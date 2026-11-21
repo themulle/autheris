@@ -361,15 +361,34 @@ public sealed class IdentityPipeline : IIdentityPipeline
             return "role provider unavailable";
         }
 
-        var roles = new HashSet<string>(rolesResolution.Roles, StringComparer.OrdinalIgnoreCase);
+        var isForwardAuth = normalized.Identities.Any(i =>
+            i.IsAuthenticated &&
+            string.Equals(i.AuthenticationType, Autheris.Domain.Security.ClusterAdminPolicy.ForwardAuthScheme, StringComparison.OrdinalIgnoreCase));
+
+        var roles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var role in rolesResolution.Roles)
         {
-            identity.AddClaim(new Claim(ClaimTypes.Role, role));
+            if (isForwardAuth && Autheris.Domain.Security.ClusterAdminPolicy.IsClusterAdminRole(role))
+            {
+                _logger.LogWarning("ForwardAuth identity dropped resolved ClusterAdmin role from realm role resolver for realm {RealmId}.", realmId);
+                continue;
+            }
+
+            if (roles.Add(role))
+            {
+                identity.AddClaim(new Claim(ClaimTypes.Role, role));
+            }
         }
 
         // Workload subject mapping: additive only, audited on every authentication (role cache hits included) before any mapped role is applied.
         foreach (var mappedRole in await ResolveMappedRolesAsync(identity, realm, realmId, tenantId, ct).ConfigureAwait(false))
         {
+            if (isForwardAuth && Autheris.Domain.Security.ClusterAdminPolicy.IsClusterAdminRole(mappedRole))
+            {
+                _logger.LogWarning("ForwardAuth identity dropped mapped ClusterAdmin role for realm {RealmId}.", realmId);
+                continue;
+            }
+
             if (roles.Add(mappedRole))
             {
                 identity.AddClaim(new Claim(ClaimTypes.Role, mappedRole));

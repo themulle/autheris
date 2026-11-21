@@ -58,7 +58,7 @@ internal static class EndpointSecurity
 
     /// <summary>Cluster-wide administrator (may act across tenants).</summary>
     public static bool IsClusterAdmin(ClaimsPrincipal? principal)
-        => GatewayPolicies.HasRole(principal, GatewayRole.ClusterAdmin);
+        => IsCanonicalClusterAdmin(principal);
 
     /// <summary>SEC M-1 / M-4: Canonical ClusterAdmin role check (strictly global, not mapped from tenant-scoped aliases).</summary>
     public static bool IsCanonicalClusterAdmin(ClaimsPrincipal? principal)
@@ -233,7 +233,7 @@ internal static class EndpointSecurity
         return group.AddEndpointFilter(async (invocationContext, next) =>
         {
             var httpContext = invocationContext.HttpContext;
-            if (IsCanonicalClusterAdmin(httpContext.User) || IsClusterAdmin(httpContext.User))
+            if (IsCanonicalClusterAdmin(httpContext.User))
             {
                 return await next(invocationContext);
             }

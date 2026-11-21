@@ -75,7 +75,7 @@ public static partial class McpDocTools
             IsReadOnlySession: sessionContext.IsReadOnly);
 
     private static bool IsClusterAdmin(McpSessionContext sessionContext) =>
-        (sessionContext.Roles ?? []).Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase);
+        (sessionContext.Roles ?? []).Any(Autheris.Domain.Security.ClusterAdminPolicy.IsClusterAdminRole);
 
     public static Task<string> ExecuteDocToolAsync(
         string toolName,
@@ -567,7 +567,7 @@ public static partial class McpDocTools
             }
 
             var roles = sessionContext.Roles ?? [];
-            bool isAdmin = roles.Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase) ||
+            bool isAdmin = IsClusterAdmin(sessionContext) ||
                            roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
             if (!isAdmin)
             {
