@@ -111,7 +111,7 @@ public sealed class DbtHealthExecutionMiddleware
             if (health.Status == DbtModelHealthStatus.Quarantined || health.Status == DbtModelHealthStatus.Degraded)
             {
                 var targetTable = await ResolveTargetTableAsync(tableRepo, tableId, modelName, context.RequestAborted).ConfigureAwait(false);
-                bool isGlobalAdmin = principal.IsInRole("GovernanceAdmin") ||
+                bool isGlobalAdmin = Autheris.GraphQL.Security.GraphQlCallerPrincipal.HasGatewayRole(principal, Autheris.Domain.Security.GatewayRole.GovernanceAdmin, tenant.Value) ||
                                      Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
                 bool isTableOwner = false;
                 if (!isGlobalAdmin && ownershipRepo != null && principal.GetUserSid() is { } userSid)

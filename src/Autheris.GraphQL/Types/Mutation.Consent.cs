@@ -49,8 +49,8 @@ public sealed partial class Mutation
     /// </summary>
     private static async Task EnsureDecisionPermittedAsync(
         IHttpContextAccessor? httpContextAccessor,
-        CancellationToken ct,
-        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        CancellationToken ct = default)
     {
         var guard = RequireDecisionService<IConsentDecisionGuard>(httpContextAccessor, resolverContext);
         var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
@@ -215,10 +215,10 @@ public sealed partial class Mutation
         [Service] IDataOwnershipRepository ownershipRepository,
         [Service] IHttpContextAccessor httpContextAccessor,
         [Service] IOptions<GovernanceTextOptions>? textOptions = null,
-        CancellationToken ct = default,
-        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        CancellationToken ct = default)
     {
-        await EnsureDecisionPermittedAsync(httpContextAccessor, ct, resolverContext).ConfigureAwait(false);
+        await EnsureDecisionPermittedAsync(httpContextAccessor, resolverContext, ct).ConfigureAwait(false);
         var actorSid = GetAuthenticatedUserSid(httpContextAccessor, resolverContext);
         var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
 
@@ -394,7 +394,7 @@ public sealed partial class Mutation
         [Service] IConsentRequestService consentRequestService,
         [Service] IHttpContextAccessor httpContextAccessor,
         CancellationToken ct = default)
-        => RequestTableAccessAsync(domain, schema, tableName, justification, durationDays, idempotencyKey, null, consentRequestService, httpContextAccessor, null, null, null, null, ct);
+        => RequestTableAccessAsync(domain, schema, tableName, justification, durationDays, idempotencyKey, null, consentRequestService, httpContextAccessor, null, null, null, null, resolverContext: null, ct: ct);
 
     public async Task<ConsentRequestPayload> RequestTableAccessAsync(
         string domain,
@@ -410,8 +410,8 @@ public sealed partial class Mutation
         bool? requestWriteOnly = null,
         List<string>? clearColumns = null,
         [Service] IDiscoveryAccessRequestService? discoveryAccessRequests = null,
-        CancellationToken ct = default,
-        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        CancellationToken ct = default)
     {
         var userSid = GetAuthenticatedUserSid(httpContextAccessor, resolverContext);
         var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
@@ -468,8 +468,8 @@ public sealed partial class Mutation
         Guid requestId,
         [Service] IConsentRequestService consentRequestService = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
-        CancellationToken ct = default,
-        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        CancellationToken ct = default)
     {
         var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
         if (principal.Identity?.IsAuthenticated != true)
@@ -504,7 +504,7 @@ public sealed partial class Mutation
         [Service] IHttpContextAccessor httpContextAccessor,
         [Service] IIdempotencyStore idempotencyStore = default!,
         CancellationToken ct = default)
-        => ApproveConsentRequestAsync(requestId, idempotencyKey, repository, repository, repository, repository, httpContextAccessor, idempotencyStore, null, null, null, null, ct);
+        => ApproveConsentRequestAsync(requestId, idempotencyKey, repository, repository, repository, repository, httpContextAccessor, idempotencyStore, null, null, null, null, resolverContext: null, ct: ct);
 
     [GraphQLIgnore]
     public Task<ConsentRequestPayload> ApproveConsentRequestAsync(
@@ -528,7 +528,8 @@ public sealed partial class Mutation
             null,
             null,
             null,
-            ct);
+            resolverContext: null,
+            ct: ct);
 
     public async Task<ConsentRequestPayload> ApproveConsentRequestAsync(
         Guid requestId,
@@ -543,10 +544,10 @@ public sealed partial class Mutation
         ColumnMaskingInput? columnMasking = null,
         string? description = null,
         List<ConsentWriteRuleInput>? writeRules = null,
-        CancellationToken ct = default,
-        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        CancellationToken ct = default)
     {
-        await EnsureDecisionPermittedAsync(httpContextAccessor, ct, resolverContext).ConfigureAwait(false);
+        await EnsureDecisionPermittedAsync(httpContextAccessor, resolverContext, ct).ConfigureAwait(false);
         _ = RequireDecisionService<IGrantPolicy>(httpContextAccessor, resolverContext);
 
         var approverSid = GetAuthenticatedUserSid(httpContextAccessor, resolverContext);
@@ -629,7 +630,7 @@ public sealed partial class Mutation
         [Service] IHttpContextAccessor httpContextAccessor,
         [Service] IIdempotencyStore idempotencyStore = default!,
         CancellationToken ct = default)
-        => RejectConsentRequestAsync(requestId, reason, idempotencyKey, repository, repository, httpContextAccessor, idempotencyStore, ct);
+        => RejectConsentRequestAsync(requestId, reason, idempotencyKey, repository, repository, httpContextAccessor, idempotencyStore, resolverContext: null, ct: ct);
 
     public async Task<ConsentRequestPayload> RejectConsentRequestAsync(
         Guid requestId,
@@ -639,10 +640,10 @@ public sealed partial class Mutation
         [Service] IDataOwnershipRepository ownershipRepository = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         [Service] IIdempotencyStore idempotencyStore = default!,
-        CancellationToken ct = default,
-        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        CancellationToken ct = default)
     {
-        await EnsureDecisionPermittedAsync(httpContextAccessor, ct, resolverContext).ConfigureAwait(false);
+        await EnsureDecisionPermittedAsync(httpContextAccessor, resolverContext, ct).ConfigureAwait(false);
         _ = RequireDecisionService<IGrantPolicy>(httpContextAccessor, resolverContext); // composition fail-fast: both decision resolvers need the same services
 
         var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
@@ -714,7 +715,17 @@ public sealed partial class Mutation
         [Service] IGovernanceRepository repository,
         [Service] IHttpContextAccessor httpContextAccessor,
         CancellationToken ct = default)
-        => RevokeConsentAsync(consentId, reason, repository, repository, httpContextAccessor, ct);
+        => RevokeConsentAsync(consentId, reason, repository, repository, httpContextAccessor, resolverContext: null, ct: ct);
+
+    [GraphQLIgnore]
+    public Task<bool> RevokeConsentAsync(
+        Guid consentId,
+        string reason,
+        [Service] IConsentRepository consentRepository,
+        [Service] IDataOwnershipRepository ownershipRepository,
+        [Service] IHttpContextAccessor httpContextAccessor,
+        CancellationToken ct)
+        => RevokeConsentAsync(consentId, reason, consentRepository, ownershipRepository, httpContextAccessor, resolverContext: null, ct: ct);
 
     public async Task<bool> RevokeConsentAsync(
         Guid consentId,
@@ -722,8 +733,8 @@ public sealed partial class Mutation
         [Service] IConsentRepository consentRepository = default!,
         [Service] IDataOwnershipRepository ownershipRepository = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
-        CancellationToken ct = default,
-        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        CancellationToken ct = default)
     {
         var revokerSid = GetAuthenticatedUserSid(httpContextAccessor, resolverContext);
 

@@ -24,8 +24,8 @@ public sealed partial class Query
         string table,
         [Service] Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService explanationService,
         [Service] IHttpContextAccessor httpContextAccessor,
-        CancellationToken ct = default,
-        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        CancellationToken ct = default)
     {
         var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
         if (principal?.Identity?.IsAuthenticated != true)
@@ -54,8 +54,8 @@ public sealed partial class Query
         int? after = null,
         [Service] IConsentApprovalRepository approvalRepository = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
-        CancellationToken ct = default,
-        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        CancellationToken ct = default)
     {
         var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
         if (principal?.Identity?.IsAuthenticated != true)
@@ -107,8 +107,8 @@ public sealed partial class Query
         [Service] IConsentApprovalRepository approvalRepository = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         [Service] Autheris.Application.Policy.Pdp.IGrantEffectPreview? effectPreview = null,
-        CancellationToken ct = default,
-        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        CancellationToken ct = default)
     {
         var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
         if (principal?.Identity?.IsAuthenticated != true)
@@ -170,8 +170,8 @@ public sealed partial class Query
         [Service] IConsentRepository consentRepository = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         [Service] IOptions<GovernanceTextOptions>? textOptions = null,
-        CancellationToken ct = default,
-        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        CancellationToken ct = default)
     {
         var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
         if (principal?.Identity?.IsAuthenticated != true)
@@ -237,8 +237,8 @@ public sealed partial class Query
         Guid consentId,
         [Service] ILineageImpactAnalyzerService lineageService,
         [Service] IHttpContextAccessor httpContextAccessor,
-        CancellationToken ct = default,
-        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        CancellationToken ct = default)
     {
         var callerContext = GetCallerSecurityContext(httpContextAccessor, "Authentication is required for lineage and impact analyses.", resolverContext);
 

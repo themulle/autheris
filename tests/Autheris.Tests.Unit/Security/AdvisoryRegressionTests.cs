@@ -30,7 +30,9 @@ using Autheris.Domain.Options;
 using Autheris.Infrastructure.Connectors;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Tests.Unit.TestDoubles;
+using HotChocolate.Execution;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -64,7 +66,7 @@ public sealed partial class AdvisoryRegressionTests
             Options.Create(new GatewayOptions()), null,
             provider, ingestion, UnusedSearch, NullLogger<CatalogDiscoveryService>.Instance);
 
-    private static RequestContext Ctx() => new(TenantA, new Sid("admin"), Roles: ["GovernanceAdmin"]);
+    private static Autheris.Domain.Model.RequestContext Ctx() => new(TenantA, new Sid("admin"), Roles: ["GovernanceAdmin"]);
 
     private static TableMetadata Table(string owner, string name = "orders", string source = "src_b") => new()
     {
@@ -372,7 +374,7 @@ public sealed partial class AdvisoryRegressionTests
         [
             new Claim(ClaimTypes.PrimarySid, "S-1-5-21-HTTP"),
             new Claim(ClaimTypes.Role, "GovernanceAdmin"),
-            new Claim(ClaimTypes.GroupSid, "S-1-5-21-1-2-3-400", ClaimValueTypes.String, Autheris.Domain.Security.IdentityClaimIssuers.Pipeline),
+            new Claim(ClaimTypes.GroupSid, "S-1-5-21-1-2-3-400", ClaimValueTypes.String, Autheris.Domain.Common.IdentityClaimIssuers.Pipeline),
             new Claim("tenant_id", "tenant-a")
         ], "Bearer");
         var httpUser = new ClaimsPrincipal(httpIdentity);
@@ -393,7 +395,7 @@ public sealed partial class AdvisoryRegressionTests
             .Returns(_ => new Autheris.Application.Analytics.MetricQueryResult(
                 ["revenue"], "v1", [],
                 new Autheris.Application.Analytics.AggregationGroupRow(new Dictionary<string, object?>(), 1, new Dictionary<string, object?>()),
-                new Autheris.Application.Analytics.AggregationMetadata(5, Autheris.Application.Analytics.SmallGroupStrategy.Suppress, false, 0, 0, false, false),
+                new Autheris.Application.Analytics.AggregationMetadata(5, SmallGroupStrategy.Suppress, false, 0, 0, false, false),
                 new Dictionary<string, Autheris.Application.Catalog.Semantic.MetricDefinitionSummary>()));
 
         var approvalRepo = Substitute.For<IConsentApprovalRepository>();
@@ -430,13 +432,14 @@ public sealed partial class AdvisoryRegressionTests
         httpContext.RequestServices = sp;
         accessor.HttpContext.Returns(httpContext);
 
-        var executor = await HotChocolate.Execution.RequestExecutorBuilderExtensions.BuildRequestExecutorAsync(
-            GraphQLRequestExecutorBuilderExtensions.AddGraphQLServer(services)
-                .AddQueryType<Autheris.GraphQL.Types.Query>()
-                .AddMutationType<Autheris.GraphQL.Types.Mutation>()
-                .AddTypeModule(_ => new Autheris.GraphQL.Catalog.CatalogGraphQlTypeModule(metadataRepo, relationRepo, null, null, null, true))
-                .UseRequest<Autheris.GraphQL.Catalog.CatalogOperationCleanupMiddleware>()
-                .UseDefaultPipeline());
+        var executor = await services
+            .AddGraphQLServer()
+            .AddQueryType<Autheris.GraphQL.Types.Query>()
+            .AddMutationType<Autheris.GraphQL.Types.Mutation>()
+            .AddTypeModule(_ => new Autheris.GraphQL.Catalog.CatalogGraphQlTypeModule(metadataRepo, relationRepo, null, null, null, true))
+            .UseRequest<Autheris.GraphQL.Catalog.CatalogOperationCleanupMiddleware>()
+            .UseDefaultPipeline()
+            .BuildRequestExecutorAsync();
 
         // 1. Aggregate resolver uses GlobalState ClaimsPrincipal (app-only, zero groups), not HttpContext.User.
         var aggRes = await executor.ExecuteAsync(HotChocolate.Execution.OperationRequestBuilder.New()

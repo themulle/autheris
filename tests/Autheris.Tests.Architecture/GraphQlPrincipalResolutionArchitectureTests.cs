@@ -24,7 +24,7 @@ public sealed class GraphQlPrincipalResolutionArchitectureTests
     [Fact]
     public void GraphQl_resolvers_use_shared_caller_principal_helper()
     {
-        var graphqlRoot = Path.Combine(RepoPaths.Root, "src", "Autheris.GraphQL");
+        var graphqlRoot = Path.Combine(RepositoryScan.RepoRoot, "src", "Autheris.GraphQL");
         Directory.Exists(graphqlRoot).ShouldBeTrue();
 
         var violations = new List<string>();

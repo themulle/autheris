@@ -23,8 +23,8 @@ public sealed partial class Mutation
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         [Service] Autheris.Application.Common.Interfaces.IAuditLogRepository auditLog = default!,
         [Service] Autheris.Application.Audit.IAuditWriter? auditWriter = null,
-        CancellationToken ct = default,
-        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        CancellationToken ct = default)
     {
         var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
         if (principal.Identity?.IsAuthenticated != true)
@@ -94,8 +94,8 @@ public sealed partial class Mutation
         bool dryRun = false,
         [Service] IServiceProvider serviceProvider = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
-        CancellationToken ct = default,
-        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        CancellationToken ct = default)
     {
         var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
         if (principal.Identity?.IsAuthenticated != true)
@@ -171,8 +171,8 @@ public sealed partial class Mutation
         [Service] Autheris.Application.Audit.IAuditWriter? auditWriter = null,
         [Service] Autheris.Application.Common.Interfaces.IAuditLogRepository? auditLog = null,
         [Service] ILogger<Mutation>? logger = null,
-        CancellationToken ct = default,
-        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        CancellationToken ct = default)
     {
         var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
         if (principal.Identity?.IsAuthenticated != true)

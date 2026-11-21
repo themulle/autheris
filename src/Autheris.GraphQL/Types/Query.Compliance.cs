@@ -21,8 +21,8 @@ public sealed partial class Query
         int timeWindowDays = 365,
         [Service] IGdprDisclosureReportService gdprService = null!,
         [Service] IHttpContextAccessor httpContextAccessor = null!,
-        CancellationToken ct = default,
-        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        CancellationToken ct = default)
     {
         var callerContext = GetCallerSecurityContext(httpContextAccessor, "Authentication is required for GDPR access reports.", resolverContext);
 
@@ -85,10 +85,10 @@ public sealed partial class Query
         [Service] IGdprDisclosureReportService gdprService = null!,
         [Service] IGdprAuditReportExporter pdfExporter = null!,
         [Service] IHttpContextAccessor httpContextAccessor = null!,
-        CancellationToken ct = default,
-        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        CancellationToken ct = default)
     {
-        var report = await GetGdprDataDisclosureReportAsync(domain, schema, tableName, subjectSid, timeWindowDays, gdprService, httpContextAccessor, ct, resolverContext);
+        var report = await GetGdprDataDisclosureReportAsync(domain, schema, tableName, subjectSid, timeWindowDays, gdprService, httpContextAccessor, resolverContext, ct);
         var exportResult = pdfExporter.ExportReportToPdf(report);
         return Convert.ToBase64String(exportResult.DocumentBytes);
     }

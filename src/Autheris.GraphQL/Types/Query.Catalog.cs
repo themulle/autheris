@@ -32,8 +32,8 @@ public sealed partial class Query
         [Service] IGatewayExecutionService executionService = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         [Service] IOptions<GatewayOptions>? gatewayOptions = null,
-        CancellationToken ct = default,
-        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        CancellationToken ct = default)
     {
         // SR-M-17: bound the offset like the tree path does (GraphQL.MaxAllowedOffset).
         var maxOffset = gatewayOptions?.Value?.GraphQL?.MaxAllowedOffset >= 0
@@ -131,8 +131,8 @@ public sealed partial class Query
         [Service] IDiscoveryService? discoveryService = null,
         [Service] IClassificationRepository? classificationRepository = null,
         [Service] IConsentResolutionService? consentResolution = null,
-        CancellationToken ct = default,
-        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        CancellationToken ct = default)
     {
         var httpContext = Autheris.GraphQL.Security.GraphQlCallerPrincipal.HasSessionPrincipalOverride(resolverContext)
             ? null
@@ -284,8 +284,8 @@ public sealed partial class Query
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         [Service] Autheris.Application.Catalog.Localization.ILanguageNegotiator? languageNegotiator = null,
         [Service] IOptions<Autheris.Domain.Options.CatalogLocalizationOptions>? localizationOptions = null,
-        CancellationToken ct = default,
-        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        CancellationToken ct = default)
     {
         if (!TableIdentifier.TryCreate(domain, schema, name, out var tableId))
         {
@@ -345,8 +345,8 @@ public sealed partial class Query
         int? limit = null,
         [Service] IDiscoveryArtifactService? artifactService = null,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
-        CancellationToken ct = default,
-        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        CancellationToken ct = default)
     {
         if (!TableIdentifier.TryCreate(domain, schema, name, out var tableId))
         {
@@ -624,8 +624,8 @@ public sealed partial class Query
         [Service] IHttpContextAccessor httpContextAccessor = null!,
         [Service] IConsentRepository? consentRepository = null,
         [Service] IDataOwnershipRepository? ownershipRepository = null,
-        CancellationToken ct = default,
-        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        CancellationToken ct = default)
     {
         var callerContext = GetCallerSecurityContext(httpContextAccessor, "Authentication is required for consumer analyses.", resolverContext);
 

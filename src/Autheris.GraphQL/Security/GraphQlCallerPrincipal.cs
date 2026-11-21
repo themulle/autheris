@@ -1,6 +1,7 @@
 namespace Autheris.GraphQL.Security;
 
 using System;
+using System.Linq;
 using System.Security.Claims;
 using Autheris.Application.Security;
 using Autheris.Domain.Common;
@@ -81,8 +82,63 @@ public static class GraphQlCallerPrincipal
         return contextTenant;
     }
 
-    public static bool HasGatewayRole(ClaimsPrincipal? principal, GatewayRole role, string? tenantId = null) =>
-        role == GatewayRole.ClusterAdmin
-            ? ClusterAdminPolicy.IsCanonicalClusterAdmin(principal)
-            : RoleEvaluator.HasRole(principal, role, tenantId);
+    public static bool HasGatewayRole(ClaimsPrincipal? principal, GatewayRole role, string? tenantId = null)
+    {
+        if (principal?.Identity?.IsAuthenticated != true)
+        {
+            return false;
+        }
+
+        if (role == GatewayRole.ClusterAdmin)
+        {
+            return ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        }
+
+        if (!ClusterAdminPolicy.IsCanonicalClusterAdmin(principal))
+        {
+            return RoleEvaluator.HasRole(StripClusterAdminRoleClaims(principal), role, tenantId);
+        }
+
+        return RoleEvaluator.HasRole(principal, role, tenantId);
+    }
+
+    private static ClaimsPrincipal StripClusterAdminRoleClaims(ClaimsPrincipal principal)
+    {
+        bool hasClusterAdminClaim = false;
+        foreach (var identity in principal.Identities)
+        {
+            foreach (var claim in identity.Claims)
+            {
+                if (IsRoleClaim(claim, identity.RoleClaimType) && ClusterAdminPolicy.IsClusterAdminRole(claim.Value))
+                {
+                    hasClusterAdminClaim = true;
+                    break;
+                }
+            }
+
+            if (hasClusterAdminClaim)
+            {
+                break;
+            }
+        }
+
+        if (!hasClusterAdminClaim)
+        {
+            return principal;
+        }
+
+        return new ClaimsPrincipal(principal.Identities.Select(identity =>
+            new ClaimsIdentity(
+                identity.Claims.Where(c => !(IsRoleClaim(c, identity.RoleClaimType) && ClusterAdminPolicy.IsClusterAdminRole(c.Value))),
+                identity.AuthenticationType,
+                identity.NameClaimType,
+                identity.RoleClaimType)));
+    }
+
+    private static bool IsRoleClaim(Claim claim, string roleClaimType) =>
+        string.Equals(claim.Type, roleClaimType, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(claim.Type, ClaimTypes.Role, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(claim.Type, "roles", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(claim.Type, "role", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(claim.Type, "http://schemas.microsoft.com/ws/2008/06/identity/claims/role", StringComparison.OrdinalIgnoreCase);
 }
