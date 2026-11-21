@@ -68,10 +68,12 @@ public sealed partial class Query
     /// The caller context of an authenticated principal. An unauthenticated or SID-less caller is refused first (UNAUTHORIZED with
     /// <paramref name="authenticationRequiredMessage"/>), then a caller without a valid tenant (never a default tenant, DT-A-3).
     /// </summary>
-    private static CallerSecurityContext GetCallerSecurityContext(IHttpContextAccessor httpContextAccessor, string authenticationRequiredMessage)
+    private static CallerSecurityContext GetCallerSecurityContext(
+        IHttpContextAccessor? httpContextAccessor,
+        string authenticationRequiredMessage,
+        HotChocolate.Resolvers.IResolverContext? resolverContext = null)
     {
-        var httpContext = httpContextAccessor?.HttpContext;
-        var principal = httpContext?.User ?? new ClaimsPrincipal();
+        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
         if (principal.Identity?.IsAuthenticated != true || principal.GetUserSid() is not { } userSid || userSid.Value == "S-1-5-21-ANONYMOUS")
         {
             throw new GraphQLException(ErrorBuilder.New()
@@ -84,7 +86,9 @@ public sealed partial class Query
         var roles = principal.GetUserRoles().ToList();
 
         TenantId tenantId;
-        if (httpContext?.Items.TryGetValue("TenantId", out var tidObj) == true && tidObj is TenantId tid)
+        if (!Autheris.GraphQL.Security.GraphQlCallerPrincipal.HasSessionPrincipalOverride(resolverContext) &&
+            httpContextAccessor?.HttpContext?.Items.TryGetValue("TenantId", out var tidObj) == true &&
+            tidObj is TenantId tid)
         {
             tenantId = tid;
         }

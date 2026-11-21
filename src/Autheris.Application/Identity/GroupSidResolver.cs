@@ -111,7 +111,7 @@ public sealed class GroupSidResolver : IGroupSidResolver
 
             var correlatedUserKey = correlation?.Status == CorrelationStatus.Matched ? correlation.ScimUserKey : null;
             var outcome = realm.GroupSource == RealmGroupSource.Resolver
-                ? await ResolveFromChainAsync(normalized, realm, tenant, ct, correlatedUserKey).ConfigureAwait(false)
+                ? await ResolveFromChainAsync(normalized, realm, tenant, correlatedUserKey, ct).ConfigureAwait(false)
                 : await ResolveFromSchemeAsync(normalized, realm, tenant, scheme, ct).ConfigureAwait(false);
 
             if (outcome.Degraded)
@@ -171,7 +171,7 @@ public sealed class GroupSidResolver : IGroupSidResolver
             case "Negotiate":
                 return _isWindowsHost
                     ? FromClaims(principal, [ClaimTypes.GroupSid], requirePipelineIssuer: false, IdentityGroupMetrics.SourceNegotiate, "negotiate-pac", isToken: false)
-                    : await ResolveFromChainAsync(principal, realm, tenant, ct).ConfigureAwait(false);
+                    : await ResolveFromChainAsync(principal, realm, tenant, ct: ct).ConfigureAwait(false);
             case "Basic" or "BasicSession":
                 return FromPipelineClaims(principal, IdentityGroupMetrics.SourceBasic, "basic");
             case "ForwardAuth":
@@ -428,7 +428,7 @@ public sealed class GroupSidResolver : IGroupSidResolver
         return sids;
     }
 
-    private async ValueTask<Outcome> ResolveFromChainAsync(ClaimsPrincipal principal, IdentityRealm realm, TenantId tenant, CancellationToken ct, string? correlatedUserKey = null)
+    private async ValueTask<Outcome> ResolveFromChainAsync(ClaimsPrincipal principal, IdentityRealm realm, TenantId tenant, string? correlatedUserKey = null, CancellationToken ct = default)
     {
         var identity = BuildIdentity(principal, realm, tenant, correlatedUserKey);
         if (_roleResolver is null || identity is null)

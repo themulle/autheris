@@ -39,6 +39,7 @@ public sealed partial class AdvisoryRegressionTests
     public async Task Ghsa_7v65_hxqv_regression()
     {
         await VerifyCrossRealmWindowsSidStrippingAndUserBindingAsync();
+        await VerifyNonWindowsScimCorrelationWithoutOnpremSidAsync();
         await VerifyRealmUserKeyResolverClaimsAsync();
         await VerifyConsentQueryTenantIsolationAsync();
         await VerifyRoleAndScimCacheNamespaceIsolationAsync();
@@ -51,6 +52,13 @@ public sealed partial class AdvisoryRegressionTests
     public async Task NonWindowsOidcRealm_StripsInboundWindowsSids_AndPreservesMixedCaseSubIsolation()
     {
         await VerifyCrossRealmWindowsSidStrippingAndUserBindingAsync();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task NonWindowsOidcRealm_WithScimAndNoOnpremSid_CorrelatesAndBindsUserSid()
+    {
+        await VerifyNonWindowsScimCorrelationWithoutOnpremSidAsync();
     }
 
     [Fact]
@@ -131,6 +139,57 @@ public sealed partial class AdvisoryRegressionTests
         lowerResult.GetUserSid().ShouldBe(new Sid("oidc-b|alice"));
         (result.GetUserSid()!.Value == lowerResult.GetUserSid()!.Value).ShouldBeFalse();
 
+        // Delimiter collision check: literal "oidc-b|alice" still receives unconditional realm binding.
+        var delimiterPrincipal = new ClaimsPrincipal(new ClaimsIdentity(
+            [
+                new Claim("iss", "https://idp-b.example"),
+                new Claim("sub", "oidc-b|alice")
+            ],
+            "Bearer"));
+        var delimiterResult = await pipeline.ProcessAsync(delimiterPrincipal, "Bearer", null, CancellationToken.None);
+        delimiterResult.GetUserSid().ShouldBe(new Sid("oidc-b|oidc-b|alice"));
+        (delimiterResult.GetUserSid()!.Value == lowerResult.GetUserSid()!.Value).ShouldBeFalse();
+        roleCache.KeysSeen.ShouldContain(("oidc-b", "role:oidc-b|alice"));
+
+        // Inbound cert: values without clientCert must still be stripped and realm-bound.
+        var certSpoofOidc = new ClaimsPrincipal(new ClaimsIdentity(
+            [
+                new Claim("iss", "https://idp-b.example"),
+                new Claim(ClaimTypes.PrimarySid, "cert:fake"),
+                new Claim("primarysid", "cert:fake"),
+                new Claim("sub", "cert:fake")
+            ],
+            "Bearer"));
+        var certSpoofResult = await pipeline.ProcessAsync(certSpoofOidc, "Bearer", null, CancellationToken.None);
+        certSpoofResult.Identity!.IsAuthenticated.ShouldBeTrue();
+        certSpoofResult.GetUserSid().ShouldBe(new Sid("oidc-b|cert:fake"));
+        certSpoofResult.GetAllUserSids().ShouldBe([new Sid("oidc-b|cert:fake")]);
+        certSpoofResult.GetAllUserSids().ShouldNotContain(new Sid("cert:fake"));
+
+        // Missing configured UserKeyClaim fails closed (Unauthenticated) regardless of GroupSource (None / Token).
+        foreach (var groupSource in new[] { RealmGroupSource.None, RealmGroupSource.Token })
+        {
+            var strictRealm = new IdentityRealm(
+                "strict-oidc",
+                IdentityRealmKind.GenericOidc,
+                new TenantBindingSpecification(TenantBindingKind.Fixed, new TenantId("tenant-shared")),
+                groupSource,
+                RealmProvisioningMode.None,
+                issuers: ["https://strict.example"],
+                userKeyClaim: "sub");
+            var strictPipeline = new IdentityPipeline(new FakeIdentityRealmRegistry(strictRealm), groupResolver, options: options);
+            var missingSubPrincipal = new ClaimsPrincipal(new ClaimsIdentity(
+                [
+                    new Claim("iss", "https://strict.example"),
+                    new Claim("oid", "fallback-oid"),
+                    new Claim("upn", "user@example.com")
+                ],
+                "Bearer"));
+            var strictResult = await strictPipeline.ProcessAsync(missingSubPrincipal, "Bearer", null, CancellationToken.None);
+            strictResult.Identity!.IsAuthenticated.ShouldBeFalse();
+            strictResult.GetUserSid().ShouldBeNull();
+        }
+
         // Non-SID subject matching in ConsentSqlCore stays exact (case-sensitive), while canonical Windows SIDs and GUIDs match case-insensitively.
         var table = new TableIdentifier("sales", "dbo", "orders");
         var consentRows = BuildConsentSubjectRows(
@@ -147,6 +206,83 @@ public sealed partial class AdvisoryRegressionTests
             matchingMixedLower);
         matchingMixedLower.Select(c => c.GranteeSid!.Value.Value).ShouldBe(
             ["S-1-5-21-1000-2000-3000-1001", "a1b2c3d4-0000-0000-0000-000000000001"]);
+    }
+
+    private static async Task VerifyNonWindowsScimCorrelationWithoutOnpremSidAsync()
+    {
+        var oidcScimRealm = new IdentityRealm(
+            "oidc-scim",
+            IdentityRealmKind.GenericOidc,
+            new TenantBindingSpecification(TenantBindingKind.Fixed, TenantA),
+            RealmGroupSource.Resolver,
+            RealmProvisioningMode.Scim,
+            issuers: ["https://oidc-scim.example"],
+            resolverChain: ["scim-provider"],
+            userKeyClaim: "sub");
+
+        var entraScimRealm = new IdentityRealm(
+            "entra-scim",
+            IdentityRealmKind.EntraWorkforce,
+            new TenantBindingSpecification(TenantBindingKind.Fixed, TenantA),
+            RealmGroupSource.Resolver,
+            RealmProvisioningMode.Scim,
+            issuers: ["https://entra-scim.example"],
+            resolverChain: ["scim-provider"],
+            userKeyClaim: "oid");
+
+        var registry = new FakeIdentityRealmRegistry([oidcScimRealm, entraScimRealm], oidcScimRealm);
+        var cache = new RoleResolverCache();
+        var scimStore = new InMemoryScimCacheAndEpochStore("cloud-oid-1", "S-1-5-21-1000-2000-3000-7777");
+        var options = Options.Create(new GatewayOptions());
+        var roleProvider = new StaticRoleProvider("scim-provider", ["S-1-5-21-1000-2000-3000-8888"]);
+        var roleResolver = new RoleResolver(registry, [roleProvider], cache, options, scimStore);
+        var groupResolver = new GroupSidResolver(
+            roleResolver,
+            [roleProvider],
+            options,
+            scimCorrelator: new ScimIdentityCorrelator(scimStore),
+            scimGroupStore: scimStore,
+            scimProvisioningStore: scimStore,
+            roleCache: cache);
+        var pipeline = new IdentityPipeline(registry, groupResolver, roleResolver, options: options);
+
+        // OIDC SCIM realm without onprem_sid: synthesized PrimarySid must not collide with ScimIdentityCorrelator objectSid check.
+        var oidcPrincipal = new ClaimsPrincipal(new ClaimsIdentity(
+            [
+                new Claim("iss", "https://oidc-scim.example"),
+                new Claim("oid", "cloud-oid-1"),
+                new Claim("sub", "sub-alice")
+            ],
+            "Bearer"));
+        var oidcResult = await pipeline.ProcessAsync(oidcPrincipal, "Bearer", null, CancellationToken.None);
+        oidcResult.Identity!.IsAuthenticated.ShouldBeTrue();
+        oidcResult.HasClaim(RoleResolutionClaims.ClaimType, RoleResolutionClaims.Degraded).ShouldBeFalse();
+        oidcResult.GetUserSid().ShouldBe(new Sid("oidc-scim|sub-alice"));
+        oidcResult.GetGroupSids().ShouldContain(new Sid("S-1-5-21-1000-2000-3000-7777"));
+        oidcResult.GetGroupSids().ShouldContain(new Sid("S-1-5-21-1000-2000-3000-8888"));
+
+        // Entra SCIM cloud-only user without onprem_sid: synthesized PrimarySid is ignored; malformed inbound objectSid still fails closed.
+        var entraCloudPrincipal = new ClaimsPrincipal(new ClaimsIdentity(
+            [
+                new Claim("iss", "https://entra-scim.example"),
+                new Claim("oid", "cloud-oid-1"),
+                new Claim("sub", "sub-alice")
+            ],
+            "Bearer"));
+        var entraCloudResult = await pipeline.ProcessAsync(entraCloudPrincipal, "Bearer", null, CancellationToken.None);
+        entraCloudResult.Identity!.IsAuthenticated.ShouldBeTrue();
+        entraCloudResult.HasClaim(RoleResolutionClaims.ClaimType, RoleResolutionClaims.Degraded).ShouldBeFalse();
+        entraCloudResult.GetGroupSids().ShouldContain(new Sid("S-1-5-21-1000-2000-3000-7777"));
+
+        var malformedSidPrincipal = new ClaimsPrincipal(new ClaimsIdentity(
+            [
+                new Claim("iss", "https://entra-scim.example"),
+                new Claim("oid", "cloud-oid-1"),
+                new Claim("objectSid", "not-a-windows-sid")
+            ],
+            "Bearer"));
+        var malformedResult = await pipeline.ProcessAsync(malformedSidPrincipal, "Bearer", null, CancellationToken.None);
+        malformedResult.HasClaim(RoleResolutionClaims.ClaimType, RoleResolutionClaims.Degraded).ShouldBeTrue();
     }
 
     private static Task VerifyRealmUserKeyResolverClaimsAsync()
@@ -230,12 +366,12 @@ public sealed partial class AdvisoryRegressionTests
             }
         };
 
-        var mine = await query.MyAccessRequestsAsync(null, null, null, repo, tenantAAccessor, CancellationToken.None);
+        var mine = await query.MyAccessRequestsAsync(null, null, null, repo, tenantAAccessor, ct: CancellationToken.None);
         mine.Count.ShouldBe(1);
         mine[0].TableIdentifier.ShouldBe("db.s.t1");
         repo.LastRequesterTenant.ShouldBe(TenantA);
 
-        var pending = await query.PendingApprovalsForMeAsync(null, null, repo, tenantAAccessor, null, CancellationToken.None);
+        var pending = await query.PendingApprovalsForMeAsync(null, null, repo, tenantAAccessor, null, ct: CancellationToken.None);
         pending.Count.ShouldBe(1);
         pending[0].TableIdentifier.ShouldBe("db.s.t1");
         repo.LastApproverTenant.ShouldBe(TenantA);
@@ -247,8 +383,8 @@ public sealed partial class AdvisoryRegressionTests
                 User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, sid.Value)], "Bearer"))
             }
         };
-        await Should.ThrowAsync<GraphQLException>(() => query.MyAccessRequestsAsync(null, null, null, repo, noTenantAccessor, CancellationToken.None));
-        await Should.ThrowAsync<GraphQLException>(() => query.PendingApprovalsForMeAsync(null, null, repo, noTenantAccessor, null, CancellationToken.None));
+        await Should.ThrowAsync<GraphQLException>(() => query.MyAccessRequestsAsync(null, null, null, repo, noTenantAccessor, ct: CancellationToken.None));
+        await Should.ThrowAsync<GraphQLException>(() => query.PendingApprovalsForMeAsync(null, null, repo, noTenantAccessor, null, ct: CancellationToken.None));
 
         using var conn = DialectKit.PostgreSql.NewConnection();
         var governanceRepo = new GovernanceRepository(
@@ -319,6 +455,20 @@ public sealed partial class AdvisoryRegressionTests
         (await cache.GetAsync("nonscim-realm", "role:alice-plain")).ShouldNotBeNull();
         cache.Invalidate("nonscim-realm", "alice-plain");
         (await cache.GetAsync("nonscim-realm", "role:alice-plain")).ShouldBeNull();
+
+        // Cache accommodates max-length (256-char) userKeys with role/SCIM prefixes and invalidates userKeys literally prefixed with "role:".
+        var maxUserKey = new string('u', 256);
+        await cache.SetAsync("nonscim-realm", $"role:{maxUserKey}", resolvedRoles);
+        await cache.SetAsync("scim-realm", $"role:e0:{maxUserKey}", resolvedRoles);
+        await cache.SetAsync("scim-realm", $"scim:e0:{maxUserKey}", resolvedRoles);
+        (await cache.GetAsync("nonscim-realm", $"role:{maxUserKey}")).ShouldNotBeNull();
+        (await cache.GetAsync("scim-realm", $"role:e0:{maxUserKey}")).ShouldNotBeNull();
+        (await cache.GetAsync("scim-realm", $"scim:e0:{maxUserKey}")).ShouldNotBeNull();
+
+        await roleResolver.ResolveRolesAsync(new ResolvedIdentity("role:admin", null, null, null, TenantA, "nonscim-realm", []));
+        (await cache.GetAsync("nonscim-realm", "role:role:admin")).ShouldNotBeNull();
+        cache.Invalidate("nonscim-realm", "role:admin");
+        (await cache.GetAsync("nonscim-realm", "role:role:admin")).ShouldBeNull();
     }
 
     private static async Task VerifyScimAdditionInvalidationAsync()

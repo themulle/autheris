@@ -4,6 +4,7 @@ namespace Autheris.Tests.Integration;
 
 using System;
 using System.Threading.Tasks;
+using DotNet.Testcontainers.Builders;
 using DotNet.Testcontainers.Containers;
 using Testcontainers.MsSql;
 using Testcontainers.PostgreSql;
@@ -50,6 +51,23 @@ internal static class SharedDatabaseServers
             .WithReuse(Reuse)
             .WithLabel("autheris.tests", "shared-sqlserver")
             .Build()));
+
+    private static readonly Lazy<Task<IContainer>> Redis =
+        new(() => StartAsync(new ContainerBuilder(TestImages.Redis)
+            .WithPortBinding(6379, true)
+            .WithWaitStrategy(Wait.ForUnixContainer().UntilCommandIsCompleted("redis-cli", "ping"))
+            .WithReuse(Reuse)
+            .WithLabel("autheris.tests", "shared-redis")
+            .Build()));
+
+    /// <summary>Connection string of the shared Redis server.</summary>
+    public static async Task<string> RedisServerAsync()
+    {
+        var env = Environment.GetEnvironmentVariable("AUTHERIS_TEST_REDIS");
+        if (!string.IsNullOrWhiteSpace(env)) return env;
+        var container = await Redis.Value;
+        return $"{container.Hostname}:{container.GetMappedPublicPort(6379)}";
+    }
 
     /// <summary>Connection string of the shared PostgreSQL server (superuser, maintenance database).</summary>
     public static async Task<string> PostgreSqlServerAsync()

@@ -218,9 +218,10 @@ public sealed class IdentityPipeline : IIdentityPipeline
             degradedReason = await AddRolesAndRightsAsync(identity, normalized, realm, realmId, resolution.Tenant, groups, ct).ConfigureAwait(false);
         }
 
-        if (stripUntrustedWindowsSids && clientCert is null)
+        if (stripUntrustedWindowsSids && clientCert is null && !BindNonWindowsUserSid(identity, realm!, realmId))
         {
-            BindNonWindowsUserSid(identity, realm!, realmId);
+            _logger.LogWarning("Authentication rejected: missing required user key claim for realm {RealmId}.", realmId);
+            return Unauthenticated();
         }
 
         var degraded = degradedReason is not null;
@@ -534,9 +535,7 @@ public sealed class IdentityPipeline : IIdentityPipeline
 
     private static ClaimsPrincipal StripInboundWindowsSidClaims(ClaimsPrincipal raw)
     {
-        var hasUntrustedSid = raw.Claims.Any(static c =>
-            UntrustedWindowsSidClaimTypes.Contains(c.Type)
-            && !c.Value.StartsWith("cert:", StringComparison.OrdinalIgnoreCase));
+        var hasUntrustedSid = raw.Claims.Any(static c => UntrustedWindowsSidClaimTypes.Contains(c.Type));
         if (!hasUntrustedSid)
         {
             return raw;
@@ -546,8 +545,7 @@ public sealed class IdentityPipeline : IIdentityPipeline
         foreach (var source in clone.Identities)
         {
             var toRemove = source.Claims
-                .Where(static c => UntrustedWindowsSidClaimTypes.Contains(c.Type)
-                                   && !c.Value.StartsWith("cert:", StringComparison.OrdinalIgnoreCase))
+                .Where(static c => UntrustedWindowsSidClaimTypes.Contains(c.Type))
                 .ToList();
             foreach (var claim in toRemove)
             {
@@ -558,26 +556,21 @@ public sealed class IdentityPipeline : IIdentityPipeline
         return clone;
     }
 
-    private static void BindNonWindowsUserSid(ClaimsIdentity identity, IdentityRealm realm, string realmId)
+    private static bool BindNonWindowsUserSid(ClaimsIdentity identity, IdentityRealm realm, string realmId)
     {
-        if (identity.FindAll(ClaimTypes.PrimarySid).Any(static c => c.Value.StartsWith("cert:", StringComparison.OrdinalIgnoreCase)))
-        {
-            return;
-        }
-
         foreach (var existing in identity.FindAll(ClaimTypes.PrimarySid).ToList())
         {
             identity.RemoveClaim(existing);
         }
 
         var userKey = RealmUserKeyResolver.Resolve(identity, realm);
-        if (string.IsNullOrWhiteSpace(userKey) || userKey.StartsWith("cert:", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(userKey))
         {
-            return;
+            return false;
         }
 
-        var scopedSid = userKey.StartsWith($"{realmId}|", StringComparison.Ordinal) ? userKey : $"{realmId}|{userKey}";
-        identity.AddClaim(IdentityClaimIssuers.CreatePrimarySidClaim(scopedSid));
+        identity.AddClaim(IdentityClaimIssuers.CreatePrimarySidClaim($"{realmId}|{userKey}"));
+        return true;
     }
 
     private static ClaimsPrincipal Unauthenticated() => new(new ClaimsIdentity());

@@ -62,7 +62,7 @@ public static class ClaimsNormalizer
             var userSid = clonedPrincipal.GetUserSid();
             if (userSid != null)
             {
-                identity.AddClaim(new Claim(ClaimTypes.PrimarySid, userSid.Value.Value));
+                identity.AddClaim(new Claim(ClaimTypes.PrimarySid, userSid.Value.Value, ClaimValueTypes.String, IdentityClaimIssuers.SynthesizedPrimarySid));
             }
         }
 

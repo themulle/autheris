@@ -19,6 +19,7 @@ public interface IRoleResolverCache
 
 public sealed class RoleResolverCache : IRoleResolverCache
 {
+    private const int MaxCacheKeyLength = IdentityGroupsChangedChannel.MaxKeyLength + 32;
     private readonly ConcurrentLru<(string RealmId, string UserKey), RoleResolution> _l1Cache;
     private readonly byte[] _hmacKey;
 
@@ -30,7 +31,7 @@ public sealed class RoleResolverCache : IRoleResolverCache
 
     private static bool IsWithinBounds(string realmId, string userKey) =>
         !string.IsNullOrEmpty(realmId) && !string.IsNullOrEmpty(userKey)
-        && realmId.Length <= IdentityGroupsChangedChannel.MaxKeyLength && userKey.Length <= IdentityGroupsChangedChannel.MaxKeyLength;
+        && realmId.Length <= IdentityGroupsChangedChannel.MaxKeyLength && userKey.Length <= MaxCacheKeyLength;
 
     public ValueTask<RoleResolution?> GetAsync(string realmId, string userKey, CancellationToken ct = default)
     {
@@ -72,7 +73,7 @@ public sealed class RoleResolverCache : IRoleResolverCache
     public void Invalidate(string realmId, string userKey)
     {
         _l1Cache.TryRemove((realmId, userKey));
-        if (!string.IsNullOrEmpty(userKey) && !userKey.StartsWith("role:", StringComparison.Ordinal))
+        if (!string.IsNullOrEmpty(userKey))
         {
             _l1Cache.TryRemove((realmId, $"role:{userKey}"));
         }
