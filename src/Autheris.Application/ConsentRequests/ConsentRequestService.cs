@@ -95,14 +95,17 @@ public sealed class ConsentRequestService : IConsentRequestService
         ConsentSubmissionPipeline.EnsurePersonSubject(principal, _subjectResolver);
         ConsentSubmissionPipeline.EnsureSelfServiceEnabled(_gatewayOptions?.Value);
 
-        var rateLimitTenant = ResolveTenantId(principal, command.ContextTenant, ClusterAdminPolicy.IsCanonicalClusterAdmin(principal));
-        await ConsentSubmissionPipeline.CheckAccessRequestRateAsync(
-            rateLimitTenant,
-            command.UserSid,
-            _rateLimiter,
-            _gatewayOptions?.Value,
-            _discoveryOptions?.Value,
-            ct).ConfigureAwait(false);
+        if (_rateLimiter is not null && _gatewayOptions is not null)
+        {
+            var rateLimitTenant = ResolveTenantId(principal, command.ContextTenant, ClusterAdminPolicy.IsCanonicalClusterAdmin(principal));
+            await ConsentSubmissionPipeline.CheckAccessRequestRateAsync(
+                rateLimitTenant,
+                command.UserSid,
+                _rateLimiter,
+                _gatewayOptions.Value,
+                _discoveryOptions?.Value,
+                ct).ConfigureAwait(false);
+        }
 
         // #341: caller text; a blank component or one with a dot or line break is a client error, not a constructor fault.
         if (!TableIdentifier.TryCreate(command.Domain, command.Schema, command.TableName, out var tableId))

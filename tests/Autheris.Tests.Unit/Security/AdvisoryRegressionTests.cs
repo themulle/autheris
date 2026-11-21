@@ -401,10 +401,10 @@ public sealed partial class AdvisoryRegressionTests
                 ConsentWorkflowMode.External, extSystemId, MaxDurationDays: 30, RequestTimeoutDays: 14, ExpiryNoticeLeadHours: 24, RequireResolvableApprover: false, WorkflowRouteScopeKind.DataSource));
 
         var fixedNow = new DateTimeOffset(2026, 11, 21, 12, 0, 0, TimeSpan.Zero);
-        var clock = new Autheris.Tests.Common.TestClock(fixedNow);
+        var clock = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(fixedNow);
         var limiter = Substitute.For<IRateLimiterService>();
-        limiter.CheckPostAuthSidAsync(Arg.Any<string>(), Arg.Any<Autheris.Domain.Options.PostAuthSidRateLimitOptions>(), Arg.Any<CancellationToken>())
-            .Returns(new Autheris.Domain.Model.CostQuotaResult { Allowed = true, RemainingTokens = 10 });
+        limiter.CheckCostQuotaAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<ClientQuotaPolicy>(), Arg.Any<CancellationToken>())
+            .Returns(new CostQuotaResult(true, 10, 0));
 
         var svc = new Autheris.Application.Governance.Analysis.BundledConsentRequestService(
             tables,
@@ -427,7 +427,7 @@ public sealed partial class AdvisoryRegressionTests
         var clamped = await svc.SubmitBundledRequestAsync(
             personUser,
             new Autheris.Application.Governance.Analysis.BundledConsentRequest(
-                [new Autheris.Application.Governance.Analysis.RequestableConsentItem("sales.dbo.orders", null, "READ", null)],
+                [new Autheris.Application.Governance.Analysis.RequestableConsentItem("sales.dbo.orders", null, "READ", "Analytics query need")],
                 Purpose: "Analytics query need",
                 ConsumerReference: "PR-1"));
         clamped.Tickets.ShouldHaveSingleItem().Status.ShouldBe("PENDING_EXTERNAL_APPROVAL");
@@ -443,7 +443,7 @@ public sealed partial class AdvisoryRegressionTests
         var overCapEx = await Should.ThrowAsync<Autheris.Application.ConsentRequests.ConsentRequestException>(() => svc.SubmitBundledRequestAsync(
             personUser,
             new Autheris.Application.Governance.Analysis.BundledConsentRequest(
-                [new Autheris.Application.Governance.Analysis.RequestableConsentItem("sales.dbo.orders", null, "READ", null)],
+                [new Autheris.Application.Governance.Analysis.RequestableConsentItem("sales.dbo.orders", null, "READ", "Analytics query need")],
                 Purpose: "Analytics query need",
                 RequestedUntilUtc: fixedNow.AddDays(60))));
         overCapEx.Code.ShouldBe("VALIDITY_EXCEEDS_MAXIMUM");
@@ -458,14 +458,14 @@ public sealed partial class AdvisoryRegressionTests
         (await Should.ThrowAsync<Autheris.Application.ConsentRequests.ConsentRequestException>(() => svc.SubmitBundledRequestAsync(
             appOnly,
             new Autheris.Application.Governance.Analysis.BundledConsentRequest(
-                [new Autheris.Application.Governance.Analysis.RequestableConsentItem("sales.dbo.orders", null, "READ", null)],
+                [new Autheris.Application.Governance.Analysis.RequestableConsentItem("sales.dbo.orders", null, "READ", "Analytics query need")],
                 Purpose: "Analytics query need"))))
             .Code.ShouldBe("FORBIDDEN");
 
         (await Should.ThrowAsync<Autheris.Application.ConsentRequests.ConsentRequestException>(() => svc.SubmitBundledRequestAsync(
             personUser,
             new Autheris.Application.Governance.Analysis.BundledConsentRequest(
-                [new Autheris.Application.Governance.Analysis.RequestableConsentItem("sales.dbo.orders", null, "READ", null)],
+                [new Autheris.Application.Governance.Analysis.RequestableConsentItem("sales.dbo.orders", null, "READ", "Analytics query need")],
                 Purpose: "ab"))))
             .Code.ShouldBe("VALIDATION_ERROR");
 
@@ -476,21 +476,21 @@ public sealed partial class AdvisoryRegressionTests
             approvals,
             gatewayOptions: Options.Create(new GatewayOptions
             {
-                Authentication = new AuthenticationOptions { EntraId = new EntraIdOptions { SelfServiceEnabled = false } }
+                Authentication = new AuthenticationOptions { EntraId = new EntraIdAuthOptions { SelfServiceEnabled = false } }
             }));
         (await Should.ThrowAsync<Autheris.Application.ConsentRequests.ConsentRequestException>(() => disabledSvc.SubmitBundledRequestAsync(
             personUser,
             new Autheris.Application.Governance.Analysis.BundledConsentRequest(
-                [new Autheris.Application.Governance.Analysis.RequestableConsentItem("sales.dbo.orders", null, "READ", null)],
+                [new Autheris.Application.Governance.Analysis.RequestableConsentItem("sales.dbo.orders", null, "READ", "Analytics query need")],
                 Purpose: "Analytics query need"))))
             .Code.ShouldBe("FORBIDDEN");
 
-        limiter.CheckPostAuthSidAsync(Arg.Any<string>(), Arg.Any<Autheris.Domain.Options.PostAuthSidRateLimitOptions>(), Arg.Any<CancellationToken>())
-            .Returns(new Autheris.Domain.Model.CostQuotaResult { Allowed = false, RetryAfterSeconds = 42 });
+        limiter.CheckCostQuotaAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<ClientQuotaPolicy>(), Arg.Any<CancellationToken>())
+            .Returns(new CostQuotaResult(false, 0, 42));
         var rlEx = await Should.ThrowAsync<Autheris.Application.ConsentRequests.ConsentRequestException>(() => svc.SubmitBundledRequestAsync(
             personUser,
             new Autheris.Application.Governance.Analysis.BundledConsentRequest(
-                [new Autheris.Application.Governance.Analysis.RequestableConsentItem("sales.dbo.orders", null, "READ", null)],
+                [new Autheris.Application.Governance.Analysis.RequestableConsentItem("sales.dbo.orders", null, "READ", "Analytics query need")],
                 Purpose: "Analytics query need")));
         rlEx.Code.ShouldBe("RATE_LIMIT_EXCEEDED");
         rlEx.RetryAfterSeconds.ShouldBe(42);

@@ -118,8 +118,8 @@ public static class ConsentSubmissionPipeline
         DateTimeOffset now,
         DateTimeOffset? requestedValidFrom,
         DateTimeOffset? requestedValidTo,
-        int durationDays = 0,
-        TimeSpan? requestedDuration = null)
+        int? durationDays = null,
+        string? requestedDuration = null)
     {
         ArgumentNullException.ThrowIfNull(validityPolicy);
         try
@@ -128,7 +128,7 @@ public static class ConsentSubmissionPipeline
                 now,
                 requestedValidFrom,
                 requestedValidTo,
-                requestedDuration == null && requestedValidTo == null ? durationDays : null,
+                string.IsNullOrWhiteSpace(requestedDuration) && requestedValidTo == null ? durationDays : null,
                 requestedDuration);
         }
         catch (GrantValidityException ex)
