@@ -731,11 +731,8 @@ public sealed partial class McpDatasetCatalog
             paths.Add(new("MCP sample_rows", "MCP", SampleRows, "A few rows of this dataset, for a first look."));
         }
 
-        if (o.Arrow.Enabled)
-        {
-            paths.Add(new("Arrow IPC export", "POST", "/api/v1/export/arrow",
-                $"Body {{\"table\": \"{id.Domain}.{id.Schema}.{id.TableName}\"}}: columnar bulk export (application/vnd.apache.arrow.stream)."));
-        }
+        paths.Add(new("Arrow IPC export", "POST", "/api/v1/export/arrow",
+            $"Body {{\"table\": \"{id.Domain}.{id.Schema}.{id.TableName}\"}}: columnar bulk export (application/vnd.apache.arrow.stream)."));
 
         return paths;
     }
@@ -782,10 +779,7 @@ public sealed partial class McpDatasetCatalog
                 "Body {\"sql\", \"tableNames\", \"limit\"}: analytical SQL across several datasets."));
         }
 
-        if (o.Arrow.Enabled)
-        {
-            endpoints.Add(new("Arrow IPC export", "POST", "/api/v1/export/arrow", "Columnar bulk export of one dataset."));
-        }
+        endpoints.Add(new("Arrow IPC export", "POST", "/api/v1/export/arrow", "Columnar bulk export of one dataset."));
 
         if (o.Lakehouse.Enabled)
         {

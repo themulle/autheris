@@ -53,7 +53,7 @@ public static class ParquetResponseWriter
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        if (service != null && GetEgressOptions(context).Enabled)
+        if (service != null)
         {
             return false;
         }

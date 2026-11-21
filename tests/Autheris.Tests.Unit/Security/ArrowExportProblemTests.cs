@@ -23,7 +23,7 @@ using Xunit;
 public sealed class ArrowExportProblemTests
 {
     private static ArrowExportService Service() => new(
-        Options.Create(new GatewayOptions { Arrow = new ArrowExportOptions { Enabled = true, MaxExportRows = 1000, BatchSize = 1000 } }),
+        Options.Create(new GatewayOptions { Arrow = new ArrowExportOptions { MaxExportRows = 1000, BatchSize = 1000 } }),
         NullLogger<ArrowExportService>.Instance);
 
     private static DefaultHttpContext Ctx(string query, bool authenticated = true)

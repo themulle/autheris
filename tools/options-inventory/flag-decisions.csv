@@ -33,9 +33,7 @@ SoftDeleteDefinition,Enabled,true,False,unconditional,Default-on soft-delete beh
 GraphQLSlowListReportOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 4,src/Autheris.Domain/Options/Protocols/GraphQlOptions.cs
 GraphQLSubscriptionOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 4,src/Autheris.Domain/Options/Protocols/GraphQlOptions.cs
 McpOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 4,src/Autheris.Domain/Options/Protocols/McpOptions.cs
-ArrowExportOptions,Enabled,true,False,unconditional,Default-on Arrow export; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Protocols/ODataOptions.cs
 ODataOptions,Enabled,true,False,keep opt-in,Operational kill switch for OData protocol (A7.3),PR 4,src/Autheris.Domain/Options/Protocols/ODataOptions.cs
-ParquetEgressOptions,Enabled,true,False,unconditional,Default-on Parquet egress; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Protocols/ODataOptions.cs
 CoLocationOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
 CrossSourceOptions,AllowNonEquiJoins,false,False,keep opt-in,SEC-SIMPL-32 default-off non-equi join guard,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
 CrossSourceOptions,Enabled,false,False,keep opt-in,R13 default-off opt-in switch of kept feature,PR 4,src/Autheris.Domain/Options/Protocols/RestApiOptions.cs
@@ -49,7 +47,6 @@ MssqlChangeTrackingOptions,AllowNonSnapshotRead,false,False,module,CDC module op
 MssqlChangeTrackingOptions,Enabled,false,False,module,CDC module option; module presence replaces flag in PR 6,PR 6,src/Autheris.Domain/Options/Protocols/StreamingCdcOptions.cs
 PostgreSqlCdcOptions,Enabled,false,False,module,CDC module option; module presence replaces flag in PR 6,PR 6,src/Autheris.Domain/Options/Protocols/StreamingCdcOptions.cs
 SystemMetricsOptions,Enabled,true,False,keep opt-in,Operational and test seam kill switch (A7.3),PR 5,src/Autheris.Domain/Options/Resilience/DegradedModeOptions.cs
-ResourceGroupsOptions,Enabled,true,False,unconditional,Default-on resource groups; remove flag and make unconditional,PR 4,src/Autheris.Domain/Options/Resilience/QueryGovernorOptions.cs
 AuditOptions,VerifyHashChainEnabled,true,False,keep opt-in,SEC-SIMPL-32 audit hash chain verification guard,PR 1,src/Autheris.Domain/Options/Security/AuditLoggingOptions.cs
 AuditRetentionOptions,Enabled,true,False,keep opt-in,SEC-SIMPL-32 audit retention guard,PR 1,src/Autheris.Domain/Options/Security/AuditLoggingOptions.cs
 LoggingOptions,AllowStatementText,true,False,keep opt-in,SEC-SIMPL-32 audit statement text logging guard,PR 1,src/Autheris.Domain/Options/Security/AuditLoggingOptions.cs

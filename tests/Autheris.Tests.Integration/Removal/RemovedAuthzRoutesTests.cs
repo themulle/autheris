@@ -42,7 +42,6 @@ public sealed class RemovedAuthzRoutesTests
             ["Gateway:GovernanceDb:Provider"] = "PostgreSql",
             ["Gateway:GovernanceDb:ConnectionString"] = "Host=localhost;Port=5432;Database=autheris_unit;Username=autheris;Password=test",
             ["Gateway:OData:Enabled"] = "true",
-            ["Gateway:Arrow:Enabled"] = "true",
             ["Gateway:DuckDbOlap:Enabled"] = "true",
             ["Gateway:Mcp:Enabled"] = "true",
             ["Gateway:SqlEndpoints:Enabled"] = "false",

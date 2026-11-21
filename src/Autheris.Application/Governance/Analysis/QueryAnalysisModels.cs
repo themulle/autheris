@@ -28,10 +28,19 @@ public static class QueryDiagnosticCodes
 /// </summary>
 public sealed class QueryAnalysisOptions
 {
+    /// <summary>Maximum estimated query cost permitted before static analysis flags the query as over-budget.</summary>
     public int MaxAllowedCost { get; init; } = 500;
+
+    /// <summary>Cost weight added per requested field in static query analysis.</summary>
     public int CostPerRequestedField { get; init; } = 5;
+
+    /// <summary>Cost weight added per table join in static query analysis.</summary>
     public int CostPerJoin { get; init; } = 25;
+
+    /// <summary>Cost weight added per level of subquery nesting in static query analysis.</summary>
     public int CostPerSubqueryDepth { get; init; } = 30;
+
+    /// <summary>Cost penalty added when a query performs an unbounded table scan without a predicate or limit.</summary>
     public int UnboundedScanPenalty { get; init; } = 50;
 
     /// <summary>

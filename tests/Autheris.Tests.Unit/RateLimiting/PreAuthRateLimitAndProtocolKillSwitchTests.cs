@@ -118,7 +118,6 @@ public sealed class PreAuthRateLimitAndProtocolKillSwitchTests
         var disabledOptions = new GatewayOptions
         {
             OData = new ODataOptions { Enabled = false },
-            Arrow = new ArrowExportOptions { Enabled = false },
             Lakehouse = new LakehouseOptions { Enabled = false }
         };
 
@@ -133,10 +132,10 @@ public sealed class PreAuthRateLimitAndProtocolKillSwitchTests
         // Act
         var result = await catalog.ListDatasetsAsync(principal, null, null, default);
 
-        // Assert: Endpoints should NOT contain OData, Arrow, or Iceberg
+        // Assert: Endpoints should NOT contain OData or Iceberg (Arrow is always enabled)
         result.Endpoints.ShouldNotBeNull();
         result.Endpoints!.ShouldNotContain(e => e.Protocol.Contains("OData"));
-        result.Endpoints.ShouldNotContain(e => e.Protocol.Contains("Arrow"));
+        result.Endpoints.ShouldContain(e => e.Protocol.Contains("Arrow"));
         result.Endpoints.ShouldNotContain(e => e.Protocol.Contains("Iceberg"));
         result.Endpoints.ShouldContain(e => e.Protocol == "GraphQL");
     }
@@ -154,7 +153,6 @@ public sealed class PreAuthRateLimitAndProtocolKillSwitchTests
         var enabledOptions = new GatewayOptions
         {
             OData = new ODataOptions { Enabled = true },
-            Arrow = new ArrowExportOptions { Enabled = true },
             Lakehouse = new LakehouseOptions { Enabled = true }
         };
 

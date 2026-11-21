@@ -54,10 +54,16 @@ public sealed record PolicyParseContext(
     public TargetSqlDialect? TargetDialect { get; init; }
 }
 
+/// <summary>Bounded cache settings for parsed policy filter expressions.</summary>
 public sealed class PolicyParseCacheOptions
 {
+    /// <summary>Maximum total number of cached parsed policy expressions.</summary>
     public int MaxEntries { get; init; } = 4096;
+
+    /// <summary>Maximum number of cached entries retained per partition.</summary>
     public int MaxEntriesPerPartition { get; init; } = 256;
+
+    /// <summary>Time-to-live for negative (parse failure) cache entries.</summary>
     public TimeSpan NegativeTtl { get; init; } = TimeSpan.FromSeconds(10);
 }
 

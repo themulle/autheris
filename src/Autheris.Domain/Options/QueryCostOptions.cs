@@ -2,22 +2,28 @@ namespace Autheris.Domain.Options;
 
 using System.ComponentModel.DataAnnotations;
 
+/// <summary>GraphQL and SQL query cost estimation weights (<c>Gateway:QueryCost</c>).</summary>
 public sealed class QueryCostOptions
 {
     public const string SectionName = "Gateway:QueryCost";
 
+    /// <summary>Minimum base cost charged per query operation.</summary>
     [Range(1, 1000)]
     public int BaseCost { get; set; } = 1;
 
+    /// <summary>Cost multiplier per estimated result row.</summary>
     [Range(0, 1000)]
     public double RowCostFactor { get; set; } = 0.5;
 
+    /// <summary>Cost multiplier per nested relation depth level.</summary>
     [Range(0, 500)]
     public int NestedCostFactor { get; set; } = 1;
 
+    /// <summary>Flat cost fee debited when a policy-denied or failed query aborts.</summary>
     [Range(1, 1000)]
     public int FailureFee { get; set; } = 1;
 
+    /// <summary>Cost charged for a single-row primary-key lookup.</summary>
     [Range(1, 1000)]
     public int CostPerSingleRowLookup { get; set; } = 1;
 
@@ -25,6 +31,7 @@ public sealed class QueryCostOptions
     public static int RequireValidListMultiplier(int value) =>
         value is >= 1 and <= 1000 ? value : throw new ArgumentOutOfRangeException(nameof(value), "DefaultListMultiplier must be between 1 and 1000.");
 
+    /// <summary>Default list cardinality multiplier when no explicit limit or index hint applies.</summary>
     [Range(1, 1000)]
     public int DefaultListMultiplier { get; set; } = 10;
 
@@ -42,5 +49,6 @@ public sealed class QueryCostOptions
     [Range(1.0, 50.0)]
     public double UnindexedRootListSurchargeMultiplier { get; set; } = 2.0;
 
+    /// <summary>When true, settles actual vs. estimated query cost against the caller's quota after execution.</summary>
     public bool EnablePostExecutionSettlement { get; set; } = true;
 }

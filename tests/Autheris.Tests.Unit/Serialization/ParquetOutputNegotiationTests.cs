@@ -48,14 +48,12 @@ public sealed class ParquetOutputNegotiationTests
         int maxRows = 1000,
         string compression = "Snappy",
         long maxBufferedSourceBytes = 64 * 1024 * 1024,
-        bool enabled = true,
         bool flatten = true)
     {
         return new GatewayOptions
         {
             ParquetEgress = new ParquetEgressOptions
             {
-                Enabled = enabled,
                 MaxRowsPerFile = maxRows,
                 Compression = compression,
                 MaxBufferedSourceBytes = maxBufferedSourceBytes,
@@ -410,14 +408,6 @@ public sealed class ParquetOutputNegotiationTests
         var rows = Rows(new Dictionary<string, object?> { ["bad\r\nname"] = 1L });
 
         await Should.ThrowAsync<ArgumentException>(() => CreateService().ExportToParquetAsync(CreateRequest(), rows));
-    }
-
-    [Fact]
-    public async Task PARQ_Writer_Disabled_Throws()
-    {
-        var service = CreateService(CreateOptions(enabled: false));
-
-        await Should.ThrowAsync<InvalidOperationException>(() => service.ExportToParquetAsync(CreateRequest(), []));
     }
 
     // =========================================================================
@@ -827,20 +817,6 @@ public sealed class ParquetOutputNegotiationTests
     }
 
     [Fact]
-    public async Task PARQ_WebSql_ParquetDisabled_Returns406_WithoutExecutingQuery()
-    {
-        var options = CreateOptions(enabled: false);
-        using var services = BuildServices(options);
-        var context = CreateWebSqlContext(services, ParquetAccept);
-        var sqlService = new DataTableSqlService(CreateEmployeeTable(1));
-
-        await WebSqlEndpoints.HandleWebSqlRequest(context, sqlService, Options.Create(options), NullLoggerFactory.Instance);
-
-        context.Response.StatusCode.ShouldBe(StatusCodes.Status406NotAcceptable);
-        sqlService.Executions.ShouldBe(0);
-    }
-
-    [Fact]
     public async Task PARQ_WebSql_ResultCutByWebSqlRowLimit_IsReportedAsTruncated()
     {
         // WebSQL findings 4.2: the WebSQL limit (MaxAllowedRows) cuts the result in the rewritten SQL, below the Parquet
@@ -964,26 +940,6 @@ public sealed class ParquetOutputNegotiationTests
         var content = await ReadParquetAsync(ResponseBytes(context));
         content.Columns["id"].ShouldBe(new object?[] { 1, 2 });
         content.Columns["email"].ShouldBe(new object?[] { "a***@company.com", "b***@company.com" });
-    }
-
-    [Fact]
-    public async Task PARQ_SqlEndpoint_ParquetDisabled_Returns406_WithoutExecuting()
-    {
-        var options = CreateOptions(enabled: false);
-        using var services = BuildServices(options);
-        var context = CreateHttpContext(services, ParquetAccept, path: "/api/v1/queries/active_customers", method: "GET");
-        var execution = CreateSqlEndpointService(new GovernedSqlResult("SELECT 1", ["id"], Rows(), 0, 1));
-
-        await SqlEndpointRoutes.HandleGetEndpoint("active_customers", context, execution, Options.Create(options), NullLoggerFactory.Instance);
-
-        context.Response.StatusCode.ShouldBe(StatusCodes.Status406NotAcceptable);
-        await execution.DidNotReceive().ExecuteEndpointAsync(
-            Arg.Any<string>(),
-            Arg.Any<IReadOnlyDictionary<string, object?>?>(),
-            Arg.Any<ClaimsPrincipal>(),
-            Arg.Any<TenantId>(),
-            Arg.Any<Autheris.Application.Sql.Endpoints.Interfaces.SqlEndpointInvocation>(),
-            Arg.Any<CancellationToken>());
     }
 
     private static IODataHandler CreateODataHandler(ODataQueryResult result)

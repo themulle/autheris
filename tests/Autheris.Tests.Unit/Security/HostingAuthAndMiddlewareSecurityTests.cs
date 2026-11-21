@@ -449,7 +449,6 @@ public sealed class HostingAuthAndMiddlewareSecurityTests
         {
             ResourceGroups = new ResourceGroupsOptions
             {
-                Enabled = true,
                 Interactive = new ResourceGroupTierConfigOptions(MaxConcurrency: 1, MaxQueueDepth: 0, TimeoutSeconds: 1)
             }
         });
@@ -484,7 +483,6 @@ public sealed class HostingAuthAndMiddlewareSecurityTests
         {
             ResourceGroups = new ResourceGroupsOptions
             {
-                Enabled = true,
                 MaxPersistentConnectionsPerPrincipal = 1
             }
         });

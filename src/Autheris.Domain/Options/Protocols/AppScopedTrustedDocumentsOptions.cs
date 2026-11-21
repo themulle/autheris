@@ -10,6 +10,7 @@ public sealed class AppScopedTrustedDocumentsOptions
 {
     public const string DefaultHeaderName = "X-Autheris-App";
 
+    /// <summary>Enables app-scoped trusted GraphQL document enforcement.</summary>
     public bool Enabled { get; init; }
 
     /// <summary>Name of the app identity request header (an RFC 7230 token).</summary>

@@ -19,7 +19,7 @@ public static class ReadPathInventory
 
         return string.Create(CultureInfo.InvariantCulture,
             $"Read paths: graphql=on graphql_aggregate=on rest_data={OnOff(options.RestApi?.DataEndpoint?.Enabled ?? true)} odata={OnOff(options.OData.Enabled)} " +
-            $"arrow={OnOff(options.Arrow.Enabled)} " +
+            $"arrow=on " +
             $"duckdb_olap={OnOff(options.DuckDbOlap.Enabled)} websql={OnOff(options.WebSql.Enabled)} " +
             $"sql_endpoints={OnOff(options.SqlEndpoints.Enabled)} lakehouse={OnOff(options.Lakehouse.Enabled)} " +
             $"mcp={OnOff(mcp.Enabled)}(catalog={OnOff(tools.Catalog)},query={OnOff(tools.Query)},api={OnOff(tools.Api)},access={OnOff(tools.Access)},disabled_tools={disabledCount})");

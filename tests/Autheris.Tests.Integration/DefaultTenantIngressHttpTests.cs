@@ -164,7 +164,6 @@ public sealed class DefaultTenantIngressHttpTests : IClassFixture<DefaultTenantI
                 ["Gateway:Mcp:Enabled"] = "true",
                 ["Gateway:Mcp:EndpointPath"] = "/mcp",
                 ["Gateway:WebSql:Enabled"] = "true",
-                ["Gateway:Arrow:Enabled"] = "true",
                 ["Gateway:Modules:Enabled:0"] = "lakehouse",
                 ["Gateway:Lakehouse:Enabled"] = "true",
                 // appsettings.Development.json configures D; an empty value is rejected, so the key is nulled when omitted.
