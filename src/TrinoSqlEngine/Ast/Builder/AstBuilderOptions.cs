@@ -18,7 +18,9 @@ public sealed record AstBuilderOptions
     /// <summary>When true, restricts SQL function calls to the configured allowlist.</summary>
     public bool EnforceFunctionPolicy { get; init; } = true;
 
-    /// <summary>Explicitly permitted SQL function names overriding the default allowlist.</summary>
+    /// <summary>
+    /// Explicitly permitted SQL function names; when null and <see cref="EnforceFunctionPolicy"/> is true, all functions are denied (fail closed).
+    /// </summary>
     public IReadOnlySet<string>? AllowedFunctions { get; init; }
 
     /// <summary>Additional SQL function names denied even if otherwise present in the allowlist.</summary>

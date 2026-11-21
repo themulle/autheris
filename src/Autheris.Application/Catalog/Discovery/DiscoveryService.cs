@@ -594,7 +594,7 @@ public sealed partial class DiscoveryService : IDiscoveryService
         var decisionsTask = _decisionPoint!.DecideManyAsync(
             subject, uncachedTables, AccessOperation.Discover, AccessTransport.Discovery, ct).AsTask();
 
-        var pendingTask = LoadPendingRequestTablesAsync(sid, ct);
+        var pendingTask = LoadPendingRequestTablesAsync(sid, caller.Tenant, ct);
         var expiredTask = LoadRecentlyExpiredTablesAsync(sid, caller.Tenant, ct);
 
         await Task.WhenAll(ownersTask, decisionsTask, pendingTask, expiredTask).ConfigureAwait(false);
@@ -706,7 +706,7 @@ public sealed partial class DiscoveryService : IDiscoveryService
             return results.Where(static r => r is not null).Select(static r => r!).ToList();
         }
 
-        var pendingTask = LoadPendingRequestTablesAsync(sid, ct);
+        var pendingTask = LoadPendingRequestTablesAsync(sid, caller.Tenant, ct);
         var expiredTask = LoadRecentlyExpiredTablesAsync(sid, caller.Tenant, ct);
         await Task.WhenAll(pendingTask, expiredTask).ConfigureAwait(false);
 
@@ -735,7 +735,7 @@ public sealed partial class DiscoveryService : IDiscoveryService
         return results.Where(static r => r is not null).Select(static r => r!).ToList();
     }
 
-    private async Task<IReadOnlySet<TableIdentifier>> LoadPendingRequestTablesAsync(Sid sid, CancellationToken ct)
+    private async Task<IReadOnlySet<TableIdentifier>> LoadPendingRequestTablesAsync(Sid sid, TenantId tenantId, CancellationToken ct)
     {
         if (_approvalRepository is null)
         {
@@ -744,7 +744,7 @@ public sealed partial class DiscoveryService : IDiscoveryService
 
         try
         {
-            var requests = await _approvalRepository.GetRequestsByRequesterSidAsync(sid, status: null, ct).ConfigureAwait(false);
+            var requests = await _approvalRepository.GetRequestsByRequesterSidAsync(sid, tenantId, status: null, ct).ConfigureAwait(false);
             var pending = new HashSet<TableIdentifier>();
             foreach (var req in requests)
             {

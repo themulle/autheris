@@ -224,7 +224,12 @@ public sealed class ConsentRowFilterAttributeValidatorTests
         var seam = (IConsentDescriptionRepository)repo;
         var updates = new List<ConsentDescriptionUpdate> { new(Guid.NewGuid(), Autheris.Tests.Common.TestTenants.Default, "text") };
 
-        var authority = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
+        var authority = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, "S-1"),
+                new System.Security.Claims.Claim("tenant_id", Autheris.Tests.Common.TestTenants.Default.Value)
+            ], "test")));
         await Should.ThrowAsync<InvalidOperationException>(() => seam.ReplaceConsentsAsync([], [ConsentOf(Attr(name: "unknown"))], new Sid("S-1"), "r", authority, null, updates, default));
         await ((IConsentDescriptionRepository)inner).DidNotReceive().ReplaceConsentsAsync(default!, default!, default, default!, default!, default, default, default);
 
@@ -237,7 +242,12 @@ public sealed class ConsentRowFilterAttributeValidatorTests
     public async Task Decorator_Replace_ValidatesEveryNewConsent()
     {
         var (repo, inner) = Decorator();
-        var authority = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
+        var authority = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, "S-1"),
+                new System.Security.Claims.Claim("tenant_id", Autheris.Tests.Common.TestTenants.Default.Value)
+            ], "test")));
         await Should.ThrowAsync<InvalidOperationException>(() => repo.ReplaceConsentsAsync([], [ConsentOf(Attr("IN")), ConsentOf(Attr("LT"))], new Sid("S-1"), "r", authority));
         await inner.DidNotReceive().ReplaceConsentsAsync(Arg.Any<IReadOnlyList<Guid>>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<Autheris.Domain.Security.ConsentRevocationAuthority>(), Arg.Any<IReadOnlyList<AuditLogEntry>?>(), Arg.Any<CancellationToken>());
     }

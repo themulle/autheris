@@ -13,8 +13,10 @@ public sealed class SqleRepeatLengthTests
 
     private void Build(string sql)
     {
+        var allowed = new HashSet<string>(SqlFunctionAllowlists.SqlServer, StringComparer.OrdinalIgnoreCase);
+        allowed.UnionWith(SqlFunctionAllowlists.PostgreSql);
         var (tree, _) = _engine.Parse(sql.AsMemory(), SqlTokenSecurityOptions.None);
-        new SqlAstBuilder().BuildStatement(tree);
+        new SqlAstBuilder(new AstBuilderOptions { AllowedFunctions = allowed }).BuildStatement(tree);
     }
 
     [Theory]

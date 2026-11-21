@@ -188,7 +188,13 @@ public sealed class PostgreSqlGovernanceConcurrencyTests : IDisposable
             ValidTo = now.AddDays(1)
         });
 
-        await _repository.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-1000-1000-1000-1001"), "no longer needed", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
+        var actorAuth = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, "S-1-5-21-1000-1000-1000-1001"),
+                new System.Security.Claims.Claim("tenant_id", Autheris.Tests.Common.TestTenants.Default.Value)
+            ], "test")));
+        await _repository.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-1000-1000-1000-1001"), "no longer needed", actorAuth);
 
         // A separate connection (not the one that revoked) sees the committed revocation immediately.
         Scalar("SELECT is_revoked FROM CONSENTS WHERE id = @id", ("@id", consent.Id.ToString())).ShouldBe(1);

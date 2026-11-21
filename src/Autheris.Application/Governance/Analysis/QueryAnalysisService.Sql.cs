@@ -68,7 +68,11 @@ public sealed partial class QueryAnalysisService
         {
             var normalizedSql = SqlParameterExtractor.NormalizeForAst(trimmed);
             var (tree, _) = FastSqlEngine.Default.Parse(normalizedSql.AsMemory());
-            parsedStatement = new SqlAstBuilder().BuildStatement(tree);
+            parsedStatement = new SqlAstBuilder(new AstBuilderOptions
+            {
+                EnforceFunctionPolicy = true,
+                AllowedFunctions = SqlDialectMapper.AllSafeDialectFunctions
+            }).BuildStatement(tree);
             var analyzer = new SqlQueryAnalyzer();
             metadata = analyzer.Analyze(tree);
         }

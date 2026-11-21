@@ -15,7 +15,7 @@ public sealed class SqlAstBuilderTests
     private SqlStatement ParseToAst(string sql, AstBuilderOptions? options = null)
     {
         var (tree, _) = _engine.Parse(sql.AsMemory(), SqlTokenSecurityOptions.None);
-        var builder = new SqlAstBuilder(options);
+        var builder = new SqlAstBuilder(options ?? new AstBuilderOptions { AllowedFunctions = SqlFunctionAllowlists.DuckDb });
         return builder.BuildStatement(tree);
     }
 

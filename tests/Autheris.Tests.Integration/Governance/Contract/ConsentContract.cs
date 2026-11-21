@@ -387,8 +387,13 @@ public abstract class ConsentContract : GovernanceContractBase
         var consent = await Store.Consents.CreateConsentAsync(NewConsent(table.Identifier, Store.TenantA, GranteeSid));
 
         Store.SetCaller(new CallerContext("contract-test", "1.0", "revoke"));
-        var none = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
-        await Store.Consents.RevokeConsentAsync(consent.Id, Owner1Sid, "Revoked in contract test", none);
+        var ownerAuth = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, Owner1Sid.Value),
+                new System.Security.Claims.Claim("tenant_id", Store.TenantA.Value)
+            ], "test")));
+        await Store.Consents.RevokeConsentAsync(consent.Id, Owner1Sid, "Revoked in contract test", ownerAuth);
 
         var activeBySubj = await Store.Consents.GetActiveConsentsForSubjectsAsync([GranteeSid], table.Identifier, now, Store.TenantA);
         activeBySubj.Should().BeEmpty();
@@ -421,10 +426,21 @@ public abstract class ConsentContract : GovernanceContractBase
         var c1 = await Store.Consents.CreateConsentAsync(NewConsent(table.Identifier, Store.TenantA, GranteeSid, requestId: syncMarker));
         var c2 = await Store.Consents.CreateConsentAsync(NewConsent(table.Identifier, Store.TenantA, new Sid("S-1-5-21-900-55")));
 
-        var none = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
         var unauthorizedSid = new Sid("S-1-5-21-999-999");
+        var strangerAuth = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, unauthorizedSid.Value),
+                new System.Security.Claims.Claim("tenant_id", Store.TenantA.Value)
+            ], "test")));
+        var ownerAuth = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, Owner1Sid.Value),
+                new System.Security.Claims.Claim("tenant_id", Store.TenantA.Value)
+            ], "test")));
         Store.SetCaller(new CallerContext("stranger-app", "1.0", "revoke"));
-        var unauthAct = () => Store.Consents.RevokeConsentAsync(c2.Id, unauthorizedSid, "Unauthorized attempt", none);
+        var unauthAct = () => Store.Consents.RevokeConsentAsync(c2.Id, unauthorizedSid, "Unauthorized attempt", strangerAuth);
         await unauthAct.Should().ThrowAsync<Autheris.Domain.Exceptions.ConsentRevocationForbiddenException>();
 
         var wrongMarkerRevoked = await Store.Consents.RevokeSystemConsentAsync(c1.Id, Guid.NewGuid(), new Sid("system:sync"), "Wrong marker");
@@ -435,7 +451,7 @@ public abstract class ConsentContract : GovernanceContractBase
 
         var replacement = NewConsent(table.Identifier, Store.TenantA, new Sid("S-1-5-21-900-77"));
         var epochBefore = await Store.PolicyEpochs.GetTableEpochAsync(table.Identifier);
-        await Store.Consents.ReplaceConsentsAsync([c2.Id], [replacement], Owner1Sid, "Declarative replace", none);
+        await Store.Consents.ReplaceConsentsAsync([c2.Id], [replacement], Owner1Sid, "Declarative replace", ownerAuth);
         var epochAfter = await Store.PolicyEpochs.GetTableEpochAsync(table.Identifier);
         epochAfter.Should().BeGreaterThan(epochBefore);
 

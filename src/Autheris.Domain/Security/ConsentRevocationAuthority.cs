@@ -18,7 +18,7 @@ public enum ConsentRevocationScope
 public sealed class ConsentRevocationAuthority
 {
     internal static readonly ConsentRevocationAuthority GranteeOrApproverInternal =
-        new(ConsentRevocationScope.GranteeOrApproverOnly, null);
+        new(ConsentRevocationScope.GranteeOrApproverOnly, null, denyAllTenants: true);
 
     private readonly bool _denyAllTenants;
 
@@ -114,7 +114,7 @@ public sealed class ConsentRevocationAuthority
         {
             ConsentRevocationScope.ClusterAdmin => true,
             ConsentRevocationScope.TenantGovernanceAdmin => TenantId.HasValue && TenantId.Value == consentTenant,
-            _ => !TenantId.HasValue || TenantId.Value == consentTenant
+            _ => TenantId.HasValue && TenantId.Value == consentTenant
         };
     }
 
@@ -137,7 +137,7 @@ public sealed class ConsentRevocationAuthority
     {
         var hasValidTenant = Autheris.Domain.Common.TenantId.TryParse(rawTenant, out var parsedTenant);
         auditTenant = hasValidTenant ? parsedTenant : Autheris.Domain.Common.TenantId.Platform;
-        if (hasValidTenant && !CanAccessTenant(parsedTenant))
+        if (_denyAllTenants || (hasValidTenant && !CanAccessTenant(parsedTenant)))
         {
             isAdminForTenant = false;
             return false;

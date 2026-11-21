@@ -133,7 +133,13 @@ public sealed class SetConsentDescriptionTests : IDisposable
         var consent = await NewConsentAsync();
         var foreign = await NewConsentAsync(tenant: new TenantId("tenant-foreign"));
         var revoked = await NewConsentAsync();
-        await _repository.RevokeConsentAsync(revoked.Id, Alice, "gone", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
+        var aliceAuth = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, Alice.Value),
+                new System.Security.Claims.Claim("tenant_id", revoked.TenantId.Value)
+            ], "test")));
+        await _repository.RevokeConsentAsync(revoked.Id, Alice, "gone", aliceAuth);
         var expired = await NewConsentAsync(validDays: 1);
         var conn = _repository.RawConnection();
         {

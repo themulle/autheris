@@ -58,7 +58,12 @@ public sealed class ConvertTimeZoneSurfaceTests
     {
         var engine = new FastSqlEngine();
         var (tree, _) = engine.Parse(sql.AsMemory());
-        Should.Throw<AstBuildException>(() => new SqlAstBuilder().BuildStatement(tree));
+        var options = new AstBuilderOptions
+        {
+            EnforceFunctionPolicy = true,
+            AllowedFunctions = SqlFunctionAllowlists.WithDateTranslation(SqlFunctionAllowlists.DuckDb)
+        };
+        Should.Throw<AstBuildException>(() => new SqlAstBuilder(options).BuildStatement(tree));
     }
 
     [Fact]

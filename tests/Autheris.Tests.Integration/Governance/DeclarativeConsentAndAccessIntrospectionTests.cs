@@ -322,8 +322,8 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
         await repo.CreateConsentRequestAsync(req2);
 
         // Act
-        var allRequests = await repo.GetRequestsByRequesterSidAsync(requesterSid);
-        var pendingRequests = await repo.GetRequestsByRequesterSidAsync(requesterSid, status: "PENDING_APPROVAL");
+        var allRequests = await repo.GetRequestsByRequesterSidAsync(requesterSid, new TenantId("tenant-1"));
+        var pendingRequests = await repo.GetRequestsByRequesterSidAsync(requesterSid, new TenantId("tenant-1"), status: "PENDING_APPROVAL");
 
         // Assert
         allRequests.Count.ShouldBe(2);

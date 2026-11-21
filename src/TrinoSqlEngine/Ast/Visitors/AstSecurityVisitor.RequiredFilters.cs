@@ -360,6 +360,8 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             expr = new Builder.SqlAstBuilder(new Builder.AstBuilderOptions
             {
                 EnforceReadOnlyQueries = true,
+                EnforceFunctionPolicy = true,
+                AllowedFunctions = SqlFunctionAllowlists.WithDateTranslation(SqlFunctionAllowlists.DuckDb),
                 RejectTimeTravelQueries = true
             }).BuildStandaloneExpression(tree);
         }

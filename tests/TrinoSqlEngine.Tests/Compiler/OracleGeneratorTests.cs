@@ -140,7 +140,11 @@ public class OracleGeneratorTests
     [Fact]
     public void TranslatedDateFunctions_AreBound_WithReviewedUnitFragments()
     {
-        var stmt = new TrinoSqlEngine.Ast.Builder.SqlAstBuilder(new TrinoSqlEngine.Ast.Builder.AstBuilderOptions { TranslateTrinoDateFunctions = true })
+        var stmt = new TrinoSqlEngine.Ast.Builder.SqlAstBuilder(new TrinoSqlEngine.Ast.Builder.AstBuilderOptions
+        {
+            TranslateTrinoDateFunctions = true,
+            AllowedFunctions = SqlFunctionAllowlists.WithDateTranslation(SqlFunctionAllowlists.Oracle)
+        })
             .BuildStatement(new FastSqlEngine().Parse("SELECT date_add('day', 3, d) AS a, date_add('month', 2, d) AS m, date_trunc('month', d) AS t FROM t".AsMemory(), SqlTokenSecurityOptions.None).Tree);
         var c = SqlDialectGeneratorFactory.GetGenerator(TargetSqlDialect.Oracle).Generate(stmt, ParameterSource.Empty, CancellationToken.None);
         Assert.Contains("NUMTODSINTERVAL(:p1, 'DAY')", c.Sql);

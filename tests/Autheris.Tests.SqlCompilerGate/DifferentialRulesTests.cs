@@ -1,5 +1,7 @@
+using System.Security;
 using Autheris.Tests.SqlCompilerGate.Harness;
 using Shouldly;
+using TrinoSqlEngine;
 
 namespace Autheris.Tests.SqlCompilerGate;
 
@@ -35,4 +37,15 @@ public sealed class DifferentialRulesTests
     [Fact]
     public void AvailableAstLeg_DoesNotThrow() =>
         Should.NotThrow(() => DifferentialRules.RequireAstLeg("PostgreSql", Array.Empty<string>()));
+
+    [Fact]
+    public void RejectionReason_MapsMaskedColumnPredicateToSecurityException_AndPreservesOtherSubclasses()
+    {
+        GateRunner.RejectionReason(new MaskedColumnPredicateException("masked")).ShouldBe(nameof(SecurityException));
+        GateRunner.RejectionReason(new SecurityException("plain")).ShouldBe(nameof(SecurityException));
+        GateRunner.RejectionReason(new UnfilteredDmlException("unfiltered")).ShouldBe(nameof(UnfilteredDmlException));
+        GateRunner.RejectionReason(new MaskedAggregationException()).ShouldBe(nameof(MaskedAggregationException));
+        GateRunner.RejectionReason(new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "x"))
+            .ShouldBe(nameof(SqlCompileNotSupportedException));
+    }
 }

@@ -105,6 +105,6 @@ public sealed class RoleResolverDegradedTests
 
         resolution.IsDegraded.ShouldBeFalse();
         resolution.Groups.ShouldBeEmpty();
-        await _cache.Received(1).SetAsync("customer-b2b", "user-1", resolution, Arg.Any<CancellationToken>());
+        await _cache.Received(1).SetAsync("customer-b2b", "role:user-1", resolution, Arg.Any<CancellationToken>());
     }
 }

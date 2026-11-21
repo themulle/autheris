@@ -19,6 +19,7 @@ public interface IRoleResolverCache
 
 public sealed class RoleResolverCache : IRoleResolverCache
 {
+    private const int MaxCacheKeyLength = IdentityGroupsChangedChannel.MaxKeyLength + 32;
     private readonly ConcurrentLru<(string RealmId, string UserKey), RoleResolution> _l1Cache;
     private readonly byte[] _hmacKey;
 
@@ -28,9 +29,23 @@ public sealed class RoleResolverCache : IRoleResolverCache
         _hmacKey = hmacKey ?? RandomNumberGenerator.GetBytes(32);
     }
 
-    private static bool IsWithinBounds(string realmId, string userKey) =>
-        !string.IsNullOrEmpty(realmId) && !string.IsNullOrEmpty(userKey)
-        && realmId.Length <= IdentityGroupsChangedChannel.MaxKeyLength && userKey.Length <= IdentityGroupsChangedChannel.MaxKeyLength;
+    private static bool IsWithinBounds(string realmId, string userKey)
+    {
+        if (string.IsNullOrEmpty(realmId) || string.IsNullOrEmpty(userKey)
+            || realmId.Length > IdentityGroupsChangedChannel.MaxKeyLength
+            || userKey.Length > MaxCacheKeyLength)
+        {
+            return false;
+        }
+
+        if (TryStripEpochPrefix(userKey, out var unwrapped))
+        {
+            return unwrapped.Length > 0 && unwrapped.Length <= IdentityGroupsChangedChannel.MaxKeyLength;
+        }
+
+        var rawLength = userKey.StartsWith("role:", StringComparison.Ordinal) ? userKey.Length - 5 : userKey.Length;
+        return rawLength > 0 && rawLength <= IdentityGroupsChangedChannel.MaxKeyLength;
+    }
 
     public ValueTask<RoleResolution?> GetAsync(string realmId, string userKey, CancellationToken ct = default)
     {
@@ -72,6 +87,54 @@ public sealed class RoleResolverCache : IRoleResolverCache
     public void Invalidate(string realmId, string userKey)
     {
         _l1Cache.TryRemove((realmId, userKey));
+        if (!string.IsNullOrEmpty(userKey))
+        {
+            _l1Cache.TryRemove((realmId, $"role:{userKey}"));
+        }
+
+        if (string.IsNullOrEmpty(realmId) || string.IsNullOrEmpty(userKey))
+        {
+            return;
+        }
+
+        foreach (var entry in _l1Cache)
+        {
+            if (string.Equals(entry.Key.RealmId, realmId, StringComparison.Ordinal)
+                && IsEpochCacheKeyForUser(entry.Key.UserKey, userKey))
+            {
+                _l1Cache.TryRemove(entry.Key);
+            }
+        }
+    }
+
+    private static bool IsEpochCacheKeyForUser(string cachedKey, string userKey) =>
+        TryStripEpochPrefix(cachedKey, out var unwrapped) && unwrapped.Equals(userKey.AsSpan(), StringComparison.Ordinal);
+
+    private static bool TryStripEpochPrefix(string key, out ReadOnlySpan<char> unwrapped)
+    {
+        unwrapped = default;
+        if (!key.StartsWith("role:e", StringComparison.Ordinal) && !key.StartsWith("scim:e", StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var rest = key.AsSpan(6);
+        var colonIdx = rest.IndexOf(':');
+        if (colonIdx <= 0)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < colonIdx; i++)
+        {
+            if (rest[i] is < '0' or > '9')
+            {
+                return false;
+            }
+        }
+
+        unwrapped = rest[(colonIdx + 1)..];
+        return true;
     }
 
     public void InvalidateAll()

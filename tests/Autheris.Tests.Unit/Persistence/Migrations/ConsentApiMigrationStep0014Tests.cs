@@ -174,7 +174,7 @@ public sealed class ConsentApiMigrationStep0014Tests
         ConsentSqlCore.ReadAllSubjectConsentRows(
             subjectReader,
             now,
-            new HashSet<string>(["S-1-5-21-500"], StringComparer.OrdinalIgnoreCase),
+            new HashSet<Sid>([new Sid("S-1-5-21-500")]),
             new HashSet<Guid>(),
             list);
 

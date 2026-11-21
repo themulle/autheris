@@ -19,7 +19,7 @@ public sealed class AstBuilderFailLoudTests
     private SqlStatement Build(string sql)
     {
         var (tree, _) = _engine.Parse(sql.AsMemory(), SqlTokenSecurityOptions.None);
-        return new SqlAstBuilder().BuildStatement(tree);
+        return new SqlAstBuilder(new AstBuilderOptions { EnforceFunctionPolicy = false }).BuildStatement(tree);
     }
 
     [Theory]

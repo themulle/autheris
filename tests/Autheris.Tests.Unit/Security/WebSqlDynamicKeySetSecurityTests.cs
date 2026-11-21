@@ -331,23 +331,20 @@ public sealed class WebSqlDynamicKeySetSecurityTests
 
     [Fact]
     [Trait("Category", "Security")] // SEC-DATA124-04
-    public async Task T_SEC_DATA124_05_OrdinalDeduplication_CollationSafety()
+    public async Task T_SEC_DATA124_05_DisjointKeyBatches_PreserveDuplicateRows()
     {
         var customers = CreateSqlTable("crm", "public", "customers", ["id", "code"]);
         var orders = CreateSqlTable("erp", "public", "orders", ["id", "customer_code", "total"], pkColumns: ["id"]);
 
-        // Driving table returns two distinct codes under ordinal comparison: "ABC" and "abc"
         var customerRows = new[]
         {
             Row(("id", "1"), ("code", "ABC")),
             Row(("id", "2"), ("code", "abc"))
         };
 
-        // SQL Server case-insensitive collation matches both "ABC" and "abc" to the exact same order row
         var duplicateOrder = Row(("id", "order_1"), ("customer_code", "ABC"), ("total", "99"));
 
         var stubCustomers = new StubTableConnector("crm", customerRows);
-        // Stub returns duplicateOrder for each batch call
         var stubOrders = new StubTableConnector("erp", [duplicateOrder]);
         var registry = StubRegistry.For((customers, stubCustomers), (orders, stubOrders));
 
@@ -381,7 +378,7 @@ public sealed class WebSqlDynamicKeySetSecurityTests
                 {
                     DynamicKeySet = new DynamicKeySetOptions
                     {
-                        MaxKeySetBatchSize = 1 // Forces 2 separate batches: 1 for "ABC", 1 for "abc"
+                        MaxKeySetBatchSize = 1 // Forces 2 disjoint batches: "ABC" and "abc"
                     }
                 }
             }
@@ -391,9 +388,24 @@ public sealed class WebSqlDynamicKeySetSecurityTests
         var staged = await staging.StageAsync([reqCustomers, reqOrders], User(), Tenant, Budget());
 
         var orderStaged = staged.First(s => s.Table == orders.Identifier);
-        // Gateway ordinal deduplication must drop duplicate rows across batches
-        orderStaged.GovernedRows.Count.ShouldBe(1);
+        // Disjoint key batches must preserve duplicate rows so aggregates/COUNT/UNION ALL in DuckDB stay accurate
+        orderStaged.GovernedRows.Count.ShouldBe(2);
         ((string?)orderStaged.GovernedRows[0]["id"]).ShouldBe("order_1");
+        ((string?)orderStaged.GovernedRows[1]["id"]).ShouldBe("order_1");
+
+        // Staging row cap must still enforce MaxStagedRowsPerTable on accumulated batch rows
+        var tightBudget = new FederationBudget(
+            MaxTableCount: 10,
+            MaxStagedRowsPerTable: 2,
+            MaxTotalStagedRows: 10,
+            MaxStagedBytesPerTable: 32 * 1024 * 1024,
+            MaxTotalStagedBytes: 64 * 1024 * 1024,
+            TimeoutSeconds: 30,
+            MaxParallelSourceReads: 2);
+        var tightEx = await Should.ThrowAsync<Autheris.Domain.Exceptions.GatewaySecurityException>(async () =>
+            await staging.StageAsync([reqCustomers, reqOrders], User(), Tenant,
+                tightBudget with { MaxStagedRowsPerTable = 1 }));
+        tightEx.ErrorCode.ShouldBe("ROW_LIMIT_EXCEEDED");
     }
 
     [Fact]
