@@ -31,7 +31,7 @@ internal static class TenantPushdown
     public static bool HasConflictingRawClaim(ClaimsPrincipal principal, string resolvedTenant)
     {
         ArgumentNullException.ThrowIfNull(principal);
-        if (principal.GetUserRoles().Contains("ClusterAdmin", StringComparer.OrdinalIgnoreCase))
+        if (ClusterAdminPolicy.IsCanonicalClusterAdmin(principal))
         {
             return false;
         }
