@@ -389,8 +389,6 @@ public sealed class DatasetIndexVisibilityLeakTests
     {
         public static readonly StubGoldenQueryService Instance = new();
         public void RegisterGoldenQuery(GoldenQuery query) { }
-        public ValueTask<IReadOnlyList<GoldenQuery>> GetGoldenQueriesAsync(string? domain = null, string? tableName = null, CancellationToken ct = default)
-            => ValueTask.FromResult<IReadOnlyList<GoldenQuery>>([]);
         public ValueTask<IReadOnlyList<GoldenQuery>> GetGoldenQueriesAsync(string? domain, string? tableName, Func<GoldenQuery, bool>? visible, CancellationToken ct)
             => ValueTask.FromResult<IReadOnlyList<GoldenQuery>>([]);
         public ValueTask<IReadOnlyList<GoldenQuery>> GetGoldenQueriesAsync(GoldenQueryReadContext context, string? domain, string? tableName, CancellationToken ct)

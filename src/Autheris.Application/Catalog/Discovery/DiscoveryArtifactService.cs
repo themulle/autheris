@@ -40,7 +40,6 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
     private readonly IRateLimiterService? _rateLimiter;
     private readonly TimeProvider _timeProvider;
     private readonly IAccessDecisionPoint? _decisionPoint;
-    private readonly IRestrictedScopePolicy _restrictedScopes;
 
     public DiscoveryArtifactService(
         ITableMetadataRepository metadata,
@@ -65,7 +64,7 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
         _rateLimiter = rateLimiter;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _decisionPoint = decisionPoint;
-        _restrictedScopes = restrictedScopes ?? RestrictedScopePolicy.Default;
+        _ = restrictedScopes;
     }
 
     public async Task<DiscoveryArtifactWriteResult> UpsertAsync(
@@ -264,30 +263,23 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
             return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
         }
 
-        var tokenScopes = TokenAccessScope.GetScopeSet(principal.Claims);
-        var isRestrictedCaller = _restrictedScopes.HeldBy(tokenScopes).Count > 0;
-
-        TableAccessDecision? decision = null;
-        if (isRestrictedCaller)
+        if (_decisionPoint is null)
         {
-            if (_decisionPoint is null)
-            {
-                return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
-            }
+            return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
+        }
 
-            var subject = SecurityPrincipalContext.FromPrincipal(principal, resolution.Tenant!.Value);
-            decision = await _decisionPoint.DecideAsync(
-                new AccessRequest(subject, table, AccessOperation.Discover, AccessTransport.Discovery),
-                ct).ConfigureAwait(false);
-            if (!decision.IsAllowed)
-            {
-                return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
-            }
+        var subject = SecurityPrincipalContext.FromPrincipal(principal, resolution.Tenant!.Value);
+        var decision = await _decisionPoint.DecideAsync(
+            new AccessRequest(subject, table, AccessOperation.Discover, AccessTransport.Discovery),
+            ct).ConfigureAwait(false);
+        if (!decision.IsAllowed)
+        {
+            return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
         }
 
         var maxRows = Math.Clamp(settings.MaxSampleRows, 1, CatalogDiscoverySettings.HardMaxSampleRows);
         var take = limit is > 0 ? Math.Min(limit.Value, maxRows) : maxRows;
-        var projected = ProjectVisibleSamples(stored.SamplesJson, table, take, decision, isRestrictedCaller);
+        var projected = ProjectVisibleSamples(stored.SamplesJson, table, take, decision);
         if (projected.Count == 0)
         {
             return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
@@ -408,8 +400,7 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
         string samplesJson,
         TableMetadata table,
         int maxRows,
-        TableAccessDecision? decision,
-        bool isRestrictedCaller)
+        TableAccessDecision decision)
     {
         var visibleColumns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var col in table.Columns)
@@ -419,9 +410,7 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
                 continue;
             }
 
-            if (decision is not null &&
-                (isRestrictedCaller || decision.ScopeClearance is not null) &&
-                DiscoveryAccessMapper.MapColumnState(table, decision, col.ColumnName).State != DiscoveryColumnState.Clear)
+            if (DiscoveryAccessMapper.MapColumnState(table, decision, col.ColumnName).State != DiscoveryColumnState.Clear)
             {
                 continue;
             }

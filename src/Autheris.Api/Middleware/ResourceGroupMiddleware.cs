@@ -213,7 +213,8 @@ public sealed class ResourceGroupMiddleware
             return requested;
         }
 
-        if (context.User.IsInRole("ClusterAdmin") || context.User.IsInRole("GovernanceAdmin"))
+        if (ClusterAdminPolicy.IsCanonicalClusterAdmin(context.User) ||
+            Autheris.Api.Security.GatewayPolicies.HasRole(context.User, GatewayRole.GovernanceAdmin))
         {
             return requested;
         }
