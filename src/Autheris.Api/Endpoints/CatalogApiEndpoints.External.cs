@@ -77,6 +77,9 @@ public static class ExternalCatalogApiEndpoints
         int? pageSize = null,
         string? accessStatus = null,
         string? q = null,
+        string? mode = null,
+        string? sort = null,
+        string? language = null,
         CancellationToken ct = default)
     {
         if (!TryResolveTenant(context, out var tenantId, out var denied))
@@ -96,7 +99,10 @@ public static class ExternalCatalogApiEndpoints
             Cursor: cursor,
             PageSize: pageSize ?? ExternalCatalogReader.DefaultPageSize,
             AccessStatus: accessStatus,
-            Q: q);
+            Q: q,
+            Mode: mode,
+            Sort: sort,
+            Language: language);
 
         var result = await reader.ListObjectsAsync(context.User, tenantId, query, ct).ConfigureAwait(false);
         return ToJsonOrProblemResult(context, result);
@@ -106,6 +112,9 @@ public static class ExternalCatalogApiEndpoints
         HttpContext context,
         ExternalCatalogReader reader,
         string? accessStatus = null,
+        string? q = null,
+        string? mode = null,
+        string? language = null,
         CancellationToken ct = default)
     {
         if (!TryResolveTenant(context, out var tenantId, out var denied))
@@ -113,7 +122,7 @@ public static class ExternalCatalogApiEndpoints
             return denied!;
         }
 
-        var result = await reader.GetFacetsAsync(context.User, tenantId, accessStatus, ct).ConfigureAwait(false);
+        var result = await reader.GetFacetsAsync(context.User, tenantId, accessStatus, q, mode, language, ct).ConfigureAwait(false);
         if (!result.IsSuccess)
         {
             return ToJsonOrProblemResult(context, result);

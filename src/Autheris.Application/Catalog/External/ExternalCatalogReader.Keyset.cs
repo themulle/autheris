@@ -152,6 +152,8 @@ public sealed partial class ExternalCatalogReader
         DiscoveryObjectKind? kindFilter,
         DiscoveryAccessState? accessFilter,
         string? searchText,
+        string? searchMode,
+        bool orderByRelevance,
         string? afterKey,
         int? cursorCount,
         int pageSize,
@@ -198,6 +200,7 @@ public sealed partial class ExternalCatalogReader
             First: pageSize,
             AfterKey: afterKey,
             Search: searchText,
+            Language: string.IsNullOrWhiteSpace(query.Language) ? null : query.Language.Trim(),
             Surface: DiscoverySurface.Rest,
             Access: accessFilter,
             Domain: string.IsNullOrWhiteSpace(query.Domain) ? null : query.Domain.Trim(),
@@ -207,7 +210,9 @@ public sealed partial class ExternalCatalogReader
             Sensitivity: string.IsNullOrWhiteSpace(query.Sensitivity) ? null : query.Sensitivity.Trim(),
             MetadataPredicate: metadataPredicate,
             ProjectedPredicate: projectedPredicate,
-            CountTotal: !cursorCount.HasValue);
+            CountTotal: !cursorCount.HasValue,
+            Mode: searchMode,
+            OrderByRelevance: orderByRelevance);
 
         DiscoveryKeysetPage keysetPage;
         try

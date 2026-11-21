@@ -103,6 +103,22 @@ public sealed partial class ExternalCatalogReader(
                 $"The q filter exceeds the maximum length of {MaxSearchTextLength} characters.");
         }
 
+        if (!TryParseSearchMode(query.Mode, out var normalizedMode))
+        {
+            return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(
+                400,
+                "INVALID_QUERY",
+                "Invalid search mode. Allowed values: hybrid, keyword, semantic.");
+        }
+
+        if (!TryParseSortOption(query.Sort, out var orderByRelevance))
+        {
+            return ExternalCatalogResult.Fail<ExternalCatalogPageDto>(
+                400,
+                "INVALID_QUERY",
+                "Invalid sort option. Allowed values: id, relevance.");
+        }
+
         var cursorBinding = ExternalCatalogCursor.ComputeBinding(query, kindFilter, accessFilter, searchText, tenantId, user);
         string? afterKey = null;
         int? cursorCount = null;
@@ -135,7 +151,52 @@ public sealed partial class ExternalCatalogReader(
 
         return isServicePrincipal
             ? await ListAppObjectsKeysetAsync(user, tenantId, query, kindEnum, afterKey, cursorCount, pageSize, cursorBinding, ct).ConfigureAwait(false)
-            : await ListUserObjectsKeysetAsync(user, tenantId, query, kindEnum, accessFilter, searchText, afterKey, cursorCount, pageSize, cursorBinding, ct).ConfigureAwait(false);
+            : await ListUserObjectsKeysetAsync(user, tenantId, query, kindEnum, accessFilter, searchText, normalizedMode, orderByRelevance, afterKey, cursorCount, pageSize, cursorBinding, ct).ConfigureAwait(false);
+    }
+
+    internal static bool TryParseSearchMode(string? mode, out string? normalizedMode)
+    {
+        if (string.IsNullOrWhiteSpace(mode))
+        {
+            normalizedMode = null;
+            return true;
+        }
+
+        switch (mode.Trim().ToLowerInvariant())
+        {
+            case "hybrid":
+                normalizedMode = "hybrid";
+                return true;
+            case "keyword":
+            case "keywordbm25":
+                normalizedMode = "keyword";
+                return true;
+            case "semantic":
+            case "semanticvector":
+                normalizedMode = "semantic";
+                return true;
+            default:
+                normalizedMode = null;
+                return false;
+        }
+    }
+
+    private static bool TryParseSortOption(string? sort, out bool orderByRelevance)
+    {
+        if (string.IsNullOrWhiteSpace(sort) || string.Equals(sort.Trim(), "id", StringComparison.OrdinalIgnoreCase))
+        {
+            orderByRelevance = false;
+            return true;
+        }
+
+        if (string.Equals(sort.Trim(), "relevance", StringComparison.OrdinalIgnoreCase))
+        {
+            orderByRelevance = true;
+            return true;
+        }
+
+        orderByRelevance = false;
+        return false;
     }
 
     public async Task<ExternalCatalogResult<ExternalCatalogObjectDto>> GetObjectAsync(
