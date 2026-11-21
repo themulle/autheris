@@ -170,7 +170,7 @@ Details and an example manifest: [F-GOV-15, Apply Semantics](../features/f-gov-1
 
 ## 5. Installing Signed Release Modules into the Core Image
 
-Release tags publish a signed module archive `Autheris-modules-<version>.tar.gz` alongside the container images (containing `lakehouse`, `dbt`, `openmetadata`, `events`, and `lineage`).
+The `autheris-full` image already ships all 5 signed modules (`lakehouse`, `dbt`, `openmetadata`, `events`, and `lineage`) under `/app/modules`. For the minimal `core` image, release tags also publish the signed module archive `Autheris-modules-<version>.tar.gz` alongside the container images (containing lightweight module bundles that reuse the host's native libraries such as `libduckdb` and `libonnxruntime`).
 
 To run optional modules on top of the core image without switching to `autheris-full`:
 

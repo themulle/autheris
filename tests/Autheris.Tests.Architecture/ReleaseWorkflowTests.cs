@@ -259,6 +259,21 @@ public sealed class ReleaseWorkflowTests
         ReadRepoFile(".github/workflows/docker-publish.yml").ShouldNotContain("pull_request_target");
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Docker_publish_and_release_package_all_modules_and_trim_runtimes()
+    {
+        var dockerPublish = ReadRepoFile(".github/workflows/docker-publish.yml");
+        dockerPublish.ShouldNotContain("modules/Autheris.Modules.Lakehouse/Autheris.Modules.Lakehouse.csproj");
+        Regex.Count(dockerPublish, Regex.Escape("for csproj in modules/*/*.csproj; do"))
+            .ShouldBe(2, "Both build-and-push and module-e2e-branch in docker-publish.yml must package all non-test modules");
+        dockerPublish.ShouldContain("! -name linux-x64");
+
+        var releaseWorkflow = ReadRepoFile(".github/workflows/release.yml");
+        releaseWorkflow.ShouldContain("for csproj in modules/*/*.csproj; do");
+        releaseWorkflow.ShouldContain("! -name linux-x64 ! -name linux-arm64");
+    }
+
     private static string ReadRepoFile(string relativePath) =>
         File.ReadAllText(Path.Combine(RepositoryScan.RepoRoot, relativePath.Replace('/', Path.DirectorySeparatorChar)));
 

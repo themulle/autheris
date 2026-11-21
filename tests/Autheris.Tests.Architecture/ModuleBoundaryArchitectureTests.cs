@@ -477,6 +477,48 @@ public sealed partial class ModuleBoundaryArchitectureTests
             new Microsoft.Extensions.FileProviders.NullFileProvider();
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Module_project_references_exclude_runtime_and_native_assets()
+    {
+        var root = RepositoryScan.FindRepositoryRoot();
+        var modulesRootDir = Path.Combine(root, "modules");
+        Directory.Exists(modulesRootDir).ShouldBeTrue("Missing modules/ directory");
+
+        var moduleProjects = Directory.EnumerateFiles(modulesRootDir, "*.csproj", SearchOption.AllDirectories)
+            .Where(p => !p.EndsWith(".Tests.csproj", StringComparison.OrdinalIgnoreCase))
+            .OrderBy(p => p, StringComparer.Ordinal)
+            .ToList();
+        moduleProjects.ShouldNotBeEmpty("Expected non-test module projects under modules/");
+
+        var violations = new List<string>();
+        foreach (var csproj in moduleProjects)
+        {
+            var projectName = Path.GetFileNameWithoutExtension(csproj);
+            var doc = System.Xml.Linq.XDocument.Load(csproj);
+            var projectRefs = doc.Descendants().Where(e => e.Name.LocalName == "ProjectReference");
+            foreach (var pr in projectRefs)
+            {
+                var include = pr.Attribute("Include")?.Value ?? "<unknown>";
+                var isPrivateFalse = string.Equals(
+                    pr.Elements().FirstOrDefault(e => e.Name.LocalName == "Private")?.Value.Trim(),
+                    "false",
+                    StringComparison.OrdinalIgnoreCase);
+                var excludeTokens = (pr.Elements().FirstOrDefault(e => e.Name.LocalName == "ExcludeAssets")?.Value ?? string.Empty)
+                    .Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+                if (!isPrivateFalse || !excludeTokens.Contains("runtime") || !excludeTokens.Contains("native"))
+                {
+                    violations.Add($"{projectName} -> {include}");
+                }
+            }
+        }
+
+        violations.ShouldBeEmpty(
+            "Every module ProjectReference must set <Private>false</Private> and <ExcludeAssets>runtime;native</ExcludeAssets> so host native libraries are not duplicated into module bundles.");
+    }
+
     private static List<string> ExtractProjectReferences(string csprojContent) =>
         ProjectReferenceRegex()
             .Matches(csprojContent)

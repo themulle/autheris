@@ -279,6 +279,8 @@ jobs:
             module_id="$(printf '%s' "$short_name" | tr '[:upper:]' '[:lower:]')"
             module_out="dist/modules/${module_id}"
             dotnet publish "$csproj" -c Release --no-restore -p:Version="$VERSION" -o "$module_out"
+            # Keep only Linux x64/arm64 runtimes if a module ever ships private native assets, before signing the manifest.
+            find "$module_out/runtimes" -mindepth 1 -maxdepth 1 ! -name linux-x64 ! -name linux-arm64 -exec rm -rf {} + 2>/dev/null || true
             dotnet run --project tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-build -- \
               --dir "$module_out" \
               --id "$module_id" \

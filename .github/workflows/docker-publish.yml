@@ -108,19 +108,28 @@ jobs:
             dotnet build tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-restore
             # The full image flavor verifies every module offline with this tool against the embedded release public key.
             dotnet publish tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-restore -o ./dist/tools/module-signer
-            dotnet publish modules/Autheris.Modules.Lakehouse/Autheris.Modules.Lakehouse.csproj \
-              -c Release \
-              --no-restore \
-              -p:Version="$VERSION" \
-              -o ./dist/modules/lakehouse
-            # The module host rejects module files larger than 256 MiB (the macOS/Windows DuckDB natives are large); the image is linux-x64 only.
-            find ./dist/modules/lakehouse/runtimes -mindepth 1 -maxdepth 1 ! -name linux-x64 -exec rm -rf {} + 2>/dev/null || true
-            find ./dist/modules/lakehouse -type f -size +64M -print >&2
-            dotnet run --project tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-build -- \
-              --dir ./dist/modules/lakehouse \
-              --id lakehouse \
-              --version "$HOST_VERSION" \
-              --host-version "$HOST_VERSION"
+            for csproj in modules/*/*.csproj; do
+              case "$csproj" in
+                *.Tests.csproj) continue ;;
+              esac
+              proj_name="$(basename "$csproj" .csproj)"
+              short_name="${proj_name#Autheris.Modules.}"
+              module_id="$(printf '%s' "$short_name" | tr '[:upper:]' '[:lower:]')"
+              module_out="./dist/modules/${module_id}"
+              dotnet publish "$csproj" \
+                -c Release \
+                --no-restore \
+                -p:Version="$VERSION" \
+                -o "$module_out"
+              # If a module ever ships private native assets, keep only the image platform's runtime (linux-x64).
+              find "$module_out/runtimes" -mindepth 1 -maxdepth 1 ! -name linux-x64 -exec rm -rf {} + 2>/dev/null || true
+              find "$module_out" -type f -size +64M -print >&2
+              dotnet run --project tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-build -- \
+                --dir "$module_out" \
+                --id "$module_id" \
+                --version "$HOST_VERSION" \
+                --host-version "$HOST_VERSION"
+            done
           fi
 
       - name: Verify TestAuthHandler is Excluded from Publish Output (SC-04)
@@ -403,7 +412,7 @@ jobs:
           persist-credentials: false
           sparse-checkout: .github/scripts
 
-      - name: Start published container with signed Lakehouse module and assert endpoints
+      - name: Start published container with signed modules and assert endpoints
         env:
           IMAGE_REF: ghcr.io/${{ github.repository }}-full@${{ needs.build-and-push.outputs.image_digest_full }}
         run: bash .github/scripts/module-e2e.sh
@@ -425,7 +434,7 @@ jobs:
         with:
           persist-credentials: false
 
-      - name: Setup .NET 10
+      - name: Setup .NET 11
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
         with:
           global-json-file: global.json
@@ -433,7 +442,7 @@ jobs:
       - name: Restore with Locked Mode
         run: dotnet restore Autheris.sln --locked-mode
 
-      - name: Publish Autheris and sign the Lakehouse module
+      - name: Publish Autheris and sign all modules
         env:
           AUTHERIS_MODULE_SIGNING_KEY_PEM: ${{ secrets.AUTHERIS_MODULE_SIGNING_KEY_PEM }}
         run: |
@@ -447,18 +456,30 @@ jobs:
           mkdir -p dist/modules
           dotnet build tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-restore
           dotnet publish tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-restore -o ./dist/tools/module-signer
-          dotnet publish modules/Autheris.Modules.Lakehouse/Autheris.Modules.Lakehouse.csproj -c Release --no-restore \
-            -p:Version="$VERSION" -o ./dist/modules/lakehouse
-          # The module host rejects module files larger than 256 MiB (the macOS/Windows DuckDB natives are large); the image is linux-x64 only.
-          find ./dist/modules/lakehouse/runtimes -mindepth 1 -maxdepth 1 ! -name linux-x64 -exec rm -rf {} + 2>/dev/null || true
-          find ./dist/modules/lakehouse -type f -size +64M -print >&2
-          dotnet run --project tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-build -- \
-            --dir ./dist/modules/lakehouse --id lakehouse --version "$VERSION" --host-version "$VERSION"
+          for csproj in modules/*/*.csproj; do
+            case "$csproj" in
+              *.Tests.csproj) continue ;;
+            esac
+            proj_name="$(basename "$csproj" .csproj)"
+            short_name="${proj_name#Autheris.Modules.}"
+            module_id="$(printf '%s' "$short_name" | tr '[:upper:]' '[:lower:]')"
+            module_out="./dist/modules/${module_id}"
+            dotnet publish "$csproj" \
+              -c Release \
+              --no-restore \
+              -p:Version="$VERSION" \
+              -o "$module_out"
+            # If a module ever ships private native assets, keep only the image platform's runtime (linux-x64).
+            find "$module_out/runtimes" -mindepth 1 -maxdepth 1 ! -name linux-x64 -exec rm -rf {} + 2>/dev/null || true
+            find "$module_out" -type f -size +64M -print >&2
+            dotnet run --project tools/Autheris.ModuleSigner/Autheris.ModuleSigner.csproj -c Release --no-build -- \
+              --dir "$module_out" --id "$module_id" --version "$VERSION" --host-version "$VERSION"
+          done
 
       - name: Build local image
         run: docker build -f Dockerfile --build-arg FLAVOR=full -t autheris:module-e2e .
 
-      - name: Start container with signed Lakehouse module and assert endpoints
+      - name: Start container with signed modules and assert endpoints
         env:
           IMAGE_REF: autheris:module-e2e
         run: bash .github/scripts/module-e2e.sh
