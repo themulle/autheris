@@ -346,7 +346,7 @@ public sealed partial class DiscoveryService : IDiscoveryService
             var visibleById = searchable.ToDictionary(static t => t.Identifier);
 
             List<TableMetadata> matchedTables;
-            if (!string.IsNullOrWhiteSpace(trimmed) && _searchEngine?.IsIndexReady == true)
+            if (!string.IsNullOrWhiteSpace(trimmed) && _searchEngine?.IsIndexReady == true && _searchEngine.IndexedTableCount > 0)
             {
                 var mode = ParseSearchMode(options.Mode);
                 // Candidates are verified against the caller-visible text before the limit applies, so the index window grows

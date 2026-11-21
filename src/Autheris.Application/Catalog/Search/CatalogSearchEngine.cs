@@ -35,6 +35,9 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
     private readonly object _statusLock = new();
     private readonly Lock _stateLock = new();
 
+    /// <summary>Maximum number of documents sent in a single batch to <see cref="ILocalEmbeddingGenerator.GenerateNormalizedEmbeddingsAsync"/>.</summary>
+    public const int EmbeddingBatchSize = 32;
+
     /// <summary>Fallback when <see cref="CatalogSearchOptions.MaxQueryLength"/> is not a positive value.</summary>
     public const int DefaultMaxQueryLength = 256;
 
@@ -70,6 +73,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
 
     public bool IsIndexReady => Volatile.Read(ref _currentSnapshot) != null;
     public int IndexedTableCount => Volatile.Read(ref _currentSnapshot)?.MetadataMap.Count ?? 0;
+    public bool ContainsTable(TableIdentifier id) => Volatile.Read(ref _currentSnapshot)?.MetadataMap.ContainsKey(id) == true;
     public DateTimeOffset? LastIndexedAt => Volatile.Read(ref _currentSnapshot)?.CreatedAt;
     public int CachedDocumentEmbeddingCount => _documentEmbeddingCache.Count;
 
@@ -368,9 +372,10 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
             ct.ThrowIfCancellationRequested();
             var table = tables[i];
             var hiddenCols = await hiddenResolver.ResolveAsync(table, ct).ConfigureAwait(false);
-            var (bm25Doc, text) = CatalogSearchDocumentBuilder.BuildDocuments(table, hiddenCols);
-            var sha256 = CatalogSearchEmbeddingCache.ComputeContentSha256Hex(text);
-            docs[i] = new PreparedDocument(table, bm25Doc, text, sha256, hiddenCols);
+            var (bm25Doc, _) = CatalogSearchDocumentBuilder.BuildDocuments(table, hiddenCols);
+            var embeddingText = CatalogSearchDocumentBuilder.BuildEmbeddingText(table, hiddenCols);
+            var sha256 = CatalogSearchEmbeddingCache.ComputeContentSha256Hex(embeddingText);
+            docs[i] = new PreparedDocument(table, bm25Doc, embeddingText, sha256, hiddenCols);
         }
         return docs;
     }
@@ -428,10 +433,27 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
 
         if (missTexts.Count > 0)
         {
-            IReadOnlyList<ReadOnlyMemory<float>> computed;
+            var computed = new ReadOnlyMemory<float>[missTexts.Count];
             try
             {
-                computed = await _embeddingGenerator.GenerateNormalizedEmbeddingsAsync(missTexts, ct).ConfigureAwait(false);
+                for (int offset = 0; offset < missTexts.Count; offset += EmbeddingBatchSize)
+                {
+                    int count = Math.Min(EmbeddingBatchSize, missTexts.Count - offset);
+                    var chunk = missTexts.GetRange(offset, count);
+                    var chunkVectors = await _embeddingGenerator.GenerateNormalizedEmbeddingsAsync(chunk, ct).ConfigureAwait(false);
+                    if (chunkVectors.Count != count)
+                    {
+                        var mismatch = new InvalidOperationException(
+                            $"Embedding generator returned {chunkVectors.Count} vectors for {count} documents.");
+                        mismatch.Data[CatalogSearchErrorCodes.ErrorCodeDataKey] = CatalogSearchErrorCodes.EmbeddingFailed;
+                        throw mismatch;
+                    }
+
+                    for (int j = 0; j < count; j++)
+                    {
+                        computed[offset + j] = chunkVectors[j];
+                    }
+                }
             }
             catch (Exception ex) when (ex is not OperationCanceledException || !ct.IsCancellationRequested)
             {
@@ -440,15 +462,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
                 throw;
             }
 
-            if (computed.Count != missTexts.Count)
-            {
-                var mismatch = new InvalidOperationException(
-                    $"Embedding generator returned {computed.Count} vectors for {missTexts.Count} documents.");
-                mismatch.Data[CatalogSearchErrorCodes.ErrorCodeDataKey] = CatalogSearchErrorCodes.EmbeddingFailed;
-                throw mismatch;
-            }
-
-            for (int slot = 0; slot < computed.Count; slot++)
+            for (int slot = 0; slot < computed.Length; slot++)
             {
                 if (!computed[slot].IsEmpty)
                 {
@@ -725,6 +739,25 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
         var vectorHits = !queryVec.IsEmpty
             ? snapshot.VectorIndex.Search(queryVec, _options.Value.MinVectorSimilarity, topK, isAllowed: isAllowed)
             : [];
+
+        if (query.Mode != CatalogSearchMode.KeywordBm25 &&
+            (string.Equals(effectiveMode, "keyword", StringComparison.Ordinal) || queryVec.IsEmpty))
+        {
+            _logger.LogInformation(
+                "Catalog search fell back to keyword mode (requestedMode={RequestedMode}, effectiveMode={EffectiveMode}, vectorAvailable={VectorAvailable}).",
+                query.Mode,
+                effectiveMode,
+                IsVectorSearchAvailable());
+        }
+        else
+        {
+            _logger.LogDebug(
+                "Catalog search executed (requestedMode={RequestedMode}, effectiveMode={EffectiveMode}, bm25Hits={Bm25Hits}, vectorHits={VectorHits}).",
+                query.Mode,
+                effectiveMode,
+                bm25Hits.Count,
+                vectorHits.Count);
+        }
 
         // 3. Reciprocal Rank Fusion (RRF)
         var scoreMap = new Dictionary<TableIdentifier, (double Score, double? Bm25, double? Vec, List<string> Terms)>();

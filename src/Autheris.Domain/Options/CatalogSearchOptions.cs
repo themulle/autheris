@@ -18,10 +18,10 @@ public sealed class CatalogSearchOptions
     public CatalogEmbeddingProvider EmbeddingProvider { get; set; } = CatalogEmbeddingProvider.None;
 
     // LocalOnnx Settings
-    /// <summary>Filesystem path to the local ONNX embedding model file.</summary>
+    /// <summary>Filesystem path to the local ONNX embedding model file (e.g., quantized 384-dim multilingual-e5-small or paraphrase-multilingual-MiniLM-L12-v2).</summary>
     public string? ModelPath { get; set; }
 
-    /// <summary>Filesystem path to the tokenizer vocabulary/config file for the local ONNX model.</summary>
+    /// <summary>Filesystem path to the tokenizer vocabulary/config file (vocab.txt or tokenizer.json) for the local ONNX model.</summary>
     public string? TokenizerPath { get; set; }
 
     /// <summary>Expected hex-encoded SHA-256 digest used to verify the local ONNX model file.</summary>
@@ -31,7 +31,7 @@ public sealed class CatalogSearchOptions
     /// <summary>Ollama base URL. Loopback addresses are refused; private hosts need <c>Gateway:Egress</c> trusted hosts or networks plus <c>CatalogEmbeddings</c> in <c>TrustedIntegrations</c>.</summary>
     public string? OllamaEndpoint { get; set; }
 
-    /// <summary>Name of the Ollama embedding model to invoke.</summary>
+    /// <summary>Name of the Ollama embedding model to invoke (use multilingual models such as bge-m3 or snowflake-arctic-embed2 for cross-language catalog search).</summary>
     public string? OllamaModelName { get; set; }
 
     /// <summary>When true, permits plain HTTP connections to the configured Ollama endpoint (development/testing only).</summary>
@@ -58,6 +58,6 @@ public sealed class CatalogSearchOptions
     /// <summary>Maximale Abfragelänge in Zeichen zur Abwehr von DoS-Attacken.</summary>
     public int MaxQueryLength { get; set; } = 256;
 
-    /// <summary>Dimension of the embedding vectors (LocalOnnx, Ollama).</summary>
+    /// <summary>Dimension of the embedding vectors (LocalOnnx, Ollama; default 384 for multilingual-e5-small / MiniLM-L12-v2).</summary>
     public int EmbeddingDimensions { get; set; } = 384;
 }

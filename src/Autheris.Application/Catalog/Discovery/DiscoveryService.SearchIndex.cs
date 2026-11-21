@@ -33,7 +33,7 @@ public sealed partial class DiscoveryService
             return candidates;
         }
 
-        if (_searchEngine?.IsIndexReady == true)
+        if (_searchEngine?.IsIndexReady == true && _searchEngine.IndexedTableCount > 0)
         {
             var candidateById = candidates.ToDictionary(static t => t.Identifier);
             var hits = await _searchEngine.SearchAsync(
@@ -53,6 +53,14 @@ public sealed partial class DiscoveryService
                 if (candidateById.TryGetValue(hit.TableIdentifier, out var meta))
                 {
                     indexCandidates.Add(meta);
+                }
+            }
+            foreach (var table in candidates)
+            {
+                if (!_searchEngine.ContainsTable(table.Identifier) &&
+                    DiscoveryVisibleTextMatcher.MatchesNonHiddenTextTerms(table, searchText))
+                {
+                    indexCandidates.Add(table);
                 }
             }
 

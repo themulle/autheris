@@ -16,6 +16,43 @@ internal static class CatalogSearchDocumentBuilder
     public static string BuildScrubbedDocumentText(TableMetadata t, IReadOnlySet<string>? hiddenTextColumns = null) =>
         BuildDocuments(t, hiddenTextColumns).CombinedText;
 
+    /// <summary>
+    /// Builds focused text for sentence embedding (table name, display name, descriptions, and column names),
+    /// omitting verbose column descriptions so wide tables fit within typical 512-token model limits.
+    /// </summary>
+    public static string BuildEmbeddingText(TableMetadata t, IReadOnlySet<string>? hiddenTextColumns = null)
+    {
+        ArgumentNullException.ThrowIfNull(t);
+        var sb = new StringBuilder(512);
+        void Append(string? text, bool scrub = true)
+        {
+            if (!string.IsNullOrWhiteSpace(text))
+                sb.Append(scrub ? SecretScrubber.Redact(text) : text).Append(' ');
+        }
+
+        Append($"{t.Identifier.Domain} {t.Identifier.Schema} {t.Identifier.TableName}", scrub: false);
+        Append(t.Table.DisplayName);
+        Append(t.Table.Description);
+        Append(t.Table.LongDescription);
+        foreach (var (_, entry) in t.Table.Texts.Entries)
+        {
+            Append(entry.DisplayName);
+            Append(entry.Description);
+            Append(entry.LongDescription);
+        }
+        foreach (var c in t.Columns)
+        {
+            if (c.DiscoveryHidden) continue;
+            Append(c.ColumnName, scrub: false);
+            if (hiddenTextColumns is null || !hiddenTextColumns.Contains(c.ColumnName))
+            {
+                Append(c.DisplayName);
+                foreach (var (_, colEntry) in c.Texts.Entries) Append(colEntry.DisplayName);
+            }
+        }
+        return sb.ToString().Trim();
+    }
+
     public static (Bm25Document Document, string CombinedText) BuildDocuments(
         TableMetadata t,
         IReadOnlySet<string>? hiddenTextColumns = null)
