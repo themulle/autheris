@@ -179,6 +179,7 @@ public sealed class ClassificationGrantWriteTests
             {
                 var req = approvals.GetConsentRequestAsync(call.ArgAt<Guid>(0), CancellationToken.None).GetAwaiter().GetResult()!;
                 req.Status = "PENDING_SECOND_APPROVAL";
+                req.ApprovalSteps.Add(new ApprovalStep { StepNumber = req.ApprovalSteps.Count + 1, ApproverSid = call.ArgAt<Sid>(1), Decision = "APPROVED" });
                 return req;
             });
         return harness;
@@ -300,13 +301,17 @@ public sealed class ClassificationGrantWriteTests
         var h = Build();
         var req = Request([Pii()]);
 
-        var result = await Approve(h, req, Owner1);
+        var step1 = await Approve(h, req, Owner1);
+        step1.Request.Status.ShouldBe("PENDING_SECOND_APPROVAL");
+        step1.ActivatedConsent.ShouldBeNull();
+
+        var result = await Approve(h, req, Owner2);
 
         result.ActivatedConsent.ShouldNotBeNull();
         var access = h.Access.ShouldHaveSingleItem();
         access.Code.ShouldBe("PII");
         access.AccessLevel.ShouldBe(ColumnAccessLevel.Clear);
-        access.ApprovedBySid.ShouldBe(Owner1.Value);
+        access.ApprovedBySid.ShouldBe(Owner2.Value);
         access.ConsentId.ShouldBe(result.ActivatedConsent!.Id);
         h.ActivatedRules.Single(r => r.ColumnName == "email").AccessLevel.ShouldBe(ColumnAccessLevel.Clear);
         h.ActivatedRules.Where(r => r.ColumnName is "diagnosis" or "token" or "hr_note").ShouldAllBe(r => r.AccessLevel != ColumnAccessLevel.Clear);
@@ -386,21 +391,26 @@ public sealed class ClassificationGrantWriteTests
     {
         // Classification limit 10 days, grant 14 days: Clear ends first.
         var h = Build(Vocabulary(piiMaxClearDays: 10));
-        var result = await Approve(h, Request([Pii()]), Owner1);
+        var req1 = Request([Pii()]);
+        await Approve(h, req1, Owner1);
+        var result = await Approve(h, req1, Owner2);
         h.Access.ShouldHaveSingleItem().ValidUntil.ShouldBe(Now.AddDays(10));
         result.ActivatedConsent!.ValidTo.ShouldBe(Now.AddDays(14));
 
         // Grant shorter than the limit: Clear never outlives the grant.
         var h2 = Build(Vocabulary(piiMaxClearDays: 10));
         var req2 = Request([Pii()]);
+        await Approve(h2, req2, Owner1);
         h2.Approvals.GetConsentRequestAsync(req2.Id, Arg.Any<CancellationToken>()).Returns(req2);
         await h2.Pipeline.DecideAsync(new ConsentDecisionCommand(
-            req2.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, Person(Owner1), ApprovedValidTo: Now.AddDays(5)));
+            req2.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, Person(Owner2), ApprovedValidTo: Now.AddDays(5)));
         h2.Access.ShouldHaveSingleItem().ValidUntil.ShouldBe(Now.AddDays(5));
 
         // No classification limit: the configured default applies.
         var h3 = Build(Vocabulary(piiMaxClearDays: null), defaultMaxClearDays: 7);
-        await Approve(h3, Request([Pii()]), Owner1);
+        var req3 = Request([Pii()]);
+        await Approve(h3, req3, Owner1);
+        await Approve(h3, req3, Owner2);
         h3.Access.ShouldHaveSingleItem().ValidUntil.ShouldBe(Now.AddDays(7));
     }
 
@@ -409,12 +419,13 @@ public sealed class ClassificationGrantWriteTests
     {
         var h = Build();
         var req = Request([Pii()]);
+        await Approve(h, req, Owner1);
 
-        var widen = await Should.ThrowAsync<ConsentDecisionException>(() => Approve(h, req, Owner1, ["PII", "PII_SPECIAL"]));
+        var widen = await Should.ThrowAsync<ConsentDecisionException>(() => Approve(h, req, Owner2, ["PII", "PII_SPECIAL"]));
         widen.ErrorCode.ShouldBe(ConsentDecisionErrorCodes.DecisionExceedsRequest);
         ConsentWasCreated(h).ShouldBeFalse();
 
-        var narrowed = await Approve(h, req, Owner1, []);
+        var narrowed = await Approve(h, req, Owner2, []);
         narrowed.ActivatedConsent.ShouldNotBeNull();
         h.Access.ShouldBeEmpty();
         h.ActivatedRules.Where(r => r.ColumnName is "email" or "diagnosis" or "token" or "hr_note").ShouldAllBe(r => r.AccessLevel != ColumnAccessLevel.Clear);
@@ -577,8 +588,13 @@ public sealed class ClassificationGrantWriteTests
     public async Task Clear_rows_travel_with_the_atomic_approval_never_in_a_separate_write()
     {
         var h = Build();
+        var req = Request([Pii()]);
 
-        await Approve(h, Request([Pii()]), Owner1);
+        await Approve(h, req, Owner1);
+        ConsentWasCreated(h).ShouldBeFalse();
+        h.Store.GrantAccess.ShouldBeEmpty();
+
+        await Approve(h, req, Owner2);
 
         // The CLEAR rows are part of the consent handed to the atomic approval (one transaction), the classification store is untouched.
         h.Access.ShouldHaveSingleItem().AccessLevel.ShouldBe(ColumnAccessLevel.Clear);

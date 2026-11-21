@@ -47,8 +47,8 @@ public sealed class ClusterTotpSecretStore : ITotpSecretStore
 
         var stored = _protector != null ? ProtectedPrefix + _protector.Protect(val) : val;
 
-        // Permanent until explicitly revoked/re-enrolled (e.g. 365 days TTL)
-        await _clusterState.SetAsync(key, stored, TimeSpan.FromDays(365), ct).ConfigureAwait(false);
+        // Permanent until explicitly revoked/removed or re-enrolled
+        await _clusterState.SetAsync(key, stored, TimeSpan.MaxValue, ct).ConfigureAwait(false);
     }
 
     public async Task<string?> GetSecretAsync(string userSid, CancellationToken ct = default)

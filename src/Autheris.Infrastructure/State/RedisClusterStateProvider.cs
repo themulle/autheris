@@ -156,7 +156,14 @@ end
         {
             var db = _multiplexer.GetDatabase();
             var serialized = JsonSerializer.Serialize(value);
-            await db.StringSetAsync((RedisKey)BuildKey(key), (RedisValue)serialized, ttl).ConfigureAwait(false);
+            if (ttl <= TimeSpan.Zero || ttl == TimeSpan.MaxValue)
+            {
+                await db.StringSetAsync((RedisKey)BuildKey(key), (RedisValue)serialized).ConfigureAwait(false);
+            }
+            else
+            {
+                await db.StringSetAsync((RedisKey)BuildKey(key), (RedisValue)serialized, ttl).ConfigureAwait(false);
+            }
         }
         catch (Exception ex) when (IsInfrastructureFailure(ex))
         {

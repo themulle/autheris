@@ -269,17 +269,29 @@ public sealed class ConsentDecisionPipelineTests
         metadata.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(meta);
         var req = Request();
         approvals.GetConsentRequestAsync(req.Id, Arg.Any<CancellationToken>()).Returns(req);
+        approvals.ApproveConsentRequestStepAsync(req.Id, Approver1Sid, true, Arg.Any<CancellationToken>())
+            .Returns(_ =>
+            {
+                req.Status = "PENDING_SECOND_APPROVAL";
+                req.ApprovalSteps.Add(new ApprovalStep { ConsentRequestId = req.Id, ApproverSid = Approver1Sid, Decision = "APPROVED" });
+                return req;
+            });
         approvals.ExecuteAtomicApprovalWithConsentAsync(
                 req.Id, Arg.Any<ApprovalStep>(), Arg.Any<Consent>(),
-                Arg.Any<IReadOnlyList<ConsentRowFilter>>(), Arg.Any<IReadOnlyList<ConsentColumnRule>>(), Arg.Any<CancellationToken>())
+                Arg.Any<IReadOnlyList<ConsentRowFilter>>(), Arg.Any<IReadOnlyList<ConsentColumnRule>>(), true, Arg.Any<CancellationToken>())
             .Returns(ci => ci.ArgAt<Consent>(2));
 
-        var result = await pipeline.DecideAsync(new ConsentDecisionCommand(
+        var step1 = await pipeline.DecideAsync(new ConsentDecisionCommand(
             req.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, Principal(Approver1Sid)));
 
-        result.Request.Status.ShouldBe("APPROVED");
-        result.ActivatedConsent.ShouldNotBeNull();
-        await approvals.DidNotReceiveWithAnyArgs().ApproveConsentRequestStepAsync(default, default, default);
+        step1.Request.Status.ShouldBe("PENDING_SECOND_APPROVAL");
+        step1.ActivatedConsent.ShouldBeNull();
+
+        var step2 = await pipeline.DecideAsync(new ConsentDecisionCommand(
+            req.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, Principal(Approver2Sid)));
+
+        step2.Request.Status.ShouldBe("APPROVED");
+        step2.ActivatedConsent.ShouldNotBeNull();
     }
 
     [Fact]

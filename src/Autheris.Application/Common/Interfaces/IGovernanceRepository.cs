@@ -441,6 +441,14 @@ public interface IConsentApprovalRepository
         CancellationToken ct = default)
         => throw new NotSupportedException($"{GetType().Name} does not implement external approval steps.");
 
+    Task<ConsentRequest> ApproveExternalConsentRequestStepAsync(
+        Guid requestId,
+        ExternalDecisionAttribution attribution,
+        Sid effectiveApproverSid,
+        bool requireSecondApprover,
+        CancellationToken ct = default)
+        => ApproveExternalConsentRequestStepAsync(requestId, attribution, effectiveApproverSid, ct);
+
     Task<Consent> ExecuteExternalAtomicApprovalWithConsentAsync(
         Guid requestId,
         ExternalDecisionAttribution attribution,

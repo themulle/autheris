@@ -19,10 +19,18 @@ using Autheris.Infrastructure.Persistence.Dialects;
 
 public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IConsentWorkflowAdminRepository
 {
+    public Task<ConsentRequest> ApproveExternalConsentRequestStepAsync(
+        Guid requestId,
+        ExternalDecisionAttribution attribution,
+        Sid effectiveApproverSid,
+        CancellationToken ct = default)
+        => ApproveExternalConsentRequestStepAsync(requestId, attribution, effectiveApproverSid, requireSecondApprover: false, ct);
+
     public async Task<ConsentRequest> ApproveExternalConsentRequestStepAsync(
         Guid requestId,
         ExternalDecisionAttribution attribution,
         Sid effectiveApproverSid,
+        bool requireSecondApprover,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(attribution);
@@ -59,7 +67,7 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
             int stepNumber = state.NextStepNumber;
             await ConsentSqlCore.InsertApprovedStepAsync(conn, tx, Guid.NewGuid(), requestId, stepNumber, effectiveApproverSid, attribution.DecidedAt, ct).ConfigureAwait(false);
 
-            string newStatus = ConsentApprovalPolicy.StatusAfterApproval(state.RequiresFourEyes, stepNumber, ConsentWorkflowMode.External, state.Sensitivity);
+            string newStatus = ConsentApprovalPolicy.StatusAfterApproval(state.RequiresFourEyes || requireSecondApprover, stepNumber, ConsentWorkflowMode.External, state.Sensitivity);
             await ConsentSqlCore.ApplyGuardedStatusAsync(conn, tx, ConsentStatusUpdateSeam, requestId, newStatus, currentStatus, ct).ConfigureAwait(false);
 
             req.Status = newStatus;

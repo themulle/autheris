@@ -7,7 +7,9 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
+using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Policies;
+using Autheris.Application.Identity;
 using Autheris.Domain.Common;
 using Autheris.Domain.Governance;
 using Autheris.Domain.Interfaces;
@@ -22,6 +24,7 @@ public sealed class RecertificationService : IRecertificationService
     private readonly IAuditWriter? _auditWriter;
     private readonly ILogger<RecertificationService>? _logger;
     private readonly TimeProvider _timeProvider;
+    private readonly ISeparationOfDutiesService _separationOfDuties;
     private const string ItemAlreadyDecidedCode = "RECERT_ITEM_ALREADY_DECIDED";
 
     public RecertificationService(
@@ -30,7 +33,10 @@ public sealed class RecertificationService : IRecertificationService
         IPolicyEpochService? epochService = null,
         IAuditWriter? auditWriter = null,
         ILogger<RecertificationService>? logger = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        ISeparationOfDutiesService? separationOfDutiesService = null,
+        IScimGroupStore? groupStore = null,
+        IIdentityRealmRegistry? realmRegistry = null)
     {
         _timeProvider = timeProvider ?? TimeProvider.System;
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
@@ -38,6 +44,7 @@ public sealed class RecertificationService : IRecertificationService
         _epochService = epochService;
         _auditWriter = auditWriter;
         _logger = logger;
+        _separationOfDuties = separationOfDutiesService ?? new SeparationOfDutiesService(groupStore, realmRegistry);
     }
 
     public async Task<RecertificationCampaign> CreateCampaignAsync(
@@ -194,9 +201,16 @@ public sealed class RecertificationService : IRecertificationService
         var reviewer = reviewerId.Trim();
 
         // Anti-Self-Review Rule
-        if (string.Equals(reviewer, item.AssignedTo.Trim(), StringComparison.OrdinalIgnoreCase))
+        if (SeparationOfDutiesService.IdentifiersOverlap(reviewer, item.AssignedTo))
         {
             throw new SecurityException($"Self-certification prohibited: Reviewer '{reviewerId}' cannot certify their own assignment (SEC-SC-15: self_certification_prohibited).");
+        }
+
+        var groupCheck = await _separationOfDuties.CheckGroupMembershipAsync(
+            tenantId, null, new Sid(reviewer), null, null, item.AssignedTo, ct).ConfigureAwait(false);
+        if (!groupCheck.Allowed)
+        {
+            throw new SecurityException($"Self-certification prohibited: {groupCheck.Reason}");
         }
 
         // Only the designated reviewer may decide.

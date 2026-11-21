@@ -10,8 +10,10 @@ using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests.Events;
 using Autheris.Application.ConsentRequests.Routing;
+using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Grants.Records;
+using Autheris.Application.Identity;
 using Autheris.Domain.Common;
 using Autheris.Domain.Grants;
 using Autheris.Domain.Interfaces;
@@ -23,7 +25,7 @@ using Autheris.Domain.Tenancy;
 /// Orchestrates submission and per-item/whole-request approval of <see cref="ConsentRequestKind.ProfileAssignment"/>
 /// requests through <see cref="IConsentDecisionPipeline"/> and <see cref="IProfileGrantMaterializer"/>.
 /// </summary>
-public sealed class ProfileAssignmentRequestService(
+public sealed partial class ProfileAssignmentRequestService(
     IAccessProfileRepository profileRepository,
     ITableMetadataRepository metadataRepository,
     IConsentApprovalRepository approvalRepository,
@@ -35,7 +37,10 @@ public sealed class ProfileAssignmentRequestService(
     IGrantWriter? grantWriter = null,
     IConsentWorkflowRouter? workflowRouter = null,
     IConsentEventOutbox? eventOutbox = null,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    IScimGroupStore? groupStore = null,
+    IIdentityRealmRegistry? realmRegistry = null,
+    ISeparationOfDutiesService? separationOfDutiesService = null)
     : IProfileAssignmentRequestService, IProfileAssignmentDecisionHandler
 {
     private readonly IAccessProfileRepository _profileRepository = profileRepository ?? throw new ArgumentNullException(nameof(profileRepository));
@@ -50,6 +55,7 @@ public sealed class ProfileAssignmentRequestService(
     private readonly IConsentWorkflowRouter? _workflowRouter = workflowRouter;
     private readonly IConsentEventOutbox? _eventOutbox = eventOutbox;
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+    private readonly ISeparationOfDutiesService _separationOfDuties = separationOfDutiesService ?? new SeparationOfDutiesService(groupStore, realmRegistry);
 
     public async Task<SubmitConsentRequestResult> SubmitAsync(ProfileAssignmentSubmission submission, CancellationToken ct = default)
     {
@@ -293,67 +299,6 @@ public sealed class ProfileAssignmentRequestService(
         return await DecideInternalAsync(command, req, snapshot, tenantTables, actorSid, now, ct).ConfigureAwait(false);
     }
 
-    private async Task<ConsentDecisionResult> DecideExternalAsync(
-        ConsentDecisionCommand command,
-        ConsentRequest req,
-        ProfileAssignmentRequestContext snapshot,
-        IReadOnlyList<TableMetadata> tenantTables,
-        Sid actorSid,
-        IReadOnlyList<Sid> externalApproverSids,
-        DateTimeOffset now,
-        CancellationToken ct)
-    {
-        if (command.Decision == ConsentDecisionKind.Reject)
-        {
-            var reason = ValidateRejectionReason(command.Reason);
-            var rejected = await _approvalRepository.RejectExternalConsentRequestAsync(
-                req.Id, command.ExternalAttribution!, externalApproverSids[^1], reason, ct).ConfigureAwait(false);
-            if (_grantWriter is not null)
-            {
-                await using var rtx = await _store.BeginTransactionAsync(ct).ConfigureAwait(false);
-                await _grantWriter.RecordRejectionAsync(rtx.Transaction, BuildRejectionInput(req, externalApproverSids[^1], reason, now), ct).ConfigureAwait(false);
-                await rtx.CommitAsync(ct).ConfigureAwait(false);
-            }
-
-            await EmitEventAsync(rejected, ConsentEventTypes.RequestDecided, now, ct).ConfigureAwait(false);
-            return new ConsentDecisionResult(rejected);
-        }
-
-        var approvedValidTo = ResolveApprovedValidToOrThrow(req, command.ApprovedValidTo, now);
-        IReadOnlyList<Consent> materialized;
-        await using (var tx = await _store.BeginTransactionAsync(ct).ConfigureAwait(false))
-        {
-            try
-            {
-                await _store.ApplyRequestStepAndStatusInTransactionAsync(
-                    tx.Transaction, req, "APPROVED", externalApproverSids[^1], "APPROVED", command.ExternalAttribution?.ExternalReference, now, ct)
-                    .ConfigureAwait(false);
-
-                materialized = await _materializer.MaterializeApprovedAsync(
-                    tx.Transaction, req, snapshot, [], tenantTables, externalApproverSids[^1], externalApproverSids,
-                    approvedValidTo, now, command.Description, command.WriteRules, command.ApprovedProfileItems, command.ApprovedClearColumns, ct)
-                    .ConfigureAwait(false);
-
-                await tx.CommitAsync(ct).ConfigureAwait(false);
-            }
-            catch
-            {
-                await tx.RollbackAsync(ct).ConfigureAwait(false);
-                throw;
-            }
-        }
-
-        var concreteTables = materialized.Where(c => !c.IsPatternGrant).Select(c => c.TableIdentifier).Distinct().ToList();
-        if (concreteTables.Count > 0)
-        {
-            await _store.InvalidateTablesAfterCommitAsync(concreteTables, ct).ConfigureAwait(false);
-        }
-
-        var approvedReq = CloneWithStatus(req, "APPROVED", now);
-        await EmitEventAsync(approvedReq, ConsentEventTypes.RequestDecided, now, ct).ConfigureAwait(false);
-        return new ConsentDecisionResult(approvedReq, materialized.FirstOrDefault());
-    }
-
     private async Task<ConsentDecisionResult> DecideInternalAsync(
         ConsentDecisionCommand command,
         ConsentRequest req,
@@ -363,26 +308,28 @@ public sealed class ProfileAssignmentRequestService(
         DateTimeOffset now,
         CancellationToken ct)
     {
+        if (command.Decision == ConsentDecisionKind.Approve)
+        {
+            await EnsureSodAsync(req, command.Principal, actorSid, checkPriorApprovers: false, ct).ConfigureAwait(false);
+        }
+
         var items = await _store.GetAssignmentItemsAsync(null, req.Id, ct).ConfigureAwait(false);
         var pendingRows = items.Where(i => string.Equals(i.OwnerDecision, "PENDING", StringComparison.OrdinalIgnoreCase)).ToList();
-        if (pendingRows.Count == 0)
+        var isSecondStepOnly = pendingRows.Count == 0 && string.Equals(req.Status, "PENDING_SECOND_APPROVAL", StringComparison.OrdinalIgnoreCase);
+        if (pendingRows.Count == 0 && !isSecondStepOnly)
         {
             throw new ConsentDecisionException(ConsentDecisionErrorCodes.RequestNotDecidable, $"Request '{req.Id}' has no pending items.", statusCode: 409);
         }
 
         var isPrivAdmin = IsPrivilegedAdmin(command.Principal);
-        var authorizedOwnerSids = await ResolveAuthorizedPendingOwnerSidsAsync(
-            pendingRows, snapshot, tenantTables, actorSid, isPrivAdmin, ct).ConfigureAwait(false);
-        if (authorizedOwnerSids.Count == 0)
+        var authorizedOwnerSids = isSecondStepOnly
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : await ResolveAuthorizedPendingOwnerSidsAsync(pendingRows, snapshot, tenantTables, actorSid, isPrivAdmin, ct).ConfigureAwait(false);
+        if (isSecondStepOnly
+            ? !isPrivAdmin && !await IsAuthorizedForAnyMatchedTableAsync(snapshot, tenantTables, actorSid, ct).ConfigureAwait(false)
+            : authorizedOwnerSids.Count == 0)
         {
             throw new ConsentDecisionException("FORBIDDEN", $"User '{actorSid}' is not an authorized owner or delegate for any pending item of request '{req.Id}'.", statusCode: 403);
-        }
-
-        if (req.ApprovalSteps.Any(s => string.Equals(s.Decision, "APPROVED", StringComparison.OrdinalIgnoreCase) &&
-                                       string.Equals(s.ApproverSid.Value, actorSid.Value, StringComparison.OrdinalIgnoreCase)) &&
-            RequiresFourEyes(snapshot, tenantTables, req))
-        {
-            throw new ConsentDecisionException(ConsentDecisionErrorCodes.FourEyesSameApprover, "Four-eyes principle violated: this approver has already approved this request.", statusCode: 409);
         }
 
         var decisionText = command.Decision == ConsentDecisionKind.Approve ? "APPROVED" : "REJECTED";
@@ -390,6 +337,22 @@ public sealed class ProfileAssignmentRequestService(
         var approvedValidTo = command.Decision == ConsentDecisionKind.Approve
             ? ResolveApprovedValidToOrThrow(req, command.ApprovedValidTo, now)
             : req.RequestedValidTo;
+
+        var combinedApprovers = req.ApprovalSteps
+            .Where(s => string.Equals(s.Decision, "APPROVED", StringComparison.OrdinalIgnoreCase))
+            .Select(s => s.ApproverSid.Value)
+            .Append(actorSid.Value)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var requiresFourEyes = command.Decision == ConsentDecisionKind.Approve
+            && RequiresFourEyes(snapshot, tenantTables, req, approvedValidTo, now, combinedApprovers);
+
+        if (requiresFourEyes &&
+            SeparationOfDutiesService.CollectSubjectIdentifiers(command.Principal, actorSid.Value)
+                .Overlaps(SeparationOfDutiesService.CollectPriorApproverIdentifiers(req.ApprovalSteps)))
+        {
+            throw new ConsentDecisionException(ConsentDecisionErrorCodes.FourEyesSameApprover, "Four-eyes principle violated: this approver has already approved this request.", statusCode: 409);
+        }
 
         IReadOnlyList<Consent> materialized = Array.Empty<Consent>();
         var invalidatedTables = new List<TableIdentifier>();
@@ -399,19 +362,35 @@ public sealed class ProfileAssignmentRequestService(
         {
             try
             {
-                var decideAll = isPrivAdmin && command.Decision == ConsentDecisionKind.Approve && authorizedOwnerSids.Count == pendingRows.Select(r => r.OwnerSid).Distinct(StringComparer.OrdinalIgnoreCase).Count();
-                await _store.DecideAssignmentItemsAsync(
-                    tx.Transaction, req.Id, authorizedOwnerSids, decisionText, actorSid.Value, now, decideAll, ct).ConfigureAwait(false);
+                IReadOnlyList<ProfileAssignmentItemRow> updatedItems;
+                if (isSecondStepOnly)
+                {
+                    updatedItems = items;
+                }
+                else
+                {
+                    var decideAll = isPrivAdmin && command.Decision == ConsentDecisionKind.Approve && authorizedOwnerSids.Count == pendingRows.Select(r => r.OwnerSid).Distinct(StringComparer.OrdinalIgnoreCase).Count();
+                    await _store.DecideAssignmentItemsAsync(
+                        tx.Transaction, req.Id, authorizedOwnerSids, decisionText, actorSid.Value, now, decideAll, ct).ConfigureAwait(false);
+                    updatedItems = await _store.GetAssignmentItemsAsync(tx.Transaction, req.Id, ct).ConfigureAwait(false);
+                }
 
-                var updatedItems = await _store.GetAssignmentItemsAsync(tx.Transaction, req.Id, ct).ConfigureAwait(false);
-                var stillPending = updatedItems.Any(i => string.Equals(i.OwnerDecision, "PENDING", StringComparison.OrdinalIgnoreCase));
-                var anyApproved = updatedItems.Any(i => string.Equals(i.OwnerDecision, "APPROVED", StringComparison.OrdinalIgnoreCase));
-                var immediateReject = command.Decision == ConsentDecisionKind.Reject && !anyApproved;
+                var stillPending = !isSecondStepOnly && updatedItems.Any(i => string.Equals(i.OwnerDecision, "PENDING", StringComparison.OrdinalIgnoreCase));
+                var anyApproved = isSecondStepOnly
+                    ? command.Decision == ConsentDecisionKind.Approve
+                    : updatedItems.Any(i => string.Equals(i.OwnerDecision, "APPROVED", StringComparison.OrdinalIgnoreCase));
+                var immediateReject = command.Decision == ConsentDecisionKind.Reject && (!anyApproved || isSecondStepOnly);
 
                 if (stillPending && !immediateReject)
                 {
                     await _store.ApplyRequestStepAndStatusInTransactionAsync(
                         tx.Transaction, req, newStatus: null, actorSid, decisionText, rejectionReason, now, ct).ConfigureAwait(false);
+                }
+                else if (anyApproved && requiresFourEyes && !isSecondStepOnly && CountDistinctApprovers(req, combinedApprovers) < 2)
+                {
+                    finalStatus = "PENDING_SECOND_APPROVAL";
+                    await _store.ApplyRequestStepAndStatusInTransactionAsync(
+                        tx.Transaction, req, finalStatus, actorSid, decisionText, rejectionReason, now, ct).ConfigureAwait(false);
                 }
                 else
                 {
@@ -473,7 +452,9 @@ public sealed class ProfileAssignmentRequestService(
         }
 
         var updatedReq = finalStatus is null ? req : CloneWithStatus(req, finalStatus, now);
-        var eventType = finalStatus is null ? ConsentEventTypes.RequestUpdated : ConsentEventTypes.RequestDecided;
+        var eventType = finalStatus is null || string.Equals(finalStatus, "PENDING_SECOND_APPROVAL", StringComparison.OrdinalIgnoreCase)
+            ? ConsentEventTypes.RequestUpdated
+            : ConsentEventTypes.RequestDecided;
         await EmitEventAsync(updatedReq, eventType, now, ct).ConfigureAwait(false);
         return new ConsentDecisionResult(updatedReq, materialized.FirstOrDefault());
     }
@@ -814,20 +795,68 @@ public sealed class ProfileAssignmentRequestService(
         return result;
     }
 
-    private static bool RequiresFourEyes(
+    private async Task EnsureSodAsync(ConsentRequest req, ClaimsPrincipal? principal, Sid actorSid, bool checkPriorApprovers, CancellationToken ct)
+    {
+        var sod = await _separationOfDuties.CheckConsentApprovalAsync(
+            req.TenantId, req, principal, actorSid, null, checkPriorApprovers, ct: ct).ConfigureAwait(false);
+        if (!sod.Allowed)
+        {
+            throw new ConsentDecisionException(
+                sod.Kind == SodViolationKind.SameApprover ? ConsentDecisionErrorCodes.FourEyesSameApprover : ConsentDecisionErrorCodes.SelfApprovalForbidden,
+                sod.Reason,
+                statusCode: sod.Kind == SodViolationKind.SameApprover ? 409 : 403);
+        }
+    }
+
+    private async Task<bool> IsAuthorizedForAnyMatchedTableAsync(ProfileAssignmentRequestContext snapshot, IReadOnlyList<TableMetadata> tenantTables, Sid actorSid, CancellationToken ct)
+    {
+        foreach (var table in snapshot.Items.SelectMany(i => ProfileGrantMaterializer.MatchTablesForItem(i, tenantTables)).DistinctBy(t => t.Identifier))
+        {
+            if (await _ownershipRepository.IsAuthorizedApproverForTableAsync(table.Identifier, actorSid, ct).ConfigureAwait(false))
+                return true;
+        }
+
+        return false;
+    }
+
+    private static int CountDistinctApprovers(ConsentRequest req, IReadOnlyList<string> combinedApprovers) =>
+        SeparationOfDutiesService.CountDistinctIndependentApprovers(
+            combinedApprovers,
+            req.RequesterSid.Value,
+            req.RequestedGranteeType is GranteeType.User or GranteeType.ServicePrincipal ? req.RequestedGranteeRef : null);
+
+    private bool RequiresFourEyes(
         ProfileAssignmentRequestContext snapshot,
         IReadOnlyList<TableMetadata> tenantTables,
-        ConsentRequest req)
+        ConsentRequest req,
+        DateTimeOffset approvedValidTo,
+        DateTimeOffset now,
+        IReadOnlyList<string>? approvers = null)
     {
-        if (snapshot.MaskingMode == MaskingPolicyMode.Unmasked &&
-            req.RequestedGranteeType is GranteeType.User or GranteeType.ServicePrincipal)
+        var matched = snapshot.Items.SelectMany(i => ProfileGrantMaterializer.MatchTablesForItem(i, tenantTables)).ToList();
+        if (matched.Any(t => t.Table.IsHighlySensitive || t.Table.RequiresFourEyes) ||
+            (snapshot.MaskingMode == MaskingPolicyMode.Unmasked && req.RequestedGranteeType is GranteeType.User or GranteeType.ServicePrincipal))
         {
             return true;
         }
 
-        return snapshot.Items
-            .SelectMany(i => ProfileGrantMaterializer.MatchTablesForItem(i, tenantTables))
-            .Any(t => t.Table.IsHighlySensitive || t.Table.RequiresFourEyes);
+        if (req.RequestedGranteeType is not (GranteeType.User or GranteeType.ServicePrincipal) || matched.Count == 0)
+            return false;
+
+        var masking = snapshot.MaskingMode;
+        var justification = string.IsNullOrWhiteSpace(req.BusinessJustification) ? snapshot.ProfileName : req.BusinessJustification;
+        foreach (var table in matched)
+        {
+            var d = _grantPolicy.Evaluate(new GrantRequest(
+                req.RequestedGranteeType, req.RequestedGranteeRef, GrantKind.Consent, approvedValidTo, now,
+                GrantClassifier.Classify([table]), masking, Requester: req.RequesterSid.Value, Approvers: approvers, Justification: justification));
+            if (!d.Allowed && !string.Equals(d.ErrorCode, GrantErrorCodes.FourEyesRequired, StringComparison.Ordinal))
+                throw new ConsentDecisionException(d.ErrorCode ?? GrantErrorCodes.Indeterminate, d.Reason, statusCode: 400);
+            if (d.RequiresFourEyes || string.Equals(d.ErrorCode, GrantErrorCodes.FourEyesRequired, StringComparison.Ordinal))
+                return true;
+        }
+
+        return false;
     }
 
     private DateTimeOffset ResolveApprovedValidToOrThrow(ConsentRequest req, DateTimeOffset? approvedValidTo, DateTimeOffset now)

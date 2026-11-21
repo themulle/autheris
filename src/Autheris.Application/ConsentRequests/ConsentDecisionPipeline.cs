@@ -53,7 +53,8 @@ public sealed partial class ConsentDecisionPipeline(
     IConsentEventOutbox? eventOutbox = null,
     IProfileAssignmentDecisionHandler? profileAssignmentHandler = null,
     IClassificationRepository? classificationRepository = null,
-    IOptions<GrantValidityOptions>? grantOptions = null) : IConsentDecisionPipeline
+    IOptions<GrantValidityOptions>? grantOptions = null,
+    ISeparationOfDutiesService? separationOfDutiesService = null) : IConsentDecisionPipeline
 {
     private static readonly JsonSerializerOptions CaseInsensitiveJsonOptions = new() { PropertyNameCaseInsensitive = true };
     private readonly IConsentApprovalRepository _approvalRepository = approvalRepository ?? throw new ArgumentNullException(nameof(approvalRepository));
@@ -67,6 +68,7 @@ public sealed partial class ConsentDecisionPipeline(
     private readonly IConsentEventOutbox? _eventOutbox = eventOutbox ?? (approvalRepository as IConsentEventOutbox);
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;
     private readonly int _descriptionMaxLength = textOptions?.Value?.ConsentDescriptionMaxLength ?? new GovernanceTextOptions().ConsentDescriptionMaxLength;
+    private readonly ISeparationOfDutiesService _separationOfDuties = separationOfDutiesService ?? new SeparationOfDutiesService(groupStore, realmRegistry);
 
     public async Task<ConsentDecisionResult> DecideAsync(ConsentDecisionCommand command, CancellationToken ct = default)
     {
@@ -260,42 +262,16 @@ public sealed partial class ConsentDecisionPipeline(
     {
         if (decision == ConsentDecisionKind.Approve)
         {
-            var callerIds = ConsentRequestService.ExtractPrincipalIdentifiers(principal, approverSid.Value);
-            var requesterIds = new HashSet<string>(req.RequesterIdentifiers ?? [], StringComparer.OrdinalIgnoreCase);
-            if (!string.IsNullOrWhiteSpace(req.RequesterSid.Value))
-            {
-                requesterIds.Add(req.RequesterSid.Value);
-            }
-
-            if (callerIds.Any(id => requesterIds.Contains(id)))
+            var sod = await _separationOfDuties.CheckConsentApprovalAsync(
+                req.TenantId, req, principal, approverSid, null, checkPriorApprovers: true, ct: ct).ConfigureAwait(false);
+            if (!sod.Allowed)
             {
                 throw new ConsentDecisionException(
-                    ConsentDecisionErrorCodes.SelfApprovalForbidden,
-                    "Separation of duties violated: The requester cannot approve their own consent request.",
-                    statusCode: 403);
-            }
-
-            if (req.RequestedGranteeType == GranteeType.Group && groupStore != null)
-            {
-                var realmId = realmRegistry?.GetDefaultRealm()?.Id ?? "default";
-                var effective = await groupStore.GetEffectiveGroupSidsForUserAsync(req.TenantId, realmId, approverSid.Value, ct: ct).ConfigureAwait(false);
-                if (effective.MaxDepthExceeded || effective.GroupObjectSids.Contains(req.RequestedGranteeRef))
-                {
-                    throw new ConsentDecisionException(
-                        ConsentDecisionErrorCodes.SelfApprovalForbidden,
-                        "Separation of duties violated: a member of the requested target group cannot approve the request.",
-                        statusCode: 403);
-                }
-            }
-
-            if (req.ApprovalSteps != null && req.ApprovalSteps.Any(s =>
-                string.Equals(s.Decision, "APPROVED", StringComparison.OrdinalIgnoreCase) &&
-                callerIds.Any(id => string.Equals(id, s.ApproverSid.Value, StringComparison.OrdinalIgnoreCase))))
-            {
-                throw new ConsentDecisionException(
-                    ConsentDecisionErrorCodes.FourEyesSameApprover,
-                    "Four-eyes principle violated: this approver has already approved this request.",
-                    statusCode: 409);
+                    sod.Kind == SodViolationKind.SameApprover
+                        ? ConsentDecisionErrorCodes.FourEyesSameApprover
+                        : ConsentDecisionErrorCodes.SelfApprovalForbidden,
+                    sod.Reason,
+                    statusCode: sod.Kind == SodViolationKind.SameApprover ? 409 : 403);
             }
         }
 
@@ -386,6 +362,7 @@ public sealed partial class ConsentDecisionPipeline(
             : [actorSid.Value];
         var combinedApprovers = approversSoFar.Concat(currentApprovers).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
 
+        bool grantRequiresFourEyes = false;
         if (req.RequestedGranteeType is GranteeType.User or GranteeType.ServicePrincipal)
         {
             var grantDecision = _grantPolicy.Evaluate(new GrantRequest(
@@ -406,17 +383,24 @@ public sealed partial class ConsentDecisionPipeline(
                     grantDecision.Reason,
                     statusCode: 400);
             }
+
+            grantRequiresFourEyes = meta != null &&
+                (grantDecision.RequiresFourEyes ||
+                 string.Equals(grantDecision.ErrorCode, GrantErrorCodes.FourEyesRequired, StringComparison.Ordinal));
         }
 
-        // The repositories decide the status of a first step under the row lock and only require a second approver for highly sensitive
-        // tables. Routing a first step through the step-only path for any other reason (for example the grant class of a table with a
-        // sensitive column) would leave the request APPROVED without a consent row, so the grant-class flag must not choose the path.
-        // A steward approves per-classification Clear after the data owner: that needs a second distinct approver on the internal channel.
         bool stewardGate = clearPlan is { NeedsSteward: true };
-        bool requireSecondApprover = stewardGate && command.Channel == ConsentDecisionChannel.Internal;
-        bool requiresFourEyes = (meta?.Table.IsHighlySensitive ?? false) || requireSecondApprover;
+        bool requiresFourEyes = (meta?.Table.IsHighlySensitive ?? false) || stewardGate || grantRequiresFourEyes;
+        bool needsSecondApproverOverride = (stewardGate || grantRequiresFourEyes) && !(meta?.Table.IsHighlySensitive ?? false);
+        bool requireSecondApprover = needsSecondApproverOverride && command.Channel == ConsentDecisionChannel.Internal;
 
-        bool isFinalApproval = !requiresFourEyes || combinedApprovers.Count >= 2 || string.Equals(req.Status, "PENDING_SECOND_APPROVAL", StringComparison.OrdinalIgnoreCase);
+        var distinctIndependentApprovers = SeparationOfDutiesService.CountDistinctIndependentApprovers(
+            combinedApprovers,
+            req.RequesterSid.Value,
+            req.RequestedGranteeType is GranteeType.User or GranteeType.ServicePrincipal ? req.RequestedGranteeRef : null);
+        bool isFinalApproval = !requiresFourEyes
+            || distinctIndependentApprovers >= 2
+            || string.Equals(req.Status, "PENDING_SECOND_APPROVAL", StringComparison.OrdinalIgnoreCase);
 
         bool hasRestrictions = command.HasPrebuiltRestrictions
             || command.WriteRules != null
@@ -442,14 +426,28 @@ public sealed partial class ConsentDecisionPipeline(
                 statusCode: 400);
         }
 
+        if (stewardGate && (isFinalApproval || command.Channel == ConsentDecisionChannel.External))
+        {
+            var ordered = (req.ApprovalSteps ?? [])
+                .Where(static s => string.Equals(s.Decision, "APPROVED", StringComparison.OrdinalIgnoreCase))
+                .OrderBy(static s => s.StepNumber)
+                .Select(static s => s.ApproverSid.Value)
+                .Concat(currentApprovers)
+                .ToList();
+            await EnsureStewardCoverageAsync(req, clearPlan!, ordered, ct).ConfigureAwait(false);
+        }
+
         try
         {
             if (!isFinalApproval)
             {
                 if (command.Channel == ConsentDecisionChannel.External)
                 {
-                    var extStep = await _approvalRepository.ApproveExternalConsentRequestStepAsync(
-                        req.Id, command.ExternalAttribution!, externalApproverSids[0], ct).ConfigureAwait(false);
+                    var extStep = needsSecondApproverOverride
+                        ? await _approvalRepository.ApproveExternalConsentRequestStepAsync(
+                            req.Id, command.ExternalAttribution!, externalApproverSids[0], requireSecondApprover: true, ct).ConfigureAwait(false)
+                        : await _approvalRepository.ApproveExternalConsentRequestStepAsync(
+                            req.Id, command.ExternalAttribution!, externalApproverSids[0], ct).ConfigureAwait(false);
                     await EmitRequestEventAsync(extStep, ConsentEventTypes.RequestUpdated, now, ct).ConfigureAwait(false);
                     return new ConsentDecisionResult(extStep);
                 }
@@ -481,18 +479,6 @@ public sealed partial class ConsentDecisionPipeline(
             else
             {
                 approvedWriteRules = req.RequestedWriteRules;
-            }
-
-            if (stewardGate)
-            {
-                // Prior approvers in step order, then the current ones: the first is the owner step.
-                var ordered = (req.ApprovalSteps ?? [])
-                    .Where(static s => string.Equals(s.Decision, "APPROVED", StringComparison.OrdinalIgnoreCase))
-                    .OrderBy(static s => s.StepNumber)
-                    .Select(static s => s.ApproverSid.Value)
-                    .Concat(currentApprovers)
-                    .ToList();
-                await EnsureStewardCoverageAsync(req, clearPlan!, ordered, ct).ConfigureAwait(false);
             }
 
             var effectiveFinalSid = command.Channel == ConsentDecisionChannel.External ? externalApproverSids[^1] : actorSid;
