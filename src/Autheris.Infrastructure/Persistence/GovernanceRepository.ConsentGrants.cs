@@ -587,7 +587,8 @@ internal static class ConsentGrantSqlCore
         var rawGranteeSid = reader.IsDBNull(5) ? null : reader.GetString(5);
         var isGranteeSelf = (string.Equals(granteeType, "User", StringComparison.OrdinalIgnoreCase) ||
                              string.Equals(granteeType, "ServicePrincipal", StringComparison.OrdinalIgnoreCase)) &&
-                            string.Equals(rawGranteeSid, actor.Value, StringComparison.OrdinalIgnoreCase);
+                            rawGranteeSid != null &&
+                            new Sid(rawGranteeSid) == actor;
         var isRevoked = reader.GetInt32(6) == 1;
         var rawGrantSource = reader.FieldCount > 7 && !reader.IsDBNull(7) ? reader.GetString(7) : null;
         var consentRequestId = ConsentWorkflowSql.ReadOptionalGuid(reader, 8);

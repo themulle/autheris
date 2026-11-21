@@ -40,7 +40,7 @@ public sealed class DiscoveryAccessRequestTests
                 _submitted = ci.Arg<ConsentRequestSubmission>();
                 return new SubmitConsentRequestResult { RequestId = Guid.NewGuid(), Status = "PENDING", Message = "ok" };
             });
-        _approvals.GetRequestsByRequesterSidAsync(Arg.Any<Sid>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+        _approvals.GetRequestsByRequesterSidAsync(Arg.Any<Sid>(), Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(Array.Empty<ConsentRequest>());
     }
 
@@ -137,7 +137,7 @@ public sealed class DiscoveryAccessRequestTests
             Status = "PENDING",
             ContextJson = RequestedClearCodec.Merge(null, [new RequestedClearItem("PII", ["email"])])
         };
-        _approvals.GetRequestsByRequesterSidAsync(Arg.Any<Sid>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+        _approvals.GetRequestsByRequesterSidAsync(Arg.Any<Sid>(), Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(new[] { existing });
 
         var result = await Service().RequestAsync(Request("Email"), Caller());

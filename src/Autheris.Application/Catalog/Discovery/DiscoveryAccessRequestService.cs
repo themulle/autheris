@@ -202,7 +202,7 @@ public sealed class DiscoveryAccessRequestService : IDiscoveryAccessRequestServi
         }
 
         var wantedKey = ClearKey(wanted);
-        var requests = await _approvals.GetRequestsByRequesterSidAsync(sid, status: null, ct).ConfigureAwait(false);
+        var requests = await _approvals.GetRequestsByRequesterSidAsync(sid, tenant, status: null, ct).ConfigureAwait(false);
         foreach (var r in requests)
         {
             if (r.TenantId == tenant &&

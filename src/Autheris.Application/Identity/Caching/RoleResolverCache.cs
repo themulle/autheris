@@ -72,6 +72,57 @@ public sealed class RoleResolverCache : IRoleResolverCache
     public void Invalidate(string realmId, string userKey)
     {
         _l1Cache.TryRemove((realmId, userKey));
+        if (!string.IsNullOrEmpty(userKey) && !userKey.StartsWith("role:", StringComparison.Ordinal))
+        {
+            _l1Cache.TryRemove((realmId, $"role:{userKey}"));
+        }
+
+        if (string.IsNullOrEmpty(realmId) || string.IsNullOrEmpty(userKey))
+        {
+            return;
+        }
+
+        foreach (var entry in _l1Cache)
+        {
+            if (string.Equals(entry.Key.RealmId, realmId, StringComparison.Ordinal)
+                && IsEpochCacheKeyForUser(entry.Key.UserKey, userKey))
+            {
+                _l1Cache.TryRemove(entry.Key);
+            }
+        }
+    }
+
+    private static bool IsEpochCacheKeyForUser(string cachedKey, string userKey)
+    {
+        ReadOnlySpan<char> rest;
+        if (cachedKey.StartsWith("role:e", StringComparison.Ordinal))
+        {
+            rest = cachedKey.AsSpan(6);
+        }
+        else if (cachedKey.StartsWith("scim:e", StringComparison.Ordinal))
+        {
+            rest = cachedKey.AsSpan(6);
+        }
+        else
+        {
+            return false;
+        }
+
+        var colonIdx = rest.IndexOf(':');
+        if (colonIdx <= 0)
+        {
+            return false;
+        }
+
+        for (var i = 0; i < colonIdx; i++)
+        {
+            if (rest[i] is < '0' or > '9')
+            {
+                return false;
+            }
+        }
+
+        return rest[(colonIdx + 1)..].Equals(userKey.AsSpan(), StringComparison.Ordinal);
     }
 
     public void InvalidateAll()

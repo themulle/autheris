@@ -348,7 +348,7 @@ public sealed class ScimService : IScimService
 
         await _repository.CreateGroupAsync(tenantId, realmId, entity, ct).ConfigureAwait(false);
 
-        if (group.Members != null)
+        if (group.Members is { Count: > 0 })
         {
             foreach (var m in group.Members)
             {
@@ -363,6 +363,8 @@ public sealed class ScimService : IScimService
                     _roleCache?.Invalidate(realmId, m.Value);
                 }
             }
+
+            await _repository.IncrementRealmDeprovisionEpochAsync(tenantId, realmId, ct).ConfigureAwait(false);
         }
 
         await RecordWriteContactAsync(tenantId, realmId, now, ct).ConfigureAwait(false);
@@ -483,7 +485,7 @@ public sealed class ScimService : IScimService
                 await _repository.AddGroupNestingEdgeAsync(tenantId, realmId, groupId, addedChild, ct).ConfigureAwait(false);
             }
 
-            if (usersToRemove.Count > 0 || removedChildren.Count > 0)
+            if (usersToRemove.Count > 0 || removedChildren.Count > 0 || addedUsers.Count > 0 || addedChildren.Count > 0)
             {
                 await _repository.IncrementRealmDeprovisionEpochAsync(tenantId, realmId, ct).ConfigureAwait(false);
             }
@@ -654,7 +656,7 @@ public sealed class ScimService : IScimService
             }
         }
 
-        if (membersToRemove.Count > 0)
+        if (membersToRemove.Count > 0 || membersToAdd.Count > 0)
         {
             await _repository.IncrementRealmDeprovisionEpochAsync(tenantId, realmId, ct).ConfigureAwait(false);
         }

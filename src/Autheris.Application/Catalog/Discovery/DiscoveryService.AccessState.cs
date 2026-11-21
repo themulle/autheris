@@ -84,7 +84,7 @@ public sealed partial class DiscoveryService
 
         if (wanted != DiscoveryAccessState.Granted)
         {
-            memo.Pending ??= await LoadPendingRequestTablesAsync(sid, ct).ConfigureAwait(false);
+            memo.Pending ??= await LoadPendingRequestTablesAsync(sid, caller.Tenant, ct).ConfigureAwait(false);
             memo.Expired ??= await LoadRecentlyExpiredTablesAsync(sid, caller.Tenant, ct).ConfigureAwait(false);
         }
 

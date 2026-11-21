@@ -986,7 +986,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         {
             try
             {
-                pendingRequests = await approvalRepository.GetRequestsByRequesterSidAsync(userSid.Value, "PENDING", ct).ConfigureAwait(false);
+                pendingRequests = await approvalRepository.GetRequestsByRequesterSidAsync(userSid.Value, tenantId, "PENDING", ct).ConfigureAwait(false);
             }
             catch
             {

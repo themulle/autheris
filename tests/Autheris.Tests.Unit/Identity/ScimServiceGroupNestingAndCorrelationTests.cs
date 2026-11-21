@@ -189,6 +189,46 @@ public sealed class ScimServiceGroupNestingAndCorrelationTests
         state2!.LastWriteAt!.Value.ShouldBeGreaterThanOrEqualTo(state1.LastWriteAt!.Value);
     }
 
+    [Fact]
+    public async Task GroupMemberOrNestingAdditions_IncrementDeprovisionEpoch()
+    {
+        var (service, store) = CreateSut();
+
+        await service.CreateGroupAsync(
+            Tenant,
+            Realm,
+            new ScimGroup("g-add", "ext-add", "Added", [new ScimGroupMember("u-1", "U1", ScimMemberTypes.User)], null, null, ObjectSid: ValidGroupSid));
+        (await store.GetRealmSyncStateAsync(Tenant, Realm))!.DeprovisionEpoch.ShouldBe(1L);
+
+        var patchAdd = JsonSerializer.SerializeToElement(new[] { new { value = "g-child", type = "Group" } });
+        await service.PatchGroupAsync(
+            Tenant,
+            Realm,
+            "g-add",
+            new ScimPatchRequest(
+                ["urn:ietf:params:scim:api:messages:2.0:PatchOp"],
+                [new ScimPatchOperation("add", "members", patchAdd)]));
+        (await store.GetRealmSyncStateAsync(Tenant, Realm))!.DeprovisionEpoch.ShouldBe(2L);
+
+        await service.UpdateGroupAsync(
+            Tenant,
+            Realm,
+            "g-add",
+            new ScimGroup(
+                "g-add",
+                "ext-add",
+                "Added",
+                [
+                    new ScimGroupMember("u-1", "U1", ScimMemberTypes.User),
+                    new ScimGroupMember("g-child", "Child", ScimMemberTypes.Group),
+                    new ScimGroupMember("g-child-2", "Child2", ScimMemberTypes.Group)
+                ],
+                null,
+                null,
+                ObjectSid: ValidGroupSid));
+        (await store.GetRealmSyncStateAsync(Tenant, Realm))!.DeprovisionEpoch.ShouldBe(3L);
+    }
+
     private sealed class NoOpDeprovisioningService : IIdentityDeprovisioningService
     {
         public Task DeprovisionAndLockSubjectAsync(TenantId tenantId, string realmId, string userKey, string reason, string source, CancellationToken ct = default) =>

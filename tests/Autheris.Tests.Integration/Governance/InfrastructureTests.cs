@@ -441,7 +441,13 @@ public class InfrastructureTests : IDisposable
         var epochBefore = await _repository.GetTableEpochAsync(table);
         epochBefore.ShouldBe(1L);
 
-        await _repository.RevokeConsentAsync(consent.Id, userSid, "Testing epoch increment", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
+        var userAuth = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, userSid.Value),
+                new System.Security.Claims.Claim("tenant_id", Autheris.Tests.Common.TestTenants.Default.Value)
+            ], "test")));
+        await _repository.RevokeConsentAsync(consent.Id, userSid, "Testing epoch increment", userAuth);
 
         var epochAfter = await _repository.GetTableEpochAsync(table);
         epochAfter.ShouldBe(2L);
@@ -477,10 +483,10 @@ public class InfrastructureTests : IDisposable
         var meta = await _repository.GetTableMetadataAsync(table);
         meta.ShouldNotBeNull();
 
-        // Stored with lowercase
-        var storedSid = new Sid("s-1-5-21-case-test-12345");
-        // Queried with uppercase
-        var querySid = new Sid("S-1-5-21-CASE-TEST-12345");
+        // Stored with lowercase canonical Windows SID
+        var storedSid = new Sid("s-1-5-21-1000-2000-12345");
+        // Queried with uppercase canonical Windows SID
+        var querySid = new Sid("S-1-5-21-1000-2000-12345");
 
         var consent = await _repository.CreateConsentAsync(new Consent
         {

@@ -497,8 +497,8 @@ public sealed class DiscoveryWriteStateTests
         public Task<ConsentRequest?> GetConsentRequestAsync(Guid requestId, CancellationToken ct = default)
             => Task.FromResult(Requests.FirstOrDefault(r => r.Id == requestId));
 
-        public Task<IReadOnlyList<ConsentRequest>> GetRequestsByRequesterSidAsync(Sid requesterSid, string? status = null, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<ConsentRequest>>(Requests.Where(r => r.RequesterSid == requesterSid).ToList());
+        public Task<IReadOnlyList<ConsentRequest>> GetRequestsByRequesterSidAsync(Sid requesterSid, TenantId tenantId, string? status = null, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<ConsentRequest>>(Requests.Where(r => r.RequesterSid == requesterSid && (r.TenantId == default || r.TenantId == tenantId)).ToList());
 
         public Task<Consent> ExecuteAtomicApprovalWithConsentAsync(
             Guid requestId,
@@ -516,7 +516,7 @@ public sealed class DiscoveryWriteStateTests
             return Task.FromResult(consentToCreate);
         }
 
-        public Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<ConsentRequest>>([]);
+        public Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, TenantId tenantId, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<ConsentRequest>>([]);
 
         public Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default)
         {

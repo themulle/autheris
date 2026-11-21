@@ -368,7 +368,7 @@ public sealed class GroupSidResolver : IGroupSidResolver
         DateTimeOffset expiresAt,
         CancellationToken ct)
     {
-        var cacheKey = $"e{epoch}:scim:{scimUserKey}";
+        var cacheKey = $"scim:e{epoch}:{scimUserKey}";
         if (_roleCache is not null)
         {
             var cached = await _roleCache.GetAsync(realmId, cacheKey, ct).ConfigureAwait(false);
@@ -460,12 +460,7 @@ public sealed class GroupSidResolver : IGroupSidResolver
     /// <summary>The user key comes from the validated subject only (oid, sub, user SID), never from upn, name or email.</summary>
     private static ResolvedIdentity? BuildIdentity(ClaimsPrincipal principal, IdentityRealm realm, TenantId tenant, string? correlatedUserKey = null)
     {
-        var userKey = correlatedUserKey
-            ?? principal.FindFirst("oid")?.Value
-            ?? principal.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
-            ?? principal.FindFirst("sub")?.Value
-            ?? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value
-            ?? principal.GetUserSid()?.Value;
+        var userKey = RealmUserKeyResolver.Resolve(principal, realm, correlatedUserKey);
         if (string.IsNullOrWhiteSpace(userKey) || userKey.Length > 256)
         {
             return null;

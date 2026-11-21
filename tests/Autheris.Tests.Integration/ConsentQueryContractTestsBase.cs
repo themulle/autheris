@@ -20,6 +20,14 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
     private static readonly TenantId TenantA = new("tenant-a");
     private static readonly TenantId TenantB = new("tenant-b");
 
+    private static Autheris.Domain.Security.ConsentRevocationAuthority TenantAuthority(string sid, TenantId tenant) =>
+        Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, sid),
+                new System.Security.Claims.Claim("tenant_id", tenant.Value)
+            ], "test")));
+
     protected IGovernanceRepository Repo { get; private set; } = null!;
     protected bool Available { get; private set; }
 
@@ -81,7 +89,7 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
             });
             if (revoke)
             {
-                await Repo.RevokeConsentAsync(c.Id, new Sid(sid!), "test", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
+                await Repo.RevokeConsentAsync(c.Id, new Sid(sid!), "test", TenantAuthority(sid!, tenant));
                 revoked.Add(c.Id);
             }
 
@@ -89,6 +97,8 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         }
 
         await Add(tableId, table, TenantA, GranteeType.User, "S-1-5-21-Alice", ConsentEffect.Allow, -1, 10);
+        await Add(tableId, table, TenantA, GranteeType.User, "S-1-5-21-1000-1000-1", ConsentEffect.Allow, -1, 10);
+        await Add(tableId, table, TenantA, GranteeType.User, "a1b2c3d4-0000-0000-0000-000000000001", ConsentEffect.Allow, -1, 10);
         await Add(tableId, table, TenantA, GranteeType.User, "s-1-5-21-bob", ConsentEffect.Allow, -1, 10);
         await Add(tableId, table, TenantA, GranteeType.Group, "S-1-5-21-GROUP-1", ConsentEffect.Allow, -1, 10);
         await Add(tableId, table, TenantA, GranteeType.User, "alias:alice@corp", ConsentEffect.Allow, -1, 10);
@@ -103,11 +113,11 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
 
     private static HashSet<Guid> Oracle(Seed seed, string[] subjects, TenantId? tenant)
     {
-        var set = subjects.ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var set = subjects.Select(s => new Sid(s)).ToHashSet();
         return seed.Consents
             .Where(c => !seed.Revoked.Contains(c.Id) && c.TableId == seed.TableId && (tenant == null || c.TenantId == tenant))
             .Where(c => seed.Now < c.ValidTo && !(seed.Now < c.ValidFrom && c.Effect != ConsentEffect.Deny))
-            .Where(c => c.GranteeSid != null && set.Contains(c.GranteeSid.Value.Value))
+            .Where(c => c.GranteeSid != null && set.Contains(c.GranteeSid.Value))
             .Select(c => c.Id).ToHashSet();
     }
 
@@ -115,7 +125,8 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
     [
         [new[] { "S-1-5-21-Alice" }],
         [new[] { "s-1-5-21-ALICE" }],
-        [new[] { "S-1-5-21-BOB", "S-1-5-21-group-1" }],
+        [new[] { "s-1-5-21-1000-1000-1", "A1B2C3D4-0000-0000-0000-000000000001" }],
+        [new[] { "s-1-5-21-bob", "S-1-5-21-GROUP-1" }],
         [new[] { "ALIAS:ALICE@CORP" }],
         [new[] { "S-1-5-21-Nobody" }],
         [new[] { "S-1-5-21-Carol" }],
@@ -146,7 +157,7 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         var seed = await SeedAsync();
         var upper = new TableIdentifier(seed.Table.Domain.ToUpperInvariant(), seed.Table.Schema.ToUpperInvariant(), seed.Table.TableName.ToUpperInvariant());
 
-        var result = await Repo.GetActiveConsentsForSubjectsAsync([new Sid("s-1-5-21-alice")], upper, seed.Now, TenantA);
+        var result = await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Alice")], upper, seed.Now, TenantA);
 
         result.ShouldContain(c => c.Effect == ConsentEffect.Deny && c.ValidFrom > seed.Now);
         result.ShouldNotContain(c => c.Effect == ConsentEffect.Allow && c.ValidFrom > seed.Now);
@@ -158,7 +169,7 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
     {
         if (!Available) return;
         var seed = await SeedAsync();
-        var sids = Enumerable.Range(0, 5000).Select(i => new Sid($"S-1-5-21-X{i}")).Append(new Sid("S-1-5-21-ALICE")).ToArray();
+        var sids = Enumerable.Range(0, 5000).Select(i => new Sid($"S-1-5-21-X{i}")).Append(new Sid("S-1-5-21-Alice")).ToArray();
 
         var result = await Repo.GetActiveConsentsForSubjectsAsync(sids, seed.Table, seed.Now, TenantA);
 
@@ -191,7 +202,7 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         var old = seed.Consents.First(c => c.TenantId == TenantA && c.GranteeSid?.Value == "S-1-5-21-Alice" && c.Effect == ConsentEffect.Allow && c.ValidFrom < seed.Now && c.ValidTo > seed.Now);
         var before = await Repo.GetTableEpochAsync(seed.Table);
 
-        await Repo.ReplaceConsentsAsync([old.Id], [NewConsent(seed, GranteeType.User, "S-1-5-21-Dave", TenantA), NewConsent(seed, GranteeType.User, "S-1-5-21-Erin", TenantA)], alice, "apply", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
+        await Repo.ReplaceConsentsAsync([old.Id], [NewConsent(seed, GranteeType.User, "S-1-5-21-Dave", TenantA), NewConsent(seed, GranteeType.User, "S-1-5-21-Erin", TenantA)], alice, "apply", TenantAuthority(alice.Value, TenantA));
 
         (await Repo.GetConsentByIdAsync(old.Id))!.IsRevoked.ShouldBeTrue();
         (await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Dave"), new Sid("S-1-5-21-Erin")], seed.Table, seed.Now, TenantA)).Count.ShouldBe(2);
@@ -242,7 +253,7 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
             GranteeSid = new Sid("S-1-5-21-Frank"), ValidFrom = seed.Now.AddDays(-1), ValidTo = seed.Now.AddDays(3)
         };
 
-        await Should.ThrowAsync<Exception>(() => Repo.ReplaceConsentsAsync([old.Id], [clash], new Sid("S-1-5-21-Alice"), "apply", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null)));
+        await Should.ThrowAsync<Exception>(() => Repo.ReplaceConsentsAsync([old.Id], [clash], new Sid("S-1-5-21-Alice"), "apply", TenantAuthority("S-1-5-21-Alice", TenantA)));
 
         (await Repo.GetConsentByIdAsync(old.Id))!.IsRevoked.ShouldBeFalse();
         (await Repo.GetTableEpochAsync(seed.Table)).ShouldBe(before);
@@ -255,12 +266,13 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         if (!Available) return;
         var seed = await SeedAsync();
         var old = seed.Consents.First(c => c.TenantId == TenantA && c.GranteeSid?.Value == "S-1-5-21-Alice" && c.Effect == ConsentEffect.Allow && c.ValidFrom < seed.Now && c.ValidTo > seed.Now);
-        var none = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
+        var stranger = TenantAuthority("S-1-5-21-STRANGER", TenantA);
+        var aliceAuth = TenantAuthority("S-1-5-21-Alice", TenantA);
 
         await Should.ThrowAsync<Autheris.Domain.Exceptions.ConsentRevocationForbiddenException>(() =>
-            Repo.ReplaceConsentsAsync([old.Id], [NewConsent(seed, GranteeType.User, "S-1-5-21-Gina", TenantA)], new Sid("S-1-5-21-STRANGER"), "x", none));
+            Repo.ReplaceConsentsAsync([old.Id], [NewConsent(seed, GranteeType.User, "S-1-5-21-Gina", TenantA)], new Sid("S-1-5-21-STRANGER"), "x", stranger));
         await Should.ThrowAsync<KeyNotFoundException>(() =>
-            Repo.ReplaceConsentsAsync([Guid.NewGuid()], [NewConsent(seed, GranteeType.User, "S-1-5-21-Gina", TenantA)], new Sid("S-1-5-21-Alice"), "x", none));
+            Repo.ReplaceConsentsAsync([Guid.NewGuid()], [NewConsent(seed, GranteeType.User, "S-1-5-21-Gina", TenantA)], new Sid("S-1-5-21-Alice"), "x", aliceAuth));
 
         (await Repo.GetConsentByIdAsync(old.Id))!.IsRevoked.ShouldBeFalse();
         (await Repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-Gina")], seed.Table, seed.Now, TenantA)).ShouldBeEmpty();

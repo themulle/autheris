@@ -62,7 +62,7 @@ internal static class ConsentSqlCore
                                        CASE WHEN EXISTS (SELECT 1 FROM COLUMN_MASK_OVERRIDES m WHERE m.table_column_id = c.id AND m.scope = '*' AND m.code IS NULL) THEN 1 ELSE 0 END AS has_mask
                                        FROM TABLE_COLUMNS c WHERE c.table_id = @tid";
 
-    public static void ReadSubjectConsentRows(DbDataReader reader, TableIdentifier table, DateTimeOffset atTime, HashSet<string> subjectSet, HashSet<Guid> seen, List<Consent> consents)
+    public static void ReadSubjectConsentRows(DbDataReader reader, TableIdentifier table, DateTimeOffset atTime, HashSet<Sid> subjectSet, HashSet<Guid> seen, List<Consent> consents)
     {
         while (reader.Read())
         {
@@ -76,7 +76,7 @@ internal static class ConsentSqlCore
 
             var granteeType = GranteeTypeParsing.ParseStored(reader.GetString(4));
             var granteeSidStr = reader.IsDBNull(5) ? null : reader.GetString(5);
-            if (granteeSidStr == null || !subjectSet.Contains(granteeSidStr)) continue;
+            if (granteeSidStr == null || !subjectSet.Contains(new Sid(granteeSidStr))) continue;
 
             var id = Guid.Parse(reader.GetString(0));
             if (!seen.Add(id)) continue;
@@ -98,7 +98,7 @@ internal static class ConsentSqlCore
         }
     }
 
-    public static void ReadAllSubjectConsentRows(DbDataReader reader, DateTimeOffset effectiveAt, HashSet<string> subjectSet, HashSet<Guid> seen, List<Consent> consents)
+    public static void ReadAllSubjectConsentRows(DbDataReader reader, DateTimeOffset effectiveAt, HashSet<Sid> subjectSet, HashSet<Guid> seen, List<Consent> consents)
     {
         while (reader.Read())
         {
@@ -108,7 +108,7 @@ internal static class ConsentSqlCore
 
             var granteeType = GranteeTypeParsing.ParseStored(reader.GetString(4));
             var granteeSidStr = reader.IsDBNull(5) ? null : reader.GetString(5);
-            if (granteeSidStr == null || !subjectSet.Contains(granteeSidStr)) continue;
+            if (granteeSidStr == null || !subjectSet.Contains(new Sid(granteeSidStr))) continue;
 
             var id = Guid.Parse(reader.GetString(0));
             if (!seen.Add(id)) continue;
@@ -634,6 +634,7 @@ internal static class ConsentSqlCore
     {
         var (writeRules, includeRead) = ConsentWriteRulesSql.DeserializeRequestedWriteRules(
             reader.FieldCount > 13 && !reader.IsDBNull(13) ? reader.GetString(13) : null);
+        var tenant = reader.FieldCount > 22 && !reader.IsDBNull(22) ? StoredTenant.Parse(reader.GetString(22)) : default;
         return ConsentWorkflowSql.BuildConsentRequest(
             reader,
             Guid.Parse(reader.GetString(0)),
@@ -646,7 +647,7 @@ internal static class ConsentSqlCore
             DateTimeOffset.Parse(reader.GetString(7)),
             DateTimeOffset.Parse(reader.GetString(8)),
             reader.IsDBNull(9) ? default : new TableIdentifier(reader.GetString(9), reader.GetString(10), reader.GetString(11)),
-            default,
+            tenant,
             new List<string>(),
             reader.FieldCount > 12 && !reader.IsDBNull(12) ? reader.GetString(12) : null,
             writeRules,
@@ -654,7 +655,7 @@ internal static class ConsentSqlCore
             14);
     }
 
-    public static async Task<IReadOnlyList<ConsentRequest>> GetRequestsByRequesterSidAsync(DbConnection conn, string baseSelectSql, Sid requesterSid, string? status, CancellationToken ct)
+    public static async Task<IReadOnlyList<ConsentRequest>> GetRequestsByRequesterSidAsync(DbConnection conn, string baseSelectSql, Sid requesterSid, TenantId tenantId, string? status, CancellationToken ct)
     {
         var list = new List<ConsentRequest>();
         await using var cmd = conn.CreateCommand();
@@ -667,18 +668,20 @@ internal static class ConsentSqlCore
 
         cmd.CommandText = sql + " ORDER BY r.requested_at DESC";
         cmd.AddBound("@reqSid", requesterSid.Value);
+        cmd.AddBound("@tenantId", tenantId.Value);
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false)) list.Add(ReadSummaryConsentRequestRow(reader));
         return list;
     }
 
-    public static async Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(DbConnection conn, string selectSql, Sid approverSid, DateTimeOffset now, CancellationToken ct)
+    public static async Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(DbConnection conn, string selectSql, Sid approverSid, TenantId tenantId, DateTimeOffset now, CancellationToken ct)
     {
         var list = new List<ConsentRequest>();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = selectSql;
         cmd.AddBound("@apprSid", approverSid.Value);
+        cmd.AddBound("@tenantId", tenantId.Value);
         cmd.AddBound("@now", now.ToString("O"));
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);

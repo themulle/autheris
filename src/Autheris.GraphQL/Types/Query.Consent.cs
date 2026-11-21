@@ -70,7 +70,8 @@ public sealed partial class Query
             return Array.Empty<ConsentRequestDto>();
         }
 
-        var requests = await approvalRepository.GetRequestsByRequesterSidAsync(userSid.Value, status, ct).ConfigureAwait(false);
+        var tenantId = RequireCallerTenant(principal, "No valid tenant in the authentication token.");
+        var requests = await approvalRepository.GetRequestsByRequesterSidAsync(userSid.Value, tenantId, status, ct).ConfigureAwait(false);
         var dtos = requests.Select(r => new ConsentRequestDto
         {
             Id = r.Id,
@@ -122,7 +123,8 @@ public sealed partial class Query
             return Array.Empty<ConsentRequestDto>();
         }
 
-        var requests = await approvalRepository.GetPendingRequestsForApproverAsync(userSid.Value, ct).ConfigureAwait(false);
+        var tenantId = RequireCallerTenant(principal, "No valid tenant in the authentication token.");
+        var requests = await approvalRepository.GetPendingRequestsForApproverAsync(userSid.Value, tenantId, ct).ConfigureAwait(false);
         var paged = requests.AsEnumerable();
         if (after.HasValue && after.Value > 0)
         {
@@ -252,6 +254,21 @@ public sealed partial class Query
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("NOT_FOUND")
                 .SetMessage("The consent was not found.")
+                .Build());
+        }
+    }
+
+    private static TenantId RequireCallerTenant(ClaimsPrincipal principal, string message)
+    {
+        try
+        {
+            return principal.GetTenantId();
+        }
+        catch (Exception ex) when (ex is System.Security.SecurityException or Autheris.Domain.Exceptions.GatewaySecurityException)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("UNAUTHORIZED")
+                .SetMessage(message)
                 .Build());
         }
     }

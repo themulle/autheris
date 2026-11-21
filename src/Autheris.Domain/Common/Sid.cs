@@ -9,11 +9,25 @@ public readonly record struct Sid(string Value) : IEquatable<Sid>
     public static implicit operator string(Sid sid) => sid.Value;
     public static implicit operator Sid(string value) => new(value);
 
-    public bool Equals(Sid other) =>
-        string.Equals(Value, other.Value, StringComparison.OrdinalIgnoreCase);
+    public bool Equals(Sid other)
+    {
+        var comparison = UsesCaseInsensitiveComparison(Value) && UsesCaseInsensitiveComparison(other.Value)
+            ? StringComparison.OrdinalIgnoreCase
+            : StringComparison.Ordinal;
+        return string.Equals(Value, other.Value, comparison);
+    }
 
-    public override int GetHashCode() =>
-        StringComparer.OrdinalIgnoreCase.GetHashCode(Value ?? string.Empty);
+    public override int GetHashCode()
+    {
+        var value = Value ?? string.Empty;
+        var comparer = UsesCaseInsensitiveComparison(value)
+            ? StringComparer.OrdinalIgnoreCase
+            : StringComparer.Ordinal;
+        return comparer.GetHashCode(value);
+    }
+
+    private static bool UsesCaseInsensitiveComparison(string? value) =>
+        !string.IsNullOrEmpty(value) && (SidFormat.IsCanonicalIgnoreCase(value) || Guid.TryParse(value, out _));
 
 }
 
@@ -114,6 +128,24 @@ public static class ClaimsPrincipalExtensions
     {
         var result = new HashSet<Sid>();
         if (principal == null) return result;
+
+        // When the identity pipeline has minted realm-bound PrimarySid claims (e.g. non-Windows OIDC realms), return only those so
+        // unprefixed raw sub/oid claims never cross realm boundaries in consent or profile matching.
+        var hasPipelinePrimarySid = false;
+        foreach (var claim in principal.FindAll(System.Security.Claims.ClaimTypes.PrimarySid))
+        {
+            if (string.Equals(claim.Issuer, IdentityClaimIssuers.Pipeline, StringComparison.Ordinal)
+                && !string.IsNullOrWhiteSpace(claim.Value))
+            {
+                result.Add(new Sid(claim.Value.Trim()));
+                hasPipelinePrimarySid = true;
+            }
+        }
+
+        if (hasPipelinePrimarySid)
+        {
+            return result;
+        }
 
         var primary = principal.GetUserSid();
         if (primary.HasValue && !string.IsNullOrWhiteSpace(primary.Value.Value))

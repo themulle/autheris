@@ -297,7 +297,7 @@ public class GovernanceSecurityTests : IDisposable
             RequestedValidTo = DateTimeOffset.UtcNow.AddDays(14)
         });
 
-        var pendingForFinanceOwner = await _repository.GetPendingRequestsForApproverAsync(ownerFinance);
+        var pendingForFinanceOwner = await _repository.GetPendingRequestsForApproverAsync(ownerFinance, Autheris.Tests.Common.TestTenants.Default);
 
         pendingForFinanceOwner.ShouldContain(r => r.Id == reqFinance.Id);
         pendingForFinanceOwner.ShouldNotContain(r => r.Id == reqSales.Id);
@@ -339,7 +339,7 @@ public class GovernanceSecurityTests : IDisposable
             RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7)
         });
 
-        var pendingForDelegate = await _repository.GetPendingRequestsForApproverAsync(delegateSid);
+        var pendingForDelegate = await _repository.GetPendingRequestsForApproverAsync(delegateSid, Autheris.Tests.Common.TestTenants.Default);
         pendingForDelegate.ShouldNotContain(r => r.Id == req.Id);
     }
 
@@ -533,7 +533,7 @@ public class GovernanceSecurityTests : IDisposable
         // Calling repo.RevokeConsentAsync directly without authorization must throw ConsentRevocationForbiddenException
         await Should.ThrowAsync<ConsentRevocationForbiddenException>(async () =>
         {
-            await _repository.RevokeConsentAsync(consent.Id, attackerSid, "Malicious direct revocation", ConsentRevocationAuthority.FromPrincipal(null));
+            await _repository.RevokeConsentAsync(consent.Id, attackerSid, "Malicious direct revocation", ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity([new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, attackerSid.Value), new System.Security.Claims.Claim("tenant_id", Autheris.Tests.Common.TestTenants.Default.Value)], "test"))));
         });
     }
 

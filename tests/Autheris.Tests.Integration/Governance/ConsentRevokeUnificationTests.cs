@@ -100,13 +100,21 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
     private async Task<List<AuditLogEntry>> AuditAsync(string eventType) =>
         (await _repo.GetAuditLogEntriesAsync(500)).Where(e => e.EventType == eventType).ToList();
 
+    private static Autheris.Domain.Security.ConsentRevocationAuthority TenantAuthority(Sid actor, TenantId tenant) =>
+        Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
+            new System.Security.Claims.ClaimsIdentity(
+            [
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, actor.Value),
+                new System.Security.Claims.Claim("tenant_id", tenant.Value)
+            ], "test")));
+
     private Task InvokeAsync(string entry, Guid consentId, Sid actor)
     {
-        var none = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
+        var caller = TenantAuthority(actor, TenantA);
         return entry switch
         {
-            "RevokeConsentAsync" => _repo.RevokeConsentAsync(consentId, actor, "r", none),
-            "ReplaceConsentsAsync" => _repo.ReplaceConsentsAsync([consentId], [], actor, "r", none),
+            "RevokeConsentAsync" => _repo.RevokeConsentAsync(consentId, actor, "r", caller),
+            "ReplaceConsentsAsync" => _repo.ReplaceConsentsAsync([consentId], [], actor, "r", caller),
             _ => _repo.RevokeSystemConsentAsync(consentId, SyncMarker, actor, "r")
         };
     }
@@ -160,9 +168,9 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
         // DEF-T-07 / DEF-SC-02: no audit amplification for ids that do not exist.
         await EnsureTableAsync();
 
-        var none = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null);
-        await Should.ThrowAsync<KeyNotFoundException>(() => _repo.RevokeConsentAsync(Guid.NewGuid(), Admin, "r", none));
-        await Should.ThrowAsync<KeyNotFoundException>(() => _repo.ReplaceConsentsAsync([Guid.NewGuid()], [], Admin, "r", none));
+        var caller = TenantAuthority(Admin, TenantA);
+        await Should.ThrowAsync<KeyNotFoundException>(() => _repo.RevokeConsentAsync(Guid.NewGuid(), Admin, "r", caller));
+        await Should.ThrowAsync<KeyNotFoundException>(() => _repo.ReplaceConsentsAsync([Guid.NewGuid()], [], Admin, "r", caller));
 
         (await AuditAsync(AuditEventTypes.ConsentTenantIntegrityRefused)).ShouldBeEmpty();
     }
@@ -176,7 +184,8 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
         var consent = await CreateConsentAsync();
         await PlantTenantAsync(consent.Id, "bad tenant!");
 
-        await Should.ThrowAsync<ConsentRevocationForbiddenException>(() => _repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-MALLORY"), "r", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null)));
+        var mallory = TenantAuthority(new Sid("S-1-5-21-MALLORY"), TenantA);
+        await Should.ThrowAsync<ConsentRevocationForbiddenException>(() => _repo.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-MALLORY"), "r", mallory));
 
         (await AuditAsync(AuditEventTypes.ConsentTenantIntegrityRefused)).ShouldBeEmpty();
     }
@@ -195,7 +204,7 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
                           FOR EACH ROW WHEN (NEW.event_type = 'CONSENT_TENANT_INTEGRITY_REFUSED')
                           EXECUTE FUNCTION fail_refusal_audit_fn();");
 
-        var ex = await Should.ThrowAsync<Exception>(() => _repo.RevokeConsentAsync(consent.Id, Admin, "r", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null)));
+        var ex = await Should.ThrowAsync<Exception>(() => _repo.RevokeConsentAsync(consent.Id, Admin, "r", TenantAuthority(Admin, TenantA)));
 
         ex.ShouldNotBeOfType<ConsentTenantIntegrityException>();
         (await IsRevokedAsync(consent.Id)).ShouldBeFalse();
@@ -290,7 +299,7 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
         (await _repo.GetTableMetadataAsync(_table))!.Table.Sensitivity.ShouldBe("LOW");
         await ExecAsync("UPDATE TABLES SET sensitivity = 'HIGH' WHERE id = @id", ("@id", _tableId.ToString()));
 
-        await _repo.ReplaceConsentsAsync([consent.Id], [], Admin, "evict", Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(null));
+        await _repo.ReplaceConsentsAsync([consent.Id], [], Admin, "evict", TenantAuthority(Admin, TenantA));
 
         (await _repo.GetTableMetadataAsync(_table))!.Table.Sensitivity.ShouldBe("HIGH");
     }

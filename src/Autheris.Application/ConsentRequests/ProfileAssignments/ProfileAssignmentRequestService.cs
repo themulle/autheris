@@ -185,6 +185,7 @@ public sealed class ProfileAssignmentRequestService(
 
         var existingPending = await _approvalRepository.GetRequestsByRequesterSidAsync(
             patternConsent.GranteeSid ?? new Sid(patternConsent.RequestedGranteeOrSystem()),
+            patternConsent.TenantId,
             "PENDING",
             ct).ConfigureAwait(false);
         if (existingPending.Any(r =>
