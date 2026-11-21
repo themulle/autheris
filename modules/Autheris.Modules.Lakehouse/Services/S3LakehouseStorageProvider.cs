@@ -14,6 +14,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Options;
 using Autheris.Extensions.Lakehouse.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -126,7 +127,7 @@ public sealed class S3LakehouseStorageProvider : ILakehouseStorageProvider
         }
         catch (Exception ex) when (ex is not InvalidOperationException and not SecurityException and not OperationCanceledException)
         {
-            _logger.LogDebug(ex, "Failed to check S3 object existence for '{Location}'", location);
+            _logger.LogDebug(ex, "Failed to check S3 object existence for '{Location}'", LogSanitizer.Sanitize(location));
             return false;
         }
     }
@@ -421,7 +422,7 @@ public sealed class S3LakehouseStorageProvider : ILakehouseStorageProvider
         {
             if (_options.Value.AreUnsignedS3RequestsAllowed)
             {
-                _logger.LogDebug("[INSECURE GETTING STARTED] Sending unsigned S3 request to {Uri}", uri);
+                _logger.LogDebug("[INSECURE GETTING STARTED] Sending unsigned S3 request to {Uri}", LogSanitizer.Sanitize(uri.ToString()));
                 return;
             }
 

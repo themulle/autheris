@@ -12,6 +12,7 @@ using System.Security;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
 using Autheris.Extensions.Lakehouse.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -193,7 +194,7 @@ public sealed class IcebergMetadataReader : IIcebergMetadataReader
         var cacheKey = $"iceberg:meta:{resolvedLocation}";
         if (_memoryCache != null && _memoryCache.TryGetValue(cacheKey, out IcebergTableMetadata? cachedMeta) && cachedMeta != null)
         {
-            _logger.LogDebug("Cache hit for Iceberg table metadata: {Location}", resolvedLocation);
+            _logger.LogDebug("Cache hit for Iceberg table metadata: {Location}", LogSanitizer.Sanitize(resolvedLocation));
             return cachedMeta;
         }
 
@@ -271,7 +272,7 @@ public sealed class IcebergMetadataReader : IIcebergMetadataReader
         var partitionSpec = new IcebergPartitionSpec(0, partitionFields);
 
         _logger.LogInformation("Loaded Iceberg table {TableUuid} (Format: v{FormatVersion}, CurrentSnapshotId: {SnapshotId}, Columns: {ColCount}).",
-            tableUuid, formatVersion, currentSnapshotId, schemaFields.Count);
+            LogSanitizer.Sanitize(tableUuid), formatVersion, currentSnapshotId, schemaFields.Count);
 
         var result = new IcebergTableMetadata(
             tableUuid,
@@ -350,7 +351,7 @@ public sealed class IcebergMetadataReader : IIcebergMetadataReader
         // Check if manifest list exists
         if (!await _storageProvider.ExistsAsync(currentSnap.ManifestListLocation, cancellationToken).ConfigureAwait(false))
         {
-            _logger.LogWarning("Iceberg manifest list '{Location}' not found in storage.", currentSnap.ManifestListLocation);
+            _logger.LogWarning("Iceberg manifest list '{Location}' not found in storage.", LogSanitizer.Sanitize(currentSnap.ManifestListLocation));
             return dataFiles;
         }
 

@@ -14,6 +14,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using System.Xml;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Options;
 using Autheris.Extensions.Lakehouse.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -123,7 +124,7 @@ public sealed class AzureBlobStorageProvider : ILakehouseStorageProvider
         }
         catch (Exception ex) when (ex is not InvalidOperationException and not FormatException and not SecurityException and not OperationCanceledException)
         {
-            _logger.LogDebug(ex, "Failed to check Azure Blob existence for '{Location}'", location);
+            _logger.LogDebug(ex, "Failed to check Azure Blob existence for '{Location}'", LogSanitizer.Sanitize(location));
             return false;
         }
     }
@@ -404,7 +405,7 @@ public sealed class AzureBlobStorageProvider : ILakehouseStorageProvider
                 request.Headers.Remove("x-ms-version");
                 request.Headers.TryAddWithoutValidation("x-ms-date", rfc1123Date);
                 request.Headers.TryAddWithoutValidation("x-ms-version", "2023-11-03");
-                _logger.LogDebug("[INSECURE GETTING STARTED] Sending unsigned Azure Blob request to {Uri}", uri);
+                _logger.LogDebug("[INSECURE GETTING STARTED] Sending unsigned Azure Blob request to {Uri}", LogSanitizer.Sanitize(uri.ToString()));
                 return;
             }
 
