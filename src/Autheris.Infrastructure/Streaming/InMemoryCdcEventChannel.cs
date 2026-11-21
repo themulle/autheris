@@ -167,6 +167,7 @@ public sealed class InMemoryCdcEventChannel : ICdcEventChannel
         {
             _owner = owner;
             _topic = topic;
+            (_subscriber, _subscribers) = owner.RegisterSubscriber(topic);
 
             if (subscribeCt.CanBeCanceled && enumeratorCt.CanBeCanceled && subscribeCt != enumeratorCt)
             {
@@ -177,8 +178,6 @@ public sealed class InMemoryCdcEventChannel : ICdcEventChannel
             {
                 _ct = enumeratorCt.CanBeCanceled ? enumeratorCt : subscribeCt;
             }
-
-            (_subscriber, _subscribers) = owner.RegisterSubscriber(topic);
         }
 
         public CdcEvent Current { get; private set; } = default!;
