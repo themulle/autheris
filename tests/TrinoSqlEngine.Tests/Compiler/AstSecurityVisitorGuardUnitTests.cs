@@ -267,7 +267,7 @@ public class AstSecurityVisitorGuardUnitTests
 
     private static void AssertMasked(SqlNode scope, string table = "dbo.Orders", string clause = "WHERE", AstSecurityVisitor? visitor = null)
     {
-        var ex = Assert.Throws<SecurityException>(() => Call<object?>(visitor ?? Visitor(), "CheckNoMaskedColumnReferences", table, null, scope, clause));
+        var ex = Assert.Throws<MaskedColumnPredicateException>(() => Call<object?>(visitor ?? Visitor(), "CheckNoMaskedColumnReferences", table, null, scope, clause));
         Assert.Equal($"Masked column 'ssn' of table '{table}' must not be referenced in {clause}.", ex.Message);
     }
 
@@ -335,22 +335,22 @@ public class AstSecurityVisitorGuardUnitTests
     public void AColumnIsMasked_ByItsTable_ItsQualifier_OrAnyMaskedTable()
     {
         var byTable = Visitor((t, c) => t == "dbo.Orders" && c == "k");
-        Assert.Throws<SecurityException>(() => Call<object?>(byTable, "CheckNoMaskedColumnReferences", "dbo.Orders", null, Col("k"), "WHERE"));
-        Assert.Throws<SecurityException>(() => Call<object?>(byTable, "CheckNoMaskedColumnReferences", "dbo.Orders", null, Col("dbo.Orders".Split('.')[1], "k"), "WHERE"));
+        Assert.Throws<MaskedColumnPredicateException>(() => Call<object?>(byTable, "CheckNoMaskedColumnReferences", "dbo.Orders", null, Col("k"), "WHERE"));
+        Assert.Throws<MaskedColumnPredicateException>(() => Call<object?>(byTable, "CheckNoMaskedColumnReferences", "dbo.Orders", null, Col("dbo.Orders".Split('.')[1], "k"), "WHERE"));
         AssertClean(Col("other"), byTable);
 
         var byQualifier = Visitor((t, c) => t == "q" && c == "k");
-        Assert.Throws<SecurityException>(() => Call<object?>(byQualifier, "CheckNoMaskedColumnReferences", "dbo.Orders", null, Col("q", "k"), "WHERE"));
+        Assert.Throws<MaskedColumnPredicateException>(() => Call<object?>(byQualifier, "CheckNoMaskedColumnReferences", "dbo.Orders", null, Col("q", "k"), "WHERE"));
         AssertClean(Col("k"), byQualifier);
         AssertClean(Col("z", "k"), byQualifier);
 
         var byAnyTable = Visitor((t, c) => t == "zzz" && c == "k", b => b.MaskedTables.Add("zzz"));
-        Assert.Throws<SecurityException>(() => Call<object?>(byAnyTable, "CheckNoMaskedColumnReferences", "dbo.Orders", null, Col("k"), "WHERE"));
+        Assert.Throws<MaskedColumnPredicateException>(() => Call<object?>(byAnyTable, "CheckNoMaskedColumnReferences", "dbo.Orders", null, Col("k"), "WHERE"));
         AssertClean(Col("other"), byAnyTable);
         // a USING column is asked per table as well
         var usingNode = new UsingJoinCondition(new[] { new SqlIdentifier("k") });
-        Assert.Throws<SecurityException>(() => Call<object?>(byAnyTable, "CheckNoMaskedColumnReferences", "dbo.Orders", null, usingNode, "JOIN condition"));
-        Assert.Throws<SecurityException>(() => Call<object?>(byTable, "CheckNoMaskedColumnReferences", "dbo.Orders", null, usingNode, "JOIN condition"));
+        Assert.Throws<MaskedColumnPredicateException>(() => Call<object?>(byAnyTable, "CheckNoMaskedColumnReferences", "dbo.Orders", null, usingNode, "JOIN condition"));
+        Assert.Throws<MaskedColumnPredicateException>(() => Call<object?>(byTable, "CheckNoMaskedColumnReferences", "dbo.Orders", null, usingNode, "JOIN condition"));
         AssertClean(new UsingJoinCondition(new[] { new SqlIdentifier("other") }), byAnyTable);
         AssertClean(new UsingJoinCondition(new[] { new SqlIdentifier("a"), new SqlIdentifier("other") }), byTable);
         var noTables = Visitor((t, c) => false);
@@ -411,17 +411,17 @@ public class AstSecurityVisitorGuardUnitTests
     {
         var s = Col("ssn");
         var on = Visitor();
-        Assert.Throws<SecurityException>(() => Call<object?>(on, "EnsureNoMaskedColumnReferences", "dbo.Orders", null, s, "UPDATE SET"));
-        Assert.Throws<SecurityException>(() => Call<object?>(on, "EnsureNoMaskedColumnReferencesInPredicate", "dbo.Orders", null, s, "WHERE"));
+        Assert.Throws<MaskedColumnPredicateException>(() => Call<object?>(on, "EnsureNoMaskedColumnReferences", "dbo.Orders", null, s, "UPDATE SET"));
+        Assert.Throws<MaskedColumnPredicateException>(() => Call<object?>(on, "EnsureNoMaskedColumnReferencesInPredicate", "dbo.Orders", null, s, "WHERE"));
         var off = Visitor(null, b => { b.InDml = false; b.InPredicates = false; });
         Call<object?>(off, "EnsureNoMaskedColumnReferences", "dbo.Orders", null, s, "UPDATE SET");
         Call<object?>(off, "EnsureNoMaskedColumnReferencesInPredicate", "dbo.Orders", null, s, "WHERE");
         var dmlOnly = Visitor(null, b => b.InPredicates = false);
-        Assert.Throws<SecurityException>(() => Call<object?>(dmlOnly, "EnsureNoMaskedColumnReferences", "dbo.Orders", null, s, "UPDATE SET"));
+        Assert.Throws<MaskedColumnPredicateException>(() => Call<object?>(dmlOnly, "EnsureNoMaskedColumnReferences", "dbo.Orders", null, s, "UPDATE SET"));
         Call<object?>(dmlOnly, "EnsureNoMaskedColumnReferencesInPredicate", "dbo.Orders", null, s, "WHERE");
         var predOnly = Visitor(null, b => b.InDml = false);
         Call<object?>(predOnly, "EnsureNoMaskedColumnReferences", "dbo.Orders", null, s, "UPDATE SET");
-        Assert.Throws<SecurityException>(() => Call<object?>(predOnly, "EnsureNoMaskedColumnReferencesInPredicate", "dbo.Orders", null, s, "WHERE"));
+        Assert.Throws<MaskedColumnPredicateException>(() => Call<object?>(predOnly, "EnsureNoMaskedColumnReferencesInPredicate", "dbo.Orders", null, s, "WHERE"));
     }
 
     [Fact]
@@ -469,10 +469,10 @@ public class AstSecurityVisitorGuardUnitTests
         void Check(TableSource? from) => Call<object?>(v, "CheckJoinConditions", from, tables);
         Check(null);
         Check(a);
-        Assert.Throws<SecurityException>(() => Check(new JoinedTableSource(a, JoinType.Inner, b, new OnJoinCondition(s))));
-        Assert.Throws<SecurityException>(() => Check(new JoinedTableSource(a, JoinType.Inner, b, new UsingJoinCondition(new[] { new SqlIdentifier("ssn") }))));
-        Assert.Throws<SecurityException>(() => Check(new JoinedTableSource(new JoinedTableSource(a, JoinType.Inner, b, new OnJoinCondition(s)), JoinType.Inner, b, null)));
-        Assert.Throws<SecurityException>(() => Check(new JoinedTableSource(a, JoinType.Inner, new JoinedTableSource(a, JoinType.Inner, b, new OnJoinCondition(s)), null)));
+        Assert.Throws<MaskedColumnPredicateException>(() => Check(new JoinedTableSource(a, JoinType.Inner, b, new OnJoinCondition(s))));
+        Assert.Throws<MaskedColumnPredicateException>(() => Check(new JoinedTableSource(a, JoinType.Inner, b, new UsingJoinCondition(new[] { new SqlIdentifier("ssn") }))));
+        Assert.Throws<MaskedColumnPredicateException>(() => Check(new JoinedTableSource(new JoinedTableSource(a, JoinType.Inner, b, new OnJoinCondition(s)), JoinType.Inner, b, null)));
+        Assert.Throws<MaskedColumnPredicateException>(() => Check(new JoinedTableSource(a, JoinType.Inner, new JoinedTableSource(a, JoinType.Inner, b, new OnJoinCondition(s)), null)));
         Check(new JoinedTableSource(a, JoinType.Inner, b, new OnJoinCondition(Col("id"))));
         Check(new JoinedTableSource(a, JoinType.Cross, b, null));
     }
@@ -516,5 +516,13 @@ public class AstSecurityVisitorGuardUnitTests
         Assert.Equal("...[TRUNCATED]", AstSecurityVisitor.TruncateForAudit("a", 0));
         Assert.Equal(new string('a', 4096), AstSecurityVisitor.TruncateForAudit(new string('a', 4096)));
         Assert.Equal(new string('a', 4096) + "...[TRUNCATED]", AstSecurityVisitor.TruncateForAudit(new string('a', 4097)));
+    }
+
+    [Fact]
+    public void MaskedColumnPredicateException_IsTypedSecurityExceptionSubclass_AndCaughtCleanlyBySelect()
+    {
+        var ex = Assert.Throws<MaskedColumnPredicateException>(() => Call<object?>(Visitor(), "CheckNoMaskedColumnReferences", "dbo.Orders", null, Col("ssn"), "WHERE"));
+        Assert.IsAssignableFrom<SecurityException>(ex);
+        Assert.Equal("Masked column 'ssn' of table 'dbo.Orders' must not be referenced in WHERE.", ex.Message);
     }
 }

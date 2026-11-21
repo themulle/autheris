@@ -11,6 +11,7 @@ using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.ConsentRequests.Events;
+using Autheris.Application.Sql;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -145,7 +146,11 @@ public sealed partial class DataProductService
         try
         {
             var (tree, _) = _sqlEngine.Parse(definition.AsMemory(), null, ct);
-            statement = new SqlAstBuilder().BuildStatement(tree);
+            statement = new SqlAstBuilder(new AstBuilderOptions
+            {
+                EnforceFunctionPolicy = true,
+                AllowedFunctions = SqlDialectMapper.AllSafeDialectFunctions
+            }).BuildStatement(tree);
         }
         catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {

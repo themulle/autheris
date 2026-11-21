@@ -67,7 +67,10 @@ public sealed class WebSqlSameSourceSubtreeSecurityTests
     private static SqlStatement Parse(string sql)
     {
         var (tree, _) = Engine.Parse(sql.AsMemory());
-        return new SqlAstBuilder().BuildStatement(tree);
+        return new SqlAstBuilder(new AstBuilderOptions
+        {
+            AllowedFunctions = SqlFunctionAllowlists.WithDateTranslation(SqlFunctionAllowlists.DuckDb)
+        }).BuildStatement(tree);
     }
 
     private static ClaimsPrincipal CreateUser() =>

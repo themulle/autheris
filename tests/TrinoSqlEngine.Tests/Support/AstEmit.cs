@@ -21,7 +21,7 @@ internal static class AstEmit
         var ast = new SqlAstBuilder(new AstBuilderOptions
         {
             EnforceReadOnlyQueries = enforceReadOnly,
-            EnforceFunctionPolicy = true,
+            EnforceFunctionPolicy = allowedFunctions is not null,
             AllowedFunctions = allowedFunctions,
             TranslateTrinoDateFunctions = translateDates
         }).BuildStatement(tree);

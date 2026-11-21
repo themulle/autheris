@@ -43,7 +43,11 @@ public sealed class SqlaOuterJoinSafetyTests
     private static SqlStatement Parse(string sql)
     {
         var (tree, _) = Engine.Parse(sql.AsMemory());
-        return new SqlAstBuilder().BuildStatement(tree);
+        return new SqlAstBuilder(new AstBuilderOptions
+        {
+            EnforceFunctionPolicy = true,
+            AllowedFunctions = SqlFunctionAllowlists.WithDateTranslation(SqlFunctionAllowlists.DuckDb)
+        }).BuildStatement(tree);
     }
 
     private static IReadOnlyList<KeySetJoinPlan> KeySet(string sql)

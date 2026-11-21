@@ -14,7 +14,7 @@ internal static class CompilerTestHelpers
     public static SqlStatement Build(string sql)
     {
         var (tree, _) = Engine.Parse(sql.AsMemory(), SqlTokenSecurityOptions.None);
-        return new SqlAstBuilder(new AstBuilderOptions()).BuildStatement(tree);
+        return new SqlAstBuilder(new AstBuilderOptions { EnforceFunctionPolicy = false }).BuildStatement(tree);
     }
 
     public static CompiledSql GenerateSqlServer(string sql, IDictionary<string, PolicyValue>? policyValues = null) =>

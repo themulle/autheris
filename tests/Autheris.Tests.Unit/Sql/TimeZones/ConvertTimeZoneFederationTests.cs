@@ -62,7 +62,10 @@ public sealed class ConvertTimeZoneFederationTests
     private static SqlStatement Parse(string sql)
     {
         var (tree, _) = Engine.Parse(sql.AsMemory());
-        return new SqlAstBuilder().BuildStatement(tree);
+        return new SqlAstBuilder(new AstBuilderOptions
+        {
+            AllowedFunctions = TrinoSqlEngine.SqlFunctionAllowlists.WithDateTranslation(TrinoSqlEngine.SqlFunctionAllowlists.DuckDb)
+        }).BuildStatement(tree);
     }
 
     private static string Rejected(string select, ITimeZoneConversionState? state, bool supplied, ColumnAccessLevel access = ColumnAccessLevel.Clear)

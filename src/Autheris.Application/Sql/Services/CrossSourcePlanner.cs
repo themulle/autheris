@@ -173,7 +173,11 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         if (statement == null)
         {
             var (tree, _) = _sqlEngine.Parse(rawSql.AsMemory());
-            statement = new SqlAstBuilder().BuildStatement(tree);
+            statement = new SqlAstBuilder(new AstBuilderOptions
+            {
+                EnforceFunctionPolicy = true,
+                AllowedFunctions = SqlFunctionAllowlists.WithDateTranslation(SqlFunctionAllowlists.DuckDb)
+            }).BuildStatement(tree);
         }
 
         // 4. Staging names and minimal projections
@@ -253,12 +257,6 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             {
                 map[name] = value;
             }
-        }
-
-        if (statement == null)
-        {
-            var (tree, _) = _sqlEngine.Parse(rawSql.AsMemory());
-            statement = new SqlAstBuilder().BuildStatement(tree);
         }
 
         // Issue #123: AST Subtree Graph Partitioning
@@ -450,7 +448,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             }
             else if (parameters != null && t.Metadata.Table.DataSourceType == DataSourceType.Sql)
             {
-                pushdownFilter = Autheris.Application.Sql.Federation.Optimization.PushedClauseBuilder.BuildPushdown(statement, t.Target, t.Metadata, dec, parameters, plannedTables, out paramAudit);
+                pushdownFilter = Autheris.Application.Sql.Federation.Pushdown.PushedClauseBuilder.BuildPushdown(statement, t.Target, t.Metadata, dec, parameters, plannedTables, out paramAudit);
             }
 
             if (requiredFilterPending.Contains(identifier) &&
@@ -591,7 +589,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
         private readonly Dictionary<string, string> _targetToStaging;
         private readonly Dictionary<string, string> _targetToAlias;
         private readonly IReadOnlyList<ResolvedSourceTable> _tables;
-        private readonly HashSet<string> _cteNames = new(StringComparer.OrdinalIgnoreCase);
+        private readonly Stack<HashSet<string>> _cteScopeStack = new();
         private readonly IReadOnlyList<SubtreeExecutionPlan>? _subtrees;
 
         public FederationAstRewriter(
@@ -604,6 +602,7 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             _targetToAlias = targetToAlias;
             _tables = tables;
             _subtrees = subtrees;
+            _cteScopeStack.Push(new HashSet<string>(StringComparer.OrdinalIgnoreCase));
         }
 
         public override SqlNode VisitJoinedTableSource(JoinedTableSource node)
@@ -699,16 +698,50 @@ public sealed class CrossSourcePlanner : ICrossSourcePlanner
             }
         }
 
-        public override SqlNode VisitCommonTableExpression(CommonTableExpression node)
+        public override SqlNode VisitSelectStatement(SelectStatement node)
         {
-            // A CTE name is visible to its own body (recursive) and to everything after it.
-            _cteNames.Add(node.Name.Value);
-            return base.VisitCommonTableExpression(node);
+            WithClause? with = node.With;
+            bool pushedScope = node.With != null;
+            if (pushedScope)
+            {
+                _cteScopeStack.Push(new HashSet<string>(_cteScopeStack.Peek(), StringComparer.OrdinalIgnoreCase));
+            }
+
+            try
+            {
+                if (node.With != null)
+                {
+                    var ctes = new List<CommonTableExpression>(node.With.Ctes.Count);
+                    bool changed = false;
+                    foreach (var cte in node.With.Ctes)
+                    {
+                        if (node.With.IsRecursive) _cteScopeStack.Peek().Add(cte.Name.Value);
+                        var visitedCte = (CommonTableExpression)VisitCommonTableExpression(cte);
+                        changed |= !ReferenceEquals(visitedCte, cte);
+                        ctes.Add(visitedCte);
+                        if (!node.With.IsRecursive) _cteScopeStack.Peek().Add(cte.Name.Value);
+                    }
+
+                    if (changed) with = node.With with { Ctes = ctes.AsReadOnly() };
+                }
+
+                var body = (QueryBody)Visit(node.Body);
+                var orderBy = node.OrderBy != null ? (OrderByClause)Visit(node.OrderBy) : null;
+                var pagination = node.Pagination != null ? (PaginationClause)Visit(node.Pagination) : null;
+
+                return with == node.With && body == node.Body && orderBy == node.OrderBy && pagination == node.Pagination
+                    ? node
+                    : node with { With = with, Body = body, OrderBy = orderBy, Pagination = pagination };
+            }
+            finally
+            {
+                if (pushedScope) _cteScopeStack.Pop();
+            }
         }
 
         public override SqlNode VisitNamedTableSource(NamedTableSource node)
         {
-            if (node.Name.Parts.Count == 1 && _cteNames.Contains(node.Name.Parts[0].Value))
+            if (node.Name.Parts.Count == 1 && _cteScopeStack.Peek().Contains(node.Name.Parts[0].Value))
             {
                 return node;   // reference to a CTE of the query, not to a source table
             }

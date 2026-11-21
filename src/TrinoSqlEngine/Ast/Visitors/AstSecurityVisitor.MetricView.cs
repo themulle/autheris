@@ -142,7 +142,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         {
             if (node is ColumnReference col && _typed.Masks.HasMask(entry.Identity, col.Name.SimpleName))
             {
-                throw new SecurityException($"Masked column '{col.Name.SimpleName}' of metric view '{entry.Identity}' must not be referenced in {clause}.");
+                throw new MaskedColumnPredicateException($"Masked column '{col.Name.SimpleName}' of metric view '{entry.Identity}' must not be referenced in {clause}.");
             }
 
             return true;
@@ -181,7 +181,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
                     if (_typed.Masks.HasMask(entry.Identity, col.Name.SimpleName))
                     {
-                        throw new SecurityException($"Masked column '{col.Name.SimpleName}' of metric view '{entry.Identity}' must not be referenced in ORDER BY.");
+                        throw new MaskedColumnPredicateException($"Masked column '{col.Name.SimpleName}' of metric view '{entry.Identity}' must not be referenced in ORDER BY.");
                     }
                 }
 
