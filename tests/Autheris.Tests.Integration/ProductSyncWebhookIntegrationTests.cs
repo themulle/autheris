@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Products.Sync;
 using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
+using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
 using Shouldly;
@@ -120,6 +121,12 @@ public sealed class ProductSyncWebhookIntegrationTests : IClassFixture<ProductSy
 
     public sealed class HostFixture : IntegrationHost<HostFixture>
     {
+        protected override void ConfigureWebHost(IWebHostBuilder builder)
+        {
+            builder.UseEnvironment("Development");
+            base.ConfigureWebHost(builder);
+        }
+
         protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
         {
             config.AddInMemoryCollection(new Dictionary<string, string?>
