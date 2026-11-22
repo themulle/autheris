@@ -151,4 +151,41 @@ public class ParseWorkerPoolTests
         Assert.False(queuedRan);
         Assert.Equal(1, pool.ThreadsCreated);
     }
+
+    [Fact]
+    public async Task ParseAsync_TimedOutOrCanceled_ReleasesLimiterSlotWithoutBlocking()
+    {
+        using var limiter = new SemaphoreSlim(1, 1);
+        var engine = new FastSqlEngine { ParseConcurrencyLimiter = limiter, ParseTimeout = TimeSpan.FromTicks(1), ParseThreadStackSize = IsolatedStackSize };
+        string sql = "SELECT * FROM orders WHERE id IN (" + string.Join(", ", Enumerable.Range(0, 5000)) + ")";
+
+        await Assert.ThrowsAnyAsync<Antlr4.Runtime.Misc.ParseCanceledException>(() => engine.ParseAsync(sql.AsMemory()));
+        WaitFor(() => limiter.CurrentCount == 1, "the async parser slot to be released after timeout");
+
+        engine.ParseTimeout = TimeSpan.FromSeconds(30);
+        using var cts = new CancellationTokenSource();
+        await cts.CancelAsync();
+        await Assert.ThrowsAnyAsync<OperationCanceledException>(() => engine.ParseAsync("SELECT 1".AsMemory(), null, cts.Token));
+        Assert.Equal(1, limiter.CurrentCount);
+
+        var (tree, _) = await engine.ParseAsync("SELECT id FROM orders".AsMemory());
+        Assert.NotNull(tree);
+        Assert.Equal(1, limiter.CurrentCount);
+    }
+
+    [Fact]
+    public async Task ParseAsync_WaitsAsynchronouslyForBusyLimiterSlot_AndCompletesOnceReleased()
+    {
+        using var limiter = new SemaphoreSlim(1, 1);
+        await limiter.WaitAsync();
+        var engine = new FastSqlEngine { ParseConcurrencyLimiter = limiter, ParseTimeout = TimeSpan.FromSeconds(10), ParseThreadStackSize = IsolatedStackSize };
+
+        var parseTask = engine.ParseAsync("SELECT id FROM orders".AsMemory());
+        Assert.False(parseTask.IsCompleted);
+
+        limiter.Release();
+        var (tree, _) = await parseTask.WaitAsync(TimeSpan.FromSeconds(5));
+        Assert.NotNull(tree);
+        Assert.Equal(1, limiter.CurrentCount);
+    }
 }

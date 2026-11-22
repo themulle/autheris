@@ -397,4 +397,86 @@ public sealed class QueryCostQuotaTests : IDisposable
         probe.ShouldNotBeNull();
         probe.CurrentBalance.ShouldBe(-15.0);
     }
+
+    private sealed class RecordingUsageRecorder : Autheris.Application.Usage.IUsageRecorder
+    {
+        public int Calls { get; private set; }
+        public void Record(in Autheris.Application.Usage.UsageFact fact, Autheris.Domain.Common.TenantId tenant, Autheris.Domain.Common.Sid actor) => Calls++;
+    }
+
+    private sealed class FixedCostRateLimiter(bool allow) : IRateLimiterService
+    {
+        public Task<RateLimitResult> CheckPreAuthIpAsync(string ip, PreAuthIpRateLimitOptions options, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<RateLimitResult> CheckPostAuthSidAsync(string sid, PostAuthSidRateLimitOptions options, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<CostQuotaResult> CheckCostQuotaAsync(string key, int requestedCost, ClientQuotaPolicy policy, CancellationToken ct = default) =>
+            Task.FromResult(allow ? new CostQuotaResult(true, 100, 0) : new CostQuotaResult(false, 0, 45));
+        public Task<CostQuotaResult> ReserveCostQuotaAsync(string key, int reservedCost, ClientQuotaPolicy policy, CancellationToken ct = default) =>
+            CheckCostQuotaAsync(key, reservedCost, policy, ct);
+        public Task<CostQuotaResult> SettleCostQuotaAsync(string key, int reservedCost, int actualCost, ClientQuotaPolicy policy, CancellationToken ct = default) =>
+            Task.FromResult(new CostQuotaResult(true, 100, 0));
+        public Task<CallerBucketState?> GetBucketStateAsync(string key, ClientQuotaPolicy policy, CancellationToken ct = default) =>
+            Task.FromResult<CallerBucketState?>(null);
+        public Task<CallerBucketState?> GetBucketStateAsync(string key, CancellationToken ct = default) =>
+            Task.FromResult<CallerBucketState?>(null);
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task DenialWithUsageRecorder_WhenPrincipalHasNoTenant_ReturnsCleanStatusWithoutThrowing(bool overCost)
+    {
+        var recorder = new RecordingUsageRecorder();
+        var tier = overCost ? 0 : 500;
+        var gatewayOptions = new GatewayOptions
+        {
+            RateLimiting = new RateLimitingOptions
+            {
+                ClientTiers = new ClientTierOptions
+                {
+                    TierLimits = new Dictionary<string, ClientTierLimitOverride>
+                    {
+                        ["Standard"] = new ClientTierLimitOverride { MaxCostPerQuery = tier }
+                    }
+                }
+            },
+            QueryCost = new QueryCostOptions { BaseCost = 10, EnablePostExecutionSettlement = true }
+        };
+
+        var rateLimiter = new FixedCostRateLimiter(allow: overCost);
+        var tenantlessUser = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "tenantless-user-" + Guid.NewGuid())], "TestAuth"));
+        var httpContext = new DefaultHttpContext { User = tenantlessUser };
+        var accessor = new HttpContextAccessor { HttpContext = httpContext };
+
+        var services = new ServiceCollection();
+        services.AddSingleton<IRateLimiterService>(rateLimiter);
+        services.AddSingleton<IHttpContextAccessor>(accessor);
+        services.AddSingleton(Options.Create(gatewayOptions));
+        services.AddSingleton<IClientTierResolver>(new ClientTierResolver(NullLogger<ClientTierResolver>.Instance, Options.Create(gatewayOptions)));
+        services.AddSingleton<IQueryCostQuota, QueryCostQuota>();
+        services.AddSingleton<Autheris.Application.Usage.IUsageRecorder>(recorder);
+        var executor = await services
+            .AddGraphQLServer()
+            .AddQueryType<QuotaTestQuery>()
+            .UseRequest<CostAndQuotaMiddleware>()
+            .UseDefaultPipeline()
+            .BuildRequestExecutorAsync();
+
+        var result = await executor.ExecuteAsync(OperationRequestBuilder.New().SetDocument("{ greeting }").Build());
+        var op = result.ShouldBeOfType<OperationResult>();
+        op.Errors.ShouldNotBeNull();
+
+        if (overCost)
+        {
+            httpContext.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+            op.Errors[0].Code.ShouldBe("QUERY_COST_QUOTA_EXCEEDED");
+        }
+        else
+        {
+            httpContext.Response.StatusCode.ShouldBe(StatusCodes.Status429TooManyRequests);
+            httpContext.Response.Headers.ContainsKey("Retry-After").ShouldBeTrue();
+            op.Errors[0].Code.ShouldBe("RATE_LIMIT_EXCEEDED");
+        }
+
+        recorder.Calls.ShouldBe(0);
+    }
 }

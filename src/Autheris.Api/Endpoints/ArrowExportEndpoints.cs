@@ -25,6 +25,7 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
+using TrinoSqlEngine;
 
 /// <summary>
 /// F-DATA-04: HTTP endpoints for streaming governed relational data directly in Apache Arrow IPC columnar format.
@@ -251,7 +252,7 @@ public static class ArrowExportEndpoints
             IReadOnlyList<TrinoSqlEngine.Analysis.TableAccessTarget> referencedTables;
             try
             {
-                referencedTables = engine.Analyze(sql.AsMemory()).ReferencedTables;
+                referencedTables = (await engine.AnalyzeAsync(sql.AsMemory(), cancellationToken: ct).ConfigureAwait(false)).ReferencedTables;
             }
             catch (Exception) when (!ct.IsCancellationRequested)
             {

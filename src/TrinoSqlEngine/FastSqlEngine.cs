@@ -7,6 +7,7 @@ using System.IO;
 using System.Runtime.CompilerServices;
 using System.Runtime.ExceptionServices;
 using System.Threading;
+using System.Threading.Tasks;
 using Antlr4.Runtime;
 using Antlr4.Runtime.Atn;
 using Antlr4.Runtime.Misc;
@@ -29,7 +30,7 @@ public sealed class ThrowingErrorListener : BaseErrorListener, IAntlrErrorListen
     }
 }
 
-public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQueryCompiler
+public sealed partial class FastSqlEngine : ISqlEngine, IAsyncSqlEngine, Governance.IPolicyKeyQueryCompiler
 {
     /// <summary>Thread-safe default shared instance of <see cref="FastSqlEngine"/>.</summary>
     public static FastSqlEngine Default { get; } = new();
@@ -205,13 +206,7 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
         SqlTokenSecurityOptions? tokenOptions,
         CancellationToken cancellationToken = default)
     {
-        if (sql.Length > MaxQueryLength)
-        {
-            throw new ArgumentOutOfRangeException(nameof(sql), $"SQL query length ({sql.Length}) exceeds the maximum allowed limit of {MaxQueryLength} characters.");
-        }
-
-        var effectiveOptions = tokenOptions ?? CreateDefaultTokenSecurityOptions();
-        ThrowIfKnownSyntaxError(sql, StatementRule, effectiveOptions);
+        var effectiveOptions = PrepareParse(sql, StatementRule, "SQL query", tokenOptions);
         return RunWithParseBudget(
             cancellation => ParseOnCurrentThread(sql, effectiveOptions, cancellation, StatementRule, static parser => parser.singleStatement()),
             sql.Length,
@@ -228,17 +223,27 @@ public sealed partial class FastSqlEngine : ISqlEngine, Governance.IPolicyKeyQue
         SqlTokenSecurityOptions? tokenOptions,
         CancellationToken cancellationToken = default)
     {
-        if (sql.Length > MaxQueryLength)
-        {
-            throw new ArgumentOutOfRangeException(nameof(sql), $"SQL expression length ({sql.Length}) exceeds the maximum allowed limit of {MaxQueryLength} characters.");
-        }
-
-        var effectiveOptions = tokenOptions ?? CreateDefaultTokenSecurityOptions();
-        ThrowIfKnownSyntaxError(sql, ExpressionRule, effectiveOptions);
+        var effectiveOptions = PrepareParse(sql, ExpressionRule, "SQL expression", tokenOptions);
         return RunWithParseBudget(
             cancellation => ParseOnCurrentThread(sql, effectiveOptions, cancellation, ExpressionRule, static parser => parser.standaloneExpression()),
             sql.Length,
             cancellationToken);
+    }
+
+    private SqlTokenSecurityOptions PrepareParse(
+        ReadOnlyMemory<char> sql,
+        int ruleKind,
+        string subjectLabel,
+        SqlTokenSecurityOptions? tokenOptions)
+    {
+        if (sql.Length > MaxQueryLength)
+        {
+            throw new ArgumentOutOfRangeException(nameof(sql), $"{subjectLabel} length ({sql.Length}) exceeds the maximum allowed limit of {MaxQueryLength} characters.");
+        }
+
+        var effectiveOptions = tokenOptions ?? CreateDefaultTokenSecurityOptions();
+        ThrowIfKnownSyntaxError(sql, ruleKind, effectiveOptions);
+        return effectiveOptions;
     }
 
     /// <summary>
