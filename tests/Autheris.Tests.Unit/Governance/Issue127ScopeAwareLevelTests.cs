@@ -75,8 +75,11 @@ public sealed class Issue127ScopeAwareLevelTests
 
         var result = await AnalyzeAsync(consents, Simulator(), Principal());
 
-        // The no-scope evaluation denies the column; the minimum keeps it denied.
-        result.ValidationReport.OutputColumns.Single(c => c.Column == "grade").EffectiveAccessLevel.ShouldBe(ColumnAccessLevel.Deny);
+        // The no-scope evaluation denies the column; denied columns are omitted and reported identically to unknown columns.
+        result.ValidationReport.OutputColumns.ShouldNotContain(c => c.Column == "grade");
+        result.ValidationReport.Diagnostics.ShouldContain(d =>
+            d.Code == QueryDiagnosticCodes.UnknownColumn &&
+            string.Equals(d.Column, "grade", StringComparison.OrdinalIgnoreCase));
     }
 
     [Fact]
@@ -96,8 +99,8 @@ public sealed class Issue127ScopeAwareLevelTests
 
         var result = await AnalyzeAsync(consents, WithScopes());
 
-        result.ValidationReport.OutputColumns.Where(c => c.Column == "grade")
-            .ShouldAllBe(c => c.EffectiveAccessLevel == ColumnAccessLevel.Deny);
+        result.ValidationReport.OutputColumns.ShouldNotContain(c => c.Column == "grade");
+        result.ValidationReport.OutputColumns.ShouldBeEmpty();
     }
 
     // T-8 / ST-15: CatalogVisibility is scope-aware; null scopes behave like a token without scopes.

@@ -129,7 +129,12 @@ public sealed class ExplainSubtreeEligibilityTests
             [orders, customers, stocks],
             [
                 AllowConsent(orders),
-                AllowConsent(customers, columnRules: [new ConsentColumnRule { ColumnName = "ssn", AccessLevel = ColumnAccessLevel.Mask }]),
+                AllowConsent(customers, columnRules:
+                [
+                    new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear },
+                    new ConsentColumnRule { ColumnName = "region", AccessLevel = ColumnAccessLevel.Clear },
+                    new ConsentColumnRule { ColumnName = "ssn", AccessLevel = ColumnAccessLevel.Mask }
+                ]),
                 AllowConsent(stocks)
             ]);
 
