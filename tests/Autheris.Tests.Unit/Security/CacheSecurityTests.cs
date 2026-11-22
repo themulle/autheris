@@ -118,15 +118,20 @@ public sealed class CacheSecurityTests
         repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
 
         var exec = Substitute.For<IGatewayExecutionService>();
-        exec.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), false, Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
+        var enforcerCalls = 0;
+        var policyEnforcer = new Autheris.Tests.Common.Fakes.DelegatingODataQueryPolicyEnforcer((_, _, _, _) =>
+        {
+            enforcerCalls++;
+            return ValueTask.FromResult(TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
+        });
 
         var versionProvider = Substitute.For<ICatalogVersionProvider>();
         versionProvider.GetCatalogVersionAsync(Arg.Any<CancellationToken>())
             .Returns(new ValueTask<CatalogVersion>(new CatalogVersion(1, 1)));
 
         var cache = new MemoryCache(new MemoryCacheOptions());
-        var handler = new ODataHandler(repo, exec, NullLogger<ODataHandler>.Instance, memoryCache: cache, versionProvider: versionProvider);
+        var handler = Autheris.Tests.Common.Fakes.ODataHandlerTestFactory.Create(
+            repo, exec, NullLogger<ODataHandler>.Instance, memoryCache: cache, versionProvider: versionProvider, policyEnforcer: policyEnforcer);
 
         var principal = new ClaimsPrincipal(new ClaimsIdentity([
             new Claim(ClaimTypes.NameIdentifier, "user-1"),
@@ -136,12 +141,12 @@ public sealed class CacheSecurityTests
         // First call with version (1, 1)
         var csdl1 = await handler.GetMetadataCsdlAsync(principal);
         csdl1.ShouldNotBeNull();
-        await exec.Received(1).CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), false, Arg.Any<CancellationToken>());
+        enforcerCalls.ShouldBe(1);
 
         // Second call with same version (1, 1) -> served from cache, no new check
         var csdl2 = await handler.GetMetadataCsdlAsync(principal);
         csdl2.ShouldBe(csdl1);
-        await exec.Received(1).CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), false, Arg.Any<CancellationToken>());
+        enforcerCalls.ShouldBe(1);
 
         // Version bumps to (1, 2) (content change / policy update) -> cache misses
         versionProvider.GetCatalogVersionAsync(Arg.Any<CancellationToken>())
@@ -149,7 +154,7 @@ public sealed class CacheSecurityTests
 
         var csdl3 = await handler.GetMetadataCsdlAsync(principal);
         csdl3.ShouldNotBeNull();
-        await exec.Received(2).CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), false, Arg.Any<CancellationToken>());
+        enforcerCalls.ShouldBe(2);
     }
 
     [Fact]

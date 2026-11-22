@@ -179,14 +179,14 @@ public sealed class TransportGateHardeningTests
             Substitute.For<ITableMetadataRepository>());
         repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([Row()]));
         var exec = Substitute.For<IGatewayExecutionService>();
-        exec.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), false, Arg.Any<CancellationToken>())
-            .Returns(ci => Task.FromResult(TableAccessDecision.Allowed(
-                ci.ArgAt<TableMetadata>(1).Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
+        var policyEnforcer = new Autheris.Tests.Common.Fakes.DelegatingODataQueryPolicyEnforcer((_, tableMeta, _, _) =>
+            ValueTask.FromResult(TableAccessDecision.Allowed(
+                tableMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
         var ingress = new IngressTransportContext();
         ingress.Set(DataSourceTransportFlags.OData);
         using var memory = new MemoryCache(new MemoryCacheOptions { SizeLimit = 10_000_000 });
-        var handler = new ODataHandler(
-            repo, exec, NullLogger<ODataHandler>.Instance, memoryCache: memory, transportResolver: resolver, ingress: ingress);
+        var handler = Autheris.Tests.Common.Fakes.ODataHandlerTestFactory.Create(
+            repo, exec, NullLogger<ODataHandler>.Instance, memoryCache: memory, transportResolver: resolver, ingress: ingress, policyEnforcer: policyEnforcer);
         var user = Wp0.User("S-USER", "corp");
 
         (await handler.GetMetadataCsdlAsync(user)).ShouldContain("hidden_t");

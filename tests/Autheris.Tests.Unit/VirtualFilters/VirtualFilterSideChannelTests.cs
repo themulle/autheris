@@ -74,9 +74,9 @@ public sealed class VirtualFilterSideChannelTests
     {
         var metadata = Substitute.For<ITableMetadataRepository>();
         metadata.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(Meta());
-        var enforcer = new StreamRlsPolicyEnforcer(
+        var enforcer = Autheris.Tests.Unit.TestDoubles.StreamRlsPolicyEnforcerTestFactory.Create(
             Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), metadata, Substitute.For<IColumnMaskingProvider>(), Substitute.For<IEpochValidationService>(),
-            NullLogger<StreamRlsPolicyEnforcer>.Instance, Substitute.For<IConsentRepository>(), AllowAll(), Substitute.For<IConsentCacheService>(),
+            Substitute.For<IConsentRepository>(), AllowAll(), Substitute.For<IConsentCacheService>(),
             mandatoryFilters: new FixedOutcome(Outcome(outcome)));
         var subscriber = new ClaimsPrincipal(new ClaimsIdentity([new Claim("tenant_id", "tenant-1"), new Claim(ClaimTypes.PrimarySid, "S-1-5-21-STREAM-USER")], "Test"));
         var cdcEvent = new CdcEvent("ev-1", Orders, CdcOperation.Insert, "tenant-1", null, new Dictionary<string, object?> { ["id"] = 1, ["client_id"] = 7 }, DateTimeOffset.UtcNow);

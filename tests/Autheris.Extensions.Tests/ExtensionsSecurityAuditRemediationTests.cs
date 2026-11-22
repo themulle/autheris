@@ -9,14 +9,20 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.DataSources;
+using Autheris.Application.Tenancy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Autheris.Extensions.DataCatalog;
 using Autheris.Modules.Dbt;
 using Autheris.Extensions.Lakehouse.Services;
 using Autheris.Application.OData;
+using Autheris.Tests.Common;
 using Autheris.Tests.Common.Fakes;
+using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Shouldly;
 using Xunit;
@@ -45,7 +51,20 @@ public sealed class ExtensionsSecurityAuditRemediationTests
         // SR-M-16: a missing decision is a deny, so the access check must answer explicitly.
         var execMock = StubGatewayExecutionService.WithAccessDecision(m =>
             TableAccessDecision.Allowed(m.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
-        var handler = new ODataHandler(metaMock, execMock, NullLogger<ODataHandler>.Instance);
+        var policyEnforcer = new DelegatingODataQueryPolicyEnforcer((_, tableMeta, _, _) =>
+            ValueTask.FromResult(TableAccessDecision.Allowed(tableMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
+        using var memoryCache = new MemoryCache(new MemoryCacheOptions());
+        var handler = new ODataHandler(
+            metaMock,
+            execMock,
+            NullLogger<ODataHandler>.Instance,
+            new TestHostEnvironment(Environments.Production),
+            memoryCache,
+            StaticCatalogVersionProvider.Instance,
+            new TenantResolver(() => new TenancyOptions(), null, NullLogger<TenantResolver>.Instance),
+            PermissiveDataSourceOptionsResolver.Instance,
+            new IngressTransportContext(),
+            policyEnforcer);
 
         // 1. Unauthenticated principal
         var unauthenticated = new ClaimsPrincipal(new ClaimsIdentity());

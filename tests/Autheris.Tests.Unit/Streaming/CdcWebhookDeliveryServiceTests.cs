@@ -708,8 +708,8 @@ public sealed partial class CdcWebhookDeliveryServiceTests
         {
             DataMasking = new DataMaskingOptions { HmacSecretKeyVaultRef = "Test-Vault-Key" }
         }));
-        return new StreamRlsPolicyEnforcer(
-            policy, metadataRepo, masking, epoch, NullLogger<StreamRlsPolicyEnforcer>.Instance, consentRepo,
+        return Autheris.Tests.Unit.TestDoubles.StreamRlsPolicyEnforcerTestFactory.Create(
+            policy, metadataRepo, masking, epoch, consentRepo,
             new Autheris.Application.Services.ConsentResolutionService(), cache);
     }
 

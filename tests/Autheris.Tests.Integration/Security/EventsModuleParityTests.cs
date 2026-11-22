@@ -86,7 +86,12 @@ public sealed class EventsModuleParityTests
         return new StreamRlsPolicyEnforcer(
             pdp, metadataRepo, masking, epoch, NullLogger<StreamRlsPolicyEnforcer>.Instance, consentRepo,
             new Autheris.Application.Services.ConsentResolutionService(), cache,
-            transportGate: Substitute.For<Autheris.Application.DataSources.IDataSourceTransportGate>());
+            Autheris.Tests.Common.Fakes.NullClientIpResolver.Instance,
+            Options.Create(new GatewayOptions()),
+            Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
+            Autheris.Tests.Common.Fakes.DisabledCallerAttributeResolver.Instance,
+            TimeProvider.System,
+            Substitute.For<Autheris.Application.DataSources.IDataSourceTransportGate>());
     }
 
     private static CdcEvent Event() =>

@@ -16,7 +16,10 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
 using Autheris.Tests.Unit.Identity.Attributes;
+using Autheris.Tests.Unit.TestDoubles;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -58,7 +61,7 @@ public sealed class StreamRlsCallerAttributeTests : IDisposable
         ColumnName = "cost_center", Operator = op, ValueJson = "[]", ValueSource = "USER_ATTRIBUTE", UserAttribute = "cost_center"
     };
 
-    private StreamRlsPolicyEnforcer Enforcer(ConsentRowFilterRecipe recipe, string legacyText, bool resolverEnabled = true, bool withResolver = true)
+    private StreamRlsPolicyEnforcer Enforcer(ConsentRowFilterRecipe recipe, string legacyText, bool resolverEnabled = true)
     {
         var def = CallerAttributeTestSupport.Definition("cost_center", "claims", CallerAttributeType.Text, CallerAttributeCardinality.List, 50, 60) with { Tenant = Tenant };
         var registry = Substitute.For<ICallerAttributeRegistry>();
@@ -82,10 +85,10 @@ public sealed class StreamRlsCallerAttributeTests : IDisposable
             .Returns(TableAccessDecision.Allowed(Orders, new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear, ["cost_center"] = ColumnAccessLevel.Clear }, rowFilterSql: legacyText, hasUnconstrainedColumnAllow: true)
                 with { ConsentFilterRecipe = recipe });
         var policy = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll();
-        return new StreamRlsPolicyEnforcer(
+        return StreamRlsPolicyEnforcerTestFactory.Create(
             policy, metadataRepo, Substitute.For<IColumnMaskingProvider>(), Substitute.For<IEpochValidationService>(),
-            NullLogger<StreamRlsPolicyEnforcer>.Instance, consents, resolution, Substitute.For<IConsentCacheService>(),
-            callerAttributes: withResolver ? resolver : null, time: _time);
+            consents, resolution, Substitute.For<IConsentCacheService>(),
+            callerAttributes: resolver, time: _time);
     }
 
     private static CdcEvent Event(string costCenter) => new(
@@ -166,7 +169,21 @@ public sealed class StreamRlsCallerAttributeTests : IDisposable
     public async Task FeatureOff_AndNoResolver_KeepTheTextConstant_NothingIsDelivered()
     {
         (await Enforcer(Allow(Attr()), "1 = 0", resolverEnabled: false).EvaluateAndMaskAsync(Event("CC100"), Subscriber(OidA))).IsAllowed.ShouldBeFalse();
-        (await Enforcer(Allow(Attr()), "1 = 0", withResolver: false).EvaluateAndMaskAsync(Event("CC100"), Subscriber(OidA))).IsAllowed.ShouldBeFalse();
+        Should.Throw<ArgumentNullException>(() => new StreamRlsPolicyEnforcer(
+            Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(),
+            new InMemoryTableMetadataRepository(),
+            StubColumnMaskingProvider.Null,
+            new FakeEpochValidationService(),
+            NullLogger<StreamRlsPolicyEnforcer>.Instance,
+            new InMemoryConsentRepository(),
+            new ConsentResolutionService(),
+            new InMemoryConsentCacheService(),
+            NullClientIpResolver.Instance,
+            Options.Create(new GatewayOptions()),
+            Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
+            callerAttributes: null!,
+            _time,
+            AllowAllTransportGate.Instance)).ParamName.ShouldBe("callerAttributes");
     }
 
     [Fact]

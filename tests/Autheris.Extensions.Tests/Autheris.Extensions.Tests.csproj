@@ -30,6 +30,7 @@
     <Compile Include="..\Autheris.Tests.Common\Fakes\InMemoryLineageGraphStore.cs" Link="TestSupport\Fakes\InMemoryLineageGraphStore.cs" />
     <Compile Include="..\Autheris.Tests.Common\Fakes\InMemoryPolicyEpochRepository.cs" Link="TestSupport\Fakes\InMemoryPolicyEpochRepository.cs" />
     <Compile Include="..\Autheris.Tests.Common\Fakes\InMemoryTableMetadataRepository.cs" Link="TestSupport\Fakes\InMemoryTableMetadataRepository.cs" />
+    <Compile Include="..\Autheris.Tests.Common\Fakes\ODataAndStreamingTestStubs.cs" Link="TestSupport\Fakes\ODataAndStreamingTestStubs.cs" />
     <Compile Include="..\Autheris.Tests.Common\Fakes\InMemoryTableRelationRepository.cs" Link="TestSupport\Fakes\InMemoryTableRelationRepository.cs" />
     <Compile Include="..\Autheris.Tests.Common\Fakes\RecordingConsentRepository.cs" Link="TestSupport\Fakes\RecordingConsentRepository.cs" />
     <Compile Include="..\Autheris.Tests.Common\Fakes\StubDataCatalogClient.cs" Link="TestSupport\Fakes\StubDataCatalogClient.cs" />

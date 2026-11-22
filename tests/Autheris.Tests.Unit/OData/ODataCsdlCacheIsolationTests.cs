@@ -40,24 +40,23 @@ public class ODataCsdlCacheIsolationTests
         repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
 
         var exec = Substitute.For<IGatewayExecutionService>();
-        exec.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), false, Arg.Any<CancellationToken>())
-            .Returns(ci =>
+        var policyEnforcer = new Autheris.Tests.Common.Fakes.DelegatingODataQueryPolicyEnforcer((principal, _, _, _) =>
+        {
+            var userName = principal.Identity?.Name ?? "anon";
+            var denied = userDeniedColumns.TryGetValue(userName, out var cols) ? cols : new HashSet<string>();
+
+            var colDecisions = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
+            foreach (var col in denied)
             {
-                var principal = ci.ArgAt<ClaimsPrincipal?>(0);
-                var userName = principal?.Identity?.Name ?? "anon";
-                var denied = userDeniedColumns.TryGetValue(userName, out var cols) ? cols : new HashSet<string>();
+                colDecisions[col] = ColumnAccessLevel.Deny;
+            }
 
-                var colDecisions = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
-                foreach (var col in denied)
-                {
-                    colDecisions[col] = ColumnAccessLevel.Deny;
-                }
-
-                return Task.FromResult(TableAccessDecision.Allowed(OrdersTableId, colDecisions, hasUnconstrainedColumnAllow: true));
-            });
+            return ValueTask.FromResult(TableAccessDecision.Allowed(OrdersTableId, colDecisions, hasUnconstrainedColumnAllow: true));
+        });
 
         var cache = new MemoryCache(new MemoryCacheOptions());
-        var handler = new ODataHandler(repo, exec, NullLogger<ODataHandler>.Instance, memoryCache: cache);
+        var handler = Autheris.Tests.Common.Fakes.ODataHandlerTestFactory.Create(
+            repo, exec, NullLogger<ODataHandler>.Instance, memoryCache: cache, policyEnforcer: policyEnforcer);
         return (handler, cache);
     }
 

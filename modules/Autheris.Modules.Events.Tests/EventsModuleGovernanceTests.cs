@@ -81,8 +81,20 @@ public sealed class EventsModuleGovernanceTests
         }));
         var gate = Substitute.For<Autheris.Application.DataSources.IDataSourceTransportGate>();
         return new StreamRlsPolicyEnforcer(
-            Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), metadataRepo, masking, epoch, NullLogger<StreamRlsPolicyEnforcer>.Instance, consentRepo,
-            new Autheris.Application.Services.ConsentResolutionService(), cache, transportGate: gate);
+            Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(),
+            metadataRepo,
+            masking,
+            epoch,
+            NullLogger<StreamRlsPolicyEnforcer>.Instance,
+            consentRepo,
+            new Autheris.Application.Services.ConsentResolutionService(),
+            cache,
+            Autheris.Tests.Common.Fakes.NullClientIpResolver.Instance,
+            Options.Create(new GatewayOptions()),
+            Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
+            Autheris.Tests.Common.Fakes.DisabledCallerAttributeResolver.Instance,
+            TimeProvider.System,
+            gate);
     }
 
     private static async Task<Host> LoadModuleOverHost(bool withConsent)

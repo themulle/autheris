@@ -67,7 +67,11 @@ public sealed class CatalogCallerMigrationBatch3Tests
         }
 
         var exec = new StubGatewayExecutionService();
-        var odataHandler = new ODataHandler(repo, exec, NullLogger<ODataHandler>.Instance);
+        var policyEnforcer = new Autheris.Tests.Common.Fakes.DelegatingODataQueryPolicyEnforcer((_, tableMeta, _, _) =>
+            ValueTask.FromResult(TableAccessDecision.Allowed(
+                tableMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
+        var odataHandler = Autheris.Tests.Common.Fakes.ODataHandlerTestFactory.Create(
+            repo, exec, NullLogger<ODataHandler>.Instance, policyEnforcer: policyEnforcer);
         var tenantUser = new ClaimsPrincipal(new ClaimsIdentity(
         [
             new Claim(ClaimTypes.PrimarySid, AliceSid.Value),

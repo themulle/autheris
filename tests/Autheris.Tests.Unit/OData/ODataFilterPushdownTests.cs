@@ -142,7 +142,7 @@ public sealed class ODataFilterPushdownTests
         var metaRepo = Substitute.For<ITableMetadataRepository>();
         metaRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(OrderMetadata());
 
-        var handler = new ODataHandler(metaRepo, execution, NullLogger<ODataHandler>.Instance);
+        var handler = Autheris.Tests.Common.Fakes.ODataHandlerTestFactory.Create(metaRepo, execution, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             principal: User(),
