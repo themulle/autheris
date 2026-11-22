@@ -59,8 +59,39 @@ public static partial class GatewayGovernanceServiceExtensions
         AddTriageAndContracts(services);
         AddIdentityAndAccessGovernance(services);
         AddDataProducts(services);
+        AddGovernanceProtectionCaching(services);
 
         return services;
+    }
+
+    private static void AddGovernanceProtectionCaching(IServiceCollection services)
+    {
+        services.AddOptions<GovernanceCacheSettings>()
+            .BindConfiguration(GovernanceCacheSettings.SectionName)
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddSingleton<Autheris.Application.Governance.Caching.IGovernanceChangeNotifier, RedisGovernanceChangeChannel>();
+        services.AddSingleton<Autheris.Application.Governance.Caching.GovernanceEpochProvider>();
+        services.AddSingleton<Autheris.Application.Governance.Caching.IGovernanceCacheInvalidator>(sp =>
+            sp.GetRequiredService<Autheris.Application.Governance.Caching.GovernanceEpochProvider>());
+        services.AddSingleton<Autheris.Application.Governance.Protection.ProtectionSnapshotProvider>(sp =>
+            new Autheris.Application.Governance.Protection.ProtectionSnapshotProvider(
+                sp.GetRequiredService<ITableMetadataRepository>(),
+                sp.GetRequiredService<IGovernanceDomainRepository>(),
+                sp.GetRequiredService<Autheris.Application.Governance.Caching.GovernanceEpochProvider>(),
+                sp.GetService<Autheris.Application.Catalog.ICatalogVersionProvider>()
+                    ?? new Autheris.Infrastructure.Persistence.Catalog.DbCatalogVersionProvider(
+                        sp.GetRequiredService<ITableMetadataRepository>(),
+                        sp.GetService<IEventBus>(),
+                        timeProvider: sp.GetService<TimeProvider>()),
+                sp.GetService<Microsoft.Extensions.Options.IOptions<GovernanceCacheSettings>>(),
+                sp.GetService<Autheris.Application.Governance.Caching.IGovernanceChangeNotifier>(),
+                sp.GetService<TimeProvider>()));
+        services.AddSingleton<IProtectionSnapshotProvider>(sp =>
+            sp.GetRequiredService<Autheris.Application.Governance.Protection.ProtectionSnapshotProvider>());
+        services.AddSingleton<Autheris.Application.Governance.Caching.IGovernanceCacheInvalidator>(sp =>
+            sp.GetRequiredService<Autheris.Application.Governance.Protection.ProtectionSnapshotProvider>());
+        services.AddHostedService<Autheris.Application.Governance.Caching.GovernanceCacheInvalidationHostedService>();
     }
 
     private static void AddGovernanceStateAndStores(IServiceCollection services, GatewayOptions gatewayOptions)
@@ -210,6 +241,9 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Mcp.Interfaces.IGoldenQueryRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<Autheris.Application.Products.IDataProductRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<Autheris.Application.Docs.Interfaces.IDocLinkRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<GovernanceDomainStore>();
+        services.AddSingleton<IGovernanceDomainRepository>(sp => sp.GetRequiredService<GovernanceDomainStore>());
+        services.AddSingleton<Autheris.Application.Governance.Caching.IGovernanceEpochStore>(sp => sp.GetRequiredService<GovernanceDomainStore>());
         services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IConsumerAggregationRepository>(sp => sp.GetRequiredService<TRepository>());
