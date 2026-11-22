@@ -57,8 +57,7 @@ public sealed class McpToolSwitchTests
         ReadPathSwitches Switches,
         AiDataGuardrailService Guardrail,
         IAuditLogRepository Audit,
-        IMcpQueryExecutor Executor,
-        McpProtocolHandler Handler);
+        IMcpQueryExecutor Executor);
 
     private static Rig Rigged(GatewayOptions o, IAuditLogRepository? audit = null)
     {
@@ -68,8 +67,7 @@ public sealed class McpToolSwitchTests
         var options = Options.Create(o);
         var guardrail = new AiDataGuardrailService(
             registry, options, NullLogger<AiDataGuardrailService>.Instance, audit, queryExecutor: executor, switches: switches, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
-        var handler = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), registry, guardrail, NullLogger<McpProtocolHandler>.Instance);
-        return new Rig(registry, switches, guardrail, audit, executor, handler);
+        return new Rig(registry, switches, guardrail, audit, executor);
     }
 
     private static McpSessionContext Session() =>
@@ -91,23 +89,6 @@ public sealed class McpToolSwitchTests
         Names(switched).ShouldContain("query_sql");
     }
 
-    [Fact]
-    public async Task Default_tools_list_over_JSON_RPC_is_identical_with_and_without_switches()
-    {
-        var plainRegistry = new McpToolRegistry(Options.Create(Opts()));
-        var plainGuardrail = new AiDataGuardrailService(plainRegistry, Options.Create(Opts()), NullLogger<AiDataGuardrailService>.Instance, new InMemoryAuditLogRepository(), decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
-        var plain = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), plainRegistry, plainGuardrail, NullLogger<McpProtocolHandler>.Instance);
-        var rig = Rigged(Opts());
-
-        string Normalize(string json) => string.Join(",", JsonDocument.Parse(json).RootElement.GetProperty("result").GetProperty("tools").EnumerateArray()
-            .OrderBy(t => t.GetProperty("name").GetString(), StringComparer.Ordinal).Select(t => t.GetRawText()));
-
-        var a = await plain.HandleMessageAsync(plain.CreateSession("agent", "t", userSid: null).SessionId, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""");
-        var b = await rig.Handler.HandleMessageAsync(rig.Handler.CreateSession("agent", "t", userSid: null).SessionId, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""");
-
-        Normalize(b).ShouldBe(Normalize(a));
-    }
-
     // ---- AC 2: absent from registry ---------------------------------------------------------------------------------------
 
     [Theory]
@@ -115,7 +96,7 @@ public sealed class McpToolSwitchTests
     [InlineData(McpToolGroup.Query)]
     [InlineData(McpToolGroup.Api)]
     [InlineData(McpToolGroup.Access)]
-    public async Task Group_off_removes_its_tools_from_both_tools_list_paths_and_FindTool(McpToolGroup group)
+    public void Group_off_removes_its_tools_from_registry_and_FindTool(McpToolGroup group)
     {
         var rig = Rigged(Opts(Off(group)));
         var members = McpToolGroups.BuiltInNames.Where(n => McpToolGroups.Of(n) == group).ToArray();
@@ -126,9 +107,6 @@ public sealed class McpToolSwitchTests
             Names(rig.Registry).ShouldNotContain(m);
             rig.Registry.FindTool(m).ShouldBeNull();
         }
-
-        var json = await rig.Handler.HandleMessageAsync(rig.Handler.CreateSession("agent", "t", userSid: null).SessionId, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""");
-        foreach (var m in members) json.ShouldNotContain($"\"name\": \"{m}\"");
 
         // Everything outside the group stays registered.
         Names(rig.Registry).ShouldContain(McpToolGroups.BuiltInNames.First(n => McpToolGroups.Of(n) != group && McpToolGroups.Of(n) != McpToolGroup.None));
@@ -206,9 +184,6 @@ public sealed class McpToolSwitchTests
 
         Names(rig.Registry).ShouldNotContain("list_orders");
         Names(rig.Registry).ShouldNotContain("discovered_tool");
-        var json = await rig.Handler.HandleMessageAsync(rig.Handler.CreateSession("agent", "t", userSid: null).SessionId, """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""");
-        json.ShouldNotContain("discovered_tool");
-        json.ShouldNotContain("list_orders");
 
         var call = await rig.Guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("discovered_tool", "{}"), Session());
         call.IsSuccess.ShouldBeFalse();
@@ -388,9 +363,8 @@ public sealed class McpToolSwitchTests
         var o = how == "List" ? Opts(disabled: [disabledName]) : Opts(Off(Enum.Parse<McpToolGroup>(how)));
         var rig = Rigged(o);
         const string unknown = "never_registered_tool";
-        var sessionId = rig.Handler.CreateSession("agent", "t", userSid: null).SessionId;
 
-        // Guardrail result (the object both transports serialise).
+        // Guardrail result (the object the SDK transport serialises).
         var a = await rig.Guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(disabledName, "{}"), Session());
         var b = await rig.Guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(unknown, "{}"), Session());
         a.IsSuccess.ShouldBe(b.IsSuccess);
@@ -399,11 +373,24 @@ public sealed class McpToolSwitchTests
         a.EstimatedTokens.ShouldBe(b.EstimatedTokens);
         Substitute_(a.ErrorMessage!, disabledName).ShouldBe(Substitute_(b.ErrorMessage!, unknown));
 
-        // JSON-RPC transport, complete serialised response.
-        string Rpc(string name) => """{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"<N>","arguments":{ }}}""".Replace("<N>", name);
-        var ra = await rig.Handler.HandleMessageAsync(sessionId, Rpc(disabledName));
-        var rb = await rig.Handler.HandleMessageAsync(sessionId, Rpc(unknown));
-        Substitute_(ra, disabledName).ShouldBe(Substitute_(rb, unknown));
+        // Live SDK server path, complete serialised CallToolResult.
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity([new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, "S-1-USER"), new System.Security.Claims.Claim("tenant_id", "00000000-0000-0000-0000-000000000001")], "Bearer"))
+        };
+        http.Items[Autheris.Domain.Security.SecurityPrincipalContext.TenantIdItemKey] = new TenantId("00000000-0000-0000-0000-000000000001");
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<Microsoft.AspNetCore.Http.IHttpContextAccessor>(services, new Microsoft.AspNetCore.Http.HttpContextAccessor { HttpContext = http });
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton(services, Options.Create(o));
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<IAiDataGuardrailService>(services, rig.Guardrail);
+        await using var sp = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+
+        var ra = await Autheris.Api.Mcp.GatewayMcpServer.CallGuardedToolAsync(sp, disabledName, "{}", CancellationToken.None);
+        var rb = await Autheris.Api.Mcp.GatewayMcpServer.CallGuardedToolAsync(sp, unknown, "{}", CancellationToken.None);
+        ra.IsError.ShouldBe(rb.IsError);
+        var textA = ((ModelContextProtocol.Protocol.TextContentBlock)ra.Content[0]).Text;
+        var textB = ((ModelContextProtocol.Protocol.TextContentBlock)rb.Content[0]).Text;
+        Substitute_(textA, disabledName).ShouldBe(Substitute_(textB, unknown));
     }
 
     [Fact]
@@ -448,27 +435,6 @@ public sealed class McpToolSwitchTests
         rig.Switches.IsGroupEnabled(McpToolGroup.Query).ShouldBeFalse();
         rig.Switches.IsToolEnabled("query_sql").ShouldBeFalse();
         rig.Switches.IsToolEnabled("admin_apply_access").ShouldBeFalse();
-    }
-
-    // ---- Pruner input -----------------------------------------------------------------------------------------------------------
-
-    [Fact]
-    public async Task Pruner_receives_no_disabled_tool()
-    {
-        var o = Opts(Off(McpToolGroup.Query));
-        var (registry, switches) = Build(o);
-        var guardrail = new AiDataGuardrailService(registry, Options.Create(o), NullLogger<AiDataGuardrailService>.Instance, new InMemoryAuditLogRepository(), switches: switches, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
-        var pruner = Substitute.For<Autheris.Application.Mcp.Pruning.ISemanticToolPruner>();
-        IReadOnlyList<McpToolDefinition>? seen = null;
-        pruner.PruneToolsAsync(Arg.Any<string>(), Arg.Any<IReadOnlyList<McpToolDefinition>>(), Arg.Any<Autheris.Application.Mcp.Pruning.ToolPruningOptions?>(), Arg.Any<CancellationToken>())
-            .Returns(ci => { seen = ci.ArgAt<IReadOnlyList<McpToolDefinition>>(1); return ValueTask.FromResult(ci.ArgAt<IReadOnlyList<McpToolDefinition>>(1)); });
-        var handler = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), registry, guardrail, NullLogger<McpProtocolHandler>.Instance, toolPruner: pruner);
-
-        await handler.HandleMessageAsync(handler.CreateSession("agent", "t", userSid: null).SessionId, """{"jsonrpc":"2.0","id":1,"method":"tools/list","params":{"prompt":"rows please"}}""");
-
-        seen.ShouldNotBeNull();
-        seen!.Select(t => t.Name).ShouldNotContain("query_sql");
-        seen.Select(t => t.Name).ShouldNotContain("sample_rows");
     }
 
     [Fact]

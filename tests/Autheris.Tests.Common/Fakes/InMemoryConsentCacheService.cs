@@ -52,16 +52,6 @@ public sealed class InMemoryConsentCacheService : IConsentCacheService
         return Task.CompletedTask;
     }
 
-    public Task EvictTableDecisionsAsync(TableIdentifier table, CancellationToken ct = default)
-    {
-        foreach (var key in _entries.Keys.Where(k => k.Table == table).ToList())
-        {
-            _entries.TryRemove(key, out _);
-        }
-
-        return Task.CompletedTask;
-    }
-
     public Task ClearL1CacheAsync(CancellationToken ct = default)
     {
         _entries.Clear();

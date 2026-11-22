@@ -72,7 +72,6 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         IMcpQueryExecutor? queryExecutor = null,
         Autheris.Application.Policy.Pdp.IAccessDecisionPoint? decisionPoint = null,
         ITableMetadataRepository? tableMetadataRepository = null,
-        IMcpSessionStore? sessionStore = null,
         ISemanticPromptGuardrail? promptGuardrail = null,
         IGoldenQueryService? goldenQueryService = null,
         IHitLStepUpApprovalService? stepUpApprovalService = null,
@@ -100,7 +99,6 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         _queryExecutor = queryExecutor;
         _decisionPoint = decisionPoint ?? throw new ArgumentNullException(nameof(decisionPoint));
         _tableMetadataRepository = tableMetadataRepository;
-        _ = sessionStore;
         _promptGuardrail = promptGuardrail ?? new SemanticPromptGuardrail();
         _goldenQueryService = goldenQueryService;
         _stepUpApprovalService = stepUpApprovalService;

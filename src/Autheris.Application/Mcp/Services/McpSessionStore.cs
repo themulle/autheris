@@ -113,22 +113,23 @@ public sealed class McpSessionStore : IMcpSessionStore
             return null;
         }
 
-        return Touch(sessionId, session);
+        return Touch(sessionId);
     }
 
     public async ValueTask<McpSessionContext?> GetSessionAsync(string sessionId, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(sessionId)) return null;
-        if (!_sessions.TryGetValue(sessionId, out var session))
+        if (!_sessions.TryGetValue(sessionId, out _))
         {
             if (_clusterState == null)
             {
                 return null;
             }
 
+            McpSessionContext? remoteSession = null;
             try
             {
-                session = await _clusterState.GetAsync<McpSessionContext>($"mcp:session:{sessionId}", ct).ConfigureAwait(false);
+                remoteSession = await _clusterState.GetAsync<McpSessionContext>($"mcp:session:{sessionId}", ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -136,32 +137,40 @@ public sealed class McpSessionStore : IMcpSessionStore
                 _logger.LogWarning(ex, "Failed to retrieve remote MCP session {SessionId} from cluster state.", safeGetSessionId);
             }
 
-            if (session == null)
+            if (remoteSession == null)
             {
                 return null;
             }
 
-            _sessions[sessionId] = session;
+            _sessions.TryAdd(sessionId, remoteSession);
         }
 
-        return Touch(sessionId, session);
+        return Touch(sessionId);
     }
 
-    private McpSessionContext? Touch(string sessionId, McpSessionContext session)
+    internal McpSessionContext? Touch(string sessionId, Action? beforeTryUpdate = null)
     {
         var now = DateTimeOffset.UtcNow;
-        if (now - session.LastActiveAt > DefaultSessionTtl)
+        while (_sessions.TryGetValue(sessionId, out var current))
         {
-            RemoveSession(sessionId);
-            var safeTouchSessionId = sessionId.Replace("\r", string.Empty, StringComparison.Ordinal).Replace("\n", string.Empty, StringComparison.Ordinal);
-            _logger.LogWarning("MCP session {SessionId} expired due to inactivity (TTL: {Ttl}).", safeTouchSessionId, DefaultSessionTtl);
-            return null;
+            if (now - current.LastActiveAt > DefaultSessionTtl)
+            {
+                RemoveSession(sessionId);
+                var safeTouchSessionId = sessionId.Replace("\r", string.Empty, StringComparison.Ordinal).Replace("\n", string.Empty, StringComparison.Ordinal);
+                _logger.LogWarning("MCP session {SessionId} expired due to inactivity (TTL: {Ttl}).", safeTouchSessionId, DefaultSessionTtl);
+                return null;
+            }
+
+            var updated = current with { LastActiveAt = now };
+            beforeTryUpdate?.Invoke();
+            if (_sessions.TryUpdate(sessionId, updated, current))
+            {
+                PersistInBackground(sessionId, updated);
+                return updated;
+            }
         }
 
-        var updated = session with { LastActiveAt = now };
-        _sessions[sessionId] = updated;
-        PersistInBackground(sessionId, updated);
-        return updated;
+        return null;
     }
 
     /// <summary>MCP-2: best-effort write to the cluster state without blocking the caller (and never inside a lock).</summary>

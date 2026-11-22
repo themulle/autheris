@@ -39,9 +39,6 @@ public sealed class NullConsentCacheService : IConsentCacheService
     public Task<long?> GetEpochSnapshotAsync(TableIdentifier table, CancellationToken ct = default)
         => Task.FromResult<long?>(null);
 
-    public Task EvictTableDecisionsAsync(TableIdentifier table, CancellationToken ct = default)
-        => Task.CompletedTask;
-
     public Task ClearL1CacheAsync(CancellationToken ct = default)
         => Task.CompletedTask;
 }

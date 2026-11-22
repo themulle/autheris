@@ -52,12 +52,6 @@ internal sealed class TestMemoryConsentCache : IConsentCacheService
         return Task.CompletedTask;
     }
 
-    public Task EvictTableDecisionsAsync(TableIdentifier table, CancellationToken ct = default)
-    {
-        _cache.Clear();
-        return Task.CompletedTask;
-    }
-
     public Task ClearL1CacheAsync(CancellationToken ct = default)
     {
         _cache.Clear();
@@ -72,7 +66,6 @@ internal sealed class TestNoOpConsentCache : IConsentCacheService
     public Task<IReadOnlyDictionary<TableIdentifier, TableAccessDecision?>> GetCachedDecisionsAsync(TenantId tenant, Sid userSid, IReadOnlyList<TableIdentifier> tables, string? contextHash = null, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyDictionary<TableIdentifier, TableAccessDecision?>>(tables.ToDictionary(t => t, _ => (TableAccessDecision?)null));
     public Task SetCachedDecisionAsync(TenantId tenant, Sid userSid, TableIdentifier table, TableAccessDecision decision, TimeSpan ttl, string? contextHash = null, CancellationToken ct = default) => Task.CompletedTask;
-    public Task EvictTableDecisionsAsync(TableIdentifier table, CancellationToken ct = default) => Task.CompletedTask;
     public Task ClearL1CacheAsync(CancellationToken ct = default) => Task.CompletedTask;
 }
 

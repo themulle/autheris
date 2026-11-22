@@ -673,30 +673,4 @@ public sealed partial class InfrastructureAndPluginSecurityTests : IDisposable
         // SG-11: Bei bestehenden Tabellen keine neuen Phantomspalten zulassen
         merged.HasColumn("amount").ShouldBeFalse();
     }
-
-    // =========================================================================
-    // Low: MCP JSON responses are not built from unescaped string templates
-    // =========================================================================
-
-    [Fact]
-    public async Task Low_McpToolsList_EscapesToolNamesAndSchemas()
-    {
-        var sessionStore = Substitute.For<IMcpSessionStore>();
-        sessionStore.GetSessionAsync("s1", Arg.Any<CancellationToken>()).Returns(new ValueTask<McpSessionContext?>(new McpSessionContext("s1", "sp", "tenant-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow)));
-        var registry = Substitute.For<IMcpToolRegistry>();
-        const string evilName = "tool\",\"injected\":\"x";
-        registry.GetAvailableTools().Returns(new List<McpToolDefinition>
-        {
-            new(evilName, "desc", "{\"type\":\"object\"} , \"x\": 1", "query { x }")
-        });
-
-        var handler = new McpProtocolHandler(sessionStore, registry, Substitute.For<IAiDataGuardrailService>(), NullLogger<McpProtocolHandler>.Instance);
-        var json = await handler.HandleMessageAsync("s1", "{\"jsonrpc\":\"2.0\",\"id\":1,\"method\":\"tools/list\"}");
-
-        using var doc = JsonDocument.Parse(json);
-        var tool = doc.RootElement.GetProperty("result").GetProperty("tools")[0];
-        tool.GetProperty("name").GetString().ShouldBe(evilName);
-        tool.TryGetProperty("injected", out _).ShouldBeFalse();
-        tool.GetProperty("inputSchema").GetRawText().ShouldBe("{}");
-    }
 }

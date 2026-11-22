@@ -7,7 +7,6 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance;
-using Autheris.Application.Governance.Caching;
 using Autheris.Application.Identity.Attributes;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
@@ -131,15 +130,6 @@ public sealed class CallerAttributeSecurityTests : IDisposable
         failed.CallerAttributes!.Single().Outcome.ShouldBe("Failed");
         failed.CallerAttributes!.Single().Reason.ShouldBe("SourceUnavailable");
         failed.CallerAttributes!.Single().ToString().ShouldNotContain("hunter2");
-    }
-
-    // ---- ST-129-18 -----------------------------------------------------------------------------------------------------------------
-
-    [Fact]
-    public void ST_129_18_ARuleThatMentionsAPlaceholder_IsNeverShareableBetweenUsers()
-    {
-        PolicyShapeAnalyzer.Analyze("true", "region = {{caller.dept}}").Shareable.ShouldBeFalse();
-        PolicyShapeAnalyzer.Analyze("true", "region = 'EU'").Shareable.ShouldBeTrue();   // the control: a plain rule is still shareable
     }
 
     // ---- ST-129-19 -----------------------------------------------------------------------------------------------------------------

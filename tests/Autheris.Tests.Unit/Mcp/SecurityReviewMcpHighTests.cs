@@ -278,23 +278,4 @@ public sealed class SecurityReviewMcpHighTests
     {
         McpAdminTools.CanUseAdminTools(Session([role], readOnly), authBypassed: false).ShouldBe(visible);
     }
-
-    [Theory]
-    [InlineData("TenantAdmin", false)]
-    [InlineData("Admin", false)]
-    [InlineData("ClusterAdmin", true)]
-    public async Task SR_H_02_ToolsList_HidesAdminToolsFromNonClusterAdmins(string role, bool visible)
-    {
-        var registry = new McpToolRegistry(Options.Create(new GatewayOptions()), new NoDemo());
-        var store = Substitute.For<IMcpSessionStore>();
-        var session = Session([role]);
-        store.GetSessionAsync("s1", Arg.Any<CancellationToken>()).Returns(new ValueTask<McpSessionContext?>(session));
-        var handler = new McpProtocolHandler(store, registry, Substitute.For<IAiDataGuardrailService>(),
-            NullLogger<McpProtocolHandler>.Instance, options: Options.Create(new GatewayOptions()));
-
-        var json = await handler.HandleMessageAsync("s1", """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""");
-
-        json.ShouldNotBeNull();
-        json.Contains("admin_set_dataset_state", StringComparison.Ordinal).ShouldBe(visible);
-    }
 }

@@ -1,19 +1,17 @@
 namespace Autheris.Tests.Unit.GraphQL;
 
-using System;
 using System.Linq;
 using System.Net.Http;
 using System.Security.Claims;
-using Autheris.Domain.Options;
+using System.Threading.Tasks;
 using Autheris.Application.Federation.Services;
-using Autheris.GraphQL.Federation;
+using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
-/// <summary>VF-09: the federation context signature covers the query string.</summary>
-[Collection("SubgraphReplayCache")]
+/// <summary>VF-09: the outbound federation context signature covers the query string.</summary>
 [Trait("Category", "Security")]
 public sealed class SubgraphQuerySignatureVf09Tests
 {
@@ -44,27 +42,27 @@ public sealed class SubgraphQuerySignatureVf09Tests
             request.Headers.GetValues("X-Autheris-Body-Sha256").First());
     }
 
-    private static bool Validate((string Sig, string Ts, string Nonce, string BodyHash) s, string pathAndQuery) =>
-        SubgraphSecurityValidator.ValidateSignature(
+    private static bool MatchesCanonicalV2((string Sig, string Ts, string Nonce, string BodyHash) s, string pathAndQuery)
+    {
+        var canonical = FederationContextSignature.BuildCanonicalV2(
             tenant: "tenant_alpha",
             userSid: "S-1-5-21-FED-USER",
-            timestampStr: s.Ts,
+            timestamp: s.Ts,
             nonce: s.Nonce,
-            signature: s.Sig,
-            signingKey: Secret,
             subgraph: "products",
-            roles: "",
+            roles: string.Empty,
             method: "GET",
             path: pathAndQuery,
-            version: "v2",
             bodySha256: s.BodyHash);
+        return string.Equals(s.Sig, FederationContextSignature.Sign(canonical, Secret), System.StringComparison.Ordinal);
+    }
 
     [Fact]
     public async Task SignedQueryString_Validates()
     {
         var signed = await SignAsync("https://subgraph.internal/graphql?query=%7Ba%7D");
 
-        Validate(signed, "/graphql?query=%7Ba%7D").ShouldBeTrue();
+        MatchesCanonicalV2(signed, "/graphql?query=%7Ba%7D").ShouldBeTrue();
     }
 
     [Fact]
@@ -72,6 +70,6 @@ public sealed class SubgraphQuerySignatureVf09Tests
     {
         var signed = await SignAsync("https://subgraph.internal/graphql?query=%7Ba%7D");
 
-        Validate(signed, "/graphql?query=%7Bevil%7D").ShouldBeFalse();
+        MatchesCanonicalV2(signed, "/graphql?query=%7Bevil%7D").ShouldBeFalse();
     }
 }
