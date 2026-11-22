@@ -413,7 +413,7 @@ internal static class DocEndpointAccess
 {
     public static DocCaller BuildCaller(HttpContext httpContext, string? tenant, string? authorSid) => new(
         IsCanonicalClusterAdmin: EndpointSecurity.IsCanonicalClusterAdmin(httpContext.User),
-        IsGovernanceAdmin: GatewayPolicies.HasRole(httpContext.User, GatewayRole.GovernanceAdmin),
+        IsGovernanceAdmin: GatewayPolicies.HasRequestRole(httpContext, GatewayRole.GovernanceAdmin),
         TenantId: tenant,
         AuthorSid: authorSid,
         HasSession: httpContext.User.Identity?.IsAuthenticated ?? false,
@@ -499,7 +499,7 @@ internal static class DocEndpointAccess
 
             var caller = new DocCaller(
                 IsCanonicalClusterAdmin: EndpointSecurity.IsCanonicalClusterAdmin(httpContext.User),
-                IsGovernanceAdmin: GatewayPolicies.HasRole(httpContext.User, GatewayRole.GovernanceAdmin),
+                IsGovernanceAdmin: GatewayPolicies.HasRequestRole(httpContext, GatewayRole.GovernanceAdmin),
                 TenantId: tenant,
                 AuthorSid: EndpointSecurity.GetCallerIdentity(httpContext),
                 HasSession: httpContext.User.Identity?.IsAuthenticated ?? false,

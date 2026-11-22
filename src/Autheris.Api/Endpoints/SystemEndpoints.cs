@@ -37,7 +37,7 @@ public static class SystemEndpoints
                 return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "System metrics endpoints are disabled.");
             }
 
-            if (!IsAuthorized(context.User, sysOpts.GetEffectiveAllowedRoles()))
+            if (!IsAuthorized(context, sysOpts.GetEffectiveAllowedRoles()))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
@@ -60,7 +60,7 @@ public static class SystemEndpoints
                 return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "System metrics endpoints are disabled.");
             }
 
-            if (!IsAuthorized(context.User, sysOpts.GetEffectiveAllowedRoles()))
+            if (!IsAuthorized(context, sysOpts.GetEffectiveAllowedRoles()))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
@@ -74,7 +74,7 @@ public static class SystemEndpoints
                 version = metrics.Version,
                 uptime = metrics.Uptime,
                 components = metrics.Components,
-                graphQlCatalog = BuildCatalogDiagnostics(catalogDiagnostics, context.User),
+                graphQlCatalog = BuildCatalogDiagnostics(catalogDiagnostics, context),
                 catalogSearch = BuildCatalogSearchDiagnostics(searchEngine)
             }, statusCode: isAllHealthy ? StatusCodes.Status200OK : StatusCodes.Status503ServiceUnavailable);
         }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
@@ -90,7 +90,7 @@ public static class SystemEndpoints
                 return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "System metrics endpoints are disabled.");
             }
 
-            if (!IsAuthorized(context.User, sysOpts.GetEffectiveAllowedRoles()))
+            if (!IsAuthorized(context, sysOpts.GetEffectiveAllowedRoles()))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
@@ -110,7 +110,7 @@ public static class SystemEndpoints
     /// GovernanceAdmin; every other authorised caller gets the count. Null when no diagnostics are registered, which
     /// omits the property. Entries carry only the qualified table name and the reason. Never influences the status.
     /// </summary>
-    private static object? BuildCatalogDiagnostics(ICatalogSchemaDiagnostics? diagnostics, ClaimsPrincipal user)
+    private static object? BuildCatalogDiagnostics(ICatalogSchemaDiagnostics? diagnostics, HttpContext context)
     {
         if (diagnostics == null)
         {
@@ -118,7 +118,7 @@ public static class SystemEndpoints
         }
 
         var omitted = diagnostics.OmittedTables;
-        if (!GatewayPolicies.HasRole(user, GatewayRole.GovernanceAdmin))
+        if (!GatewayPolicies.HasRequestRole(context, GatewayRole.GovernanceAdmin))
         {
             return new { omittedTableCount = omitted.Count };
         }
@@ -150,13 +150,13 @@ public static class SystemEndpoints
         };
     }
 
-    private static bool IsAuthorized(ClaimsPrincipal user, IReadOnlyList<string>? allowedRoles)
+    private static bool IsAuthorized(HttpContext context, IReadOnlyList<string>? allowedRoles)
     {
         if (allowedRoles == null || allowedRoles.Count == 0)
         {
-            return GatewayPolicies.HasRole(user, GatewayRole.GovernanceAdmin);
+            return GatewayPolicies.HasRequestRole(context, GatewayRole.GovernanceAdmin);
         }
 
-        return GatewayPolicies.HasAnyRole(user, allowedRoles);
+        return GatewayPolicies.HasAnyRequestRole(context, allowedRoles);
     }
 }

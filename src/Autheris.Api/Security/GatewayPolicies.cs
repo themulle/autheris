@@ -108,28 +108,173 @@ public static class GatewayPolicies
     public static readonly string[] ComplianceCertificateReadRoles = ["GovernanceAdmin", "TenantAdmin", "SecurityAuditor"];
 
     /// <summary>
-    /// K-K10: Checks if principal satisfies any of the strongly-typed GatewayRole requirements,
-    /// respecting role hierarchy (e.g. ClusterAdmin implies GovernanceAdmin/DataSteward).
+    /// Checks if principal satisfies the strongly-typed GatewayRole requirement,
+    /// respecting role hierarchy (e.g. ClusterAdmin implies TenantAdmin/SecurityAuditor)
+    /// and tenant-bound role prefixes for non-cluster roles.
     /// </summary>
     public static bool HasRole(ClaimsPrincipal? principal, GatewayRole role, string? tenantId = null)
-        => role == GatewayRole.ClusterAdmin && string.IsNullOrEmpty(tenantId)
-            ? ClusterAdminPolicy.IsCanonicalClusterAdmin(principal)
-            : Evaluator.HasRole(principal, role, tenantId);
+    {
+        if (principal?.Identity?.IsAuthenticated != true)
+        {
+            return false;
+        }
+
+        var claim = Autheris.Domain.Tenancy.TenantClaimReader.Read(principal);
+        if (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Invalid)
+        {
+            return false;
+        }
+
+        bool isCanonicalClusterAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        if (role == GatewayRole.ClusterAdmin)
+        {
+            return isCanonicalClusterAdmin;
+        }
+
+        if (!TryResolvePrincipalTenantScope(claim, tenantId, isCanonicalClusterAdmin, out var effectiveTenant))
+        {
+            return false;
+        }
+
+        if (GatewayRole.GovernanceAdmin.Implies(role) &&
+            GatewayRoleEvaluator.HasTenantBoundRole(principal, nameof(GatewayRole.GovernanceAdmin), effectiveTenant))
+        {
+            return true;
+        }
+
+        return HasEffectiveGatewayRole(principal, role, effectiveTenant);
+    }
 
     /// <summary>
-    /// K-K10: Checks if principal satisfies any of the strongly-typed GatewayRoles.
+    /// Checks if the request principal and resolved tenant satisfy the strongly-typed GatewayRole requirement.
+    /// </summary>
+    public static bool HasRequestRole(HttpContext context, GatewayRole role)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        if (!TryResolveHttpContextRoleScope(context, out var effectiveTenant, out var security))
+        {
+            return false;
+        }
+
+        if (security != null && security.HasRole(role))
+        {
+            return true;
+        }
+
+        return HasRole(context.User, role, effectiveTenant);
+    }
+
+    /// <summary>
+    /// Checks if principal satisfies any of the strongly-typed GatewayRoles.
     /// </summary>
     public static bool HasAnyRole(ClaimsPrincipal? principal, IEnumerable<GatewayRole> roles, string? tenantId = null)
-        => Evaluator.HasAnyRole(principal, roles, tenantId);
-
-    /// <summary>
-    /// True when the principal carries any of the given roles, by exact name via
-    /// <see cref="ClaimsPrincipal.IsInRole"/>, or raw "role"/"roles" claims.
-    /// </summary>
-    public static bool HasAnyRole(ClaimsPrincipal? principal, IReadOnlyList<string> roles)
     {
         ArgumentNullException.ThrowIfNull(roles);
-        return Evaluator.HasAnyExactRole(principal, roles);
+        foreach (var role in roles)
+        {
+            if (HasRole(principal, role, tenantId))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Checks if the request principal and resolved tenant satisfy any of the strongly-typed GatewayRoles.
+    /// </summary>
+    public static bool HasAnyRequestRole(HttpContext context, IReadOnlyList<GatewayRole> roles)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(roles);
+        if (!TryResolveHttpContextRoleScope(context, out var effectiveTenant, out var security))
+        {
+            return false;
+        }
+
+        foreach (var role in roles)
+        {
+            if ((security != null && security.HasRole(role)) || HasRole(context.User, role, effectiveTenant))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// True when the principal carries any of the given roles by exact name (unprefixed or scoped to the
+    /// resolved tenant claim, excluding wildcard prefixes and ForwardAuth ClusterAdmin escalation).
+    /// </summary>
+    public static bool HasAnyRole(ClaimsPrincipal? principal, IReadOnlyList<string> roles, string? tenantId = null)
+    {
+        ArgumentNullException.ThrowIfNull(roles);
+        if (principal?.Identity?.IsAuthenticated != true || roles.Count == 0)
+        {
+            return false;
+        }
+
+        var claim = Autheris.Domain.Tenancy.TenantClaimReader.Read(principal);
+        if (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Invalid)
+        {
+            return false;
+        }
+
+        bool isCanonicalClusterAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        if (!TryResolvePrincipalTenantScope(claim, tenantId, isCanonicalClusterAdmin, out var effectiveTenant))
+        {
+            return false;
+        }
+
+        return HasAnyExactRoleCore(principal, roles, effectiveTenant);
+    }
+
+    /// <summary>
+    /// True when the request principal carries any of the given roles by exact name (unprefixed or scoped
+    /// to the resolved request tenant, excluding wildcard prefixes and ForwardAuth ClusterAdmin escalation).
+    /// </summary>
+    public static bool HasAnyRequestRole(HttpContext context, IReadOnlyList<string> roles)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+        ArgumentNullException.ThrowIfNull(roles);
+        if (roles.Count == 0 || !TryResolveHttpContextRoleScope(context, out var effectiveTenant, out var security))
+        {
+            return false;
+        }
+
+        if (HasAnyExactRoleCore(context.User, roles, effectiveTenant))
+        {
+            return true;
+        }
+
+        if (security == null)
+        {
+            return false;
+        }
+
+        bool isCanonicalClusterAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(context.User);
+        foreach (var roleName in roles)
+        {
+            if (string.Equals(roleName, nameof(GatewayRole.ClusterAdmin), StringComparison.OrdinalIgnoreCase))
+            {
+                if (isCanonicalClusterAdmin && security.IsClusterAdmin)
+                {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (security.TenantRoles.Contains(roleName) ||
+                (!string.IsNullOrEmpty(effectiveTenant) && security.TenantRoles.Contains($"{effectiveTenant}:{roleName}")))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     /// <summary>
@@ -165,7 +310,7 @@ public static class GatewayPolicies
         options.AddPolicy(ClusterAdmin, policy => policy
             .RequireAuthenticatedUser()
             .RequireAssertion(ctx => ClusterAdminPolicy.IsCanonicalClusterAdmin(ctx.User)));
-        AddSecurityRolePolicy(options, SchemaPublisher, [GatewayRole.SchemaPublisher], SchemaPublisherRoles);
+        AddSecurityRolePolicy(options, SchemaPublisher, [GatewayRole.SchemaPublisher]);
         options.AddPolicy(MetricsScrape, policy => policy
             .RequireAuthenticatedUser()
             .RequireAssertion(ctx => ClusterAdminPolicy.IsCanonicalClusterAdmin(ctx.User) || HasAnyRole(ctx.User, MetricsScrapeRoles)));
@@ -180,7 +325,7 @@ public static class GatewayPolicies
             .RequireAuthenticatedUser()
             .RequireAssertion(AllowsItAdmin));
         options.AddPolicy(AuthenticatedCaller, policy => policy.RequireAuthenticatedUser());
-        AddSecurityRolePolicy(options, McpCaller, [GatewayRole.Consumer], McpCallerRoles);
+        AddSecurityRolePolicy(options, McpCaller, [GatewayRole.Consumer]);
         options.AddPolicy(CatalogRead, policy => policy
             .RequireAuthenticatedUser()
             .RequireAssertion(ctx => ExternalApiPermissions.AllowsCatalogRead(ctx.User)));
@@ -215,7 +360,7 @@ public static class GatewayPolicies
                 }
 
                 var tenantId = claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid ? claim.Tenant.Value : null;
-                return HasAnyGatewayRolesCanonical(ctx.User, [GatewayRole.CatalogArtifactUploader], tenantId);
+                return HasAnyRole(ctx.User, [GatewayRole.CatalogArtifactUploader], tenantId);
             }));
 
         // Security review: previously RequireAuthorization(GatewayAuthSchemes.Scim) referenced a non-existent policy.
@@ -229,68 +374,49 @@ public static class GatewayPolicies
             .RequireAssertion(MatchesRouteRealm));
 
         AddSecurityRolePolicy(options, CallerAttributeRead,
-            [GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor, GatewayRole.FilterAdmin, GatewayRole.CallerAttributeApprover],
-            CallerAttributeReadRoles);
+            [GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor, GatewayRole.FilterAdmin, GatewayRole.CallerAttributeApprover]);
         AddSecurityRolePolicy(options, CallerAttributeApprove,
-            [GatewayRole.GovernanceAdmin, GatewayRole.CallerAttributeApprover],
-            CallerAttributeApproveRoles);
+            [GatewayRole.GovernanceAdmin, GatewayRole.CallerAttributeApprover]);
         AddSecurityRolePolicy(options, CallerAttributeSimulate,
-            [GatewayRole.GovernanceAdmin, GatewayRole.FilterAdmin],
-            CallerAttributeSimulateRoles);
+            [GatewayRole.GovernanceAdmin, GatewayRole.FilterAdmin]);
 
         AddSecurityRolePolicy(options, VirtualFilterRead,
-            [GatewayRole.FilterAdmin, GatewayRole.FilterSync, GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor],
-            VirtualFilterReadRoles);
+            [GatewayRole.FilterAdmin, GatewayRole.FilterSync, GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor]);
         AddSecurityRolePolicy(options, VirtualFilterWrite,
-            [GatewayRole.FilterAdmin, GatewayRole.GovernanceAdmin],
-            VirtualFilterWriteRoles);
+            [GatewayRole.FilterAdmin, GatewayRole.GovernanceAdmin]);
         AddSecurityRolePolicy(options, VirtualFilterApprove,
-            [GatewayRole.GovernanceAdmin],
-            VirtualFilterApproveRoles);
+            [GatewayRole.GovernanceAdmin]);
         AddSecurityRolePolicy(options, FilterAdmin,
-            [GatewayRole.FilterAdmin],
-            FilterAdminRoles);
+            [GatewayRole.FilterAdmin]);
         AddSecurityRolePolicy(options, VirtualFilterSyncPlan,
-            [GatewayRole.FilterSync, GatewayRole.FilterAdmin],
-            VirtualFilterSyncPlanRoles);
+            [GatewayRole.FilterSync, GatewayRole.FilterAdmin]);
         AddSecurityRolePolicy(options, VirtualFilterSyncApply,
-            [GatewayRole.FilterSync],
-            VirtualFilterSyncApplyRoles);
+            [GatewayRole.FilterSync]);
         AddSecurityRolePolicy(options, EffectiveFilterInspect,
-            [GatewayRole.FilterAdmin, GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor],
-            EffectiveFilterInspectRoles);
+            [GatewayRole.FilterAdmin, GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor]);
 
         options.AddPolicy(ProductAccess, policy => policy
             .RequireAuthenticatedUser()
             .RequireAssertion(AllowsProductAccess));
         AddSecurityRolePolicy(options, ProductOwnerRead,
-            [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor, GatewayRole.DataProductAdmin],
-            ProductOwnerReadRoles);
+            [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor, GatewayRole.DataProductAdmin]);
         AddSecurityRolePolicy(options, ProductOwnerAdmin,
-            [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin],
-            ProductOwnerAdminRoles);
+            [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin]);
         AddSecurityRolePolicy(options, ProductSync,
-            [GatewayRole.DataProductSync],
-            ProductSyncRoles);
+            [GatewayRole.DataProductSync]);
 
         AddSecurityRolePolicy(options, OpenApiPublish,
-            [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher, GatewayRole.TenantAdmin],
-            OpenApiPublishRoles);
+            [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher, GatewayRole.TenantAdmin]);
         AddSecurityRolePolicy(options, ProfileAdmin,
-            [GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin],
-            ProfileAdminRoles);
+            [GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin]);
         AddSecurityRolePolicy(options, ProfileRead,
-            [GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor],
-            ProfileReadRoles);
+            [GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor]);
         AddSecurityRolePolicy(options, SunsettingRead,
-            [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher, GatewayRole.TenantAdmin],
-            SunsettingReadRoles);
+            [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher, GatewayRole.TenantAdmin]);
         AddSecurityRolePolicy(options, SunsettingEvaluate,
-            [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher, GatewayRole.Consumer, GatewayRole.TenantAdmin],
-            SunsettingEvaluateRoles);
+            [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher, GatewayRole.Consumer, GatewayRole.TenantAdmin]);
         AddSecurityRolePolicy(options, ComplianceCertificateRead,
-            [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor],
-            ComplianceCertificateReadRoles);
+            [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor]);
 
         options.AddPolicy(SqlEndpointRegister, policy => policy
             .RequireAuthenticatedUser()
@@ -366,12 +492,11 @@ public static class GatewayPolicies
     private static void AddSecurityRolePolicy(
         AuthorizationOptions options,
         string name,
-        GatewayRole[] gatewayRoles,
-        string[] fallbackRoleNames)
+        GatewayRole[] gatewayRoles)
     {
         options.AddPolicy(name, policy => policy
             .RequireAuthenticatedUser()
-            .RequireAssertion(ctx => HasSecurityRole(ctx, gatewayRoles, fallbackRoleNames)));
+            .RequireAssertion(ctx => HasSecurityRole(ctx, gatewayRoles)));
     }
 
     private static bool TryGetSecurityContext(
@@ -411,7 +536,7 @@ public static class GatewayPolicies
 
     private static bool AllowsAuditRead(AuthorizationHandlerContext ctx)
         => AllowsGovernanceAdmin(ctx)
-            || HasSecurityRole(ctx, [GatewayRole.SecurityAuditor], AuditReadRoles);
+            || HasSecurityRole(ctx, [GatewayRole.SecurityAuditor]);
 
     private static bool HasTenantBoundRole(AuthorizationHandlerContext ctx, string roleName)
     {
@@ -446,30 +571,19 @@ public static class GatewayPolicies
                    (scopedRole != null && security.TenantRoles.Contains(scopedRole));
         }
 
-        var claimTenant = claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid ? claim.Tenant.Value : null;
-        var claimScopedRole = string.IsNullOrEmpty(claimTenant) ? null : $"{claimTenant}:{roleName}";
-        foreach (var raw in ctx.User.GetUserRoles())
-        {
-            var trimmed = raw.Trim();
-            if (string.Equals(trimmed, roleName, StringComparison.OrdinalIgnoreCase) ||
-                (claimScopedRole != null && string.Equals(trimmed, claimScopedRole, StringComparison.OrdinalIgnoreCase)))
-            {
-                return true;
-            }
-        }
-
-        return false;
+        return GatewayRoleEvaluator.HasTenantBoundRole(ctx.User, roleName);
     }
 
     internal static bool HasSecurityRole(
         AuthorizationHandlerContext ctx,
-        GatewayRole[] gatewayRoles,
-        string[] fallbackRoleNames)
+        GatewayRole[] gatewayRoles)
     {
-        _ = fallbackRoleNames;
-        if (Array.IndexOf(gatewayRoles, GatewayRole.GovernanceAdmin) >= 0 && AllowsGovernanceAdmin(ctx))
+        foreach (var required in gatewayRoles)
         {
-            return true;
+            if (GatewayRole.GovernanceAdmin.Implies(required) && AllowsGovernanceAdmin(ctx))
+            {
+                return true;
+            }
         }
 
         if (ctx.Resource is HttpContext httpContext)
@@ -486,7 +600,7 @@ public static class GatewayPolicies
 
             var resolvedTenant = security.ResolvedTenant?.Value;
             return !string.IsNullOrEmpty(resolvedTenant) &&
-                   HasAnyGatewayRolesCanonical(ctx.User, gatewayRoles, resolvedTenant);
+                   HasAnyRole(ctx.User, gatewayRoles, resolvedTenant);
         }
 
         var claim = Autheris.Domain.Tenancy.TenantClaimReader.Read(ctx.User);
@@ -496,7 +610,7 @@ public static class GatewayPolicies
         }
 
         var claimTenant = claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid ? claim.Tenant.Value : null;
-        if (HasAnyGatewayRolesCanonical(ctx.User, gatewayRoles, claimTenant))
+        if (HasAnyRole(ctx.User, gatewayRoles, claimTenant))
         {
             return true;
         }
@@ -539,35 +653,201 @@ public static class GatewayPolicies
         return !sync || admin;
     }
 
-    private static bool HasAnyGatewayRolesCanonical(ClaimsPrincipal? principal, GatewayRole[] gatewayRoles, string? tenantId = null)
+    private static bool IsForwardAuthPrincipal(ClaimsPrincipal principal) =>
+        principal.Identities.Any(i =>
+            i.IsAuthenticated &&
+            string.Equals(i.AuthenticationType, ClusterAdminPolicy.ForwardAuthScheme, StringComparison.OrdinalIgnoreCase));
+
+    private static bool TryResolvePrincipalTenantScope(
+        Autheris.Domain.Tenancy.ClaimTenant claim,
+        string? explicitTenantId,
+        bool isCanonicalClusterAdmin,
+        out string? effectiveTenant)
     {
-        if (principal?.Identity?.IsAuthenticated != true || gatewayRoles.Length == 0)
+        var trimmedTenant = string.IsNullOrWhiteSpace(explicitTenantId) ? null : explicitTenantId.Trim();
+        if (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid)
+        {
+            if (trimmedTenant != null &&
+                !string.Equals(claim.Tenant.Value, trimmedTenant, StringComparison.OrdinalIgnoreCase) &&
+                !isCanonicalClusterAdmin)
+            {
+                effectiveTenant = null;
+                return false;
+            }
+
+            effectiveTenant = trimmedTenant ?? claim.Tenant.Value;
+            return true;
+        }
+
+        effectiveTenant = trimmedTenant;
+        return true;
+    }
+
+    private static bool TryResolveHttpContextRoleScope(
+        HttpContext context,
+        out string? effectiveTenant,
+        out SecurityPrincipalContext? security)
+    {
+        security = null;
+        effectiveTenant = null;
+
+        var principal = context.User;
+        if (principal?.Identity?.IsAuthenticated != true)
         {
             return false;
         }
 
-        if (!principal.Identities.Any(i =>
-                i.IsAuthenticated &&
-                string.Equals(i.AuthenticationType, ClusterAdminPolicy.ForwardAuthScheme, StringComparison.OrdinalIgnoreCase)))
+        var claim = Autheris.Domain.Tenancy.TenantClaimReader.Read(principal);
+        if (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Invalid)
         {
-            return HasAnyRole(principal, gatewayRoles, tenantId);
+            return false;
         }
 
-        // Non-canonical ForwardAuth identities must never satisfy roles via an implied ClusterAdmin claim.
-        var effective = Evaluator.GetEffectiveRoles(principal, tenantId);
-        foreach (var granted in effective)
+        bool isCanonicalClusterAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        if (context.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var secObj) && secObj is SecurityPrincipalContext sec)
         {
-            if (granted == GatewayRole.ClusterAdmin)
+            if (sec.TenantClaimInvalid)
+            {
+                return false;
+            }
+
+            var resolved = sec.ResolvedTenant?.Value;
+            if (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid &&
+                !string.IsNullOrEmpty(resolved) &&
+                !string.Equals(claim.Tenant.Value, resolved, StringComparison.OrdinalIgnoreCase) &&
+                !isCanonicalClusterAdmin)
+            {
+                return false;
+            }
+
+            security = sec;
+            effectiveTenant = !string.IsNullOrEmpty(resolved)
+                ? resolved
+                : (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid ? claim.Tenant.Value : null);
+            return true;
+        }
+
+        if (context.Items.TryGetValue(SecurityPrincipalContext.TenantIdItemKey, out var itemTenantObj) && itemTenantObj is TenantId itemTenant)
+        {
+            if (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid &&
+                !string.Equals(claim.Tenant.Value, itemTenant.Value, StringComparison.OrdinalIgnoreCase) &&
+                !isCanonicalClusterAdmin)
+            {
+                return false;
+            }
+
+            effectiveTenant = itemTenant.Value;
+            return true;
+        }
+
+        if (context.Request.Headers.TryGetValue(SecurityContextFactory.TenantHeaderName, out var hv) && !string.IsNullOrWhiteSpace(hv))
+        {
+            var headerTenant = hv.ToString().Trim();
+            if (!isCanonicalClusterAdmin &&
+                (claim.Kind != Autheris.Domain.Tenancy.ClaimTenantKind.Valid ||
+                 !string.Equals(claim.Tenant.Value, headerTenant, StringComparison.OrdinalIgnoreCase)))
+            {
+                return false;
+            }
+
+            effectiveTenant = headerTenant;
+            return true;
+        }
+
+        effectiveTenant = claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid ? claim.Tenant.Value : null;
+        return true;
+    }
+
+    private static bool HasEffectiveGatewayRole(ClaimsPrincipal principal, GatewayRole required, string? effectiveTenant)
+    {
+        bool isForwardAuth = IsForwardAuthPrincipal(principal);
+        foreach (var granted in Evaluator.GetEffectiveRoles(principal, effectiveTenant))
+        {
+            if (isForwardAuth && granted == GatewayRole.ClusterAdmin)
             {
                 continue;
             }
 
-            foreach (var required in gatewayRoles)
+            if (granted.Implies(required))
             {
-                if (granted.Implies(required))
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool HasAnyExactRoleCore(ClaimsPrincipal principal, IReadOnlyList<string> roles, string? effectiveTenant)
+    {
+        bool isCanonicalClusterAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        foreach (var raw in principal.GetUserRoles())
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                continue;
+            }
+
+            var trimmed = raw.Trim();
+            if (!trimmed.Contains(':', StringComparison.Ordinal))
+            {
+                if (string.Equals(trimmed, nameof(GatewayRole.ClusterAdmin), StringComparison.OrdinalIgnoreCase) &&
+                    !isCanonicalClusterAdmin)
+                {
+                    continue;
+                }
+
+                foreach (var roleName in roles)
+                {
+                    if (string.Equals(trimmed, roleName, StringComparison.OrdinalIgnoreCase))
+                    {
+                        return true;
+                    }
+                }
+
+                continue;
+            }
+
+            if (string.IsNullOrEmpty(effectiveTenant))
+            {
+                continue;
+            }
+
+            var firstColon = trimmed.IndexOf(':', StringComparison.Ordinal);
+            var lastColon = trimmed.LastIndexOf(':', StringComparison.Ordinal);
+            if (firstColon <= 0 || firstColon != lastColon || firstColon == trimmed.Length - 1)
+            {
+                continue;
+            }
+
+            var roleTenant = trimmed[..firstColon];
+            var parsedRoleName = trimmed[(firstColon + 1)..];
+            if (roleTenant == "*" ||
+                !string.Equals(roleTenant, effectiveTenant, StringComparison.OrdinalIgnoreCase) ||
+                string.Equals(parsedRoleName, nameof(GatewayRole.ClusterAdmin), StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            foreach (var roleName in roles)
+            {
+                if (string.Equals(parsedRoleName, roleName, StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }
+            }
+        }
+
+        foreach (var roleName in roles)
+        {
+            if (string.Equals(roleName, nameof(GatewayRole.ClusterAdmin), StringComparison.OrdinalIgnoreCase) &&
+                !isCanonicalClusterAdmin)
+            {
+                continue;
+            }
+
+            if (principal.IsInRole(roleName))
+            {
+                return true;
             }
         }
 
@@ -575,7 +855,7 @@ public static class GatewayPolicies
     }
 
     /// <summary>
-    /// K-K10: Fluent route helper to enforce strongly-typed GatewayRole requirements on Minimal API endpoints.
+    /// Fluent route helper to enforce strongly-typed GatewayRole requirements on Minimal API endpoints.
     /// </summary>
     public static RouteHandlerBuilder RequireGatewayRole(this RouteHandlerBuilder builder, params GatewayRole[] roles)
     {
@@ -584,6 +864,8 @@ public static class GatewayPolicies
 
         return builder.RequireAuthorization(policy => policy
             .RequireAuthenticatedUser()
-            .RequireAssertion(ctx => HasAnyRole(ctx.User, roles)));
+            .RequireAssertion(ctx => ctx.Resource is HttpContext httpContext
+                ? HasAnyRequestRole(httpContext, roles)
+                : HasAnyRole(ctx.User, roles)));
     }
 }

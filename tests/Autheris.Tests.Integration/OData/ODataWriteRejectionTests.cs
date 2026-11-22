@@ -141,7 +141,7 @@ public sealed class ODataWriteRejectionTests : IClassFixture<ODataWriteRejection
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", WriterSid.Value);
         client.DefaultRequestHeaders.Add("X-Test-Tenant", Tenant);
-        client.DefaultRequestHeaders.Add("X-Test-Roles", "ClusterAdmin,GovernanceAdmin,DataOwner,Reader");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "ClusterAdmin,GovernanceAdmin,Reader");
         client.DefaultRequestHeaders.Add("GraphQL-Preflight", "1");
         return client;
     }

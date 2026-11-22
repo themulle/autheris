@@ -360,7 +360,7 @@ public static partial class UsageEndpoints
             return tenantErr!;
         }
 
-        bool isUsageAdmin = IsUsageAdmin(httpContext.User);
+        bool isUsageAdmin = IsUsageAdmin(httpContext);
         if (!isUsageAdmin)
         {
             if (!TableIdentifier.TryParse(tableId.Trim(), out var parsedTable))
@@ -444,7 +444,7 @@ public static partial class UsageEndpoints
         }
 
         string trimmedGrantId = grantId.Trim();
-        if (!IsUsageAdmin(httpContext.User))
+        if (!IsUsageAdmin(httpContext))
         {
             bool authorized = await IsAuthorizedForGrantReportAsync(httpContext, secContext, targetTenant, trimmedGrantId, ct).ConfigureAwait(false);
             if (!authorized)
@@ -616,9 +616,9 @@ public static partial class UsageEndpoints
         }
     }
 
-    private static bool IsUsageAdmin(ClaimsPrincipal principal) =>
-        ClusterAdminPolicy.IsCanonicalClusterAdmin(principal) ||
-        GatewayPolicies.HasAnyRole(principal, GatewayPolicies.UsageAdminRoles);
+    private static bool IsUsageAdmin(HttpContext httpContext) =>
+        ClusterAdminPolicy.IsCanonicalClusterAdmin(httpContext.User) ||
+        GatewayPolicies.HasAnyRequestRole(httpContext, GatewayPolicies.UsageAdminRoles);
 
     private static bool TryGetAuthenticatedCaller(HttpContext httpContext, out SecurityPrincipalContext secContext, out IResult? error)
     {

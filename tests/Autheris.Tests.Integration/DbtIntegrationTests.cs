@@ -125,12 +125,11 @@ public class DbtIntegrationTests : IClassFixture<DbtIntegrationTests.HostFixture
     [InlineData("/modules/dbt/sync")]
     [InlineData("/modules/dbt/run-results")]
     [InlineData("/modules/dbt/health/reset")]
-    public async Task DbtGlobalMutationEndpoints_DataOwnerWithoutAdminRole_ReturnsForbidden(string path)
+    public async Task DbtGlobalMutationEndpoints_NonAdminRole_ReturnsForbidden(string path)
     {
-        // Review E-7: a DataOwner must not change global dbt metadata or quarantine state.
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-OWNER-1");
-        client.DefaultRequestHeaders.Add("X-Test-Roles", "DataOwner");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "Consumer");
 
         var response = await client.PostAsync(path, new StringContent("{}", Encoding.UTF8, "application/json"));
 
@@ -141,12 +140,11 @@ public class DbtIntegrationTests : IClassFixture<DbtIntegrationTests.HostFixture
     [InlineData("/modules/dbt/exposures")]
     [InlineData("/modules/dbt/proposals")]
     [InlineData("/modules/dbt/health")]
-    public async Task DbtGlobalReadEndpoints_DataOwnerWithoutAdminRole_ReturnsForbidden(string path)
+    public async Task DbtGlobalReadEndpoints_NonAdminRole_ReturnsForbidden(string path)
     {
-        // Review E-7 (rest): the read endpoints expose global dbt state and are not open to a plain DataOwner either.
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-OWNER-1");
-        client.DefaultRequestHeaders.Add("X-Test-Roles", "DataOwner");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "Consumer");
 
         var response = await client.GetAsync(path);
 

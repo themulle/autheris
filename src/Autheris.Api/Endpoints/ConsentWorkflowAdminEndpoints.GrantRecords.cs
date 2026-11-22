@@ -69,11 +69,11 @@ public static partial class ConsentWorkflowAdminEndpoints
         }
 
         if (!EndpointSecurity.IsCanonicalClusterAdmin(context.User) &&
-            !GatewayPolicies.HasAnyRole(context.User, [Autheris.Domain.Security.GatewayRole.GovernanceAdmin, Autheris.Domain.Security.GatewayRole.SecurityAuditor]))
+            !GatewayPolicies.HasAnyRequestRole(context, [Autheris.Domain.Security.GatewayRole.GovernanceAdmin, Autheris.Domain.Security.GatewayRole.SecurityAuditor]))
         {
             errorResult = ApiProblems.Forbidden(
                 ApiErrorCodes.AccessDenied,
-                "Grant record export and verification require Auditor, Compliance, GovernanceAdmin, TenantAdmin, or ClusterAdmin access.",
+                "Grant record export and verification require SecurityAuditor, GovernanceAdmin, TenantAdmin, or ClusterAdmin access.",
                 context);
             return false;
         }

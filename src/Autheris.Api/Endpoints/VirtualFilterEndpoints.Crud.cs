@@ -66,16 +66,6 @@ public static partial class VirtualFilterEndpoints
                 return Forbidden();
             }
 
-            if (!security.HasRole(GatewayRole.GovernanceAdmin))
-            {
-                var snapshot = await service.GetSnapshotAsync(context.RequestAborted).ConfigureAwait(false);
-                var target = snapshot.Filters.FirstOrDefault(f => f.TenantId == tenant.Value && string.Equals(f.Name, name, StringComparison.Ordinal));
-                if ((target?.Draft ?? target)?.Sql == null)
-                {
-                    return await AuditDeniedAsync(context, security, GatewayRole.GovernanceAdmin).ConfigureAwait(false);
-                }
-            }
-
             // VF-05: no hash, no approval; a mismatch stays a 409.
             var expectedHash = context.Request.Query["hash"].FirstOrDefault() ?? context.Request.Query["expected_hash"].FirstOrDefault();
             if (string.IsNullOrWhiteSpace(expectedHash))

@@ -30,7 +30,7 @@ public static partial class GovernanceEndpoints
     internal static async Task<bool> IsAuthorizedForSimulationAsync(HttpContext context, string? targetTable)
     {
         var user = context.User;
-        if (GatewayPolicies.HasAnyRole(user, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor]))
+        if (GatewayPolicies.HasAnyRequestRole(context, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor]))
         {
             return true;
         }
@@ -234,7 +234,7 @@ public static partial class GovernanceEndpoints
             ISchemaSunsettingService sunsettingService,
             HttpContext context) =>
         {
-            var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher]);
+            var isPrivileged = GatewayPolicies.HasAnyRequestRole(context, [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher]);
             if (!isPrivileged)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -260,7 +260,7 @@ public static partial class GovernanceEndpoints
             IEuAiActAuditExporter exporter,
             HttpContext context) =>
         {
-            var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor]);
+            var isPrivileged = GatewayPolicies.HasAnyRequestRole(context, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor]);
 
             if (!isPrivileged)
             {
@@ -320,7 +320,7 @@ public static partial class GovernanceEndpoints
 
         var tenantId = EndpointSecurity.GetRequestTenant(context);
 
-        bool isGovAdmin = roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
+        bool isGovAdmin = GatewayPolicies.HasRequestRole(context, GatewayRole.GovernanceAdmin);
         bool isClusterAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
 
         var callerContext = new CallerSecurityContext(

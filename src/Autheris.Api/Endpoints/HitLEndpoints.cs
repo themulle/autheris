@@ -37,7 +37,7 @@ public static class HitLEndpoints
             }
 
             // SEC C-05: Only approvers may list tickets, and only those of their own tenant.
-            if (!EndpointSecurity.IsApprover(context.User))
+            if (!EndpointSecurity.IsRequestApprover(context))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
@@ -63,7 +63,7 @@ public static class HitLEndpoints
                 return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "HitL step-up approval is disabled.");
             }
 
-            if (!EndpointSecurity.IsApprover(context.User) || string.IsNullOrWhiteSpace(request.ApprovalId))
+            if (!EndpointSecurity.IsRequestApprover(context) || string.IsNullOrWhiteSpace(request.ApprovalId))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
@@ -96,7 +96,7 @@ public static class HitLEndpoints
                 return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "HitL step-up approval is disabled.");
             }
 
-            if (!EndpointSecurity.IsApprover(context.User) || string.IsNullOrWhiteSpace(ticketId))
+            if (!EndpointSecurity.IsRequestApprover(context) || string.IsNullOrWhiteSpace(ticketId))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }
@@ -128,7 +128,7 @@ public static class HitLEndpoints
                 return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "HitL step-up approval is disabled.");
             }
 
-            if (!EndpointSecurity.IsApprover(context.User) || string.IsNullOrWhiteSpace(request.ApprovalId))
+            if (!EndpointSecurity.IsRequestApprover(context) || string.IsNullOrWhiteSpace(request.ApprovalId))
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
             }

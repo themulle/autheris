@@ -253,7 +253,7 @@ public sealed class ClassificationAdminAuthorizationTests
         routes.Where(r => r.Pattern.StartsWith("/api/v1/governance/", StringComparison.Ordinal))
             .ShouldAllBe(r => r.Policy == "GovernanceAdmin");
         routes.Where(r => r.Pattern.StartsWith("/api/v1/catalog/columns/", StringComparison.Ordinal))
-            .ShouldAllBe(r => r.Policy == "Approver");
+            .ShouldAllBe(r => r.Policy == Autheris.Api.Security.GatewayPolicies.GovernanceAdmin);
 
         routes.Where(r => r.Method is "PUT" or "DELETE").ShouldAllBe(r => r.Audit.Level == AuditLevel.Full);
         routes.Single(r => r.Method == "PUT" && r.Pattern.EndsWith("/mask-rule", StringComparison.Ordinal))

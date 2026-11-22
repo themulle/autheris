@@ -96,7 +96,7 @@ public sealed class OpenApiDocsEndToEndTests : IClassFixture<OpenApiDocsEndToEnd
     {
         var c = _factory.CreateClient();
         c.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-OPENAPI-ADMIN");
-        c.DefaultRequestHeaders.Add("X-Test-Roles", "ClusterAdmin,SchemaAdmin");
+        c.DefaultRequestHeaders.Add("X-Test-Roles", "ClusterAdmin,SchemaPublisher");
         return c;
     }
 
@@ -371,7 +371,7 @@ public sealed class OpenApiDocsEndToEndTests : IClassFixture<OpenApiDocsEndToEnd
     {
         var c = f.CreateClient();
         c.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-OPENAPI-ADMIN");
-        c.DefaultRequestHeaders.Add("X-Test-Roles", "ClusterAdmin,SchemaAdmin");
+        c.DefaultRequestHeaders.Add("X-Test-Roles", "ClusterAdmin,SchemaPublisher");
         return c;
     }
 

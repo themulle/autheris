@@ -335,7 +335,7 @@ public sealed class EndToEndSqliteTests : IClassFixture<EndToEndSqliteTests.Fixt
         var plain = await Client(roles: "Reader").SendAsync(new HttpRequestMessage(new HttpMethod(method), path));
         ((int)plain.StatusCode).ShouldBeOneOf([401, 403]);
 
-        var admin = await Client(roles: "GovernanceAdmin,ClusterAdmin,SchemaAdmin,StreamingAdmin,DbtAdmin")
+        var admin = await Client(roles: "GovernanceAdmin,ClusterAdmin,SchemaPublisher,StreamingAdmin,DbtAdmin")
             .SendAsync(new HttpRequestMessage(new HttpMethod(method), path));
         ((int)admin.StatusCode).ShouldBeLessThan(500);
 

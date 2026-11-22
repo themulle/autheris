@@ -208,4 +208,80 @@ public sealed class GatewayRoleEvaluator : IGatewayRoleEvaluator
 
         return result;
     }
+
+    /// <summary>
+    /// Evaluates whether the principal holds <paramref name="roleName"/> unprefixed or scoped to the
+    /// effective tenant (never matching wildcard prefixes, and failing closed on invalid or mismatched tenant claims).
+    /// </summary>
+    public static bool HasTenantBoundRole(ClaimsPrincipal? principal, string roleName, string? tenantId = null)
+    {
+        if (principal?.Identity?.IsAuthenticated != true || string.IsNullOrWhiteSpace(roleName))
+        {
+            return false;
+        }
+
+        var claim = Autheris.Domain.Tenancy.TenantClaimReader.Read(principal);
+        if (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Invalid)
+        {
+            return false;
+        }
+
+        string? effectiveTenant;
+        if (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid)
+        {
+            if (!string.IsNullOrWhiteSpace(tenantId) &&
+                !string.Equals(claim.Tenant.Value, tenantId.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            effectiveTenant = string.IsNullOrWhiteSpace(tenantId) ? claim.Tenant.Value : tenantId.Trim();
+        }
+        else
+        {
+            effectiveTenant = string.IsNullOrWhiteSpace(tenantId) ? null : tenantId.Trim();
+        }
+
+        foreach (var raw in principal.GetUserRoles())
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                continue;
+            }
+
+            var trimmed = raw.Trim();
+            if (!trimmed.Contains(':', StringComparison.Ordinal))
+            {
+                if (string.Equals(trimmed, roleName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (string.IsNullOrEmpty(effectiveTenant))
+            {
+                continue;
+            }
+
+            var firstColon = trimmed.IndexOf(':', StringComparison.Ordinal);
+            var lastColon = trimmed.LastIndexOf(':', StringComparison.Ordinal);
+            if (firstColon <= 0 || firstColon != lastColon || firstColon == trimmed.Length - 1)
+            {
+                continue;
+            }
+
+            var roleTenant = trimmed[..firstColon];
+            var parsedRoleName = trimmed[(firstColon + 1)..];
+            if (roleTenant != "*" &&
+                string.Equals(roleTenant, effectiveTenant, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(parsedRoleName, roleName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

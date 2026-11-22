@@ -78,7 +78,7 @@ public sealed class SyntheticSamplesRouteAuthorizationTests : IClassFixture<Synt
 
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-USER");
-        client.DefaultRequestHeaders.Add("X-Test-Roles", "AiAgent");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "Consumer");
         client.DefaultRequestHeaders.Add("X-Test-Tenant", Autheris.Tests.Common.TestTenants.Default.Value);
 
         using var content = new StringContent("""{"schemaVersion":1,"samples":[],"statistics":{}}""", System.Text.Encoding.UTF8, "application/json");

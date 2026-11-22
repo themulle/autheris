@@ -18,8 +18,8 @@ public sealed class SystemMetricsOptions
     public bool ExposeRestEndpoints { get; init; } = true;
 
     /// <summary>
-    /// Roles that may read the system metrics endpoints. When not configured: GovernanceAdmin, ClusterAdmin and
-    /// SecurityAdmin. A configured list replaces that default entirely. Nullable on purpose: the configuration binder
+    /// Roles that may read the system metrics endpoints. When not configured: GovernanceAdmin and ClusterAdmin.
+    /// A configured list replaces that default entirely. Nullable on purpose: the configuration binder
     /// appends to pre-filled lists, so a non-empty default could not be narrowed. A configured empty JSON array
     /// aborts the start (it would silently apply the default); to switch the endpoints off set <see cref="Enabled"/>
     /// (or <see cref="ExposeRestEndpoints"/>) to false. A list that is empty only when built in code (not through

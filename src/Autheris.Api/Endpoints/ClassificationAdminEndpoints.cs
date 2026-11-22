@@ -134,7 +134,7 @@ public static partial class ClassificationAdminEndpoints
             EndpointSecurity.GetRequestTenant(http),
             sid,
             EndpointSecurity.IsCanonicalClusterAdmin(user),
-            GatewayPolicies.HasRole(user, GatewayRole.GovernanceAdmin));
+            GatewayPolicies.HasRequestRole(http, GatewayRole.GovernanceAdmin));
     }
 
     internal static bool TryParseScope(string? scope, out ClassificationAdminScope parsed)

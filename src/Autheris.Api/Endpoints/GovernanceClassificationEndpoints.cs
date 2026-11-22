@@ -99,7 +99,7 @@ public static class GovernanceClassificationEndpoints
                 return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The proposal was not found.", httpContext);
             }
 
-            var identity = ResolveReviewer(httpContext.User, proposal);
+            var identity = ResolveReviewer(httpContext, proposal);
             if (identity.Error != null)
             {
                 return identity.Error;
@@ -167,7 +167,7 @@ public static class GovernanceClassificationEndpoints
                 return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The proposal was not found.", httpContext);
             }
 
-            var identity = ResolveReviewer(httpContext.User, proposal);
+            var identity = ResolveReviewer(httpContext, proposal);
             if (identity.Error != null)
             {
                 return identity.Error;
@@ -211,7 +211,7 @@ public static class GovernanceClassificationEndpoints
                 return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The proposal was not found.", httpContext);
             }
 
-            var identity = ResolveReviewer(httpContext.User, proposal);
+            var identity = ResolveReviewer(httpContext, proposal);
             if (identity.Error != null)
             {
                 return identity.Error;
@@ -279,8 +279,9 @@ public static class GovernanceClassificationEndpoints
     /// Data-owner actions require an exact, non-empty <c>DataOwnerSid</c> match (fail closed: an unset owner denies
     /// everyone, including governance admins, who must assign an owner first). Stage 2 requires a compliance role.
     /// </summary>
-    private static ReviewerIdentity ResolveReviewer(ClaimsPrincipal user, TableClassificationProposal proposal)
+    private static ReviewerIdentity ResolveReviewer(HttpContext httpContext, TableClassificationProposal proposal)
     {
+        var user = httpContext.User;
         var callerSid = user.GetUserSid();
         if (callerSid == null || string.IsNullOrWhiteSpace(callerSid.Value.Value))
         {
@@ -288,7 +289,7 @@ public static class GovernanceClassificationEndpoints
         }
 
         var isCompliance = user.IsInRole("ComplianceReviewer") || user.IsInRole("ComplianceOfficer");
-        var isOwnerCapable = GatewayPolicies.HasRole(user, Autheris.Domain.Security.GatewayRole.GovernanceAdmin) || EndpointSecurity.IsGlobalGovernanceAdmin(user);
+        var isOwnerCapable = GatewayPolicies.HasRequestRole(httpContext, Autheris.Domain.Security.GatewayRole.GovernanceAdmin) || EndpointSecurity.IsGlobalGovernanceAdmin(user);
         var inGovernanceStage = string.Equals(proposal.Status, "PENDING_GOVERNANCE_REVIEW", StringComparison.OrdinalIgnoreCase);
 
         string? role = null;

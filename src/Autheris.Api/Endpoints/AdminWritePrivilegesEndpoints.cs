@@ -60,7 +60,7 @@ public static class AdminWritePrivilegesEndpoints
         TimeProvider? timeProvider = null,
         CancellationToken ct = default)
     {
-        if (!GatewayPolicies.HasRole(httpContext.User, GatewayRole.GovernanceAdmin))
+        if (!GatewayPolicies.HasRequestRole(httpContext, GatewayRole.GovernanceAdmin))
         {
             return ApiProblems.Problem(
                 StatusCodes.Status403Forbidden,
