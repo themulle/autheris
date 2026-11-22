@@ -1,6 +1,7 @@
 namespace Autheris.Api.Middleware;
 
 using Autheris.Api.Errors;
+using Autheris.Api.Security;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -11,6 +12,7 @@ using Autheris.Api.Extensions;
 using Autheris.Api.Serialization;
 using Autheris.Application.Common.Serialization;
 using Autheris.Domain.Options;
+using Autheris.Domain.Options.DataSources;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
@@ -57,13 +59,14 @@ public sealed class ParquetGraphQLResponseMiddleware
     public async Task InvokeAsync(HttpContext context)
     {
         var accept = ParquetContentNegotiation.Evaluate(context.Request);
-        if (!accept.ParquetPreferred || IsExcludedPath(context.Request.Path))
+        if (!accept.ParquetPreferred || IsExcludedPath(context))
         {
             await _next(context);
             return;
         }
 
-        if (context.Request.Path.StartsWithSegments(_graphQlPath, StringComparison.OrdinalIgnoreCase))
+        if (GatewayEndpointMetadata.HasTransport(context, DataSourceTransportFlags.GraphQL) ||
+            context.Request.Path.StartsWithSegments(_graphQlPath, StringComparison.OrdinalIgnoreCase))
         {
             // Subscriptions (WebSocket / SSE / multipart) are never converted.
             if (!(HttpMethods.IsGet(context.Request.Method) || HttpMethods.IsPost(context.Request.Method)) ||
@@ -100,12 +103,16 @@ public sealed class ParquetGraphQLResponseMiddleware
     /// <summary>
     /// MCP (JSON-RPC envelope), webhooks, health probes and metrics are never converted or rejected.
     /// </summary>
-    private bool IsExcludedPath(PathString path) =>
-        path.StartsWithSegments(_mcpBasePath, StringComparison.OrdinalIgnoreCase) ||
-        path.StartsWithSegments("/api/webhooks", StringComparison.OrdinalIgnoreCase) ||
-        path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase) ||
-        path.StartsWithSegments("/metrics", StringComparison.OrdinalIgnoreCase) ||
-        (path.Value?.Contains("/webhook", StringComparison.OrdinalIgnoreCase) ?? false);
+    private bool IsExcludedPath(HttpContext context)
+    {
+        var path = context.Request.Path;
+        return GatewayEndpointMetadata.HasTransport(context, DataSourceTransportFlags.Mcp) ||
+               path.StartsWithSegments(_mcpBasePath, StringComparison.OrdinalIgnoreCase) ||
+               path.StartsWithSegments("/api/webhooks", StringComparison.OrdinalIgnoreCase) ||
+               GatewayEndpointMetadata.IsHealthProbe(context) ||
+               GatewayEndpointMetadata.IsMetricsEndpoint(context) ||
+               (path.Value?.Contains("/webhook", StringComparison.OrdinalIgnoreCase) ?? false);
+    }
 
     private async Task HandleGraphQLAsync(HttpContext context)
     {

@@ -1,4 +1,6 @@
+using Autheris.Api.Endpoints;
 using Autheris.Api.Errors;
+using Autheris.Api.Security;
 using System.Security.Claims;
 using System.Text.Json;
 using Autheris.Application.Common.Interfaces;
@@ -42,8 +44,8 @@ public sealed class PreAuthIpRateLimitingMiddleware
     {
         // Skip health probes or when rate limiting is explicitly disabled (warn_disable_rate_limiting).
         // E-13: /metrics is authenticated and therefore rate limited like every other path (no PBKDF2 amplification);
-        // /health never runs Basic authentication (see BasicAuthenticationHandler).
-        if (context.Request.Path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase) ||
+        // health probes never run Basic authentication (see BasicAuthenticationHandler).
+        if (GatewayEndpointMetadata.IsHealthProbe(context) ||
             _gatewayOptions.IsRateLimitingDisabled)
         {
             await _next(context);
@@ -130,9 +132,10 @@ public sealed class PostAuthSidRateLimitingMiddleware
     {
         // Skip health, metrics, and SCIM endpoints (SCIM uses per-realm ScimEndpointGuard limits),
         // or when rate limiting is explicitly disabled (warn_disable_rate_limiting).
-        if (context.Request.Path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase) ||
-            context.Request.Path.StartsWithSegments("/metrics", StringComparison.OrdinalIgnoreCase) ||
-            Autheris.Api.Security.GatewayAuthSchemes.IsScimPath(context.Request.Path) ||
+        if (GatewayEndpointMetadata.IsHealthProbe(context) ||
+            GatewayEndpointMetadata.IsMetricsEndpoint(context) ||
+            context.GetEndpoint()?.Metadata.GetMetadata<ScimEndpointGuardMetadata>() is not null ||
+            GatewayAuthSchemes.IsScimPath(context.Request.Path) ||
             _gatewayOptions.IsRateLimitingDisabled)
         {
             await _next(context);
@@ -191,7 +194,7 @@ public sealed class UnauthenticatedBearerIpRateLimitingMiddleware
     public async Task InvokeAsync(HttpContext context)
     {
         if (_gatewayOptions.IsRateLimitingDisabled ||
-            context.Request.Path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase) ||
+            GatewayEndpointMetadata.IsHealthProbe(context) ||
             context.User.Identity?.IsAuthenticated == true ||
             !context.Items.ContainsKey("Autheris_PreAuthExempted"))
         {

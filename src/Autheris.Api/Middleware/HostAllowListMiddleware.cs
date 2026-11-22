@@ -15,7 +15,7 @@ public sealed class HostAllowListMiddleware(RequestDelegate next, HostAllowList 
     {
         System.ArgumentNullException.ThrowIfNull(context);
 
-        if (context.Request.Path.StartsWithSegments("/health", System.StringComparison.OrdinalIgnoreCase)
+        if (GatewayEndpointMetadata.IsHealthProbe(context)
             || allowList.IsAllowed(context.Request.Host.Value))
         {
             return next(context);

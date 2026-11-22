@@ -73,7 +73,7 @@ public sealed class GatewayCorsCsrfMiddleware
             // For REST endpoints, CSRF attack vectors require browser execution with ambient credentials (Cookie, cached Basic/Negotiate)
             // indicated by Cookie, Sec-Fetch-*, or Origin/Referer headers.
             // Exclude explicit login exchange (/api/auth/login) unless ambient Cookie is present.
-            bool isLoginEndpoint = context.Request.Path.Equals("/api/auth/login", StringComparison.OrdinalIgnoreCase);
+            bool isLoginEndpoint = GatewayEndpointMetadata.IsCsrfLoginExempt(context);
             bool hasBrowserIndicators = context.Request.Headers.ContainsKey("Cookie") ||
                                         context.Request.Headers.ContainsKey("Origin") ||
                                         context.Request.Headers.ContainsKey("Referer") ||

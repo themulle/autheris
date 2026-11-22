@@ -4,6 +4,7 @@ using Autheris.Domain.Options.DataSources;
 using System.Collections.Generic;
 using System.Text.Json;
 using Autheris.Api.Extensions;
+using Autheris.Api.Security;
 using Autheris.Api.Serialization;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Options;
@@ -44,6 +45,7 @@ public static partial class WebSqlEndpoints
         webSql.MapPost("/api/v1/sql", HandleWebSqlRequest)
            .WithName("ExecuteGovernedWebSqlV1")
            .WithMetadata(new ParquetOutputSupportedMetadata())
+           .WithReadOnlyTokenAccess(HttpMethods.Post)
            .WithRequestBodyLimit(2 * 1024 * 1024)
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
@@ -51,6 +53,7 @@ public static partial class WebSqlEndpoints
         webSql.MapPost("/api/sql", HandleWebSqlRequest)
            .WithName("ExecuteGovernedWebSql")
            .WithMetadata(new ParquetOutputSupportedMetadata())
+           .WithReadOnlyTokenAccess(HttpMethods.Post)
            .WithRequestBodyLimit(2 * 1024 * 1024)
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
@@ -67,11 +70,13 @@ public static partial class WebSqlEndpoints
 
         webSql.MapDelete("/api/v1/sql/statements/{statementId}", HandleWebSqlStatementCancelRequest)
            .WithName("CancelWebSqlStatementV1")
+           .WithReadOnlyTokenAccess(HttpMethods.Delete, strictRawPath: true)
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 
         webSql.MapDelete("/api/sql/statements/{statementId}", HandleWebSqlStatementCancelRequest)
            .WithName("CancelWebSqlStatement")
+           .WithReadOnlyTokenAccess(HttpMethods.Delete, strictRawPath: true)
            .RequireAuthorization()
            .WithAudit(AuditLevel.Full, AuditEventTypes.WebSqlQuery);
 

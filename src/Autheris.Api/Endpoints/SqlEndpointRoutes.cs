@@ -11,6 +11,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
+using Autheris.Api.Security;
 using Autheris.Api.Serialization;
 using Autheris.Application.Common.Serialization;
 using Autheris.Application.Sql;
@@ -60,6 +61,7 @@ public static class SqlEndpointRoutes
         group.MapPost("/{name}", HandlePostEndpoint)
              .WithName("ExecuteSqlEndpointPost")
              .WithMetadata(new ParquetOutputSupportedMetadata())
+             .WithReadOnlyTokenAccess(HttpMethods.Post)
              .RequireAuthorization()
              .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 

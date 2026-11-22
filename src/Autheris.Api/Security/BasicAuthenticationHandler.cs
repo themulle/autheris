@@ -4,6 +4,7 @@ using System.Text;
 using System.Text.Encodings.Web;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
+using Autheris.Domain.Options.DataSources;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
@@ -164,7 +165,7 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
         }
 
         // E-13: anonymous probes never pay for cryptographic hashing (and cannot be used as a password oracle).
-        if (Request.Path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase))
+        if (GatewayEndpointMetadata.IsHealthProbe(Context))
         {
             return AuthenticateResult.NoResult();
         }
@@ -350,7 +351,8 @@ public sealed class BasicAuthenticationHandler : AuthenticationHandler<Authentic
         // NEVER HTML. When Microsoft Excel / Power Query encounters an HTML response to an unauthenticated
         // challenge, it fails with "The feed's metadata document appears to be invalid" / "We couldn't parse
         // OData response result" and refuses to prompt the user for HTTP Basic credentials.
-        if (Request.Path.StartsWithSegments("/odata", StringComparison.OrdinalIgnoreCase))
+        if (GatewayEndpointMetadata.HasTransport(Context, DataSourceTransportFlags.OData) ||
+            Request.Path.StartsWithSegments("/odata", StringComparison.OrdinalIgnoreCase))
         {
             Response.Headers["OData-Version"] = "4.0";
             Response.ContentType = "application/json;odata.metadata=minimal;charset=utf-8";

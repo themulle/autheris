@@ -5,6 +5,7 @@ using System.Linq;
 using System.Threading.Tasks;
 using Autheris.Api.Security;
 using Autheris.Domain.Options;
+using Autheris.Domain.Options.DataSources;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Hosting;
 
@@ -61,7 +62,9 @@ public sealed class SecurityHeadersMiddleware
             context.Response.Headers.Append("Vary", "Authorization, Cookie");
         }
 
-        if (_options.OData.Enabled && context.Request.Path.StartsWithSegments("/odata", StringComparison.OrdinalIgnoreCase))
+        if (_options.OData.Enabled &&
+            (GatewayEndpointMetadata.HasTransport(context, DataSourceTransportFlags.OData) ||
+             context.Request.Path.StartsWithSegments("/odata", StringComparison.OrdinalIgnoreCase)))
         {
             context.Response.Headers["OData-Version"] = "4.0";
             if (Autheris.Api.Endpoints.ODataEndpoints.IsWriteMethod(context.Request.Method))
@@ -89,7 +92,7 @@ public sealed class SecurityHeadersMiddleware
 
     private bool IsPublicDocumentOrStatic(HttpContext context)
     {
-        if (context.GetEndpoint()?.Metadata.GetMetadata<IPublicDocumentMetadata>() != null)
+        if (GatewayEndpointMetadata.IsPublicDocument(context))
         {
             return true;
         }
