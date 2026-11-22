@@ -212,7 +212,7 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
         if (!shouldMask)
         {
             // GHSA-xpw9-4m63-69pf: nested value masking
-            if (value is IDictionary or IReadOnlyDictionary<string, object?>)
+            if (value is IDictionary or IReadOnlyDictionary<string, object?> or IDictionary<string, object?>)
             {
                 var maskedDict = MaskRecursive(value, null, null, ctx);
                 masked = !ReferenceEquals(maskedDict, value);
@@ -240,26 +240,38 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
             return value;
         }
 
-        if (value is IEnumerable list && value is not string)
+        masked = true;
+        return ApplyMaskToValue(responseName, value, rule);
+    }
+
+    private object? ApplyMaskToValue(string name, object? value, MaskingRule rule)
+    {
+        if (value == null)
+        {
+            return null;
+        }
+
+        if (value is System.Text.Json.JsonElement jsonElem && jsonElem.ValueKind == System.Text.Json.JsonValueKind.Array)
+        {
+            var converted = ToMaskableObject(jsonElem);
+            var maskedArray = ApplyMaskToValue(name, converted, rule);
+            var reEncoded = System.Text.Json.JsonSerializer.Serialize(maskedArray);
+            using var doc = System.Text.Json.JsonDocument.Parse(reEncoded);
+            return doc.RootElement.Clone();
+        }
+
+        if (value is IEnumerable list && value is not string && value is not byte[])
         {
             var resultList = new List<object?>();
             foreach (var item in list)
             {
-                if (item == null)
-                {
-                    resultList.Add(null);
-                }
-                else
-                {
-                    resultList.Add(_maskingProvider.MaskValue(responseName, item, rule));
-                }
+                resultList.Add(item == null ? null : ApplyMaskToValue(name, item, rule));
             }
-            masked = true;
+
             return resultList;
         }
 
-        masked = true;
-        return _maskingProvider.MaskValue(responseName, value, rule);
+        return _maskingProvider.MaskValue(name, value, rule);
     }
 
     private static object? ToMaskableObject(object? node)
@@ -292,20 +304,12 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
 
         if (node is IReadOnlyDictionary<string, object?> dict)
         {
-            var result = new Dictionary<string, object?>(dict.Count, StringComparer.OrdinalIgnoreCase);
-            foreach (var (k, v) in dict)
-            {
-                var childPath = AppendPath(path, k);
-                if (ShouldMaskField(k, childPath, v, aliasToFieldMap, ctx, out var rule))
-                {
-                    result[k] = _maskingProvider.MaskValue(k, v, rule);
-                }
-                else
-                {
-                    result[k] = MaskRecursive(v, aliasToFieldMap, childPath, ctx);
-                }
-            }
-            return result;
+            return MaskDictionaryEntries(dict, dict.Count, aliasToFieldMap, path, ctx);
+        }
+
+        if (node is IDictionary<string, object?> genericDict)
+        {
+            return MaskDictionaryEntries(genericDict, genericDict.Count, aliasToFieldMap, path, ctx);
         }
 
         if (node is IDictionary legacyDict)
@@ -318,7 +322,7 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
                 var childPath = AppendPath(path, k);
                 if (ShouldMaskField(k, childPath, v, aliasToFieldMap, ctx, out var rule))
                 {
-                    result[k] = _maskingProvider.MaskValue(k, v, rule);
+                    result[k] = ApplyMaskToValue(k, v, rule);
                 }
                 else
                 {
@@ -418,8 +422,113 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
         return IsMaskedFieldName(fieldName, out rule);
     }
 
+    private Dictionary<string, object?> MaskDictionaryEntries(
+        IEnumerable<KeyValuePair<string, object?>> entries,
+        int capacity,
+        IReadOnlyDictionary<string, string>? aliasToFieldMap,
+        string? path,
+        MaskContext ctx)
+    {
+        var result = new Dictionary<string, object?>(capacity, StringComparer.OrdinalIgnoreCase);
+        foreach (var (k, v) in entries)
+        {
+            var childPath = AppendPath(path, k);
+            if (ShouldMaskField(k, childPath, v, aliasToFieldMap, ctx, out var rule))
+            {
+                result[k] = ApplyMaskToValue(k, v, rule);
+            }
+            else
+            {
+                result[k] = MaskRecursive(v, aliasToFieldMap, childPath, ctx);
+            }
+        }
+
+        return result;
+    }
+
     private static bool IsScalarLeaf(object? value)
-        => value != null && (value is string || (value is not IEnumerable && value is not IDictionary));
+    {
+        if (value == null)
+        {
+            return false;
+        }
+
+        if (value is string or byte[])
+        {
+            return true;
+        }
+
+        if (value is IDictionary or IReadOnlyDictionary<string, object?> or IDictionary<string, object?>)
+        {
+            return false;
+        }
+
+        if (value is System.Text.Json.JsonElement jsonElem)
+        {
+            return jsonElem.ValueKind switch
+            {
+                System.Text.Json.JsonValueKind.Object => false,
+                System.Text.Json.JsonValueKind.Null or System.Text.Json.JsonValueKind.Undefined => false,
+                System.Text.Json.JsonValueKind.Array => IsJsonScalarArray(jsonElem),
+                _ => true
+            };
+        }
+
+        if (value is IEnumerable seq)
+        {
+            bool hasScalarItem = false;
+            foreach (var item in seq)
+            {
+                if (item == null)
+                {
+                    continue;
+                }
+
+                if (!IsScalarLeaf(item))
+                {
+                    return false;
+                }
+
+                hasScalarItem = true;
+            }
+
+            return hasScalarItem;
+        }
+
+        return true;
+    }
+
+    private static bool IsJsonScalarArray(System.Text.Json.JsonElement array)
+    {
+        bool hasScalarItem = false;
+        foreach (var item in array.EnumerateArray())
+        {
+            if (item.ValueKind is System.Text.Json.JsonValueKind.Null or System.Text.Json.JsonValueKind.Undefined)
+            {
+                continue;
+            }
+
+            if (item.ValueKind == System.Text.Json.JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            if (item.ValueKind == System.Text.Json.JsonValueKind.Array)
+            {
+                if (!IsJsonScalarArray(item))
+                {
+                    return false;
+                }
+
+                hasScalarItem = true;
+                continue;
+            }
+
+            hasScalarItem = true;
+        }
+
+        return hasScalarItem;
+    }
 
     private static bool IsIdentifierName(string name)
         => name.Equals("__typename", StringComparison.Ordinal)

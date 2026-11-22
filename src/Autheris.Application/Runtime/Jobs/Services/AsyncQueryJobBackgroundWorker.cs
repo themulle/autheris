@@ -407,7 +407,7 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
         await JsonSerializer.SerializeAsync(stream, result.Rows, cancellationToken: ct).ConfigureAwait(false);
     }
 
-    private static async Task WriteCsvResultAsync(
+    internal static async Task WriteCsvResultAsync(
         string filePath,
         GovernedSqlResult result,
         CancellationToken ct)
@@ -431,38 +431,23 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
             for (int i = 0; i < result.Columns.Count; i++)
             {
                 var col = result.Columns[i];
-                var val = row.TryGetValue(col, out var obj) ? obj?.ToString() ?? string.Empty : string.Empty;
+                var val = row.TryGetValue(col, out var obj) ? FormatCsvValue(obj) : string.Empty;
                 values[i] = EscapeCsv(val);
             }
             await writer.WriteLineAsync(string.Join(",", values)).ConfigureAwait(false);
         }
     }
 
-    internal static string EscapeCsv(string value)
-    {
-        if (string.IsNullOrEmpty(value))
+    internal static string FormatCsvValue(object? value) =>
+        value switch
         {
-            return value;
-        }
+            null => string.Empty,
+            IFormattable formattable => formattable.ToString(format: null, CultureInfo.InvariantCulture),
+            _ => value.ToString() ?? string.Empty
+        };
 
-        // OWASP CSV Formula Injection defense:
-        // If the value starts with '=', '+', '-', '@', '\t', or '\r', prepend a single quote "'"
-        // unless the value is a valid numeric literal (e.g. negative or positive number).
-        if (value.StartsWith('=', StringComparison.Ordinal) || value.StartsWith('+', StringComparison.Ordinal) || value.StartsWith('-', StringComparison.Ordinal) ||
-            value.StartsWith('@', StringComparison.Ordinal) || value.StartsWith('\t', StringComparison.Ordinal) || value.StartsWith('\r', StringComparison.Ordinal))
-        {
-            if (!decimal.TryParse(value, NumberStyles.Number | NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint | NumberStyles.AllowExponent, CultureInfo.InvariantCulture, out _))
-            {
-                value = "'" + value;
-            }
-        }
-
-        if (value.Contains(',', StringComparison.Ordinal) || value.Contains('"', StringComparison.Ordinal) || value.Contains('\n', StringComparison.Ordinal) || value.Contains('\r', StringComparison.Ordinal))
-        {
-            return $"\"{value.Replace("\"", "\"\"", StringComparison.Ordinal)}\"";
-        }
-        return value;
-    }
+    internal static string EscapeCsv(string value) =>
+        UsageCsvWriter.FormatCell(value, preserveSignedNumbers: true);
 
     private async Task RecordAuditAsync(
         AsyncJobDescriptor job,
