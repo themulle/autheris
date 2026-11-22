@@ -1,19 +1,16 @@
-using System.Text.RegularExpressions;
+using Autheris.Domain.Common;
 
 namespace Autheris.Domain.Model;
 
 /// <summary>Validates and normalizes the declared primary key and indexes of a table (fail closed).</summary>
-public static partial class TableKeyDefinitionValidator
+public static class TableKeyDefinitionValidator
 {
     public const int MaxColumnsPerKey = 32;
     public const int MaxIndexesPerTable = 64;
 
-    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]{0,127}\z")]
-    private static partial Regex IndexNameRegex();
-
     /// <summary>True when <paramref name="name"/> is a valid declared index identifier.</summary>
     public static bool IsValidIndexName(string? name) =>
-        !string.IsNullOrWhiteSpace(name) && IndexNameRegex().IsMatch(name);
+        SqlIdentifierGuard.IsValidIdentifier(name);
 
     private const int MaxEchoedNameLength = 64;
 
@@ -105,7 +102,7 @@ public static partial class TableKeyDefinitionValidator
             var seenIndexNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             foreach (var index in declaredIndexes)
             {
-                if (index == null || string.IsNullOrWhiteSpace(index.Name) || !IndexNameRegex().IsMatch(index.Name))
+                if (index == null || !IsValidIndexName(index.Name))
                 {
                     throw new TableDefinitionException(
                         $"Index name '{Safe(index?.Name)}' on table '{metadata.Identifier}' is invalid.",

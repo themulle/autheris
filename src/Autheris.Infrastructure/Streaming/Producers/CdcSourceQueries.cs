@@ -29,7 +29,9 @@ internal static class CdcSourceQueries
     /// <summary>SQL Server error: snapshot isolation is not enabled for the database.</summary>
     public const int SnapshotIsolationDisabledError = 3952;
 
-    private static string Qualified(TableIdentifier table) => $"[{table.Schema}].[{table.TableName}]";
+    private static string Qualified(TableIdentifier table) => DatabaseDialect.SqlServer.FormatTableIdentifier(table);
+
+    private static string Quote(string identifier) => DatabaseDialect.SqlServer.QuoteIdentifier(identifier);
 
     private static DbParameter Param(DbCommand cmd, string name, object value)
     {
@@ -136,14 +138,14 @@ internal static class CdcSourceQueries
         int timeoutSeconds,
         CancellationToken ct)
     {
-        var join = string.Join(" AND ", primaryKey.Select(pk => $"T.[{pk}] = CT.[{pk}]"));
+        var join = string.Join(" AND ", primaryKey.Select(pk => $"T.{Quote(pk)} = CT.{Quote(pk)}"));
         var top = exactVersion is null ? "TOP (@batchSize) " : string.Empty;
         var versionFilter = exactVersion is null ? string.Empty : "WHERE CT.SYS_CHANGE_VERSION = @version ";
-        var keySelect = string.Join(", ", primaryKey.Select(pk => $"CT.[{pk}]"));
-        var rowSelect = columns.Count == 0 ? string.Empty : ", " + string.Join(", ", columns.Select(c => $"T.[{c}]"));
-        var order = string.Join(", ", primaryKey.Select(pk => $"CT.[{pk}]"));
+        var keySelect = string.Join(", ", primaryKey.Select(pk => $"CT.{Quote(pk)}"));
+        var rowSelect = columns.Count == 0 ? string.Empty : ", " + string.Join(", ", columns.Select(c => $"T.{Quote(c)}"));
+        var order = string.Join(", ", primaryKey.Select(pk => $"CT.{Quote(pk)}"));
         var sql = $"SELECT {top}CT.SYS_CHANGE_VERSION, CT.SYS_CHANGE_OPERATION, {keySelect}, " +
-                  $"CASE WHEN T.[{primaryKey[0]}] IS NULL THEN 0 ELSE 1 END{rowSelect} " +
+                  $"CASE WHEN T.{Quote(primaryKey[0])} IS NULL THEN 0 ELSE 1 END{rowSelect} " +
                   $"FROM CHANGETABLE(CHANGES {Qualified(table)}, @lastVersion) AS CT " +
                   $"LEFT OUTER JOIN {Qualified(table)} AS T ON {join} {versionFilter}" +
                   $"ORDER BY CT.SYS_CHANGE_VERSION ASC, {order};";

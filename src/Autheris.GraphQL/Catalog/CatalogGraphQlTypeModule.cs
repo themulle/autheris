@@ -438,7 +438,7 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
                 foreach (var table in schemaModel.Tables)
                 {
                     var pk = table.Metadata.PrimaryKeyColumns.Count > 0 ? table.Metadata.PrimaryKeyColumns[0] : "id";
-                    if (string.IsNullOrWhiteSpace(pk) || !ValidPkFieldRegex().IsMatch(pk))
+                    if (!SqlIdentifierGuard.IsValidIdentifier(pk, maxLength: null))
                     {
                         pk = "id";
                     }
@@ -985,9 +985,6 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
             throw;
         }
     }
-
-    [System.Text.RegularExpressions.GeneratedRegex(@"^[a-zA-Z_][a-zA-Z0-9_]*$")]
-    private static partial System.Text.RegularExpressions.Regex ValidPkFieldRegex();
 
     private static readonly System.Text.RegularExpressions.Regex HmacRegex =
         new("^[a-fA-F0-9]{64}$", System.Text.RegularExpressions.RegexOptions.Compiled);

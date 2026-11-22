@@ -12,16 +12,13 @@ public enum DatabaseDialect
 
 public static class DatabaseDialectExtensions
 {
-    private static readonly Regex SafeIdentifierRegex =
-        new(@"\A[a-zA-Z_][a-zA-Z0-9_]*\z", RegexOptions.Compiled);
-
-    public static void ValidateIdentifier(string id, string paramName = "Identifier")
-    {
-        if (string.IsNullOrWhiteSpace(id) || !SafeIdentifierRegex.IsMatch(id))
-        {
-            throw new ArgumentException($"Invalid identifier '{id}'. Only alphanumeric characters and underscores are allowed, starting with a letter or underscore.", paramName);
-        }
-    }
+    public static void ValidateIdentifier(string id, string paramName = "Identifier") =>
+        SqlIdentifierGuard.ValidateIdentifier(
+            id,
+            paramName,
+            maxLength: null,
+            allowLeadingDigit: false,
+            message: $"Invalid identifier '{id}'. Only alphanumeric characters and underscores are allowed, starting with a letter or underscore.");
 
     public static string QuoteIdentifier(this DatabaseDialect dialect, string identifier)
     {

@@ -4,9 +4,9 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Autheris.Application.Identity.Attributes;
 using Autheris.Application.Services;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Nodes;
@@ -17,11 +17,8 @@ using TrinoSqlEngine.Governance;
 /// conditions of one <c>FilterGroup</c> are AND-combined, groups OR-combined, allow consents OR-combined and deny consents
 /// excluded with <c>NOT (...)</c>. Every value is a policy parameter; an <c>IN</c> list has one parameter per item.
 /// </summary>
-public sealed partial class TypedRowFilterBuilder
+public sealed class TypedRowFilterBuilder
 {
-    [GeneratedRegex("^[a-zA-Z_][a-zA-Z0-9_]*$", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 100)]
-    private static partial Regex SafeIdentifierRegex();
-
     private static readonly HashSet<string> AllowedOperators = new(StringComparer.Ordinal)
     {
         "EQ", "NEQ", "LT", "GT", "LTE", "GTE", "LIKE", "IN"
@@ -148,19 +145,13 @@ public sealed partial class TypedRowFilterBuilder
             return AttributeCondition(filter, dialect, namer, isDeny, attributes, padding);
         }
 
-        var column = filter.ColumnName;
-        if (!SafeIdentifierRegex().IsMatch(column))
-        {
-            throw new InvalidOperationException($"Invalid column name in row filter: '{column}'. Potential injection attack.");
-        }
-
+        var columnRef = CreateValidatedColumnRef(filter.ColumnName);
         var op = filter.Operator.ToUpperInvariant();
         if (!AllowedOperators.Contains(op))
         {
             throw new InvalidOperationException($"Unsupported operator '{filter.Operator}' in row filter.");
         }
 
-        var columnRef = PolicyParameterNamer.Column(column);
         JsonDocument document;
         try
         {
@@ -232,13 +223,7 @@ public sealed partial class TypedRowFilterBuilder
             return Constant(isDeny);
         }
 
-        var column = filter.ColumnName;
-        if (!SafeIdentifierRegex().IsMatch(column))
-        {
-            throw new InvalidOperationException($"Invalid column name in row filter: '{column}'. Potential injection attack.");
-        }
-
-        var columnRef = PolicyParameterNamer.Column(column);
+        var columnRef = CreateValidatedColumnRef(filter.ColumnName);
         var parameters = CallerAttributeBinder.Expand(namer, filter.UserAttribute!, result.Value, padding ?? CallerAttributePadding.Default);
         if (op == "EQ")
         {
@@ -260,6 +245,16 @@ public sealed partial class TypedRowFilterBuilder
         return lists.Count == 1
             ? lists[0]
             : new ParenthesizedExpression(lists.Aggregate((left, right) => new BinaryExpression(left, BinaryOperator.Or, right)));
+    }
+
+    private static ColumnReference CreateValidatedColumnRef(string column)
+    {
+        if (!SqlIdentifierGuard.IsValidIdentifier(column, maxLength: null))
+        {
+            throw new InvalidOperationException($"Invalid column name in row filter: '{column}'. Potential injection attack.");
+        }
+
+        return PolicyParameterNamer.Column(column);
     }
 
     /// <summary><c>1 = 1</c> (true) or <c>1 = 0</c> (false).</summary>

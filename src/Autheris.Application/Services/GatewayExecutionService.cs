@@ -1,5 +1,4 @@
 using System.Security.Claims;
-using System.Text.RegularExpressions;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Tenancy;
@@ -34,9 +33,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
     /// <summary>O10: Retry-After for a throttled read; the typical duration of a slow read is the query timeout.</summary>
     private const int ThrottledRetryAfterSeconds = 2;
-
-    [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
-    private static partial Regex EchoableColumnNameRegex();
 
     [ActivatorUtilitiesConstructor]
     public GatewayExecutionService(
@@ -626,14 +622,14 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                     usageRecorder: _usageRecorder,
                     dataSource: metadata.Table.SourceName).ConfigureAwait(false);
 
-                var echo = trimmed != null && EchoableColumnNameRegex().IsMatch(trimmed) ? trimmed : "(invalid name)";
+                var echo = SqlIdentifierGuard.IsValidIdentifier(trimmed) ? trimmed : "(invalid name)";
                 throw new GatewayInvalidQueryException($"The property '{echo}' does not exist or is not accessible.");
             }
 
             var catalogName = authorizedColumns.FirstOrDefault(c => string.Equals(c, trimmed, StringComparison.OrdinalIgnoreCase));
             if (catalogName == null)
             {
-                var echo = trimmed != null && EchoableColumnNameRegex().IsMatch(trimmed) ? trimmed : "(invalid name)";
+                var echo = SqlIdentifierGuard.IsValidIdentifier(trimmed) ? trimmed : "(invalid name)";
                 throw new GatewayInvalidQueryException($"The property '{echo}' does not exist or is not accessible.");
             }
             if (seen.Add(catalogName))

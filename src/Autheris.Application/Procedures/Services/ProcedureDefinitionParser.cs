@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Text.RegularExpressions;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using YamlDotNet.Core;
 using YamlDotNet.Serialization;
@@ -19,20 +20,9 @@ public static partial class ProcedureDefinitionParser
     private static readonly Regex EndpointNameRegex = new(
         @"\A[A-Za-z][A-Za-z0-9_-]{0,63}\z", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
 
-    private static readonly Regex IdentifierRegex = new(
-        @"\A[A-Za-z_][A-Za-z0-9_]{0,127}\z", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
-
-    private static readonly Regex ProcedureNameRegex = new(
-        @"\A([A-Za-z_][A-Za-z0-9_]{0,127})\.([A-Za-z_][A-Za-z0-9_]{0,127})\z", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
-
     private static readonly Regex ParamRegex = new(
         @"\A@?([A-Za-z_][A-Za-z0-9_]{0,127})[ \t]+([A-Za-z0-9]+(?:\([ \t]*(?:\d+|max)(?:[ \t]*,[ \t]*\d+)?[ \t]*\))?)[ \t]+(required|optional)(?:[ \t]+(.*))?\z",
         RegexOptions.Compiled | RegexOptions.IgnoreCase,
-        TimeSpan.FromMilliseconds(100));
-
-    private static readonly Regex ResultTableRegex = new(
-        @"\A[A-Za-z_][A-Za-z0-9_]{0,127}\.[A-Za-z_][A-Za-z0-9_]{0,127}\z",
-        RegexOptions.Compiled,
         TimeSpan.FromMilliseconds(100));
 
     /// <summary>
@@ -152,7 +142,7 @@ public static partial class ProcedureDefinitionParser
             throw new FormatException("Endpoint name must match [A-Za-z][A-Za-z0-9_-]{0,63}.");
         }
 
-        if (string.IsNullOrWhiteSpace(model.Procedure) || !ProcedureNameRegex.IsMatch(model.Procedure.Trim()))
+        if (string.IsNullOrWhiteSpace(model.Procedure) || !SqlIdentifierGuard.IsValidQualifiedIdentifier(model.Procedure.Trim(), minSegments: 2, maxSegments: 2))
         {
             throw new FormatException("Procedure name is required and must have the form schema.name.");
         }
@@ -261,7 +251,7 @@ public static partial class ProcedureDefinitionParser
         var cleared = (model.ClearedColumns ?? []).Select(c => RequireIdentifier(c?.Trim(), "cleared column")).ToList();
 
         string? resultTable = string.IsNullOrWhiteSpace(model.ResultTable) ? null : model.ResultTable.Trim();
-        if (resultTable != null && !ResultTableRegex.IsMatch(resultTable))
+        if (resultTable != null && !SqlIdentifierGuard.IsValidQualifiedIdentifier(resultTable, minSegments: 2, maxSegments: 2))
         {
             throw new FormatException("result_table must have the form schema.table.");
         }
@@ -279,7 +269,7 @@ public static partial class ProcedureDefinitionParser
 
         foreach (var rt in referencedTables)
         {
-            if (!ResultTableRegex.IsMatch(rt))
+            if (!SqlIdentifierGuard.IsValidQualifiedIdentifier(rt, minSegments: 2, maxSegments: 2))
             {
                 throw new FormatException($"tables entry '{rt}' must have the form schema.table.");
             }
@@ -626,12 +616,12 @@ public static partial class ProcedureDefinitionParser
     /// <summary>Review P-4: identifiers end up in SQL text (TVF/CALL); only [A-Za-z_][A-Za-z0-9_]* is accepted.</summary>
     private static string RequireIdentifier(string? value, string what)
     {
-        if (string.IsNullOrWhiteSpace(value) || !IdentifierRegex.IsMatch(value))
+        if (!SqlIdentifierGuard.IsValidIdentifier(value))
         {
             throw new FormatException($"Invalid {what} '{value}'. Only [A-Za-z_][A-Za-z0-9_]{{0,127}} is allowed.");
         }
 
-        return value;
+        return value!;
     }
 }
 

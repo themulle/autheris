@@ -1,5 +1,4 @@
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Application.Sql.Policy;
@@ -11,14 +10,8 @@ namespace Autheris.Application.Services;
 /// <summary>
 /// Generator for cross-source set Row-Level Security (RLS) filters with chunked parameter budgeting.
 /// </summary>
-public static partial class AdvancedRlsFilterGenerator
+public static class AdvancedRlsFilterGenerator
 {
-    [GeneratedRegex("^[a-zA-Z_][a-zA-Z0-9_]*$")]
-    private static partial Regex SafeSimpleIdentifierRegex();
-
-    [GeneratedRegex(@"^[a-zA-Z_][a-zA-Z0-9_]*(\.[a-zA-Z_][a-zA-Z0-9_]*)*$")]
-    private static partial Regex SafeQualifiedIdentifierRegex();
-
     /// <summary>Typed form of <see cref="BuildCrossSourceSetFilter"/>: one parameter per value; an unknown dialect throws.</summary>
     public static PolicyPredicate BuildCrossSourceSetPredicate(ConsentRowFilter filter, DatabaseDialect dialect, string parameterPrefix = "__gql_rls_") =>
         AdvancedRlsPredicateBuilder.BuildCrossSourceSet(filter, PolicyParameterNamer.ToTargetDialect(dialect), parameterPrefix);
@@ -92,20 +85,12 @@ public static partial class AdvancedRlsFilterGenerator
     {
         ValidateIdentifier(table.Schema, "Schema");
         ValidateIdentifier(table.TableName, "TableName");
-
-        return dialect switch
-        {
-            DatabaseDialect.SqlServer => $"[{table.Schema}].[{table.TableName}]",
-            DatabaseDialect.PostgreSql => $"\"{table.Schema}\".\"{table.TableName}\"",
-            DatabaseDialect.Databricks => $"`{table.Schema}`.`{table.TableName}`",
-            DatabaseDialect.Oracle => $"\"{table.Schema}\".\"{table.TableName}\"",
-            _ => $"\"{table.Schema}\".\"{table.TableName}\""
-        };
+        return dialect.FormatTableIdentifier(table);
     }
 
     internal static void ValidateIdentifier(string id, string context)
     {
-        if (string.IsNullOrWhiteSpace(id) || !SafeSimpleIdentifierRegex().IsMatch(id))
+        if (!SqlIdentifierGuard.IsValidIdentifier(id, maxLength: null))
         {
             throw new InvalidOperationException($"Invalid identifier in {context}: '{id}'. SQL injection protection triggered.");
         }
@@ -113,7 +98,7 @@ public static partial class AdvancedRlsFilterGenerator
 
     internal static void ValidateQualifiedIdentifier(string id, string context)
     {
-        if (string.IsNullOrWhiteSpace(id) || !SafeQualifiedIdentifierRegex().IsMatch(id))
+        if (!SqlIdentifierGuard.IsValidQualifiedIdentifier(id, minSegments: 1, maxSegments: null, maxSegmentLength: null))
         {
             throw new InvalidOperationException($"Invalid qualified identifier in {context}: '{id}'. SQL injection protection triggered.");
         }

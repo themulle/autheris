@@ -8,6 +8,7 @@ using System.IO;
 using System.Linq;
 using System.Text.RegularExpressions;
 using Autheris.Application.Sql.Endpoints.Interfaces;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 using TrinoSqlEngine;
@@ -440,7 +441,7 @@ public sealed class SqlEndpointLoader : IDisposable
         ArgumentException.ThrowIfNullOrWhiteSpace(name);
         ArgumentException.ThrowIfNullOrWhiteSpace(sql);
 
-        if (!DbtNameRegex.IsMatch(name))
+        if (!SqlIdentifierGuard.IsValidIdentifier(name, maxLength: SqlIdentifierGuard.DefaultMaxLength, allowLeadingDigit: true))
         {
             throw new ArgumentException($"Invalid dbt endpoint name '{SanitizeHeaderValue(name)}'. Allowed: ^[A-Za-z0-9_]{{1,128}}$.", nameof(name));
         }
@@ -509,7 +510,7 @@ public sealed class SqlEndpointLoader : IDisposable
         {
             foreach (var p in parameters)
             {
-                if (!DbtNameRegex.IsMatch(p.Name))
+                if (!SqlIdentifierGuard.IsValidIdentifier(p.Name, maxLength: SqlIdentifierGuard.DefaultMaxLength, allowLeadingDigit: true))
                 {
                     throw new ArgumentException($"Invalid parameter name '{SanitizeHeaderValue(p.Name)}'.", nameof(parameters));
                 }
@@ -535,11 +536,6 @@ public sealed class SqlEndpointLoader : IDisposable
     /// </summary>
     public const string DbtGeneratedMarker = "-- @generated_by: autheris-dbt-sync";
 
-    private static readonly Regex DbtNameRegex = new(
-        @"\A[A-Za-z0-9_]{1,128}\z",
-        RegexOptions.Compiled | RegexOptions.CultureInvariant,
-        TimeSpan.FromMilliseconds(100));
-
     private static readonly Regex DbtDataSourceRegex = new(
         @"\A[A-Za-z0-9_.\-]{1,128}\z",
         RegexOptions.Compiled | RegexOptions.CultureInvariant,
@@ -554,7 +550,7 @@ public sealed class SqlEndpointLoader : IDisposable
 
     private static string QuoteDbtIdentifier(string? identifier, string paramName)
     {
-        if (string.IsNullOrWhiteSpace(identifier) || !DbtNameRegex.IsMatch(identifier))
+        if (!SqlIdentifierGuard.IsValidIdentifier(identifier, maxLength: SqlIdentifierGuard.DefaultMaxLength, allowLeadingDigit: true))
         {
             throw new ArgumentException($"Invalid dbt identifier '{SanitizeHeaderValue(identifier)}'. Allowed: ^[A-Za-z0-9_]{{1,128}}$.", paramName);
         }

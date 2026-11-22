@@ -2,7 +2,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql.Policy;
 using Autheris.Domain.Common;
@@ -12,11 +11,8 @@ using TrinoSqlEngine;
 
 namespace Autheris.Application.Services;
 
-public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
+public sealed class RowFilterSqlBuilder : IRowFilterSqlBuilder
 {
-    [GeneratedRegex("^[a-zA-Z_][a-zA-Z0-9_]*$")]
-    private static partial Regex SafeIdentifierRegex();
-
     private static readonly HashSet<string> AllowedFilterOperators = new(StringComparer.OrdinalIgnoreCase)
     {
         "EQ", "NEQ", "LT", "GT", "LTE", "GTE", "LIKE", "IN"
@@ -140,13 +136,7 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
             return isDeny ? "1 = 1" : "1 = 0";
         }
 
-        var col = filter.ColumnName;
-        if (!SafeIdentifierRegex().IsMatch(col))
-        {
-            throw new InvalidOperationException($"Invalid column name in row filter: '{col}'. Potential injection attack.");
-        }
-
-        var quotedCol = dialect.QuoteIdentifier(col);
+        var quotedCol = QuoteValidatedColumn(filter.ColumnName, dialect);
 
         var op = filter.Operator.ToUpperInvariant();
         if (!AllowedFilterOperators.Contains(op))
@@ -278,13 +268,7 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
             return isDeny ? "1 = 1" : "1 = 0";
         }
 
-        var col = filter.ColumnName;
-        if (!SafeIdentifierRegex().IsMatch(col))
-        {
-            throw new InvalidOperationException($"Invalid column name in row filter: '{col}'. Potential injection attack.");
-        }
-
-        var quotedCol = dialect.QuoteIdentifier(col);
+        var quotedCol = QuoteValidatedColumn(filter.ColumnName, dialect);
 
         var op = filter.Operator.ToUpperInvariant();
         if (!AllowedFilterOperators.Contains(op))
@@ -353,6 +337,16 @@ public sealed partial class RowFilterSqlBuilder : IRowFilterSqlBuilder
                 _ => $"{quotedCol} = {formattedValue}"
             };
         }
+    }
+
+    private static string QuoteValidatedColumn(string columnName, DatabaseDialect dialect)
+    {
+        if (!SqlIdentifierGuard.IsValidIdentifier(columnName, maxLength: null))
+        {
+            throw new InvalidOperationException($"Invalid column name in row filter: '{columnName}'. Potential injection attack.");
+        }
+
+        return dialect.QuoteIdentifier(columnName);
     }
 
     private static string FormatLiteral(JsonElement elem, DatabaseDialect dialect)

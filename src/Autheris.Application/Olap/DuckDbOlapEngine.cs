@@ -344,9 +344,9 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
             }
             bool isMasked = source.MaskedColumns != null && source.MaskedColumns.Contains(c.ColumnName);
             var duckType = isMasked ? "VARCHAR" : MapDuckDbType(c);
-            colDefs.Add($"\"{cleanColName}\" {duckType}");
+            colDefs.Add($"{DatabaseDialect.PostgreSql.QuoteIdentifier(cleanColName)} {duckType}");
         }
-        var createTableSql = $"CREATE TABLE \"{cleanTableName}\" ({string.Join(", ", colDefs)});";
+        var createTableSql = $"CREATE TABLE {DatabaseDialect.PostgreSql.QuoteIdentifier(cleanTableName)} ({string.Join(", ", colDefs)});";
 
         using (var createCmd = connection.CreateCommand())
         {
@@ -360,7 +360,7 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
                 if (!string.Equals(qualifiedViewName, cleanTableName, StringComparison.OrdinalIgnoreCase))
                 {
                     using var viewCmd = connection.CreateCommand();
-                    viewCmd.CommandText = $"CREATE VIEW \"{qualifiedViewName}\" AS SELECT * FROM \"{cleanTableName}\";";
+                    viewCmd.CommandText = $"CREATE VIEW {DatabaseDialect.PostgreSql.QuoteIdentifier(qualifiedViewName)} AS SELECT * FROM {DatabaseDialect.PostgreSql.QuoteIdentifier(cleanTableName)};";
                     await viewCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
                 }
             }
@@ -379,7 +379,7 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         {
             var chunk = source.GovernedRows.Skip(i).Take(batchSize).ToList();
             var sqlBuilder = new StringBuilder();
-            sqlBuilder.Append($"INSERT INTO \"{cleanTableName}\" ({string.Join(", ", cleanColNames.Select(c => $"\"{c}\""))}) VALUES ");
+            sqlBuilder.Append($"INSERT INTO {DatabaseDialect.PostgreSql.QuoteIdentifier(cleanTableName)} ({string.Join(", ", cleanColNames.Select(c => DatabaseDialect.PostgreSql.QuoteIdentifier(c)))}) VALUES ");
 
             using var insertCmd = connection.CreateCommand();
             int paramIndex = 1;
@@ -420,13 +420,8 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         return first.Keys.Select(k => new TableColumn { ColumnName = k, DataType = "string" }).ToList();
     }
 
-    internal static string SanitizeIdentifier(string identifier)
-    {
-        if (string.IsNullOrWhiteSpace(identifier)) return "col";
-        var cleaned = Regex.Replace(identifier, @"[^a-zA-Z0-9_]", "_");
-        if (char.IsDigit(cleaned[0])) cleaned = "_" + cleaned;
-        return cleaned;
-    }
+    internal static string SanitizeIdentifier(string identifier) =>
+        SqlIdentifierGuard.SanitizeIdentifier(identifier);
 
     private static readonly Regex MemorySizePattern = new(@"^(\d+)\s*(MB|GB|TB|B)$", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant, TimeSpan.FromMilliseconds(250));
 

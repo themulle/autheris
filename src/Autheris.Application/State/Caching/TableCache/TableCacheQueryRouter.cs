@@ -1,7 +1,6 @@
 namespace Autheris.Application.State.Caching.TableCache;
 
 using System;
-using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security;
@@ -18,9 +17,6 @@ public sealed class TableCacheQueryRouter : ITableCacheQueryRouter
 {
     public const string InternalTableAccessProhibitedCode = "INTERNAL_TABLE_ACCESS_PROHIBITED";
 
-    private static readonly SearchValues<char> ValidIdentifierChars =
-        SearchValues.Create("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_");
-
     private readonly ITableCacheCatalog _catalog;
 
     public TableCacheQueryRouter(ITableCacheCatalog catalog)
@@ -33,12 +29,12 @@ public sealed class TableCacheQueryRouter : ITableCacheQueryRouter
         ArgumentException.ThrowIfNullOrWhiteSpace(identifier);
         var trimmed = identifier.Trim();
 
-        if (trimmed.Length > 128)
+        if (trimmed.Length > SqlIdentifierGuard.DefaultMaxLength)
         {
-            throw new SecurityException($"{InternalTableAccessProhibitedCode}: Identifier exceeds maximum allowed length of 128 characters: '{identifier}'");
+            throw new SecurityException($"{InternalTableAccessProhibitedCode}: Identifier exceeds maximum allowed length of {SqlIdentifierGuard.DefaultMaxLength} characters: '{identifier}'");
         }
 
-        if (trimmed.AsSpan().ContainsAnyExcept(ValidIdentifierChars))
+        if (!SqlIdentifierGuard.IsValidIdentifier(trimmed, maxLength: SqlIdentifierGuard.DefaultMaxLength, allowLeadingDigit: true))
         {
             throw new SecurityException($"{InternalTableAccessProhibitedCode}: Illegal characters detected in SQL identifier: '{identifier}'");
         }
