@@ -50,14 +50,8 @@ public sealed partial class DatabricksStatementExecutionClient(
     [GeneratedRegex("^[0-9a-fA-F-]{36}$", RegexOptions.CultureInvariant)]
     private static partial Regex StatementIdRegex();
 
-    [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,127}$", RegexOptions.CultureInvariant)]
-    private static partial Regex ParameterNameRegex();
-
     [GeneratedRegex(@"^(STRING|BOOLEAN|TINYINT|SMALLINT|INT|BIGINT|FLOAT|DOUBLE|DATE|TIMESTAMP|TIMESTAMP_NTZ|BINARY|DECIMAL\(\d{1,2},\d{1,2}\))$", RegexOptions.CultureInvariant)]
     private static partial Regex ParameterTypeRegex();
-
-    [GeneratedRegex("^[A-Za-z0-9_]{1,64}$", RegexOptions.CultureInvariant)]
-    private static partial Regex ErrorCodeRegex();
 
     private sealed record Settings(DatabricksDataSourceOptions Databricks, int CommandTimeoutSeconds);
 
@@ -216,7 +210,7 @@ public sealed partial class DatabricksStatementExecutionClient(
 
         foreach (var p in request.Parameters)
         {
-            if (p.Name is null || !ParameterNameRegex().IsMatch(p.Name))
+            if (!SqlIdentifierGuard.IsValidIdentifier(p.Name))
             {
                 throw Invalid("A statement parameter name is invalid.");
             }
@@ -451,7 +445,7 @@ public sealed partial class DatabricksStatementExecutionClient(
             case "FAILED":
                 var code = root.GetProperty("status").TryGetProperty("error", out var err) && err.ValueKind == JsonValueKind.Object &&
                            err.TryGetProperty("error_code", out var codeEl) && codeEl.ValueKind == JsonValueKind.String &&
-                           codeEl.GetString() is { } c && ErrorCodeRegex().IsMatch(c)
+                           codeEl.GetString() is { } c && SqlIdentifierGuard.IsValidIdentifier(c, maxLength: 64, allowLeadingDigit: true)
                     ? c
                     : "UNKNOWN";
                 logger?.LogWarning("Databricks statement failed with error code {ErrorCode}.", code);

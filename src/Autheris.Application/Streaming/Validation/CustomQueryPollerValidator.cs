@@ -25,7 +25,6 @@ public sealed record CustomQueryPollerValidationResult(bool IsValid, IReadOnlyLi
 /// </summary>
 public sealed class CustomQueryPollerValidator
 {
-    private static readonly Regex SafeIdentifierRegex = new(@"^[a-zA-Z0-9_]+$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(200));
     private static readonly Regex SelectIntoRegex = new(@"\bINTO\b", RegexOptions.Compiled | RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(200));
     private static readonly Regex ProceduralExecRegex = new(@"\b(EXEC|EXECUTE|CALL|sp_executesql)\b", RegexOptions.Compiled | RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(200));
 
@@ -129,7 +128,7 @@ public sealed class CustomQueryPollerValidator
         {
             foreach (var pk in poller.KeyColumns)
             {
-                if (string.IsNullOrWhiteSpace(pk) || !SafeIdentifierRegex.IsMatch(pk))
+                if (!SqlIdentifierGuard.IsValidIdentifier(pk, maxLength: null, allowLeadingDigit: true))
                 {
                     errors.Add($"Declared primary key column '{pk}' is invalid. Only alphanumeric characters and underscores are allowed.");
                 }
@@ -150,7 +149,7 @@ public sealed class CustomQueryPollerValidator
 
         if (poller.SoftDelete is { Enabled: true } sd)
         {
-            if (string.IsNullOrWhiteSpace(sd.Column) || !SafeIdentifierRegex.IsMatch(sd.Column))
+            if (!SqlIdentifierGuard.IsValidIdentifier(sd.Column, maxLength: null, allowLeadingDigit: true))
             {
                 errors.Add($"Soft-delete column '{sd.Column}' is invalid. Only alphanumeric characters and underscores are allowed.");
             }
@@ -252,13 +251,13 @@ public sealed class CustomQueryPollerValidator
         }
 
         // Whitelist pattern ^[a-zA-Z0-9_]+$
-        if (!SafeIdentifierRegex.IsMatch(wm.Name))
+        if (!SqlIdentifierGuard.IsValidIdentifier(wm.Name, maxLength: null, allowLeadingDigit: true))
         {
             errors.Add($"Watermark dimension Name '{wm.Name}' contains invalid characters. Must match ^[a-zA-Z0-9_]+$.");
         }
 
         var paramName = string.IsNullOrWhiteSpace(wm.ParameterName) ? "p_wm_" + wm.Name : wm.ParameterName.TrimStart('@');
-        if (!SafeIdentifierRegex.IsMatch(paramName))
+        if (!SqlIdentifierGuard.IsValidIdentifier(paramName, maxLength: null, allowLeadingDigit: true))
         {
             errors.Add($"Watermark dimension ParameterName '{wm.ParameterName}' contains invalid characters. Must match ^[a-zA-Z0-9_]+$.");
         }

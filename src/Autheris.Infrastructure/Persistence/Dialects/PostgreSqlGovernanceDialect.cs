@@ -3,6 +3,7 @@ namespace Autheris.Infrastructure.Persistence.Dialects;
 using System;
 using System.Data.Common;
 using System.Text;
+using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Npgsql;
 
@@ -197,5 +198,6 @@ public sealed class PostgreSqlGovernanceDialect : IGovernanceSqlDialect
         }
     }
 
-    private static string Quote(string identifier) => "\"" + GovernanceSqlInput.Identifier(identifier, nameof(identifier)) + "\"";
+    private static string Quote(string identifier) =>
+        SqlIdentifierGuard.QuoteSafeIdentifier(identifier, DatabaseDialect.PostgreSql, nameof(identifier), maxLength: null);
 }

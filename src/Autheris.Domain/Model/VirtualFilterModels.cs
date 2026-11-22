@@ -3,6 +3,7 @@ namespace Autheris.Domain.Model;
 using System.Security.Cryptography;
 using System.Text;
 using System.Text.RegularExpressions;
+using Autheris.Domain.Common;
 
 /// <summary>Approval status for virtual filters and access profiles when RequireApproval is active.</summary>
 public enum FilterApprovalStatus
@@ -564,9 +565,6 @@ public static partial class VirtualFilterNames
     [GeneratedRegex("^[a-z][a-z0-9_]{0,63}$")]
     private static partial Regex FilterNameRegex();
 
-    [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
-    private static partial Regex IdentifierRegex();
-
     public static void ValidateFilterName(string? name, string paramName)
     {
         if (name == null || !FilterNameRegex().IsMatch(name))
@@ -577,7 +575,7 @@ public static partial class VirtualFilterNames
 
     public static void ValidateIdentifier(string? name, string paramName)
     {
-        if (name == null || !IdentifierRegex().IsMatch(name))
+        if (!SqlIdentifierGuard.IsValidIdentifier(name))
         {
             throw new ArgumentException($"'{name}' is not a valid identifier.", paramName);
         }

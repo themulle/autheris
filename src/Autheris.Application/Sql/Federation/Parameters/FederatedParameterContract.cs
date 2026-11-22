@@ -7,7 +7,6 @@ using System.Collections.Frozen;
 using System.Linq;
 using System.Security;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.ListParameters;
 using Autheris.Domain.Common;
@@ -32,8 +31,6 @@ public enum ColumnTypeClass
 
 public sealed class FederatedParameterContract
 {
-    private static readonly Regex ValidNamePattern = new(@"^[A-Za-z_][A-Za-z0-9_]{0,127}$", RegexOptions.Compiled);
-
     public static FederatedParameterContract Empty { get; } = new(
         FrozenDictionary<string, object?>.Empty,
         FrozenDictionary<string, int>.Empty,
@@ -62,7 +59,7 @@ public sealed class FederatedParameterContract
         _astShapes = astShapes;
         HasValues = hasValues;
         _names = clientValues.Keys
-            .Where(k => ValidNamePattern.IsMatch(k))
+            .Where(k => SqlIdentifierGuard.IsValidIdentifier(k))
             .OrderBy(k => k, StringComparer.Ordinal)
             .ToArray();
     }
@@ -304,7 +301,7 @@ public sealed class FederatedParameterContract
 
         foreach (var (key, val) in _clientValues)
         {
-            if (!ValidNamePattern.IsMatch(key))
+            if (!SqlIdentifierGuard.IsValidIdentifier(key))
             {
                 invalidNames++;
                 continue;

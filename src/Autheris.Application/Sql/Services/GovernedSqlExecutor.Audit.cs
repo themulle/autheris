@@ -77,9 +77,6 @@ public sealed partial class GovernedSqlExecutor
         }, CancellationToken.None).ConfigureAwait(false);
     }
 
-    [System.Text.RegularExpressions.GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,63}$")]
-    private static partial System.Text.RegularExpressions.Regex AuditListNameRegex();
-
     private static void AddListAuditField(Dictionary<string, object?> fields, CompiledSql compiled, IReadOnlyDictionary<string, object?>? clientValues)
     {
         SortedDictionary<string, int>? lists = null;
@@ -101,7 +98,7 @@ public sealed partial class GovernedSqlExecutor
             SortedSet<string>? empty = null;
             foreach (var (name, value) in clientValues)
             {
-                if (value is ClientListValue { Count: 0 } && AuditListNameRegex().IsMatch(name))
+                if (value is ClientListValue { Count: 0 } && SqlIdentifierGuard.IsValidIdentifier(name, maxLength: 64))
                 {
                     (empty ??= new SortedSet<string>(StringComparer.Ordinal)).Add(name.ToLowerInvariant());
                 }

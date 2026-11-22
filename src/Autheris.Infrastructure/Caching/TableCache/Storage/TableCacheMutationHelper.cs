@@ -1,7 +1,6 @@
 namespace Autheris.Infrastructure.Caching.TableCache.Storage;
 
 using System;
-using System.Buffers;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Linq;
@@ -17,9 +16,6 @@ using DuckDB.NET.Data;
 /// </summary>
 internal static class TableCacheMutationHelper
 {
-    private static readonly SearchValues<char> ValidIdentifierChars =
-        SearchValues.Create("abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789_");
-
     private enum InferredKind
     {
         Unknown = 0,
@@ -44,17 +40,14 @@ internal static class TableCacheMutationHelper
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(identifier);
         var trimmed = identifier.Trim();
-        if (trimmed.Length > 128)
-        {
-            throw new ArgumentException($"Identifier exceeds maximum length of 128 characters: '{identifier}'", nameof(identifier));
-        }
-
-        if (trimmed.AsSpan().ContainsAnyExcept(ValidIdentifierChars))
-        {
-            throw new ArgumentException($"Identifier contains invalid characters: '{identifier}'", nameof(identifier));
-        }
-
-        return trimmed;
+        return SqlIdentifierGuard.ValidateIdentifier(
+            trimmed,
+            nameof(identifier),
+            maxLength: SqlIdentifierGuard.DefaultMaxLength,
+            allowLeadingDigit: true,
+            message: trimmed.Length > SqlIdentifierGuard.DefaultMaxLength
+                ? $"Identifier exceeds maximum length of {SqlIdentifierGuard.DefaultMaxLength} characters: '{identifier}'"
+                : $"Identifier contains invalid characters: '{identifier}'");
     }
 
     public static TableIdentifier ResolveTableIdentifier(TableCacheTargetOptions options)

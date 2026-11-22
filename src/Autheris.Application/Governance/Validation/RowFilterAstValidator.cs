@@ -6,6 +6,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Autheris.Application.ConsentRequests;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
 /// <summary>
@@ -22,7 +23,6 @@ public static class RowFilterAstValidator
         "IN", "NOT IN", "LIKE", "IS NULL", "IS NOT NULL"
     };
 
-    private static readonly Regex SafeIdentifierRegex = new(@"^[a-zA-Z_][a-zA-Z0-9_]*$", RegexOptions.Compiled);
     private static readonly Regex SqlInjectionKeywordsRegex = new(@"\b(SELECT|UNION|DROP|INSERT|UPDATE|DELETE|EXEC|EXECUTE|ALTER|CREATE|TRUNCATE|DECLARE|XP_|PG_|INFORMATION_SCHEMA|OR|AND)\b|--|/\*|;|'", RegexOptions.Compiled | RegexOptions.IgnoreCase);
 
     public static void Validate(RowFilterInput? input, TableMetadata metadata)
@@ -44,7 +44,7 @@ public static class RowFilterAstValidator
             }
 
             var colName = predicate.ColumnName.Trim();
-            if (!SafeIdentifierRegex.IsMatch(colName))
+            if (!SqlIdentifierGuard.IsValidIdentifier(colName, maxLength: null))
             {
                 throw new ConsentRequestException("BAD_REQUEST", $"Invalid column name '{colName}' in row filter predicate.");
             }

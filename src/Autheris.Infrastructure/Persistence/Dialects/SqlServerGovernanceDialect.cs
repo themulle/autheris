@@ -6,6 +6,7 @@ using System.Data.Common;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Microsoft.Data.SqlClient;
 
@@ -262,7 +263,8 @@ public sealed class SqlServerGovernanceDialect : IGovernanceSqlDialect
     internal static DbConnection Unwrap(DbConnection conn) =>
         conn is QuotedIdentifierSqlConnection wrapper ? wrapper.InnerConnection : conn;
 
-    private static string Quote(string identifier) => "[" + GovernanceSqlInput.Identifier(identifier, nameof(identifier)) + "]";
+    private static string Quote(string identifier) =>
+        SqlIdentifierGuard.QuoteSafeIdentifier(identifier, DatabaseDialect.SqlServer, nameof(identifier), maxLength: null);
 
     private sealed class QuotedIdentifierSqlConnection : DbConnection
     {

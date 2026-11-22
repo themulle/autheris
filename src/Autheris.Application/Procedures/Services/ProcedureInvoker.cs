@@ -292,14 +292,13 @@ public sealed partial class ProcedureInvoker : IProcedureInvoker
         return arguments.Select(a => a.Placeholder).ToList();
     }
 
-    private static readonly Regex IdentifierRegex = new(
-        @"^[A-Za-z_][A-Za-z0-9_]{0,127}$", RegexOptions.Compiled, TimeSpan.FromMilliseconds(100));
-
     /// <summary>Review P-4: defense in depth, identifiers are written into SQL text for TVF/CALL.</summary>
     private static void EnsureIdentifier(string value, bool allowSchema)
     {
-        var parts = allowSchema ? value.Split('.') : new[] { value };
-        if ((allowSchema && parts.Length != 2) || parts.Any(p => !IdentifierRegex.IsMatch(p)))
+        bool valid = allowSchema
+            ? SqlIdentifierGuard.IsValidQualifiedIdentifier(value, minSegments: 2, maxSegments: 2)
+            : SqlIdentifierGuard.IsValidIdentifier(value);
+        if (!valid)
         {
             throw new InvalidOperationException($"Invalid identifier '{value}'.");
         }
