@@ -70,6 +70,10 @@ public sealed class Consent
     /// <summary>number of approved renewals (extensions) of this grant; persisted by the repositories.</summary>
     public int RenewalCount { get; init; }
     public ConsentGrantSource GrantSource { get; init; } = ConsentGrantSource.ConsentRequest;
+    public PermissionGrantKind GrantKind { get; init; } = PermissionGrantKind.Data;
+    public ApproverCapacity? ApproverCapacity { get; init; }
+    public bool SelfGrant { get; init; }
+    public IReadOnlyList<string>? TargetColumns { get; init; }
     public long GrantRecordSeq { get; init; }
     public Guid? ProfileAssignmentId { get; init; }
     public DateTimeOffset? ExpiryNoticeSentAt { get; init; }

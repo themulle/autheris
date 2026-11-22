@@ -54,8 +54,17 @@ public sealed class ConsentRequest
     public string? ExternalReference { get; init; }
     public DateTimeOffset? RequestedValidFrom { get; init; }
     public DateTimeOffset? UpdatedAt { get; init; }
-    public ConsentRequestKind RequestKind { get; init; } = ConsentRequestKind.Consent;
+    public ConsentRequestKind RequestKind { get; init; } = ConsentRequestKind.Data;
+    public PermissionGrantKind GrantKind { get; init; } = PermissionGrantKind.Data;
     public Guid? ProfileId { get; init; }
+    public IReadOnlyList<string>? TargetColumns { get; init; }
+    public ContainerKind? ContainerKind { get; init; }
+    public Guid? ContainerId { get; init; }
+    public ApproverCapacity? ApproverCapacity { get; init; }
+    public bool SelfGrant { get; init; }
+    public Guid? BundleId { get; init; }
+    public Sid? DecidedBy { get; init; }
+    public DateTimeOffset? DecidedAt { get; init; }
 
     public bool ShouldGrantReadColumns => RequestedWriteRules.Count == 0 || IncludeReadAccess;
     public bool IsWriteOnlyRequest => RequestedWriteRules.Count > 0 && !IncludeReadAccess;

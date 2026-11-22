@@ -268,5 +268,51 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
         isValidAfter.ShouldBeTrue("GDPR anonymization of actor directory must not break the cryptographic audit hash chain.");
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Cas_with_audit()
+    {
+        var table = new TableIdentifier("sales", "dbo", "cas_audit_" + Guid.NewGuid().ToString("N")[..6]);
+        var meta = await _repository.UpsertTableMetadataAsync(new TableMetadata
+        {
+            Identifier = table,
+            OwnerTenantId = Autheris.Tests.Common.TestTenants.Default.Value,
+            Table = new Table { Id = Guid.NewGuid(), SourceName = table.Domain, SchemaName = table.Schema, TableName = table.TableName, IsActive = true }
+        });
+
+        var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
+        {
+            TableId = meta.Table.Id,
+            TableIdentifier = table,
+            RequesterSid = new Sid("S-1-5-21-CAS-REQ"),
+            RequestedGranteeType = GranteeType.User,
+            RequestedGranteeRef = "S-1-5-21-CAS-REQ",
+            BusinessJustification = "CAS with fail-closed audit transaction test.",
+            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(14),
+            Status = "PENDING",
+            TenantId = Autheris.Tests.Common.TestTenants.Default
+        });
+
+        await Should.ThrowAsync<InvalidOperationException>(() => _repository.TryDecideAsync(
+            req.Id,
+            1,
+            (_, locked) => Task.FromResult(new Autheris.Application.Governance.Requests.PermissionDecisionRecord(
+                "APPROVED",
+                new Sid("S-1-5-21-CAS-APPR"),
+                DateTimeOffset.UtcNow,
+                ApproverCapacity.DataOwner,
+                false,
+                "APPROVED",
+                null,
+                locked.RequestedValidTo)),
+            (_, _, _) => throw new InvalidOperationException("Simulated audit failure")));
+
+        // Status must remain PENDING at version 1 when apply/audit fails inside CAS transaction.
+        var reloaded = await _repository.GetConsentRequestAsync(req.Id);
+        reloaded.ShouldNotBeNull();
+        reloaded.Status.ShouldBe("PENDING");
+        reloaded.Version.ShouldBe(1);
+    }
+
     #endregion
 }

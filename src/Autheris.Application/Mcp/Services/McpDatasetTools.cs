@@ -263,13 +263,13 @@ public static class McpDatasetTools
         yield return new McpToolDefinition(
             Name: RequestAccess,
             Description: "Requests access to a dataset for the caller. Optionally asks for Clear (unmasked) access to named columns; the data owner decides. The justification is sent to the data owner.",
-            InputJsonSchema: """
+            InputJsonSchema: $$"""
             {
               "type": "object",
               "required": ["dataset", "justification"],
               "properties": {
                 "dataset": { "type": "string", "description": "Dataset id as returned by list_datasets (domain.schema.table)." },
-                "justification": { "type": "string", "minLength": 5, "maxLength": 2000, "description": "Business justification (5 to 2000 characters)." },
+                "justification": { "type": "string", "minLength": {{Autheris.Application.Governance.Requests.JustificationPolicy.MinLength}}, "maxLength": {{Autheris.Application.Governance.Requests.JustificationPolicy.MaxLength}}, "description": "Business justification ({{Autheris.Application.Governance.Requests.JustificationPolicy.MinLength}} to {{Autheris.Application.Governance.Requests.JustificationPolicy.MaxLength}} characters)." },
                 "durationDays": { "type": "integer", "minimum": 1, "description": "Requested validity in days. Omit for the configured default." },
                 "duration": { "type": "string", "description": "Requested validity as ISO-8601 duration (for example P2W). Wins over durationDays." },
                 "clearColumns": { "type": "array", "maxItems": 50, "items": { "type": "string" }, "description": "Columns that should be Clear instead of masked. Only masked columns that offer a Clear request are accepted." }

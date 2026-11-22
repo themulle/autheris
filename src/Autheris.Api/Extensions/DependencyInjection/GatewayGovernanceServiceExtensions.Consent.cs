@@ -68,6 +68,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Governance.Grants.Records.IGrantChainVerifier, Autheris.Application.Governance.Grants.Records.GrantChainVerifier>();
         services.AddSingleton<Autheris.Application.Governance.Grants.Records.IGrantRecordExportService, Autheris.Application.Governance.Grants.Records.GrantRecordExportService>();
         services.AddHostedService<GrantRecordKeyStartupCheck>();
+        services.AddHostedService<Autheris.Infrastructure.Persistence.Migrations.MigrationPurgeAuditHostedService>();
         services.AddOptions<Autheris.Domain.Options.GrantValidityOptions>()
             .BindConfiguration(Autheris.Domain.Options.GrantValidityOptions.SectionName)
             .ValidateOnStart();
@@ -91,6 +92,19 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddScoped<Autheris.Application.ConsentRequests.ProfileAssignments.ProfileAssignmentRequestService>();
         services.AddScoped<Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentRequestService>(sp => sp.GetRequiredService<Autheris.Application.ConsentRequests.ProfileAssignments.ProfileAssignmentRequestService>());
         services.AddScoped<Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentDecisionHandler>(sp => sp.GetRequiredService<Autheris.Application.ConsentRequests.ProfileAssignments.ProfileAssignmentRequestService>());
+        services.AddSingleton<Autheris.Infrastructure.Persistence.PermissionRequestStore>(sp =>
+            new Autheris.Infrastructure.Persistence.PermissionRequestStore(
+                sp.GetRequiredService<Autheris.Infrastructure.Persistence.Dialects.IGovernanceSqlDialect>(),
+                sp.GetService<TimeProvider>()));
+        services.AddSingleton<Autheris.Application.Governance.Requests.IConsentExtrasWriter>(sp =>
+            sp.GetRequiredService<Autheris.Infrastructure.Persistence.PermissionRequestStore>());
+        services.AddSingleton<Autheris.Application.Governance.Requests.ApproverResolver>();
+        services.AddSingleton<Autheris.Application.Governance.Requests.ApproverEligibility>();
+        services.AddSingleton<Autheris.Application.Governance.Requests.IGrantEffectApplier, Autheris.Application.Governance.Requests.DataGrantApplier>();
+        services.AddSingleton<Autheris.Application.Governance.Requests.IGrantEffectApplier, Autheris.Application.Governance.Requests.UnmaskGrantApplier>();
+        services.AddSingleton<Autheris.Application.Governance.Requests.IGrantEffectApplier, Autheris.Application.Governance.Requests.CatalogGrantApplier>();
+        services.AddSingleton<Autheris.Application.Governance.Requests.IGrantEffectApplier, Autheris.Application.Governance.Requests.ProfileAssignmentApplier>();
+        services.AddScoped<Autheris.Application.Governance.Requests.PermissionRequestEngine>();
         services.AddHostedService<Autheris.Application.ConsentRequests.Events.ConsentWebhookDispatcherHostedService>();
         services.AddHostedService<Autheris.Application.Governance.Grants.GrantExpiryHostedService>();
         services.AddHostedService<Autheris.Application.Policy.RowScopes.PatternCoverageMonitor>();

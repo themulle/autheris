@@ -19,7 +19,7 @@ public partial class GovernanceRepository
         const string sql = @"SELECT DISTINCT t.source_name, t.schema_name, t.table_name
                              FROM CONSENTS c
                              JOIN TABLES t ON c.table_id = t.id
-                             WHERE c.is_revoked = 0 AND c.tenant_id = @tenantId";
+                             WHERE c.is_revoked = 0 AND c.grant_kind = 'DATA' AND c.tenant_id = @tenantId";
         var result = new List<TableIdentifier>();
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();

@@ -112,23 +112,24 @@ public partial class GovernanceRepository
             "c.is_revoked, c.tenant_id, c.grant_source, c.grant_record_seq, " +
             "c.profile_assignment_id, c.expiry_notice_sent_at, c.object_pattern, " +
             "c.data_source, c.column_set_mode, c.workflow_mode, c.profile_item_no, " +
-            "c.renewal_count, c.revoked_by_sid, c.revoked_at, c.revoke_reason " +
+            "c.renewal_count, c.revoked_by_sid, c.revoked_at, c.revoke_reason, " +
+            "c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns " +
             "FROM CONSENTS c WHERE ";
 
         private const string SelectPatternByIdSql =
             SelectPatternColumnsPrefix + "c.id = @id AND c.object_pattern IS NOT NULL";
 
         private const string SelectActivePatternsSql =
-            SelectPatternColumnsPrefix + "c.is_revoked = 0 AND c.object_pattern IS NOT NULL";
+            SelectPatternColumnsPrefix + "c.is_revoked = 0 AND c.grant_kind = 'DATA' AND c.object_pattern IS NOT NULL";
 
         private const string SelectActivePatternsByTenantSql =
-            SelectPatternColumnsPrefix + "c.is_revoked = 0 AND c.object_pattern IS NOT NULL AND c.tenant_id = @tenantId";
+            SelectPatternColumnsPrefix + "c.is_revoked = 0 AND c.grant_kind = 'DATA' AND c.object_pattern IS NOT NULL AND c.tenant_id = @tenantId";
 
         private const string SelectActivePatternsByDomainSql =
-            SelectPatternColumnsPrefix + "c.is_revoked = 0 AND c.object_pattern IS NOT NULL AND LOWER(c.data_source) = LOWER(@domain)";
+            SelectPatternColumnsPrefix + "c.is_revoked = 0 AND c.grant_kind = 'DATA' AND c.object_pattern IS NOT NULL AND LOWER(c.data_source) = LOWER(@domain)";
 
         private const string SelectActivePatternsByTenantDomainSql =
-            SelectPatternColumnsPrefix + "c.is_revoked = 0 AND c.object_pattern IS NOT NULL AND c.tenant_id = @tenantId AND LOWER(c.data_source) = LOWER(@domain)";
+            SelectPatternColumnsPrefix + "c.is_revoked = 0 AND c.grant_kind = 'DATA' AND c.object_pattern IS NOT NULL AND c.tenant_id = @tenantId AND LOWER(c.data_source) = LOWER(@domain)";
 
         public static void BindPatternParameters(DbCommand cmd, Consent consent)
         {
@@ -336,7 +337,11 @@ public partial class GovernanceRepository
                 RenewalCount = reader.IsDBNull(19) ? 0 : Convert.ToInt32(reader.GetValue(19), CultureInfo.InvariantCulture),
                 RevokedBySid = reader.IsDBNull(20) ? (Sid?)null : new Sid(reader.GetString(20)),
                 RevokedAt = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 21),
-                RevokeReason = ConsentWorkflowSql.ReadOptionalString(reader, 22)
+                RevokeReason = ConsentWorkflowSql.ReadOptionalString(reader, 22),
+                GrantKind = ConsentWorkflowSql.ReadGrantKind(reader, 23),
+                ApproverCapacity = ConsentWorkflowSql.ReadApproverCapacity(reader, 24),
+                SelfGrant = ConsentWorkflowSql.ReadBooleanOrFalse(reader, 25),
+                TargetColumns = ConsentWorkflowSql.ReadTargetColumns(reader, 26)
             };
         }
     }

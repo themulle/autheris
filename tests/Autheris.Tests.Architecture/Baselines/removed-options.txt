@@ -58,6 +58,7 @@ Autheris.Domain.Options.HitLStepUpOptions.AutoCreateItsmTicket
 Autheris.Domain.Options.HitLStepUpOptions.PreferredItsmSystem
 Autheris.Domain.Options.IncrementalDeliveryOptions.Enabled
 Autheris.Domain.Options.IndividualGrantOptions.BreakGlassMaxHours
+Autheris.Domain.Options.IndividualGrantOptions.ServicePrincipalMaxDays
 Autheris.Domain.Options.ItsmOptions.AuthHeader
 Autheris.Domain.Options.ItsmOptions.Enabled
 Autheris.Domain.Options.ItsmOptions.EndpointUrl

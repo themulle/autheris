@@ -111,9 +111,9 @@ public sealed class IndividualGrantClampTests : IDisposable
     }
 
     [Fact]
-    public void SEC_SC_20_ServicePrincipal_ClampFollowsTheConfiguredLimit()
+    public void SEC_SC_20_ServicePrincipal_ClampFollowsTheUserLimit()
     {
-        IndividualGrantLimits.Configure(null, null, TimeSpan.FromDays(365));
+        IndividualGrantLimits.Configure(TimeSpan.FromDays(365), null);
         var c = C(GranteeType.ServicePrincipal, DateTimeOffset.MaxValue);
         c.EffectiveValidTo.ShouldBe(From.AddDays(365));
     }
@@ -132,7 +132,6 @@ public sealed class IndividualGrantClampTests : IDisposable
     {
         IndividualGrantLimits.RegularMax.ShouldBeNull();
         IndividualGrantLimits.UnmaskedMax.ShouldBeNull();
-        IndividualGrantLimits.ServicePrincipalMax.ShouldBeNull();
 
         var to = From.AddYears(3);
         C(GranteeType.User, to).EffectiveValidTo.ShouldBe(to);
@@ -192,18 +191,19 @@ public sealed class IndividualGrantClampTests : IDisposable
         var customOptions = new Autheris.Domain.Options.IndividualGrantOptions
         {
             RegularMaxDays = 45,
-            UnmaskedMaxDays = 15,
-            ServicePrincipalMaxDays = 90
+            UnmaskedMaxDays = 15
         };
 
         var service = new Autheris.Application.Governance.Grants.IndividualGrantLimitsService(customOptions);
 
         service.RegularMax.ShouldBe(TimeSpan.FromDays(45));
         service.UnmaskedMax.ShouldBe(TimeSpan.FromDays(15));
-        service.ServicePrincipalMax.ShouldBe(TimeSpan.FromDays(90));
 
         var consentValidTo = service.EffectiveConsentValidTo(GranteeType.User, From, DateTimeOffset.MaxValue);
         consentValidTo.ShouldBe(From.AddDays(45));
+
+        var spValidTo = service.EffectiveConsentValidTo(GranteeType.ServicePrincipal, From, DateTimeOffset.MaxValue);
+        spValidTo.ShouldBe(From.AddDays(45));
 
         var profileValidTo = service.EffectiveProfileValidTo(MaskingPolicyMode.Unmasked, From, null);
         profileValidTo.ShouldBe(From.AddDays(15));

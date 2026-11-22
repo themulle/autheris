@@ -10,7 +10,6 @@ public interface IIndividualGrantLimits
 {
     TimeSpan? RegularMax { get; }
     TimeSpan? UnmaskedMax { get; }
-    TimeSpan? ServicePrincipalMax { get; }
 
     DateTimeOffset EffectiveConsentValidTo(
         GranteeType granteeType,

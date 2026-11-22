@@ -14,7 +14,7 @@ using Autheris.Infrastructure.Persistence.Dialects;
 public partial class GovernanceRepository
 {
     private const string SelectConsentPagePrefix =
-        "SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type, c.grantee_sid, c.valid_from, c.valid_to, c.is_revoked, c.tenant_id, c.renewal_count, t.source_name, t.schema_name, t.table_name, c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at FROM CONSENTS c JOIN TABLES t ON c.table_id = t.id WHERE ";
+        "SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type, c.grantee_sid, c.valid_from, c.valid_to, c.is_revoked, c.tenant_id, c.renewal_count, t.source_name, t.schema_name, t.table_name, c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns FROM CONSENTS c JOIN TABLES t ON c.table_id = t.id WHERE ";
 
     private const string SelectConsentPageSuffix =
         " ORDER BY c.id OFFSET 0 ROWS FETCH NEXT @take ROWS ONLY";
@@ -45,6 +45,11 @@ public partial class GovernanceRepository
         if (!query.IncludeInactive)
         {
             where.Append(" AND c.is_revoked = 0");
+        }
+
+        if (query.GrantKind is { } grantKind)
+        {
+            where.Append(" AND c.grant_kind = @gkind");
         }
 
         if (query.AfterId is not null)
@@ -80,6 +85,11 @@ public partial class GovernanceRepository
             if (query.AfterId is { } after)
             {
                 cmd.AddBound("@after", after.ToString());
+            }
+
+            if (query.GrantKind is { } gkind)
+            {
+                cmd.AddBound("@gkind", gkind.ToSqlString());
             }
 
             await using (var reader = await ExecuteReaderAsync(cmd, "ConsentPage.GetPage", ct).ConfigureAwait(false))

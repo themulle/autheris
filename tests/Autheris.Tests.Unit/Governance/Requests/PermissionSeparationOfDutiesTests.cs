@@ -147,4 +147,168 @@ public sealed class PermissionSeparationOfDutiesTests
             Tenant, principal: null, new Sid($"realm-b|{userKey}"), ctxInB, lookupKeys: null, "realm:realm-a:grp-owners", CancellationToken.None);
         ctxOtherRealmAllow.Allowed.ShouldBeTrue();
     }
+
+    [Fact]
+    public async Task Decider_is_requester_denied()
+    {
+        var sut = new SeparationOfDutiesService();
+        var req = CreateRequest(new Sid("user:alice"), GranteeType.User, "user:bob", ["user:alice", "alice@corp.example"]);
+        var decider = MakeContext("user:alice", extraClaims: [new Claim(ClaimTypes.Email, "ALICE@corp.example")]);
+
+        var decision = await sut.CheckPermissionDecisionAsync(Tenant, decider, req);
+        decision.Allowed.ShouldBeFalse();
+        decision.Kind.ShouldBe(SodViolationKind.SelfApproval);
+    }
+
+    [Fact]
+    public void Decider_is_user_grantee_any_identifier_form_denied()
+    {
+        var sut = new SeparationOfDutiesService();
+        var req = CreateRequest(new Sid("user:requester"), GranteeType.User, "11223344-5566-7788-99aa-bbccddeeff00");
+        var decider = MakeContext("user:bob", oid: "11223344-5566-7788-99AA-BBCCDDEEFF00");
+
+        var decision = sut.CheckPermissionDecision(decider, req, new HashSet<Sid>());
+        decision.Allowed.ShouldBeFalse();
+        decision.Kind.ShouldBe(SodViolationKind.SelfApproval);
+    }
+
+    [Fact]
+    public void Decider_member_of_grantee_group_is_selfgrant()
+    {
+        var sut = new SeparationOfDutiesService();
+        var grpSid = new Sid("group:S-1-5-21-ANALYSTS");
+        var req = CreateRequest(new Sid("user:requester"), GranteeType.Group, grpSid.Value);
+        var decider = MakeContext("user:approver", groups: [grpSid]);
+
+        var decision = sut.CheckPermissionDecision(decider, req, new HashSet<Sid>([grpSid]));
+        decision.Outcome.ShouldBe(SodDecisionOutcome.SelfGrant);
+        decision.Allowed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Transitive_membership_detected()
+    {
+        var realm = new IdentityRealm("default", IdentityRealmKind.GenericOidc, TenantBindingSpecification.Fixed(Tenant));
+        var groupStore = NullFake.Create<IIdentityStoreRepository>((method, _) =>
+        {
+            if (method.Name == nameof(IScimGroupStore.GetEffectiveGroupSidsForUserAsync))
+            {
+                return Task.FromResult(new EffectiveScimGroupsResult(
+                    new HashSet<string>(["group:S-1-5-21-NESTED-PARENT"], StringComparer.OrdinalIgnoreCase),
+                    MaxDepthExceeded: false,
+                    HasNonCanonicalSid: false));
+            }
+
+            if (method.Name == nameof(IScimGroupStore.GetGroupMembershipsForUserAsync))
+            {
+                return Task.FromResult<IReadOnlyList<string>>([]);
+            }
+
+            return NullFake.UseDefault;
+        });
+
+        var sut = new SeparationOfDutiesService(groupStore, new FakeIdentityRealmRegistry([realm], realm));
+        var req = CreateRequest(new Sid("user:requester"), GranteeType.Group, "group:S-1-5-21-NESTED-PARENT");
+        var decider = MakeContext("user:approver");
+
+        var decision = await sut.CheckPermissionDecisionAsync(Tenant, decider, req);
+        decision.Outcome.ShouldBe(SodDecisionOutcome.SelfGrant);
+        decision.Allowed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Degraded_membership_denies()
+    {
+        var sut = new SeparationOfDutiesService();
+        var req = CreateRequest(new Sid("user:requester"), GranteeType.Group, "group:S-1-5-21-ANALYSTS");
+        var decider = MakeContext("user:approver", groupStatus: GroupResolutionStatus.Degraded);
+
+        var decision = await sut.CheckPermissionDecisionAsync(Tenant, decider, req);
+        decision.Allowed.ShouldBeFalse();
+        decision.Outcome.ShouldNotBe(SodDecisionOutcome.SelfGrant);
+    }
+
+    [Fact]
+    public void Email_case_and_unicode_normalised()
+    {
+        var sut = new SeparationOfDutiesService();
+        var req = CreateRequest(new Sid("user:requester"), GranteeType.User, "alice.m\u00FCller@corp.example");
+        var decomposedEmail = "ALICE.MU\u0308LLER@CORP.EXAMPLE";
+        var decider = MakeContext("user:alice", extraClaims: [new Claim(ClaimTypes.Email, decomposedEmail)]);
+
+        var decision = sut.CheckPermissionDecision(decider, req, new HashSet<Sid>());
+        decision.Allowed.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Service_principal_forms()
+    {
+        var sut = new SeparationOfDutiesService();
+        const string clientId = "sp-client-9988";
+        var req = CreateRequest(new Sid("user:requester"), GranteeType.ServicePrincipal, $"sp:{clientId}");
+        var deciderSp = MakeContext($"sp:{clientId}", extraClaims: [new Claim("appid", clientId), new Claim("idtyp", "app")]);
+
+        var decision = sut.CheckPermissionDecision(deciderSp, req, new HashSet<Sid>());
+        decision.Allowed.ShouldBeFalse();
+        decision.Kind.ShouldBe(SodViolationKind.SelfApproval);
+    }
+
+    [Fact]
+    public void External_decider_checked()
+    {
+        var sut = new SeparationOfDutiesService();
+        var req = CreateRequest(new Sid("user:alice"), GranteeType.User, "user:bob", ["user:alice"]);
+        var externalMapped = MakeContext("user:bob");
+
+        var decision = sut.CheckPermissionDecision(externalMapped, req, new HashSet<Sid>());
+        decision.Allowed.ShouldBeFalse();
+    }
+
+    private static ConsentRequest CreateRequest(
+        Sid requesterSid,
+        GranteeType granteeType,
+        string granteeRef,
+        List<string>? requesterIdentifiers = null) =>
+        new()
+        {
+            Id = Guid.NewGuid(),
+            TableIdentifier = new TableIdentifier("fin", "dbo", "ledger"),
+            RequesterSid = requesterSid,
+            RequestedGranteeType = granteeType,
+            RequestedGranteeRef = granteeRef,
+            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(5),
+            TenantId = Tenant,
+            RequesterIdentifiers = requesterIdentifiers ?? [requesterSid.Value]
+        };
+
+    private static SecurityPrincipalContext MakeContext(
+        string sid,
+        string? oid = null,
+        Sid[]? groups = null,
+        GroupResolutionStatus groupStatus = GroupResolutionStatus.Complete,
+        Claim[]? extraClaims = null)
+    {
+        var claims = new List<Claim> { new(ClaimTypes.PrimarySid, sid) };
+        if (!string.IsNullOrWhiteSpace(oid))
+        {
+            claims.Add(new Claim("oid", oid));
+        }
+
+        if (extraClaims is not null)
+        {
+            claims.AddRange(extraClaims);
+        }
+
+        return new SecurityPrincipalContext
+        {
+            UserSid = new Sid(sid),
+            TenantId = Tenant,
+            GroupSids = groups?.ToHashSet() ?? new HashSet<Sid>(),
+            GroupResolutionStatus = groupStatus,
+            TenantRoles = new HashSet<string>(),
+            ClusterRoles = new HashSet<string>(),
+            AuthenticationScheme = "Bearer",
+            Principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer"))
+        };
+    }
 }

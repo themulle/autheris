@@ -248,7 +248,7 @@ public sealed class PatternCoverageMonitor : BackgroundService
                 WorkflowMode = ConsentWorkflowMode.Internal,
                 RequestKind = consent.ProfileAssignmentId.HasValue
                     ? ConsentRequestKind.ProfileAssignment
-                    : ConsentRequestKind.Consent,
+                    : ConsentRequestKind.Data,
                 ProfileId = consent.ProfileAssignmentId
             };
 

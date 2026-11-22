@@ -7,6 +7,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
+using Autheris.Application.Governance.Requests;
 using Autheris.Application.Security;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Model;
@@ -22,7 +23,6 @@ public sealed class ViewDowngradeGuard(
     IAuditWriter audit,
     TimeProvider? timeProvider = null)
 {
-    public const int MinJustificationLength = 10;
     public const int MaxJustificationLength = ProductColumnClassifier.MaxReasonLength;
 
     private readonly IGovernanceCapabilities _capabilities = capabilities ?? throw new ArgumentNullException(nameof(capabilities));
@@ -122,20 +122,13 @@ public sealed class ViewDowngradeGuard(
 
     public static bool TryNormalizeJustification(string? raw, out string? normalized)
     {
-        if (string.IsNullOrWhiteSpace(raw))
+        if (!JustificationPolicy.TryValidate(raw, out var validated, out _) || validated.Length > MaxJustificationLength)
         {
             normalized = null;
             return false;
         }
 
-        var trimmed = new string(raw.Where(c => !char.IsControl(c)).ToArray()).Trim();
-        if (trimmed.Length < MinJustificationLength || trimmed.Length > MaxJustificationLength)
-        {
-            normalized = null;
-            return false;
-        }
-
-        normalized = trimmed;
+        normalized = validated;
         return true;
     }
 }

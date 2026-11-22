@@ -33,6 +33,8 @@ public static class GatewayEventServiceExtensions
             sp.GetService<TimeProvider>() ?? TimeProvider.System));
         services.AddHttpClient<WebhookDeliveryClient>()
             .AddSecureOutboundHandlers(EgressIntegrations.Webhooks);
+        services.AddHttpClient(EgressIntegrations.GovernanceNotifications)
+            .AddSecureOutboundHandlers(EgressIntegrations.GovernanceNotifications);
 
         // The webhook dispatcher, the event bridge and the delivery workers belong to the events module.
         // Configured webhook subscriptions without that module fail startup (see AddGatewayModules).

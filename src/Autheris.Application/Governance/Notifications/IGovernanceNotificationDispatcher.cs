@@ -9,7 +9,9 @@ public sealed record GovernanceNotificationMessage(
     string RealmId,
     string SubjectOrGroupId,
     string Summary,
-    DateTimeOffset OccurredAtUtc);
+    DateTimeOffset OccurredAtUtc,
+    string? ObjectName = null,
+    string? Justification = null);
 
 /// <summary>
 /// Dispatches outbound governance notifications (e.g. webhooks). Default DI registration is a no-op until webhook delivery is configured.

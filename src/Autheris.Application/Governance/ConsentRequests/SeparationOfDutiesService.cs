@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Identity;
@@ -13,12 +14,23 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 
-public enum SodViolationKind { None = 0, SelfApproval = 1, SameApprover = 2 }
+public enum SodViolationKind { None = 0, SelfApproval = 1, SameApprover = 2, SelfGrant = 3 }
 
-public readonly record struct SodDecision(bool Allowed, SodViolationKind Kind = SodViolationKind.None, string Reason = "")
+public enum SodDecisionOutcome { Allow = 0, Deny = 1, SelfGrant = 2 }
+
+public readonly record struct SodDecision(
+    bool Allowed,
+    SodViolationKind Kind = SodViolationKind.None,
+    string Reason = "",
+    SodDecisionOutcome Outcome = SodDecisionOutcome.Deny)
 {
-    public static SodDecision Allow() => new(true);
-    public static SodDecision Deny(SodViolationKind kind, string reason) => new(false, kind, reason);
+    public static SodDecision Allow() => new(true, SodViolationKind.None, string.Empty, SodDecisionOutcome.Allow);
+
+    public static SodDecision Deny(SodViolationKind kind, string reason) =>
+        new(false, kind, reason, SodDecisionOutcome.Deny);
+
+    public static SodDecision SelfGrant(string reason = "Separation of duties detected grantee group membership; requires explicit IT self-grant flow.") =>
+        new(false, SodViolationKind.SelfGrant, reason, SodDecisionOutcome.SelfGrant);
 }
 
 public interface ISeparationOfDutiesService
@@ -31,16 +43,31 @@ public interface ISeparationOfDutiesService
     Task<SodDecision> CheckGroupMembershipAsync(
         TenantId tenantId, ClaimsPrincipal? principal, Sid actorSid, SecurityPrincipalContext? callerContext,
         IReadOnlyCollection<string>? lookupKeys, string? targetGroupRef, CancellationToken ct = default);
+
+    SodDecision CheckPermissionDecision(
+        SecurityPrincipalContext? decider,
+        ConsentRequest request,
+        IReadOnlySet<Sid>? granteeGroupMembersOfDecider) =>
+        SodDecision.Deny(SodViolationKind.SelfApproval, "Separation-of-duties service must implement CheckPermissionDecision.");
+
+    Task<SodDecision> CheckPermissionDecisionAsync(
+        TenantId tenantId,
+        SecurityPrincipalContext? decider,
+        ConsentRequest request,
+        CancellationToken ct = default) =>
+        Task.FromResult(CheckPermissionDecision(decider, request, granteeGroupMembersOfDecider: null));
 }
 
 /// <summary>
 /// Centralized separation-of-duties evaluator enforcing requester, direct grantee, prior-approver,
-/// and fail-closed group membership checks across consent, grant, plan, and recertification flows.
+/// and fail-closed group membership checks across permission requests, decisions, self-grants, and renewals.
 /// </summary>
 public sealed class SeparationOfDutiesService(
     IScimGroupStore? groupStore = null,
     IIdentityRealmRegistry? realmRegistry = null) : ISeparationOfDutiesService
 {
+    private readonly IScimGroupStore? _groupStore = groupStore;
+    private readonly IIdentityRealmRegistry? _realmRegistry = realmRegistry;
     private static readonly string[] ExtraSubjectClaimTypes =
     [
         ClaimTypes.PrimarySid, ClaimTypes.NameIdentifier, "objectSid", "onprem_sid",
@@ -48,6 +75,174 @@ public sealed class SeparationOfDutiesService(
     ];
 
     private static readonly string[] AppIdClaimTypes = ["appid", "azp", "client_id"];
+
+    /// <summary>
+    /// Evaluates per-person separation of duties for a unified permission request decision without consulting prior approval steps.
+    /// Returns <see cref="SodDecisionOutcome.Allow"/>, <see cref="SodDecisionOutcome.Deny"/>, or
+    /// <see cref="SodDecisionOutcome.SelfGrant"/> when the decider belongs to a requested grantee group.
+    /// Degraded group resolution always denies.
+    /// </summary>
+    public SodDecision CheckPermissionDecision(
+        SecurityPrincipalContext? decider,
+        ConsentRequest request,
+        IReadOnlySet<Sid>? granteeGroupMembersOfDecider)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+
+        if (decider is null || !decider.IsAuthenticated)
+        {
+            return SodDecision.Deny(SodViolationKind.SelfApproval, "Separation of duties violated: authenticated decider context is required.");
+        }
+
+        if (decider.GroupResolutionStatus != GroupResolutionStatus.Complete ||
+            GroupResolutionClaims.HasAnyDegradedClaim(decider.Claims) ||
+            IsDegradedGroupOrRoleResolution(decider.Principal))
+        {
+            return SodDecision.Deny(SodViolationKind.SelfApproval, "Separation of duties violated: group resolution is degraded; denied fail-closed.");
+        }
+
+        var actorIds = CollectActorIdentifiers(decider.Principal, decider.UserSid, decider);
+        var spIds = CollectServicePrincipalIdentifiers(
+            decider.Principal,
+            decider.UserSid.Value,
+            string.IsNullOrWhiteSpace(decider.Caller?.ClientId) ? null : [decider.Caller.ClientId!]);
+
+        foreach (var id in spIds)
+        {
+            actorIds.Add(id);
+        }
+
+        var requesterIds = CollectRequesterIdentifiers(request.RequesterSid, request.RequesterIdentifiers);
+        if (actorIds.Overlaps(requesterIds))
+        {
+            return SodDecision.Deny(SodViolationKind.SelfApproval, "Separation of duties violated: the requester cannot decide their own request.");
+        }
+
+        if (request.RequestedGranteeType == GranteeType.User && AnyOverlap(actorIds, request.RequestedGranteeRef))
+        {
+            return SodDecision.Deny(SodViolationKind.SelfApproval, "Separation of duties violated: the requested user grantee cannot decide their own request.");
+        }
+
+        if (request.RequestedGranteeType == GranteeType.ServicePrincipal && AnyOverlap(spIds, request.RequestedGranteeRef))
+        {
+            return SodDecision.Deny(SodViolationKind.SelfApproval, "Separation of duties violated: the requested service principal grantee cannot decide their own request.");
+        }
+
+        if (request.RequestedGranteeType == GranteeType.Group)
+        {
+            if (granteeGroupMembersOfDecider is null)
+            {
+                return SodDecision.Deny(SodViolationKind.SelfApproval, "Separation of duties violated: group membership set is unavailable; denied fail-closed.");
+            }
+
+            var targetForms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            AddIdentifierForms(targetForms, request.RequestedGranteeRef);
+            if (targetForms.Count == 0)
+            {
+                return SodDecision.Deny(SodViolationKind.SelfApproval, "Separation of duties violated: target group reference is missing.");
+            }
+
+            var combinedGroups = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            foreach (var g in decider.GroupSids)
+            {
+                AddIdentifierForms(combinedGroups, g.Value);
+            }
+
+            if (decider.Principal is not null)
+            {
+                foreach (var g in decider.Principal.GetGroupSids())
+                {
+                    AddIdentifierForms(combinedGroups, g.Value);
+                }
+            }
+
+            foreach (var g in granteeGroupMembersOfDecider)
+            {
+                AddIdentifierForms(combinedGroups, g.Value);
+            }
+
+            if (combinedGroups.Overlaps(targetForms))
+            {
+                return SodDecision.SelfGrant("Decider belongs to the requested grantee group.");
+            }
+        }
+
+        return SodDecision.Allow();
+    }
+
+    public async Task<SodDecision> CheckPermissionDecisionAsync(
+        TenantId tenantId,
+        SecurityPrincipalContext? decider,
+        ConsentRequest request,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        if (decider is null || !decider.IsAuthenticated)
+        {
+            return SodDecision.Deny(SodViolationKind.SelfApproval, "Separation of duties violated: authenticated decider context is required.");
+        }
+
+        if (decider.GroupResolutionStatus != GroupResolutionStatus.Complete ||
+            GroupResolutionClaims.HasAnyDegradedClaim(decider.Claims) ||
+            IsDegradedGroupOrRoleResolution(decider.Principal))
+        {
+            return SodDecision.Deny(SodViolationKind.SelfApproval, "Separation of duties violated: group resolution is degraded; denied fail-closed.");
+        }
+
+        var members = new HashSet<Sid>(decider.GroupSids);
+        if (request.RequestedGranteeType == GranteeType.Group && _groupStore is not null)
+        {
+            if (string.IsNullOrWhiteSpace(tenantId.Value))
+            {
+                return SodDecision.Deny(SodViolationKind.SelfApproval, "Separation of duties violated: tenant context is required for group membership verification; denied fail-closed.");
+            }
+
+            var realmId = ResolveRealmId(decider.Principal, decider.UserSid, decider, _realmRegistry);
+            var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            AddLookupKey(keys, decider.UserSid.Value);
+            if (decider.UserSid.Value.StartsWith($"{realmId}|", StringComparison.OrdinalIgnoreCase) && decider.UserSid.Value.Length > realmId.Length + 1)
+            {
+                keys.Add(decider.UserSid.Value[(realmId.Length + 1)..]);
+            }
+
+            foreach (var key in keys)
+            {
+                var effective = await _groupStore.GetEffectiveGroupSidsForUserAsync(tenantId, realmId, key, ct: ct).ConfigureAwait(false);
+                if (effective is null || effective.MaxDepthExceeded || effective.HasNonCanonicalSid)
+                {
+                    return SodDecision.Deny(SodViolationKind.SelfApproval, "Effective group membership depth exceeded or non-canonical SID encountered; denied (fail closed).");
+                }
+
+                foreach (var sid in effective.GroupObjectSids)
+                {
+                    if (!string.IsNullOrWhiteSpace(sid))
+                    {
+                        members.Add(new Sid(sid));
+                    }
+                }
+
+                var directGroups = await _groupStore.GetGroupMembershipsForUserAsync(tenantId, realmId, key, ct).ConfigureAwait(false);
+                if (directGroups is not null)
+                {
+                    foreach (var g in directGroups)
+                    {
+                        if (string.IsNullOrWhiteSpace(g))
+                        {
+                            continue;
+                        }
+
+                        members.Add(new Sid(g));
+                        if (!SidFormat.IsGroupSid(g) && SidFormat.TryFormatRealmGroupKey(realmId, g, out var qualified))
+                        {
+                            members.Add(new Sid(qualified));
+                        }
+                    }
+                }
+            }
+        }
+
+        return CheckPermissionDecision(decider, request, members);
+    }
 
     public async Task<SodDecision> CheckConsentApprovalAsync(
         TenantId tenantId, ConsentRequest request, ClaimsPrincipal? principal, Sid approverSid,
@@ -103,7 +298,7 @@ public sealed class SeparationOfDutiesService(
         if (directSids.Overlaps(targetForms))
             return SodDecision.Deny(SodViolationKind.SelfApproval, "Separation of duties violated: a member of the requested target group cannot approve the request.");
 
-        if (groupStore is null) return SodDecision.Allow();
+        if (_groupStoreAccess is null) return SodDecision.Allow();
         if (string.IsNullOrWhiteSpace(tenantId.Value))
             return SodDecision.Deny(SodViolationKind.SelfApproval, "Separation of duties violated: tenant context is required for group membership verification; denied fail-closed.");
 
@@ -118,7 +313,7 @@ public sealed class SeparationOfDutiesService(
             if (callerContext is not null) AddLookupKey(keys, callerContext.UserSid.Value);
         }
 
-        var realmId = ResolveRealmId(principal, actorSid, callerContext, realmRegistry);
+        var realmId = ResolveRealmId(principal, actorSid, callerContext, _realmRegistry);
         foreach (var existingKey in keys.ToList())
         {
             if (existingKey.StartsWith($"{realmId}|", StringComparison.OrdinalIgnoreCase) && existingKey.Length > realmId.Length + 1)
@@ -127,13 +322,13 @@ public sealed class SeparationOfDutiesService(
 
         foreach (var key in keys)
         {
-            var effective = await groupStore.GetEffectiveGroupSidsForUserAsync(tenantId, realmId, key, ct: ct).ConfigureAwait(false);
+            var effective = await _groupStoreAccess.GetEffectiveGroupSidsForUserAsync(tenantId, realmId, key, ct: ct).ConfigureAwait(false);
             if (effective is null || effective.MaxDepthExceeded || effective.HasNonCanonicalSid)
                 return SodDecision.Deny(SodViolationKind.SelfApproval, "Effective group membership depth exceeded or non-canonical SID encountered; denied (fail closed).");
             if (effective.GroupObjectSids.Any(g => AnyOverlap(targetForms, g)))
                 return SodDecision.Deny(SodViolationKind.SelfApproval, "Separation of duties violated: a member of the requested target group cannot approve the request.");
 
-            var directGroups = await groupStore.GetGroupMembershipsForUserAsync(tenantId, realmId, key, ct).ConfigureAwait(false);
+            var directGroups = await _groupStoreAccess.GetGroupMembershipsForUserAsync(tenantId, realmId, key, ct).ConfigureAwait(false);
             if (directGroups is not null && directGroups.Any(g =>
                     AnyOverlap(targetForms, g)
                     || (!SidFormat.IsGroupSid(g) && SidFormat.TryFormatRealmGroupKey(realmId, g, out var qualified) && AnyOverlap(targetForms, qualified))))
@@ -142,6 +337,8 @@ public sealed class SeparationOfDutiesService(
 
         return SodDecision.Allow();
     }
+
+    private readonly IScimGroupStore? _groupStoreAccess = groupStore;
 
     public static bool IsDegradedGroupOrRoleResolution(ClaimsPrincipal? principal) =>
         principal is not null &&
@@ -159,11 +356,17 @@ public sealed class SeparationOfDutiesService(
         AddIdentifierForms(ids, fallbackSid);
         if (principal is not null)
         {
+            var realmId = principal.FindFirst("autheris:realm")?.Value;
             var isPipelineBound = HasRealmBoundPipelinePrimarySid(principal);
             foreach (var id in principal.GetUserIdentifiers()) AddIdentifierForms(ids, id);
             foreach (var claim in principal.Claims)
-                if (ExtraSubjectClaimTypes.Contains(claim.Type, StringComparer.OrdinalIgnoreCase) && !(isPipelineBound && IsRawCrossRealmSubjectClaim(claim.Type)))
-                    AddIdentifierForms(ids, claim.Value);
+                if (ExtraSubjectClaimTypes.Contains(claim.Type, StringComparer.OrdinalIgnoreCase))
+                {
+                    if (!(isPipelineBound && IsRawCrossRealmSubjectClaim(claim.Type)))
+                        AddIdentifierForms(ids, claim.Value);
+                    else if (!string.IsNullOrWhiteSpace(realmId) && !string.IsNullOrWhiteSpace(claim.Value))
+                        AddIdentifierForms(ids, $"{realmId}|{claim.Value}");
+                }
         }
 
         if (additional is not null)
@@ -198,8 +401,13 @@ public sealed class SeparationOfDutiesService(
             foreach (var id in principal.GetUserIdentifiers()) AddIdentifierForms(ids, id, includeLocalAccountForms: true);
             foreach (var claim in principal.Claims)
             {
-                if (ExtraSubjectClaimTypes.Contains(claim.Type, StringComparer.OrdinalIgnoreCase) && !(isPipelineBound && IsRawCrossRealmSubjectClaim(claim.Type)))
-                    AddIdentifierForms(ids, claim.Value, includeLocalAccountForms: true);
+                if (ExtraSubjectClaimTypes.Contains(claim.Type, StringComparer.OrdinalIgnoreCase))
+                {
+                    if (!(isPipelineBound && IsRawCrossRealmSubjectClaim(claim.Type)))
+                        AddIdentifierForms(ids, claim.Value, includeLocalAccountForms: true);
+                    else if (!string.IsNullOrWhiteSpace(realmId) && !string.IsNullOrWhiteSpace(claim.Value))
+                        AddIdentifierForms(ids, $"{realmId}|{claim.Value}", includeLocalAccountForms: false);
+                }
                 else if (AppIdClaimTypes.Contains(claim.Type, StringComparer.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(claim.Value))
                     AddIdentifierForms(ids, QualifyAppClaim(claim.Value, realmId, isPipelineBound), includeLocalAccountForms: true);
             }
@@ -210,6 +418,32 @@ public sealed class SeparationOfDutiesService(
         if (callerContext is not null)
         {
             AddIdentifierForms(ids, callerContext.UserSid.Value, includeLocalAccountForms: true);
+            if (!string.IsNullOrWhiteSpace(callerContext.Caller?.ClientId))
+            {
+                var realmId = callerContext.Principal?.FindFirst("autheris:realm")?.Value;
+                var isPipelineBound = HasRealmBoundPipelinePrimarySid(callerContext.Principal);
+                AddIdentifierForms(ids, QualifyAppClaim(callerContext.Caller!.ClientId!, realmId, isPipelineBound), includeLocalAccountForms: true);
+            }
+
+            if (callerContext.Claims is not null)
+            {
+                var isPipelineBound = HasRealmBoundPipelinePrimarySid(callerContext.Principal);
+                var realmId = callerContext.Principal?.FindFirst("autheris:realm")?.Value
+                    ?? callerContext.Claims.FirstOrDefault(c => string.Equals(c.Type, "autheris:realm", StringComparison.OrdinalIgnoreCase))?.Value;
+                foreach (var claim in callerContext.Claims)
+                {
+                    if (ExtraSubjectClaimTypes.Contains(claim.Type, StringComparer.OrdinalIgnoreCase))
+                    {
+                        if (!(isPipelineBound && IsRawCrossRealmSubjectClaim(claim.Type)))
+                            AddIdentifierForms(ids, claim.Value, includeLocalAccountForms: true);
+                        else if (!string.IsNullOrWhiteSpace(realmId) && !string.IsNullOrWhiteSpace(claim.Value))
+                            AddIdentifierForms(ids, $"{realmId}|{claim.Value}", includeLocalAccountForms: false);
+                    }
+                    else if (AppIdClaimTypes.Contains(claim.Type, StringComparer.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(claim.Value))
+                        AddIdentifierForms(ids, QualifyAppClaim(claim.Value, realmId, isPipelineBound), includeLocalAccountForms: true);
+                }
+            }
+
             foreach (var g in callerContext.GroupSids) AddIdentifierForms(ids, g.Value, includeLocalAccountForms: true);
             foreach (var r in callerContext.TenantRoles.Concat(callerContext.ClusterRoles)) AddIdentifierForms(ids, r, includeLocalAccountForms: true);
         }
@@ -277,17 +511,22 @@ public sealed class SeparationOfDutiesService(
     public static void AddIdentifierForms(ISet<string> target, string? value, bool includeLocalAccountForms = false)
     {
         if (string.IsNullOrWhiteSpace(value)) return;
-        var v = value.Trim();
+        var v = NormalizeIdentifier(value);
+        if (v.Length == 0) return;
         var realmQualified = IsRealmQualifiedIdentifier(v);
         AddSingleForm(target, v, includeLocalAccountForms && !realmQualified);
         if (!realmQualified && TryStripEntityTypePrefix(v, out var stripped))
             AddSingleForm(target, stripped, includeLocalAccountForms && !IsRealmQualifiedIdentifier(stripped));
     }
 
+    private static string NormalizeIdentifier(string value) =>
+        value.Trim().Normalize(NormalizationForm.FormKC);
+
     private static void AddLookupKey(ISet<string> keys, string? raw)
     {
         if (string.IsNullOrWhiteSpace(raw)) return;
-        var v = raw.Trim();
+        var v = NormalizeIdentifier(raw);
+        if (v.Length == 0) return;
         keys.Add(v);
         if (!IsRealmQualifiedIdentifier(v) && TryStripEntityTypePrefix(v, out var stripped)) keys.Add(stripped);
     }
@@ -333,9 +572,10 @@ public sealed class SeparationOfDutiesService(
 
     private static void AddSingleForm(ISet<string> target, string v, bool includeLocalAccountForms)
     {
-        v = v.Trim();
+        v = NormalizeIdentifier(v);
         if (v.Length == 0) return;
         target.Add(v);
+        target.Add(v.ToUpperInvariant());
         if (!includeLocalAccountForms) return;
         var slash = v.LastIndexOf('\\', StringComparison.Ordinal);
         if (slash >= 0 && slash < v.Length - 1) target.Add(v[(slash + 1)..]);

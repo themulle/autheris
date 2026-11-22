@@ -20,6 +20,7 @@ public partial class GovernanceRepository
                                JOIN TABLES t ON c.table_id = t.id
                                WHERE c.tenant_id = @tenantId
                                  AND c.is_revoked = 0
+                                 AND c.grant_kind = 'DATA'
                                  AND UPPER(c.effect) = 'ALLOW'
                                  AND (LOWER(c.grantee_sid) = LOWER(@sid) OR LOWER(COALESCE(c.grantee_sid_norm, '')) = LOWER(@sidNorm))
                                  AND c.valid_to >= @since

@@ -407,6 +407,58 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
         (await Repo.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("PENDING");
     }
 
+    [RuntimeSkippableFact]
+    [Trait("Category", "Security")]
+    public async Task Concurrent_deciders_exactly_one_grant()
+    {
+        RequireAvailable();
+        var approverA = await NewApproverAsync();
+        var approverB = await NewApproverAsync();
+        var req = await NewRequestAsync(fourEyes: false);
+
+        Task<Autheris.Application.Governance.Requests.DecisionCasResult> RunDeciderAsync(string approverSid) =>
+            Repo.TryDecideAsync(
+                req.Id,
+                expectedVersion: 1,
+                (_, lockedReq) => Task.FromResult(new Autheris.Application.Governance.Requests.PermissionDecisionRecord(
+                    NewStatus: "APPROVED",
+                    DecidedBy: new Sid(approverSid),
+                    DecidedAt: DateTimeOffset.UtcNow,
+                    Capacity: ApproverCapacity.DataOwner,
+                    SelfGrant: false,
+                    StepDecision: "APPROVED",
+                    Reason: null,
+                    ApprovedValidTo: lockedReq.RequestedValidTo)),
+                async (tx, decision, updatedReq) =>
+                {
+                    await using var insertCmd = tx.Connection.CreateCommand();
+                    insertCmd.Transaction = tx.Transaction;
+                    insertCmd.CommandText = @"INSERT INTO CONSENTS (id, table_id, consent_request_id, effect, grantee_type, grantee_sid, grantee_sid_norm, valid_from, valid_to, is_revoked, tenant_id, grant_source, grant_kind, approver_capacity, self_grant)
+                                              VALUES (@cid, @tid, @rid, 'ALLOW', @gt, @gs, @gn, @vf, @vt, 0, @tenant, 'CONSENT_REQUEST', 'DATA', @cap, @sg)";
+                    var consentId = Guid.NewGuid();
+                    var p = insertCmd.CreateParameter(); p.ParameterName = "@cid"; p.Value = consentId.ToString("D"); insertCmd.Parameters.Add(p);
+                    var p2 = insertCmd.CreateParameter(); p2.ParameterName = "@tid"; p2.Value = updatedReq.TableId.ToString("D"); insertCmd.Parameters.Add(p2);
+                    var p3 = insertCmd.CreateParameter(); p3.ParameterName = "@rid"; p3.Value = updatedReq.Id.ToString("D"); insertCmd.Parameters.Add(p3);
+                    var p4 = insertCmd.CreateParameter(); p4.ParameterName = "@gt"; p4.Value = updatedReq.RequestedGranteeType.ToString(); insertCmd.Parameters.Add(p4);
+                    var p5 = insertCmd.CreateParameter(); p5.ParameterName = "@gs"; p5.Value = updatedReq.RequestedGranteeRef; insertCmd.Parameters.Add(p5);
+                    var p6 = insertCmd.CreateParameter(); p6.ParameterName = "@gn"; p6.Value = updatedReq.RequestedGranteeRef.ToUpperInvariant(); insertCmd.Parameters.Add(p6);
+                    var p7 = insertCmd.CreateParameter(); p7.ParameterName = "@vf"; p7.Value = decision.DecidedAt.ToString("O"); insertCmd.Parameters.Add(p7);
+                    var p8 = insertCmd.CreateParameter(); p8.ParameterName = "@vt"; p8.Value = decision.ApprovedValidTo.ToString("O"); insertCmd.Parameters.Add(p8);
+                    var p9 = insertCmd.CreateParameter(); p9.ParameterName = "@tenant"; p9.Value = updatedReq.TenantId.Value; insertCmd.Parameters.Add(p9);
+                    var p10 = insertCmd.CreateParameter(); p10.ParameterName = "@cap"; p10.Value = decision.Capacity.ToSqlString(); insertCmd.Parameters.Add(p10);
+                    var p11 = insertCmd.CreateParameter(); p11.ParameterName = "@sg"; p11.Value = false; insertCmd.Parameters.Add(p11);
+                    await insertCmd.ExecuteNonQueryAsync();
+                    return [new Autheris.Application.Governance.Requests.GrantRef(consentId, PermissionGrantKind.Data, updatedReq.TableIdentifier)];
+                });
+
+        var results = await Task.WhenAll(RunDeciderAsync(approverA), RunDeciderAsync(approverB));
+        results.Count(r => r.Outcome == Autheris.Application.Governance.Requests.DecisionCasOutcome.Applied).ShouldBe(1);
+        results.Count(r => r.Outcome == Autheris.Application.Governance.Requests.DecisionCasOutcome.AlreadyDecided).ShouldBe(1);
+        (await CountApprovalStepsAsync(req.Id)).ShouldBe(1);
+        var active = await Repo.GetActiveConsentsByConsentRequestIdAsync(req.Id, DateTimeOffset.UtcNow);
+        active.Count.ShouldBe(1);
+    }
+
     /// <summary>True when the call succeeded, false when it lost with exactly <typeparamref name="TLoser"/>; any other exception propagates and fails the test.</summary>
     private static async Task<bool> Attempt<TLoser>(Func<Task<ConsentRequest>> action, bool exact = false)
         where TLoser : InvalidOperationException

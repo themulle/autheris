@@ -3,6 +3,7 @@ namespace Autheris.Application.Governance.Grants;
 using System;
 using System.Collections.Generic;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 
 /// <summary>Every path that writes a grant. Used for classification, audit and the architecture test.</summary>
 public enum GrantKind
@@ -23,25 +24,20 @@ public enum GrantSensitivity
     Sensitive = 1
 }
 
-/// <summary>Resulting class of a grant; selects the maximum duration and the recertification cadence.</summary>
+/// <summary>Resulting capacity/standing class of a grant; determines maximum duration.</summary>
 public enum GrantClass
 {
-    /// <summary>Group/role grantee: not an individual grant, not limited by this policy.</summary>
+    /// <summary>Group/role deny or legacy standing grant.</summary>
     Standing,
-    Regular,
-    Sensitive,
-    IndividualUnmasked,
-    IndividualPrivileged,
-    ServicePrincipal,
-    CustomerRegular
+    DataOwner,
+    Governance,
+    ItAdmin,
+    SelfGrant
 }
 
-/// <param name="Approvers">
-/// Null when the grant is only being validated before approval (request time); a list (possibly empty) when approvals are being
-/// enforced at activation time. Four-eyes is enforced only when this is not null.
-/// </param>
-/// <param name="Effect">A <see cref="ConsentEffect.Deny"/> only restricts access: it is never limited (no expiry, no maximum) and never clamped, because an expiring deny would fail open.</param>
-/// <param name="Renewer">The actor of a renewal. A renewal by the grantee is always rejected.</param>
+/// <summary>
+/// Input to <see cref="IGrantPolicy"/> evaluation across legacy and capacity-based permission flows.
+/// </summary>
 public sealed record GrantRequest(
     GranteeType GranteeType,
     string GranteeRef,
@@ -57,9 +53,14 @@ public sealed record GrantRequest(
     string? Renewer = null,
     int RenewalCount = 0,
     string? Justification = null,
-    ConsentEffect Effect = ConsentEffect.Allow);
+    ConsentEffect Effect = ConsentEffect.Allow,
+    ConsentRequestKind? RequestKind = null,
+    ApproverCapacity? Capacity = null,
+    bool SelfGrant = false,
+    ProtectionClass ProtectionClass = ProtectionClass.Confidential,
+    TenantAccessPolicy? TenantPolicy = null);
 
-/// <param name="ErrorCode">Stable machine code when <see cref="Allowed"/> is false (HTTP 400/403 mapping by the caller).</param>
+/// <param name="ErrorCode">Stable machine code when <see cref="Allowed"/> is false (HTTP 400/422/403 mapping by the caller).</param>
 public sealed record GrantDecision(
     bool Allowed,
     DateTimeOffset? MaxValidTo,
@@ -70,20 +71,24 @@ public sealed record GrantDecision(
     bool SuggestRoleConversion = false,
     bool RequiresCampaignDecision = false)
 {
-    public static GrantDecision Deny(string errorCode, string reason, GrantClass cls = GrantClass.Regular, DateTimeOffset? maxValidTo = null) =>
-        new(false, maxValidTo, true, cls, reason, errorCode);
+    public static GrantDecision Deny(string errorCode, string reason, GrantClass cls = GrantClass.DataOwner, DateTimeOffset? maxValidTo = null) =>
+        new(false, maxValidTo, false, cls, reason, errorCode);
 }
 
 public static class GrantErrorCodes
 {
     public const string RequiresExpiry = "INDIVIDUAL_GRANT_REQUIRES_EXPIRY";
+    public const string EndDateRequired = "GRANT_END_DATE_REQUIRED";
     public const string ExpiryInPast = "INDIVIDUAL_GRANT_EXPIRY_IN_PAST";
     public const string ExceedsMaximum = "INDIVIDUAL_GRANT_EXCEEDS_MAXIMUM";
+    public const string ExceedsApproverLimit = "GRANT_DURATION_EXCEEDS_APPROVER_LIMIT";
     public const string FourEyesRequired = "INDIVIDUAL_GRANT_REQUIRES_FOUR_EYES";
     public const string RenewalByGrantee = "INDIVIDUAL_GRANT_RENEWAL_BY_GRANTEE";
     public const string RenewalRequiresCampaign = "INDIVIDUAL_GRANT_RENEWAL_REQUIRES_CAMPAIGN";
     public const string DisabledForRealm = "INDIVIDUAL_GRANT_DISABLED_FOR_REALM";
     public const string JustificationRequired = "INDIVIDUAL_GRANT_REQUIRES_JUSTIFICATION";
+    public const string SelfGrantSecretRefused = "SELF_GRANT_SECRET_REFUSED";
+    public const string SelfGrantExceedsCeiling = "SELF_GRANT_EXCEEDS_CEILING";
     public const string Indeterminate = "INDIVIDUAL_GRANT_INDETERMINATE";
 }
 
@@ -93,17 +98,14 @@ public interface IGrantPolicy
     GrantDecision Evaluate(GrantRequest request);
 }
 
-/// <summary>Thrown by write paths when <see cref="IGrantPolicy"/> denies a grant. Endpoints map it to HTTP 400 with <see cref="ErrorCode"/>.</summary>
+/// <summary>Thrown by write paths when <see cref="IGrantPolicy"/> denies a grant. Endpoints map it to HTTP 400/422 with <see cref="ErrorCode"/>.</summary>
 public sealed class GrantPolicyViolationException(GrantDecision decision)
     : InvalidOperationException(decision.Reason)
 {
     public string ErrorCode { get; } = decision.ErrorCode ?? GrantErrorCodes.Indeterminate;
-
     public DateTimeOffset? MaxValidTo { get; } = decision.MaxValidTo;
-
     public GrantDecision Decision { get; } = decision;
 
-    /// <summary>Returns when allowed, otherwise throws.</summary>
     public static void ThrowIfDenied(GrantDecision decision)
     {
         ArgumentNullException.ThrowIfNull(decision);

@@ -334,6 +334,17 @@ public interface IConsentRepository
     Task<IReadOnlyList<Consent>> GetActiveInternalPatternConsentsAsync(
         DateTimeOffset atTime, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<Consent>>([]);
+
+    /// <summary>
+    /// Returns active non-revoked <see cref="PermissionGrantKind.Unmask"/> grants covering <paramref name="subjects"/> on <paramref name="table"/>.
+    /// </summary>
+    Task<IReadOnlyList<Consent>> GetActiveUnmaskGrantsForSubjectsAsync(
+        IEnumerable<Sid> subjects,
+        TableIdentifier table,
+        DateTimeOffset atTime,
+        TenantId tenantId,
+        CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<Consent>>([]);
 }
 
 
@@ -460,6 +471,28 @@ public interface IConsentApprovalRepository
         => requireSecondApprover
             ? throw new NotSupportedException($"{GetType().Name} does not support enforcing a second approver on external approval steps.")
             : ApproveExternalConsentRequestStepAsync(requestId, attribution, effectiveApproverSid, ct);
+
+    /// <summary>
+    /// Counts pending permission requests submitted by <paramref name="requesterSid"/> in <paramref name="tenantId"/>.
+    /// </summary>
+    Task<int> CountPendingRequestsForRequesterAsync(
+        TenantId tenantId,
+        Sid requesterSid,
+        CancellationToken ct = default) =>
+        Task.FromResult(0);
+
+    /// <summary>
+    /// Atomically locks the request row, evaluates state inside the transaction, executes <paramref name="decideInTransaction"/>,
+    /// performs the versioned CAS update (<c>WHERE id = @id AND status = 'PENDING' AND version = @expected</c>), inserts the single
+    /// <c>APPROVAL_STEPS</c> row, and invokes <paramref name="applyEffect"/> (on approval) within the same database transaction.
+    /// </summary>
+    Task<Autheris.Application.Governance.Requests.DecisionCasResult> TryDecideAsync(
+        Guid requestId,
+        int expectedVersion,
+        Func<Autheris.Application.Governance.Requests.IGovernanceTransaction, ConsentRequest, Task<Autheris.Application.Governance.Requests.PermissionDecisionRecord>> decideInTransaction,
+        Func<Autheris.Application.Governance.Requests.IGovernanceTransaction, Autheris.Application.Governance.Requests.PermissionDecisionRecord, ConsentRequest, Task<IReadOnlyList<Autheris.Application.Governance.Requests.GrantRef>>> applyEffect,
+        CancellationToken ct = default) =>
+        throw new NotSupportedException($"{GetType().Name} does not implement atomic single-transaction request decisions.");
 
     Task<Consent> ExecuteExternalAtomicApprovalWithConsentAsync(
         Guid requestId,

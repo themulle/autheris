@@ -606,7 +606,7 @@ public sealed class AccessProfileTests
         var (status, body) = await ExecuteResultAsync(result, context);
 
         status.ShouldBe(StatusCodes.Status400BadRequest);
-        body.ShouldContain("Justification is required and must be at least 15 characters long");
+        body.ShouldContain("Justification is required and must be between 10 and 2000 characters long");
     }
 
     [Theory]

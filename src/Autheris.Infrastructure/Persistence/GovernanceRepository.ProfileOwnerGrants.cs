@@ -91,7 +91,8 @@ SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
        c.grantee_sid, c.valid_from, c.valid_to,
        c.is_revoked, c.tenant_id, c.renewal_count,
        c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at,
-       t.source_name, t.schema_name, t.table_name
+       t.source_name, t.schema_name, t.table_name,
+       c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns
 FROM CONSENTS c
 JOIN TABLES t ON c.table_id = t.id
 WHERE c.table_id = @tid
@@ -110,7 +111,8 @@ SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
        c.is_revoked, c.tenant_id, c.renewal_count,
        c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at,
        t.source_name, t.schema_name, t.table_name,
-       c.object_pattern, c.data_source, c.column_set_mode, c.workflow_mode, c.profile_item_no
+       c.object_pattern, c.data_source, c.column_set_mode, c.workflow_mode, c.profile_item_no,
+       c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns
 FROM CONSENTS c
 LEFT JOIN TABLES t ON c.table_id = t.id
 WHERE c.tenant_id = @tenantId
@@ -443,6 +445,7 @@ WHERE c.tenant_id = @tenantId
             ? default
             : new TableIdentifier(reader.GetString(15), reader.GetString(16), reader.GetString(17));
 
+        var kindOrdinal = hasPatternCols ? 23 : 18;
         return new Consent
         {
             Id = Guid.Parse(reader.GetString(0)),
@@ -469,7 +472,11 @@ WHERE c.tenant_id = @tenantId
             WorkflowMode = hasPatternCols
                 ? ConsentWorkflowSqlMapping.ParseWorkflowModeOrDefault(ConsentWorkflowSql.ReadOptionalString(reader, 21))
                 : ConsentWorkflowMode.Internal,
-            ProfileItemNo = hasPatternCols && reader.FieldCount > 22 && !reader.IsDBNull(22) ? reader.GetInt32(22) : null
+            ProfileItemNo = hasPatternCols && reader.FieldCount > 22 && !reader.IsDBNull(22) ? reader.GetInt32(22) : null,
+            GrantKind = ConsentWorkflowSql.ReadGrantKind(reader, kindOrdinal),
+            ApproverCapacity = ConsentWorkflowSql.ReadApproverCapacity(reader, kindOrdinal + 1),
+            SelfGrant = ConsentWorkflowSql.ReadBooleanOrFalse(reader, kindOrdinal + 2),
+            TargetColumns = ConsentWorkflowSql.ReadTargetColumns(reader, kindOrdinal + 3)
         };
     }
 }
