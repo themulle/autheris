@@ -1,0 +1,106 @@
+{
+  "ops": [
+    {
+      "op": "addTable",
+      "table": "governance_domains",
+      "newTable": {
+        "name": "governance_domains",
+        "columns": [
+          { "name": "tenant_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "id", "type": "CHARACTER VARYING(36)", "family": "string", "nullable": false },
+          { "name": "name", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "description", "type": "CHARACTER VARYING(1024)", "family": "string", "nullable": true },
+          { "name": "contact", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": true },
+          { "name": "owner_group_sid", "type": "CHARACTER VARYING(184)", "family": "string", "nullable": true },
+          { "name": "default_class", "type": "CHARACTER VARYING(16)", "family": "string", "nullable": true },
+          { "name": "visibility", "type": "CHARACTER VARYING(16)", "family": "string", "nullable": false },
+          { "name": "is_system", "type": "BOOLEAN", "family": "boolean", "nullable": false },
+          { "name": "version", "type": "INTEGER", "family": "integer", "nullable": false },
+          { "name": "created_by", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "created_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false },
+          { "name": "updated_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "id"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addIndex",
+      "table": "governance_domains",
+      "name": "ux_governance_domains_name",
+      "unique": true,
+      "columns": ["tenant_id", "name"]
+    },
+    {
+      "op": "addTable",
+      "table": "governance_domain_tables",
+      "newTable": {
+        "name": "governance_domain_tables",
+        "columns": [
+          { "name": "tenant_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "table_id", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "domain_id", "type": "CHARACTER VARYING(36)", "family": "string", "nullable": false },
+          { "name": "assigned_by", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "assigned_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "table_id"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addIndex",
+      "table": "governance_domain_tables",
+      "name": "ix_governance_domain_tables_domain",
+      "unique": false,
+      "columns": ["tenant_id", "domain_id"]
+    },
+    {
+      "op": "addTable",
+      "table": "object_protection",
+      "newTable": {
+        "name": "object_protection",
+        "columns": [
+          { "name": "tenant_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "table_id", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "column_name", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "protection_class", "type": "CHARACTER VARYING(16)", "family": "string", "nullable": true },
+          { "name": "mask_category", "type": "CHARACTER VARYING(64)", "family": "string", "nullable": true },
+          { "name": "updated_by", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "updated_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "table_id", "column_name"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "access_policy_settings",
+      "newTable": {
+        "name": "access_policy_settings",
+        "columns": [
+          { "name": "tenant_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "settings_json", "type": "TEXT", "family": "string", "nullable": false },
+          { "name": "version", "type": "INTEGER", "family": "integer", "nullable": false },
+          { "name": "updated_by", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "updated_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "governance_epochs",
+      "newTable": {
+        "name": "governance_epochs",
+        "columns": [
+          { "name": "tenant_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "epoch", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "updated_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id"],
+        "indexes": []
+      }
+    }
+  ]
+}
