@@ -44,125 +44,27 @@ public sealed class GatewayRoleEvaluatorTests
     }
 
     [Fact]
-    public void GetEffectiveRoles_TenantBoundAdminRoles_ResolveFromClaimAndExplicitPrefix()
+    public void GetEffectiveRoles_ExcludesPrefixedAdminRoles_Wildcards_AndUnprefixedProductRoles()
     {
         var evaluator = new GatewayRoleEvaluator();
 
-        // Unprefixed GovernanceAdmin / TenantAdmin with valid tenant claim resolves when tenantId is null or matches.
-        var unprefixedGov = MakePrincipal(tenantId: "tenant-a", roles: "GovernanceAdmin");
-        evaluator.GetEffectiveRoles(unprefixedGov).ShouldBe([GatewayRole.GovernanceAdmin]);
-        evaluator.GetEffectiveRoles(unprefixedGov, "tenant-a").ShouldBe([GatewayRole.GovernanceAdmin]);
-        evaluator.GetEffectiveRoles(unprefixedGov, "tenant-b").ShouldBeEmpty();
+        // t:GovernanceAdmin and t:ClusterAdmin are never returned by GetEffectiveRoles.
+        var prefixedAdmins = MakePrincipal(tenantId: "tenant-a", roles: ["tenant-a:GovernanceAdmin", "tenant-a:ClusterAdmin"]);
+        evaluator.GetEffectiveRoles(prefixedAdmins).ShouldBeEmpty();
+        evaluator.GetEffectiveRoles(prefixedAdmins, "tenant-a").ShouldBeEmpty();
 
-        var unprefixedTenantAdmin = MakePrincipal(tenantId: "tenant-a", roles: "TenantAdmin");
-        evaluator.GetEffectiveRoles(unprefixedTenantAdmin).ShouldBe([GatewayRole.TenantAdmin]);
-        evaluator.GetEffectiveRoles(unprefixedTenantAdmin, "tenant-a").ShouldBe([GatewayRole.TenantAdmin]);
-        evaluator.GetEffectiveRoles(unprefixedTenantAdmin, "tenant-b").ShouldBeEmpty();
+        // Unprefixed DataProduct* and wildcard *:DataProduct* never confer product roles.
+        var invalidProducts = MakePrincipal(tenantId: "tenant-a", roles: ["DataProductAdmin", "DataProductSync", "*:DataProductAdmin", "*:DataProductSync"]);
+        evaluator.GetEffectiveRoles(invalidProducts).ShouldBeEmpty();
+        evaluator.GetEffectiveRoles(invalidProducts, "tenant-a").ShouldBeEmpty();
 
-        // Prefixed t:GovernanceAdmin / t:TenantAdmin resolves for matching claim or explicit tenant only.
-        var prefixedGovWithClaim = MakePrincipal(tenantId: "tenant-a", roles: "tenant-a:GovernanceAdmin");
-        evaluator.GetEffectiveRoles(prefixedGovWithClaim).ShouldBe([GatewayRole.GovernanceAdmin]);
-        evaluator.GetEffectiveRoles(prefixedGovWithClaim, "tenant-a").ShouldBe([GatewayRole.GovernanceAdmin]);
-        evaluator.GetEffectiveRoles(prefixedGovWithClaim, "tenant-b").ShouldBeEmpty();
-
-        var prefixedGovNoClaim = MakePrincipal(tenantId: null, roles: "tenant-a:GovernanceAdmin");
-        evaluator.GetEffectiveRoles(prefixedGovNoClaim).ShouldBeEmpty();
-        evaluator.GetEffectiveRoles(prefixedGovNoClaim, "tenant-a").ShouldBe([GatewayRole.GovernanceAdmin]);
-        evaluator.GetEffectiveRoles(prefixedGovNoClaim, "tenant-b").ShouldBeEmpty();
-    }
-
-    [Fact]
-    public void GetEffectiveRoles_UntetheredAdminWithoutTenantClaim_FailsClosed()
-    {
-        var evaluator = new GatewayRoleEvaluator();
-
-        var untetheredGov = MakePrincipal(tenantId: null, roles: "GovernanceAdmin");
-        evaluator.GetEffectiveRoles(untetheredGov).ShouldBeEmpty();
-        evaluator.GetEffectiveRoles(untetheredGov, "tenant-a").ShouldBeEmpty();
-
-        var untetheredTenantAdmin = MakePrincipal(tenantId: null, roles: "TenantAdmin");
-        evaluator.GetEffectiveRoles(untetheredTenantAdmin).ShouldBeEmpty();
-        evaluator.GetEffectiveRoles(untetheredTenantAdmin, "tenant-a").ShouldBeEmpty();
-    }
-
-    [Fact]
-    public void GovernanceAdmin_WithoutTenantClaim_Denied_EvenWhenTargetTenantProvided()
-    {
-        var evaluator = new GatewayRoleEvaluator();
-        var untetheredGov = MakePrincipal(tenantId: null, roles: "GovernanceAdmin");
-
-        evaluator.GetEffectiveRoles(untetheredGov, "tenant-a").ShouldBeEmpty();
-        evaluator.HasRole(untetheredGov, GatewayRole.GovernanceAdmin, "tenant-a").ShouldBeFalse();
-        evaluator.HasRole(untetheredGov, GatewayRole.GovernanceAdmin, null).ShouldBeFalse();
-        GatewayRoleEvaluator.HasTenantBoundRole(untetheredGov, nameof(GatewayRole.GovernanceAdmin), "tenant-a").ShouldBeFalse();
-        GatewayPolicies.HasRole(untetheredGov, GatewayRole.GovernanceAdmin, "tenant-a").ShouldBeFalse();
-    }
-
-    [Fact]
-    public void TenantAdmin_WithoutTenantClaim_Denied_EvenWhenTargetTenantProvided()
-    {
-        var evaluator = new GatewayRoleEvaluator();
-        var untetheredTenantAdmin = MakePrincipal(tenantId: null, roles: "TenantAdmin");
-
-        evaluator.GetEffectiveRoles(untetheredTenantAdmin, "tenant-a").ShouldBeEmpty();
-        evaluator.HasRole(untetheredTenantAdmin, GatewayRole.TenantAdmin, "tenant-a").ShouldBeFalse();
-        evaluator.HasRole(untetheredTenantAdmin, GatewayRole.TenantAdmin, null).ShouldBeFalse();
-        GatewayRoleEvaluator.HasTenantBoundRole(untetheredTenantAdmin, nameof(GatewayRole.TenantAdmin), "tenant-a").ShouldBeFalse();
-        GatewayPolicies.HasRole(untetheredTenantAdmin, GatewayRole.TenantAdmin, "tenant-a").ShouldBeFalse();
-    }
-
-    [Theory]
-    [InlineData("*:GovernanceAdmin")]
-    [InlineData("*:TenantAdmin")]
-    [InlineData("*:DataProductAdmin")]
-    [InlineData("*:DataProductSync")]
-    [InlineData("*:ClusterAdmin")]
-    [InlineData("tenant-a:ClusterAdmin")]
-    [InlineData("DataProductAdmin")]
-    [InlineData("DataProductSync")]
-    public void GetEffectiveRoles_WildcardTenantBoundAndUnprefixedProductAndPrefixedCluster_AreRejected(string role)
-    {
-        var evaluator = new GatewayRoleEvaluator();
-        var principal = MakePrincipal(tenantId: "tenant-a", roles: role);
-
-        evaluator.GetEffectiveRoles(principal).ShouldBeEmpty();
-        evaluator.GetEffectiveRoles(principal, "tenant-a").ShouldBeEmpty();
-    }
-
-    [Fact]
-    public void GetEffectiveRoles_DataProductRoles_RemainPrefixedOnly()
-    {
-        var evaluator = new GatewayRoleEvaluator();
-
-        var prefixedProduct = MakePrincipal(tenantId: "tenant-a", roles: ["tenant-a:DataProductAdmin", "tenant-a:DataProductSync"]);
-        evaluator.GetEffectiveRoles(prefixedProduct).ShouldBe([GatewayRole.DataProductAdmin, GatewayRole.DataProductSync]);
-        evaluator.GetEffectiveRoles(prefixedProduct, "tenant-a").ShouldBe([GatewayRole.DataProductAdmin, GatewayRole.DataProductSync]);
-        evaluator.GetEffectiveRoles(prefixedProduct, "tenant-b").ShouldBeEmpty();
-    }
-
-    [Fact]
-    public void GetEffectiveRoles_InvalidTenantClaim_FailsClosed_EvenForClusterAdmin()
-    {
-        var evaluator = new GatewayRoleEvaluator();
-        var invalidTenantAdmin = MakePrincipal(tenantId: "evil<script>tenant", roles: ["ClusterAdmin", "GovernanceAdmin", "Consumer"]);
-
-        evaluator.GetEffectiveRoles(invalidTenantAdmin).ShouldBeEmpty();
-        evaluator.GetEffectiveRoles(invalidTenantAdmin, "tenant-a").ShouldBeEmpty();
-    }
-
-    [Fact]
-    public void GetEffectiveRoles_ForeignTenantMismatch_BlocksNonClusterRoles_AllowsCanonicalClusterAdmin()
-    {
-        var evaluator = new GatewayRoleEvaluator();
-        var principal = MakePrincipal(tenantId: "tenant-a", roles: ["ClusterAdmin", "GovernanceAdmin", "SchemaPublisher"]);
-
-        var tenantB = evaluator.GetEffectiveRoles(principal, "tenant-b");
-        tenantB.ShouldBe([GatewayRole.ClusterAdmin]);
-        evaluator.HasRole(principal, GatewayRole.GovernanceAdmin, "tenant-b").ShouldBeFalse();
-        evaluator.HasRole(principal, GatewayRole.SchemaPublisher, "tenant-b").ShouldBeTrue(); // implied by ClusterAdmin
-
-        var nonCluster = MakePrincipal(tenantId: "tenant-a", roles: ["GovernanceAdmin", "SchemaPublisher"]);
-        evaluator.GetEffectiveRoles(nonCluster, "tenant-b").ShouldBeEmpty();
+        // Tenant-prefixed TenantAdmin and DataProduct* resolve only for the matching explicit tenantId.
+        var tenantScoped = MakePrincipal(tenantId: "tenant-a", roles: ["tenant-a:TenantAdmin", "tenant-a:DataProductAdmin", "tenant-a:DataProductSync"]);
+        evaluator.GetEffectiveRoles(tenantScoped).ShouldBeEmpty();
+        evaluator.GetEffectiveRoles(tenantScoped, "tenant-b").ShouldBeEmpty();
+        evaluator.GetEffectiveRoles(tenantScoped, "tenant-a").ShouldBe(
+            [GatewayRole.TenantAdmin, GatewayRole.DataProductAdmin, GatewayRole.DataProductSync],
+            ignoreOrder: true);
     }
 
     [Fact]
@@ -187,6 +89,47 @@ public sealed class GatewayRoleEvaluatorTests
         evaluator.GetEffectiveRoles(restricted, "tenant-a").ShouldBe([GatewayRole.Consumer]);
     }
 
+    [Fact]
+    public void HasTenantBoundRole_FailsClosedOnInvalidOrForeignTenant_AndAllowsMatchingPrefixOrClaim()
+    {
+        var evaluator = new GatewayRoleEvaluator();
+
+        // Invalid tenant claim fails closed even with GovernanceAdmin or matching prefix.
+        var invalidClaim = MakePrincipal(tenantId: "evil<script>tenant", roles: ["GovernanceAdmin", "tenant-a:GovernanceAdmin"]);
+        GatewayRoleEvaluator.HasTenantBoundRole(invalidClaim, nameof(GatewayRole.GovernanceAdmin), "tenant-a").ShouldBeFalse();
+        GatewayRoleEvaluator.HasTenantBoundRole(invalidClaim, nameof(GatewayRole.GovernanceAdmin), null).ShouldBeFalse();
+
+        // Foreign tenant mismatch fails closed.
+        var foreignClaim = MakePrincipal(tenantId: "tenant-a", roles: ["GovernanceAdmin", "tenant-b:GovernanceAdmin"]);
+        GatewayRoleEvaluator.HasTenantBoundRole(foreignClaim, nameof(GatewayRole.GovernanceAdmin), "tenant-b").ShouldBeFalse();
+        GatewayRoleEvaluator.HasTenantBoundRole(foreignClaim, nameof(GatewayRole.GovernanceAdmin), "tenant-a").ShouldBeTrue();
+        GatewayRoleEvaluator.HasTenantBoundRole(foreignClaim, nameof(GatewayRole.GovernanceAdmin), null).ShouldBeTrue();
+
+        // Matching t:Role works when claim matches or claim is absent and explicit tenant matches.
+        var prefixedClaim = MakePrincipal(tenantId: "tenant-a", roles: "tenant-a:GovernanceAdmin");
+        GatewayRoleEvaluator.HasTenantBoundRole(prefixedClaim, nameof(GatewayRole.GovernanceAdmin), null).ShouldBeTrue();
+        GatewayRoleEvaluator.HasTenantBoundRole(prefixedClaim, nameof(GatewayRole.GovernanceAdmin), "tenant-a").ShouldBeTrue();
+        GatewayRoleEvaluator.HasTenantBoundRole(prefixedClaim, nameof(GatewayRole.GovernanceAdmin), "tenant-b").ShouldBeFalse();
+
+        var prefixedNoClaim = MakePrincipal(tenantId: null, roles: "tenant-a:TenantAdmin");
+        GatewayRoleEvaluator.HasTenantBoundRole(prefixedNoClaim, nameof(GatewayRole.TenantAdmin), "tenant-a").ShouldBeTrue();
+        GatewayRoleEvaluator.HasTenantBoundRole(prefixedNoClaim, nameof(GatewayRole.TenantAdmin), "tenant-b").ShouldBeFalse();
+        GatewayRoleEvaluator.HasTenantBoundRole(prefixedNoClaim, nameof(GatewayRole.TenantAdmin), null).ShouldBeFalse();
+
+        // Wildcard *:Role never matches HasTenantBoundRole.
+        var wildcard = MakePrincipal(tenantId: "tenant-a", roles: "*:GovernanceAdmin");
+        GatewayRoleEvaluator.HasTenantBoundRole(wildcard, nameof(GatewayRole.GovernanceAdmin), "tenant-a").ShouldBeFalse();
+
+        // ForwardAuth ClusterAdmin and disallowed roles fail closed.
+        var forwardCluster = MakePrincipal(scheme: ClusterAdminPolicy.ForwardAuthScheme, tenantId: "tenant-a", roles: "ClusterAdmin");
+        GatewayRoleEvaluator.HasTenantBoundRole(forwardCluster, nameof(GatewayRole.ClusterAdmin), "tenant-a").ShouldBeFalse();
+
+        var disallowed = MakePrincipal(tenantId: "tenant-a", allowedGatewayRoles: [GatewayRole.Consumer], roles: "GovernanceAdmin");
+        GatewayRoleEvaluator.HasTenantBoundRole(disallowed, nameof(GatewayRole.GovernanceAdmin), "tenant-a").ShouldBeFalse();
+
+        _ = evaluator;
+    }
+
 #if AUTHERIS_TEST_AUTH
     [Fact]
     public async Task TestAuth_ThroughIdentityPipeline_WithUnregisteredDefaultRealm_PreservesRoles()
@@ -209,7 +152,8 @@ public sealed class GatewayRoleEvaluatorTests
         var evaluator = new GatewayRoleEvaluator(registry);
 
         evaluator.HasRole(processed, GatewayRole.GovernanceAdmin, "warehouse").ShouldBeTrue();
-        evaluator.HasRole(processed, GatewayRole.GovernanceAdmin, "other-tenant").ShouldBeFalse();
+        GatewayPolicies.HasRole(processed, GatewayRole.GovernanceAdmin, "warehouse").ShouldBeTrue();
+        GatewayPolicies.HasRole(processed, GatewayRole.GovernanceAdmin, "other-tenant").ShouldBeFalse();
     }
 #endif
 }

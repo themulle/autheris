@@ -372,15 +372,15 @@ public sealed class DeclarativeConsentApplyAuthorizationTests
     }
 
     [Fact]
-    public async Task Apply_TenantPrefixedGovernanceAdminWithMatchingClaim_IsAccepted()
+    public async Task Apply_TenantPrefixedGovernanceAdmin_IsRejected()
     {
-        var (svc, _, consents) = CreateSut();
+        var (svc, tables, consents) = CreateSut();
 
-        var result = await svc.ApplyManifestAsync(Admin($"{CallerTenant}:GovernanceAdmin", CallerTenant), SinglePolicyManifest());
+        await Should.ThrowAsync<ConsentApplyForbiddenException>(() =>
+            svc.ApplyManifestAsync(Admin($"{CallerTenant}:GovernanceAdmin", CallerTenant), SinglePolicyManifest()));
 
-        result.Applied.ShouldBe(1);
-        var created = consents.Active(DateTimeOffset.UtcNow).ShouldHaveSingleItem();
-        created.TenantId.Value.ShouldBe(CallerTenant);
+        tables.LookupCalls.ShouldBe(0);
+        consents.ReplaceCalls.ShouldBe(0);
     }
 
     [Fact]
