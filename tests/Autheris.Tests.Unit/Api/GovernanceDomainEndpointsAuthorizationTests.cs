@@ -66,6 +66,8 @@ public sealed class GovernanceDomainEndpointsAuthorizationTests
             Task.FromResult<StoredTenantAccessPolicy?>(null);
         public Task<AccessPolicyWriteResult> UpsertAsync(TenantId tenant, TenantAccessPolicyUpdate settings, int expectedVersion, Sid actor, CancellationToken ct = default) =>
             throw new NotSupportedException();
+        public Task<bool> DeleteIfVersionAsync(TenantId tenant, int expectedVersion, CancellationToken ct = default) =>
+            throw new NotSupportedException();
     }
 
     private static (GovernanceDomainService Service, IGovernanceDomainRepository Domains, InMemoryTableMetadataRepository Tables) BuildService(

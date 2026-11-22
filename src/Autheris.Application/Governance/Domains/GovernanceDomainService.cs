@@ -431,12 +431,13 @@ public sealed partial class GovernanceDomainService(
                 new CatalogTableQuery(IncludeInactive: true),
                 t => wanted.Contains(t.Table.Id),
                 ct: ct).ConfigureAwait(false);
-            foreach (var meta in matched)
+            var visibleIds = matched
+                .Where(meta => IsVisibleInTenant(meta, tenant))
+                .Select(meta => meta.Table.Id)
+                .ToHashSet();
+            if (distinct.Any(id => !visibleIds.Contains(id)))
             {
-                if (!IsVisibleInTenant(meta, tenant))
-                {
-                    return NotFound<int>("RESOURCE_NOT_FOUND", "One or more requested tables were not found.");
-                }
+                return NotFound<int>("RESOURCE_NOT_FOUND", "One or more requested tables were not found.");
             }
         }
 

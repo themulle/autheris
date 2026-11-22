@@ -62,6 +62,8 @@ public abstract class AccessPolicySettingsContract : GovernanceContractBase
         await Should.ThrowAsync<ArgumentException>(() => Repo.GetAsync(TenantId.Platform));
         await Should.ThrowAsync<ArgumentException>(() => Repo.UpsertAsync(default, new TenantAccessPolicyUpdate(), 0, Alice));
         await Should.ThrowAsync<ArgumentException>(() => Repo.UpsertAsync(TenantId.Platform, new TenantAccessPolicyUpdate(), 0, Alice));
+        await Should.ThrowAsync<ArgumentException>(() => Repo.DeleteIfVersionAsync(default, 1));
+        await Should.ThrowAsync<ArgumentException>(() => Repo.DeleteIfVersionAsync(TenantId.Platform, 1));
     }
 
     [RequiresContainerRuntimeFact]
@@ -92,6 +94,10 @@ public abstract class AccessPolicySettingsContract : GovernanceContractBase
             expectedVersion: 1,
             Bob);
         stale.Status.ShouldBe(AccessPolicyWriteStatus.Conflict);
+
+        (await Repo.DeleteIfVersionAsync(Store.TenantA, 1)).ShouldBeFalse();
+        (await Repo.DeleteIfVersionAsync(Store.TenantA, 2)).ShouldBeTrue();
+        (await Repo.GetAsync(Store.TenantA)).ShouldBeNull();
     }
 
     [RequiresContainerRuntimeFact]

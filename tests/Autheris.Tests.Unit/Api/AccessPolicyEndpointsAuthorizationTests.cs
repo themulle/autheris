@@ -71,6 +71,8 @@ public sealed class AccessPolicyEndpointsAuthorizationTests
         public Task<AccessPolicyWriteResult> UpsertAsync(TenantId tenant, TenantAccessPolicyUpdate settings, int expectedVersion, Sid actor, CancellationToken ct = default) =>
             Task.FromResult(new AccessPolicyWriteResult(AccessPolicyWriteStatus.Created,
                 new StoredTenantAccessPolicy(tenant, settings, 1, actor.Value, DateTimeOffset.UtcNow)));
+        public Task<bool> DeleteIfVersionAsync(TenantId tenant, int expectedVersion, CancellationToken ct = default) =>
+            Task.FromResult(false);
     }
 
     [Fact]

@@ -34,6 +34,9 @@ public sealed class AccessPolicySettingsStore(
         "UPDATE ACCESS_POLICY_SETTINGS SET settings_json = @settingsJson, version = @newVersion, updated_by = @updatedBy, updated_at = @updatedAt " +
         "WHERE tenant_id = @tenantId AND version = @expectedVersion";
 
+    internal const string DeleteSql =
+        "DELETE FROM ACCESS_POLICY_SETTINGS WHERE tenant_id = @tenantId AND version = @expectedVersion";
+
     internal const string BumpEpochPgSql =
         "INSERT INTO GOVERNANCE_EPOCHS (tenant_id, epoch, updated_at) VALUES (@tenantId, 1, @updatedAt) " +
         "ON CONFLICT (tenant_id) DO UPDATE SET epoch = GOVERNANCE_EPOCHS.epoch + 1, updated_at = EXCLUDED.updated_at RETURNING epoch";
@@ -46,7 +49,7 @@ public sealed class AccessPolicySettingsStore(
         "OUTPUT inserted.epoch;";
 
     internal static IReadOnlyList<string> AllSqlTemplates =>
-        [GetSql, InsertSql, UpdateSql, BumpEpochPgSql, BumpEpochSsSql];
+        [GetSql, InsertSql, UpdateSql, DeleteSql, BumpEpochPgSql, BumpEpochSsSql];
 
     private readonly IGovernanceSqlDialect _dialect = dialect ?? throw new ArgumentNullException(nameof(dialect));
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
@@ -130,6 +133,32 @@ public sealed class AccessPolicySettingsStore(
         {
             return new AccessPolicyWriteResult(AccessPolicyWriteStatus.Conflict);
         }
+    }
+
+    public async Task<bool> DeleteIfVersionAsync(TenantId tenant, int expectedVersion, CancellationToken ct = default)
+    {
+        var tenantId = RequireTenant(tenant);
+        ArgumentOutOfRangeException.ThrowIfLessThanOrEqual(expectedVersion, 0);
+        var now = _time.GetUtcNow().ToUniversalTime();
+
+        var outcome = await RunInTxAsync(async (conn, tx) =>
+        {
+            await using var del = Cmd(conn, tx, DeleteSql, tenantId, ("@expectedVersion", expectedVersion, DbType.Int32));
+            if (await del.ExecuteNonQueryAsync(ct).ConfigureAwait(false) == 1)
+            {
+                var epoch = await BumpEpochInTxAsync(conn, tx, tenantId, now, ct).ConfigureAwait(false);
+                return (true, (Deleted: true, Epoch: epoch));
+            }
+
+            return (false, (Deleted: false, Epoch: 0L));
+        }, ct).ConfigureAwait(false);
+
+        if (outcome.Deleted && _changeNotifier is not null)
+        {
+            await _changeNotifier.NotifyAsync(new GovernanceChangeEvent(tenantId, outcome.Epoch, null, now), CancellationToken.None).ConfigureAwait(false);
+        }
+
+        return outcome.Deleted;
     }
 
     private async Task<long> BumpEpochInTxAsync(DbConnection conn, DbTransaction tx, string tenantId, DateTimeOffset now, CancellationToken ct)

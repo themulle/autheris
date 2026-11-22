@@ -20,10 +20,11 @@ public sealed class PolicyAuditTests
     private static readonly Sid GovActor = new("S-1-5-21-1001-2002-3003-10");
     private static readonly DateTimeOffset T0 = new(2026, 11, 22, 10, 0, 0, TimeSpan.Zero);
 
-    private sealed class FakePolicyRepo(StoredTenantAccessPolicy initial) : IAccessPolicySettingsRepository
+    private sealed class FakePolicyRepo(StoredTenantAccessPolicy? initial) : IAccessPolicySettingsRepository
     {
         public StoredTenantAccessPolicy? Stored { get; private set; } = initial;
         public List<(TenantAccessPolicyUpdate Settings, int ExpectedVersion)> Upserts { get; } = [];
+        public List<(TenantId Tenant, int ExpectedVersion)> Deletes { get; } = [];
 
         public Task<StoredTenantAccessPolicy?> GetAsync(TenantId tenant, CancellationToken ct = default) =>
             Task.FromResult(Stored is not null && Stored.Tenant == tenant ? Stored : null);
@@ -31,8 +32,21 @@ public sealed class PolicyAuditTests
         public Task<AccessPolicyWriteResult> UpsertAsync(TenantId tenant, TenantAccessPolicyUpdate settings, int expectedVersion, Sid actor, CancellationToken ct = default)
         {
             Upserts.Add((settings, expectedVersion));
+            var status = expectedVersion == 0 ? AccessPolicyWriteStatus.Created : AccessPolicyWriteStatus.Updated;
             Stored = new StoredTenantAccessPolicy(tenant, settings, expectedVersion + 1, actor.Value, T0.AddMinutes(5));
-            return Task.FromResult(new AccessPolicyWriteResult(AccessPolicyWriteStatus.Updated, Stored));
+            return Task.FromResult(new AccessPolicyWriteResult(status, Stored));
+        }
+
+        public Task<bool> DeleteIfVersionAsync(TenantId tenant, int expectedVersion, CancellationToken ct = default)
+        {
+            Deletes.Add((tenant, expectedVersion));
+            if (Stored is not null && Stored.Tenant == tenant && Stored.Version == expectedVersion)
+            {
+                Stored = null;
+                return Task.FromResult(true);
+            }
+
+            return Task.FromResult(false);
         }
     }
 
@@ -90,5 +104,19 @@ public sealed class PolicyAuditTests
         repo.Upserts.Count.ShouldBe(2);
         repo.Upserts[1].ExpectedVersion.ShouldBe(2);
         repo.Upserts[1].Settings.ShouldBe(before.Settings);
+    }
+
+    [Fact]
+    public async Task Initial_policy_create_compensates_with_delete_when_required_audit_fails()
+    {
+        var repo = new FakePolicyRepo(null);
+        var audit = new InMemoryAuditWriter(failure: new InvalidOperationException("audit store offline"));
+        var provider = new AccessPolicySettingsProvider(repo, Options.Create(new AccessPolicyOptions()), audit, new FakeTimeProvider(T0));
+
+        await Should.ThrowAsync<InvalidOperationException>(() =>
+            provider.UpdateAsync(TenantA, new TenantAccessPolicyUpdate(MaxSelfGrantDays: 60), 0, GovActor));
+
+        repo.Deletes.ShouldBe([(TenantA, 1)]);
+        repo.Stored.ShouldBeNull();
     }
 }

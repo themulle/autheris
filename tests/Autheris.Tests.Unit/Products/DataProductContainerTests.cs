@@ -1,5 +1,7 @@
 #pragma warning disable CA2012 // NSubstitute .Returns(...) configures a ValueTask member; the instance is not consumed here.
 using System.Security.Claims;
+using System.Text;
+using Autheris.Api.Endpoints;
 using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Governance.Policy;
@@ -15,6 +17,8 @@ using Autheris.Domain.Identity;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -60,6 +64,36 @@ public sealed class DataProductContainerTests
                 TenantA, new TenantAccessPolicyUpdate(DefaultContainerVisibility: CatalogVisibilityMode.Open), 1, AdminSid, T0));
         public Task<AccessPolicyWriteResult> UpsertAsync(TenantId tenant, TenantAccessPolicyUpdate settings, int expectedVersion, Sid actor, CancellationToken ct = default) =>
             throw new NotSupportedException();
+        public Task<bool> DeleteIfVersionAsync(TenantId tenant, int expectedVersion, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+    }
+
+    private sealed class StubDomainRepo(Guid domainId, Guid tableId) : IGovernanceDomainRepository
+    {
+        public Task<IReadOnlyList<GovernanceDomain>> ListAsync(TenantId tenant, int limit = 100, int offset = 0, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<GovernanceDomain>>([]);
+        public Task<GovernanceDomain?> GetAsync(TenantId tenant, Guid id, CancellationToken ct = default) =>
+            Task.FromResult<GovernanceDomain?>(id == domainId
+                ? new GovernanceDomain(domainId, TenantA, "Sales", null, null, DomainOwnerGroup, ProtectionClass.Confidential, CatalogVisibilityMode.OnRequest, false, 1, T0, T0)
+                : null);
+        public Task<GovernanceDomainUpsertResult> UpsertAsync(GovernanceDomain domain, int expectedVersion, Sid actor, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task<bool> DeleteAsync(TenantId tenant, Guid id, int expectedVersion, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task<GovernanceDomain> EnsureUnassignedAsync(TenantId tenant, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task AssignTablesAsync(TenantId tenant, Guid id, IReadOnlyList<Guid> tableIds, Sid actor, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task<(ObjectProtection? Table, IReadOnlyDictionary<string, ObjectProtection> Columns)> GetProtectionAsync(TenantId tenant, Guid id, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task SetProtectionAsync(TenantId tenant, Guid id, string column, ObjectProtection protection, Sid actor, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task SetTableProtectionAsync(TenantId tenant, Guid id, ObjectProtection protection, IReadOnlyList<string>? clearColumns, Sid actor, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task<ContainerDefaults> GetContainerForTableAsync(TenantId tenant, Guid id, CancellationToken ct = default) =>
+            Task.FromResult(id == tableId
+                ? new ContainerDefaults(new ContainerRef(ContainerKind.Domain, domainId), DomainOwnerGroup, ProtectionClass.Confidential, CatalogVisibilityMode.OnRequest, IsValid: true)
+                : ContainerDefaults.Unassigned);
     }
 
     private sealed class StubCatalogColumns : IProductCatalogColumns
@@ -175,5 +209,60 @@ public sealed class DataProductContainerTests
         executor.Captured.ShouldNotBeNull();
         executor.Captured.Product.Id.ShouldBe(product.Id);
         executor.Captured.Product.OwnerGroupSid.ShouldBe(DomainOwnerGroup);
+    }
+
+    [Fact]
+    public async Task PutAsync_Accepts_Canonical_OnRequest_And_Rejects_Invalid_Enum_With_422()
+    {
+        var store = new InMemoryDataProductRepository();
+        var domainId = Guid.NewGuid();
+        var ordersGuid = Guid.NewGuid();
+        var domainRepo = new StubDomainRepo(domainId, ordersGuid);
+        var tableRepo = new InMemoryTableMetadataRepository(new TableMetadata { Identifier = OrdersTable, Table = new Table { Id = ordersGuid, IsActive = true } });
+        var ownershipRepo = new InMemoryDataOwnershipRepository();
+        var audit = new RecordingAuditWriter();
+        var caps = new GovernanceCapabilities(domainRepository: domainRepo, productRepository: store);
+        var authority = new ProductAuthorityService(ownershipRepo, store, new FakeTimeProvider(T0), caps, domainRepo, tableRepo);
+        var service = new DataProductService(
+            store, authority, new StubCatalogColumns(), FastSqlEngine.Default, ownershipRepo, audit,
+            timeProvider: new FakeTimeProvider(T0),
+            downgradeGuard: new ViewDowngradeGuard(caps, audit, new FakeTimeProvider(T0)));
+
+        static HttpContext BuildPutHttp(string json)
+        {
+            var sec = Context(AdminSid, "DataProductAdmin");
+            var ctx = new DefaultHttpContext { User = sec.Principal! };
+            ctx.Items[SecurityPrincipalContext.ItemKey] = sec;
+            ctx.Items[SecurityPrincipalContext.TenantIdItemKey] = TenantA;
+            ctx.Request.Body = new MemoryStream(Encoding.UTF8.GetBytes(json));
+            ctx.Request.ContentType = "application/json";
+            return ctx;
+        }
+
+        var okRes = await ProductEndpoints.PutAsync(
+            "sales",
+            "orders_on_request",
+            BuildPutHttp($$"""{"kind":"View","definition":"SELECT id, total FROM crm.public.orders","ownerGroupSid":"{{DomainOwnerGroup.Value}}","defaultClass":"CONFIDENTIAL","visibility":"ON_REQUEST"}"""),
+            service);
+        (okRes as IStatusCodeHttpResult)?.StatusCode.ShouldBe(StatusCodes.Status200OK);
+
+        var stored = await store.GetProductAsync(TenantA, "sales", "orders_on_request");
+        stored.ShouldNotBeNull();
+        stored.DefaultClass.ShouldBe(ProtectionClass.Confidential);
+        stored.Visibility.ShouldBe(CatalogVisibilityMode.OnRequest);
+
+        var badVisibility = await ProductEndpoints.PutAsync(
+            "sales",
+            "orders_bad_vis",
+            BuildPutHttp("""{"kind":"View","definition":"SELECT id, total FROM crm.public.orders","visibility":"INVALID_VISIBILITY"}"""),
+            service);
+        (badVisibility as IStatusCodeHttpResult)?.StatusCode.ShouldBe(StatusCodes.Status422UnprocessableEntity);
+
+        var badClass = await ProductEndpoints.PutAsync(
+            "sales",
+            "orders_bad_class",
+            BuildPutHttp("""{"kind":"View","definition":"SELECT id, total FROM crm.public.orders","defaultClass":"INVALID_CLASS"}"""),
+            service);
+        (badClass as IStatusCodeHttpResult)?.StatusCode.ShouldBe(StatusCodes.Status422UnprocessableEntity);
     }
 }

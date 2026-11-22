@@ -87,8 +87,8 @@ public static partial class ProductEndpoints
         LoadBody? Load,
         LimitsBody? Limits,
         string? Description,
-        ProtectionClass? DefaultClass = null,
-        CatalogVisibilityMode? Visibility = null);
+        string? DefaultClass = null,
+        string? Visibility = null);
 
     internal sealed record OwnerGroupBody(string? OwnerGroupSid);
 

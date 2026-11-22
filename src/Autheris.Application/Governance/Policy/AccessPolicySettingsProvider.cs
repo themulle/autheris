@@ -87,6 +87,17 @@ public sealed class AccessPolicySettingsProvider(
                     // Compensation failure must still fail closed and propagate the audit exception.
                 }
             }
+            else
+            {
+                try
+                {
+                    await _repository.DeleteIfVersionAsync(tenant, writeResult.Stored.Version, CancellationToken.None).ConfigureAwait(false);
+                }
+                catch
+                {
+                    // Compensation failure must still fail closed and propagate the audit exception.
+                }
+            }
 
             throw;
         }

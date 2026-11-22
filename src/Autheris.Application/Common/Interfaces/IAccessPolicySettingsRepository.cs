@@ -17,4 +17,5 @@ public interface IAccessPolicySettingsRepository
 {
     Task<StoredTenantAccessPolicy?> GetAsync(TenantId tenant, CancellationToken ct = default);
     Task<AccessPolicyWriteResult> UpsertAsync(TenantId tenant, TenantAccessPolicyUpdate settings, int expectedVersion, Sid actor, CancellationToken ct = default);
+    Task<bool> DeleteIfVersionAsync(TenantId tenant, int expectedVersion, CancellationToken ct = default);
 }

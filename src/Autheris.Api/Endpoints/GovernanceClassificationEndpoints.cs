@@ -297,14 +297,14 @@ public static class GovernanceClassificationEndpoints
         (string.IsNullOrWhiteSpace(clientSid) || string.Equals(clientSid, identity.Sid.Value, StringComparison.OrdinalIgnoreCase)) &&
         (string.IsNullOrWhiteSpace(clientRole) || string.Equals(clientRole, identity.Role, StringComparison.OrdinalIgnoreCase));
 
-    private readonly record struct ReviewerIdentity(Sid Sid, string? Role, IResult? Error);
+    internal readonly record struct ReviewerIdentity(Sid Sid, string? Role, IResult? Error);
 
     /// <summary>
     /// Derives the reviewer SID and workflow role from the authenticated principal and the proposal stage.
     /// Data-owner actions require an exact, non-empty <c>DataOwnerSid</c> match (fail closed: an unset owner denies
     /// everyone, including governance admins, who must assign an owner first). Stage 2 requires a compliance role.
     /// </summary>
-    private static async Task<ReviewerIdentity> ResolveReviewerAsync(
+    internal static async Task<ReviewerIdentity> ResolveReviewerAsync(
         HttpContext httpContext,
         TableClassificationProposal proposal,
         IGovernanceCapabilities? capabilities,
@@ -338,7 +338,15 @@ public static class GovernanceClassificationEndpoints
                 }
             }
 
-            var callerCtx = SecurityPrincipalContext.FromPrincipal(user, tenant);
+            var callerCtx = httpContext.Items.TryGetValue(SecurityPrincipalContext.ItemKey, out var item) &&
+                            item is SecurityPrincipalContext
+                ? EndpointSecurity.GetSecurityContext(httpContext)
+                : SecurityPrincipalContext.FromPrincipal(user, tenant);
+            if (callerCtx.ResolvedTenant is null)
+            {
+                callerCtx = callerCtx with { ResolvedTenant = tenant };
+            }
+
             isOwnerCapable = await capabilities.CanClassifyAsync(callerCtx, containerRef, tenant, ct).ConfigureAwait(false);
         }
 

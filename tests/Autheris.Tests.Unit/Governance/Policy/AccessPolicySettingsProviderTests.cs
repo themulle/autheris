@@ -35,6 +35,17 @@ public sealed class AccessPolicySettingsProviderTests
                 expectedVersion == 0 ? AccessPolicyWriteStatus.Created : AccessPolicyWriteStatus.Updated,
                 Stored));
         }
+
+        public Task<bool> DeleteIfVersionAsync(TenantId tenant, int expectedVersion, CancellationToken ct = default)
+        {
+            if (Stored is not null && Stored.Tenant == tenant && Stored.Version == expectedVersion)
+            {
+                Stored = null;
+                return Task.FromResult(true);
+            }
+
+            return Task.FromResult(false);
+        }
     }
 
     private static (AccessPolicySettingsProvider Provider, FakePolicyRepo Repo, InMemoryAuditWriter Audit) Build(

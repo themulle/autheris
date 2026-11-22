@@ -160,4 +160,41 @@ public sealed class GovernanceDomainServiceTests
         var unknownCol = await service.SetColumnProtectionAsync(ownerCaller, TenantA, tableIdRef.ToString(), "non_existent", ProtectionClass.Secret, null);
         unknownCol.Status.ShouldBe(DomainServiceStatus.NotFound);
     }
+
+    [Fact]
+    public async Task AssignTablesAsync_Missing_or_foreign_tableIds_Returns_NotFound()
+    {
+        var (service, domains, tables) = Build();
+        var gov = MakeCaller(GovSid, "GovernanceAdmin");
+        var domainId = Guid.NewGuid();
+        var existingId = Guid.NewGuid();
+        var foreignId = Guid.NewGuid();
+        var missingId = Guid.NewGuid();
+
+        domains.GetAsync(TenantA, domainId, Arg.Any<CancellationToken>())
+            .Returns(new GovernanceDomain(domainId, TenantA, "CRM", null, null, OwnerGroupSid, ProtectionClass.Confidential, CatalogVisibilityMode.OnRequest, false, 1, T0, T0));
+
+        tables.Add(new TableMetadata
+        {
+            Identifier = new TableIdentifier("crm", "public", "customers"),
+            OwnerTenantId = TenantA.Value,
+            Table = new Table { Id = existingId, SourceName = "crm", SchemaName = "public", TableName = "customers", IsActive = true }
+        });
+        tables.Add(new TableMetadata
+        {
+            Identifier = new TableIdentifier("erp", "public", "foreign_tbl"),
+            OwnerTenantId = "tenant-b",
+            Table = new Table { Id = foreignId, SourceName = "erp", SchemaName = "public", TableName = "foreign_tbl", IsActive = true }
+        });
+
+        var missingRes = await service.AssignTablesAsync(gov, TenantA, domainId, [existingId, missingId]);
+        missingRes.Status.ShouldBe(DomainServiceStatus.NotFound);
+        missingRes.ErrorCode.ShouldBe("RESOURCE_NOT_FOUND");
+
+        var foreignRes = await service.AssignTablesAsync(gov, TenantA, domainId, [existingId, foreignId]);
+        foreignRes.Status.ShouldBe(DomainServiceStatus.NotFound);
+        foreignRes.ErrorCode.ShouldBe("RESOURCE_NOT_FOUND");
+
+        await domains.DidNotReceiveWithAnyArgs().AssignTablesAsync(default, default, default!, default, default);
+    }
 }

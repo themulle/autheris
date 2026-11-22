@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Errors;
 using Autheris.Application.Products;
 using Autheris.Domain.Common;
+using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Http;
 
@@ -26,14 +27,36 @@ public static partial class ProductEndpoints
         RunAsync(context, async caller =>
         {
             var body = await ReadAsync<PutBody>(context).ConfigureAwait(false);
+            ProtectionClass? defaultClass = null;
+            if (!string.IsNullOrWhiteSpace(body.DefaultClass))
+            {
+                if (!ProtectionClassExtensions.TryParse(body.DefaultClass, out var parsedClass))
+                {
+                    return ApiProblems.Unprocessable(ProductErrorCodes.DefinitionInvalid, "The protection class is invalid.", context);
+                }
+
+                defaultClass = parsedClass;
+            }
+
+            CatalogVisibilityMode? visibility = null;
+            if (!string.IsNullOrWhiteSpace(body.Visibility))
+            {
+                if (!CatalogVisibilityModeExtensions.TryParse(body.Visibility, out var parsedVisibility))
+                {
+                    return ApiProblems.Unprocessable(ProductErrorCodes.DefinitionInvalid, "The visibility mode is invalid.", context);
+                }
+
+                visibility = parsedVisibility;
+            }
+
             var ownerGroup = string.IsNullOrWhiteSpace(body.OwnerGroupSid) ? (Sid?)null : new Sid(body.OwnerGroupSid.Trim());
             var saved = await service.PutAsync(
                 new ProductPutRequest(
                     caller, schema, name, body.Kind, body.Definition ?? string.Empty, ownerGroup, body.Load?.ToModel(),
-                    body.Limits is null ? null : new Autheris.Domain.Model.ProductLimits(body.Limits.MaxRows, body.Limits.MaxBytes, body.Limits.MaxRuntimeSeconds),
+                    body.Limits is null ? null : new ProductLimits(body.Limits.MaxRows, body.Limits.MaxBytes, body.Limits.MaxRuntimeSeconds),
                     body.Description,
-                    DefaultClass: body.DefaultClass,
-                    Visibility: body.Visibility),
+                    DefaultClass: defaultClass,
+                    Visibility: visibility),
                 context.RequestAborted).ConfigureAwait(false);
             return Results.Ok(View(saved));
         });
