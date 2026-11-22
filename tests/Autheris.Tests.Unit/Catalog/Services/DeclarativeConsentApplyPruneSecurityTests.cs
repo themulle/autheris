@@ -87,9 +87,6 @@ public sealed class DeclarativeConsentApplyPruneSecurityTests
         public Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default) =>
             Task.FromResult(Consents.FirstOrDefault(c => c.Id == consentId));
 
-        public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default) =>
-            GetActiveConsentsForSubjectsAsync(subjects, table, atTime, null, ct);
-
         public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default)
         {
             var set = subjects.Select(s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -101,9 +98,6 @@ public sealed class DeclarativeConsentApplyPruneSecurityTests
                 (tenantId is null || c.TenantId == tenantId.Value)).ToList();
             return Task.FromResult(match);
         }
-
-        public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles = null, DateTimeOffset? atTime = null, CancellationToken ct = default) =>
-            GetAllActiveConsentsForSubjectsAsync(subjects, roles, atTime, null, ct);
 
         public async Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default)
         {

@@ -394,10 +394,8 @@ public sealed class UsageReportAuthorizationTests
         public Dictionary<Guid, Consent> Items { get; } = new();
         public Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default) =>
             Task.FromResult(Items.TryGetValue(consentId, out var c) ? c : null);
-        public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> s, TableIdentifier t, DateTimeOffset at, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<Consent>>([]);
-        public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> s, TableIdentifier t, DateTimeOffset at, TenantId? tid, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<Consent>>([]);
-        public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> s, IEnumerable<string>? r = null, DateTimeOffset? at = null, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<Consent>>([]);
-        public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> s, IEnumerable<string>? r, DateTimeOffset? at, TenantId? tid, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<Consent>>([]);
+        public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier t, DateTimeOffset at, TenantId? tid, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<Consent>>([]);
+        public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? r, DateTimeOffset? at, TenantId? tid, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<Consent>>([]);
         public Task<Consent> CreateConsentAsync(Consent c, CancellationToken ct = default) => Task.FromResult(c);
         public Task RevokeConsentAsync(Guid id, Sid by, string reason, ConsentRevocationAuthority auth, CancellationToken ct = default) => Task.CompletedTask;
         public Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, int maxResults = 1000, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<Consent>>([]);

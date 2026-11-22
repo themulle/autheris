@@ -27,7 +27,7 @@ using Xunit;
 public sealed class FederationTests
 {
     [Fact]
-    public void SubgraphContextPropagation_AppliesHeaders_WhenEnabled()
+    public async Task SubgraphContextPropagation_AppliesHeaders_WhenEnabled()
     {
         var options = Options.Create(new GatewayOptions
         {
@@ -35,6 +35,7 @@ public sealed class FederationTests
             {
                 Enabled = true,
                 EnableZeroTrustContextForwarding = true,
+                SigningKey = "test-federation-signing-key-32bytes!!",
                 SubjectHeaderName = "X-Gateway-Subject",
                 TenantHeaderName = "X-Tenant-ID",
                 RolesHeaderName = "X-Gateway-Roles"
@@ -51,7 +52,7 @@ public sealed class FederationTests
             new Claim(ClaimTypes.Role, "Auditor")
         ], "TestAuth"));
 
-        service.ApplySecurityHeaders(request, "FinanceSubgraph", principal, "tenant-alpha");
+        await service.ApplySecurityHeadersAsync(request, "FinanceSubgraph", principal, "tenant-alpha");
 
         request.Headers.Contains("X-Gateway-Subject").ShouldBeTrue();
         request.Headers.GetValues("X-Gateway-Subject").ShouldContain("S-1-5-21-USER-123");
@@ -68,7 +69,7 @@ public sealed class FederationTests
     }
 
     [Fact]
-    public void SubgraphContextPropagation_BlocksRestrictedIp_SSRF()
+    public async Task SubgraphContextPropagation_BlocksRestrictedIp_SSRF()
     {
         var options = Options.Create(new GatewayOptions
         {
@@ -78,9 +79,9 @@ public sealed class FederationTests
         var service = new SubgraphContextPropagationService(options, NullLogger<SubgraphContextPropagationService>.Instance);
         var request = new HttpRequestMessage(HttpMethod.Post, "http://127.0.0.1:5000/graphql");
 
-        Should.Throw<SecurityException>(() =>
+        await Should.ThrowAsync<SecurityException>(async () =>
         {
-            service.ApplySecurityHeaders(request, "LocalExploit", null, null);
+            await service.ApplySecurityHeadersAsync(request, "LocalExploit", null, null);
         });
     }
 
@@ -254,11 +255,12 @@ public sealed class FederationTests
 
         await client.SendAsync(request, CancellationToken.None);
 
-        propagationService.Received(1).ApplySecurityHeaders(
+        await propagationService.Received(1).ApplySecurityHeadersAsync(
             Arg.Any<HttpRequestMessage>(),
             "InventorySubgraph",
             principal,
-            "tenant-xyz");
+            "tenant-xyz",
+            Arg.Any<CancellationToken>());
 
         innerHandler.LastRequest.ShouldNotBeNull();
         innerHandler.LastRequest.Headers.Authorization.ShouldNotBeNull();

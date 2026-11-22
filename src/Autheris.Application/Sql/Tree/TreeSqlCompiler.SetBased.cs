@@ -295,11 +295,7 @@ public static partial class TreeSqlCompiler
                 break;
 
             case DatabaseDialect.PostgreSql:
-                var pgChunks = pairs
-                    .Chunk(ObjectChunkSize)
-                    .Select(chunk => "jsonb_build_object(" + string.Join(", ", chunk.Select(p => $"'{p.Key}', {p.Expression}")) + ")")
-                    .ToList();
-                var pgObj = pgChunks.Count == 0 ? "'{}'::jsonb" : string.Join(" || ", pgChunks);
+                var pgObj = BuildPostgresObject(pairs, context);
                 rootQuery = $"SELECT coalesce(jsonb_agg({pgObj}{(outerOrder.Length > 0 ? " ORDER BY " + outerOrder : string.Empty)}), '[]'::jsonb)::text FROM {fromBuilder}";
                 break;
 

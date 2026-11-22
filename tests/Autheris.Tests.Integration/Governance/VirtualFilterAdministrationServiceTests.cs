@@ -24,7 +24,10 @@ using Xunit;
 public sealed class VirtualFilterAdministrationServiceTests : IDisposable
 {
     private static readonly TenantId Tenant = new("tenant_lwe");
-    private static readonly VirtualFilterActor Admin = new(new Sid("S-1-5-21-ADMIN"), IsSync: false);
+    private static readonly VirtualFilterActor Admin = new(
+        new Sid("S-1-5-21-ADMIN"),
+        IsSync: false,
+        Roles: new System.Collections.Generic.HashSet<string>([nameof(Autheris.Domain.Security.GatewayRole.GovernanceAdmin)], StringComparer.OrdinalIgnoreCase));
     private static readonly VirtualFilterActor Sync = new(new Sid("S-1-5-21-TALOS"), IsSync: true);
 
     private readonly PostgreSqlGovernanceRepository _repository = GovernanceTestDatabase.CreateRepository(

@@ -227,17 +227,7 @@ public sealed partial class QueryAnalysisService
                 }
                 else
                 {
-                    var columnLevels = new Dictionary<string, ColumnAccessLevel>();
-                    foreach (var col in table.Metadata.Columns)
-                    {
-                        bool isMasked = outcome.OutputColumns.Any(o =>
-                            string.Equals(o.Dataset, FormatDatasetId(table.ResolvedIdentifier), StringComparison.OrdinalIgnoreCase) &&
-                            string.Equals(o.Column, col.ColumnName, StringComparison.OrdinalIgnoreCase) &&
-                            o.IsMasked);
-
-                        columnLevels[col.ColumnName] = isMasked ? ColumnAccessLevel.Mask : ColumnAccessLevel.Clear;
-                    }
-                    var decision = TableAccessDecision.Allowed(table.ResolvedIdentifier, columnLevels, hasUnconstrainedColumnAllow: true);
+                    var decision = ResolveFederationTableDecision(scopeContext, table.ResolvedIdentifier);
 
                     if (singleConjunctsByTable.TryGetValue(table.ResolvedIdentifier, out var tableConjuncts))
                     {
@@ -303,17 +293,7 @@ public sealed partial class QueryAnalysisService
             var keySetDecisions = new Dictionary<TableIdentifier, TableAccessDecision>();
             foreach (var table in resolvedTables)
             {
-                var columnLevels = new Dictionary<string, ColumnAccessLevel>();
-                foreach (var col in table.Metadata.Columns)
-                {
-                    bool isMasked = outcome.OutputColumns.Any(o =>
-                        string.Equals(o.Dataset, FormatDatasetId(table.ResolvedIdentifier), StringComparison.OrdinalIgnoreCase) &&
-                        string.Equals(o.Column, col.ColumnName, StringComparison.OrdinalIgnoreCase) &&
-                        o.IsMasked);
-
-                    columnLevels[col.ColumnName] = isMasked ? ColumnAccessLevel.Mask : ColumnAccessLevel.Clear;
-                }
-                keySetDecisions[table.ResolvedIdentifier] = TableAccessDecision.Allowed(table.ResolvedIdentifier, columnLevels, hasUnconstrainedColumnAllow: true);
+                keySetDecisions[table.ResolvedIdentifier] = ResolveFederationTableDecision(scopeContext, table.ResolvedIdentifier);
             }
 
             var keySetPlans = DynamicKeySetPlanner.Plan(
@@ -629,4 +609,11 @@ public sealed partial class QueryAnalysisService
             _ => false
         };
     }
+
+    private static TableAccessDecision ResolveFederationTableDecision(
+        AnalysisScopeContext scopeContext,
+        TableIdentifier tableId) =>
+        scopeContext.TableDecisions.TryGetValue(tableId, out var existing)
+            ? existing
+            : TableAccessDecision.Denied(tableId, "Missing access decision.");
 }

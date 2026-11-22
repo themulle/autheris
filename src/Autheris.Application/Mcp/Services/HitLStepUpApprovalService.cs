@@ -348,19 +348,6 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
 
     internal int TicketCount => _tickets.Count;
 
-    public Task<HitLApprovalResult> ApproveStepUpRequestAsync(string approvalId, string approverSid, CancellationToken ct = default)
-    {
-        return ApproveStepUpRequestAsync(approvalId, approverSid, totpCode: null, ct);
-    }
-
-    public Task<HitLApprovalResult> ApproveStepUpRequestAsync(string approvalId, string approverSid, string? totpCode, CancellationToken ct = default)
-    {
-        if (string.IsNullOrWhiteSpace(approverSid))
-            throw new ArgumentException("Approver SID cannot be null or whitespace.", nameof(approverSid));
-
-        return ApproveStepUpRequestAsync(approvalId, new HitLApproverContext(approverSid, new[] { approverSid }, TenantId: null, IsCrossTenantAdmin: true), totpCode, ct);
-    }
-
     public Task<HitLApprovalResult> ApproveStepUpRequestAsync(string approvalId, HitLApproverContext approver, CancellationToken ct = default)
     {
         return ApproveStepUpRequestAsync(approvalId, approver, totpCode: null, ct);
@@ -526,22 +513,15 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
         }
     }
 
-    public Task<HitLApprovalResult> RejectStepUpRequestAsync(string approvalId, string approverSid, string? reason = null, CancellationToken ct = default)
-    {
-        IReadOnlyCollection<string> identifiers = string.IsNullOrWhiteSpace(approverSid) ? Array.Empty<string>() : new[] { approverSid };
-        return RejectStepUpRequestAsync(
-            approvalId,
-            new HitLApproverContext(approverSid, identifiers, TenantId: null, IsCrossTenantAdmin: true),
-            reason,
-            ct);
-    }
-
     public async Task<HitLApprovalResult> RejectStepUpRequestAsync(string approvalId, HitLApproverContext approver, string? reason = null, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(approvalId))
             throw new ArgumentException("Approval ID cannot be null or whitespace.", nameof(approvalId));
 
         ArgumentNullException.ThrowIfNull(approver);
+
+        if (string.IsNullOrWhiteSpace(approver.ApproverSid))
+            throw new ArgumentException("Approver SID cannot be null or whitespace.", nameof(approver));
 
         var entry = await GetEntryForApproverAsync(approvalId, approver, ct).ConfigureAwait(false);
         if (entry == null)
@@ -701,8 +681,8 @@ public sealed class HitLStepUpApprovalService : IHitLStepUpApprovalService
         }
 
         if (!approver.IsCrossTenantAdmin &&
-            approver.TenantId != null &&
-            !string.Equals(entry.Ticket.TenantId, approver.TenantId, StringComparison.OrdinalIgnoreCase))
+            (string.IsNullOrWhiteSpace(approver.TenantId) ||
+             !string.Equals(entry.Ticket.TenantId, approver.TenantId, StringComparison.OrdinalIgnoreCase)))
         {
             var safeApproverSidForLog = (approver.ApproverSid ?? string.Empty).Replace("\r", string.Empty, StringComparison.Ordinal).Replace("\n", string.Empty, StringComparison.Ordinal);
             var safeTenantForLog = (approver.TenantId ?? "none").Replace("\r", string.Empty, StringComparison.Ordinal).Replace("\n", string.Empty, StringComparison.Ordinal);

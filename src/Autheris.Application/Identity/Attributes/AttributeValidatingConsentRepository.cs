@@ -130,14 +130,8 @@ public sealed class AttributeValidatingConsentRepository : IConsentRepository, I
         await _guard.EnsureMayMaterializeAsync(consent.TenantId, consent.TableIdentifier, consent.RowFilters, ct).ConfigureAwait(false);
     }
 
-    public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default) =>
-        _inner.GetActiveConsentsForSubjectsAsync(subjects, table, atTime, tenantId: null, ct);
-
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default) =>
         _inner.GetActiveConsentsForSubjectsAsync(subjects, table, atTime, tenantId, ct);
-
-    public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles = null, DateTimeOffset? atTime = null, CancellationToken ct = default) =>
-        _inner.GetAllActiveConsentsForSubjectsAsync(subjects, roles, atTime, tenantId: null, ct);
 
     public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default) =>
         _inner.GetAllActiveConsentsForSubjectsAsync(subjects, roles, atTime, tenantId, ct);

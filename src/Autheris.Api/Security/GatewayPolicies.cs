@@ -130,9 +130,7 @@ public static class GatewayPolicies
         AddRolePolicy(options, MetricsScraper, MetricsScrapeRoles);
         AddRolePolicy(options, UsageAdmin, UsageAdminRoles);
         options.AddPolicy(AuthenticatedCaller, policy => policy.RequireAuthenticatedUser());
-        options.AddPolicy(McpCaller, policy => policy
-            .RequireAuthenticatedUser()
-            .RequireAssertion(ctx => ctx.User.Identity?.IsAuthenticated == true));
+        AddRolePolicy(options, McpCaller, McpCallerRoles);
         options.AddPolicy(CatalogRead, policy => policy
             .RequireAuthenticatedUser()
             .RequireAssertion(ctx => ExternalApiPermissions.AllowsCatalogRead(ctx.User)));

@@ -105,12 +105,8 @@ public sealed class QueryConsentAndCatalogPagingTests
         public int GetAllActiveConsentsCalls { get; private set; }
         public int LoadedDescriptionBatchSize { get; private set; }
 
-        public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<Consent>>([]);
         public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<Consent>>([]);
-        public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles = null, DateTimeOffset? atTime = null, CancellationToken ct = default) =>
-            Task.FromResult(consents);
         public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default)
         {
             GetAllActiveConsentsCalls++;

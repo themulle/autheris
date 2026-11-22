@@ -17,7 +17,7 @@ public sealed class InMemoryRepositoryFakeTests
             repo.GetActiveConsentsForSubjectsAsync([], table, DateTimeOffset.UtcNow, null));
         await Should.ThrowAsync<ArgumentException>(() =>
             repo.GetAllActiveConsentsForSubjectsAsync([], null, null, null));
-        (await repo.GetAllActiveConsentsForSubjectsAsync([])).ShouldBeEmpty();
+        (await repo.GetAllActiveConsentsForSubjectsAsync([], null, null, Autheris.Tests.Common.TestTenants.Default)).ShouldBeEmpty();
     }
 
     [Fact]
