@@ -9,7 +9,6 @@ using System.Threading.Tasks;
 using Autheris.Application.Catalog;
 using Autheris.Application.Common;
 using Autheris.Application.Common.Interfaces;
-using System.Text.RegularExpressions;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Microsoft.Extensions.Caching.Memory;
@@ -32,9 +31,6 @@ public sealed partial class ODataHandler : IODataHandler
 
     // G3 / RR-L3: detailed denial and not-found messages are only returned in Development (fail-closed when unknown).
     private readonly bool _verboseErrors;
-
-    [GeneratedRegex("^[a-zA-Z_][a-zA-Z0-9_]*$")]
-    private static partial Regex SafeIdentifierRegex();
 
     private readonly ITableMetadataRepository _metadataRepo;
     private readonly IGatewayExecutionService _executionService;
@@ -466,7 +462,7 @@ public sealed partial class ODataHandler : IODataHandler
             }
             foreach (var field in fields)
             {
-                if (!SafeIdentifierRegex().IsMatch(field))
+                if (!SqlIdentifierGuard.IsValidIdentifier(field, maxLength: null))
                 {
                     return new ODataQueryResult(
                         Success: false,
@@ -743,7 +739,7 @@ public sealed partial class ODataHandler : IODataHandler
         foreach (var item in items)
         {
             var parts = item.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-            if (parts.Length is < 1 or > 2 || !SafeIdentifierRegex().IsMatch(parts[0]))
+            if (parts.Length is < 1 or > 2 || !SqlIdentifierGuard.IsValidIdentifier(parts[0], maxLength: null))
             {
                 error = $"The expression '{Truncate(item)}' in '$orderby' is not supported; use 'property [asc|desc]'.";
                 return false;

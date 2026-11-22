@@ -424,17 +424,15 @@ public sealed partial class GovernedTableReadPlanner
         }
 
         var trimmed = identifier.Trim();
-        if (trimmed.Contains('.', StringComparison.Ordinal) || trimmed.Contains(';', StringComparison.Ordinal) || trimmed.Contains('/', StringComparison.Ordinal) ||
-            trimmed.Contains('\\', StringComparison.Ordinal) || trimmed.Contains('\'', StringComparison.Ordinal) || trimmed.Contains('"', StringComparison.Ordinal) ||
-            trimmed.Contains("/*", StringComparison.Ordinal) || trimmed.Contains("--", StringComparison.Ordinal) || trimmed.Contains(' ', StringComparison.Ordinal))
-        {
-            throw new ArgumentException($"Identifier '{identifier}' contains invalid characters or dots. Joins and dotted table identifiers are strictly prohibited.", paramName);
-        }
-
         if (DisallowedSqlKeywords.Contains(trimmed))
         {
             throw new ArgumentException($"Identifier '{identifier}' is a reserved SQL keyword and cannot be used as an expression target.", paramName);
         }
+
+        SqlIdentifierGuard.ValidateIdentifier(
+            identifier,
+            paramName,
+            message: $"Identifier '{identifier}' contains invalid characters or dots. Joins and dotted table identifiers are strictly prohibited.");
     }
 
     private static bool IsColumnConstrained(TypedFilterNode? node, string columnName)

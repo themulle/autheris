@@ -233,35 +233,36 @@ public static class MetricViewStatementGuard
             throw Refuse();
         }
 
-        if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
+        if (!decision.HasRowFilter)
         {
-            try
+            return;
+        }
+
+        try
+        {
+            var policyFunctions = SqlFunctionAllowlists.BuildForPolicy(TargetSqlDialect.Databricks, null);
+            if (!DecisionRowFilter.TryResolveExpression(decision, policyFunctions, out var expr, ParserEngine))
             {
-                var (tree, _) = ParserEngine.Parse($"SELECT 1 FROM t WHERE {decision.CombinedRowFilterSql}".AsMemory(), SqlTokenSecurityOptions.Strict);
-                var stmt = (SelectStatement)new SqlAstBuilder(new AstBuilderOptions
+                return;
+            }
+
+            var referenced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            CollectColumnNames(expr, referenced);
+            foreach (var col in referenced)
+            {
+                if (!IsExposedDimension(col, columnsByName))
                 {
-                    EnforceFunctionPolicy = true,
-                    AllowedFunctions = SqlFunctionAllowlists.BuildForPolicy(TargetSqlDialect.Databricks, null)
-                }).BuildStatement(tree);
-                var where = ((QuerySpecification)stmt.Body).Where!;
-                var referenced = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-                CollectColumnNames(where, referenced);
-                foreach (var col in referenced)
-                {
-                    if (!IsExposedDimension(col, columnsByName))
-                    {
-                        throw Refuse();
-                    }
+                    throw Refuse();
                 }
             }
-            catch (WebSqlPolicyException)
-            {
-                throw;
-            }
-            catch (Exception ex) when (ex is not OutOfMemoryException)
-            {
-                throw Refuse();
-            }
+        }
+        catch (WebSqlPolicyException)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException)
+        {
+            throw Refuse();
         }
     }
 
