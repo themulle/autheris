@@ -330,7 +330,11 @@ public partial class GovernanceRepository
             WorkflowMode = source.WorkflowMode,
             ProfileItemNo = source.ProfileItemNo,
             ApprovingOwners = source.ApprovingOwners,
-            ClassificationAccess = source.ClassificationAccess
+            ClassificationAccess = source.ClassificationAccess,
+            GrantKind = source.GrantKind,
+            ApproverCapacity = source.ApproverCapacity,
+            SelfGrant = source.SelfGrant,
+            TargetColumns = source.TargetColumns?.ToArray()
         };
 
     private static GrantRecordInput BuildConsentGrantInput(Consent consent, string tenantId, string requestedBy, string decisionJson, DateTimeOffset decidedAt, GrantRecordType? recordType = null) =>

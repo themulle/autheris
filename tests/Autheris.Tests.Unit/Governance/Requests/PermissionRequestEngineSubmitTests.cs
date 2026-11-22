@@ -305,4 +305,64 @@ public sealed class PermissionRequestEngineSubmitTests
         var pendingEx = await Should.ThrowAsync<ConsentRequestException>(() => engine.SubmitAsync(tooBigBundle[0]));
         pendingEx.Code.ShouldBe("PENDING_REQUEST_LIMIT_EXCEEDED");
     }
+
+    [Fact]
+    public async Task Whitespace_or_blank_target_columns_rejected()
+    {
+        var engine = CreateEngine(NullFake.Create<IConsentApprovalRepository>());
+
+        var blankOnlyEx = await Should.ThrowAsync<ConsentRequestException>(() => engine.SubmitAsync(
+            new PermissionRequestSubmission(
+                UserPrincipal(), TenantA, ConsentRequestKind.Data,
+                PermissionTarget.ForTable(OrdersTable, ["   ", ""]),
+                GranteeType.User, "user:alice", "Valid justification text here.", ValidTo: Now.AddDays(10))));
+        blankOnlyEx.Code.ShouldBe("VALIDATION_ERROR");
+
+        var mixedBlankEx = await Should.ThrowAsync<ConsentRequestException>(() => engine.SubmitAsync(
+            new PermissionRequestSubmission(
+                UserPrincipal(), TenantA, ConsentRequestKind.Unmask,
+                PermissionTarget.ForTable(OrdersTable, ["email", " "]),
+                GranteeType.User, "user:alice", "Valid justification text here.", ValidTo: Now.AddDays(10))));
+        mixedBlankEx.Code.ShouldBe("VALIDATION_ERROR");
+    }
+
+    [Fact]
+    public async Task Column_scoped_request_when_metadata_absent_or_empty_rejected()
+    {
+        var emptyColsTable = new TableIdentifier("sales", "dbo", "no_cols");
+        var metadata = DefaultMetadata(new TableMetadata
+        {
+            Identifier = emptyColsTable,
+            OwnerTenantId = TenantA.Value,
+            Table = new Table { Id = Guid.NewGuid(), SourceName = "sales", SchemaName = "dbo", TableName = "no_cols", IsActive = true },
+            Columns = []
+        });
+
+        var engineWithEmptyCols = CreateEngine(NullFake.Create<IConsentApprovalRepository>(), metadata: metadata);
+        var emptyColsEx = await Should.ThrowAsync<ConsentRequestException>(() => engineWithEmptyCols.SubmitAsync(
+            new PermissionRequestSubmission(
+                UserPrincipal(), TenantA, ConsentRequestKind.Data,
+                PermissionTarget.ForTable(emptyColsTable, ["email"]),
+                GranteeType.User, "user:alice", "Valid justification text here.", ValidTo: Now.AddDays(10))));
+        emptyColsEx.Code.ShouldBe("TARGET_NOT_FOUND");
+
+        var engineWithoutMetadata = new PermissionRequestEngine(
+            NullFake.Create<IConsentApprovalRepository>(),
+            new InMemoryAuditWriter(),
+            new ApproverResolver(),
+            new ApproverEligibility(new GovernanceCapabilities()),
+            new SeparationOfDutiesService(),
+            new GrantPolicy(),
+            GrantValidityPolicy.CreateDefault(),
+            Array.Empty<IGrantEffectApplier>(),
+            metadataRepository: null,
+            timeProvider: new FakeTimeProvider(Now));
+
+        var noMetaEx = await Should.ThrowAsync<ConsentRequestException>(() => engineWithoutMetadata.SubmitAsync(
+            new PermissionRequestSubmission(
+                UserPrincipal(), TenantA, ConsentRequestKind.Unmask,
+                PermissionTarget.ForTable(OrdersTable, ["email"]),
+                GranteeType.User, "user:alice", "Valid justification text here.", ValidTo: Now.AddDays(10))));
+        noMetaEx.Code.ShouldBe("COLUMN_METADATA_UNAVAILABLE");
+    }
 }
