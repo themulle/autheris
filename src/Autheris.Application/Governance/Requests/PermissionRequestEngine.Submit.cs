@@ -378,23 +378,30 @@ public sealed partial class PermissionRequestEngine
             IReadOnlyList<string>? normalizedCols = null;
             if (target.Columns is { Count: > 0 })
             {
+                if (target.Columns.Any(string.IsNullOrWhiteSpace))
+                {
+                    throw new ConsentRequestException("VALIDATION_ERROR", "Target columns must not contain empty or whitespace entries.");
+                }
+
                 normalizedCols = target.Columns
-                    .Where(c => !string.IsNullOrWhiteSpace(c))
                     .Select(c => c.Trim())
                     .Distinct(StringComparer.OrdinalIgnoreCase)
                     .ToArray();
 
-                if (normalizedCols.Count == 0)
+                if (meta is null)
                 {
-                    normalizedCols = null;
+                    throw new ConsentRequestException("COLUMN_METADATA_UNAVAILABLE", "Table column metadata is unavailable for column-scoped permission requests.");
                 }
-                else if (meta is not null && meta.Columns.Count > 0)
+
+                if (meta.Columns.Count == 0)
                 {
-                    var knownCols = new HashSet<string>(meta.Columns.Select(c => c.ColumnName), StringComparer.OrdinalIgnoreCase);
-                    if (normalizedCols.Any(c => !knownCols.Contains(c)))
-                    {
-                        throw new ConsentRequestException("TARGET_NOT_FOUND", "Target was not found.");
-                    }
+                    throw new ConsentRequestException("TARGET_NOT_FOUND", "Target was not found.");
+                }
+
+                var knownCols = new HashSet<string>(meta.Columns.Select(c => c.ColumnName), StringComparer.OrdinalIgnoreCase);
+                if (normalizedCols.Any(c => !knownCols.Contains(c)))
+                {
+                    throw new ConsentRequestException("TARGET_NOT_FOUND", "Target was not found.");
                 }
             }
 

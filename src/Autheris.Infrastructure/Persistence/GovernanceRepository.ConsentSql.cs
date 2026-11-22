@@ -541,7 +541,10 @@ internal static class ConsentSqlCore
 
     public static async Task<ConsentRequest> CreateConsentRequestAsync(DbConnection conn, string? findTableIdSql, ConsentRequest request, CancellationToken ct)
     {
-        var tableGuid = request.RequestKind == ConsentRequestKind.ProfileAssignment && request.TableId == Guid.Empty && string.IsNullOrWhiteSpace(request.TableIdentifier.TableName)
+        var skipTableResolution = request.RequestKind is ConsentRequestKind.ProfileAssignment or ConsentRequestKind.Catalog
+            && request.TableId == Guid.Empty
+            && string.IsNullOrWhiteSpace(request.TableIdentifier.TableName);
+        var tableGuid = skipTableResolution
             ? Guid.Empty
             : await ResolveTableIdOrThrowAsync(conn, null, findTableIdSql, request.TableId, request.TableIdentifier, "consent request", ct).ConfigureAwait(false);
         var reqId = request.Id == Guid.Empty ? Guid.NewGuid() : request.Id;
@@ -847,7 +850,9 @@ internal static class ConsentSqlCore
         var granteeSid = new Sid(req.RequestedGranteeRef);
         var grantSource = req.RequestKind == ConsentRequestKind.ProfileAssignment
             ? ConsentGrantSource.AccessProfile
-            : ConsentGrantSource.ConsentRequest;
+            : req.SelfGrant
+                ? ConsentGrantSource.SelfGrant
+                : ConsentGrantSource.ConsentRequest;
         Guid? profileAssignmentId = req.RequestKind == ConsentRequestKind.ProfileAssignment ? req.Id : null;
 
         var draft = new Consent
@@ -864,7 +869,11 @@ internal static class ConsentSqlCore
             ValidFrom = now,
             ValidTo = req.RequestedValidTo.ToUniversalTime(),
             GrantSource = grantSource,
-            ProfileAssignmentId = profileAssignmentId
+            ProfileAssignmentId = profileAssignmentId,
+            GrantKind = req.GrantKind,
+            ApproverCapacity = req.ApproverCapacity,
+            SelfGrant = req.SelfGrant,
+            TargetColumns = req.TargetColumns?.ToArray()
         };
         return (true, consentId, draft);
     }

@@ -120,22 +120,52 @@ public sealed class DataGrantApplier(
         ConsentRequest req,
         CancellationToken ct)
     {
-        if (req.TargetColumns is not { Count: > 0 } || _metadataRepository is null || string.IsNullOrWhiteSpace(req.TableIdentifier.TableName))
+        if (req.TargetColumns is null or { Count: 0 })
         {
             return Array.Empty<ConsentColumnRule>();
+        }
+
+        var normalizedRequested = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var raw in req.TargetColumns)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                throw new ConsentDecisionException("VALIDATION_ERROR", "Target columns must not contain empty or whitespace entries.", 422);
+            }
+
+            normalizedRequested.Add(raw.Trim());
+        }
+
+        if (_metadataRepository is null || string.IsNullOrWhiteSpace(req.TableIdentifier.TableName))
+        {
+            throw new ConsentDecisionException(
+                "COLUMN_METADATA_UNAVAILABLE",
+                "Table column metadata is unavailable to enforce column-scoped grant rules.",
+                422);
         }
 
         var metadata = await _metadataRepository.GetTableMetadataAsync(req.TableIdentifier, ct).ConfigureAwait(false);
         if (metadata is null || metadata.Columns.Count == 0)
         {
-            return Array.Empty<ConsentColumnRule>();
+            throw new ConsentDecisionException(
+                "COLUMN_METADATA_UNAVAILABLE",
+                "Table column metadata is missing or empty; column-scoped grant rules cannot be safely materialized.",
+                422);
         }
 
-        var requestedSet = new HashSet<string>(req.TargetColumns, StringComparer.OrdinalIgnoreCase);
+        var knownCols = new HashSet<string>(metadata.Columns.Select(c => c.ColumnName), StringComparer.OrdinalIgnoreCase);
+        if (normalizedRequested.Any(c => !knownCols.Contains(c)))
+        {
+            throw new ConsentDecisionException(
+                "TARGET_NOT_FOUND",
+                "One or more requested target columns do not exist in table metadata.",
+                422);
+        }
+
         var rules = new List<ConsentColumnRule>();
         foreach (var col in metadata.Columns)
         {
-            if (!requestedSet.Contains(col.ColumnName))
+            if (!normalizedRequested.Contains(col.ColumnName))
             {
                 rules.Add(new ConsentColumnRule
                 {
