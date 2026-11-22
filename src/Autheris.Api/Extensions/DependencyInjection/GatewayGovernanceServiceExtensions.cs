@@ -210,6 +210,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Mcp.Interfaces.IGoldenQueryRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<Autheris.Application.Products.IDataProductRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<Autheris.Application.Docs.Interfaces.IDocLinkRepository>(sp => sp.GetRequiredService<TRepository>());
+        services.AddSingleton<IGovernanceDomainRepository, GovernanceDomainStore>();
         services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IConsumerAggregationRepository>(sp => sp.GetRequiredService<TRepository>());
