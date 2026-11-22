@@ -691,10 +691,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                                 syncClassifications,
                                 importTags));
                         }
-                        if (model.GoldenQueries is { } goldenMeta)
-                        {
-                            pendingGoldenQueries.Add((updatedMetadata, goldenMeta));
-                        }
+                        pendingGoldenQueries.Add((updatedMetadata, model.GoldenQueries ?? DbtGoldenQueryMeta.None));
                     }
                 }
             }
