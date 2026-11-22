@@ -12,10 +12,12 @@ using Autheris.GraphQL.Federation;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
 using NSubstitute;
 using Shouldly;
 using Xunit;
 
+[Collection("SubgraphReplayCache")]
 [Trait("Category", "Security")]
 public sealed class SubgraphFederationSecurityTests
 {
@@ -620,8 +622,62 @@ public sealed class SubgraphFederationSecurityTests
             Autheris.Api.Extensions.GatewayServiceCollectionExtensions.ValidateGatewayOptions(options, prodEnv))
             .Message.ShouldContain("Federation:SigningKey");
     }
+
+    [Fact]
+    public void ValidateSignature_PrunesExpiredNoncesByMaxDrift_AndBoundsReplayCacheCapacity()
+    {
+        var start = new DateTimeOffset(2026, 11, 21, 12, 0, 0, TimeSpan.Zero);
+        var fakeTime = new FakeTimeProvider(start);
+        SubgraphSecurityValidator.TimeProvider = fakeTime;
+        SubgraphSecurityValidator.ResetReplayCache();
+        try
+        {
+            const string bodySha = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
+            static string Sign(DateTimeOffset ts, string tenant, string nonce)
+            {
+                var p = FederationContextSignature.BuildCanonicalV2(tenant, "user_1", ts.ToUnixTimeSeconds().ToString(), nonce, "products", "", "POST", "/graphql", bodySha);
+                return FederationContextSignature.Sign(p, Secret);
+            }
+
+            // Long-drift (> 10 min) entry must stay cached past 10 minutes and block replay
+            var longTs = fakeTime.GetUtcNow();
+            var longSig = Sign(longTs, "tenant_drift", "long_nonce");
+            SubgraphSecurityValidator.ValidateSignature("tenant_drift", "user_1", longTs.ToUnixTimeSeconds().ToString(), "long_nonce", longSig, Secret, TimeSpan.FromMinutes(15), "products", "", "POST", "/graphql", "v2", bodySha).ShouldBeTrue();
+
+            fakeTime.Advance(TimeSpan.FromMinutes(11));
+            SubgraphSecurityValidator.ValidateSignature("tenant_drift", "user_1", longTs.ToUnixTimeSeconds().ToString(), "long_nonce", longSig, Secret, TimeSpan.FromMinutes(15), "products", "", "POST", "/graphql", "v2", bodySha).ShouldBeFalse();
+
+            // Short-drift entry expiring before long_nonce must still be pruned despite long_nonce staying valid
+            var shortTs = fakeTime.GetUtcNow();
+            SubgraphSecurityValidator.ValidateSignature("tenant_drift", "user_1", shortTs.ToUnixTimeSeconds().ToString(), "short_nonce", Sign(shortTs, "tenant_drift", "short_nonce"), Secret, TimeSpan.FromSeconds(5), "products", "", "POST", "/graphql", "v2", bodySha).ShouldBeTrue();
+            SubgraphSecurityValidator.CachedNonceCount.ShouldBe(2);
+
+            fakeTime.Advance(TimeSpan.FromSeconds(6));
+            var triggerTs = fakeTime.GetUtcNow();
+            SubgraphSecurityValidator.ValidateSignature("tenant_drift", "user_1", triggerTs.ToUnixTimeSeconds().ToString(), "trigger_nonce", Sign(triggerTs, "tenant_drift", "trigger_nonce"), Secret, TimeSpan.FromSeconds(60), "products", "", "POST", "/graphql", "v2", bodySha).ShouldBeTrue();
+            SubgraphSecurityValidator.CachedNonceCount.ShouldBe(2);
+
+            // Heap and dictionary stay bounded even when long_nonce precedes > 20k short-drift entries
+            for (int i = 0; i < 20_500; i++)
+            {
+                if (i % 4_000 == 0 && i > 0) fakeTime.Advance(TimeSpan.FromSeconds(2));
+                var now = fakeTime.GetUtcNow();
+                var nonce = "nonce_cap_" + i;
+                SubgraphSecurityValidator.ValidateSignature("tenant_cap", "user_1", now.ToUnixTimeSeconds().ToString(), nonce, Sign(now, "tenant_cap", nonce), Secret, TimeSpan.FromSeconds(1), "products", "", "POST", "/graphql", "v2", bodySha).ShouldBeTrue();
+            }
+
+            SubgraphSecurityValidator.CachedNonceCount.ShouldBeLessThanOrEqualTo(10_000);
+            SubgraphSecurityValidator.NonceOrderCount.ShouldBeLessThanOrEqualTo(20_000);
+        }
+        finally
+        {
+            SubgraphSecurityValidator.ResetReplayCache();
+            SubgraphSecurityValidator.TimeProvider = TimeProvider.System;
+        }
+    }
 }
 
+[Collection("SubgraphReplayCache")]
 [Trait("Category", "Security")]
 public sealed class SubgraphTimestampRangeTests
 {
@@ -639,3 +695,6 @@ public sealed class SubgraphTimestampRangeTests
         result.ShouldBeFalse();
     }
 }
+
+[CollectionDefinition("SubgraphReplayCache", DisableParallelization = true)]
+public sealed class SubgraphReplayCacheCollection { }

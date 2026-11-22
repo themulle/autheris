@@ -26,6 +26,12 @@ public sealed record GrantEffectPreviewResult(
     bool EmptyHardIntersection,
     IReadOnlyList<string> AffectedObjects);
 
+/// <summary>Batch entry evaluated in a single <see cref="IGrantEffectPreview.PreviewBatchAsync"/> pass.</summary>
+public sealed record GrantEffectPreviewBatchEntry(
+    Guid RequestId,
+    SecurityPrincipalContext Subject,
+    IReadOnlyList<GrantPreviewRequestedItem> RequestedItems);
+
 /// <summary>Computes non-blocking structural effect previews for pending access requests and profile items.</summary>
 public interface IGrantEffectPreview
 {
@@ -40,4 +46,24 @@ public interface IGrantEffectPreview
         IReadOnlyList<GrantPreviewRequestedItem> requestedItems,
         CancellationToken ct = default) =>
         PreviewAsync(subject, requestedItems, ct);
+
+    async Task<IReadOnlyDictionary<Guid, GrantEffectPreviewResult?>> PreviewBatchAsync(
+        SecurityPrincipalContext actor,
+        IReadOnlyList<GrantEffectPreviewBatchEntry> entries,
+        CancellationToken ct = default)
+    {
+        var results = new Dictionary<Guid, GrantEffectPreviewResult?>(entries.Count);
+        foreach (var entry in entries)
+        {
+            try
+            {
+                results[entry.RequestId] = await PreviewAsync(actor, entry.Subject, entry.RequestedItems, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                results[entry.RequestId] = null;
+            }
+        }
+        return results;
+    }
 }

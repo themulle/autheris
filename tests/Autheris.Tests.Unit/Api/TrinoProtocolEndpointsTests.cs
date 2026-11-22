@@ -48,6 +48,7 @@ public sealed class TrinoProtocolEndpointsTests
         var sqlService = Substitute.For<IGovernedSqlExecutionService>();
 
         var services = new ServiceCollection();
+        services.AddLogging();
         services.AddSingleton(statementManager);
         services.AddSingleton(sqlService);
         services.AddSingleton(TrinoIngress());
@@ -354,5 +355,23 @@ public sealed class TrinoProtocolEndpointsTests
         error.GetProperty("errorType").GetString().ShouldBe("USER_ERROR");
         error.GetProperty("errorCode").GetInt32().ShouldBe(4);
         error.GetProperty("errorName").GetString().ShouldBe("PERMISSION_DENIED");
+    }
+
+    [Theory]
+    [InlineData(true)]
+    [InlineData(false)]
+    public async Task Submit_BodyExceeding2Mb_Returns413(bool declareContentLength)
+    {
+        var (context, statementManager, sqlService) = CreateContext();
+        var oversized = new byte[(2 * 1024 * 1024) + 128];
+        Array.Fill(oversized, (byte)'a');
+        context.Request.Body = new MemoryStream(oversized);
+        context.Request.ContentLength = declareContentLength ? oversized.Length : null;
+
+        await TrinoProtocolEndpoints.HandleTrinoSubmit(context, sqlService, Options.Create(new GatewayOptions()), NullLoggerFactory.Instance);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status413PayloadTooLarge);
+        await statementManager.DidNotReceiveWithAnyArgs().SubmitOrWaitAsync(
+            default!, default!, default!, default!, default, default, default);
     }
 }

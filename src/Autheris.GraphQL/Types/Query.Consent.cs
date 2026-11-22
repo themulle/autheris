@@ -5,6 +5,7 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Governance.Paging;
 using Autheris.Application.Lineage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -52,6 +53,7 @@ public sealed partial class Query
         [Service] IConsentApprovalRepository approvalRepository = default!,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        [Service] IOptions<GatewayOptions>? gatewayOptions = null,
         CancellationToken ct = default)
     {
         var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
@@ -63,39 +65,33 @@ public sealed partial class Query
                 .Build());
         }
 
+        var tenantId = RequireCallerTenant(principal, "No valid tenant in the authentication token.");
+        var (effectiveFirst, effectiveAfter) = ResolveBoundedPaging(first, after, gatewayOptions?.Value?.GraphQL);
         var userSid = principal.GetUserSid();
-        if (userSid == null)
+        if (userSid == null || effectiveFirst == 0)
         {
             return Array.Empty<ConsentRequestDto>();
         }
 
-        var tenantId = RequireCallerTenant(principal, "No valid tenant in the authentication token.");
         var requests = await approvalRepository.GetRequestsByRequesterSidAsync(userSid.Value, tenantId, status, ct).ConfigureAwait(false);
-        var dtos = requests.Select(r => new ConsentRequestDto
-        {
-            Id = r.Id,
-            TableId = r.TableId,
-            TableIdentifier = r.TableIdentifier.ToString(),
-            RequesterSid = r.RequesterSid.Value,
-            RequestedGranteeType = r.RequestedGranteeType.ToString(),
-            RequestedGranteeRef = r.RequestedGranteeRef,
-            BusinessJustification = r.BusinessJustification,
-            Status = r.Status,
-            RequestedAt = r.RequestedAt,
-            RequestedValidTo = r.RequestedValidTo,
-            ContextJson = r.ContextJson
-        });
-
-        if (after.HasValue && after.Value > 0)
-        {
-            dtos = dtos.Skip(after.Value);
-        }
-        if (first.HasValue && first.Value > 0)
-        {
-            dtos = dtos.Take(first.Value);
-        }
-
-        return dtos.ToList();
+        return requests
+            .Skip(effectiveAfter)
+            .Take(effectiveFirst)
+            .Select(r => new ConsentRequestDto
+            {
+                Id = r.Id,
+                TableId = r.TableId,
+                TableIdentifier = r.TableIdentifier.ToString(),
+                RequesterSid = r.RequesterSid.Value,
+                RequestedGranteeType = r.RequestedGranteeType.ToString(),
+                RequestedGranteeRef = r.RequestedGranteeRef,
+                BusinessJustification = r.BusinessJustification,
+                Status = r.Status,
+                RequestedAt = r.RequestedAt,
+                RequestedValidTo = r.RequestedValidTo,
+                ContextJson = r.ContextJson
+            })
+            .ToList();
     }
 
     [GraphQLName("pendingApprovalsForMe")]
@@ -106,6 +102,7 @@ public sealed partial class Query
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         [Service] Autheris.Application.Policy.Pdp.IGrantEffectPreview? effectPreview = null,
         HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        [Service] IOptions<GatewayOptions>? gatewayOptions = null,
         CancellationToken ct = default)
     {
         var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
@@ -117,30 +114,24 @@ public sealed partial class Query
                 .Build());
         }
 
+        var tenantId = RequireCallerTenant(principal, "No valid tenant in the authentication token.");
+        var (effectiveFirst, effectiveAfter) = ResolveBoundedPaging(first, after, gatewayOptions?.Value?.GraphQL);
         var userSid = principal.GetUserSid();
-        if (userSid == null)
+        if (userSid == null || effectiveFirst == 0)
         {
             return Array.Empty<ConsentRequestDto>();
         }
 
-        var tenantId = RequireCallerTenant(principal, "No valid tenant in the authentication token.");
         var requests = await approvalRepository.GetPendingRequestsForApproverAsync(userSid.Value, tenantId, ct).ConfigureAwait(false);
-        var paged = requests.AsEnumerable();
-        if (after.HasValue && after.Value > 0)
-        {
-            paged = paged.Skip(after.Value);
-        }
-        if (first.HasValue && first.Value > 0)
-        {
-            paged = paged.Take(first.Value);
-        }
+        var paged = requests.Skip(effectiveAfter).Take(effectiveFirst).ToList();
+        var previews = await Autheris.Application.ConsentRequests.ProfileAssignments.ApprovalEffectPreviewHelper
+            .TryBuildBatchAsync(effectPreview, paged, userSid.Value, ct)
+            .ConfigureAwait(false);
 
-        var dtos = new List<ConsentRequestDto>();
+        var dtos = new List<ConsentRequestDto>(paged.Count);
         foreach (var r in paged)
         {
-            var preview = await Autheris.Application.ConsentRequests.ProfileAssignments.ApprovalEffectPreviewHelper
-                .TryBuildAsync(effectPreview, r, userSid.Value, ct)
-                .ConfigureAwait(false);
+            previews.TryGetValue(r.Id, out var preview);
             dtos.Add(new ConsentRequestDto
             {
                 Id = r.Id,
@@ -170,6 +161,7 @@ public sealed partial class Query
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         [Service] IOptions<GovernanceTextOptions>? textOptions = null,
         HotChocolate.Resolvers.IResolverContext? resolverContext = null,
+        [Service] IOptions<GatewayOptions>? gatewayOptions = null,
         CancellationToken ct = default)
     {
         var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(resolverContext, httpContextAccessor);
@@ -181,8 +173,10 @@ public sealed partial class Query
                 .Build());
         }
 
+        var tenantId = RequireCallerTenant(principal, "No valid tenant in the authentication token.");
+        var (effectiveFirst, effectiveAfter) = ResolveBoundedPaging(first, after, gatewayOptions?.Value?.GraphQL);
         var userSid = principal.GetUserSid();
-        if (userSid == null)
+        if (userSid == null || effectiveFirst == 0)
         {
             return Array.Empty<ConsentDto>();
         }
@@ -190,7 +184,6 @@ public sealed partial class Query
         var groupSids = principal.GetGroupSids();
         var allSubjects = groupSids.Append(userSid.Value).ToList();
         var roles = principal.GetUserRoles();
-        var tenantId = principal.GetTenantId();
         var now = DateTimeOffset.UtcNow;
 
         IReadOnlyList<Consent> consents;
@@ -209,9 +202,13 @@ public sealed partial class Query
         }
 
         var descriptionMax = (textOptions?.Value ?? new GovernanceTextOptions()).ConsentDescriptionMaxLength;
-        var activeConsents = consents.Where(c => c.IsActive(now) && c.TenantId == tenantId).ToList();
-        await Autheris.Application.Governance.ConsentDescriptionLoader.LoadAsync(consentRepository, activeConsents, ct).ConfigureAwait(false);
-        var dtos = activeConsents
+        var pagedConsents = consents
+            .Where(c => c.IsActive(now) && c.TenantId == tenantId)
+            .Skip(effectiveAfter)
+            .Take(effectiveFirst)
+            .ToList();
+        await Autheris.Application.Governance.ConsentDescriptionLoader.LoadAsync(consentRepository, pagedConsents, ct).ConfigureAwait(false);
+        return pagedConsents
             .Select(c => new ConsentDto
             {
                 Id = c.Id,
@@ -223,18 +220,40 @@ public sealed partial class Query
                 ValidTo = c.ValidTo,
                 Columns = c.ColumnRules.Select(cr => cr.ColumnName).ToList(),
                 Description = ConsentDescriptionText.ForOutput(c.Description, descriptionMax)
-            });
+            })
+            .ToList();
+    }
 
-        if (after.HasValue && after.Value > 0)
+    private static (int First, int After) ResolveBoundedPaging(int? first, int? after, GraphQLOptions? gqlOptions) =>
+        ResolveBoundedPageArgs(first, after, ConsentPageQuery.DefaultPageSize, ConsentPageQuery.MaxPageSize, gqlOptions);
+
+    private static (int First, int After) ResolveBoundedPageArgs(int? first, int? after, int defaultSize, int hardMaxSize, GraphQLOptions? gqlOptions)
+    {
+        int maxOffset = gqlOptions?.MaxAllowedOffset >= 0 ? gqlOptions.MaxAllowedOffset : 10_000;
+        int offset = after ?? 0;
+        if (offset < 0 || offset > maxOffset)
         {
-            dtos = dtos.Skip(after.Value);
-        }
-        if (first.HasValue && first.Value > 0)
-        {
-            dtos = dtos.Take(first.Value);
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("BAD_REQUEST")
+                .SetMessage($"Argument 'after' must be between 0 and {maxOffset}.")
+                .Build());
         }
 
-        return dtos.ToList();
+        if (first < 0)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("BAD_REQUEST")
+                .SetMessage("Argument 'first' must not be negative.")
+                .Build());
+        }
+
+        int maxPageSize = Math.Min(
+            hardMaxSize,
+            gqlOptions?.MaxResponseRows is > 0 and var configured ? configured : hardMaxSize);
+        int limit = first.HasValue
+            ? Math.Min(first.Value, maxPageSize)
+            : Math.Min(defaultSize, maxPageSize);
+        return (limit, offset);
     }
 
     public async Task<ConsentRevocationImpactReport> CalculateConsentRevocationImpactAsync(

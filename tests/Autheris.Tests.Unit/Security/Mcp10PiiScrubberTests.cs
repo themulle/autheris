@@ -41,4 +41,29 @@ public sealed class Mcp10PiiScrubberTests
         result.ShouldNotContain("john");
         result.ShouldNotContain("tag@");
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void MCP_10_EmailScrubber_LongDottedNonEmailString_CompletesInLinearTime()
+    {
+        var dottedPrefix = string.Concat(System.Linq.Enumerable.Repeat("a.", 50_000));
+        var payloadWithoutAt = $"{{\"text\":\"{dottedPrefix}end\"}}";
+        var payloadWithTrailingAt = $"{{\"text\":\"{dottedPrefix}@invalid\"}}";
+        var payloadWithEmail = $"{{\"text\":\"{dottedPrefix} alice@example.com\"}}";
+
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        var resNoAt = AiDataGuardrailService.ScrubPiiAndSensitiveData(payloadWithoutAt, out var modNoAt);
+        var resTrailingAt = AiDataGuardrailService.ScrubPiiAndSensitiveData(payloadWithTrailingAt, out var modTrailingAt);
+        var resWithEmail = AiDataGuardrailService.ScrubPiiAndSensitiveData(payloadWithEmail, out var modWithEmail);
+        sw.Stop();
+
+        modNoAt.ShouldBeFalse();
+        resNoAt.ShouldBe(payloadWithoutAt);
+        modTrailingAt.ShouldBeFalse();
+        resTrailingAt.ShouldBe(payloadWithTrailingAt);
+        modWithEmail.ShouldBeTrue();
+        resWithEmail.ShouldContain("a***@example.com");
+        resWithEmail.ShouldNotContain("alice@example.com");
+        sw.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(2));
+    }
 }

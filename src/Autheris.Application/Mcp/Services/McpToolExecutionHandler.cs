@@ -172,7 +172,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         ArgumentNullException.ThrowIfNull(tool);
         ArgumentNullException.ThrowIfNull(sessionContext);
 
-        var argsDoc = JsonDocument.Parse(string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson);
+        using var argsDoc = JsonDocument.Parse(string.IsNullOrWhiteSpace(argumentsJson) ? "{}" : argumentsJson);
         var root = argsDoc.RootElement;
         var userPrincipal = BuildUserPrincipal(sessionContext);
         var tenantId = new TenantId(sessionContext.TenantId);

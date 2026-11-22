@@ -3,14 +3,18 @@ using Autheris.Application.Services;
 namespace Autheris.Extensions.Lakehouse.Services;
 
 using System;
+using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Net;
 using System.Net.Http;
+using System.Security;
 using System.Security.Cryptography;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using System.Xml;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Options;
 using Autheris.Extensions.Lakehouse.Interfaces;
 using Microsoft.Extensions.Logging;
@@ -121,11 +125,147 @@ public sealed class S3LakehouseStorageProvider : ILakehouseStorageProvider
             using var response = await Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
             return response.IsSuccessStatusCode;
         }
-        catch (Exception ex)
+        catch (Exception ex) when (ex is not InvalidOperationException and not SecurityException and not OperationCanceledException)
         {
-            _logger.LogDebug(ex, "Failed to check S3 object existence for '{Location}'", location);
+            _logger.LogDebug(ex, "Failed to check S3 object existence for '{Location}'", LogSanitizer.Sanitize(location));
             return false;
         }
+    }
+
+    public async ValueTask<IReadOnlyList<string>> ListAsync(string prefixLocation, CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(prefixLocation))
+        {
+            return Array.Empty<string>();
+        }
+
+        var baseUri = ResolveS3Uri(prefixLocation, out var bucket, out var keyPrefix);
+        var normalizedPrefix = string.IsNullOrEmpty(keyPrefix)
+            ? string.Empty
+            : (keyPrefix.EndsWith("/", StringComparison.Ordinal) ? keyPrefix : keyPrefix + "/");
+        var isVirtualHosted = string.IsNullOrWhiteSpace(_options.Value.Lakehouse.Storage.S3Endpoint) &&
+                              baseUri.Host.StartsWith(bucket + ".s3", StringComparison.OrdinalIgnoreCase);
+        var listPath = isVirtualHosted ? "/" : $"/{bucket}";
+
+        var results = new List<string>();
+        string? continuationToken = null;
+        const int maxPages = 20;
+
+        for (int page = 0; page < maxPages; page++)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            var query = $"list-type=2&prefix={Uri.EscapeDataString(normalizedPrefix)}&delimiter=%2F";
+            if (!string.IsNullOrEmpty(continuationToken))
+            {
+                query += $"&continuation-token={Uri.EscapeDataString(continuationToken)}";
+            }
+
+            var listUri = new Uri($"{baseUri.Scheme}://{baseUri.Authority}{listPath}?{query}");
+            using var request = new HttpRequestMessage(HttpMethod.Get, listUri);
+            ApplySigV4OrUnsigned(request, HttpMethod.Get, listUri, bucket, normalizedPrefix);
+
+            using var response = await Client.SendAsync(request, HttpCompletionOption.ResponseHeadersRead, cancellationToken).ConfigureAwait(false);
+            if (response.StatusCode == HttpStatusCode.NotFound)
+            {
+                break;
+            }
+
+            response.EnsureSuccessStatusCode();
+            var xml = await LakehouseLocationGuard.ReadBoundedTextAsync(
+                response.Content,
+                LakehouseLocationGuard.ResolveMaxReadBytes(_options.Value),
+                prefixLocation,
+                cancellationToken).ConfigureAwait(false);
+
+            var (keys, nextToken) = ParseListObjectsV2Xml(xml);
+            foreach (var objKey in keys)
+            {
+                LakehouseLocationGuard.EnsureNoTraversal(objKey, prefixLocation);
+                results.Add(FormatListedLocation(prefixLocation, baseUri, bucket, objKey, isVirtualHosted));
+            }
+
+            if (string.IsNullOrEmpty(nextToken))
+            {
+                break;
+            }
+
+            continuationToken = nextToken;
+        }
+
+        return results;
+    }
+
+    private static (List<string> Keys, string? NextContinuationToken) ParseListObjectsV2Xml(string xml)
+    {
+        var keys = new List<string>();
+        var settings = new XmlReaderSettings
+        {
+            DtdProcessing = DtdProcessing.Prohibit,
+            XmlResolver = null
+        };
+        using var stringReader = new StringReader(xml);
+        using var reader = XmlReader.Create(stringReader, settings);
+
+        var inContents = false;
+        var isTruncated = false;
+        string? nextToken = null;
+
+        while (reader.Read())
+        {
+            if (reader.NodeType == XmlNodeType.Element)
+            {
+                if (reader.Name == "Contents")
+                {
+                    inContents = true;
+                }
+                else if (inContents && reader.Name == "Key")
+                {
+                    var key = reader.ReadElementContentAsString();
+                    if (!string.IsNullOrWhiteSpace(key))
+                    {
+                        keys.Add(key);
+                    }
+                }
+                else if (reader.Name == "IsTruncated")
+                {
+                    isTruncated = string.Equals(reader.ReadElementContentAsString().Trim(), "true", StringComparison.OrdinalIgnoreCase);
+                }
+                else if (reader.Name == "NextContinuationToken")
+                {
+                    nextToken = reader.ReadElementContentAsString().Trim();
+                }
+            }
+            else if (reader.NodeType == XmlNodeType.EndElement && reader.Name == "Contents")
+            {
+                inContents = false;
+            }
+        }
+
+        return (keys, isTruncated ? nextToken : null);
+    }
+
+    private static string FormatListedLocation(string prefixLocation, Uri baseUri, string bucket, string key, bool isVirtualHosted)
+    {
+        if (prefixLocation.StartsWith("s3://", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"s3://{bucket}/{key}";
+        }
+
+        if (prefixLocation.StartsWith("minio://", StringComparison.OrdinalIgnoreCase))
+        {
+            return $"minio://{bucket}/{key}";
+        }
+
+        if (prefixLocation.StartsWith("http://", StringComparison.OrdinalIgnoreCase) ||
+            prefixLocation.StartsWith("https://", StringComparison.OrdinalIgnoreCase))
+        {
+            return isVirtualHosted
+                ? $"{baseUri.Scheme}://{baseUri.Authority}/{key}"
+                : $"{baseUri.Scheme}://{baseUri.Authority}/{bucket}/{key}";
+        }
+
+        return key;
     }
 
     public Uri ResolveS3Uri(string location, out string bucket, out string key)
@@ -282,7 +422,7 @@ public sealed class S3LakehouseStorageProvider : ILakehouseStorageProvider
         {
             if (_options.Value.AreUnsignedS3RequestsAllowed)
             {
-                _logger.LogDebug("[INSECURE GETTING STARTED] Sending unsigned S3 request to {Uri}", uri);
+                _logger.LogDebug("[INSECURE GETTING STARTED] Sending unsigned S3 request to {Uri}", LogSanitizer.Sanitize(uri.ToString()));
                 return;
             }
 
@@ -293,27 +433,31 @@ public sealed class S3LakehouseStorageProvider : ILakehouseStorageProvider
         SignAwsSigV4(request, method, uri, accessKey, secretKey, region: ResolveSigningRegion(s3Opts.S3Region, uri));
     }
 
-    private static void SignAwsSigV4(
+    internal static void SignAwsSigV4(
         HttpRequestMessage request,
         HttpMethod method,
         Uri uri,
         string accessKey,
         string secretKey,
-        string region)
+        string region,
+        DateTimeOffset? utcNow = null)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = utcNow ?? DateTimeOffset.UtcNow;
         var amzDate = now.ToString("yyyyMMddTHHmmssZ", CultureInfo.InvariantCulture);
         var dateStamp = now.ToString("yyyyMMdd", CultureInfo.InvariantCulture);
 
         const string emptyPayloadHash = "e3b0c44298fc1c149afbf4c8996fb92427ae41e4649b934ca495991b7852b855";
         var host = uri.Authority;
 
+        request.Headers.Remove("x-amz-date");
+        request.Headers.Remove("x-amz-content-sha256");
+        request.Headers.Remove("Authorization");
         request.Headers.TryAddWithoutValidation("x-amz-date", amzDate);
         request.Headers.TryAddWithoutValidation("x-amz-content-sha256", emptyPayloadHash);
         request.Headers.Host = host;
 
-        var canonicalUri = uri.AbsolutePath;
-        var canonicalQuery = uri.Query.TrimStart('?');
+        var canonicalUri = BuildCanonicalUri(uri.AbsolutePath);
+        var canonicalQuery = BuildCanonicalQueryString(uri.Query);
         var canonicalHeaders = $"host:{host}\nx-amz-content-sha256:{emptyPayloadHash}\nx-amz-date:{amzDate}\n";
         const string signedHeaders = "host;x-amz-content-sha256;x-amz-date";
 
@@ -332,6 +476,103 @@ public sealed class S3LakehouseStorageProvider : ILakehouseStorageProvider
         var authHeader = $"AWS4-HMAC-SHA256 Credential={accessKey}/{credentialScope}, SignedHeaders={signedHeaders}, Signature={signature}";
         request.Headers.TryAddWithoutValidation("Authorization", authHeader);
     }
+
+    internal static string BuildCanonicalUri(string? absolutePath)
+    {
+        if (string.IsNullOrEmpty(absolutePath))
+        {
+            return "/";
+        }
+
+        var segments = absolutePath.Split('/');
+        for (int i = 0; i < segments.Length; i++)
+        {
+            if (segments[i].Length == 0)
+            {
+                continue;
+            }
+
+            var decoded = Uri.UnescapeDataString(segments[i]);
+            segments[i] = AwsUriEncode(decoded);
+        }
+
+        return string.Join('/', segments);
+    }
+
+    internal static string BuildCanonicalQueryString(string? query)
+    {
+        if (string.IsNullOrEmpty(query))
+        {
+            return string.Empty;
+        }
+
+        var rawQuery = query.StartsWith("?", StringComparison.Ordinal) ? query[1..] : query;
+        if (rawQuery.Length == 0)
+        {
+            return string.Empty;
+        }
+
+        var pairs = new List<(string Key, string Value)>();
+        foreach (var part in rawQuery.Split('&', StringSplitOptions.RemoveEmptyEntries))
+        {
+            var eqIdx = part.IndexOf('=');
+            var rawKey = eqIdx >= 0 ? part[..eqIdx] : part;
+            var rawVal = eqIdx >= 0 ? part[(eqIdx + 1)..] : string.Empty;
+
+            var encodedKey = AwsUriEncode(Uri.UnescapeDataString(rawKey));
+            var encodedVal = AwsUriEncode(Uri.UnescapeDataString(rawVal));
+            pairs.Add((encodedKey, encodedVal));
+        }
+
+        pairs.Sort(static (a, b) =>
+        {
+            var keyCmp = StringComparer.Ordinal.Compare(a.Key, b.Key);
+            return keyCmp != 0 ? keyCmp : StringComparer.Ordinal.Compare(a.Value, b.Value);
+        });
+
+        var sb = new StringBuilder();
+        for (int i = 0; i < pairs.Count; i++)
+        {
+            if (i > 0)
+            {
+                sb.Append('&');
+            }
+
+            sb.Append(pairs[i].Key).Append('=').Append(pairs[i].Value);
+        }
+
+        return sb.ToString();
+    }
+
+    private static string AwsUriEncode(string value)
+    {
+        if (string.IsNullOrEmpty(value))
+        {
+            return string.Empty;
+        }
+
+        var bytes = Encoding.UTF8.GetBytes(value);
+        var sb = new StringBuilder(bytes.Length * 3);
+        foreach (var b in bytes)
+        {
+            if (IsRfc3986Unreserved(b))
+            {
+                sb.Append((char)b);
+            }
+            else
+            {
+                sb.Append('%').Append(b.ToString("X2", CultureInfo.InvariantCulture));
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    private static bool IsRfc3986Unreserved(byte b) =>
+        (b >= 'A' && b <= 'Z') ||
+        (b >= 'a' && b <= 'z') ||
+        (b >= '0' && b <= '9') ||
+        b is (byte)'-' or (byte)'.' or (byte)'_' or (byte)'~';
 
     private static byte[] HmacSha256(byte[] key, byte[] data)
     {

@@ -96,6 +96,10 @@ public static class IcebergRestCatalogEndpoints
             {
                 return HandleIcebergError(context, ex);
             }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                return HandleIcebergError(context, ex);
+            }
         });
 
         group.MapPost("/{prefix}/namespaces/{namespace}/tables/{table}/credentials", async (
@@ -135,6 +139,7 @@ public static class IcebergRestCatalogEndpoints
         {
             TransportNotAllowedException => (StatusCodes.Status403Forbidden, "TRANSPORT_NOT_ALLOWED", "This data source is not exposed on the requested transport."),
             SecurityException or UnauthorizedAccessException => (StatusCodes.Status403Forbidden, "ACCESS_DENIED", "Access denied."),
+            FileNotFoundException => (StatusCodes.Status404NotFound, "NO_SUCH_TABLE", "Table metadata not found."),
             ArgumentException or FormatException or InvalidDataException => (StatusCodes.Status400BadRequest, "BAD_REQUEST", "The request is invalid."),
             NotSupportedException => (StatusCodes.Status501NotImplemented, "NOT_IMPLEMENTED", "Not implemented."),
             _ => (StatusCodes.Status500InternalServerError, "INTERNAL_ERROR", "An unexpected error occurred.")

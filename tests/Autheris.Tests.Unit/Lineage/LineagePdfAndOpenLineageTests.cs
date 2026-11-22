@@ -99,7 +99,12 @@ public class LineagePdfAndOpenLineageTests
             OpenLineageApiKey = "api-token-test"
         });
 
-        var client = new OpenLineageClient(httpClient, graphStore, options, NullLogger<OpenLineageClient>.Instance);
+        var client = new OpenLineageClient(
+            httpClient,
+            graphStore,
+            options,
+            NullLogger<OpenLineageClient>.Instance,
+            environment: new TestHostEnvironment("Development"));
 
         var runEvent = new OpenLineageRunEvent(
             EventType: "COMPLETE",

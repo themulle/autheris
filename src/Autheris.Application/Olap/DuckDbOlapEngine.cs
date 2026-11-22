@@ -55,6 +55,8 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
     private readonly DuckDbOlapOptions _options;
     private readonly ILogger<DuckDbOlapEngine>? _logger;
     private readonly SemaphoreSlim _concurrencySemaphore;
+    internal string TempDirectoryRoot { get; init; } = System.IO.Path.GetTempPath();
+    internal int AvailableConcurrencySlots => _concurrencySemaphore.CurrentCount;
 
     public DuckDbOlapEngine(
         IOptions<GatewayOptions> gatewayOptions,
@@ -148,11 +150,11 @@ public sealed class DuckDbOlapEngine : IDuckDbOlapEngine
         }
 
         // SG-01: Session-isolated temporary directory to prevent cross-session spill leakage
-        var sessionTempDir = System.IO.Path.Combine(System.IO.Path.GetTempPath(), "autheris_olap_" + Guid.NewGuid().ToString("N"));
-        System.IO.Directory.CreateDirectory(sessionTempDir);
+        var sessionTempDir = System.IO.Path.Combine(TempDirectoryRoot, "autheris_olap_" + Guid.NewGuid().ToString("N"));
 
         try
         {
+            System.IO.Directory.CreateDirectory(sessionTempDir);
             // Completely transient in-memory database session
             using var connection = new DuckDBConnection("DataSource=:memory:");
             await connection.OpenAsync(cts.Token).ConfigureAwait(false);
