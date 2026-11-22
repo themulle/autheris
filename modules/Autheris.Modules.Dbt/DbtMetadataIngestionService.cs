@@ -1283,7 +1283,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     // R-51: Distinguish routine / procedure from missing catalog tables
                     if (IsRoutine(tableId.TableName, item))
                     {
-                        warnings.Add($"Routine '{tableId}' nicht anwendbar (Routine); skipped governance update.");
+                        warnings.Add($"Routine '{tableId}' is not applicable (routine); skipped governance update.");
                     }
                     else
                     {

@@ -10,7 +10,7 @@ public sealed class AccessProfile
     public required string Name { get; init; }
     public required TenantId TenantId { get; init; }
     public MaskingPolicyMode MaskingMode { get; init; } = MaskingPolicyMode.Default;
-    public List<string> TargetTables { get; init; } = []; // z. B. ["*.*"] oder ["tem.gps_position", "md.*"]
+    public List<string> TargetTables { get; init; } = []; // e.g. ["*.*"] or ["tem.gps_position", "md.*"]
     public IReadOnlyList<GrantRowScopeEntry> RowScope { get; init; } = [];
     public IReadOnlyList<AccessProfileWriteRule> WriteRules { get; init; } = [];
     /// <summary>the typed assignments (users, groups, roles) with their approvals and expiry. They are the only source of who holds a profile (O-5d: plain subject lists were removed).</summary>

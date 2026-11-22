@@ -8,9 +8,9 @@ using Autheris.Application.Catalog.Search;
 using Autheris.Domain.Interfaces;
 
 /// <summary>
-/// Vollständig lokaler, deterministischer In-Process Embedding Generator.
-/// Projiziert Schema-Begriffe und Intentionen in einen 384-dimensionalen Einheitsvektor-Raum,
-/// ohne externe Modelle, Python oder Cloud-Abhängigkeiten.
+/// Fully local, deterministic in-process embedding generator.
+/// Projects schema terms and search intents into a 384-dimensional unit vector space
+/// without external models, Python, or cloud dependencies.
 /// </summary>
 public sealed class LocalDeterministicEmbeddingGenerator : ILocalEmbeddingGenerator
 {
@@ -33,7 +33,7 @@ public sealed class LocalDeterministicEmbeddingGenerator : ILocalEmbeddingGenera
             var token = tokens[t];
             ulong hash = ComputeHash(token);
 
-            // Projiziere Token auf Dimensionen
+            // Project token onto dimensions
             for (int d = 0; d < 8; d++)
             {
                 int index = (int)((hash + (ulong)(d * 47)) % (ulong)Dimensions);

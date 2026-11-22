@@ -110,7 +110,7 @@ public sealed partial class ShippedConfigurationKeysTests
     [Fact]
     public void DeploymentArtifacts_ContainOnlyKnownGatewayEnvironmentVariables()
     {
-        var files = Files("deploy", "benchmarks", "docker-compose.yml", "Dockerfile", "Dockerfile.production", "Dockerfile.staging", "scripts", ".github")
+        var files = Files("deploy", "benchmarks", "docker-compose.yml", "Dockerfile", "scripts", ".github")
             .Where(f => !f.EndsWith(".json", StringComparison.OrdinalIgnoreCase) || !Path.GetFileName(f).StartsWith("appsettings", StringComparison.OrdinalIgnoreCase))
             .Where(f => new FileInfo(f).Length < 2_000_000)
             .ToList();

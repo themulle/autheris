@@ -1040,7 +1040,7 @@ public sealed class DbtTests
 
         result.Success.ShouldBeTrue();
         result.Warnings.Count.ShouldBe(2);
-        result.Warnings.ShouldAllBe(w => w.Contains("nicht anwendbar (Routine)"));
+        result.Warnings.ShouldAllBe(w => w.Contains("is not applicable (routine)"));
     }
 
     private sealed class PagedOnlyTableMetadataRepository(params TableMetadata[] seed) : ITableMetadataRepository

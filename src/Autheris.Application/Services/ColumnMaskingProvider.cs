@@ -435,7 +435,7 @@ public sealed partial class ColumnMaskingProvider : IColumnMaskingProvider
             return null;
         }
 
-        // Null-Island Schutz: Fehlender GPS-Fix (0.0, 0.0) bleibt zwingend 0.0
+        // Null-Island protection: missing GPS fix (0.0, 0.0) must remain 0.0
         if (Math.Abs(d) < 1e-9)
         {
             return 0.0;

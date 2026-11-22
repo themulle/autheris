@@ -349,7 +349,7 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
 
                 if (existing != null)
                 {
-                    // SG-11: Bei bestehenden Tabellen keine neuen Spalten zulassen (Phantomspalten-Schutz)
+                    // SG-11: Do not allow new columns on existing tables (phantom-column protection)
                     var existingColNames = new HashSet<string>(existing.Columns.Select(c => c.ColumnName), StringComparer.OrdinalIgnoreCase);
                     effectiveColumns = columns.Where(c => existingColNames.Contains(c.ColumnName)).ToList();
                     var ignoredColsCount = columns.Count - effectiveColumns.Count;

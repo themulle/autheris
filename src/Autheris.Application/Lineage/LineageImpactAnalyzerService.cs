@@ -64,7 +64,7 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
 
         var consent = await _consentRepo.GetConsentByIdAsync(consentId, ct).ConfigureAwait(false);
         // BOLA / Cross-tenant protection: reject if consent belongs to a different tenant
-        // SEC M-15: Keine Ausnahme mehr für Consents ohne Mandant (waren mandantenübergreifend sichtbar).
+        // M-15: No exception for consents without a tenant (previously visible across tenants).
         if (consent == null ||
             (consent.TenantId != tenant &&
              !callerContext.IsClusterAdmin))
@@ -72,7 +72,7 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
             throw new KeyNotFoundException($"Consent with ID '{consentId}' not found.");
         }
 
-        // SEC M-15: Nur Owner/Delegierte der Tabelle, GovernanceAdmin und PrivacyAdmin dürfen die Auswirkungsanalyse sehen.
+        // M-15: Only the table's Owner/delegates, GovernanceAdmin, and PrivacyAdmin may view impact analysis.
         if (!await IsAuthorizedForAccessAnalysisAsync(consent.TableIdentifier, callerContext, ct).ConfigureAwait(false))
         {
             throw new GatewayForbiddenException("Impact analyses require Data Owner, GovernanceAdmin or PrivacyAdmin permissions.");
@@ -82,8 +82,8 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
         GatewayDiagnostics.SetSafeTag(activity, "Lineage.Traverse", "tenant.id", tenant.Value);
         GatewayDiagnostics.SetSafeTag(activity, "Lineage.Traverse", "root.node_id", rootTableId);
 
-        // Zero-Trust Spaltenautorisierung für ownerEmail:
-        // Nur GovernanceAdmin, ClusterAdmin oder der registrierte Data Owner der betroffenen Tabelle dürfen E-Mails sehen
+        // Zero-trust column authorization for ownerEmail:
+        // Only GovernanceAdmin, ClusterAdmin, or the registered Data Owner of the affected table may see emails
         bool canViewEmail = callerContext.IsGovernanceAdmin || callerContext.IsClusterAdmin;
         if (!canViewEmail)
         {
@@ -111,9 +111,9 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
                 {
                     if (path.Contains(downstreamId))
                     {
-                        // Echter Zyklus! downstreamId liegt auf dem Pfad von der Wurzel zu diesem Knoten
+                        // Real cycle: downstreamId lies on the path from root to this node
                         containsCycles = true;
-                        _logger.LogWarning("Lineage Zyklus erkannt bei Knoten: {NodeId} -> {DownstreamId}", currentId, downstreamId);
+                        _logger.LogWarning("Lineage cycle detected at node: {NodeId} -> {DownstreamId}", currentId, downstreamId);
 
                         var cyclicNode = _graphStore.GetNode(downstreamId);
                         if (cyclicNode != null)
@@ -147,10 +147,10 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
 
         var affectedList = new List<AffectedEntity>(affectedMap.Values);
 
-        // Severity-Berechnung:
-        // HIGH wenn Dashboards oder Pipelines betroffen sind
-        // MEDIUM bei ExternalService
-        // LOW bei reinen Tabellen/Spalten
+        // Severity calculation:
+        // HIGH when dashboards or pipelines are affected
+        // MEDIUM for ExternalService
+        // LOW for tables/columns only
         string severity = "LOW";
         foreach (var entity in affectedList)
         {
@@ -235,8 +235,8 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
             }
         }
 
-        // SEC M-15: Das Zugriffsprotokoll (Actor-SIDs, Zugriffszahlen, Zeiträume) sehen nur Owner/Delegierte,
-        // GovernanceAdmin und PrivacyAdmin. Andere Aufrufer erhalten nur aggregierte Kennzahlen.
+        // M-15: The access log (actor SIDs, access counts, time windows) is visible only to Owner/delegates,
+        // GovernanceAdmin, and PrivacyAdmin. Other callers receive aggregated counts only.
         bool canViewRuntimeConsumers = callerContext != null &&
             await IsAuthorizedForAccessAnalysisAsync(table, callerContext, ct).ConfigureAwait(false);
 
@@ -426,8 +426,8 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
     }
 
     /// <summary>
-    /// SEC M-15: Zugriffs- und Auswirkungsanalysen sind auf Data Owner/Delegierte der Tabelle,
-    /// GovernanceAdmin und PrivacyAdmin beschränkt.
+    /// M-15: Access and impact analyses are restricted to the table's Data Owner/delegates,
+    /// GovernanceAdmin, and PrivacyAdmin.
     /// </summary>
     private async Task<bool> IsAuthorizedForAccessAnalysisAsync(TableIdentifier table, CallerSecurityContext callerContext, CancellationToken ct)
     {

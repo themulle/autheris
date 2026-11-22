@@ -464,7 +464,7 @@ public sealed partial class FastSqlEngine : ISqlEngine, IAsyncSqlEngine, Governa
 
             TTree tree;
 
-            // Stufe 1: Schneller SLL-Pfad (im Pool bereits vorkonfiguriert)
+            // Stage 1: Fast SLL path (already preconfigured in the pool)
             try
             {
                 tree = entryRule(parser);
@@ -488,7 +488,7 @@ public sealed partial class FastSqlEngine : ISqlEngine, IAsyncSqlEngine, Governa
                     throw new ParseCanceledException(message, mismatch);
                 }
 
-                // Stufe 2: Fallback auf LL(*)-Modus, mit eigenem (kleineren) Zeitbudget
+                // Stage 2: Fallback to LL(*) mode with its own tighter time budget
                 if (LlFallbackTimeout > TimeSpan.Zero)
                 {
                     cancellation.TightenDeadline(LlFallbackTimeout, "SQL parsing exceeded the LL fallback time budget.");

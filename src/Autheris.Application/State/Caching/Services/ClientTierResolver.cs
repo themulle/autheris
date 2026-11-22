@@ -194,8 +194,8 @@ public sealed class ClientTierResolver : IClientTierResolver
             return Task.FromResult(new ClientQuotaContext(subjectId, effectiveTier, effectivePolicy, canonicalScope));
         }
 
-        // 3. SEC M-16: Unbekannte X-API-Key-Werte werden ignoriert. Früher erzeugte jeder zufällige Key einen frischen Bucket;
-        //    jetzt fällt der Aufrufer auf den IP-basierten anonymen Bucket zurück.
+        // 3. M-16: Unknown X-API-Key values are ignored. Previously any random key created a fresh bucket;
+        //    now the caller falls back to the IP-based anonymous bucket.
         if (!string.IsNullOrWhiteSpace(apiKey))
         {
             _logger.LogDebug("Unregistered X-API-Key ignored for quota resolution; falling back to anonymous IP bucket.");
@@ -258,7 +258,7 @@ public sealed class ClientTierResolver : IClientTierResolver
     }
 
     /// <summary>
-    /// SEC M-16 &amp; Quota-Subjekt eines angemeldeten Aufrufers = Tenant + Benutzer-SID + client_id + canonicalScope.
+    /// M-16 &amp; quota subject of an authenticated caller = Tenant + user SID + client_id + canonicalScope.
     /// </summary>
     internal static string BuildAuthenticatedSubjectId(ClaimsPrincipal principal)
     {
