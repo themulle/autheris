@@ -6,6 +6,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Connectors;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -20,9 +21,9 @@ namespace Autheris.Application.Services;
 /// parameters) and executed through <see cref="IGovernedSqlExecutionService"/>, so tenant, row policy, masks, limits and the audit
 /// digest all come from the single compiler path. No SQL text is built here and no <c>DbCommand</c> is touched.
 /// <para>
-/// Two attestations are reported through <see cref="DataSourceExecutionContext.Items"/>: <c>RlsPushdownExecuted</c> (the compiler
-/// applied the row policy) and <c>InDbColumnMaskingExecuted</c> (it applied the masks), so the caller neither filters nor masks
-/// the rows a second time.
+/// Two attestations are reported through <see cref="DataSourceExecutionContext.Attestation"/>: <see cref="ConnectorSecurityAttestation.RlsPushdownExecuted"/>
+/// (the compiler applied the row policy) and <see cref="ConnectorSecurityAttestation.InDbColumnMaskingExecuted"/> (it applied the masks),
+/// so the caller neither filters nor masks the rows a second time.
 /// </para>
 /// </summary>
 public sealed class SqlTableReadExecutor : IDataSourceExecutor
@@ -30,8 +31,6 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
     /// <summary>16 MB limit per binary column value.</summary>
     public const int MaxAllowedBinaryBytes = 16 * 1024 * 1024;
 
-    internal const string RlsPushdownExecutedKey = "RlsPushdownExecuted";
-    internal const string InDbColumnMaskingExecutedKey = "InDbColumnMaskingExecuted";
     internal const string SourceExecutionStatsKey = Autheris.Application.Usage.ISourceExecutionStatsProvider.ItemKey;
 
     private static readonly HashSet<string> SpatialTypes = new(StringComparer.OrdinalIgnoreCase)
@@ -103,8 +102,9 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
                 tenant,
                 ct).ConfigureAwait(false);
 
-            context.Items[InDbColumnMaskingExecutedKey] = true;
-            context.Items[RlsPushdownExecutedKey] = true;
+            context.Attestation = new ConnectorSecurityAttestation(
+                RlsPushdownExecuted: true,
+                InDbColumnMaskingExecuted: true);
             if (subtreeResult.SourceStats != default)
             {
                 context.Items[SourceExecutionStatsKey] = subtreeResult.SourceStats;
@@ -163,15 +163,14 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
             context.Items[TableQueryItems.TotalCount] = await CountAsync(service, intent, metadata, decision, context, tenant, ct).ConfigureAwait(false);
         }
 
-        context.Items[RlsPushdownExecutedKey] = true;
+        var inDbMaskingExecuted = _options?.Value?.IsColumnMaskingDisabled != true &&
+            planned.ColumnsToSelect.Any(c => decision.GetEffectiveColumnAccess(c, metadata) == ColumnAccessLevel.Mask);
+        context.Attestation = new ConnectorSecurityAttestation(
+            RlsPushdownExecuted: true,
+            InDbColumnMaskingExecuted: inDbMaskingExecuted);
         if (result.SourceStats != default)
         {
             context.Items[SourceExecutionStatsKey] = result.SourceStats;
-        }
-        if (_options?.Value?.IsColumnMaskingDisabled != true &&
-            planned.ColumnsToSelect.Any(c => decision.GetEffectiveColumnAccess(c, metadata) == ColumnAccessLevel.Mask))
-        {
-            context.Items[InDbColumnMaskingExecutedKey] = true;
         }
 
         return rows;
@@ -214,12 +213,11 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
         context.Items[TableQueryItems.Ordering] = planned.Ordering.ToString();
         var service = _executionService();
 
-        context.Items[RlsPushdownExecutedKey] = true;
-        if (_options?.Value?.IsColumnMaskingDisabled != true &&
-            planned.ColumnsToSelect.Any(c => decision.GetEffectiveColumnAccess(c, metadata) == ColumnAccessLevel.Mask))
-        {
-            context.Items[InDbColumnMaskingExecutedKey] = true;
-        }
+        var inDbMaskingExecuted = _options?.Value?.IsColumnMaskingDisabled != true &&
+            planned.ColumnsToSelect.Any(c => decision.GetEffectiveColumnAccess(c, metadata) == ColumnAccessLevel.Mask);
+        context.Attestation = new ConnectorSecurityAttestation(
+            RlsPushdownExecuted: true,
+            InDbColumnMaskingExecuted: inDbMaskingExecuted);
 
         var request = new GovernedSqlQueryRequest(
             planned.Sql,

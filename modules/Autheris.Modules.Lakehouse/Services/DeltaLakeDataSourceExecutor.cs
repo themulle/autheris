@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Connectors;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -202,6 +203,7 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
 
         // SEC EX-04: Evaluate RLS before column masking
         var candidateRows = rawRows.Cast<IReadOnlyDictionary<string, object?>>().ToList();
+        var rlsExecuted = false;
         if (!string.IsNullOrWhiteSpace(context.AccessDecision.CombinedRowFilterSql))
         {
             Autheris.Application.Services.GatewayExecutionService.EnsureInMemoryFilterIsEnforceable(context.AccessDecision);
@@ -209,7 +211,7 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
                 candidateRows,
                 context.AccessDecision,
                 context.Metadata);
-            context.Items["RlsPushdownExecuted"] = true;
+            rlsExecuted = true;
         }
 
         // Column Masking
@@ -251,7 +253,9 @@ public sealed class DeltaLakeDataSourceExecutor : IDataSourceExecutor
             resultRows.Add(cleanRow);
         }
 
-        context.Items["InDbColumnMaskingExecuted"] = true;
+        context.Attestation = new ConnectorSecurityAttestation(
+            RlsPushdownExecuted: rlsExecuted,
+            InDbColumnMaskingExecuted: true);
         return resultRows;
     }
 

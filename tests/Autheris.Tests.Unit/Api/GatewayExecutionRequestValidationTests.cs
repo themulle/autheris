@@ -33,7 +33,7 @@ public sealed class GatewayExecutionRequestValidationTests
         public async Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ExecuteAsync(DataSourceExecutionContext context, CancellationToken ct = default)
         {
             RequestedFields.Add(context.RequestedFields);
-            context.Items["RlsPushdownExecuted"] = true;
+            context.Attestation = new Autheris.Domain.Connectors.ConnectorSecurityAttestation(RlsPushdownExecuted: true);
             Entered.TrySetResult();
             if (Gate != null)
             {

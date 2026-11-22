@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Autheris.Application.DataSources.Connectors;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
+using Autheris.Domain.Connectors;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -67,7 +68,7 @@ public sealed class FederatedStagingRowFilterRegressionTests
         var stub = new StubTableConnector("crm_api", TicketRows(), session =>
         {
             session.Items["VirtualFilterFederationHandled"] = true;
-            session.Items[GovernedConnectorReader.RlsPushdownExecutedKey] = true;
+            session.Attestation = new ConnectorSecurityAttestation(RlsPushdownExecuted: true);
         });
 
         var staged = await PlanAndStageAsync(Unrestricted(Tickets, "status = 'OPEN'"), stub);

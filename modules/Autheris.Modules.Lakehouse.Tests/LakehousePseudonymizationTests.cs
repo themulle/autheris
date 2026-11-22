@@ -150,8 +150,7 @@ public sealed class LakehousePseudonymizationTests
             new TenantId("tenant-a"));
 
         var rowsA = await executor.ExecuteAsync(contextA);
-        contextA.Items.TryGetValue("InDbColumnMaskingExecuted", out var maskedA).ShouldBeTrue();
-        maskedA.ShouldBe(true);
+        contextA.Attestation.InDbColumnMaskingExecuted.ShouldBeTrue();
         rowsA.Count.ShouldBe(1);
         var pseudoA = rowsA[0]["secret_col"]?.ToString();
         pseudoA.ShouldNotBeNull();
@@ -174,8 +173,7 @@ public sealed class LakehousePseudonymizationTests
             new TenantId("tenant-b"));
 
         var rowsB = await executor.ExecuteAsync(contextB);
-        contextB.Items.TryGetValue("InDbColumnMaskingExecuted", out var maskedB).ShouldBeTrue();
-        maskedB.ShouldBe(true);
+        contextB.Attestation.InDbColumnMaskingExecuted.ShouldBeTrue();
         rowsB.Count.ShouldBe(1);
         var pseudoB = rowsB[0]["secret_col"]?.ToString();
         pseudoB.ShouldNotBeNull();
@@ -253,8 +251,7 @@ public sealed class LakehousePseudonymizationTests
             new TenantId("tenant-alpha"));
 
         var rowsAlpha = await executor.ExecuteAsync(contextAlpha);
-        contextAlpha.Items.TryGetValue("InDbColumnMaskingExecuted", out var maskedAlpha).ShouldBeTrue();
-        maskedAlpha.ShouldBe(true);
+        contextAlpha.Attestation.InDbColumnMaskingExecuted.ShouldBeTrue();
         rowsAlpha.Count.ShouldBeGreaterThan(0);
         var pseudoAlpha = rowsAlpha[0]["customerEmail"]?.ToString();
         pseudoAlpha.ShouldNotBeNull();
@@ -277,8 +274,7 @@ public sealed class LakehousePseudonymizationTests
             new TenantId("tenant-beta"));
 
         var rowsBeta = await executor.ExecuteAsync(contextBeta);
-        contextBeta.Items.TryGetValue("InDbColumnMaskingExecuted", out var maskedBeta).ShouldBeTrue();
-        maskedBeta.ShouldBe(true);
+        contextBeta.Attestation.InDbColumnMaskingExecuted.ShouldBeTrue();
         rowsBeta.Count.ShouldBeGreaterThan(0);
         var pseudoBeta = rowsBeta[0]["customerEmail"]?.ToString();
         pseudoBeta.ShouldNotBeNull();

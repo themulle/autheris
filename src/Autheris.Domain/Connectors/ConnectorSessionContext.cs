@@ -18,4 +18,6 @@ public sealed record ConnectorSessionContext(
     IDictionary<string, object?>? Items = null)
 {
     public IDictionary<string, object?> Items { get; init; } = Items ?? new Dictionary<string, object?>();
+
+    public ConnectorSecurityAttestation Attestation { get; set; }
 }

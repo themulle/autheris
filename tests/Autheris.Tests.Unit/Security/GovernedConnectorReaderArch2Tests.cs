@@ -148,8 +148,7 @@ public sealed class GovernedConnectorReaderArch2Tests
             .Returns(ci =>
             {
                 var session = ci.ArgAt<ConnectorSessionContext>(1);
-                session.Items["RlsPushdownExecuted"] = true;
-                session.Items["InDbColumnMaskingExecuted"] = true;
+                session.Attestation = new ConnectorSecurityAttestation(RlsPushdownExecuted: true, InDbColumnMaskingExecuted: true);
                 return Rows();
             });
 

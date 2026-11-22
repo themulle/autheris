@@ -99,8 +99,8 @@ public sealed class IntegrationGapASqlConnectorIntegrationTests
         session.Items["TableMetadata"] = metadata;
 
         var rows = await connector.RecordSource.ReadBatchAsync(ConnectorSplit.Default(), session);
-        session.Items["InDbColumnMaskingExecuted"].ShouldBe(true);
-        session.Items["RlsPushdownExecuted"].ShouldBe(true);
+        session.Attestation.InDbColumnMaskingExecuted.ShouldBeTrue();
+        session.Attestation.RlsPushdownExecuted.ShouldBeTrue();
         rows.Count.ShouldBe(1);
         rows[0]["ssn"].ShouldBe("***");
         rows[0]["name"].ShouldBe("Alice");

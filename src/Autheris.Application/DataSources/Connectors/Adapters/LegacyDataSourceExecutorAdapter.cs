@@ -142,9 +142,14 @@ public sealed class LegacyDataSourceExecutorAdapter : IAutherisConnector
                 Limit: session.Limit ?? 1000,
                 Offset: session.Offset ?? 0,
                 Tenant: session.Tenant,
-                Items: session.Items);
+                Items: session.Items)
+            {
+                Attestation = session.Attestation
+            };
 
-            return await _executor.ExecuteAsync(dsContext, ct);
+            var rows = await _executor.ExecuteAsync(dsContext, ct);
+            session.Attestation = dsContext.Attestation;
+            return rows;
         }
     }
 }

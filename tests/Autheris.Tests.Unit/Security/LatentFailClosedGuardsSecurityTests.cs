@@ -573,8 +573,7 @@ public sealed class LatentFailClosedGuardsSecurityTests
             ConnectorSessionContext session,
             [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct = default)
         {
-            session.Items[GovernedConnectorReader.RlsPushdownExecutedKey] = true;
-            session.Items[GovernedConnectorReader.InDbColumnMaskingExecutedKey] = true;
+            session.Attestation = new ConnectorSecurityAttestation(RlsPushdownExecuted: true, InDbColumnMaskingExecuted: true);
             foreach (var row in rows)
             {
                 yield return row;
@@ -587,8 +586,7 @@ public sealed class LatentFailClosedGuardsSecurityTests
             ConnectorSessionContext session,
             CancellationToken ct = default)
         {
-            session.Items[GovernedConnectorReader.RlsPushdownExecutedKey] = true;
-            session.Items[GovernedConnectorReader.InDbColumnMaskingExecutedKey] = true;
+            session.Attestation = new ConnectorSecurityAttestation(RlsPushdownExecuted: true, InDbColumnMaskingExecuted: true);
             return Task.FromResult(rows);
         }
 

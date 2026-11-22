@@ -3,6 +3,7 @@ namespace Autheris.Api.Endpoints;
 using System.Collections.Generic;
 using System.Text.Json;
 using Autheris.Api.Extensions;
+using Autheris.Api.Security;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Governance;
 using Autheris.Domain.Audit;
@@ -19,8 +20,8 @@ public static partial class GovernanceEndpoints
         // F-Declarative Web API OpenAPI/Swagger Schema & Doc Ingestion
         app.MapPost("/api/governance/catalog/ingest-openapi", (HttpContext context, IOpenApiIngestionUseCase ingestionUseCase) =>
             IngestOpenApiAsync(context, ingestionUseCase))
-          .RequireAuthorization()
-          .WithRequestBodyLimit(20 * 1024 * 1024) // SEC M-01: explicit large-body exception to the global Kestrel limit
+          .RequireAuthorization(GatewayPolicies.OpenApiPublish)
+          .WithRequestBodyLimit(20 * 1024 * 1024) // explicit large-body exception to the global Kestrel limit
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         MapAuditAndComplianceEndpoints(app);
@@ -29,18 +30,18 @@ public static partial class GovernanceEndpoints
         // Declarative Access Profiles & Subject Cleartext Exceptions (R-52 & R-50)
         // =========================================================================
 
-        app.MapPost("/api/v1/consents/bulk", CreateBulkConsentAsync).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
-        app.MapGet("/api/v1/profiles", GetProfilesAsync).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
-        app.MapGet("/api/v1/profiles/{id}", GetProfileByIdAsync).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
-        app.MapPost("/api/v1/profiles/{id}/assignments/approve", ApproveProfileAssignmentAsync).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
-        app.MapDelete("/api/v1/profiles/{id}", DeleteProfileAsync).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+        app.MapPost("/api/v1/consents/bulk", CreateBulkConsentAsync).RequireAuthorization(GatewayPolicies.ProfileAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
+        app.MapGet("/api/v1/profiles", GetProfilesAsync).RequireAuthorization(GatewayPolicies.ProfileRead).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+        app.MapGet("/api/v1/profiles/{id}", GetProfileByIdAsync).RequireAuthorization(GatewayPolicies.ProfileRead).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+        app.MapPost("/api/v1/profiles/{id}/assignments/approve", ApproveProfileAssignmentAsync).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
+        app.MapDelete("/api/v1/profiles/{id}", DeleteProfileAsync).RequireAuthorization(GatewayPolicies.ProfileAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         // Issue #40: GitOps / Declarative Consent & Row Filter Import API
         app.MapPost("/api/v1/governance/consents/apply", ApplyConsentManifestAsync)
-            .RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApplied);
+            .RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApplied);
 
         app.MapPost("/api/governance/consents/apply", ApplyConsentManifestAsync)
-            .RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApplied);
+            .RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApplied);
 
         return app;
     }

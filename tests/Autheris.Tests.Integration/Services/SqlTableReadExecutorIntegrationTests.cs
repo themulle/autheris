@@ -91,6 +91,6 @@ public sealed class SqlTableReadExecutorIntegrationTests
         rows.Select(r => Convert.ToInt64(r["id"])).ShouldBe([1L, 3L]);
         rows.ShouldAllBe(r => (string?)r["email"] == "***");
         context.Items[TableQueryItems.TotalCount].ShouldBe(2L);
-        context.Items["InDbColumnMaskingExecuted"].ShouldBe(true);
+        context.Attestation.InDbColumnMaskingExecuted.ShouldBeTrue();
     }
 }
