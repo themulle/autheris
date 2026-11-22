@@ -1,3 +1,5 @@
+using System.Collections.Frozen;
+using System.Collections.Immutable;
 using DuckDB.NET.Data;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
@@ -174,5 +176,143 @@ public sealed class EvaluationFenceTests
         Assert.Equal(GovernedSqlErrorCodes.RowPolicyExpressionNotAllowed, ex.Code);
         Assert.Contains("TRY_CAST", ex.Hint, StringComparison.Ordinal);
         Assert.Contains("NULLIF", ex.Hint, StringComparison.Ordinal);
+    }
+
+    private static CompileRequest OraclePerCellRequest(bool protectEntitlements = false)
+    {
+        var existsSubquery = new SelectStatement(null,
+            new QuerySpecification(
+                false,
+                [new ColumnSelectItem(new LiteralExpression(1L, LiteralType.Integer), null)],
+                new NamedTableSource(
+                    new SqlQualifiedName([new SqlIdentifier("dbo", true), new SqlIdentifier("Lookup", true)]),
+                    new SqlIdentifier("l", true)),
+                new BinaryExpression(
+                    new BinaryExpression(
+                        new ColumnReference(new SqlQualifiedName([new SqlIdentifier("l", true), new SqlIdentifier("Code", true)])),
+                        BinaryOperator.Equal,
+                        new ColumnReference(new SqlQualifiedName([new SqlIdentifier(RowFilterAliases.Target), new SqlIdentifier("Status", true)]))),
+                    BinaryOperator.Or,
+                    new BinaryExpression(
+                        new ColumnReference(new SqlQualifiedName([new SqlIdentifier("l", true), new SqlIdentifier("Code", true)])),
+                        BinaryOperator.Equal,
+                        new PolicyParameterExpression("__pol_code", SqlParameterType.String))),
+                null, null),
+            null, null);
+
+        var existsPredicate = PolicyPredicate.Create(
+            new ExistsExpression(existsSubquery),
+            new Dictionary<string, PolicyValue> { ["__pol_code"] = new("VIP", SqlParameterType.String) });
+
+        var regionPredicate = PolicyPredicate.Create(
+            new BinaryExpression(
+                new ColumnReference(new SqlQualifiedName([new SqlIdentifier("Region", true)])),
+                BinaryOperator.Equal,
+                new PolicyParameterExpression("__pol_r1", SqlParameterType.String)),
+            new Dictionary<string, PolicyValue> { ["__pol_r1"] = new("Nord", SqlParameterType.String) });
+
+        var perCell = new PerCellTablePolicy(
+            [new PerCellSignatureSpec(existsPredicate), new PerCellSignatureSpec(regionPredicate)],
+            new Dictionary<string, PerCellColumnRule>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Email"] = new(ImmutableArray.Create(0), ImmutableArray.Create(1))
+            });
+
+        var rowFilters = new DictPolicyProvider();
+        rowFilters.NoPolicy.Add(Orders);
+        rowFilters.NoPolicy.Add(Lookup);
+        if (protectEntitlements)
+        {
+            rowFilters.Predicates[Entitlements] = PolicyPredicate.Create(
+                new BinaryExpression(
+                    new ColumnReference(new SqlQualifiedName([new SqlIdentifier("OrderId", true)])),
+                    BinaryOperator.GreaterThan,
+                    new PolicyParameterExpression("__pol_min_order", SqlParameterType.Int32)),
+                new Dictionary<string, PolicyValue> { ["__pol_min_order"] = new(0, SqlParameterType.Int32) });
+        }
+        else
+        {
+            rowFilters.NoPolicy.Add(Entitlements);
+        }
+
+        var masks = new DictMaskProvider();
+        masks.Masks[(Orders, "email")] = new MaskSpec(
+            MaskKind.Redact,
+            new MaskArguments(Constant: new PolicyParameterExpression("__mask_c", SqlParameterType.String)),
+            new Dictionary<string, PolicyValue> { ["__mask_c"] = new("***", SqlParameterType.String) }.ToFrozenDictionary());
+
+        var oracleCatalog = new InMemoryTableCatalog(
+        [
+            new TableCatalogEntry(Orders, ImmutableArray.Create(
+                new CatalogColumn("Id", "int"), new CatalogColumn("TenantId", "varchar2(64)"), new CatalogColumn("Region", "varchar2(20)"),
+                new CatalogColumn("Status", "varchar2(20)"), new CatalogColumn("Amount", "number(18,2)"), new CatalogColumn("Email", "varchar2(200)")),
+                "TenantId", 1),
+            new TableCatalogEntry(Entitlements, ImmutableArray.Create(
+                new CatalogColumn("Id", "int"), new CatalogColumn("TenantId", "varchar2(64)"), new CatalogColumn("OrderId", "int")),
+                "TenantId", 1),
+            new TableCatalogEntry(Lookup, ImmutableArray.Create(new CatalogColumn("Code", "varchar2(10)")), null, 1)
+        ], "dbo");
+
+        return new CompileRequest
+        {
+            TargetDialect = TargetSqlDialect.Oracle,
+            Statements = StatementPermissions.ReadOnly,
+            TokenGuards = SqlTokenSecurityOptions.Strict,
+            AllowedFunctions = SqlFunctionAllowlists.Build(TargetSqlDialect.Oracle, null),
+            AllowExperimentalDialect = true,
+            Policy = new GovernancePolicy
+            {
+                RowFilters = rowFilters,
+                Masks = masks,
+                PerCellColumns = new StaticPerCellProvider(Orders, perCell),
+                Catalog = oracleCatalog,
+                Tenant = new TenantBinding("__autheris_tenant", "acme", SqlParameterType.String)
+            }
+        };
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Oracle_PerCellWithUndecomposedExistsInProjection_KeepsRowNumFenceOnOuterSubquery()
+    {
+        // Raising arithmetic (Amount / 10) succeeds only when evaluationFenced == true.
+        var compiled = _engine.Compile("SELECT Amount / 10, Email FROM Orders".AsMemory(), OraclePerCellRequest(), CancellationToken.None);
+
+        Assert.Contains("EXISTS (", compiled.Sql, StringComparison.Ordinal);
+        Assert.Contains(") AND ROWNUM >= 1)", compiled.Sql, StringComparison.Ordinal);
+
+        int ordersFromIndex = compiled.Sql.IndexOf("\"dbo\".\"Orders\"", StringComparison.Ordinal);
+        Assert.True(ordersFromIndex > 0, compiled.Sql);
+
+        // The undecomposed EXISTS inside the PerCell CASE projection must not steal ROWNUM >= 1 from the outer subquery.
+        Assert.DoesNotContain("ROWNUM", compiled.Sql[..ordersFromIndex], StringComparison.Ordinal);
+        int rowNumIndex = compiled.Sql.IndexOf("AND ROWNUM >= 1", StringComparison.Ordinal);
+        Assert.True(rowNumIndex > ordersFromIndex, compiled.Sql);
+        Assert.Equal(-1, compiled.Sql.IndexOf("ROWNUM", rowNumIndex + "AND ROWNUM >= 1".Length, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Oracle_PerCellWithFencedInnerExistsTable_KeepsRowNumFenceOnBothSubqueries()
+    {
+        const string sql = "SELECT CASE WHEN EXISTS (SELECT 1 FROM Entitlements e WHERE e.OrderId = o.Id) THEN o.Amount / 10 ELSE 0 END, o.Email FROM Orders o";
+        var compiled = _engine.Compile(sql.AsMemory(), OraclePerCellRequest(protectEntitlements: true), CancellationToken.None);
+
+        int entitlementsIdx = compiled.Sql.IndexOf("\"dbo\".\"Entitlements\"", StringComparison.Ordinal);
+        int ordersIdx = compiled.Sql.IndexOf("\"dbo\".\"Orders\"", StringComparison.Ordinal);
+        Assert.True(entitlementsIdx > 0 && ordersIdx > entitlementsIdx, compiled.Sql);
+
+        // Inner fenced Entitlements subquery gets its own ROWNUM >= 1, and outer PerCell Orders subquery still keeps its ROWNUM >= 1.
+        int firstFence = compiled.Sql.IndexOf("AND ROWNUM >= 1", StringComparison.Ordinal);
+        int secondFence = compiled.Sql.IndexOf("AND ROWNUM >= 1", firstFence + 1, StringComparison.Ordinal);
+        Assert.True(firstFence > entitlementsIdx && firstFence < ordersIdx, compiled.Sql);
+        Assert.True(secondFence > ordersIdx, compiled.Sql);
+        Assert.Equal(-1, compiled.Sql.IndexOf("AND ROWNUM >= 1", secondFence + 1, StringComparison.Ordinal));
+    }
+
+    // Helper types placed after all [Fact]/[Theory] methods so SecurityTestInventoryTests records outer class FQN cleanly.
+    private sealed class StaticPerCellProvider(TableIdentity target, PerCellTablePolicy policy) : IPerCellColumnProvider
+    {
+        public PerCellTablePolicy? GetPolicy(TableIdentity table) => table == target ? policy : null;
     }
 }
