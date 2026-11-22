@@ -121,16 +121,17 @@ public sealed class RoleResolver : IRoleResolver
                     {
                         if (string.IsNullOrWhiteSpace(g)) continue;
 
-                        // Canonical SIDs are globally unique, so no realm prefix: isolation is the cache key (realm, user) and the
-                        // provider chain of the realm. A non-canonical value is dropped and the resolution is degraded.
-                        if (!SidFormat.IsCanonical(g.Trim()))
+                        var trimmed = g.Trim();
+                        if (!SidFormat.IsGroupSid(trimmed)
+                            || (SidFormat.IsEntraCloudSid(trimmed) && !SidFormat.HasTenantBoundEntraIssuers(realm))
+                            || (SidFormat.IsRealmGroupKey(trimmed) && !SidFormat.MatchesRealmGroupKey(trimmed, realm.Id)))
                         {
                             rejected++;
                             degraded = true;
                             continue;
                         }
 
-                        mergedGroups.Add(g.Trim());
+                        mergedGroups.Add(trimmed);
                     }
 
                     foreach (var role in result.AppRoles)

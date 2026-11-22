@@ -328,7 +328,7 @@ public sealed class SecurityContextResolutionMiddleware(RequestDelegate next)
         var dropped = 0;
         foreach (var sid in result.AddedGroupSids)
         {
-            if (!SidFormat.IsCanonical(sid.Value) || sids.Count >= maxSids)
+            if (!SidFormat.IsGroupSid(sid.Value) || sids.Count >= maxSids)
             {
                 dropped++;
                 continue;

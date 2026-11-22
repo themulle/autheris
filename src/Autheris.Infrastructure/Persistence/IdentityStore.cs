@@ -224,7 +224,7 @@ internal sealed partial class IdentityStore(
     public async Task<string?> GetGroupDisplayNameBySidAsync(TenantId tenant, Sid groupSid, CancellationToken ct = default)
     {
         TenantScope.RequireTenant(tenant, "IDENTITY_GROUPS");
-        if (!SidFormat.IsCanonical(groupSid.Value))
+        if (!SidFormat.IsGroupSid(groupSid.Value))
         {
             return null;
         }
@@ -449,7 +449,7 @@ WHERE m.tenant_id = @tenantId AND m.realm_id = @realmId AND m.user_key = @userKe
     AND gt.depth <= @maxDepth
     AND CHARINDEX('/' + CAST(n.parent_group_id AS NVARCHAR(MAX)) + '/', gt.path) = 0
 )
-SELECT g.object_sid, CASE WHEN gt.depth > @maxDepth THEN 1 ELSE 0 END AS over_depth
+SELECT g.object_sid, CASE WHEN gt.depth > @maxDepth THEN 1 ELSE 0 END AS over_depth, g.group_id
 FROM group_tree gt
 LEFT JOIN dbo.IDENTITY_GROUPS g ON g.tenant_id = @tenantId AND g.realm_id = @realmId AND g.group_id = gt.group_id
 OPTION (MAXRECURSION 100);",
@@ -465,7 +465,7 @@ OPTION (MAXRECURSION 100);",
     AND gt.depth <= @maxDepth
     AND POSITION('/' || n.parent_group_id || '/' IN gt.path) = 0
 )
-SELECT g.object_sid, CASE WHEN gt.depth > @maxDepth THEN 1 ELSE 0 END AS over_depth
+SELECT g.object_sid, CASE WHEN gt.depth > @maxDepth THEN 1 ELSE 0 END AS over_depth, g.group_id
 FROM group_tree gt
 LEFT JOIN IDENTITY_GROUPS g ON g.tenant_id = @tenantId AND g.realm_id = @realmId AND g.group_id = gt.group_id",
             _ => @"WITH RECURSIVE group_tree(group_id, depth, path) AS (
@@ -480,7 +480,7 @@ LEFT JOIN IDENTITY_GROUPS g ON g.tenant_id = @tenantId AND g.realm_id = @realmId
     AND gt.depth <= @maxDepth
     AND INSTR(gt.path, '/' || n.parent_group_id || '/') = 0
 )
-SELECT g.object_sid, CASE WHEN gt.depth > @maxDepth THEN 1 ELSE 0 END AS over_depth
+SELECT g.object_sid, CASE WHEN gt.depth > @maxDepth THEN 1 ELSE 0 END AS over_depth, g.group_id
 FROM group_tree gt
 LEFT JOIN IDENTITY_GROUPS g ON g.tenant_id = @tenantId AND g.realm_id = @realmId AND g.group_id = gt.group_id"
         };
@@ -491,6 +491,7 @@ LEFT JOIN IDENTITY_GROUPS g ON g.tenant_id = @tenantId AND g.realm_id = @realmId
         AddParam(cmd, "@maxDepth", maxDepth);
 
         var sids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var groupIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         bool maxDepthExceeded = false;
         bool hasNonCanonicalSid = false;
 
@@ -503,17 +504,19 @@ LEFT JOIN IDENTITY_GROUPS g ON g.tenant_id = @tenantId AND g.realm_id = @realmId
             }
 
             var sid = reader.IsDBNull(0) ? null : reader.GetString(0);
-            if (string.IsNullOrWhiteSpace(sid) || !SidFormat.IsCanonical(sid))
+            var gid = reader.IsDBNull(2) ? null : reader.GetString(2);
+            if (string.IsNullOrWhiteSpace(gid) || string.IsNullOrWhiteSpace(sid) || !SidFormat.IsGroupSid(sid))
             {
                 hasNonCanonicalSid = true;
             }
             else
             {
                 sids.Add(sid);
+                groupIds.Add(gid);
             }
         }
 
-        return new EffectiveScimGroupsResult(sids, maxDepthExceeded, hasNonCanonicalSid);
+        return new EffectiveScimGroupsResult(sids, maxDepthExceeded, hasNonCanonicalSid, groupIds);
     }
 
     public async Task<IReadOnlyList<string>> GetGroupMembersAsync(TenantId tenantId, string realmId, string groupId, CancellationToken ct = default)

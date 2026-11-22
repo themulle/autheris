@@ -13,7 +13,9 @@ using System.Text;
 using System.Text.Json;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.ConsentRequests;
 using Autheris.Application.Governance.Interfaces;
+using Autheris.Application.Identity;
 using Autheris.Application.Identity.Services;
 using Autheris.Application.Usage;
 using Autheris.Domain.Audit;
@@ -41,14 +43,18 @@ using Xunit;
 public sealed class ScimGroupSupplementEndToEndTests : IClassFixture<ScimGroupSupplementEndToEndTests.HostFixture>
 {
     private const string RealmId = "scim-e2e-entra";
+    private const string PartnerRealmId = "scim-e2e-partner";
     private const string ScimSecret = "ScimE2eSecret_1234567890_1234567890_ABCDEF";
+    private const string PartnerScimSecret = "ScimPartnerSecret_1234567890_1234567890_ABCDEF";
     private const string UserSid = "S-1-5-21-5100-5200-5300-1001";
     private const string OtherUserSid = "S-1-5-21-5100-5200-5300-1002";
     private const string ScimGroupSid = "S-1-5-21-5100-5200-5300-2001";
     private const string ScimNestedParentSid = "S-1-5-21-5100-5200-5300-2002";
+    private const string OwnerGroupSid = "S-1-5-21-5100-5200-5300-9901";
     private const string EntraTenant = "11111111-1111-1111-1111-111111111111";
     private const string EntraClient = "22222222-2222-2222-2222-222222222222";
     private const string Issuer = $"https://login.microsoftonline.com/{EntraTenant}/v2.0";
+    private const string PartnerIssuer = "https://partner-idp.example.org/oauth2";
     private const string RequestTenant = "scim-e2e-tenant";
     private const string AliceOid = "44444444-4444-4444-4444-444444444444";
     private const string BobOid = "55555555-5555-5555-5555-555555555555";
@@ -56,6 +62,7 @@ public sealed class ScimGroupSupplementEndToEndTests : IClassFixture<ScimGroupSu
     private static readonly SymmetricSecurityKey TestKey = new(Encoding.UTF8.GetBytes("scim-e2e-signing-key-at-least-256-bits-long-123456"));
     private static readonly TableIdentifier OpenTable = new("default", "public", "scim_e2e_open");
     private static readonly TableIdentifier FilteredTable = new("default", "public", "scim_e2e_filtered");
+    private static readonly TableIdentifier OwnerTable = new("default", "public", "scim_e2e_owner");
 
     private readonly HostFixture _fixture;
 
@@ -119,6 +126,24 @@ public sealed class ScimGroupSupplementEndToEndTests : IClassFixture<ScimGroupSu
                                 StaleSyncBehavior = ScimStaleSyncBehavior.Degrade
                             }
                         };
+                        options.Realms[PartnerRealmId] = new IdentityRealmConfigOptions
+                        {
+                            Kind = IdentityRealmKind.GenericOidc,
+                            Issuers = [PartnerIssuer],
+                            Audiences = [EntraClient],
+                            GroupSource = RealmGroupSource.Resolver,
+                            ResolverChain = ["scim-store"],
+                            Provisioning = RealmProvisioningMode.Scim,
+                            FixedTenantId = RequestTenant,
+                            Scim = new ScimRealmSecretOptions
+                            {
+                                PrimarySecret = PartnerScimSecret,
+                                RequireCorrelation = false,
+                                AllowUpnCorrelation = false,
+                                MaxSyncAgeMinutes = 180,
+                                StaleSyncBehavior = ScimStaleSyncBehavior.Degrade
+                            }
+                        };
                     });
                 });
             });
@@ -128,7 +153,7 @@ public sealed class ScimGroupSupplementEndToEndTests : IClassFixture<ScimGroupSu
             using var scope = Factory.Services.CreateScope();
             var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
 
-            foreach (var id in new[] { OpenTable, FilteredTable })
+            foreach (var id in new[] { OpenTable, FilteredTable, OwnerTable })
             {
                 await repo.UpsertTableMetadataAsync(new TableMetadata
                 {
@@ -402,6 +427,122 @@ public sealed class ScimGroupSupplementEndToEndTests : IClassFixture<ScimGroupSu
         var snapshot = aggregator.Swap();
         snapshot.Series.Keys.Any(k => k.Tenant == tenant && k.TableId == OpenTable.ToString()).ShouldBeTrue();
         snapshot.GroupSets.Values.Any(g => g.Contains(new Sid(ScimGroupSid))).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Scim_group_with_owner_group_id_grants_no_ownership()
+    {
+        const string malloryOid = "77777777-7777-7777-7777-777777777777";
+        const string mallorySid = "S-1-5-21-5100-5200-5300-1099";
+        const string requesterSid = "S-1-5-21-5100-5200-5300-1055";
+        const string ownerGroupId = "owner-group-99";
+        var tenant = new TenantId(RequestTenant);
+
+        using var scope = _fixture.Factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
+        var ownerAssignments = scope.ServiceProvider.GetRequiredService<IDataOwnerAssignmentRepository>();
+        var ownership = scope.ServiceProvider.GetRequiredService<IDataOwnershipRepository>();
+        var scim = scope.ServiceProvider.GetRequiredService<IScimService>();
+        var store = scope.ServiceProvider.GetRequiredService<IIdentityStoreRepository>();
+        var groupResolver = scope.ServiceProvider.GetRequiredService<IGroupSidResolver>();
+        var realmRegistry = scope.ServiceProvider.GetRequiredService<IIdentityRealmRegistry>();
+        var decisionPipeline = scope.ServiceProvider.GetRequiredService<IConsentDecisionPipeline>();
+
+        var ownerMeta = await repo.GetTableMetadataAsync(OwnerTable);
+        ownerMeta.ShouldNotBeNull();
+        var assignResult = await ownerAssignments.ApplyTableOwnerAssignmentsAsync(new DataOwnerAssignmentRequest(
+            [new TableOwnerAssignmentSpec(OwnerTable, [new DataOwnerSpec(OwnerGroupSid, null, "Table Owner", "owner@corp.example", "PRIMARY")])],
+            Replace: false,
+            DryRun: false,
+            TenantId: tenant));
+        assignResult.Success.ShouldBeTrue();
+
+        // 1. A SCIM client in a foreign GenericOidc realm cannot inject an AD/owner objectSid.
+        using var client = _fixture.Factory.CreateClient();
+        using var hijackSidReq = new HttpRequestMessage(HttpMethod.Post, $"/scim/v2/{PartnerRealmId}/Groups")
+        {
+            Content = JsonContent.Create(new
+            {
+                schemas = new[] { ScimSchemaUris.CoreGroup, ScimSchemaUris.AutherisGroupExtension },
+                externalId = OwnerGroupSid,
+                displayName = "Aliased Owner Group",
+                members = Array.Empty<object>(),
+                objectSid = OwnerGroupSid
+            })
+        };
+        hijackSidReq.Headers.Authorization = new AuthenticationHeaderValue("Bearer", PartnerScimSecret);
+        (await client.SendAsync(hijackSidReq)).StatusCode.ShouldBe(HttpStatusCode.BadRequest);
+
+        // 2. Creating a SCIM group in the foreign realm binds its key strictly to (realm_id, group_id).
+        if (await scim.GetUserAsync(tenant, PartnerRealmId, "partner-u1") is null)
+        {
+            await scim.CreateUserAsync(tenant, PartnerRealmId, new ScimUser(
+                "partner-u1", malloryOid, "partner-u1@example.org", "Partner U1", "partner-u1@example.org", true, null, null, null, EntraObjectId: malloryOid));
+        }
+
+        if (await scim.GetGroupAsync(tenant, PartnerRealmId, ownerGroupId) is null)
+        {
+            await scim.CreateGroupAsync(tenant, PartnerRealmId, new ScimGroup(
+                ownerGroupId, OwnerGroupSid, "Foreign Owner Id Group",
+                [new ScimGroupMember("partner-u1", Type: ScimMemberTypes.User)], null, null));
+        }
+
+        await store.UpsertRealmSyncStateAsync(tenant, PartnerRealmId, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        var partnerRealm = realmRegistry.GetRealm(PartnerRealmId)!;
+        var partnerPrincipal = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("iss", PartnerIssuer), new Claim("oid", malloryOid)], "Bearer"));
+        var partnerGroups = await groupResolver.ResolveAsync(partnerPrincipal, partnerRealm, tenant, "Bearer", CancellationToken.None);
+        partnerGroups.Status.ShouldBe(GroupResolutionStatus.Complete);
+        partnerGroups.GroupSids.ShouldBe([new Sid($"realm:{PartnerRealmId}:{ownerGroupId}")]);
+        partnerGroups.GroupSids.ShouldNotContain(new Sid(OwnerGroupSid));
+        (await ownership.IsAuthorizedApproverForTableAsync(OwnerTable, new Sid($"realm:{PartnerRealmId}:{ownerGroupId}"))).ShouldBeFalse();
+
+        // 3. Even inside EntraWorkforce SCIM, membership in a group carrying OwnerGroupSid grants no ownership authority.
+        if (await scim.GetUserAsync(tenant, RealmId, "mallory-e2e") is null)
+        {
+            await scim.CreateUserAsync(tenant, RealmId, new ScimUser(
+                "mallory-e2e", malloryOid, "mallory-e2e@example.com", "Mallory E2E", "mallory-e2e@example.com", true, null, null, null, ObjectSid: mallorySid, EntraObjectId: malloryOid));
+        }
+
+        if (await scim.GetGroupAsync(tenant, RealmId, ownerGroupId) is null)
+        {
+            await scim.CreateGroupAsync(tenant, RealmId, new ScimGroup(
+                ownerGroupId, ownerGroupId, "Entra SCIM Owner SID Group",
+                [new ScimGroupMember("mallory-e2e", Type: ScimMemberTypes.User)], null, null, ObjectSid: OwnerGroupSid));
+        }
+
+        await store.UpsertRealmSyncStateAsync(tenant, RealmId, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        (await ownership.IsAuthorizedApproverForTableAsync(OwnerTable, new Sid(mallorySid))).ShouldBeFalse();
+
+        var createdReq = await repo.CreateConsentRequestAsync(new ConsentRequest
+        {
+            TableId = ownerMeta.Table.Id,
+            TableIdentifier = OwnerTable,
+            RequesterSid = new Sid(requesterSid),
+            RequestedGranteeType = GranteeType.User,
+            RequestedGranteeRef = requesterSid,
+            BusinessJustification = "Ownership isolation test",
+            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(5),
+            TenantId = tenant,
+            RequesterIdentifiers = [requesterSid]
+        });
+
+        var malloryApprover = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            IdentityClaimIssuers.CreatePrimarySidClaim(mallorySid),
+            new Claim("oid", malloryOid),
+            new Claim("upn", "mallory-e2e@example.com"),
+            new Claim("tid", RequestTenant),
+            new Claim("autheris:realm", RealmId),
+            new Claim(ClaimTypes.Role, "DataOwner"),
+            IdentityClaimIssuers.CreateGroupSidClaim(OwnerGroupSid),
+            GroupResolutionClaims.CreateMarker(),
+            GroupResolutionClaims.CreateStatus(GroupResolutionStatus.Complete)
+        ], "Bearer"));
+
+        var decisionEx = await Should.ThrowAsync<ConsentDecisionException>(() => decisionPipeline.DecideAsync(
+            new ConsentDecisionCommand(createdReq.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, malloryApprover)));
+        decisionEx.ErrorCode.ShouldBe(ConsentDecisionErrorCodes.DecisionNotPermitted);
     }
 
     internal static async Task AssertRecursiveCteMatchesAsync(GovernanceTestStore store)

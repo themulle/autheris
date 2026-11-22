@@ -258,7 +258,7 @@ public sealed partial class AdvisoryRegressionTests
         oidcResult.Identity!.IsAuthenticated.ShouldBeTrue();
         oidcResult.HasClaim(RoleResolutionClaims.ClaimType, RoleResolutionClaims.Degraded).ShouldBeFalse();
         oidcResult.GetUserSid().ShouldBe(new Sid("oidc-scim|sub-alice"));
-        oidcResult.GetGroupSids().ShouldContain(new Sid("S-1-5-21-1000-2000-3000-7777"));
+        oidcResult.GetGroupSids().ShouldContain(new Sid("realm:oidc-scim:grp-7777"));
         oidcResult.GetGroupSids().ShouldContain(new Sid("S-1-5-21-1000-2000-3000-8888"));
 
         // Entra SCIM cloud-only user without onprem_sid: synthesized PrimarySid is ignored; malformed inbound objectSid still fails closed.
@@ -630,12 +630,26 @@ public sealed partial class AdvisoryRegressionTests
         public Task<ScimGroup?> GetGroupAsync(TenantId tenantId, string realmId, string groupId, CancellationToken ct = default) => Task.FromResult(_groups.GetValueOrDefault((tenantId.Value, realmId, groupId)));
         public Task<ScimGroup?> GetGroupByExternalIdAsync(TenantId tenantId, string realmId, string externalId, CancellationToken ct = default) => Task.FromResult<ScimGroup?>(null);
         public Task<ScimGroup?> GetGroupByObjectSidAsync(TenantId tenantId, string realmId, string objectSid, CancellationToken ct = default) => Task.FromResult<ScimGroup?>(null);
-        public Task<EffectiveScimGroupsResult> GetEffectiveGroupSidsForUserAsync(TenantId tenantId, string realmId, string requestedUserKey, int maxDepth = 32, CancellationToken ct = default) =>
-            Task.FromResult(new EffectiveScimGroupsResult(
-                effectiveUserKey is not null && effectiveGroupSid is not null && string.Equals(requestedUserKey, effectiveUserKey, StringComparison.Ordinal)
-                    ? new HashSet<string> { effectiveGroupSid }
-                    : new HashSet<string>(),
+        public Task<EffectiveScimGroupsResult> GetEffectiveGroupSidsForUserAsync(TenantId tenantId, string realmId, string requestedUserKey, int maxDepth = 32, CancellationToken ct = default)
+        {
+            if (effectiveUserKey is null || effectiveGroupSid is null || !string.Equals(requestedUserKey, effectiveUserKey, StringComparison.Ordinal))
+            {
+                return Task.FromResult(new EffectiveScimGroupsResult(new HashSet<string>(), MaxDepthExceeded: false));
+            }
+
+            if (string.Equals(realmId, "oidc-scim", StringComparison.Ordinal))
+            {
+                return Task.FromResult(new EffectiveScimGroupsResult(
+                    new HashSet<string> { "realm:oidc-scim:grp-7777" },
+                    MaxDepthExceeded: false,
+                    HasNonCanonicalSid: false,
+                    GroupIds: new HashSet<string> { "grp-7777" }));
+            }
+
+            return Task.FromResult(new EffectiveScimGroupsResult(
+                new HashSet<string> { effectiveGroupSid },
                 MaxDepthExceeded: false));
+        }
         public Task UpsertGroupAsync(ScimGroup group, TenantId tenantId, string realmId, CancellationToken ct = default) => CreateGroupAsync(tenantId, realmId, group, ct);
         public Task CreateGroupAsync(TenantId tenantId, string realmId, ScimGroup group, CancellationToken ct = default) { _groups[(tenantId.Value, realmId, group.GroupId)] = group; return Task.CompletedTask; }
         public Task UpdateGroupAsync(TenantId tenantId, string realmId, ScimGroup group, CancellationToken ct = default) => CreateGroupAsync(tenantId, realmId, group, ct);

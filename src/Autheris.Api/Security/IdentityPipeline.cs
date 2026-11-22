@@ -158,8 +158,11 @@ public sealed class IdentityPipeline : IIdentityPipeline
             return Unauthenticated();
         }
 
-        // Non-AD/external/OIDC realms must never accept inbound Windows SID claims (e.g. primarysid, objectSid, onprem_sid) from the token.
-        var stripUntrustedWindowsSids = realm != null && IsNonWindowsRealm(realm) && !tenantByClaims && !IsScimScheme(scheme);
+        // Non-AD/external/OIDC realms and app-only service principals must never accept inbound Windows SID claims from tokens.
+        var isServicePrincipal = !tenantByClaims && !IsScimScheme(scheme) && clientCert is null
+            && Autheris.Application.Catalog.External.AppOnlyPrincipal.Is(raw);
+        var stripUntrustedWindowsSids = !tenantByClaims && !IsScimScheme(scheme)
+            && ((realm != null && IsNonWindowsRealm(realm)) || isServicePrincipal);
         var normalizationInput = stripUntrustedWindowsSids ? StripInboundWindowsSidClaims(raw) : raw;
 
         // The group resolver reads the provider claims of the normalized principal; the emitted identity never carries them.
@@ -219,7 +222,7 @@ public sealed class IdentityPipeline : IIdentityPipeline
             degradedReason = await AddRolesAndRightsAsync(identity, normalized, realm, realmId, resolution.Tenant, groups, ct).ConfigureAwait(false);
         }
 
-        if (stripUntrustedWindowsSids && clientCert is null && !BindNonWindowsUserSid(identity, realm!, realmId))
+        if (!tenantByClaims && !IsScimScheme(scheme) && clientCert is null && !BindRealmSubjectSid(identity, realm, realmId, isServicePrincipal))
         {
             _logger.LogWarning("Authentication rejected: missing required user key claim for realm {RealmId}.", realmId);
             return Unauthenticated();
@@ -557,21 +560,34 @@ public sealed class IdentityPipeline : IIdentityPipeline
         return clone;
     }
 
-    private static bool BindNonWindowsUserSid(ClaimsIdentity identity, IdentityRealm realm, string realmId)
+    private static bool BindRealmSubjectSid(ClaimsIdentity identity, IdentityRealm? realm, string realmId, bool isServicePrincipal)
     {
-        foreach (var existing in identity.FindAll(ClaimTypes.PrimarySid).ToList())
+        if (!isServicePrincipal && realm is { Kind: IdentityRealmKind.Basic or IdentityRealmKind.ForwardAuth }
+            && identity.FindFirst(ClaimTypes.PrimarySid)?.Value is { } localSid && !string.IsNullOrWhiteSpace(localSid))
         {
-            identity.RemoveClaim(existing);
+            ReplacePrimarySidClaim(identity, localSid.Trim());
+            return true;
         }
 
-        var userKey = RealmUserKeyResolver.Resolve(identity, realm);
-        if (string.IsNullOrWhiteSpace(userKey))
+        if (!isServicePrincipal && (realm is null || !IsNonWindowsRealm(realm))
+            && identity.FindFirst(ClaimTypes.PrimarySid)?.Value is { } winSid && SidFormat.IsWindowsAdDomainSid(winSid))
         {
-            return false;
+            ReplacePrimarySidClaim(identity, winSid.Trim());
+            return true;
         }
 
-        identity.AddClaim(IdentityClaimIssuers.CreatePrimarySidClaim($"{realmId}|{userKey}"));
+        var userKey = RealmUserKeyResolver.Resolve(identity, realm)
+            ?? (isServicePrincipal ? Autheris.Application.Catalog.External.AppOnlyPrincipal.GetClientId(new ClaimsPrincipal(identity)) : null);
+        if (string.IsNullOrWhiteSpace(userKey)) return false;
+
+        ReplacePrimarySidClaim(identity, $"{realmId}|{userKey}");
         return true;
+    }
+
+    private static void ReplacePrimarySidClaim(ClaimsIdentity identity, string value)
+    {
+        foreach (var existing in identity.FindAll(ClaimTypes.PrimarySid).ToList()) identity.RemoveClaim(existing);
+        identity.AddClaim(IdentityClaimIssuers.CreatePrimarySidClaim(value));
     }
 
     private static ClaimsPrincipal Unauthenticated() => new(new ClaimsIdentity());

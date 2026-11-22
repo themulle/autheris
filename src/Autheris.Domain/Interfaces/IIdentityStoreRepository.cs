@@ -29,7 +29,8 @@ public interface IScimUserStore
 public sealed record EffectiveScimGroupsResult(
     IReadOnlySet<string> GroupObjectSids,
     bool MaxDepthExceeded,
-    bool HasNonCanonicalSid = false);
+    bool HasNonCanonicalSid = false,
+    IReadOnlySet<string>? GroupIds = null);
 
 public interface IScimGroupStore
 {

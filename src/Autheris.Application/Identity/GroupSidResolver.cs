@@ -209,10 +209,10 @@ public sealed class GroupSidResolver : IGroupSidResolver
         foreach (var claim in principal.FindAll(c => Array.Exists(claimTypes, t => string.Equals(t, c.Type, StringComparison.Ordinal))
                                                       && string.Equals(c.Issuer, IdentityClaimIssuers.Pipeline, StringComparison.Ordinal) == requirePipelineIssuer))
         {
+            // A dropped value makes the set incomplete (it could have been a group-scoped restriction).
             var value = claim.Value?.Trim();
-            if (value is null || !SidFormat.IsCanonical(value))
+            if (value is null || !SidFormat.IsWindowsAdDomainSid(value))
             {
-                // A dropped value makes the set incomplete (it could have been a group-scoped restriction).
                 rejected++;
                 incomplete = true;
             }
@@ -237,15 +237,21 @@ public sealed class GroupSidResolver : IGroupSidResolver
 
     private async ValueTask<Outcome> ResolveEntraAsync(ClaimsPrincipal principal, IdentityRealm realm, TenantId tenant, CancellationToken ct)
     {
+        var tokenIssuer = principal.FindFirst("iss")?.Value;
+        var tokenTid = principal.FindFirst("tid")?.Value
+            ?? principal.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
+        var allowCloudSids = SidFormat.HasTenantBoundEntraIssuers(realm, tokenIssuer, tokenTid);
+        var allowAdSids = SidFormat.UsesWorkforceAdSids(realm.Kind);
+
         var sids = new HashSet<Sid>();
         var degraded = false;
 
         if (HasGroupOverage(principal))
         {
             // The group list of the token is incomplete or omitted: ignore partial token groups and answer from Graph for the validated oid only.
-            var graph = _providers.FirstOrDefault(p => string.Equals(p.ProviderId, GraphRoleProvider.Id, StringComparison.OrdinalIgnoreCase));
+            var graph = _providers.FirstOrDefault(p => string.Equals(p.ProviderId, Providers.GraphRoleProvider.Id, StringComparison.OrdinalIgnoreCase));
             var identity = BuildIdentity(principal, realm, tenant);
-            if (graph is null || identity is null)
+            if (graph is null || identity is null || !allowCloudSids)
             {
                 return new Outcome(sids, "entra+graph", true, true, null);
             }
@@ -272,7 +278,7 @@ public sealed class GroupSidResolver : IGroupSidResolver
             sids.Clear();
             foreach (var value in result.Groups)
             {
-                if (SidFormat.IsCanonical(value))
+                if (SidFormat.IsCanonical(value) && (SidFormat.IsEntraCloudSid(value) ? allowCloudSids : allowAdSids))
                 {
                     sids.Add(new Sid(value));
                 }
@@ -296,12 +302,19 @@ public sealed class GroupSidResolver : IGroupSidResolver
             var value = claim.Value?.Trim();
             if (value is not null && SidFormat.IsCanonical(value))
             {
-                if (!sids.Add(new Sid(value)))
+                var permitted = SidFormat.IsEntraCloudSid(value) ? allowCloudSids : allowAdSids;
+                if (!permitted)
+                {
+                    rejected++;
+                    degraded = true;
+                }
+                else if (!sids.Add(new Sid(value)))
                 {
                     rejected++;
                 }
             }
-            else if (value is not null && Guid.TryParseExact(value, "D", out var objectId) && SidFormat.TryFromEntraObjectId(objectId, out var cloudSid))
+            else if (value is not null && Guid.TryParseExact(value, "D", out var objectId)
+                && SidFormat.TryFromEntraObjectId(objectId, realm, tokenIssuer, out var cloudSid, tokenTid))
             {
                 if (!sids.Add(cloudSid))
                 {
@@ -350,7 +363,7 @@ public sealed class GroupSidResolver : IGroupSidResolver
             return Outcome.Failed("scim-stale");
         }
 
-        var scimSids = await ResolveScimEffectiveSidsAsync(tenant, realm.Id, scimUserKey, epoch, now, expiresAt, ct).ConfigureAwait(false);
+        var scimSids = await ResolveScimEffectiveSidsAsync(tenant, realm, scimUserKey, epoch, now, expiresAt, ct).ConfigureAwait(false);
         if (scimSids is null)
         {
             return Outcome.Failed("scim-groups");
@@ -382,13 +395,14 @@ public sealed class GroupSidResolver : IGroupSidResolver
 
     private async ValueTask<HashSet<Sid>?> ResolveScimEffectiveSidsAsync(
         TenantId tenant,
-        string realmId,
+        IdentityRealm realm,
         string scimUserKey,
         long epoch,
         DateTimeOffset now,
         DateTimeOffset expiresAt,
         CancellationToken ct)
     {
+        var realmId = realm.Id;
         var cacheKey = $"scim:e{epoch}:{scimUserKey}";
         if (_roleCache is not null)
         {
@@ -398,7 +412,7 @@ public sealed class GroupSidResolver : IGroupSidResolver
                 var cachedSids = new HashSet<Sid>();
                 foreach (var g in cached.Groups)
                 {
-                    if (!SidFormat.IsCanonical(g))
+                    if (!IsValidScimGroupSidForRealm(g, realm))
                     {
                         return null;
                     }
@@ -413,28 +427,22 @@ public sealed class GroupSidResolver : IGroupSidResolver
         var effective = await _scimGroupStore!.GetEffectiveGroupSidsForUserAsync(
             tenant, realmId, scimUserKey, DefaultMaxGroupNestingDepth, ct).ConfigureAwait(false);
 
-        if (effective.MaxDepthExceeded || effective.HasNonCanonicalSid)
+        if (effective.MaxDepthExceeded || effective.HasNonCanonicalSid
+            || !ScimStoreRoleProvider.TryProjectRealmBoundGroupSids(effective, realm, out var projected))
         {
             return null;
         }
 
         var sids = new HashSet<Sid>();
-        var rawStrings = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var rawSid in effective.GroupObjectSids)
+        foreach (var g in projected)
         {
-            if (!SidFormat.IsCanonical(rawSid))
-            {
-                return null;
-            }
-
-            rawStrings.Add(rawSid);
-            sids.Add(new Sid(rawSid));
+            sids.Add(new Sid(g));
         }
 
         if (_roleCache is not null)
         {
             var resolution = new RoleResolution(
-                rawStrings,
+                projected,
                 new HashSet<string>(StringComparer.OrdinalIgnoreCase),
                 new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase),
                 now,
@@ -449,6 +457,13 @@ public sealed class GroupSidResolver : IGroupSidResolver
         return sids;
     }
 
+    private static bool IsValidScimGroupSidForRealm(string value, IdentityRealm realm) =>
+        SidFormat.UsesWorkforceAdSids(realm.Kind)
+            ? SidFormat.IsGroupSid(value)
+              && (!SidFormat.IsEntraCloudSid(value) || SidFormat.HasTenantBoundEntraIssuers(realm))
+              && (!SidFormat.IsRealmGroupKey(value) || SidFormat.MatchesRealmGroupKey(value, realm.Id))
+            : SidFormat.MatchesRealmGroupKey(value, realm.Id);
+
     private async ValueTask<Outcome> ResolveFromChainAsync(ClaimsPrincipal principal, IdentityRealm realm, TenantId tenant, string? correlatedUserKey = null, CancellationToken ct = default)
     {
         var identity = BuildIdentity(principal, realm, tenant, correlatedUserKey);
@@ -457,13 +472,18 @@ public sealed class GroupSidResolver : IGroupSidResolver
             return Outcome.Failed("resolver");
         }
 
+        var tokenIssuer = principal.FindFirst("iss")?.Value;
+        var tokenTid = principal.FindFirst("tid")?.Value
+            ?? principal.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
         var resolution = await _roleResolver.ResolveAsync(identity, realm, ct).ConfigureAwait(false);
         var sids = new HashSet<Sid>();
         var degraded = resolution.IsDegraded;
         var rejected = 0;
         foreach (var group in resolution.Groups)
         {
-            if (SidFormat.IsCanonical(group))
+            if (SidFormat.IsGroupSid(group)
+                && (!SidFormat.IsEntraCloudSid(group) || SidFormat.HasTenantBoundEntraIssuers(realm, tokenIssuer, tokenTid))
+                && (!SidFormat.IsRealmGroupKey(group) || SidFormat.MatchesRealmGroupKey(group, realm.Id)))
             {
                 sids.Add(new Sid(group));
             }

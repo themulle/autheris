@@ -651,7 +651,7 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
             var currentGroups = new HashSet<Sid>();
             foreach (var sid in resolution.GroupSids)
             {
-                if (string.IsNullOrWhiteSpace(sid.Value) || !SidFormat.IsCanonical(sid.Value))
+                if (string.IsNullOrWhiteSpace(sid.Value) || !SidFormat.IsGroupSid(sid.Value))
                 {
                     if (!_disposed)
                     {

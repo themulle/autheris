@@ -3,11 +3,15 @@ namespace Autheris.Domain.Common;
 using System.Buffers.Binary;
 using System.Globalization;
 using System.Text;
+using Autheris.Domain.Identity;
 
 /// <summary>Canonical SID text form checks shared by every identity source.</summary>
 public static class SidFormat
 {
     public const int MaxLength = 184;
+    public const string EntraCloudSidPrefix = "S-1-12-1-";
+    public const string RealmGroupKeyPrefix = "realm:";
+    public const int MaxGroupKeyLength = MaxLength;
 
     /// <summary>
     /// True for <c>S-1-{authority 1-2 digits}(-{subauthority 1-10 digits}){1,15}</c>, ASCII digits only, at most
@@ -78,6 +82,122 @@ public static class SidFormat
         sid = new Sid(string.Create(CultureInfo.InvariantCulture,
             $"S-1-12-1-{BinaryPrimitives.ReadUInt32LittleEndian(bytes)}-{BinaryPrimitives.ReadUInt32LittleEndian(bytes[4..])}-{BinaryPrimitives.ReadUInt32LittleEndian(bytes[8..])}-{BinaryPrimitives.ReadUInt32LittleEndian(bytes[12..])}"));
         return true;
+    }
+
+    public static bool TryFromEntraObjectId(Guid objectId, IdentityRealm? realm, string? tokenIssuer, out Sid sid, string? tokenTenantId = null)
+    {
+        sid = default;
+        return HasTenantBoundEntraIssuers(realm, tokenIssuer, tokenTenantId) && TryFromEntraObjectId(objectId, out sid);
+    }
+
+    public static bool IsEntraCloudSid(string? value) => IsCanonical(value) && value!.StartsWith(EntraCloudSidPrefix, StringComparison.Ordinal);
+    public static bool IsWindowsAdDomainSid(string? value) => IsCanonical(value) && !IsEntraCloudSid(value);
+    public static bool IsEntraRealm(IdentityRealmKind kind) => kind is IdentityRealmKind.EntraWorkforce or IdentityRealmKind.EntraExternalId;
+    public static bool UsesWorkforceAdSids(IdentityRealmKind kind) => kind is IdentityRealmKind.EntraWorkforce or IdentityRealmKind.Adfs or IdentityRealmKind.Kerberos;
+
+    public static bool IsTenantBoundEntraIssuer(string? issuer)
+    {
+        if (string.IsNullOrWhiteSpace(issuer)) return false;
+        var trimmed = issuer.Trim();
+        if (trimmed.AsSpan().IndexOfAny("*{}?#") >= 0
+            || !Uri.TryCreate(trimmed, UriKind.Absolute, out var uri)
+            || (uri.Scheme != Uri.UriSchemeHttps && uri.Scheme != Uri.UriSchemeHttp)
+            || string.IsNullOrWhiteSpace(uri.Host))
+            return false;
+
+        var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (IsWellKnownEntraAuthorityHost(uri.Host) && (segments.Length == 0 || segments[0].Equals("v2.0", StringComparison.OrdinalIgnoreCase)))
+            return false;
+        foreach (var seg in segments)
+            if (seg.Equals("common", StringComparison.OrdinalIgnoreCase)
+                || seg.Equals("organizations", StringComparison.OrdinalIgnoreCase)
+                || seg.Equals("consumers", StringComparison.OrdinalIgnoreCase))
+                return false;
+        return true;
+    }
+
+    private static bool IsWellKnownEntraAuthorityHost(string host) =>
+        host.Equals("sts.windows.net", StringComparison.OrdinalIgnoreCase)
+        || host.Equals("login.windows.net", StringComparison.OrdinalIgnoreCase)
+        || host.StartsWith("login.microsoftonline.", StringComparison.OrdinalIgnoreCase)
+        || host.Equals("login.partner.microsoftonline.cn", StringComparison.OrdinalIgnoreCase)
+        || host.Equals("ciamlogin.com", StringComparison.OrdinalIgnoreCase)
+        || host.EndsWith(".ciamlogin.com", StringComparison.OrdinalIgnoreCase);
+
+    public static bool HasTenantBoundEntraIssuers(IdentityRealm? realm, string? tokenIssuer = null, string? tokenTenantId = null)
+    {
+        if (realm is null || !IsEntraRealm(realm.Kind) || realm.Issuers.Count == 0 || !realm.Issuers.All(IsTenantBoundEntraIssuer))
+            return false;
+
+        if (!string.IsNullOrWhiteSpace(tokenIssuer))
+        {
+            var normalized = tokenIssuer.Trim().TrimEnd('/');
+            if (!realm.Issuers.Any(i => string.Equals(i.Trim().TrimEnd('/'), normalized, StringComparison.OrdinalIgnoreCase))) return false;
+            return string.IsNullOrWhiteSpace(tokenTenantId)
+                || !TryExtractEntraTenantGuid(normalized, out var issuerTid)
+                || string.Equals(issuerTid.ToString("D"), tokenTenantId.Trim(), StringComparison.OrdinalIgnoreCase);
+        }
+
+        if (string.IsNullOrWhiteSpace(tokenTenantId)) return true;
+        var guidIssuers = realm.Issuers.Select(i => (Ok: TryExtractEntraTenantGuid(i, out var tid), Tid: tid)).Where(x => x.Ok).ToList();
+        return guidIssuers.Count == 0 || guidIssuers.Any(x => string.Equals(x.Tid.ToString("D"), tokenTenantId.Trim(), StringComparison.OrdinalIgnoreCase));
+    }
+
+    private static bool TryExtractEntraTenantGuid(string issuer, out Guid tenantId)
+    {
+        tenantId = Guid.Empty;
+        if (!Uri.TryCreate(issuer.Trim(), UriKind.Absolute, out var uri)) return false;
+        var segments = uri.AbsolutePath.Split('/', StringSplitOptions.RemoveEmptyEntries);
+        return segments.Length > 0 && Guid.TryParseExact(segments[0], "D", out tenantId) && tenantId != Guid.Empty;
+    }
+
+    public static bool TryFormatRealmGroupKey(string realmId, string groupId, out string key)
+    {
+        key = string.Empty;
+        if (string.IsNullOrWhiteSpace(realmId) || string.IsNullOrWhiteSpace(groupId)) return false;
+        var candidate = $"{RealmGroupKeyPrefix}{Uri.EscapeDataString(realmId.Trim())}:{Uri.EscapeDataString(groupId.Trim())}";
+        if (candidate.Length > MaxGroupKeyLength) return false;
+        key = candidate;
+        return true;
+    }
+
+    public static string FormatRealmGroupKey(string realmId, string groupId)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(realmId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(groupId);
+        return TryFormatRealmGroupKey(realmId, groupId, out var key)
+            ? key : throw new ArgumentException("Realm-bound group key exceeds maximum supported length.", nameof(groupId));
+    }
+
+    public static bool IsRealmGroupKey(string? value)
+    {
+        if (string.IsNullOrWhiteSpace(value) || value.Length > MaxGroupKeyLength || !value.StartsWith(RealmGroupKeyPrefix, StringComparison.Ordinal))
+            return false;
+        var rest = value.AsSpan(RealmGroupKeyPrefix.Length);
+        var colon = rest.IndexOf(':');
+        if (colon <= 0 || colon >= rest.Length - 1 || rest[(colon + 1)..].IndexOf(':') >= 0) return false;
+        ReadOnlySpan<char> rawRealm = rest[..colon], rawGroup = rest[(colon + 1)..];
+        return IsValidEscapedSegment(rawRealm) && IsValidEscapedSegment(rawGroup)
+            && TryFormatRealmGroupKey(Uri.UnescapeDataString(rawRealm.ToString()), Uri.UnescapeDataString(rawGroup.ToString()), out var canonical)
+            && string.Equals(value, canonical, StringComparison.Ordinal);
+    }
+
+    public static bool IsGroupSid(string? value) => IsCanonical(value) || IsRealmGroupKey(value);
+    public static bool MatchesRealmGroupKey(string? value, string realmId) =>
+        IsRealmGroupKey(value) && !string.IsNullOrWhiteSpace(realmId)
+        && value!.StartsWith($"{RealmGroupKeyPrefix}{Uri.EscapeDataString(realmId.Trim())}:", StringComparison.Ordinal);
+
+    private static bool IsValidEscapedSegment(ReadOnlySpan<char> segment)
+    {
+        if (segment.IsEmpty) return false;
+        for (var i = 0; i < segment.Length; i++)
+        {
+            var c = segment[i];
+            if (char.IsWhiteSpace(c) || char.IsControl(c)) return false;
+            if (c == '%' && (i + 2 >= segment.Length || !Uri.IsHexDigit(segment[i + 1]) || !Uri.IsHexDigit(segment[i + 2]))) return false;
+            if (c == '%') i += 2;
+        }
+        return !string.IsNullOrWhiteSpace(Uri.UnescapeDataString(segment.ToString()));
     }
 
     /// <summary>

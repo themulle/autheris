@@ -54,6 +54,8 @@ public sealed class IdentitySubjectResolver : IIdentitySubjectResolver
             );
         }
 
+        var pipelinePrimarySid = FindPipelinePrimarySid(principal);
+
         // 3. Check for M2M / Service Principal (Entra ID App-Only or Client Credentials)
         var idType = principal.FindFirst("idtyp")?.Value;
         var appId = principal.FindFirst("appid")?.Value
@@ -70,7 +72,8 @@ public sealed class IdentitySubjectResolver : IIdentitySubjectResolver
 
         if (isAppOnly || (!string.IsNullOrWhiteSpace(appId) && !hasHumanIdentityClaim))
         {
-            var spId = principal.FindFirst("oid")?.Value
+            var spId = pipelinePrimarySid
+                ?? principal.FindFirst("oid")?.Value
                 ?? principal.FindFirst("sub")?.Value
                 ?? appId
                 ?? "spn:unknown";
@@ -82,37 +85,34 @@ public sealed class IdentitySubjectResolver : IIdentitySubjectResolver
 
             var provider = tenant.HasValue ? IdentityProviderType.EntraId : IdentityProviderType.ServiceAccount;
 
-            return new SubjectIdentity(
-                Id: spId,
-                Type: SubjectType.ServicePrincipal,
-                Provider: provider,
-                DisplayName: appDisplayName,
-                Tenant: tenant,
-                Roles: roles
-            );
+            return new SubjectIdentity(spId, SubjectType.ServicePrincipal, provider, appDisplayName, tenant, roles);
         }
 
         // 4. Check for Entra ID Interactive User (OIDC / OAuth2)
         var oid = principal.FindFirst("oid")?.Value
             ?? principal.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
 
-        if (!string.IsNullOrWhiteSpace(oid))
+        if (pipelinePrimarySid is not null || !string.IsNullOrWhiteSpace(oid))
         {
             var userDisplayName = principal.FindFirst("preferred_username")?.Value
                 ?? principal.FindFirst(ClaimTypes.Upn)?.Value
                 ?? principal.FindFirst("upn")?.Value
                 ?? principal.FindFirst(ClaimTypes.Email)?.Value
                 ?? principal.Identity.Name
-                ?? oid;
+                ?? pipelinePrimarySid
+                ?? oid!;
+            var resolvedId = pipelinePrimarySid ?? oid!;
+            var subjectProvider = pipelinePrimarySid is not null && oid is null
+                ? authType switch
+                {
+                    "TestAuth" => IdentityProviderType.TestAuth,
+                    "ForwardAuth" => IdentityProviderType.ForwardAuth,
+                    _ when resolvedId.StartsWith("S-1-", StringComparison.OrdinalIgnoreCase) => IdentityProviderType.ActiveDirectory,
+                    _ => IdentityProviderType.BasicAuth
+                }
+                : IdentityProviderType.EntraId;
 
-            return new SubjectIdentity(
-                Id: oid,
-                Type: SubjectType.User,
-                Provider: IdentityProviderType.EntraId,
-                DisplayName: userDisplayName,
-                Tenant: tenant,
-                Roles: roles
-            );
+            return new SubjectIdentity(resolvedId, SubjectType.User, subjectProvider, userDisplayName, tenant, roles);
         }
 
         // 5. Check for On-Premise Active Directory User (Kerberos / Negotiate)
@@ -151,4 +151,10 @@ public sealed class IdentitySubjectResolver : IIdentitySubjectResolver
             Roles: roles
         );
     }
+
+    private static string? FindPipelinePrimarySid(ClaimsPrincipal principal) =>
+        principal.Claims.FirstOrDefault(c =>
+            string.Equals(c.Type, ClaimTypes.PrimarySid, StringComparison.Ordinal)
+            && string.Equals(c.Issuer, IdentityClaimIssuers.Pipeline, StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(c.Value))?.Value;
 }

@@ -45,7 +45,7 @@ public sealed class UsageGroupNameResolver : IUsageGroupNameResolver
         }
 
         string trimmed = groupSid.Trim();
-        if (!SidFormat.IsCanonical(trimmed))
+        if (!SidFormat.IsGroupSid(trimmed))
         {
             return trimmed;
         }

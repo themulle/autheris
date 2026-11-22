@@ -66,6 +66,19 @@ public sealed class UsageGroupNameResolverTests
     }
 
     [Fact]
+    public async Task Resolves_realm_bound_group_sid_from_scim_store()
+    {
+        const string realmGroupSid = "realm:oidc-a:eng";
+        var store = new FakeGroupStore { [("tenant-a", realmGroupSid)] = "Partner Engineering" };
+        var resolver = new UsageGroupNameResolver(Options.Create(new UsageAccountingOptions()), store, new FakeTimeProvider());
+
+        string resolved = await resolver.ResolveGroupNameAsync(new TenantId("tenant-a"), realmGroupSid);
+
+        resolved.ShouldBe("Partner Engineering");
+        store.Calls.ShouldBe(1);
+    }
+
+    [Fact]
     public async Task Caches_per_tenant_and_sid_with_ten_minute_ttl()
     {
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 11, 15, 12, 0, 0, TimeSpan.Zero));

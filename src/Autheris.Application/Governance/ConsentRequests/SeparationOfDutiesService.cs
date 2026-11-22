@@ -118,7 +118,13 @@ public sealed class SeparationOfDutiesService(
             if (callerContext is not null) AddLookupKey(keys, callerContext.UserSid.Value);
         }
 
-        var realmId = realmRegistry?.GetDefaultRealm()?.Id ?? "default";
+        var realmId = ResolveRealmId(principal, actorSid, callerContext, realmRegistry);
+        foreach (var existingKey in keys.ToList())
+        {
+            if (existingKey.StartsWith($"{realmId}|", StringComparison.OrdinalIgnoreCase) && existingKey.Length > realmId.Length + 1)
+                keys.Add(existingKey[(realmId.Length + 1)..]);
+        }
+
         foreach (var key in keys)
         {
             var effective = await groupStore.GetEffectiveGroupSidsForUserAsync(tenantId, realmId, key, ct: ct).ConfigureAwait(false);
@@ -128,7 +134,9 @@ public sealed class SeparationOfDutiesService(
                 return SodDecision.Deny(SodViolationKind.SelfApproval, "Separation of duties violated: a member of the requested target group cannot approve the request.");
 
             var directGroups = await groupStore.GetGroupMembershipsForUserAsync(tenantId, realmId, key, ct).ConfigureAwait(false);
-            if (directGroups is not null && directGroups.Any(g => AnyOverlap(targetForms, g)))
+            if (directGroups is not null && directGroups.Any(g =>
+                    AnyOverlap(targetForms, g)
+                    || (!SidFormat.IsGroupSid(g) && SidFormat.TryFormatRealmGroupKey(realmId, g, out var qualified) && AnyOverlap(targetForms, qualified))))
                 return SodDecision.Deny(SodViolationKind.SelfApproval, "Separation of duties violated: a member of the requested target group cannot approve the request.");
         }
 
@@ -151,9 +159,11 @@ public sealed class SeparationOfDutiesService(
         AddIdentifierForms(ids, fallbackSid);
         if (principal is not null)
         {
+            var isPipelineBound = HasRealmBoundPipelinePrimarySid(principal);
             foreach (var id in principal.GetUserIdentifiers()) AddIdentifierForms(ids, id);
             foreach (var claim in principal.Claims)
-                if (ExtraSubjectClaimTypes.Contains(claim.Type, StringComparer.OrdinalIgnoreCase)) AddIdentifierForms(ids, claim.Value);
+                if (ExtraSubjectClaimTypes.Contains(claim.Type, StringComparer.OrdinalIgnoreCase) && !(isPipelineBound && IsRawCrossRealmSubjectClaim(claim.Type)))
+                    AddIdentifierForms(ids, claim.Value);
         }
 
         if (additional is not null)
@@ -167,8 +177,11 @@ public sealed class SeparationOfDutiesService(
         var ids = CollectSubjectIdentifiers(principal, fallbackSid, additional);
         if (principal is not null)
         {
+            var realmId = principal.FindFirst("autheris:realm")?.Value;
+            var isPipelineBound = HasRealmBoundPipelinePrimarySid(principal);
             foreach (var claim in principal.Claims)
-                if (AppIdClaimTypes.Contains(claim.Type, StringComparer.OrdinalIgnoreCase)) AddIdentifierForms(ids, claim.Value);
+                if (AppIdClaimTypes.Contains(claim.Type, StringComparer.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(claim.Value))
+                    AddIdentifierForms(ids, QualifyAppClaim(claim.Value, realmId, isPipelineBound));
         }
 
         return ids;
@@ -180,11 +193,16 @@ public sealed class SeparationOfDutiesService(
         AddIdentifierForms(ids, actorSid.Value, includeLocalAccountForms: true);
         if (principal is not null)
         {
+            var isPipelineBound = HasRealmBoundPipelinePrimarySid(principal);
+            var realmId = principal.FindFirst("autheris:realm")?.Value;
             foreach (var id in principal.GetUserIdentifiers()) AddIdentifierForms(ids, id, includeLocalAccountForms: true);
             foreach (var claim in principal.Claims)
-                if (ExtraSubjectClaimTypes.Contains(claim.Type, StringComparer.OrdinalIgnoreCase) ||
-                    AppIdClaimTypes.Contains(claim.Type, StringComparer.OrdinalIgnoreCase))
+            {
+                if (ExtraSubjectClaimTypes.Contains(claim.Type, StringComparer.OrdinalIgnoreCase) && !(isPipelineBound && IsRawCrossRealmSubjectClaim(claim.Type)))
                     AddIdentifierForms(ids, claim.Value, includeLocalAccountForms: true);
+                else if (AppIdClaimTypes.Contains(claim.Type, StringComparer.OrdinalIgnoreCase) && !string.IsNullOrWhiteSpace(claim.Value))
+                    AddIdentifierForms(ids, QualifyAppClaim(claim.Value, realmId, isPipelineBound), includeLocalAccountForms: true);
+            }
             foreach (var g in principal.GetGroupSids()) AddIdentifierForms(ids, g.Value, includeLocalAccountForms: true);
             foreach (var r in principal.GetUserRoles()) AddIdentifierForms(ids, r, includeLocalAccountForms: true);
         }
@@ -260,9 +278,10 @@ public sealed class SeparationOfDutiesService(
     {
         if (string.IsNullOrWhiteSpace(value)) return;
         var v = value.Trim();
-        AddSingleForm(target, v, includeLocalAccountForms);
-        var colon = v.LastIndexOf(':', StringComparison.Ordinal);
-        if (colon >= 0 && colon + 1 < v.Length) AddSingleForm(target, v[(colon + 1)..], includeLocalAccountForms);
+        var realmQualified = IsRealmQualifiedIdentifier(v);
+        AddSingleForm(target, v, includeLocalAccountForms && !realmQualified);
+        if (!realmQualified && TryStripEntityTypePrefix(v, out var stripped))
+            AddSingleForm(target, stripped, includeLocalAccountForms && !IsRealmQualifiedIdentifier(stripped));
     }
 
     private static void AddLookupKey(ISet<string> keys, string? raw)
@@ -270,8 +289,46 @@ public sealed class SeparationOfDutiesService(
         if (string.IsNullOrWhiteSpace(raw)) return;
         var v = raw.Trim();
         keys.Add(v);
-        var colon = v.LastIndexOf(':', StringComparison.Ordinal);
-        if (colon >= 0 && colon + 1 < v.Length) keys.Add(v[(colon + 1)..].Trim());
+        if (!IsRealmQualifiedIdentifier(v) && TryStripEntityTypePrefix(v, out var stripped)) keys.Add(stripped);
+    }
+
+    private static bool IsRealmQualifiedIdentifier(string value) =>
+        SidFormat.IsRealmGroupKey(value) || value.StartsWith(SidFormat.RealmGroupKeyPrefix, StringComparison.OrdinalIgnoreCase)
+        || value.StartsWith("scim:", StringComparison.OrdinalIgnoreCase) || value.StartsWith("autheris:", StringComparison.OrdinalIgnoreCase)
+        || value.Contains('|', StringComparison.Ordinal);
+
+    private static bool TryStripEntityTypePrefix(string value, out string stripped)
+    {
+        var colon = value.IndexOf(':', StringComparison.Ordinal);
+        if (colon > 0 && colon + 1 < value.Length && value[..colon] is var p &&
+            (p.Equals("user", StringComparison.OrdinalIgnoreCase) || p.Equals("sp", StringComparison.OrdinalIgnoreCase) || p.Equals("group", StringComparison.OrdinalIgnoreCase)))
+        {
+            stripped = value[(colon + 1)..].Trim();
+            return stripped.Length > 0;
+        }
+        stripped = string.Empty;
+        return false;
+    }
+
+    private static string QualifyAppClaim(string raw, string? realmId, bool isPipelineBound) =>
+        isPipelineBound && !string.IsNullOrWhiteSpace(realmId) ? $"{realmId}|{raw.Trim()}" : raw;
+
+    private static bool HasRealmBoundPipelinePrimarySid(ClaimsPrincipal? principal) =>
+        principal?.HasClaim(c => string.Equals(c.Type, ClaimTypes.PrimarySid, StringComparison.Ordinal)
+            && string.Equals(c.Issuer, IdentityClaimIssuers.Pipeline, StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(c.Value)) == true;
+
+    private static bool IsRawCrossRealmSubjectClaim(string claimType) =>
+        claimType is "oid" or "http://schemas.microsoft.com/identity/claims/objectidentifier" or "sub" or ClaimTypes.NameIdentifier;
+
+    private static string ResolveRealmId(
+        ClaimsPrincipal? principal, Sid actorSid, SecurityPrincipalContext? callerContext, IIdentityRealmRegistry? realmRegistry)
+    {
+        var claimRealm = principal?.FindFirst("autheris:realm")?.Value
+            ?? callerContext?.Principal?.FindFirst("autheris:realm")?.Value;
+        if (!string.IsNullOrWhiteSpace(claimRealm)) return claimRealm.Trim();
+        var sidSource = callerContext?.UserSid.Value ?? actorSid.Value;
+        var sep = sidSource.IndexOf('|', StringComparison.Ordinal);
+        return sep > 0 ? sidSource[..sep].Trim() : realmRegistry?.GetDefaultRealm()?.Id ?? "default";
     }
 
     private static void AddSingleForm(ISet<string> target, string v, bool includeLocalAccountForms)

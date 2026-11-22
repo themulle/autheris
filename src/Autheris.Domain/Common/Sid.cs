@@ -38,7 +38,10 @@ public static class ClaimsPrincipalExtensions
     {
         if (principal == null) return null;
 
-        var sidStr = principal.FindFirst(System.Security.Claims.ClaimTypes.PrimarySid)?.Value
+        var sidStr = principal.FindFirst(c =>
+                c.Type == System.Security.Claims.ClaimTypes.PrimarySid
+                && string.Equals(c.Issuer, IdentityClaimIssuers.Pipeline, StringComparison.Ordinal))?.Value
+            ?? principal.FindFirst(System.Security.Claims.ClaimTypes.PrimarySid)?.Value
             ?? principal.FindFirst("objectSid")?.Value
             ?? principal.FindFirst("onprem_sid")?.Value
             ?? principal.FindFirst("primarysid")?.Value
@@ -98,8 +101,18 @@ public static class ClaimsPrincipalExtensions
             result.Add(primary.Value.Value);
         }
 
+        var hasRealmBoundPipelineSid = principal.HasClaim(c =>
+            c.Type == System.Security.Claims.ClaimTypes.PrimarySid
+            && string.Equals(c.Issuer, IdentityClaimIssuers.Pipeline, StringComparison.Ordinal)
+            && !string.IsNullOrWhiteSpace(c.Value));
+
         foreach (var claimType in UserIdentifierClaimTypes)
         {
+            if (hasRealmBoundPipelineSid && claimType is "oid" or "http://schemas.microsoft.com/identity/claims/objectidentifier" or "sub" or System.Security.Claims.ClaimTypes.NameIdentifier)
+            {
+                continue;
+            }
+
             foreach (var claim in principal.FindAll(claimType))
             {
                 if (!string.IsNullOrWhiteSpace(claim.Value))
@@ -174,7 +187,7 @@ public static class ClaimsPrincipalExtensions
         // Only group SIDs minted by the identity pipeline count; token claim types and every other issuer are ignored.
         return principal.FindAll(c => c.Type == System.Security.Claims.ClaimTypes.GroupSid
                                       && string.Equals(c.Issuer, IdentityClaimIssuers.Pipeline, StringComparison.Ordinal)
-                                      && SidFormat.IsCanonical(c.Value))
+                                      && SidFormat.IsGroupSid(c.Value))
             .Select(c => new Sid(c.Value))
             .ToHashSet();
     }
