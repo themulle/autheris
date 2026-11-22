@@ -10,6 +10,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
+using Autheris.Api.Security;
 using Autheris.Application.Procedures.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -50,7 +51,7 @@ public static class ProcedureEndpointRoutes
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         group.MapGet("/{name}", HandleGet).WithName("ExecuteProcedureGet").RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
-        group.MapPost("/{name}", HandlePost).WithName("ExecuteProcedurePost").RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
+        group.MapPost("/{name}", HandlePost).WithName("ExecuteProcedurePost").WithReadOnlyTokenAccess(HttpMethods.Post, strictRawPath: true).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
         return app;
     }
 

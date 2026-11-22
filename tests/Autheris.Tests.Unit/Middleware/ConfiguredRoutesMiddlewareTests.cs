@@ -1,8 +1,12 @@
 using System;
 using System.Collections.Generic;
+using System.IO;
+using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Api.Endpoints;
 using Autheris.Api.Middleware;
+using Autheris.Api.Security;
 using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Runtime.ResourceGroups;
@@ -10,6 +14,9 @@ using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Options.DataSources;
+using Autheris.Domain.Security;
+using Autheris.Tests.Common;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -114,5 +121,205 @@ public sealed class ConfiguredRoutesMiddlewareTests
         var gqlAudit = new AuditContext();
         await mw.InvokeAsync(gqlCtx, new AuditWriter(repo, NullLogger<AuditWriter>.Instance), gqlAudit);
         gqlAudit.Channel.ShouldBe("GraphQL");
+    }
+
+    private sealed class DenyingRateLimiter : IRateLimiterService
+    {
+        public int PreAuthCalls { get; private set; }
+        public int PostAuthCalls { get; private set; }
+
+        public Task<RateLimitResult> CheckPreAuthIpAsync(string ip, PreAuthIpRateLimitOptions options, CancellationToken ct = default)
+        {
+            PreAuthCalls++;
+            return Task.FromResult(new RateLimitResult(false, 60));
+        }
+
+        public Task<RateLimitResult> CheckPostAuthSidAsync(string sid, PostAuthSidRateLimitOptions options, CancellationToken ct = default)
+        {
+            PostAuthCalls++;
+            return Task.FromResult(new RateLimitResult(false, 60));
+        }
+
+        public Task<CostQuotaResult> CheckCostQuotaAsync(string key, int requestedCost, ClientQuotaPolicy policy, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task<CostQuotaResult> ReserveCostQuotaAsync(string key, int reservedCost, ClientQuotaPolicy policy, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task<CostQuotaResult> SettleCostQuotaAsync(string key, int reservedCost, int actualCost, ClientQuotaPolicy policy, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task<CallerBucketState?> GetBucketStateAsync(string key, ClientQuotaPolicy policy, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task<CallerBucketState?> GetBucketStateAsync(string key, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+    }
+
+    private static Endpoint EndpointWith(params object[] metadata) =>
+        new(_ => Task.CompletedTask, new EndpointMetadataCollection(metadata), "test-endpoint");
+
+    private static ClaimsPrincipal ReadOnlyPrincipal()
+    {
+        var identity = new ClaimsIdentity([new Claim("oid", "33333333-3333-3333-3333-333333333333")], "Bearer");
+        TokenAccessScope.MarkReadOnly(identity);
+        return new ClaimsPrincipal(identity);
+    }
+
+    [Fact]
+    public async Task ResourceGroupMiddleware_HonorsGatewayEndpointMetadata_OnNonDefaultPaths()
+    {
+        var mgr = new RecordingResourceGroupManager();
+        var mw = new ResourceGroupMiddleware(
+            _ => Task.CompletedTask,
+            mgr,
+            Options.Create(new GatewayOptions()),
+            NullLogger<ResourceGroupMiddleware>.Instance);
+
+        var healthCtx = new DefaultHttpContext();
+        healthCtx.Request.Path = "/probe/live";
+        healthCtx.SetEndpoint(EndpointWith(HealthProbeMetadata.Instance));
+        GatewayEndpointMetadata.IsHealthProbe(healthCtx).ShouldBeTrue();
+        await mw.InvokeAsync(healthCtx);
+
+        var metricsCtx = new DefaultHttpContext();
+        metricsCtx.Request.Path = "/telemetry/prom";
+        metricsCtx.SetEndpoint(EndpointWith(MetricsEndpointMetadata.Instance));
+        GatewayEndpointMetadata.IsMetricsEndpoint(metricsCtx).ShouldBeTrue();
+        await mw.InvokeAsync(metricsCtx);
+
+        mgr.AcquiredTiers.ShouldBeEmpty();
+
+        var mcpCtx = new DefaultHttpContext();
+        mcpCtx.Request.Path = "/alt-mcp";
+        mcpCtx.SetEndpoint(EndpointWith(new IngressTransportMetadata(DataSourceTransportFlags.Mcp)));
+        await mw.InvokeAsync(mcpCtx);
+
+        var odataCtx = new DefaultHttpContext();
+        odataCtx.Request.Path = "/alt-feed/Orders";
+        odataCtx.SetEndpoint(EndpointWith(new IngressTransportMetadata(DataSourceTransportFlags.OData)));
+        await mw.InvokeAsync(odataCtx);
+
+        mgr.AcquiredTiers.ShouldBe([ResourceGroupTier.AutonomousAgents, ResourceGroupTier.BulkAnalytics]);
+    }
+
+    [Fact]
+    public async Task RateLimitAndHostAllowListMiddleware_HonorHealthAndMetricsMetadata()
+    {
+        var limiter = new DenyingRateLimiter();
+        var opts = Options.Create(new GatewayOptions());
+
+        var preNext = false;
+        var preMw = new PreAuthIpRateLimitingMiddleware(_ => { preNext = true; return Task.CompletedTask; }, opts, limiter);
+        var healthCtx = new DefaultHttpContext();
+        healthCtx.Request.Path = "/custom-live";
+        healthCtx.SetEndpoint(EndpointWith(HealthProbeMetadata.Instance));
+        await preMw.InvokeAsync(healthCtx);
+        preNext.ShouldBeTrue();
+        limiter.PreAuthCalls.ShouldBe(0);
+
+        var postNext = false;
+        var postMw = new PostAuthSidRateLimitingMiddleware(_ => { postNext = true; return Task.CompletedTask; }, opts, limiter);
+        var metricsCtx = new DefaultHttpContext { User = ReadOnlyPrincipal() };
+        metricsCtx.Request.Path = "/custom-metrics";
+        metricsCtx.SetEndpoint(EndpointWith(MetricsEndpointMetadata.Instance));
+        await postMw.InvokeAsync(metricsCtx);
+        postNext.ShouldBeTrue();
+        limiter.PostAuthCalls.ShouldBe(0);
+
+        var hostNext = false;
+        var hostMw = new HostAllowListMiddleware(_ => { hostNext = true; return Task.CompletedTask; }, new HostAllowList(["gateway.corp.example"]));
+        var podProbeCtx = new DefaultHttpContext();
+        podProbeCtx.Request.Host = new HostString("10.0.0.5");
+        podProbeCtx.Request.Path = "/custom-ready";
+        podProbeCtx.SetEndpoint(EndpointWith(HealthProbeMetadata.Instance));
+        await hostMw.InvokeAsync(podProbeCtx);
+        hostNext.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task GatewayCorsCsrfAndSecurityHeaders_HonorEndpointMetadata()
+    {
+        var options = new GatewayOptions
+        {
+            Hosting = new HostingLimitsOptions { AllowedHosts = ["gateway.corp.example"] },
+            OData = new ODataOptions { Enabled = true }
+        };
+        var allowList = new HostAllowList(options.Hosting.AllowedHosts);
+        var env = new TestHostEnvironment("Production");
+
+        var csrfPassed = false;
+        var csrfMw = new GatewayCorsCsrfMiddleware(_ => { csrfPassed = true; return Task.CompletedTask; }, options, allowList, env);
+
+        var loginCtx = new DefaultHttpContext();
+        loginCtx.Request.Method = HttpMethods.Post;
+        loginCtx.Request.Scheme = "https";
+        loginCtx.Request.Path = "/custom-auth/exchange";
+        loginCtx.Request.Headers.Origin = "https://gateway.corp.example";
+        loginCtx.Request.Headers.Cookie = "session=1";
+        loginCtx.SetEndpoint(EndpointWith(CsrfLoginExemptMetadata.Instance));
+        GatewayEndpointMetadata.IsCsrfLoginExempt(loginCtx).ShouldBeTrue();
+        await csrfMw.InvokeAsync(loginCtx);
+        csrfPassed.ShouldBeTrue();
+
+        var blockedCtx = new DefaultHttpContext();
+        blockedCtx.Request.Method = HttpMethods.Post;
+        blockedCtx.Request.Scheme = "https";
+        blockedCtx.Request.Path = "/custom-auth/other";
+        blockedCtx.Request.Headers.Origin = "https://gateway.corp.example";
+        blockedCtx.Request.Headers.Cookie = "session=1";
+        blockedCtx.Response.Body = new MemoryStream();
+        await csrfMw.InvokeAsync(blockedCtx);
+        blockedCtx.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+
+        var secMw = new SecurityHeadersMiddleware(_ => Task.CompletedTask, options, env);
+
+        var docCtx = new DefaultHttpContext();
+        docCtx.Request.Path = "/custom-docs";
+        docCtx.SetEndpoint(EndpointWith(PublicDocumentMetadata.Instance));
+        GatewayEndpointMetadata.IsPublicDocument(docCtx).ShouldBeTrue();
+        await secMw.InvokeAsync(docCtx);
+        docCtx.Response.Headers.CacheControl.ToString().ShouldBeEmpty();
+
+        var privateCtx = new DefaultHttpContext();
+        privateCtx.Request.Path = "/custom-docs";
+        await secMw.InvokeAsync(privateCtx);
+        privateCtx.Response.Headers.CacheControl.ToString().ShouldBe("no-store");
+
+        var odataCtx = new DefaultHttpContext();
+        odataCtx.Request.Method = HttpMethods.Get;
+        odataCtx.Request.Path = "/custom-odata/Orders";
+        odataCtx.SetEndpoint(EndpointWith(new IngressTransportMetadata(DataSourceTransportFlags.OData)));
+        await secMw.InvokeAsync(odataCtx);
+        odataCtx.Response.Headers["OData-Version"].ToString().ShouldBe("4.0");
+    }
+
+    [Theory]
+    [InlineData("POST", "/alt-gql", false, true)]
+    [InlineData("PUT", "/alt-gql", false, false)]
+    [InlineData("POST", "/alt-proc/run_report", true, true)]
+    [InlineData("POST", "/alt-proc/openapi.json", true, false)]
+    [InlineData("POST", "/alt-proc/openapi.json/", true, false)]
+    [InlineData("POST", "/alt-proc/run_report/", true, false)]
+    [InlineData("POST", "/alt-proc/..", true, false)]
+    [InlineData("POST", "/alt-proc/.", true, false)]
+    [InlineData("POST", "/alt-proc/a%2Fb", true, false)]
+    [InlineData("DELETE", "/alt-sql/statements/stmt-1", true, true)]
+    [InlineData("DELETE", "/alt-sql/statements/.", true, false)]
+    public async Task ReadOnlyTokenMiddleware_HonorsReadOnlyTokenAccessMetadata(
+        string method, string path, bool strictRawPath, bool expectedAllowed)
+    {
+        var passed = false;
+        var mw = new ReadOnlyTokenMiddleware(_ => { passed = true; return Task.CompletedTask; }, "/graphql", "/mcp");
+        var ctx = new DefaultHttpContext { User = ReadOnlyPrincipal() };
+        ctx.Request.Method = method;
+        ctx.Request.Path = path;
+        ctx.Response.Body = new MemoryStream();
+        var allowedMethod = method == HttpMethods.Delete ? HttpMethods.Delete : HttpMethods.Post;
+        ctx.SetEndpoint(EndpointWith(new ReadOnlyTokenAccessMetadata(allowedMethod, strictRawPath)));
+
+        await mw.InvokeAsync(ctx);
+
+        passed.ShouldBe(expectedAllowed);
+        if (!expectedAllowed)
+        {
+            ctx.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+        }
     }
 }

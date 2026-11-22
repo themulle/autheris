@@ -10,57 +10,68 @@ using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// SEC C-1 Edge Stripping: Strips untrusted client-supplied <c>x-autheris-*</c> headers from untrusted clients
-/// (while allowing explicit inbound client/webhook headers such as <c>X-Autheris-Timestamp</c>,
-/// <c>X-Autheris-Delivery</c>, <c>X-Autheris-Signature-256</c>, and <c>X-Autheris-App</c>),
-/// and strips <c>X-Forwarded-*</c> headers when the connection has no remote IP address. In <c>Direct</c> mode it also
-/// removes every configured ForwardAuth header (identity and secret) so no identity header can reach a direct credential.
+/// Edge Header Stripping: Strips only explicitly listed internal/spoofable <c>X-Autheris-*</c> headers from untrusted
+/// inbound clients, rather than stripping every <c>x-autheris-*</c> prefix blindly. An explicit internal deny-list
+/// prevents spoofing of gateway identity, routing, policy, signature, and diagnostic headers while allowing signed
+/// webhook headers (<c>X-Autheris-Timestamp</c>, <c>X-Autheris-Delivery</c>, <c>X-Autheris-Signature-256</c>),
+/// app-scoped trusted document headers (<c>X-Autheris-App</c>), and future client headers to pass through unchanged.
+/// In <c>Direct</c> mode it also removes every configured ForwardAuth header (identity and secret) so no identity
+/// header can reach a direct credential.
 /// </summary>
 public sealed class EdgeHeaderStrippingMiddleware
 {
-    private static readonly FrozenSet<string> AllowedInboundHeaders = FrozenSet.ToFrozenSet(
+    private static readonly FrozenSet<string> InternalHeadersToStrip = FrozenSet.ToFrozenSet(
     [
-        "X-Autheris-Timestamp",
-        "X-Autheris-Delivery",
-        "X-Autheris-Signature-256",
-        AppScopedTrustedDocumentsOptions.DefaultHeaderName
+        "X-Autheris-Transport",
+        "X-Autheris-Domain",
+        "X-Autheris-Principal",
+        "X-Autheris-Tenant",
+        "X-Autheris-Decision",
+        "X-Autheris-Denial-Reason",
+        "X-Autheris-Rls-Filter",
+        "X-Autheris-Roles",
+        "X-Autheris-Groups",
+        "X-Autheris-Signature",
+        "X-Autheris-Nonce",
+        "X-Autheris-Signature-Version",
+        "X-Autheris-Body-Sha256",
+        "X-Autheris-Event-Id",
+        "X-Autheris-Event-Type",
+        "X-Autheris-Mode",
+        "X-Autheris-Truncated",
+        "X-Autheris-Cache",
+        "X-Autheris-Debug",
+        "X-Autheris-Internal",
+        "X-Autheris-User",
+        "X-Autheris-Scopes",
+        "X-Autheris-Subject",
+        "X-Autheris-Realm"
     ], StringComparer.OrdinalIgnoreCase);
 
     private readonly RequestDelegate _next;
     private readonly string[] _directModeHeaders;
-    private readonly string? _appScopedHeaderName;
 
     public EdgeHeaderStrippingMiddleware(RequestDelegate next, IOptions<GatewayOptions> options)
     {
         _next = next ?? throw new ArgumentNullException(nameof(next));
-        var gatewayOptions = options?.Value;
-        var auth = gatewayOptions?.Authentication ?? new AuthenticationOptions();
+        var auth = options?.Value?.Authentication ?? new AuthenticationOptions();
         _directModeHeaders = auth.EffectiveMode == AuthenticationMode.Direct
             ? [.. auth.ForwardAuth.IdentityHeaderNames.Append(auth.ForwardAuth.SharedSecretHeader).Where(h => !string.IsNullOrWhiteSpace(h)).Distinct(StringComparer.OrdinalIgnoreCase)]
             : [];
-        var appScoped = gatewayOptions?.GraphQL?.AppScopedTrustedDocuments;
-        _appScopedHeaderName = appScoped is { Enabled: true } && !string.IsNullOrWhiteSpace(appScoped.HeaderName)
-            ? appScoped.HeaderName
-            : null;
     }
 
     public Task InvokeAsync(HttpContext context)
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        var headersToRemove = context.Request.Headers.Keys
-            .Where(k => k.StartsWith("x-autheris-", StringComparison.OrdinalIgnoreCase) &&
-                        !AllowedInboundHeaders.Contains(k) &&
-                        (_appScopedHeaderName is null || !string.Equals(k, _appScopedHeaderName, StringComparison.OrdinalIgnoreCase)))
-            .ToList();
-        foreach (var h in headersToRemove)
+        foreach (var header in InternalHeadersToStrip)
         {
-            context.Request.Headers.Remove(h);
+            context.Request.Headers.Remove(header);
         }
 
-        foreach (var h in _directModeHeaders)
+        foreach (var header in _directModeHeaders)
         {
-            if (context.Request.Headers.Remove(h))
+            if (context.Request.Headers.Remove(header))
             {
                 AuthMetrics.IdentityHeadersStripped.Add(1);
             }

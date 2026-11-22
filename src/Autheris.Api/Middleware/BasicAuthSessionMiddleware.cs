@@ -60,7 +60,7 @@ public sealed class BasicAuthSessionMiddleware
         }
 
         if (string.Equals(context.Request.Headers[BasicAuthSession.NoSessionHeader], "1", StringComparison.Ordinal) ||
-            context.Request.Path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase) ||
+            GatewayEndpointMetadata.IsHealthProbe(context) ||
             context.Response.HasStarted)
         {
             return false;

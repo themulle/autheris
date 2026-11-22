@@ -242,10 +242,10 @@ public static partial class ODataEndpoints
         }
 
         // SEC M-03: handlers perform their own (Dev/authenticated) check
-        app.MapGet("/ui/swagger", ServeSwaggerUi).AllowAnonymous().WithAuditExemption("Developer swagger documentation");
-        app.MapGet("/odata/v4/$swagger", ServeSwaggerUi).AllowAnonymous().WithAuditExemption("Developer swagger documentation");
-        app.MapGet("/docs", ServeSwaggerUi).AllowAnonymous().WithAuditExemption("Developer swagger documentation");
-        app.MapGet("/swagger", ServeSwaggerUi).AllowAnonymous().WithAuditExemption("Developer swagger documentation");
+        app.MapGet("/ui/swagger", ServeSwaggerUi).AllowAnonymous().WithPublicDocument().WithAuditExemption("Developer swagger documentation");
+        app.MapGet("/odata/v4/$swagger", ServeSwaggerUi).AllowAnonymous().WithPublicDocument().WithAuditExemption("Developer swagger documentation");
+        app.MapGet("/docs", ServeSwaggerUi).AllowAnonymous().WithPublicDocument().WithAuditExemption("Developer swagger documentation");
+        app.MapGet("/swagger", ServeSwaggerUi).AllowAnonymous().WithPublicDocument().WithAuditExemption("Developer swagger documentation");
 
         // Static, public library files (allowlist only, no path resolution from client)
         app.MapGet("/ui/swagger/assets/{file}", (string file) =>

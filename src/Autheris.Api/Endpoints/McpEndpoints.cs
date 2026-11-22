@@ -8,6 +8,7 @@ using System.Security.Claims;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
+using Autheris.Api.Security;
 using Autheris.Application.Identity.Attributes;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Domain.Audit;
@@ -58,6 +59,7 @@ public static class McpEndpoints
         // Streamable HTTP on the official MCP SDK (GatewayMcpServer); stateless, so there are no session endpoints.
         var endpoint = app.MapMcp(mcpBasePath)
             .WithIngressTransport(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Mcp) // Issue #447
+            .WithReadOnlyTokenAccess(HttpMethods.Post)
             .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         // SEC M-09: hard body limit for JSON-RPC messages and MCP >= 2025-06-18 batch rejection.

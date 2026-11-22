@@ -153,7 +153,7 @@ public static class GatewayApplicationBuilderExtensions
         var effectiveOptions = app.Services.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>()?.Value ?? gatewayOptions;
         LogReadPathInventory(app.Services.GetRequiredService<ILoggerFactory>().CreateLogger("Autheris.ReadPaths"), effectiveOptions);
 
-        app.MapMetrics().RequireAuthorization(GatewayPolicies.MetricsScrape).WithAuditExemption("Prometheus scrape endpoint");
+        app.MapMetrics().RequireAuthorization(GatewayPolicies.MetricsScrape).WithMetricsEndpoint().WithAuditExemption("Prometheus scrape endpoint");
 
         // 1. Health & Readiness Probes
         app.MapHealthEndpoints(gatewayOptions, app.Environment);
@@ -179,6 +179,7 @@ public static class GatewayApplicationBuilderExtensions
         var gqlEndpoint = app.MapGraphQL(endpoint)
             .WithOptions((NitroAppOptions nitro) => nitro.Enable = false)
             .WithIngressTransport(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.GraphQL) // Issue #447
+            .WithReadOnlyTokenAccess(HttpMethods.Post)
             .WithAudit(AuditLevel.Delegated, AuditEventTypes.TableQuery);
         // SEC H-02: Only the Development-only anonymous mode allows anonymous /graphql.
         // (SEC M-03: with the authenticated-user FallbackPolicy the anonymous mode must opt out explicitly.)

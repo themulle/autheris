@@ -252,6 +252,29 @@ public sealed partial class AiDataGuardrailService
         return false;
     }
 
+    internal static async Task<IReadOnlyList<TableIdentifier>?> ParseTablesFromToolAsync(
+        McpToolDefinition tool,
+        string? argumentsJson = null,
+        TrinoSqlEngine.ISqlEngine? sqlEngine = null,
+        string? defaultDataSourceName = null,
+        CancellationToken ct = default)
+    {
+        if (string.Equals(tool.Name, McpDatasetTools.QuerySql, StringComparison.OrdinalIgnoreCase))
+        {
+            var (tables, _) = await McpDataTargetResolver.TryResolveSqlTablesAsync(
+                McpDatasetTools.TryGetStringArgument(argumentsJson, "query", out var sql) ? sql : null,
+                sqlEngine,
+                defaultDataSourceName,
+                ct).ConfigureAwait(false);
+            return tables;
+        }
+        if (string.Equals(tool.Name, McpDatasetTools.InvokeApi, StringComparison.OrdinalIgnoreCase))
+        {
+            return await McpDataTargetResolver.ResolveInvokeApiTablesAsync(argumentsJson, sqlEngine, defaultDataSourceName, ct).ConfigureAwait(false);
+        }
+        return ParseTablesFromTool(tool, argumentsJson, sqlEngine, defaultDataSourceName);
+    }
+
     internal static IReadOnlyList<TableIdentifier>? ParseTablesFromTool(
         McpToolDefinition tool,
         string? argumentsJson = null,
