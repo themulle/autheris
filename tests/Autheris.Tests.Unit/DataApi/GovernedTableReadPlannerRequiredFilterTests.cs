@@ -56,17 +56,21 @@ public sealed class GovernedTableReadPlannerRequiredFilterTests
         PrimaryKeyColumns = ["id"]
     };
 
-    private static TableAccessDecision Decision(IRowPolicy? rowPolicy = null) => TableAccessDecision.Allowed(
-        Customers,
-        new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
-        {
-            ["id"] = ColumnAccessLevel.Clear,
-            ["region"] = ColumnAccessLevel.Clear,
-            ["tenant_id"] = ColumnAccessLevel.Clear,
-            ["name"] = ColumnAccessLevel.Clear,
-            ["status"] = ColumnAccessLevel.Clear
-        },
-        hasUnconstrainedColumnAllow: true) with { RowPolicy = rowPolicy };
+    private static TableAccessDecision Decision(IRowPolicy? rowPolicy = null)
+    {
+        var decision = TableAccessDecision.Allowed(
+            Customers,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["id"] = ColumnAccessLevel.Clear,
+                ["region"] = ColumnAccessLevel.Clear,
+                ["tenant_id"] = ColumnAccessLevel.Clear,
+                ["name"] = ColumnAccessLevel.Clear,
+                ["status"] = ColumnAccessLevel.Clear
+            },
+            hasUnconstrainedColumnAllow: true);
+        return rowPolicy is null ? decision : decision.WithAdditionalRowPolicy(rowPolicy);
+    }
 
     [Fact]
     [Trait("Category", "Security")]
