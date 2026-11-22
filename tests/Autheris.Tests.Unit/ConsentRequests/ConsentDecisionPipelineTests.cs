@@ -397,4 +397,103 @@ public sealed class ConsentDecisionPipelineTests
             req.Id, ConsentDecisionKind.Reject, ConsentDecisionChannel.External, null, Reason: "Policy denied", ExternalAttribution: extAttr with { Decision = "REJECTED" }));
         rejected.Request.Status.ShouldBe("REJECTED");
     }
+
+    [Fact]
+    public async Task DecideAsync_FutureRequestedValidFrom_IsPreservedOnApprovedConsent()
+    {
+        var (pipeline, approvals, _, _, _, _, _, _) = BuildSut(tableFourEyes: false);
+        var futureStart = FixedNow.AddDays(3);
+        var req = new ConsentRequest
+        {
+            Id = Guid.NewGuid(),
+            TableId = Guid.NewGuid(),
+            TableIdentifier = new TableIdentifier("sales", "dbo", "orders"),
+            RequesterSid = RequesterSid,
+            RequestedGranteeType = GranteeType.User,
+            RequestedGranteeRef = RequesterSid.Value,
+            BusinessJustification = "Scheduled future start",
+            RequestedValidFrom = futureStart,
+            RequestedValidTo = FixedNow.AddDays(14),
+            Status = "PENDING",
+            Version = 1,
+            TenantId = TenantA,
+            WorkflowMode = ConsentWorkflowMode.Internal
+        };
+        approvals.GetConsentRequestAsync(req.Id, Arg.Any<CancellationToken>()).Returns(req);
+        Consent? capturedConsent = null;
+        approvals.ExecuteAtomicApprovalWithConsentAsync(
+                req.Id, Arg.Any<ApprovalStep>(), Arg.Do<Consent>(c => capturedConsent = c),
+                Arg.Any<IReadOnlyList<ConsentRowFilter>>(), Arg.Any<IReadOnlyList<ConsentColumnRule>>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.ArgAt<Consent>(2));
+
+        var result = await pipeline.DecideAsync(new ConsentDecisionCommand(
+            req.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, Principal(Approver1Sid)));
+
+        capturedConsent.ShouldNotBeNull();
+        capturedConsent!.ValidFrom.ShouldBe(futureStart);
+        result.ActivatedConsent!.ValidFrom.ShouldBe(futureStart);
+        capturedConsent.IsActive(FixedNow.AddDays(2)).ShouldBeFalse();
+        capturedConsent.IsActive(futureStart).ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task DecideAsync_PastOrNullRequestedValidFrom_FallsBackToNow()
+    {
+        var (pipeline, approvals, _, _, _, _, _, _) = BuildSut(tableFourEyes: false);
+        var req = new ConsentRequest
+        {
+            Id = Guid.NewGuid(),
+            TableId = Guid.NewGuid(),
+            TableIdentifier = new TableIdentifier("sales", "dbo", "orders"),
+            RequesterSid = RequesterSid,
+            RequestedGranteeType = GranteeType.User,
+            RequestedGranteeRef = RequesterSid.Value,
+            BusinessJustification = "Past start falls back to approval time",
+            RequestedValidFrom = FixedNow.AddHours(-2),
+            RequestedValidTo = FixedNow.AddDays(14),
+            Status = "PENDING",
+            Version = 1,
+            TenantId = TenantA,
+            WorkflowMode = ConsentWorkflowMode.Internal
+        };
+        approvals.GetConsentRequestAsync(req.Id, Arg.Any<CancellationToken>()).Returns(req);
+        Consent? capturedConsent = null;
+        approvals.ExecuteAtomicApprovalWithConsentAsync(
+                req.Id, Arg.Any<ApprovalStep>(), Arg.Do<Consent>(c => capturedConsent = c),
+                Arg.Any<IReadOnlyList<ConsentRowFilter>>(), Arg.Any<IReadOnlyList<ConsentColumnRule>>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.ArgAt<Consent>(2));
+
+        await pipeline.DecideAsync(new ConsentDecisionCommand(
+            req.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, Principal(Approver1Sid)));
+
+        capturedConsent!.ValidFrom.ShouldBe(FixedNow);
+    }
+
+    [Fact]
+    public async Task DecideAsync_ShortenedApprovedValidToBeforeFutureRequestedValidFrom_IsRejected()
+    {
+        var (pipeline, approvals, _, _, _, _, _, _) = BuildSut(tableFourEyes: false);
+        var req = new ConsentRequest
+        {
+            Id = Guid.NewGuid(),
+            TableId = Guid.NewGuid(),
+            TableIdentifier = new TableIdentifier("sales", "dbo", "orders"),
+            RequesterSid = RequesterSid,
+            RequestedGranteeType = GranteeType.User,
+            RequestedGranteeRef = RequesterSid.Value,
+            BusinessJustification = "Future window check",
+            RequestedValidFrom = FixedNow.AddDays(5),
+            RequestedValidTo = FixedNow.AddDays(14),
+            Status = "PENDING",
+            Version = 1,
+            TenantId = TenantA,
+            WorkflowMode = ConsentWorkflowMode.Internal
+        };
+        approvals.GetConsentRequestAsync(req.Id, Arg.Any<CancellationToken>()).Returns(req);
+
+        var ex = await Should.ThrowAsync<ConsentDecisionException>(() => pipeline.DecideAsync(new ConsentDecisionCommand(
+            req.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, Principal(Approver1Sid),
+            ApprovedValidTo: FixedNow.AddDays(4))));
+        ex.StatusCode.ShouldBe(400);
+    }
 }

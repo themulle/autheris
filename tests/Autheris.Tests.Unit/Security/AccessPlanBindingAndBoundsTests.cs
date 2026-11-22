@@ -69,6 +69,7 @@ public sealed class AccessPlanBindingAndBoundsTests
             service.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, token), AdminB, "tenant-a"));
 
         await _consentRepo.DidNotReceiveWithAnyArgs().CreateConsentAsync(default!, default);
+        await _consentRepo.DidNotReceiveWithAnyArgs().ReplaceConsentsAsync(default!, default!, default, default!, default!, default, default);
 
         // The legitimate admin can still apply: the failed attempt did not consume the token.
         var ok = await service.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, token), AdminA, "tenant-a");
@@ -86,6 +87,7 @@ public sealed class AccessPlanBindingAndBoundsTests
             service.ApplyAccessAsync(new AdminApplyAccessRequest(plan.PlanId, token), AdminA, "tenant-b"));
 
         await _consentRepo.DidNotReceiveWithAnyArgs().CreateConsentAsync(default!, default);
+        await _consentRepo.DidNotReceiveWithAnyArgs().ReplaceConsentsAsync(default!, default!, default, default!, default!, default, default);
     }
 
     [Fact]

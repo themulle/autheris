@@ -7,7 +7,9 @@ using Autheris.Application.Catalog.Discovery;
 using Autheris.Application.Catalog.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
+using Autheris.Infrastructure.RateLimiting;
 using Autheris.Tests.Common;
+using Microsoft.Extensions.Time.Testing;
 using Shouldly;
 using Xunit;
 
@@ -109,5 +111,55 @@ public sealed class DiscoveryCallerGateTests
         }).Failed.ShouldBeTrue();
 
         validator.Validate(null, new CatalogDiscoveryOptions()).Succeeded.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task EnsureAllowed_Sub120Rpm_RefillsAtConfiguredRate_For30And90Rpm()
+    {
+        var clock = new FakeTimeProvider(new DateTimeOffset(2026, 11, 1, 12, 0, 0, TimeSpan.Zero));
+        var limiter = new InMemoryRateLimiterService(timeProvider: clock);
+        var gOpts = new GatewayOptions { Tenancy = TenancyShape.Multi.Options() };
+
+        // 30 RPM => 0.5 tokens/sec (1 token every 2 seconds).
+        var opts30 = new CatalogDiscoveryOptions { Discovery = new CatalogDiscoverySettings { RequestsPerMinute = 30 } };
+        var caller30 = DiscoveryTestBuilder.Caller(DiscoveryTestBuilder.User("S-RL-30", "tenant-a"));
+        for (int i = 0; i < 30; i++)
+        {
+            await DiscoveryCallerGate.EnsureAllowedAsync(caller30, opts30, gOpts, limiter);
+        }
+
+        await Should.ThrowAsync<DiscoveryStatusException>(async () =>
+            await DiscoveryCallerGate.EnsureAllowedAsync(caller30, opts30, gOpts, limiter));
+
+        // After 1 second only 0.5 tokens accrued -> still rate limited.
+        clock.Advance(TimeSpan.FromSeconds(1));
+        await Should.ThrowAsync<DiscoveryStatusException>(async () =>
+            await DiscoveryCallerGate.EnsureAllowedAsync(caller30, opts30, gOpts, limiter));
+
+        // After 1 more second (2s total) -> 1.0 token accrued -> 1 allowed, next rejected.
+        clock.Advance(TimeSpan.FromSeconds(1));
+        await DiscoveryCallerGate.EnsureAllowedAsync(caller30, opts30, gOpts, limiter);
+        await Should.ThrowAsync<DiscoveryStatusException>(async () =>
+            await DiscoveryCallerGate.EnsureAllowedAsync(caller30, opts30, gOpts, limiter));
+
+        // 90 RPM => 1.5 tokens/sec (30 tokens over 20 seconds, not 20).
+        var opts90 = new CatalogDiscoveryOptions { Discovery = new CatalogDiscoverySettings { RequestsPerMinute = 90 } };
+        var caller90 = DiscoveryTestBuilder.Caller(DiscoveryTestBuilder.User("S-RL-90", "tenant-a"));
+        for (int i = 0; i < 90; i++)
+        {
+            await DiscoveryCallerGate.EnsureAllowedAsync(caller90, opts90, gOpts, limiter);
+        }
+
+        await Should.ThrowAsync<DiscoveryStatusException>(async () =>
+            await DiscoveryCallerGate.EnsureAllowedAsync(caller90, opts90, gOpts, limiter));
+
+        clock.Advance(TimeSpan.FromSeconds(20));
+        for (int i = 0; i < 30; i++)
+        {
+            await DiscoveryCallerGate.EnsureAllowedAsync(caller90, opts90, gOpts, limiter);
+        }
+
+        await Should.ThrowAsync<DiscoveryStatusException>(async () =>
+            await DiscoveryCallerGate.EnsureAllowedAsync(caller90, opts90, gOpts, limiter));
     }
 }

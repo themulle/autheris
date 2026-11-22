@@ -44,7 +44,15 @@ public sealed class AuthzMigrationTests
         tables.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(table);
         var created = new List<Consent>();
         var consents = Substitute.For<IConsentRepository>();
-        consents.CreateConsentAsync(Arg.Do<Consent>(c => created.Add(c)), Arg.Any<CancellationToken>()).Returns(ci => Task.FromResult(ci.Arg<Consent>()));
+        consents.ReplaceConsentsAsync(
+                Arg.Any<IReadOnlyList<Guid>>(),
+                Arg.Do<IReadOnlyList<Consent>>(cs => created.AddRange(cs)),
+                Arg.Any<Sid>(),
+                Arg.Any<string>(),
+                Arg.Any<Autheris.Domain.Security.ConsentRevocationAuthority>(),
+                Arg.Any<IReadOnlyList<AuditLogEntry>?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
         var secrets = new InMemoryTotpSecretStore();
         var totp = new TotpVerificationService();
         var service = new AccessPlanningService(

@@ -42,7 +42,15 @@ public sealed class AccessPlanApplyGrantTests
     {
         _service = new AccessPlanningService(
             global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), _tableRepo, _consents, _totp, _secrets);
-        _consents.CreateConsentAsync(Arg.Do<Consent>(c => _created.Add(c)), Arg.Any<CancellationToken>()).Returns(ci => Task.FromResult(ci.Arg<Consent>()));
+        _consents.ReplaceConsentsAsync(
+                Arg.Any<IReadOnlyList<Guid>>(),
+                Arg.Do<IReadOnlyList<Consent>>(cs => _created.AddRange(cs)),
+                Arg.Any<Sid>(),
+                Arg.Any<string>(),
+                Arg.Any<Autheris.Domain.Security.ConsentRevocationAuthority>(),
+                Arg.Any<IReadOnlyList<Autheris.Domain.Model.AuditLogEntry>?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(Task.CompletedTask);
         UseTable(sensitive: false);
     }
 

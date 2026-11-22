@@ -213,18 +213,20 @@ public sealed class AdminMcpTwoPhaseTests
         applyResult.Success.ShouldBeTrue();
         applyResult.AppliedGrantCount.ShouldBeGreaterThan(0);
 
-        // grant record verification
-        await _consentRepo.Received(1).CreateConsentAsync(
-            Arg.Is<Consent>(c => c.GranteeSid!.Value.Value == "analyst_bob" && c.Effect == ConsentEffect.Allow && c.ValidTo > c.ValidFrom),
-            Arg.Any<CancellationToken>());
-
-        // WORM Audit Entry verification
-        await _auditRepo.Received(1).RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(entry =>
-                entry.EventType == "ADMIN_APPLY_ACCESS" &&
-                entry.TargetTable == DatasetId &&
-                entry.ActorSid.Value == AdminSid &&
-                entry.DetailsJson.Contains(planResult.PlanId)),
+        // grant record and transactional WORM audit verification
+        await _consentRepo.Received(1).ReplaceConsentsAsync(
+            Arg.Is<IReadOnlyList<Guid>>(rev => rev.Count == 0),
+            Arg.Is<IReadOnlyList<Consent>>(cs => cs.Any(c => c.GranteeSid!.Value.Value == "analyst_bob" && c.Effect == ConsentEffect.Allow && c.ValidTo > c.ValidFrom)),
+            Arg.Any<Sid>(),
+            Arg.Any<string>(),
+            Arg.Any<Autheris.Domain.Security.ConsentRevocationAuthority>(),
+            Arg.Is<IReadOnlyList<AuditLogEntry>?>(entries =>
+                entries != null &&
+                entries.Any(entry =>
+                    entry.EventType == "ADMIN_APPLY_ACCESS" &&
+                    entry.TargetTable == DatasetId &&
+                    entry.ActorSid.Value == AdminSid &&
+                    entry.DetailsJson.Contains(planResult.PlanId))),
             Arg.Any<CancellationToken>());
 
         // Single-use guarantee: Replaying the same confirmation token must fail!

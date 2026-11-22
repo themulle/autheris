@@ -139,13 +139,14 @@ public class RealtimeStreamingSubscriptionTests : IClassFixture<RealtimeStreamin
 
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
 
-        // Start reading in background task
+        // Register subscriber before publishing so live delivery does not race background scheduling.
         var receivedEvents = new List<CdcEvent>();
+        await using var enumerator = channel.SubscribeAsync("cdc_all", cts.Token).GetAsyncEnumerator(cts.Token);
         var readTask = Task.Run(async () =>
         {
-            await foreach (var evt in channel.SubscribeAsync("cdc_all", cts.Token))
+            while (await enumerator.MoveNextAsync())
             {
-                // The channel replays recent history of the shared host (for example the Debezium event of the ingest test): only this test's event counts.
+                var evt = enumerator.Current;
                 if (evt.EventId != "test-stream-1")
                 {
                     continue;
@@ -159,7 +160,7 @@ public class RealtimeStreamingSubscriptionTests : IClassFixture<RealtimeStreamin
         // Publish event
         await channel.PublishAsync(cdcEvent, CancellationToken.None);
 
-        await Task.WhenAny(readTask, Task.Delay(4000));
+        await readTask.WaitAsync(TimeSpan.FromSeconds(4));
 
         receivedEvents.Count.ShouldBeGreaterThanOrEqualTo(1);
         receivedEvents[0].EventId.ShouldBe("test-stream-1");

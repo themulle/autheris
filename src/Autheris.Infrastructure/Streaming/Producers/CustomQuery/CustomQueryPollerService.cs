@@ -432,7 +432,13 @@ public class CustomQueryPollerService : ClusterPartitionedService
     private static string FormatDimensionValue(object val, WatermarkDimensionType type)
     {
         if (val is DateTimeOffset dto) return dto.ToString("O", CultureInfo.InvariantCulture);
-        if (val is DateTime dt) return new DateTimeOffset(dt).ToString("O", CultureInfo.InvariantCulture);
+        if (val is DateTime dt)
+        {
+            var utc = dt.Kind == DateTimeKind.Unspecified
+                ? DateTime.SpecifyKind(dt, DateTimeKind.Utc)
+                : dt.ToUniversalTime();
+            return new DateTimeOffset(utc).ToString("O", CultureInfo.InvariantCulture);
+        }
         return val.ToString() ?? string.Empty;
     }
 
