@@ -86,4 +86,28 @@ public static class TenantClaimReader
 
         return TenantId.TryParse(seen, out var tenant) ? ClaimTenant.Valid(tenant) : ClaimTenant.Invalid;
     }
+
+    /// <summary>Reads Entra directory id (<c>tid</c>/<c>tenantid</c>) fail-closed, independent of business <c>tenant_id</c>.</summary>
+    public static string? ReadEntraDirectoryId(ClaimsPrincipal? principal) =>
+        TryReadEntraDirectoryId(principal, out var directoryId) ? directoryId : null;
+
+    public static bool TryReadEntraDirectoryId(ClaimsPrincipal? principal, out string? directoryId) =>
+        TryReadEntraDirectoryId(principal?.Identities.SelectMany(static i => i.Claims), out directoryId);
+
+    public static bool TryReadEntraDirectoryId(IEnumerable<Claim>? claims, out string? directoryId)
+    {
+        directoryId = null;
+        if (claims is null) return true;
+        string? seen = null;
+        foreach (var claim in claims)
+        {
+            if (claim.Type is not ("tid" or "http://schemas.microsoft.com/identity/claims/tenantid")) continue;
+            if (string.IsNullOrWhiteSpace(claim.Value)) return false;
+            var value = claim.Value.Trim();
+            if (seen is null) seen = value;
+            else if (!string.Equals(seen, value, StringComparison.OrdinalIgnoreCase)) return false;
+        }
+        directoryId = seen;
+        return true;
+    }
 }

@@ -94,9 +94,8 @@ public sealed class GraphRoleProvider : IRoleProvider
             }
 
             var tokenIssuer = FirstClaimValue(identity.RawClaims, "iss");
-            var tokenTid = FirstClaimValue(identity.RawClaims, "tid")
-                ?? FirstClaimValue(identity.RawClaims, "http://schemas.microsoft.com/identity/claims/tenantid");
-            if (!SidFormat.HasTenantBoundEntraIssuers(realm, tokenIssuer, tokenTid))
+            if (!Autheris.Domain.Tenancy.TenantClaimReader.TryReadEntraDirectoryId(identity.RawClaims, out var tokenTid)
+                || !SidFormat.HasTenantBoundEntraIssuers(realm, tokenIssuer, tokenTid))
                 return ProviderRoleResult.FailedResult;
 
             // Accepted: canonical SIDs and object-id GUIDs converted to cloud SIDs for tenant-bound Entra realms.

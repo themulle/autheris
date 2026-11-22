@@ -1,5 +1,6 @@
 using System.ComponentModel.DataAnnotations;
 using System.Security.Claims;
+using Autheris.Application.Catalog.External;
 using Autheris.Application.Identity;
 using Autheris.Application.Identity.Caching;
 using Autheris.Application.Identity.Providers;
@@ -10,6 +11,7 @@ using Autheris.Domain.Governance;
 using Autheris.Domain.Identity;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Options;
+using Autheris.Domain.Tenancy;
 using Autheris.Tests.Unit.Security;
 using Microsoft.Extensions.Options;
 using Shouldly;
@@ -114,6 +116,14 @@ public sealed class RealmBoundIdentifierTests
         spEntraA.GetAllUserSids().Overlaps(spEntraB.GetAllUserSids()).ShouldBeFalse();
         subjectResolver.ResolveSubject(spEntraA).Id.ShouldNotBe(subjectResolver.ResolveSubject(spEntraB).Id);
         subjectResolver.ResolveSubject(spEntraA).Id.ShouldNotBe(subjectResolver.ResolveSubject(spOidcA).Id);
+
+        // App-only identity without oid/sub falls back to ClaimsIdentity client_id overload without extra principal allocation
+        var appOnlyIdentity = new ClaimsIdentity([new Claim("idtyp", "app"), new Claim("appid", SharedAppId)], "Bearer");
+        AppOnlyPrincipal.GetClientId(appOnlyIdentity).ShouldBe(SharedAppId);
+        var spClientOnlyA = await pipeline.ProcessAsync(
+            new ClaimsPrincipal(new ClaimsIdentity([new Claim("iss", EntraIssuerA), new Claim("tid", TenantAId), new Claim("idtyp", "app"), new Claim("appid", SharedAppId)], "Bearer")),
+            "Bearer", null, CancellationToken.None);
+        spClientOnlyA.GetUserSid().ShouldBe(new Sid($"entra-corp-a|{SharedAppId}"));
     }
 
     [Fact]
@@ -360,6 +370,22 @@ public sealed class RealmBoundIdentifierTests
             tenantBoundExternalId, tenant, "Bearer", CancellationToken.None);
         okExt.Status.ShouldBe(GroupResolutionStatus.Complete);
         okExt.GroupSids.Select(s => s.Value).ShouldBe([SharedCloudGroupSid]);
+
+        // Conflicting Entra tid claims fail closed, while valid tid alongside a business tenant_id succeeds
+        var withBusinessTenant = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("iss", EntraIssuerA), new Claim("tenant_id", "corp"), new Claim("tid", TenantAId), new Claim("oid", "user-1"), new Claim("groups", SharedOid)], "Bearer"));
+        TenantClaimReader.ReadEntraDirectoryId(withBusinessTenant).ShouldBe(TenantAId);
+        var okWithBusinessTenant = await resolver.ResolveAsync(withBusinessTenant, tenantBoundEntra, tenant, "Bearer", CancellationToken.None);
+        okWithBusinessTenant.Status.ShouldBe(GroupResolutionStatus.Complete);
+        okWithBusinessTenant.GroupSids.Select(s => s.Value).ShouldBe([SharedCloudGroupSid]);
+
+        var conflictingTid = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("iss", EntraIssuerA), new Claim("tid", TenantAId), new Claim("http://schemas.microsoft.com/identity/claims/tenantid", TenantBId), new Claim("oid", "user-1"), new Claim("groups", SharedOid)], "Bearer"));
+        TenantClaimReader.ReadEntraDirectoryId(conflictingTid).ShouldBeNull();
+        TenantClaimReader.TryReadEntraDirectoryId(conflictingTid, out _).ShouldBeFalse();
+        var degradedConflictingTid = await resolver.ResolveAsync(conflictingTid, tenantBoundEntra, tenant, "Bearer", CancellationToken.None);
+        degradedConflictingTid.Status.ShouldBe(GroupResolutionStatus.Degraded);
+        degradedConflictingTid.GroupSids.ShouldBeEmpty();
 
         // Pathless Entra / CIAM authorities are never tenant-bound
         foreach (var pathlessIssuer in new[]

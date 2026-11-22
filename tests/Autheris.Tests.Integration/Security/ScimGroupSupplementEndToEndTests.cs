@@ -512,6 +512,7 @@ public sealed class ScimGroupSupplementEndToEndTests : IClassFixture<ScimGroupSu
         }
 
         await store.UpsertRealmSyncStateAsync(tenant, RealmId, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
+        (await ownership.IsAuthorizedApproverForTableAsync(OwnerTable, new Sid(OwnerGroupSid))).ShouldBeTrue();
         (await ownership.IsAuthorizedApproverForTableAsync(OwnerTable, new Sid(mallorySid))).ShouldBeFalse();
 
         var createdReq = await repo.CreateConsentRequestAsync(new ConsentRequest
@@ -542,7 +543,9 @@ public sealed class ScimGroupSupplementEndToEndTests : IClassFixture<ScimGroupSu
 
         var decisionEx = await Should.ThrowAsync<ConsentDecisionException>(() => decisionPipeline.DecideAsync(
             new ConsentDecisionCommand(createdReq.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, malloryApprover)));
-        decisionEx.ErrorCode.ShouldBe(ConsentDecisionErrorCodes.DecisionNotPermitted);
+        decisionEx.StatusCode.ShouldBe(403);
+        decisionEx.ErrorCode.ShouldBe("FORBIDDEN");
+        decisionEx.Message.ShouldContain("neither a data owner", Case.Insensitive);
     }
 
     internal static async Task AssertRecursiveCteMatchesAsync(GovernanceTestStore store)

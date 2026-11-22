@@ -238,13 +238,12 @@ public sealed class GroupSidResolver : IGroupSidResolver
     private async ValueTask<Outcome> ResolveEntraAsync(ClaimsPrincipal principal, IdentityRealm realm, TenantId tenant, CancellationToken ct)
     {
         var tokenIssuer = principal.FindFirst("iss")?.Value;
-        var tokenTid = principal.FindFirst("tid")?.Value
-            ?? principal.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
-        var allowCloudSids = SidFormat.HasTenantBoundEntraIssuers(realm, tokenIssuer, tokenTid);
+        var validTid = Autheris.Domain.Tenancy.TenantClaimReader.TryReadEntraDirectoryId(principal, out var tokenTid);
+        var allowCloudSids = validTid && SidFormat.HasTenantBoundEntraIssuers(realm, tokenIssuer, tokenTid);
         var allowAdSids = SidFormat.UsesWorkforceAdSids(realm.Kind);
 
         var sids = new HashSet<Sid>();
-        var degraded = false;
+        var degraded = !validTid;
 
         if (HasGroupOverage(principal))
         {
@@ -313,7 +312,8 @@ public sealed class GroupSidResolver : IGroupSidResolver
                     rejected++;
                 }
             }
-            else if (value is not null && Guid.TryParseExact(value, "D", out var objectId)
+            else if (allowCloudSids
+                && value is not null && Guid.TryParseExact(value, "D", out var objectId)
                 && SidFormat.TryFromEntraObjectId(objectId, realm, tokenIssuer, out var cloudSid, tokenTid))
             {
                 if (!sids.Add(cloudSid))
@@ -473,16 +473,15 @@ public sealed class GroupSidResolver : IGroupSidResolver
         }
 
         var tokenIssuer = principal.FindFirst("iss")?.Value;
-        var tokenTid = principal.FindFirst("tid")?.Value
-            ?? principal.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
+        var validTid = Autheris.Domain.Tenancy.TenantClaimReader.TryReadEntraDirectoryId(principal, out var tokenTid);
         var resolution = await _roleResolver.ResolveAsync(identity, realm, ct).ConfigureAwait(false);
         var sids = new HashSet<Sid>();
-        var degraded = resolution.IsDegraded;
+        var degraded = resolution.IsDegraded || !validTid;
         var rejected = 0;
         foreach (var group in resolution.Groups)
         {
             if (SidFormat.IsGroupSid(group)
-                && (!SidFormat.IsEntraCloudSid(group) || SidFormat.HasTenantBoundEntraIssuers(realm, tokenIssuer, tokenTid))
+                && (!SidFormat.IsEntraCloudSid(group) || (validTid && SidFormat.HasTenantBoundEntraIssuers(realm, tokenIssuer, tokenTid)))
                 && (!SidFormat.IsRealmGroupKey(group) || SidFormat.MatchesRealmGroupKey(group, realm.Id)))
             {
                 sids.Add(new Sid(group));

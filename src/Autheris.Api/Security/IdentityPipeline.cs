@@ -577,7 +577,7 @@ public sealed class IdentityPipeline : IIdentityPipeline
         }
 
         var userKey = RealmUserKeyResolver.Resolve(identity, realm)
-            ?? (isServicePrincipal ? Autheris.Application.Catalog.External.AppOnlyPrincipal.GetClientId(new ClaimsPrincipal(identity)) : null);
+            ?? (isServicePrincipal ? Autheris.Application.Catalog.External.AppOnlyPrincipal.GetClientId(identity) : null);
         if (string.IsNullOrWhiteSpace(userKey)) return false;
 
         ReplacePrimarySidClaim(identity, $"{realmId}|{userKey}");
