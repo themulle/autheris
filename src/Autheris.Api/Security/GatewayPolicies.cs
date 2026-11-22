@@ -2,6 +2,7 @@ namespace Autheris.Api.Security;
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics.CodeAnalysis;
 using System.Linq;
 using System.Security;
 using System.Security.Claims;
@@ -379,6 +380,32 @@ public static class GatewayPolicies
             .RequireAssertion(ctx => HasSecurityRole(ctx, gatewayRoles, fallbackRoleNames)));
     }
 
+    private static bool TryGetSecurityContext(
+        HttpContext httpContext,
+        [NotNullWhen(true)] out SecurityPrincipalContext? security)
+    {
+        try
+        {
+            security = EndpointSecurity.GetSecurityContext(httpContext);
+            return true;
+        }
+        catch (UnauthorizedAccessException)
+        {
+            security = null;
+            return false;
+        }
+        catch (SecurityException)
+        {
+            security = null;
+            return false;
+        }
+        catch (ArgumentException)
+        {
+            security = null;
+            return false;
+        }
+    }
+
     internal static bool HasSecurityRole(
         AuthorizationHandlerContext ctx,
         GatewayRole[] gatewayRoles,
@@ -386,16 +413,7 @@ public static class GatewayPolicies
     {
         if (ctx.Resource is HttpContext httpContext)
         {
-            SecurityPrincipalContext security;
-            try
-            {
-                security = EndpointSecurity.GetSecurityContext(httpContext);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return false;
-            }
-            catch (SecurityException)
+            if (!TryGetSecurityContext(httpContext, out var security))
             {
                 return false;
             }
@@ -415,16 +433,7 @@ public static class GatewayPolicies
 
         if (ctx.Resource is HttpContext httpContext)
         {
-            SecurityPrincipalContext security;
-            try
-            {
-                security = EndpointSecurity.GetSecurityContext(httpContext);
-            }
-            catch (UnauthorizedAccessException)
-            {
-                return false;
-            }
-            catch (SecurityException)
+            if (!TryGetSecurityContext(httpContext, out var security))
             {
                 return false;
             }

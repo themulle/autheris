@@ -212,12 +212,12 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
         AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/{{name}}", GatewayPolicies.AuthenticatedCaller);
     }
 
-    private static IAuthorizationService CreateAuthorizationService()
+    private static ServiceProvider BuildAuthorizationProvider()
     {
         var services = new ServiceCollection();
         services.AddLogging();
         services.AddAuthorization(GatewayPolicies.Configure);
-        return services.BuildServiceProvider().GetRequiredService<IAuthorizationService>();
+        return services.BuildServiceProvider();
     }
 
     private static ClaimsPrincipal Principal(
@@ -268,7 +268,8 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
         string[] allowedRoles,
         string deniedRole)
     {
-        var authz = CreateAuthorizationService();
+        await using var provider = BuildAuthorizationProvider();
+        var authz = provider.GetRequiredService<IAuthorizationService>();
         GatewayPolicies.TryGetPolicyRoles(policyName, out var registeredRoles).ShouldBeTrue();
         registeredRoles.ShouldBe(allowedRoles);
 
@@ -300,7 +301,8 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
     [Fact]
     public async Task HasSecurityRole_ReadsPreResolvedSecurityPrincipalContext_FromHttpContext()
     {
-        var authz = CreateAuthorizationService();
+        await using var provider = BuildAuthorizationProvider();
+        var authz = provider.GetRequiredService<IAuthorizationService>();
         var claimsOnlyConsumer = Principal(roles: "Consumer");
         var httpContext = new DefaultHttpContext { User = claimsOnlyConsumer };
         httpContext.Items[SecurityPrincipalContext.ItemKey] = new SecurityPrincipalContext
@@ -320,7 +322,8 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
     [Fact]
     public async Task ProductAccess_BlocksSyncOnlyCallers_AndAllowsOwnersAdminsAndMixedAdminSync()
     {
-        var authz = CreateAuthorizationService();
+        await using var provider = BuildAuthorizationProvider();
+        var authz = provider.GetRequiredService<IAuthorizationService>();
 
         var anonymous = new ClaimsPrincipal(new ClaimsIdentity());
         (await authz.AuthorizeAsync(anonymous, null, GatewayPolicies.ProductAccess)).Succeeded.ShouldBeFalse();
@@ -350,7 +353,8 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
     [Fact]
     public async Task SqlEndpointRegister_RequiresCanonicalWritableClusterAdmin()
     {
-        var authz = CreateAuthorizationService();
+        await using var provider = BuildAuthorizationProvider();
+        var authz = provider.GetRequiredService<IAuthorizationService>();
         GatewayPolicies.TryGetPolicyRoles(GatewayPolicies.SqlEndpointRegister, out var roles).ShouldBeTrue();
         roles.ShouldBe(GatewayPolicies.ClusterAdminRoles);
 
@@ -365,6 +369,23 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
 
         var govAdmin = Principal(roles: "GovernanceAdmin");
         (await authz.AuthorizeAsync(govAdmin, null, GatewayPolicies.SqlEndpointRegister)).Succeeded.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task AuthorizationPolicies_WithInvalidTenantHeader_FailClosedInsteadOfThrowing()
+    {
+        await using var provider = BuildAuthorizationProvider();
+        var authz = provider.GetRequiredService<IAuthorizationService>();
+        var clusterAdmin = Principal(roles: "ClusterAdmin");
+
+        foreach (var invalidTenant in new[] { "_platform", "bad!tenant" })
+        {
+            var httpContext = new DefaultHttpContext { User = clusterAdmin };
+            httpContext.Request.Headers[SecurityContextFactory.TenantHeaderName] = invalidTenant;
+
+            (await authz.AuthorizeAsync(clusterAdmin, httpContext, GatewayPolicies.VirtualFilterWrite)).Succeeded.ShouldBeFalse();
+            (await authz.AuthorizeAsync(clusterAdmin, httpContext, GatewayPolicies.ProductAccess)).Succeeded.ShouldBeFalse();
+        }
     }
 
     private sealed class ServiceRecognizingProvider(IServiceProvider inner) : IServiceProvider, IServiceProviderIsService
