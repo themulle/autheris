@@ -49,6 +49,11 @@ internal static class SqlErrorResponse
             ext["line"] = mapped.Line.Value;
             ext["column"] = mapped.Column.Value;
         }
+        if (mapped.Hint is not null)
+        {
+            ext ??= new Dictionary<string, object?>();
+            ext["hint"] = mapped.Hint;
+        }
         if (ex is TrinoSqlEngine.Ast.Emit.SqlCostExceededException costEx)
         {
             ext ??= new Dictionary<string, object?>();

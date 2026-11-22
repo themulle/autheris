@@ -301,6 +301,11 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     protected virtual void GenerateQuerySpecification(QuerySpecification spec, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
+        // Consume the pending Oracle subquery fence before emitting projections so nested subqueries
+        // inside SELECT (e.g. PerCell CASE WHEN EXISTS ...) cannot steal it from this query block.
+        bool emitOracleFence = context.PendingOracleWhereFence;
+        context.PendingOracleWhereFence = false;
+
         builder.Append("SELECT ");
         if (spec.Distinct)
         {
@@ -325,7 +330,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         context.InProjectionContext = false;
         try
         {
-            GenerateQuerySpecificationTail(spec, ref builder, context);
+            GenerateQuerySpecificationTail(spec, ref builder, context, emitOracleFence);
         }
         finally
         {
@@ -333,7 +338,17 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         }
     }
 
-    private void GenerateQuerySpecificationTail(QuerySpecification spec, ref ValueStringBuilder builder, SqlEmitterContext context)
+    protected enum SubqueryFenceStyle
+    {
+        None = 0,
+        PostgresOffsetZero = 1,
+        SqlServerOrderByNullOffsetZero = 2,
+        OracleWhereRowNum = 3
+    }
+
+    protected virtual SubqueryFenceStyle FenceStyle => SubqueryFenceStyle.None;
+
+    private void GenerateQuerySpecificationTail(QuerySpecification spec, ref ValueStringBuilder builder, SqlEmitterContext context, bool emitOracleFence)
     {
         if (spec.From != null)
         {
@@ -351,8 +366,22 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
             builder.Append(" WHERE ");
             bool prevWherePred = context.InPredicateContext;
             context.InPredicateContext = true;
+            if (emitOracleFence)
+            {
+                builder.Append('(');
+            }
             GenerateExpression(spec.Where, ref builder, context);
+            if (emitOracleFence)
+            {
+                builder.Append(") AND ROWNUM >= ");
+                AppendInlineInteger(ref builder, 1, context);
+            }
             context.InPredicateContext = prevWherePred;
+        }
+        else if (emitOracleFence)
+        {
+            builder.Append(" WHERE ROWNUM >= ");
+            AppendInlineInteger(ref builder, 1, context);
         }
 
         if (spec.GroupBy != null && (spec.GroupBy.IsAll || spec.GroupBy.GroupingExpressions.Count > 0 || spec.GroupBy.AdvancedElements is { Count: > 0 }))
@@ -413,7 +442,43 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                 break;
             case SubqueryTableSource subquery:
                 builder.Append('(');
-                GenerateSelect(subquery.Subquery, ref builder, context);
+                if (subquery.EvaluationFence && FenceStyle == SubqueryFenceStyle.OracleWhereRowNum)
+                {
+                    if (subquery.Subquery is not { With: null, OrderBy: null, Pagination: null, Body: QuerySpecification })
+                    {
+                        throw new System.Security.SecurityException("Fenced subquery has an unexpected shape.");
+                    }
+
+                    bool prevFence = context.PendingOracleWhereFence;
+                    context.PendingOracleWhereFence = true;
+                    try
+                    {
+                        GenerateSelect(subquery.Subquery, ref builder, context);
+                    }
+                    finally
+                    {
+                        context.PendingOracleWhereFence = prevFence;
+                    }
+                }
+                else
+                {
+                    GenerateSelect(subquery.Subquery, ref builder, context);
+                    if (subquery.EvaluationFence)
+                    {
+                        switch (FenceStyle)
+                        {
+                            case SubqueryFenceStyle.PostgresOffsetZero:
+                                builder.Append(" OFFSET ");
+                                AppendInlineInteger(ref builder, 0, context);
+                                break;
+                            case SubqueryFenceStyle.SqlServerOrderByNullOffsetZero:
+                                builder.Append(" ORDER BY (SELECT NULL) OFFSET ");
+                                AppendInlineInteger(ref builder, 0, context);
+                                builder.Append(" ROWS");
+                                break;
+                        }
+                    }
+                }
                 builder.Append(')');
                 builder.Append(TableAliasKeyword);
                 FormatIdentifier(ref builder, subquery.Alias, context);

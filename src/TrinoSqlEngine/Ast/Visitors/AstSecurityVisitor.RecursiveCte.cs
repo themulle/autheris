@@ -160,4 +160,51 @@ public sealed partial class AstSecurityVisitor
             result.Add(name ?? throw new SecurityException("A masked column in a recursive CTE could not be tracked."));
         }
     }
+
+    private SelectStatement VisitSqlServerRecursiveCteQuery(SelectStatement query, string cteKey) =>
+        (SelectStatement)WithScope(SecurityScope.CteBody, () => VisitSelectStatementCore(query, cteKey));
+
+    private QueryBody VisitSqlServerRecursiveBody(QueryBody body, string cteKey)
+    {
+        if (body is SetOperationQuery set)
+        {
+            var left = (QueryBody)WithScope(SecurityScope.SetOperationBranch, () => VisitSqlServerRecursiveBody(set.Left, cteKey));
+            var right = (QueryBody)WithScope(SecurityScope.SetOperationBranch, () => VisitSqlServerRecursiveBody(set.Right, cteKey));
+            return set with { Left = left, Right = right };
+        }
+
+        if (ReferencesRecursiveCte(body, cteKey))
+        {
+            _sqlServerRecursiveMemberDepth++;
+            try
+            {
+                return (QueryBody)Visit(body);
+            }
+            finally
+            {
+                _sqlServerRecursiveMemberDepth--;
+            }
+        }
+
+        return (QueryBody)Visit(body);
+    }
+
+    private static bool ReferencesRecursiveCte(SqlNode node, string cteKey)
+    {
+        if (node is NamedTableSource named)
+        {
+            return named.Name.Parts.Count == 1 &&
+                   CteScopeComparer.Equals(SqlIdentifierHelper.FoldIdentifierForScope(named.Name.Parts[0]), cteKey);
+        }
+
+        foreach (var child in node.EnumerateChildren())
+        {
+            if (ReferencesRecursiveCte(child, cteKey))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

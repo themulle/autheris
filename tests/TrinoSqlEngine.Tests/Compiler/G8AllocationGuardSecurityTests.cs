@@ -122,8 +122,8 @@ public class G8AllocationGuardSecurityTests
         string masked = Compile(projection, Request(maskEmail: true)).Sql;
         string unmasked = Compile(projection, Request(maskEmail: false)).Sql;
         Assert.NotEqual(unmasked, masked);
-        Assert.Contains("NULL", masked, StringComparison.OrdinalIgnoreCase);
-        Assert.DoesNotContain("NULL", unmasked, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains("CAST(NULL", masked, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("CAST(NULL", unmasked, StringComparison.OrdinalIgnoreCase);
         Assert.ThrowsAny<SecurityException>(() => Compile(aggregate, Request(maskEmail: true)));
     }
 

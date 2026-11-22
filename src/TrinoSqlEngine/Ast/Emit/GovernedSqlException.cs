@@ -75,6 +75,7 @@ public static class GovernedSqlErrorCodes
     public const string MethodNotAllowed = "METHOD_NOT_ALLOWED";
     public const string WriteBudgetExhausted = "WRITE_BUDGET_EXHAUSTED";
     public const string DmlWriteConnectionMissing = "DML_WRITE_CONNECTION_MISSING";
+    public const string RowPolicyExpressionNotAllowed = "ROW_POLICY_EXPRESSION_NOT_ALLOWED";
 
     /// <summary>The fixed, value-free message of a code. It never carries driver text, values or object names.</summary>
     public static string FixedMessage(string code) => code switch
@@ -124,6 +125,7 @@ public static class GovernedSqlErrorCodes
         InvalidIdentifierQualification => "Database-qualified or server-qualified object names are not permitted.",
         LiteralNotPermitted => "A string literal contains a character sequence that is not permitted; pass the value as a parameter.",
         AggregationInvalidFunctionForType => "The aggregate function is not valid for the type of its argument.",
+        RowPolicyExpressionNotAllowed => "The statement uses an expression that is not permitted on a table with a row policy. Use non-raising expressions such as TRY_CAST or NULLIF instead.",
         _ => "The statement could not be executed."
     };
 }

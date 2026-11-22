@@ -253,7 +253,7 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
             {
                 // The statement compares this client value with a typed column under a row policy; a value that does not convert would raise on
                 // whichever row is evaluated. Fixed message, no value.
-                throw new SecurityException(Ast.Security.RowPolicyErrorGuard.Message);
+                throw new Ast.Security.RowPolicyExpressionRejectedException();
             }
 
             ValidateValue(bound, value);

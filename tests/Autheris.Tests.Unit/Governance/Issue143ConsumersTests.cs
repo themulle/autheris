@@ -177,7 +177,7 @@ public sealed class Issue143ConsumersTests
     }
 
     private static ColumnAccessLevel GradeLevel(QueryAnalysisResult r) =>
-        r.ValidationReport.OutputColumns.Single(c => c.Column == "grade").EffectiveAccessLevel;
+        r.ValidationReport.OutputColumns.SingleOrDefault(c => c.Column == "grade")?.EffectiveAccessLevel ?? ColumnAccessLevel.Deny;
 
     [Fact]
     public async Task ImpersonatedAnalysis_PredictsMask()

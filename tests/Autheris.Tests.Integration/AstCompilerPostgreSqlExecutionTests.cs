@@ -365,12 +365,19 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
         clock.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(TimeoutSeconds + 3));
     }
 
-    [Theory]
-    [InlineData("SELECT id FROM orders WHERE 1 / (id - id + 1) = 1")]
-    [InlineData("SELECT id FROM orders WHERE id + 1 > 3")]
-    [InlineData("SELECT id FROM orders WHERE sqrt(id) > 1")]
-    public async Task WebSql_UserDivisionPredicate_DoesNotObserveRowsOutsideRowPolicy(string sql) =>
-        await Should.ThrowAsync<System.Security.SecurityException>(() => RunAsync(sql, "acme"));
+    [Fact]
+    public async Task WebSql_UserDivisionPredicate_DoesNotObserveRowsOutsideRowPolicy()
+    {
+        // Under #1038, PostgreSQL wraps policy/tenant scans in an OFFSET 0 evaluation fence so column expressions evaluate only over
+        // 'acme' visible rows {1, 2, 6}, never touching 'other' row id = 5 or 'ACME' rows {3, 4}; constant hazards remain refused.
+        Ids(await RunAsync("SELECT id FROM orders WHERE 1 / (id - 5) = 1", "acme")).ShouldBe(new List<int> { 6 });
+        Ids(await RunAsync("SELECT id FROM orders WHERE 1 / (id - id + 1) = 1", "acme")).ShouldBe(new List<int> { 1, 2, 6 });
+        Ids(await RunAsync("SELECT id FROM orders WHERE id + 1 > 3", "acme")).ShouldBe(new List<int> { 6 });
+        Ids(await RunAsync("SELECT id FROM orders WHERE sqrt(id) > 1", "acme")).ShouldBe(new List<int> { 2, 6 });
+
+        await Should.ThrowAsync<System.Security.SecurityException>(() =>
+            RunAsync("SELECT id FROM orders WHERE CASE WHEN id = 5 THEN sqrt(-1) ELSE 0 END = 0", "acme"));
+    }
 
     [Theory]
     [InlineData("SELECT status, count(*) AS n, max(amount) AS total FROM orders GROUP BY status ORDER BY status")]

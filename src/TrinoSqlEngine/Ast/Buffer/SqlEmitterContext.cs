@@ -78,6 +78,9 @@ public sealed class SqlEmitterContext
     /// <summary>True while the pattern of a policy LIKE is emitted: declared policy values are bound escaped (SQLE-09).</summary>
     public bool EmittingLikePattern { get; set; }
 
+    /// <summary>Internal scoped flag used when emitting an Oracle ROWNUM optimization fence inside a fenced subquery.</summary>
+    internal bool PendingOracleWhereFence { get; set; }
+
     public SqlEmitterContext(TargetSqlDialect dialect, int maxParameterBudget = int.MaxValue)
     {
         Dialect = dialect;

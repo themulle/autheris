@@ -54,6 +54,7 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
         // WP-X0a: compiler, policy and DML errors carry a stable `code` and the fixed message of that code.
         string? code = null;
         string? limit = null;
+        string? hint = null;
         (int status, string title, int? retryAfter) = (0, string.Empty, null);
         if (SqlCompilerErrorMapper.TryMap(exception, out var mapped))
         {
@@ -61,6 +62,7 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
             (status, title, retryAfter) = (mapped.Status, mapped.Title, mapped.Status == StatusCodes.Status503ServiceUnavailable ? UnavailableRetryAfterSeconds : null);
             code = mapped.Code;
             limit = mapped.Limit;
+            hint = mapped.Hint;
         }
         else if (exception is Autheris.Application.Catalog.Services.CatalogReservedSourceNameException)
         {
@@ -108,7 +110,7 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
         }
 
         httpContext.Response.Clear();
-        await GatewayProblemWriter.WriteAsync(httpContext, status, title, code, retryAfter, limit, traceId, cancellationToken).ConfigureAwait(false);
+        await GatewayProblemWriter.WriteAsync(httpContext, status, title, code, retryAfter, limit, traceId, cancellationToken, hint).ConfigureAwait(false);
         return true;
     }
 

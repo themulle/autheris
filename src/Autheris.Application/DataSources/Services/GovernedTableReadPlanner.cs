@@ -256,8 +256,8 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
                 {
                     AggregateFunction.Count => $"COUNT({quotedCol}) AS {quotedAlias}",
                     AggregateFunction.CountDistinct => $"COUNT(DISTINCT {quotedCol}) AS {quotedAlias}",
-                    AggregateFunction.Sum => $"SUM({quotedCol}) AS {quotedAlias}",
-                    AggregateFunction.Avg => $"AVG({quotedCol}) AS {quotedAlias}",
+                    AggregateFunction.Sum => $"{BuildSafeSumOrAvgExpression(AggregateFunction.Sum, quotedCol, colMeta, metadata)} AS {quotedAlias}",
+                    AggregateFunction.Avg => $"{BuildSafeSumOrAvgExpression(AggregateFunction.Avg, quotedCol, colMeta, metadata)} AS {quotedAlias}",
                     AggregateFunction.Min => $"MIN({quotedCol}) AS {quotedAlias}",
                     AggregateFunction.Max => $"MAX({quotedCol}) AS {quotedAlias}",
                     _ => throw new ArgumentOutOfRangeException(nameof(intent), $"Unsupported aggregate function '{agg.Function}'.")
@@ -364,6 +364,78 @@ public sealed partial class GovernedTableReadPlanner : IGovernedTableReadPlanner
             : new Dictionary<string, object?>((IEnumerable<KeyValuePair<string, object?>>)intent.Filter.Parameters, StringComparer.Ordinal);
 
         return new PlannedTableAggregate(sb.ToString(), parameters, groupByCols, resolvedAggregates, GroupCountColumnAlias, bucketShapes);
+    }
+
+    private static string BuildSafeSumOrAvgExpression(
+        AggregateFunction function,
+        string quotedCol,
+        TableColumn column,
+        TableMetadata metadata)
+    {
+        var fnName = function == AggregateFunction.Sum ? "SUM" : "AVG";
+        var sourceType = metadata.Table.SourceType?.Trim();
+        bool isDuckDb = string.Equals(sourceType, "duckdb", StringComparison.OrdinalIgnoreCase);
+        bool hasDialect = DatabaseDialectExtensions.TryParseDialect(sourceType, out var dialect);
+        bool supportsTryCast = isDuckDb || (hasDialect && dialect is DatabaseDialect.SqlServer or DatabaseDialect.Databricks);
+
+        var kind = ColumnValueKinds.FromDataType(column.DataType);
+        string targetType;
+        if (kind == ColumnValueKind.Float)
+        {
+            targetType = "double";
+        }
+        else if (supportsTryCast)
+        {
+            int scale = kind is ColumnValueKind.Int or ColumnValueKind.Long
+                ? (function == AggregateFunction.Sum ? 0 : 10)
+                : ResolveDecimalScale(column.DataType, function);
+            targetType = string.Create(CultureInfo.InvariantCulture, $"decimal(38, {scale})");
+        }
+        else
+        {
+            // PostgreSQL and Oracle use unbounded decimal / NUMBER when precision and scale are omitted.
+            targetType = "decimal";
+        }
+
+        string castKeyword = supportsTryCast ? "TRY_CAST" : "CAST";
+        return $"{fnName}({castKeyword}({quotedCol} AS {targetType}))";
+    }
+
+    private static int ResolveDecimalScale(string? dataType, AggregateFunction function)
+    {
+        int defaultScale = function == AggregateFunction.Avg ? 10 : 10;
+        if (string.IsNullOrWhiteSpace(dataType))
+        {
+            return defaultScale;
+        }
+
+        var lower = dataType.Trim().ToLowerInvariant();
+        if (lower.Contains("money", StringComparison.Ordinal))
+        {
+            return function == AggregateFunction.Avg ? 10 : 4;
+        }
+
+        int open = lower.IndexOf('(', StringComparison.Ordinal);
+        if (open >= 0)
+        {
+            int close = lower.IndexOf(")", open, StringComparison.Ordinal);
+            if (close > open)
+            {
+                var parts = lower[(open + 1)..close].Split(',', StringSplitOptions.TrimEntries);
+                if (parts.Length == 2 && int.TryParse(parts[1], NumberStyles.Integer, CultureInfo.InvariantCulture, out int scale))
+                {
+                    int clamped = Math.Clamp(scale, 0, 28);
+                    return function == AggregateFunction.Avg ? Math.Max(clamped, 10) : clamped;
+                }
+
+                if (parts.Length == 1)
+                {
+                    return function == AggregateFunction.Avg ? 10 : 0;
+                }
+            }
+        }
+
+        return defaultScale;
     }
 
     private static bool IsNumericDataType(string? dataType)

@@ -189,9 +189,10 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         var sunsetRules = await LoadSunsettingRulesAsync(ct).ConfigureAwait(false);
 
         // A simulated target never gets administrator semantics (hidden datasets, Clear columns, no mandatory filters), whatever roles
-        // it carries: its roles are asserted by the simulating caller, not by an identity provider. The prediction for a real
-        // administrator is therefore conservative. Only the authenticated caller evaluated as itself can be an administrator.
-        var isAdmin = targetPrincipal == null && IsAdminPrincipal(callerPrincipal);
+        // it carries: its roles are asserted by the simulating caller, not by an identity provider. Read-only tokens also drop
+        // elevated administrator and owner overrides so analysis matches the caller's read-only data/catalog visibility.
+        var isReadOnly = callerPrincipal.IsReadOnly() || effectivePrincipal.IsReadOnly();
+        var isAdmin = targetPrincipal == null && !isReadOnly && IsAdminPrincipal(callerPrincipal);
 
         // Issue #127: the caller's own token scopes (claims overload, as the data path) are only known for the caller itself;
         // an impersonated target carries no token, so its levels are predicted for the worst case (see ResolveTableColumnLevels).
@@ -199,7 +200,8 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
             !string.Equals(callerSid.Value.Value, effectiveSid.Value, StringComparison.OrdinalIgnoreCase);
         var scopeContext = new AnalysisScopeContext(
             targetImpersonated ? new HashSet<string>(StringComparer.OrdinalIgnoreCase) : TokenAccessScope.GetScopeSet(callerPrincipal.Claims),
-            targetImpersonated);
+            targetImpersonated,
+            isReadOnly);
 
         var diagnostics = new List<QueryValidationDiagnostic>();
         var outputColumns = new List<AnalyzedOutputColumn>();

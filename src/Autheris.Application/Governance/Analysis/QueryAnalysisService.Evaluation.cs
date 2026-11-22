@@ -30,7 +30,8 @@ public sealed partial class QueryAnalysisService
         Dictionary<string, TableMetadata> tableLookup,
         bool selectAllColumns,
         SingleQueryAnalysisOutcome outcome,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlyList<string>? extraValidationColumns = null)
     {
         if (!tableLookup.TryGetValue(rawDatasetName, out var table))
         {
@@ -43,21 +44,13 @@ public sealed partial class QueryAnalysisService
         }
 
         var canonicalDataset = FormatDatasetId(table.Identifier);
-        var accessStatus = CatalogVisibility.ComputeAccessStatus(table.Identifier, activeConsents, pendingRequests: null, isAdmin: isAdmin);
-        var hasTableGrant = string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase);
-
-        var isOwner = false;
-        if (_dataOwnershipRepository != null)
-        {
-            try
-            {
-                isOwner = await _dataOwnershipRepository.IsAuthorizedApproverForTableAsync(table.Identifier, effectiveSid, ct).ConfigureAwait(false);
-            }
-            catch
-            {
-                // Fail-safe
-            }
-        }
+        var (hasTableGrant, isOwner) = await ResolveTableAccessFlagsAsync(
+            table,
+            effectiveSid,
+            isAdmin,
+            scopeContext,
+            activeConsents,
+            ct).ConfigureAwait(false);
 
         if (table.Table.DiscoveryHidden && !hasTableGrant && !isOwner && !isAdmin)
         {
@@ -128,16 +121,40 @@ public sealed partial class QueryAnalysisService
                 hasUnconstrainedColumnAllow: !hasRestrictedColumn);
         }
 
-        var columnsToInspect = selectAllColumns
-            ? table.Columns.Select(c => c.ColumnName).ToList()
-            : requestedColumns.ToList();
+        var emittedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (selectAllColumns)
+        {
+            foreach (var catalogCol in table.Columns)
+            {
+                var accessLevel = ResolveEffectiveColumnAccess(catalogCol, columnLevels, isOwner, isAdmin);
+                if (accessLevel == ColumnAccessLevel.Deny)
+                {
+                    continue;
+                }
 
-        foreach (var colName in columnsToInspect)
+                AddVisibleOutputColumn(
+                    table.Identifier,
+                    canonicalDataset,
+                    queryName,
+                    catalogCol,
+                    accessLevel,
+                    sunsetRules,
+                    outcome,
+                    emittedColumns);
+            }
+        }
+
+        foreach (var colName in requestedColumns)
         {
             var catalogCol = table.Columns.FirstOrDefault(c =>
                 string.Equals(c.ColumnName, colName, StringComparison.OrdinalIgnoreCase));
 
-            if (catalogCol == null)
+            var accessLevel = catalogCol is null
+                ? ColumnAccessLevel.Deny
+                : ResolveEffectiveColumnAccess(catalogCol, columnLevels, isOwner, isAdmin);
+
+            // Denied columns are treated identically to nonexistent columns: raw caller casing, no type, no access level, no hints.
+            if (catalogCol == null || accessLevel == ColumnAccessLevel.Deny)
             {
                 outcome.Diagnostics.Add(new QueryValidationDiagnostic(
                     QueryDiagnosticCodes.UnknownColumn,
@@ -148,28 +165,38 @@ public sealed partial class QueryAnalysisService
                 continue;
             }
 
-            var accessLevel = ResolveEffectiveColumnAccess(
+            AddVisibleOutputColumn(
+                table.Identifier,
+                canonicalDataset,
+                queryName,
                 catalogCol,
-                columnLevels,
-                isOwner,
-                isAdmin);
+                accessLevel,
+                sunsetRules,
+                outcome,
+                emittedColumns);
+        }
 
-            outcome.OutputColumns.Add(new AnalyzedOutputColumn(
-                Dataset: canonicalDataset,
-                Column: catalogCol.ColumnName,
-                DataType: catalogCol.DataType,
-                EffectiveAccessLevel: accessLevel));
-
-            if (accessLevel == ColumnAccessLevel.Mask)
+        if (extraValidationColumns is { Count: > 0 })
+        {
+            foreach (var colName in extraValidationColumns)
             {
-                outcome.MissingConsents.Add(new RequestableConsentItem(
-                    Dataset: canonicalDataset,
-                    Column: catalogCol.ColumnName,
-                    RequestedLevel: "READ_CLEARTEXT",
-                    SuggestedPurpose: $"Unmasked cleartext access to column '{canonicalDataset}.{catalogCol.ColumnName}' for query '{queryName}'."));
-            }
+                var catalogCol = table.Columns.FirstOrDefault(c =>
+                    string.Equals(c.ColumnName, colName, StringComparison.OrdinalIgnoreCase));
 
-            CheckDeprecatedField(table.Identifier, canonicalDataset, catalogCol, sunsetRules, outcome.DeprecatedFields);
+                var accessLevel = catalogCol is null
+                    ? ColumnAccessLevel.Deny
+                    : ResolveEffectiveColumnAccess(catalogCol, columnLevels, isOwner, isAdmin);
+
+                if (catalogCol == null || accessLevel == ColumnAccessLevel.Deny)
+                {
+                    outcome.Diagnostics.Add(new QueryValidationDiagnostic(
+                        QueryDiagnosticCodes.UnknownColumn,
+                        $"Column '{colName}' does not exist on dataset '{canonicalDataset}'.",
+                        QueryName: queryName,
+                        Dataset: canonicalDataset,
+                        Column: colName));
+                }
+            }
         }
 
         foreach (var filterColName in filterColumns.Distinct(StringComparer.OrdinalIgnoreCase))
@@ -177,7 +204,11 @@ public sealed partial class QueryAnalysisService
             var catalogCol = table.Columns.FirstOrDefault(c =>
                 string.Equals(c.ColumnName, filterColName, StringComparison.OrdinalIgnoreCase));
 
-            if (catalogCol == null)
+            var filterAccess = catalogCol is null
+                ? ColumnAccessLevel.Deny
+                : ResolveEffectiveColumnAccess(catalogCol, columnLevels, isOwner, isAdmin);
+
+            if (catalogCol == null || filterAccess == ColumnAccessLevel.Deny)
             {
                 if (IsVirtualFilterParameter(table, canonicalDataset, filterColName))
                 {
@@ -192,12 +223,6 @@ public sealed partial class QueryAnalysisService
                     Column: filterColName));
                 continue;
             }
-
-            var filterAccess = ResolveEffectiveColumnAccess(
-                catalogCol,
-                columnLevels,
-                isOwner,
-                isAdmin);
 
             if (filterAccess == ColumnAccessLevel.Mask)
             {
@@ -217,6 +242,114 @@ public sealed partial class QueryAnalysisService
 
             CheckDeprecatedField(table.Identifier, canonicalDataset, catalogCol, sunsetRules, outcome.DeprecatedFields);
         }
+    }
+
+    private static void AddVisibleOutputColumn(
+        TableIdentifier tableId,
+        string canonicalDataset,
+        string queryName,
+        TableColumn catalogCol,
+        ColumnAccessLevel accessLevel,
+        IReadOnlyList<FieldSunsettingRule> sunsetRules,
+        SingleQueryAnalysisOutcome outcome,
+        HashSet<string> emittedColumns)
+    {
+        if (!emittedColumns.Add(catalogCol.ColumnName))
+        {
+            return;
+        }
+
+        outcome.OutputColumns.Add(new AnalyzedOutputColumn(
+            Dataset: canonicalDataset,
+            Column: catalogCol.ColumnName,
+            DataType: catalogCol.DataType,
+            EffectiveAccessLevel: accessLevel));
+
+        if (accessLevel == ColumnAccessLevel.Mask)
+        {
+            outcome.MissingConsents.Add(new RequestableConsentItem(
+                Dataset: canonicalDataset,
+                Column: catalogCol.ColumnName,
+                RequestedLevel: "READ_CLEARTEXT",
+                SuggestedPurpose: $"Unmasked cleartext access to column '{canonicalDataset}.{catalogCol.ColumnName}' for query '{queryName}'."));
+        }
+
+        CheckDeprecatedField(tableId, canonicalDataset, catalogCol, sunsetRules, outcome.DeprecatedFields);
+    }
+
+    private async Task<(bool HasTableGrant, bool IsOwner)> ResolveTableAccessFlagsAsync(
+        TableMetadata table,
+        Sid effectiveSid,
+        bool isAdmin,
+        AnalysisScopeContext scopeContext,
+        IReadOnlyList<Consent> activeConsents,
+        CancellationToken ct)
+    {
+        var accessStatus = CatalogVisibility.ComputeAccessStatus(table.Identifier, activeConsents, pendingRequests: null, isAdmin: isAdmin);
+        var hasTableGrant = string.Equals(accessStatus, "GRANTED", StringComparison.OrdinalIgnoreCase);
+
+        if (scopeContext.IsReadOnly || _dataOwnershipRepository == null)
+        {
+            return (hasTableGrant, false);
+        }
+
+        if (scopeContext.OwnershipCache.TryGetValue(table.Identifier, out var cachedOwner))
+        {
+            return (hasTableGrant, cachedOwner);
+        }
+
+        var isOwner = false;
+        try
+        {
+            isOwner = await _dataOwnershipRepository.IsAuthorizedApproverForTableAsync(table.Identifier, effectiveSid, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            // Fail-safe
+        }
+
+        scopeContext.OwnershipCache[table.Identifier] = isOwner;
+        return (hasTableGrant, isOwner);
+    }
+
+    private async Task<HashSet<string>?> ResolveVisibleColumnSetAsync(
+        TableMetadata table,
+        ClaimsPrincipal effectivePrincipal,
+        Sid effectiveSid,
+        bool isAdmin,
+        AnalysisScopeContext scopeContext,
+        IReadOnlyList<Consent> activeConsents,
+        CancellationToken ct)
+    {
+        var (hasTableGrant, isOwner) = await ResolveTableAccessFlagsAsync(
+            table,
+            effectiveSid,
+            isAdmin,
+            scopeContext,
+            activeConsents,
+            ct).ConfigureAwait(false);
+
+        if (!hasTableGrant && !isOwner && !isAdmin)
+        {
+            return null;
+        }
+
+        var (columnLevels, resolverAllowed) = ResolveTableColumnLevels(table, effectivePrincipal, effectiveSid, activeConsents, scopeContext);
+        if (!isAdmin && !isOwner && !resolverAllowed)
+        {
+            return null;
+        }
+
+        var visible = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var col in table.Columns)
+        {
+            if (ResolveEffectiveColumnAccess(col, columnLevels, isOwner, isAdmin) != ColumnAccessLevel.Deny)
+            {
+                visible.Add(col.ColumnName);
+            }
+        }
+
+        return visible;
     }
 
     private async Task EvaluateMandatoryVirtualFiltersAsync(
@@ -281,10 +414,13 @@ public sealed partial class QueryAnalysisService
     }
 
     /// <summary>Token scopes of the evaluated principal; <c>Scopes</c> is empty for an impersonated target.</summary>
-    private sealed record AnalysisScopeContext(IReadOnlySet<string> Scopes, bool TargetImpersonated)
+    private sealed record AnalysisScopeContext(IReadOnlySet<string> Scopes, bool TargetImpersonated, bool IsReadOnly)
     {
         /// <summary>Levels per table for the principal of this request (queries of one request run sequentially).</summary>
         public Dictionary<TableIdentifier, (IReadOnlyDictionary<string, ColumnAccessLevel> Levels, bool ResolverAllowed)> LevelCache { get; } = new();
+
+        /// <summary>Ownership flags per table cached for the effective principal within a request.</summary>
+        public Dictionary<TableIdentifier, bool> OwnershipCache { get; } = new();
 
         /// <summary>Per-table decisions captured during evaluation so SQL explain subtree partitioning mirrors execution.</summary>
         public Dictionary<TableIdentifier, TableAccessDecision> TableDecisions { get; } = new();

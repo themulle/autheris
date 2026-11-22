@@ -12,7 +12,7 @@ namespace Autheris.Api.Middleware;
 /// </summary>
 internal static class GatewayProblemWriter
 {
-    internal static ProblemDetails Create(int status, string title, string? code, int? retryAfterSeconds, string? limit, string traceId)
+    internal static ProblemDetails Create(int status, string title, string? code, int? retryAfterSeconds, string? limit, string traceId, string? hint = null)
     {
         var problem = new ProblemDetails
         {
@@ -35,12 +35,17 @@ internal static class GatewayProblemWriter
             problem.Extensions["limit"] = limit;
         }
 
+        if (hint is not null)
+        {
+            problem.Extensions["hint"] = hint;
+        }
+
         problem.Extensions["traceId"] = traceId;
         return problem;
     }
 
     internal static Task WriteAsync(
-        HttpContext httpContext, int status, string title, string? code, int? retryAfterSeconds, string? limit, string traceId, CancellationToken ct)
+        HttpContext httpContext, int status, string title, string? code, int? retryAfterSeconds, string? limit, string traceId, CancellationToken ct, string? hint = null)
     {
         httpContext.Response.StatusCode = status;
         if (retryAfterSeconds.HasValue)
@@ -49,7 +54,7 @@ internal static class GatewayProblemWriter
         }
 
         return httpContext.Response.WriteAsJsonAsync(
-            Create(status, title, code, retryAfterSeconds, limit, traceId),
+            Create(status, title, code, retryAfterSeconds, limit, traceId, hint),
             (System.Text.Json.JsonSerializerOptions?)null,
             "application/problem+json",
             ct);

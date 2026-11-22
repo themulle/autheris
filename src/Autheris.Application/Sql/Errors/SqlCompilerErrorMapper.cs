@@ -20,7 +20,7 @@ using TrinoSqlEngine.Governance;
 /// The result of <see cref="SqlCompilerErrorMapper.TryMap"/>: HTTP status, stable code and the fixed client message. <c>Limit</c> is
 /// the <see cref="SqlLimitKind"/> name of a limit error and never a count.
 /// </summary>
-public readonly record struct SqlErrorMapping(int Status, string Code, string Title, string? Limit = null, int? Line = null, int? Column = null);
+public readonly record struct SqlErrorMapping(int Status, string Code, string Title, string? Limit = null, int? Line = null, int? Column = null, string? Hint = null);
 
 /// <summary>
 /// WP-X0a (plan section 28.4.3): the one mapping of compiler and execution errors to a status, a stable code
@@ -199,6 +199,9 @@ public static class SqlCompilerErrorMapper
         e => e is WebSqlPolicyException { Code: GovernedSqlErrorCodes.StatementNotPermitted } ? Of(403, GovernedSqlErrorCodes.StatementNotPermitted) : null,
         e => e is RequiredFilterColumnMissingException ? Of(400, GovernedSqlErrorCodes.RequiredFilterColumnMissing) : null,
         e => e is WebSqlPolicyException { Code: GovernedSqlErrorCodes.InvalidIdentifierQualification } ? Of(400, GovernedSqlErrorCodes.InvalidIdentifierQualification) : null,
+        e => e is RowPolicyExpressionRejectedException rpe
+            ? new SqlErrorMapping(422, GovernedSqlErrorCodes.RowPolicyExpressionNotAllowed, GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.RowPolicyExpressionNotAllowed), Hint: rpe.Hint)
+            : null,
         e => e is SecurityException ? Of(403, GovernedSqlErrorCodes.PolicyViolation) : null,
         e => e is GovernedSqlException governed ? MapGoverned(governed.Code) : null,
         // Phase 5 M4: a data source that cannot hand out a correctly pinned session (missing or invalid default schema, a pin that did

@@ -1,0 +1,587 @@
+using System.Collections.Frozen;
+using System.Collections.Immutable;
+using DuckDB.NET.Data;
+using TrinoSqlEngine.Ast.Emit;
+using TrinoSqlEngine.Ast.Nodes;
+using TrinoSqlEngine.Ast.Security;
+using TrinoSqlEngine.Governance;
+using Xunit;
+using static TrinoSqlEngine.Tests.Compiler.PolicyFixtures;
+
+namespace TrinoSqlEngine.Tests.Compiler;
+
+/// <summary>
+/// Issue #1038: Filter-first evaluation fence tests per dialect and strict refusals where fencing does not apply.
+/// </summary>
+[Trait("Category", "SqlGate")]
+public sealed class EvaluationFenceTests
+{
+    private readonly FastSqlEngine _engine = new();
+
+    private static PolicyPredicate RegionOrPolicy() => PolicyPredicate.Create(
+        new BinaryExpression(
+            new BinaryExpression(
+                new ColumnReference(new SqlQualifiedName(new[] { new SqlIdentifier("Region", true) })),
+                BinaryOperator.Equal,
+                new PolicyParameterExpression("__pol_r1", SqlParameterType.String)),
+            BinaryOperator.Or,
+            new BinaryExpression(
+                new ColumnReference(new SqlQualifiedName(new[] { new SqlIdentifier("Region", true) })),
+                BinaryOperator.Equal,
+                new PolicyParameterExpression("__pol_r2", SqlParameterType.String))),
+        new Dictionary<string, PolicyValue>
+        {
+            ["__pol_r1"] = new("Nord", SqlParameterType.String),
+            ["__pol_r2"] = new("Ost", SqlParameterType.String)
+        });
+
+    private static CompileRequest Request(TargetSqlDialect dialect, StatementPermissions permissions = StatementPermissions.ReadOnly)
+    {
+        var rowFilters = new DictPolicyProvider();
+        rowFilters.Predicates[Orders] = RegionOrPolicy();
+        rowFilters.NoPolicy.Add(Entitlements);
+        rowFilters.NoPolicy.Add(Lookup);
+
+        return new CompileRequest
+        {
+            TargetDialect = dialect,
+            Statements = permissions,
+            TokenGuards = SqlTokenSecurityOptions.Strict,
+            AllowedFunctions = SqlFunctionAllowlists.Build(dialect, null),
+            AllowExperimentalDialect = true,
+            Policy = new GovernancePolicy
+            {
+                RowFilters = rowFilters,
+                Masks = new DictMaskProvider(),
+                Catalog = Catalog(),
+                Tenant = new TenantBinding("__autheris_tenant", "acme", SqlParameterType.String)
+            }
+        };
+    }
+
+    [Theory]
+    [InlineData(TargetSqlDialect.PostgreSql, "OFFSET 0")]
+    [InlineData(TargetSqlDialect.SqlServer, "ORDER BY (SELECT NULL) OFFSET 0 ROWS")]
+    [InlineData(TargetSqlDialect.Oracle, "AND ROWNUM >= 1")]
+    public void FencedDialects_EmitExpectedEvaluationBarrier_OnRowPolicyTableOnly(TargetSqlDialect dialect, string expectedBarrier)
+    {
+        const string sql = """
+            SELECT SUM(o.Amount * 2) AS doubled
+            FROM Orders o
+            JOIN Lookup l ON o.Status = l.Code
+            """;
+
+        var compiled = _engine.Compile(sql.AsMemory(), Request(dialect), CancellationToken.None);
+
+        Assert.Contains(expectedBarrier, compiled.Sql, StringComparison.Ordinal);
+
+        // Oracle OR predicate inside policy must remain parenthesized before AND ROWNUM >= 1.
+        if (dialect == TargetSqlDialect.Oracle)
+        {
+            Assert.Contains("WHERE ((", compiled.Sql, StringComparison.Ordinal);
+            Assert.Contains(") AND ROWNUM >= 1)", compiled.Sql, StringComparison.Ordinal);
+        }
+    }
+
+    [Theory]
+    [InlineData(TargetSqlDialect.PostgreSql)]
+    [InlineData(TargetSqlDialect.SqlServer)]
+    [InlineData(TargetSqlDialect.Oracle)]
+    public void FencedDialects_AllowCallerExpressions_Arithmetic_Cast_Functions_Case_Aggregates(TargetSqlDialect dialect)
+    {
+        string[] queries =
+        [
+            "SELECT SUM(Amount * 2), AVG(Amount / 100), Id + 1 FROM Orders GROUP BY Id",
+            "SELECT CAST(Status AS integer), ROUND(Amount, 1), ABS(Id) FROM Orders",
+            "SELECT CASE WHEN Amount > 0 THEN Amount / 2 ELSE 0 END FROM Orders WHERE sqrt(Amount) > 1",
+            "WITH src AS (SELECT Id, Amount FROM Orders) SELECT Id, SUM(Amount * 3) OVER (PARTITION BY Id) FROM src",
+            "SELECT o.Id, o.Amount / 10 FROM Orders o JOIN Entitlements e ON o.Id = e.OrderId WHERE o.Amount > 5"
+        ];
+
+        foreach (var sql in queries)
+        {
+            var compiled = _engine.Compile(sql.AsMemory(), Request(dialect), CancellationToken.None);
+            Assert.False(string.IsNullOrWhiteSpace(compiled.Sql));
+        }
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData(TargetSqlDialect.Databricks)]
+    [InlineData(TargetSqlDialect.DuckDb)]
+    public void UnfencedDialects_RefuseRaisingCallerExpressions_WithCodeAndSafeHint(TargetSqlDialect dialect)
+    {
+        var ex = Assert.Throws<RowPolicyExpressionRejectedException>(() =>
+            _engine.Compile("SELECT Amount * 2 FROM Orders".AsMemory(), Request(dialect), CancellationToken.None));
+
+        Assert.Equal(GovernedSqlErrorCodes.RowPolicyExpressionNotAllowed, ex.Code);
+        Assert.Equal(RowPolicyErrorGuard.Message, ex.Message);
+        Assert.Contains("TRY_CAST", ex.Hint, StringComparison.Ordinal);
+        Assert.Contains("NULLIF", ex.Hint, StringComparison.Ordinal);
+        Assert.DoesNotContain("Amount", ex.Hint, StringComparison.Ordinal);
+        Assert.DoesNotContain("Orders", ex.Hint, StringComparison.Ordinal);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void AnsiDialect_IsRejectedFailClosed()
+    {
+        Assert.Throws<SqlCompileNotSupportedException>(() =>
+            _engine.Compile("SELECT Amount * 2 FROM Orders".AsMemory(), Request(TargetSqlDialect.Ansi), CancellationToken.None));
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData(TargetSqlDialect.PostgreSql)]
+    [InlineData(TargetSqlDialect.SqlServer)]
+    [InlineData(TargetSqlDialect.Oracle)]
+    public void FencedDialects_StillRefuseDml_Coercions_AndConstantHazards(TargetSqlDialect dialect)
+    {
+        var dmlRequest = Request(dialect, StatementPermissions.Delete).WithTestWritePermit("DELETE FROM Orders WHERE Amount / Id > 1");
+        Assert.Throws<RowPolicyExpressionRejectedException>(() =>
+            _engine.Compile("DELETE FROM Orders WHERE Amount / Id > 1".AsMemory(), dmlRequest, CancellationToken.None));
+
+        string[] alwaysRefusedReads =
+        [
+            "SELECT Id FROM Orders WHERE Id = '5'",
+            "SELECT Id FROM Orders WHERE CASE WHEN Id = 42 THEN sqrt(-1) ELSE 0 END = 0",
+            "SELECT Id FROM Orders WHERE CASE WHEN Id = 42 THEN CAST('abc' AS integer) ELSE 0 END = 0",
+            "SELECT Id FROM Orders WHERE 9223372036854775807 + 1 > 0"
+        ];
+
+        foreach (var sql in alwaysRefusedReads)
+        {
+            var ex = Assert.Throws<RowPolicyExpressionRejectedException>(() =>
+                _engine.Compile(sql.AsMemory(), Request(dialect), CancellationToken.None));
+            Assert.Equal(GovernedSqlErrorCodes.RowPolicyExpressionNotAllowed, ex.Code);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void FencedDialect_ClientBindFamilyMismatch_ThrowsRowPolicyExpressionRejectedException()
+    {
+        var compiled = _engine.Compile(
+            "SELECT Id FROM Orders WHERE Id = __param_id".AsMemory(),
+            Request(TargetSqlDialect.PostgreSql),
+            CancellationToken.None);
+
+        using var cmd = new DuckDBCommand();
+        var ex = Assert.Throws<RowPolicyExpressionRejectedException>(() =>
+            CompiledSqlBinders.For(TargetSqlDialect.PostgreSql).Bind(
+                cmd,
+                compiled,
+                new Dictionary<string, object?> { ["id"] = "not-an-integer" }));
+
+        Assert.Equal(GovernedSqlErrorCodes.RowPolicyExpressionNotAllowed, ex.Code);
+        Assert.Contains("TRY_CAST", ex.Hint, StringComparison.Ordinal);
+        Assert.Contains("NULLIF", ex.Hint, StringComparison.Ordinal);
+    }
+
+    private static CompileRequest PerCellRequest(
+        TargetSqlDialect dialect,
+        bool protectEntitlements = false,
+        bool allowRecursiveCte = false)
+    {
+        bool isOracle = dialect == TargetSqlDialect.Oracle;
+        var decimalType = isOracle ? "number(18,2)" : "decimal(18,2)";
+        var strPrefix = isOracle ? "varchar2" : "nvarchar";
+
+        var existsSubquery = new SelectStatement(null,
+            new QuerySpecification(
+                false,
+                [new ColumnSelectItem(new LiteralExpression(1L, LiteralType.Integer), null)],
+                new NamedTableSource(
+                    new SqlQualifiedName([new SqlIdentifier("dbo", true), new SqlIdentifier("Lookup", true)]),
+                    new SqlIdentifier("l", true)),
+                new BinaryExpression(
+                    new BinaryExpression(
+                        new ColumnReference(new SqlQualifiedName([new SqlIdentifier("l", true), new SqlIdentifier("Code", true)])),
+                        BinaryOperator.Equal,
+                        new ColumnReference(new SqlQualifiedName([new SqlIdentifier(RowFilterAliases.Target), new SqlIdentifier("Status", true)]))),
+                    BinaryOperator.Or,
+                    new BinaryExpression(
+                        new ColumnReference(new SqlQualifiedName([new SqlIdentifier("l", true), new SqlIdentifier("Code", true)])),
+                        BinaryOperator.Equal,
+                        new PolicyParameterExpression("__pol_code", SqlParameterType.String))),
+                null, null),
+            null, null);
+
+        var existsPredicate = PolicyPredicate.Create(
+            new ExistsExpression(existsSubquery),
+            new Dictionary<string, PolicyValue> { ["__pol_code"] = new("VIP", SqlParameterType.String) });
+
+        var regionPredicate = PolicyPredicate.Create(
+            new BinaryExpression(
+                new ColumnReference(new SqlQualifiedName([new SqlIdentifier("Region", true)])),
+                BinaryOperator.Equal,
+                new PolicyParameterExpression("__pol_r1", SqlParameterType.String)),
+            new Dictionary<string, PolicyValue> { ["__pol_r1"] = new("Nord", SqlParameterType.String) });
+
+        var perCell = new PerCellTablePolicy(
+            [new PerCellSignatureSpec(existsPredicate), new PerCellSignatureSpec(regionPredicate)],
+            new Dictionary<string, PerCellColumnRule>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Email"] = new(ImmutableArray.Create(0), ImmutableArray.Create(1))
+            });
+
+        var rowFilters = new DictPolicyProvider();
+        rowFilters.NoPolicy.Add(Orders);
+        rowFilters.NoPolicy.Add(Lookup);
+        if (protectEntitlements)
+        {
+            rowFilters.Predicates[Entitlements] = PolicyPredicate.Create(
+                new BinaryExpression(
+                    new ColumnReference(new SqlQualifiedName([new SqlIdentifier("OrderId", true)])),
+                    BinaryOperator.GreaterThan,
+                    new PolicyParameterExpression("__pol_min_order", SqlParameterType.Int32)),
+                new Dictionary<string, PolicyValue> { ["__pol_min_order"] = new(0, SqlParameterType.Int32) });
+        }
+        else
+        {
+            rowFilters.NoPolicy.Add(Entitlements);
+        }
+
+        var masks = new DictMaskProvider();
+        masks.Masks[(Orders, "email")] = new MaskSpec(
+            MaskKind.Redact,
+            new MaskArguments(Constant: new PolicyParameterExpression("__mask_c", SqlParameterType.String)),
+            new Dictionary<string, PolicyValue> { ["__mask_c"] = new("***", SqlParameterType.String) }.ToFrozenDictionary());
+
+        var catalog = new InMemoryTableCatalog(
+        [
+            new TableCatalogEntry(Orders, ImmutableArray.Create(
+                new CatalogColumn("Id", "int"), new CatalogColumn("TenantId", $"{strPrefix}(64)"), new CatalogColumn("Region", $"{strPrefix}(20)"),
+                new CatalogColumn("Status", $"{strPrefix}(20)"), new CatalogColumn("Amount", decimalType), new CatalogColumn("Email", $"{strPrefix}(200)")),
+                "TenantId", 1),
+            new TableCatalogEntry(Entitlements, ImmutableArray.Create(
+                new CatalogColumn("Id", "int"), new CatalogColumn("TenantId", $"{strPrefix}(64)"), new CatalogColumn("OrderId", "int")),
+                "TenantId", 1),
+            new TableCatalogEntry(Lookup, ImmutableArray.Create(new CatalogColumn("Code", $"{strPrefix}(10)")), null, 1)
+        ], "dbo");
+
+        return new CompileRequest
+        {
+            TargetDialect = dialect,
+            Statements = StatementPermissions.ReadOnly,
+            TokenGuards = SqlTokenSecurityOptions.Strict,
+            AllowedFunctions = SqlFunctionAllowlists.Build(dialect, null),
+            AllowExperimentalDialect = true,
+            AllowRecursiveCte = allowRecursiveCte,
+            Policy = new GovernancePolicy
+            {
+                RowFilters = rowFilters,
+                Masks = masks,
+                PerCellColumns = new StaticPerCellProvider(Orders, perCell),
+                Catalog = catalog,
+                Tenant = new TenantBinding("__autheris_tenant", "acme", SqlParameterType.String)
+            }
+        };
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Oracle_PerCellWithUndecomposedExistsInProjection_KeepsRowNumFenceOnOuterSubquery()
+    {
+        // Raising arithmetic (Amount / 10) succeeds only when evaluationFenced == true.
+        var compiled = _engine.Compile("SELECT Amount / 10, Email FROM Orders".AsMemory(), PerCellRequest(TargetSqlDialect.Oracle), CancellationToken.None);
+
+        Assert.Contains("EXISTS (", compiled.Sql, StringComparison.Ordinal);
+        Assert.Contains(") AND ROWNUM >= 1)", compiled.Sql, StringComparison.Ordinal);
+
+        int ordersFromIndex = compiled.Sql.IndexOf("\"dbo\".\"Orders\"", StringComparison.Ordinal);
+        Assert.True(ordersFromIndex > 0, compiled.Sql);
+
+        // The undecomposed EXISTS inside the PerCell CASE projection must not steal ROWNUM >= 1 from the outer subquery.
+        Assert.DoesNotContain("ROWNUM", compiled.Sql[..ordersFromIndex], StringComparison.Ordinal);
+        int rowNumIndex = compiled.Sql.IndexOf("AND ROWNUM >= 1", StringComparison.Ordinal);
+        Assert.True(rowNumIndex > ordersFromIndex, compiled.Sql);
+        Assert.Equal(-1, compiled.Sql.IndexOf("ROWNUM", rowNumIndex + "AND ROWNUM >= 1".Length, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Oracle_PerCellWithFencedInnerExistsTable_KeepsRowNumFenceOnBothSubqueries()
+    {
+        const string sql = "SELECT CASE WHEN EXISTS (SELECT 1 FROM Entitlements e WHERE e.OrderId = o.Id) THEN o.Amount / 10 ELSE 0 END, o.Email FROM Orders o";
+        var compiled = _engine.Compile(sql.AsMemory(), PerCellRequest(TargetSqlDialect.Oracle, protectEntitlements: true), CancellationToken.None);
+
+        int entitlementsIdx = compiled.Sql.IndexOf("\"dbo\".\"Entitlements\"", StringComparison.Ordinal);
+        int ordersIdx = compiled.Sql.IndexOf("\"dbo\".\"Orders\"", StringComparison.Ordinal);
+        Assert.True(entitlementsIdx > 0 && ordersIdx > entitlementsIdx, compiled.Sql);
+
+        // Inner fenced Entitlements subquery gets its own ROWNUM >= 1, and outer PerCell Orders subquery still keeps its ROWNUM >= 1.
+        int firstFence = compiled.Sql.IndexOf("AND ROWNUM >= 1", StringComparison.Ordinal);
+        int secondFence = compiled.Sql.IndexOf("AND ROWNUM >= 1", firstFence + 1, StringComparison.Ordinal);
+        Assert.True(firstFence > entitlementsIdx && firstFence < ordersIdx, compiled.Sql);
+        Assert.True(secondFence > ordersIdx, compiled.Sql);
+        Assert.Equal(-1, compiled.Sql.IndexOf("AND ROWNUM >= 1", secondFence + 1, StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void HasColumn_CoversAllFastAndFallbackExpressionKinds()
+    {
+        var col = new ColumnReference(new SqlQualifiedName([new SqlIdentifier("Id")]));
+        var lit = new LiteralExpression(1L, LiteralType.Integer);
+        var fnName = new SqlQualifiedName([new SqlIdentifier("f")]);
+
+        Expression[] noCol =
+        [
+            lit,
+            new ParameterReference("p"),
+            new NamedBindMarkerExpression("p"),
+            new PolicyParameterExpression("__pol", SqlParameterType.String),
+            new PageOffsetParameterExpression(),
+            new CurrentDateTimeExpression(CurrentDateTimeKind.CurrentDate),
+            new TypedLiteralExpression(TypedLiteralKind.Date, "2024-01-01"),
+            new IntervalLiteralExpression("1", "DAY"),
+            new ParenthesizedExpression(lit),
+            new UnaryExpression(UnaryOperator.Negate, lit),
+            new CastExpression(lit, "int"),
+            new ExtractExpression("year", lit),
+            new DateFunctionExpression(DateFunctionKind.Trunc, DateUnit.Day, 0, lit),
+            new BinaryExpression(lit, BinaryOperator.Add, lit),
+            new IsDistinctFromExpression(lit, lit, false),
+            new BetweenExpression(lit, lit, lit, false),
+            new LikeExpression(lit, lit),
+            new LikeExpression(lit, lit, lit),
+            new SubstringExpression(lit, lit, null),
+            new SubstringExpression(lit, lit, lit),
+            new TrimExpression(TrimSpecification.Both, lit, null),
+            new TrimExpression(TrimSpecification.Both, lit, lit),
+            new InListExpression(lit, [lit, lit], false),
+            new FunctionCallExpression(fnName, [lit]),
+            new FunctionCallExpression(fnName, [lit], Window: new WindowSpecification([lit], new OrderByClause([new OrderByElement(lit)])), Filter: lit, OrderWithin: new OrderByClause([new OrderByElement(lit)])),
+            new CaseExpression(null, [new WhenClause(lit, lit)], null),
+            new CaseExpression(lit, [new WhenClause(lit, lit)], lit),
+            new ArrayConstructorExpression([lit])
+        ];
+
+        foreach (var expr in noCol)
+        {
+            Assert.False(RowPolicyErrorGuard.HasColumn(expr), expr.ToString());
+        }
+
+        Expression[] withCol =
+        [
+            col,
+            new ParenthesizedExpression(col),
+            new UnaryExpression(UnaryOperator.Negate, col),
+            new CastExpression(col, "int"),
+            new ExtractExpression("year", col),
+            new DateFunctionExpression(DateFunctionKind.Add, DateUnit.Day, 1, col),
+            new BinaryExpression(col, BinaryOperator.Add, lit),
+            new BinaryExpression(lit, BinaryOperator.Add, col),
+            new IsDistinctFromExpression(col, lit, false),
+            new IsDistinctFromExpression(lit, col, false),
+            new BetweenExpression(col, lit, lit, false),
+            new BetweenExpression(lit, col, lit, false),
+            new BetweenExpression(lit, lit, col, false),
+            new LikeExpression(col, lit),
+            new LikeExpression(lit, col),
+            new LikeExpression(lit, lit, col),
+            new SubstringExpression(col, lit, null),
+            new SubstringExpression(lit, col, null),
+            new SubstringExpression(lit, lit, col),
+            new TrimExpression(TrimSpecification.Both, col, null),
+            new TrimExpression(TrimSpecification.Both, lit, col),
+            new InListExpression(col, [lit], false),
+            new InListExpression(lit, [lit, col], false),
+            new FunctionCallExpression(fnName, [col]),
+            new FunctionCallExpression(fnName, [lit], Filter: col),
+            new FunctionCallExpression(fnName, [lit], OrderWithin: new OrderByClause([new OrderByElement(col)])),
+            new FunctionCallExpression(fnName, [lit], Window: new WindowSpecification([col], null)),
+            new FunctionCallExpression(fnName, [lit], Window: new WindowSpecification(null, new OrderByClause([new OrderByElement(col)]))),
+            new CaseExpression(col, [new WhenClause(lit, lit)], null),
+            new CaseExpression(null, [new WhenClause(col, lit)], null),
+            new CaseExpression(null, [new WhenClause(lit, col)], null),
+            new CaseExpression(null, [new WhenClause(lit, lit)], col),
+            new ArrayConstructorExpression([col])
+        ];
+
+        foreach (var expr in withCol)
+        {
+            Assert.True(RowPolicyErrorGuard.HasColumn(expr), expr.ToString());
+        }
+    }
+
+    [Fact]
+    public void AreAllPolicyTablesFenced_CoversFastPathsAndUnfencedShapes()
+    {
+        var tbl = new NamedTableSource(new SqlQualifiedName([new SqlIdentifier("Orders")]), null);
+        var col = new ColumnReference(new SqlQualifiedName([new SqlIdentifier("Id")]));
+        var lit = new LiteralExpression(1L, LiteralType.Integer);
+        var sec = new SecurityPredicateExpression(new BinaryExpression(col, BinaryOperator.Equal, lit), new SecurityPredicateId("Orders", 0), SecurityScope.Root);
+
+        Assert.False(RowPolicyErrorGuard.AreAllPolicyTablesFenced(new DeleteStatement(tbl, sec)));
+
+        var fencedSub = new SubqueryTableSource(
+            new SelectStatement(null, new QuerySpecification(false, [new WildcardSelectItem(null)], tbl, sec, null, null), null, null),
+            new SqlIdentifier("s")) { EvaluationFence = true };
+        var unfencedSub = new SubqueryTableSource(
+            new SelectStatement(null, new QuerySpecification(false, [new ColumnSelectItem(col, null)], tbl, sec, null, null), null, null),
+            new SqlIdentifier("u")) { EvaluationFence = false };
+
+        SelectStatement WrapFrom(TableSource from, Expression? where = null, IReadOnlyList<SelectItem>? projections = null) =>
+            new(null,
+                new QuerySpecification(false, projections ?? [new ColumnSelectItem(col, null)], from, where, new GroupByClause([col]), new BinaryExpression(col, BinaryOperator.Equal, lit)),
+                new OrderByClause([new OrderByElement(col)]),
+                new PaginationClause(null, lit));
+
+        Assert.True(RowPolicyErrorGuard.AreAllPolicyTablesFenced(WrapFrom(
+            new JoinedTableSource(fencedSub, JoinType.Inner, fencedSub, new OnJoinCondition(new BinaryExpression(col, BinaryOperator.Equal, col))),
+            new BinaryExpression(new ParenthesizedExpression(new InListExpression(col, [lit], false)), BinaryOperator.And, new BinaryExpression(col, BinaryOperator.Equal, lit)))));
+        Assert.True(RowPolicyErrorGuard.AreAllPolicyTablesFenced(WrapFrom(new JoinedTableSource(fencedSub, JoinType.Inner, tbl, new UsingJoinCondition([new SqlIdentifier("Id")])))));
+        Assert.True(RowPolicyErrorGuard.AreAllPolicyTablesFenced(WrapFrom(new JoinedTableSource(fencedSub, JoinType.Cross, tbl, null))));
+
+        Assert.False(RowPolicyErrorGuard.AreAllPolicyTablesFenced(WrapFrom(new JoinedTableSource(unfencedSub, JoinType.Cross, fencedSub, null))));
+        Assert.False(RowPolicyErrorGuard.AreAllPolicyTablesFenced(WrapFrom(new JoinedTableSource(fencedSub, JoinType.Cross, unfencedSub, null))));
+        Assert.False(RowPolicyErrorGuard.AreAllPolicyTablesFenced(WrapFrom(fencedSub, where: new BinaryExpression(new ParenthesizedExpression(sec), BinaryOperator.And, lit))));
+        Assert.False(RowPolicyErrorGuard.AreAllPolicyTablesFenced(WrapFrom(fencedSub, where: new BinaryExpression(lit, BinaryOperator.And, sec))));
+        Assert.False(RowPolicyErrorGuard.AreAllPolicyTablesFenced(WrapFrom(fencedSub, where: new InListExpression(sec, [lit], false))));
+        Assert.False(RowPolicyErrorGuard.AreAllPolicyTablesFenced(WrapFrom(fencedSub, where: new InListExpression(col, [lit, sec], false))));
+        Assert.False(RowPolicyErrorGuard.AreAllPolicyTablesFenced(WrapFrom(fencedSub, projections: [new ColumnSelectItem(sec, null)])));
+        Assert.False(RowPolicyErrorGuard.AreAllPolicyTablesFenced(WrapFrom(new JoinedTableSource(fencedSub, JoinType.Inner, tbl,
+            new OnJoinCondition(new BinaryExpression(col, BinaryOperator.Equal, new ScalarSubqueryExpression(
+                new SelectStatement(null, new QuerySpecification(false, [new ColumnSelectItem(lit, null)], tbl, sec, null, null), null, null))))))));
+    }
+
+    [Fact]
+    public void FencedDialects_AllowConstantUnderFenceShapes()
+    {
+        string[] constantFenceQueries =
+        [
+            "SELECT Id FROM Orders WHERE (SELECT 1 FROM Lookup) = 1",
+            "SELECT Id, row_number() OVER (ORDER BY Id) FROM Orders WHERE CURRENT_DATE + INTERVAL '1' DAY > DATE '2020-01-01'",
+            "SELECT Id FROM Orders WHERE Id IN (1, 2) AND (Status = 'open')"
+        ];
+
+        foreach (var sql in constantFenceQueries)
+        {
+            var compiled = _engine.Compile(sql.AsMemory(), Request(TargetSqlDialect.PostgreSql), CancellationToken.None);
+            Assert.False(string.IsNullOrWhiteSpace(compiled.Sql));
+        }
+    }
+
+    private static int CountOccurrences(string text, string pattern)
+    {
+        int count = 0;
+        int index = 0;
+        while ((index = text.IndexOf(pattern, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += pattern.Length;
+        }
+
+        return count;
+    }
+
+    [Fact]
+    public void SqlServer_RecursiveCte_SuppressesFenceInRecursiveMembersOnly_AndKeepsAnchorAndCatalogTablesFenced()
+    {
+        const string fence = "ORDER BY (SELECT NULL) OFFSET 0 ROWS";
+        var sqlServerRecursive = Request(TargetSqlDialect.SqlServer) with { AllowRecursiveCte = true };
+
+        // 1. Single recursive branch: anchor Orders keeps the fence; recursive member after UNION ALL omits it.
+        var single = _engine.Compile(
+            "WITH RECURSIVE w(id) AS (SELECT Id FROM Orders WHERE Id = 1 UNION ALL SELECT o.Id FROM Orders o JOIN w ON o.Id = w.id) SELECT id FROM w".AsMemory(),
+            sqlServerRecursive,
+            CancellationToken.None);
+        int unionIdx = single.Sql.IndexOf("UNION ALL", StringComparison.Ordinal);
+        Assert.True(unionIdx > 0, single.Sql);
+        Assert.Equal(1, CountOccurrences(single.Sql[..unionIdx], fence));
+        Assert.Equal(0, CountOccurrences(single.Sql[unionIdx..], fence));
+
+        // 2. Multi-branch recursive CTE: anchor keeps the fence; all recursive branches suppress it.
+        var multi = _engine.Compile(
+            "WITH RECURSIVE w(id) AS (SELECT Id FROM Orders WHERE Id = 1 UNION ALL SELECT o.Id FROM Orders o JOIN w ON o.Id = w.id UNION ALL SELECT o2.Id FROM Orders o2 JOIN w ON o2.Id = w.id) SELECT id FROM w".AsMemory(),
+            sqlServerRecursive,
+            CancellationToken.None);
+        int firstUnionIdx = multi.Sql.IndexOf("UNION ALL", StringComparison.Ordinal);
+        Assert.True(firstUnionIdx > 0, multi.Sql);
+        Assert.Equal(1, CountOccurrences(multi.Sql[..firstUnionIdx], fence));
+        Assert.Equal(0, CountOccurrences(multi.Sql[firstUnionIdx..], fence));
+
+        // 3. Qualified catalog table whose schema matches the CTE name (dbo.Orders, Parts.Count == 2) is not treated as the recursive CTE.
+        var qualifiedAnchor = _engine.Compile(
+            "WITH RECURSIVE dbo(id) AS (SELECT Id FROM dbo.Orders UNION ALL SELECT o.Id FROM dbo.Orders o JOIN dbo ON o.Id = dbo.id) SELECT id FROM dbo".AsMemory(),
+            sqlServerRecursive,
+            CancellationToken.None);
+        int dboUnionIdx = qualifiedAnchor.Sql.IndexOf("UNION ALL", StringComparison.Ordinal);
+        Assert.True(dboUnionIdx > 0, qualifiedAnchor.Sql);
+        Assert.Equal(1, CountOccurrences(qualifiedAnchor.Sql[..dboUnionIdx], fence));
+        Assert.Equal(0, CountOccurrences(qualifiedAnchor.Sql[dboUnionIdx..], fence));
+
+        // 4. Outer query after recursive CTE restores depth to 0 so outer table scans keep their fence and allow arithmetic.
+        var outerRaising = _engine.Compile(
+            "WITH RECURSIVE w(id) AS (SELECT Id FROM Orders WHERE Id = 1 UNION ALL SELECT id + 1 FROM w WHERE id < 3) SELECT o.Id, o.Amount * 2 FROM Orders o JOIN w ON o.Id = w.id".AsMemory(),
+            sqlServerRecursive,
+            CancellationToken.None);
+        Assert.Equal(2, CountOccurrences(outerRaising.Sql, fence));
+
+        var outerAfterPolicyRec = _engine.Compile(
+            "WITH RECURSIVE w(id) AS (SELECT Id FROM Orders WHERE Id = 1 UNION ALL SELECT o.Id FROM Orders o JOIN w ON o.Id = w.id) SELECT o.Id FROM Orders o JOIN w ON o.Id = w.id".AsMemory(),
+            sqlServerRecursive,
+            CancellationToken.None);
+        Assert.Equal(2, CountOccurrences(outerAfterPolicyRec.Sql, fence));
+
+        // 5. Non-recursive nested CTE shadowing an outer CTE name retains evaluation fences and is not misclassified as recursive.
+        var shadowedNonRecursive = _engine.Compile(
+            "WITH w AS (SELECT Id, Amount FROM Orders) SELECT * FROM (WITH w AS (SELECT o.Id, o.Amount * 2 AS x FROM Orders o JOIN w ON o.Id = w.Id) SELECT id, x FROM w) s".AsMemory(),
+            sqlServerRecursive,
+            CancellationToken.None);
+        Assert.Equal(2, CountOccurrences(shadowedNonRecursive.Sql, fence));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void SqlServer_RecursiveCte_PerCellPolicyInRecursiveMember_SuppressesFenceAndEnforcesStrictAllowlist()
+    {
+        const string fence = "ORDER BY (SELECT NULL) OFFSET 0 ROWS";
+        var request = PerCellRequest(TargetSqlDialect.SqlServer, allowRecursiveCte: true);
+
+        var safe = _engine.Compile(
+            "WITH RECURSIVE w(id, email) AS (SELECT Id, Email FROM Orders WHERE Id = 1 UNION ALL SELECT o.Id, o.Email FROM Orders o JOIN w ON o.Id = w.id) SELECT id, email FROM w".AsMemory(),
+            request,
+            CancellationToken.None);
+        int unionIdx = safe.Sql.IndexOf("UNION ALL", StringComparison.Ordinal);
+        Assert.True(unionIdx > 0, safe.Sql);
+        Assert.Equal(1, CountOccurrences(safe.Sql[..unionIdx], fence));
+        Assert.Equal(0, CountOccurrences(safe.Sql[unionIdx..], fence));
+
+        Assert.Throws<RowPolicyExpressionRejectedException>(() =>
+            _engine.Compile(
+                "WITH RECURSIVE w(id, v) AS (SELECT Id, Amount FROM Orders WHERE Id = 1 UNION ALL SELECT o.Id, o.Amount * 2 FROM Orders o JOIN w ON o.Id = w.id) SELECT id, v FROM w".AsMemory(),
+                request,
+                CancellationToken.None));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void RecursiveCte_RaisingExpressionInRecursiveMember_RejectedOnSqlServer_FencedOnPostgresAndOracle()
+    {
+        const string sql = "WITH RECURSIVE w(id, v) AS (SELECT Id, Amount FROM Orders WHERE Id = 1 UNION ALL SELECT o.Id, o.Amount * 2 FROM Orders o JOIN w ON o.Id = w.id) SELECT id, v FROM w";
+
+        var sqlServerEx = Assert.Throws<RowPolicyExpressionRejectedException>(() =>
+            _engine.Compile(sql.AsMemory(), Request(TargetSqlDialect.SqlServer) with { AllowRecursiveCte = true }, CancellationToken.None));
+        Assert.Equal(GovernedSqlErrorCodes.RowPolicyExpressionNotAllowed, sqlServerEx.Code);
+
+        var pgCompiled = _engine.Compile(sql.AsMemory(), Request(TargetSqlDialect.PostgreSql) with { AllowRecursiveCte = true }, CancellationToken.None);
+        int pgUnion = pgCompiled.Sql.IndexOf("UNION ALL", StringComparison.Ordinal);
+        Assert.True(pgUnion > 0, pgCompiled.Sql);
+        Assert.Equal(1, CountOccurrences(pgCompiled.Sql[..pgUnion], "OFFSET 0"));
+        Assert.Equal(1, CountOccurrences(pgCompiled.Sql[pgUnion..], "OFFSET 0"));
+
+        var oraCompiled = _engine.Compile(sql.AsMemory(), Request(TargetSqlDialect.Oracle) with { AllowRecursiveCte = true }, CancellationToken.None);
+        int oraUnion = oraCompiled.Sql.IndexOf("UNION ALL", StringComparison.Ordinal);
+        Assert.True(oraUnion > 0, oraCompiled.Sql);
+        Assert.Equal(1, CountOccurrences(oraCompiled.Sql[..oraUnion], "AND ROWNUM >= 1"));
+        Assert.Equal(1, CountOccurrences(oraCompiled.Sql[oraUnion..], "AND ROWNUM >= 1"));
+    }
+
+    // Helper types placed after all [Fact]/[Theory] methods so SecurityTestInventoryTests records outer class FQN cleanly.
+    private sealed class StaticPerCellProvider(TableIdentity target, PerCellTablePolicy policy) : IPerCellColumnProvider
+    {
+        public PerCellTablePolicy? GetPolicy(TableIdentity table) => table == target ? policy : null;
+    }
+}

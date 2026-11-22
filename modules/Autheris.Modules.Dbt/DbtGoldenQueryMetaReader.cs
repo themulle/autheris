@@ -17,7 +17,7 @@ internal static class DbtGoldenQueryMetaReader
     {
         if (!TryGetDeclaration(node, out var declaration))
         {
-            return DbtGoldenQueryMeta.Empty;
+            return DbtGoldenQueryMeta.None;
         }
 
         if (declaration.ValueKind == JsonValueKind.Null)
@@ -28,7 +28,7 @@ internal static class DbtGoldenQueryMetaReader
         if (declaration.ValueKind != JsonValueKind.Array)
         {
             warnings.Warn($"Node '{uniqueId}' declared an invalid meta.golden_queries value (GOLDEN_QUERIES_INVALID_SHAPE); the declaration was skipped.");
-            return new DbtGoldenQueryMeta(true, 0, []);
+            return new DbtGoldenQueryMeta(true, 0, [], HasDeclaration: true);
         }
 
         var total = declaration.GetArrayLength();

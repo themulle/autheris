@@ -42,6 +42,11 @@ public sealed partial class DbtMetadataIngestionService
             var tenant = ResolveGoldenQueryTenant(metadata);
             if (tenant is not { } resolved)
             {
+                if (!meta.HasDeclaration)
+                {
+                    continue;
+                }
+
                 warnings.Add($"Table '{dataset}': golden queries skipped (TENANT_UNRESOLVED).");
                 _logger.LogWarning("GOLDEN_QUERIES_SKIPPED: dataset {DatasetId} reason {ReasonCode}", dataset, "TENANT_UNRESOLVED");
                 continue;
