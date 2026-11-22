@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Security;
+using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Compliance;
 using Autheris.Application.ConsentRequests;
@@ -21,7 +22,9 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Authorization;
+using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -415,5 +418,102 @@ public sealed class GatewayPoliciesRoleConsolidationTests
         GatewayPolicies.HasAnyRequestRole(forwardCtx, deniedRoles).ShouldBeFalse();
         GatewayPolicies.HasAnyRole(forwardAuth, ["ClusterAdmin"]).ShouldBeFalse();
         GatewayPolicies.HasAnyRequestRole(forwardCtx, ["ClusterAdmin"]).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task GetDatasources_EndpointPolicy_IsAdminOnly_AndAllowsClusterAdminAndTenantAdmins_WhileDenyingNonAdmins()
+    {
+        var discovery = Substitute.For<ICatalogDiscoveryService>();
+        discovery.ListDatasourcesAsync(Arg.Any<RequestContext>(), Arg.Any<CancellationToken>())
+            .Returns(Array.Empty<CatalogDatasourceSummary>());
+
+        var services = new ServiceCollection();
+        services.AddRouting();
+        services.AddLogging();
+        services.AddProblemDetails();
+        services.AddSingleton(discovery);
+        services.AddSingleton(Options.Create(new GatewayOptions()));
+        services.AddAuthorization(GatewayPolicies.Configure);
+        await using var sp = services.BuildServiceProvider();
+
+        var routes = new TestRouteBuilder(new PermissiveProvider(sp));
+        routes.MapCatalogEndpoints();
+
+        var datasourcesEndpoint = routes.DataSources
+            .SelectMany(d => d.Endpoints)
+            .OfType<RouteEndpoint>()
+            .Single(e => e.RoutePattern.RawText == "/api/v1/catalog/datasources" &&
+                         (e.Metadata.GetMetadata<IHttpMethodMetadata>()?.HttpMethods.Contains(HttpMethods.Get) ?? false));
+
+        var authorizeData = datasourcesEndpoint.Metadata.GetOrderedMetadata<IAuthorizeData>();
+        authorizeData.Select(a => a.Policy).ShouldContain(GatewayPolicies.AdminOnly);
+        authorizeData.Select(a => a.Policy).ShouldNotContain(GatewayPolicies.GovernanceAdmin);
+
+        var authz = sp.GetRequiredService<IAuthorizationService>();
+        var clusterAdmin = Principal(scheme: "Bearer", tenantId: "tenant-a", roles: "ClusterAdmin");
+        var govAdmin = Principal(scheme: "Bearer", tenantId: "tenant-a", roles: "GovernanceAdmin");
+        var tenantAdmin = Principal(scheme: "Bearer", tenantId: "tenant-a", roles: "TenantAdmin");
+        var consumer = Principal(scheme: "Bearer", tenantId: "tenant-a", roles: "Consumer");
+        var auditor = Principal(scheme: "Bearer", tenantId: "tenant-a", roles: "SecurityAuditor");
+        var forwardClusterAdmin = Principal(scheme: ClusterAdminPolicy.ForwardAuthScheme, tenantId: "tenant-a", roles: "ClusterAdmin");
+
+        (await authz.AuthorizeAsync(clusterAdmin, HttpContextWithPrincipal(clusterAdmin, "tenant-a"), GatewayPolicies.AdminOnly)).Succeeded.ShouldBeTrue();
+        (await authz.AuthorizeAsync(govAdmin, HttpContextWithPrincipal(govAdmin, "tenant-a"), GatewayPolicies.AdminOnly)).Succeeded.ShouldBeTrue();
+        (await authz.AuthorizeAsync(tenantAdmin, HttpContextWithPrincipal(tenantAdmin, "tenant-a"), GatewayPolicies.AdminOnly)).Succeeded.ShouldBeTrue();
+        (await authz.AuthorizeAsync(consumer, HttpContextWithPrincipal(consumer, "tenant-a"), GatewayPolicies.AdminOnly)).Succeeded.ShouldBeFalse();
+        (await authz.AuthorizeAsync(auditor, HttpContextWithPrincipal(auditor, "tenant-a"), GatewayPolicies.AdminOnly)).Succeeded.ShouldBeFalse();
+        (await authz.AuthorizeAsync(forwardClusterAdmin, HttpContextWithPrincipal(forwardClusterAdmin, "tenant-a"), GatewayPolicies.AdminOnly)).Succeeded.ShouldBeFalse();
+
+        // Execute the endpoint delegate directly for scope-none callers (tenantless TenantAdmin, tenantless GovernanceAdmin, invalid tenant)
+        // and valid GovernanceAdmin / tenantless ClusterAdmin callers.
+        DefaultHttpContext BuildEndpointContext(ClaimsPrincipal user)
+        {
+            var ctx = new DefaultHttpContext
+            {
+                User = user,
+                RequestServices = sp
+            };
+            ctx.Response.Body = new System.IO.MemoryStream();
+            return ctx;
+        }
+
+        var tenantlessTenantAdminCtx = BuildEndpointContext(Principal(scheme: "Bearer", tenantId: null, roles: "TenantAdmin"));
+        await datasourcesEndpoint.RequestDelegate!(tenantlessTenantAdminCtx);
+        tenantlessTenantAdminCtx.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+
+        var tenantlessGovAdminCtx = BuildEndpointContext(Principal(scheme: "Bearer", tenantId: null, roles: "GovernanceAdmin"));
+        await datasourcesEndpoint.RequestDelegate!(tenantlessGovAdminCtx);
+        tenantlessGovAdminCtx.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+
+        var invalidTenantAdminCtx = BuildEndpointContext(Principal(scheme: "Bearer", tenantId: "evil<script>tenant", roles: "TenantAdmin"));
+        await datasourcesEndpoint.RequestDelegate!(invalidTenantAdminCtx);
+        invalidTenantAdminCtx.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+
+        var validGovAdminCtx = BuildEndpointContext(govAdmin);
+        await datasourcesEndpoint.RequestDelegate!(validGovAdminCtx);
+        validGovAdminCtx.Response.StatusCode.ShouldBe(StatusCodes.Status200OK);
+
+        var tenantlessClusterAdminCtx = BuildEndpointContext(Principal(scheme: "Bearer", tenantId: null, roles: "ClusterAdmin"));
+        await datasourcesEndpoint.RequestDelegate!(tenantlessClusterAdminCtx);
+        tenantlessClusterAdminCtx.Response.StatusCode.ShouldBe(StatusCodes.Status200OK);
+    }
+
+    private sealed class PermissiveProvider(IServiceProvider inner) : IServiceProvider, IServiceProviderIsService
+    {
+        public object? GetService(Type serviceType) =>
+            serviceType == typeof(IServiceProviderIsService) ? this : inner.GetService(serviceType);
+
+        public bool IsService(Type serviceType) => serviceType.IsInterface || inner.GetService(serviceType) != null;
+
+        public bool IsKeyedService(Type serviceType, object? serviceKey) => false;
+    }
+
+    private sealed class TestRouteBuilder(IServiceProvider serviceProvider) : IEndpointRouteBuilder
+    {
+        public IServiceProvider ServiceProvider { get; } = serviceProvider;
+
+        public ICollection<EndpointDataSource> DataSources { get; } = [];
+
+        public IApplicationBuilder CreateApplicationBuilder() => new ApplicationBuilder(ServiceProvider);
     }
 }

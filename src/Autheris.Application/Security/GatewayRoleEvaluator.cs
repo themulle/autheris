@@ -192,6 +192,19 @@ public sealed class GatewayRoleEvaluator(IIdentityRealmRegistry? realmRegistry =
             return new HashSet<GatewayRole>();
         }
 
+        var claim = Autheris.Domain.Tenancy.TenantClaimReader.Read(principal);
+        if (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Invalid)
+        {
+            return new HashSet<GatewayRole>();
+        }
+
+        string? explicitTenant = string.IsNullOrWhiteSpace(tenantId) ? null : tenantId.Trim();
+        bool hasClaimTenant = claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid;
+        bool foreignTenantMismatch = hasClaimTenant &&
+                                     explicitTenant is not null &&
+                                     !string.Equals(claim.Tenant.Value, explicitTenant, StringComparison.OrdinalIgnoreCase);
+        string? effectiveTenant = explicitTenant ?? (hasClaimTenant ? claim.Tenant.Value : null);
+
         var result = new HashSet<GatewayRole>();
         var rawRoles = principal.GetUserRoles();
         bool isForwardAuth = IsForwardAuthPrincipal(principal);
@@ -213,23 +226,17 @@ public sealed class GatewayRoleEvaluator(IIdentityRealmRegistry? realmRegistry =
                     continue;
                 }
 
-                // Security Guard: Tenant-scoped roles only apply when evaluating within that specific tenant.
-                // They never satisfy a global (tenantId == null) authorization check unless the role is wildcard (*).
-                if (string.IsNullOrEmpty(tenantId) ||
-                    (!string.Equals(roleTenant, tenantId, StringComparison.OrdinalIgnoreCase) && roleTenant != "*"))
+                // ClusterAdmin is strictly a global platform role and can never be granted via a tenant prefix.
+                if (parsedRole == GatewayRole.ClusterAdmin)
                 {
                     continue;
                 }
 
-                // Security Guard: ClusterAdmin and GovernanceAdmin are strictly global platform roles.
-                // They can never be granted via a tenant-scoped prefix (e.g. "tenant-1:ClusterAdmin").
-                if (parsedRole is GatewayRole.ClusterAdmin or GatewayRole.GovernanceAdmin)
-                {
-                    continue;
-                }
-
-                // Data product roles are bound to one named tenant; the wildcard tenant never confers them.
-                if (parsedRole.IsTenantScopedOnly() && roleTenant == "*")
+                // Tenant-scoped-only and tenant-bound admin roles never match the wildcard '*' tenant.
+                bool allowsWildcard = !parsedRole.IsTenantScopedOnly() && !IsTenantBoundAdminRole(parsedRole);
+                if (foreignTenantMismatch ||
+                    string.IsNullOrEmpty(effectiveTenant) ||
+                    (!string.Equals(roleTenant, effectiveTenant, StringComparison.OrdinalIgnoreCase) && (!allowsWildcard || roleTenant != "*")))
                 {
                     continue;
                 }
@@ -253,13 +260,37 @@ public sealed class GatewayRoleEvaluator(IIdentityRealmRegistry? realmRegistry =
                     continue;
                 }
 
-                // Global role (applies across all tenants)
+                if (globalRole == GatewayRole.ClusterAdmin)
+                {
+                    result.Add(globalRole);
+                    continue;
+                }
+
+                if (foreignTenantMismatch)
+                {
+                    continue;
+                }
+
+                if (IsTenantBoundAdminRole(globalRole))
+                {
+                    // Unprefixed GovernanceAdmin / TenantAdmin require a valid matching tenant claim.
+                    if (!hasClaimTenant ||
+                        string.IsNullOrEmpty(effectiveTenant) ||
+                        !string.Equals(claim.Tenant.Value, effectiveTenant, StringComparison.OrdinalIgnoreCase))
+                    {
+                        continue;
+                    }
+                }
+
                 result.Add(globalRole);
             }
         }
 
         return result;
     }
+
+    private static bool IsTenantBoundAdminRole(GatewayRole role) =>
+        role is GatewayRole.GovernanceAdmin or GatewayRole.TenantAdmin;
 
     /// <summary>
     /// Evaluates whether the principal holds <paramref name="roleName"/> unprefixed or scoped to the
@@ -335,7 +366,8 @@ public sealed class GatewayRoleEvaluator(IIdentityRealmRegistry? realmRegistry =
 
             if (!trimmed.Contains(':', StringComparison.Ordinal))
             {
-                if (string.Equals(trimmed, roleName, StringComparison.OrdinalIgnoreCase))
+                if ((claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid || string.IsNullOrWhiteSpace(tenantId)) &&
+                    string.Equals(trimmed, roleName, StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }

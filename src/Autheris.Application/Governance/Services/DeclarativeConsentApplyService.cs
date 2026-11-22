@@ -858,11 +858,6 @@ public sealed class DeclarativeConsentApplyService(
             throw new ConsentApplyForbiddenException();
         }
 
-        if (!_roleEvaluator.HasAnyRole(caller, RequiredApplyRoles))
-        {
-            throw new ConsentApplyForbiddenException();
-        }
-
         var isCanonicalClusterAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(caller);
         try
         {
@@ -873,6 +868,11 @@ public sealed class DeclarativeConsentApplyService(
             tenantId = TenantId.Platform;
         }
         catch (GatewaySecurityException)
+        {
+            throw new ConsentApplyForbiddenException();
+        }
+
+        if (!_roleEvaluator.HasAnyRole(caller, RequiredApplyRoles, tenantId.Value))
         {
             throw new ConsentApplyForbiddenException();
         }

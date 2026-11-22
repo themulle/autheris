@@ -370,4 +370,87 @@ public sealed class DeclarativeConsentApplyAuthorizationTests
         tables.LookupCalls.ShouldBe(0);
         consents.ReplaceCalls.ShouldBe(0);
     }
+
+    [Fact]
+    public async Task Apply_TenantPrefixedGovernanceAdminWithMatchingClaim_IsAccepted()
+    {
+        var (svc, _, consents) = CreateSut();
+
+        var result = await svc.ApplyManifestAsync(Admin($"{CallerTenant}:GovernanceAdmin", CallerTenant), SinglePolicyManifest());
+
+        result.Applied.ShouldBe(1);
+        var created = consents.Active(DateTimeOffset.UtcNow).ShouldHaveSingleItem();
+        created.TenantId.Value.ShouldBe(CallerTenant);
+    }
+
+    [Fact]
+    public async Task Apply_TenantPrefixedGovernanceAdminWithMismatchedClaim_IsRejected()
+    {
+        var (svc, tables, consents) = CreateSut();
+
+        await Should.ThrowAsync<ConsentApplyForbiddenException>(() =>
+            svc.ApplyManifestAsync(Admin($"{OtherTenant}:GovernanceAdmin", CallerTenant), SinglePolicyManifest()));
+
+        tables.LookupCalls.ShouldBe(0);
+        consents.ReplaceCalls.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Apply_WildcardGovernanceAdmin_IsRejected()
+    {
+        var (svc, tables, consents) = CreateSut();
+
+        await Should.ThrowAsync<ConsentApplyForbiddenException>(() =>
+            svc.ApplyManifestAsync(Admin("*:GovernanceAdmin", CallerTenant), SinglePolicyManifest()));
+
+        tables.LookupCalls.ShouldBe(0);
+        consents.ReplaceCalls.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Apply_InvalidTenantClaim_EvenWithClusterAdmin_IsRejected()
+    {
+        var (svc, tables, consents) = CreateSut();
+
+        await Should.ThrowAsync<ConsentApplyForbiddenException>(() =>
+            svc.ApplyManifestAsync(Admin("ClusterAdmin", "evil<script>tenant"), SinglePolicyManifest()));
+
+        tables.LookupCalls.ShouldBe(0);
+        consents.ReplaceCalls.ShouldBe(0);
+    }
+
+#if AUTHERIS_TEST_AUTH
+    [Fact]
+    public async Task Apply_TestAuthPipelineGovernanceAdmin_WithDiRealmRegistry_IsAccepted()
+    {
+        var registry = new Autheris.Application.Identity.IdentityRealmRegistry();
+        var options = Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions());
+        var pipeline = new Autheris.Api.Security.IdentityPipeline(
+            registry,
+            new Autheris.Application.Identity.GroupSidResolver(null, [], options),
+            options: options);
+
+        var raw = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.PrimarySid, ActorSid),
+            new Claim(ClaimTypes.Role, "GovernanceAdmin"),
+            new Claim("tenant_id", CallerTenant)
+        ], Autheris.Api.Security.TestAuthHandler.SchemeName));
+
+        var processed = await pipeline.ProcessAsync(raw, Autheris.Api.Security.TestAuthHandler.SchemeName, null, CancellationToken.None);
+
+        var tables = new CountingTableMetadataRepository();
+        var consents = new FakeConsentRepository();
+        var svc = new DeclarativeConsentApplyService(
+            tables,
+            consents,
+            new NullAuditLogRepository(),
+            roleEvaluator: new GatewayRoleEvaluator(registry));
+
+        var result = await svc.ApplyManifestAsync(processed, SinglePolicyManifest());
+
+        result.Applied.ShouldBe(1);
+        consents.ReplaceCalls.ShouldBe(1);
+    }
+#endif
 }

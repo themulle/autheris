@@ -142,6 +142,12 @@ public static class GatewayPolicies
             return true;
         }
 
+        if (GatewayRole.TenantAdmin.Implies(role) &&
+            GatewayRoleEvaluator.HasTenantBoundRole(principal, nameof(GatewayRole.TenantAdmin), effectiveTenant))
+        {
+            return true;
+        }
+
         return HasEffectiveGatewayRole(principal, role, effectiveTenant);
     }
 
@@ -581,6 +587,11 @@ public static class GatewayPolicies
         foreach (var required in gatewayRoles)
         {
             if (GatewayRole.GovernanceAdmin.Implies(required) && AllowsGovernanceAdmin(ctx))
+            {
+                return true;
+            }
+
+            if (GatewayRole.TenantAdmin.Implies(required) && HasTenantBoundRole(ctx, nameof(GatewayRole.TenantAdmin)))
             {
                 return true;
             }

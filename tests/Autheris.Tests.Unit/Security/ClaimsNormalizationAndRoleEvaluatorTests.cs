@@ -155,7 +155,7 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
     [Fact]
     public void Evaluator_TenantScopedRole_CannotEscalateToClusterAdminOrGovernanceAdmin()
     {
-        // Malicious or misconfigured token claiming "tenant-x:ClusterAdmin" or "tenant-x:GovernanceAdmin"
+        // Tenant-prefixed ClusterAdmin can never escalate anywhere; tenant-prefixed GovernanceAdmin is bound to that tenant only.
         var identity = new ClaimsIdentity([
             new Claim(ClaimTypes.Role, "tenant-x:ClusterAdmin"),
             new Claim(ClaimTypes.Role, "tenant-x:GovernanceAdmin")
@@ -164,7 +164,8 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
 
         _evaluator.HasRole(user, GatewayRole.ClusterAdmin, "tenant-x").ShouldBeFalse();
         _evaluator.HasRole(user, GatewayRole.ClusterAdmin, null).ShouldBeFalse();
-        _evaluator.HasRole(user, GatewayRole.GovernanceAdmin, "tenant-x").ShouldBeFalse();
+        _evaluator.HasRole(user, GatewayRole.GovernanceAdmin, "tenant-x").ShouldBeTrue();
+        _evaluator.HasRole(user, GatewayRole.GovernanceAdmin, "tenant-y").ShouldBeFalse();
         _evaluator.HasRole(user, GatewayRole.GovernanceAdmin, null).ShouldBeFalse();
     }
 

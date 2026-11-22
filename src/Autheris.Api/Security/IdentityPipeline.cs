@@ -189,7 +189,7 @@ public sealed class IdentityPipeline : IIdentityPipeline
 
         // DT-A-3 / DT-SC-05 / CRIT-01: the one tenant decision of the ingress.
         var resolution = TenantStamping.Apply(identity, _tenantResolver, realm != null && !tenantByClaims);
-        if (realm == null || tenantByClaims)
+        if (realm == null && !tenantByClaims)
         {
             identity.AddClaim(new Claim("autheris:realm", realmId));
         }
