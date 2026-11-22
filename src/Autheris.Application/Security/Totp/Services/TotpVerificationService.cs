@@ -130,7 +130,7 @@ public sealed class TotpVerificationService : ITotpVerificationService
         // In-process: check and mark under one lock.
         lock (_replayLock)
         {
-            PurgeExpiredLocalReplay();
+            PurgeExpiredLocalReplay(now);
             if (_localConsumed.TryGetValue(replayKey, out var expiry) && now < expiry)
             {
                 return false;
@@ -335,9 +335,8 @@ public sealed class TotpVerificationService : ITotpVerificationService
             Encoding.UTF8.GetBytes(b));
     }
 
-    private void PurgeExpiredLocalReplay()
+    private void PurgeExpiredLocalReplay(DateTimeOffset now)
     {
-        var now = DateTimeOffset.UtcNow;
         foreach (var kvp in _localConsumed)
         {
             if (now >= kvp.Value)

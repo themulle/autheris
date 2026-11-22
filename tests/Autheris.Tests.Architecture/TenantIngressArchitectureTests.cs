@@ -29,8 +29,7 @@ public sealed class TenantIngressArchitectureTests
         ["src/Autheris.Application/Services/GatewayExecutionService.cs"] = 1,           // dev anonymous: default tenant or unresolved
         ["src/Autheris.Application/Sql/Tree/GovernedTreeQueryService.cs"] = 1,          // empty fallback: unresolved
         ["src/Autheris.Domain/Model/CatalogApiModels.cs"] = 2,                          // empty principal: unresolved
-        ["src/Autheris.GraphQL/Mcp/GatewayMcpQueryExecutor.cs"] = 1,                    // MCP session tenant
-        ["src/Autheris.GraphQL/Security/GraphQlCallerPrincipal.cs"] = 2,                  // empty fallback: unresolved (consolidated GraphQL caller helper)
+        ["src/Autheris.GraphQL/Security/GraphQlCallerPrincipal.cs"] = 3,                  // consolidated GraphQL & MCP caller helper (empty fallback + strip + MCP session)
     };
 
     [Fact]
