@@ -125,6 +125,9 @@ public sealed class GovernanceNotificationDispatcherTests
             Task.FromResult(new AccessPolicyWriteResult(
                 AccessPolicyWriteStatus.Created,
                 new StoredTenantAccessPolicy(tenant, settings, 1, actor.Value, Now)));
+
+        public Task<bool> DeleteIfVersionAsync(TenantId tenant, int expectedVersion, CancellationToken ct = default) =>
+            Task.FromResult(false);
     }
 
     private sealed class EchoTestProtector : INotificationWebhookUrlProtector
