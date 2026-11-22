@@ -395,7 +395,7 @@ public class InfrastructureTests : IDisposable
         created.ShouldNotBeNull();
 
         var loadedList = await _repository.GetActiveConsentsForSubjectsAsync(
-            new[] { userSid }, targetTable, DateTimeOffset.UtcNow);
+            new[] { userSid }, targetTable, DateTimeOffset.UtcNow, Autheris.Tests.Common.TestTenants.Default);
 
         var loaded = loadedList.FirstOrDefault(c => c.Id == consent.Id);
         loaded.ShouldNotBeNull();
@@ -501,7 +501,7 @@ public class InfrastructureTests : IDisposable
         });
 
         // Act: Query using querySid with different casing
-        var activeConsents = await _repository.GetActiveConsentsForSubjectsAsync(new[] { querySid }, table, DateTimeOffset.UtcNow);
+        var activeConsents = await _repository.GetActiveConsentsForSubjectsAsync(new[] { querySid }, table, DateTimeOffset.UtcNow, Autheris.Tests.Common.TestTenants.Default);
 
         // Assert: Must resolve the consent case-insensitively
         activeConsents.Count.ShouldBe(1);

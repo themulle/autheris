@@ -743,9 +743,6 @@ public sealed class EffectiveAccessReportTests
 
     private sealed class FakeConsentRepo(IReadOnlyList<Consent> consents) : IConsentRepository
     {
-        public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default) =>
-            GetActiveConsentsForSubjectsAsync(subjects, table, atTime, tenantId: null, ct);
-
         public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default)
         {
             var set = subjects.ToHashSet();
@@ -755,9 +752,6 @@ public sealed class EffectiveAccessReportTests
                 ConsentResolutionService.IsTableTargetMatch(c, table) &&
                 c.GranteeSid is { } gs && set.Contains(gs)).ToList());
         }
-
-        public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles = null, DateTimeOffset? atTime = null, CancellationToken ct = default) =>
-            GetAllActiveConsentsForSubjectsAsync(subjects, roles, atTime, tenantId: null, ct);
 
         public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default)
         {

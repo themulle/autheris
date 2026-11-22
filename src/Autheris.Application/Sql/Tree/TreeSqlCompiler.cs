@@ -39,7 +39,7 @@ public static partial class TreeSqlCompiler
     public static bool SupportsTreeCompile(DatabaseDialect dialect) =>
         dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql;
 
-    [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
+    [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_]{0,127}\z")]
     private static partial Regex SafeNameRegex();
 
     public static CompiledTreeQuery Compile(
@@ -851,13 +851,26 @@ public static partial class TreeSqlCompiler
     private static string SqlServerSelectList(NodePlan plan, CompileContext context) =>
         string.Join(", ", ObjectPairs(plan, context).Select(p => $"{p.Expression} AS {Q(context, p.Key)}"));
 
-    private static string PostgresObject(NodePlan plan, CompileContext context)
+    private static string PostgresObject(NodePlan plan, CompileContext context) =>
+        BuildPostgresObject(ObjectPairs(plan, context), context);
+
+    private static string BuildPostgresObject(IEnumerable<(string Key, string Expression)> pairs, CompileContext context)
     {
-        var chunks = ObjectPairs(plan, context)
+        var chunks = pairs
             .Chunk(ObjectChunkSize)
-            .Select(chunk => "jsonb_build_object(" + string.Join(", ", chunk.Select(p => $"'{p.Key}', {p.Expression}")) + ")")
+            .Select(chunk => "jsonb_build_object(" + string.Join(", ", chunk.Select(p => $"'{FormatPostgresJsonKey(p.Key, context.Dialect)}', {p.Expression}")) + ")")
             .ToList();
         return chunks.Count == 0 ? "'{}'::jsonb" : string.Join(" || ", chunks);
+    }
+
+    private static string FormatPostgresJsonKey(string key, DatabaseDialect dialect)
+    {
+        if (string.IsNullOrEmpty(key) || !SafeNameRegex().IsMatch(key))
+        {
+            throw new GatewayInvalidQueryException("Invalid property name.");
+        }
+
+        return dialect.EscapeSqlLiteral(key);
     }
 
     // ---------------------------------------------------------------- filters

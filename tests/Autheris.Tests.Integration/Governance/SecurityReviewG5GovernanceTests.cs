@@ -87,7 +87,7 @@ public sealed class SecurityReviewG5GovernanceTests
             await repo.ActivateConsentAsync(request.Id, new Sid("ITSM_SERVICENOW:inst"));
 
             (await repo.GetConsentRequestAsync(request.Id))!.Status.ShouldBe("PENDING_EXTERNAL_APPROVAL");
-            (await repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-G5")], request.TableIdentifier, DateTimeOffset.UtcNow))
+            (await repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-G5")], request.TableIdentifier, DateTimeOffset.UtcNow, request.TenantId))
                 .ShouldBeEmpty();
         }
     }

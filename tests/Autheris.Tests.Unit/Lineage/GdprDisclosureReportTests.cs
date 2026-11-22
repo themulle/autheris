@@ -23,6 +23,13 @@ public sealed class GdprDisclosureReportTests
     private static readonly TableIdentifier Salary = new("finance", "dbo", "salary");
     private static readonly Sid Employee = new("S-1-5-21-employee-42");
     private static readonly Sid HrAnalyst = new("S-1-5-21-hr-analyst");
+    private static readonly CallerSecurityContext PrivacyAdminContext = new(
+        new Sid("S-1-5-21-privacy-admin"),
+        [],
+        ["PrivacyAdmin"],
+        Autheris.Tests.Common.TestTenants.Default,
+        IsGovernanceAdmin: false,
+        IsClusterAdmin: false);
 
     private static AuditLogEntry Read(Sid actor, string decision = "ALLOW") => new()
     {
@@ -53,7 +60,7 @@ public sealed class GdprDisclosureReportTests
     {
         var (sut, audit) = Create([Read(HrAnalyst)]);
 
-        await sut.GetGdprDataDisclosureReportAsync(Salary, Employee, 365, null, CancellationToken.None);
+        await sut.GetGdprDataDisclosureReportAsync(Salary, Employee, 365, PrivacyAdminContext, CancellationToken.None);
 
         await audit.Received(1).QueryAuditLogsAsync(
             Arg.Any<string?>(), Arg.Is<Sid?>(s => s == null), Arg.Any<DateTimeOffset?>(), Arg.Any<int>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>());
@@ -65,7 +72,7 @@ public sealed class GdprDisclosureReportTests
     {
         var (sut, _) = Create([Read(Employee), Read(HrAnalyst)]);
 
-        var report = await sut.GetGdprDataDisclosureReportAsync(Salary, Employee, 365, null, CancellationToken.None);
+        var report = await sut.GetGdprDataDisclosureReportAsync(Salary, Employee, 365, PrivacyAdminContext, CancellationToken.None);
 
         report.DisclosedRecipients.ShouldNotContain(r => r.RecipientSid == Employee.Value);
     }
@@ -76,7 +83,7 @@ public sealed class GdprDisclosureReportTests
     {
         var (sut, _) = Create([Read(HrAnalyst), Read(HrAnalyst), Read(Employee)]);
 
-        var report = await sut.GetGdprDataDisclosureReportAsync(Salary, Employee, 365, null, CancellationToken.None);
+        var report = await sut.GetGdprDataDisclosureReportAsync(Salary, Employee, 365, PrivacyAdminContext, CancellationToken.None);
 
         var recipient = report.DisclosedRecipients.ShouldHaveSingleItem();
         recipient.RecipientSid.ShouldBe(HrAnalyst.Value);
@@ -91,7 +98,7 @@ public sealed class GdprDisclosureReportTests
     {
         var (sut, _) = Create([Read(HrAnalyst), Read(HrAnalyst), Read(HrAnalyst)], cap: 2);
 
-        var report = await sut.GetGdprDataDisclosureReportAsync(Salary, Employee, 365, null, CancellationToken.None);
+        var report = await sut.GetGdprDataDisclosureReportAsync(Salary, Employee, 365, PrivacyAdminContext, CancellationToken.None);
 
         report.IsComplete.ShouldBeFalse();
         report.IncompletenessReasons.ShouldNotBeNull();
@@ -106,7 +113,7 @@ public sealed class GdprDisclosureReportTests
         var (sut, audit) = Create([Read(HrAnalyst)]);
 
         await Should.ThrowAsync<GdprSubjectScopeUnresolvedException>(
-            () => sut.GetGdprDataDisclosureReportAsync(null, Employee, 365, null, CancellationToken.None));
+            () => sut.GetGdprDataDisclosureReportAsync(null, Employee, 365, PrivacyAdminContext, CancellationToken.None));
 
         await audit.DidNotReceiveWithAnyArgs().QueryAuditLogsAsync(default, default, default, default, default, default);
     }

@@ -36,9 +36,6 @@ public sealed class InMemoryConsentRepository : IConsentRepository
         c.GranteeSid is { } g && sids.Contains(g) && (tenantId is null || c.TenantId == tenantId.Value) &&
         (c.IsActive(at) || (c.Effect == ConsentEffect.Deny && c.ValidFrom > at));
 
-    public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default)
-        => GetActiveConsentsForSubjectsCore(subjects, table, atTime, null);
-
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default)
     {
         // As the SQL repository: the tenant overloads require a tenant.
@@ -53,9 +50,6 @@ public sealed class InMemoryConsentRepository : IConsentRepository
             .Where(c => (c.IsPatternGrant || c.TableIdentifier == table) && IsSubjectConsent(c, sids, tenantId, atTime))
             .ToList());
     }
-
-    public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles = null, DateTimeOffset? atTime = null, CancellationToken ct = default)
-        => GetAllActiveConsentsForSubjectsCore(subjects, atTime, null);
 
     public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default)
     {

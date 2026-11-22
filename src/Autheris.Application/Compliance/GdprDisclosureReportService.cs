@@ -68,6 +68,11 @@ public sealed class GdprDisclosureReportService : IGdprDisclosureReportService
         var sw = Stopwatch.StartNew();
         using var activity = GatewayDiagnostics.Source.StartActivity("Lineage.GetGdprDisclosureReport");
 
+        if (callerContext is null)
+        {
+            throw new UnauthorizedAccessException("Caller security context is required.");
+        }
+
         // MISC-11: the audit log carries no data-subject keys, so "who read rows about the subject" cannot be answered from it. The report is
         // honest table-level evidence: the readers of the table that holds the subject's data. Without a table the scope is unresolved.
         if (!table.HasValue)
@@ -76,10 +81,9 @@ public sealed class GdprDisclosureReportService : IGdprDisclosureReportService
         }
 
         // GHSA-qx32-576x-5cq2: analysis standing
-        bool isAuthorized = callerContext == null ||
-            await IsAuthorizedForAccessAnalysisAsync(table.Value, callerContext, ct).ConfigureAwait(false);
+        bool isAuthorized = await IsAuthorizedForAccessAnalysisAsync(table.Value, callerContext, ct).ConfigureAwait(false);
 
-        if (callerContext != null && !isAuthorized)
+        if (!isAuthorized)
         {
             if (!subjectSid.HasValue || !subjectSid.Value.Equals(callerContext.UserSid))
             {
@@ -101,7 +105,7 @@ public sealed class GdprDisclosureReportService : IGdprDisclosureReportService
                 actorSid: null,
                 since: since,
                 limit: _maxGdprAuditEvents + 1,
-                tenantId: callerContext?.TenantId,
+                tenantId: callerContext.TenantId,
                 ct: ct).ConfigureAwait(false);
             if (auditLogs.Count > _maxGdprAuditEvents)
             {
@@ -118,7 +122,7 @@ public sealed class GdprDisclosureReportService : IGdprDisclosureReportService
         var allowedQuery = auditLogs
             .Where(a => string.Equals(a.Decision, "ALLOW", StringComparison.OrdinalIgnoreCase));
 
-        if (callerContext != null && !isAuthorized)
+        if (!isAuthorized)
         {
             // GHSA-qx32-576x-5cq2: actor visibility
             allowedQuery = allowedQuery.Where(a => string.Equals(a.ActorSid.Value, callerContext.UserSid.Value, StringComparison.OrdinalIgnoreCase));

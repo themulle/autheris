@@ -207,7 +207,9 @@ public static class HitLEndpoints
 
         var ticket = await hitlService.GetTicketAsync(approvalId, context.RequestAborted);
         if (ticket == null ||
-            (!approver.IsCrossTenantAdmin && !string.Equals(ticket.TenantId, approver.TenantId, StringComparison.OrdinalIgnoreCase)))
+            (!approver.IsCrossTenantAdmin &&
+             (string.IsNullOrWhiteSpace(approver.TenantId) ||
+              !string.Equals(ticket.TenantId, approver.TenantId, StringComparison.OrdinalIgnoreCase))))
         {
             // MCP-12: fail closed. A missing ticket (unknown, foreign tenant or a transient cluster-state error) must never
             // skip the ownership check; unknown and foreign tickets share one answer (no existence oracle).

@@ -192,7 +192,7 @@ public sealed class ObjectPattern
                     return false;
                 }
 
-                regexText = "^(?:" + inner + ")$";
+                regexText = @"\A(?:" + inner + @")\z";
             }
             else if (text.IndexOfAny(['*', '?']) < 0)
             {
@@ -202,7 +202,7 @@ public sealed class ObjectPattern
             }
             else
             {
-                var sb = new StringBuilder("^");
+                var sb = new StringBuilder(@"\A");
                 foreach (char c in text)
                 {
                     sb.Append(c switch
@@ -213,14 +213,14 @@ public sealed class ObjectPattern
                     });
                 }
 
-                regexText = sb.Append('$').ToString();
+                regexText = sb.Append(@"\z").ToString();
             }
 
             try
             {
                 var regex = new Regex(
                     regexText,
-                    RegexOptions.NonBacktracking | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Singleline,
+                    RegexOptions.NonBacktracking | RegexOptions.IgnoreCase | RegexOptions.CultureInvariant,
                     MatchTimeout);
                 segment = new Segment(null, regex);
                 error = string.Empty;

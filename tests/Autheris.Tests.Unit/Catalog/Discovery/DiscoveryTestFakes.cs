@@ -215,8 +215,6 @@ internal sealed class FakeDiscoveryConsentRepository : IConsentRepository
         return Task.FromResult(RecentlyExpired);
     }
 
-    public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default) => GetActiveConsentsForSubjectsAsync(subjects, table, atTime, null, ct);
-
     /// <summary>As the SQL repository: the subjects' consents on <paramref name="table"/> plus their pattern consents (the policy narrows them).</summary>
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default)
     {
@@ -229,7 +227,6 @@ internal sealed class FakeDiscoveryConsentRepository : IConsentRepository
     public List<Consent> Active { get; } = [];
     public int AllActiveReads { get; private set; }
 
-    public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles = null, DateTimeOffset? atTime = null, CancellationToken ct = default) => GetAllActiveConsentsForSubjectsAsync(subjects, roles, atTime, null, ct);
     public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default)
     {
         AllActiveReads++;

@@ -199,7 +199,7 @@ public sealed class PostgreSqlGovernanceConcurrencyTests : IDisposable
         // A separate connection (not the one that revoked) sees the committed revocation immediately.
         Scalar("SELECT is_revoked FROM CONSENTS WHERE id = @id", ("@id", consent.Id.ToString())).ShouldBe(1);
         (await _repository.GetConsentByIdAsync(consent.Id))!.IsRevoked.ShouldBeTrue();
-        (await _repository.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-REVOKE-VISIBLE")], meta.Identifier, now)).ShouldBeEmpty();
+        (await _repository.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-REVOKE-VISIBLE")], meta.Identifier, now, Autheris.Tests.Common.TestTenants.Default)).ShouldBeEmpty();
     }
 
     [Fact]

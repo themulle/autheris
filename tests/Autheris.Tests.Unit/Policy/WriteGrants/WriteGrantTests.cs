@@ -510,10 +510,6 @@ public sealed class WriteGrantTests
                 .ToList();
             return Task.FromResult(hits);
         }
-        public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default) =>
-            GetActiveConsentsForSubjectsAsync(subjects, table, atTime, null, ct);
-        public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles = null, DateTimeOffset? atTime = null, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<Consent>>(consents);
         public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<Consent>>(consents);
         public Task<Consent> CreateConsentAsync(Consent consent, CancellationToken ct = default) => Task.FromResult(consent);

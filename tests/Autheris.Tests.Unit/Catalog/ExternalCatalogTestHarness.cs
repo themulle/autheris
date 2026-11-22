@@ -541,9 +541,6 @@ internal sealed class InMemoryExternalConsentRepository : IConsentRepository, IC
                 : new HashSet<TableIdentifier>());
     }
 
-    public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default)
-        => GetActiveConsentsForSubjectsAsync(subjects, table, atTime, null, ct);
-
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(
         IEnumerable<Sid> subjects,
         TableIdentifier table,
@@ -562,9 +559,6 @@ internal sealed class InMemoryExternalConsentRepository : IConsentRepository, IC
             .ToList();
         return Task.FromResult<IReadOnlyList<Consent>>(list);
     }
-
-    public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles = null, DateTimeOffset? atTime = null, CancellationToken ct = default)
-        => GetAllActiveConsentsForSubjectsAsync(subjects, roles, atTime, null, ct);
 
     public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(
         IEnumerable<Sid> subjects,

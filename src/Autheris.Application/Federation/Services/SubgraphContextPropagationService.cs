@@ -4,6 +4,8 @@ using System;
 using System.Diagnostics;
 using System.Net.Http;
 using System.Security.Claims;
+using System.Threading;
+using System.Threading.Tasks;
 using Autheris.Application.Federation.Interfaces;
 using Autheris.Application.Services;
 using Autheris.Domain.Common;
@@ -29,11 +31,12 @@ public sealed class SubgraphContextPropagationService : ISubgraphContextPropagat
         _environment = environment;
     }
 
-    public void ApplySecurityHeaders(
+    public async Task ApplySecurityHeadersAsync(
         HttpRequestMessage request,
         string subgraphName,
         ClaimsPrincipal? principal,
-        string? tenantId)
+        string? tenantId,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
 
@@ -92,10 +95,10 @@ public sealed class SubgraphContextPropagationService : ISubgraphContextPropagat
         request.Headers.Remove("X-Correlation-ID");
         request.Headers.TryAddWithoutValidation("X-Correlation-ID", correlationId);
 
-        // 6. Sign Zero-Trust Context Headers with HMAC-SHA256 (1.10 / SG-21)
+        // 6. Sign Zero-Trust Context Headers with HMAC-SHA256
         if (fedOptions.SignContextHeaders)
         {
-            var isDevelopment = _environment == null || _environment.IsDevelopment();
+            var isDevelopment = _environment?.IsDevelopment() ?? false;
             string? signingKey = fedOptions.SigningKey;
 
             if (string.IsNullOrWhiteSpace(signingKey) || (!isDevelopment && string.Equals(signingKey, "autheris-federation-default-secret", StringComparison.OrdinalIgnoreCase)))
@@ -131,7 +134,7 @@ public sealed class SubgraphContextPropagationService : ISubgraphContextPropagat
                 ? string.Empty
                 : requestUri.IsAbsoluteUri ? requestUri.PathAndQuery : requestUri.OriginalString;
 
-            // SR-M-18: bind the request body via SHA-256 and sign an unambiguous length-prefixed v2 form.
+            // Bind the request body via SHA-256 without consuming or disposing StreamContent.
             string bodyHash;
             if (request.Content == null)
             {
@@ -139,8 +142,10 @@ public sealed class SubgraphContextPropagationService : ISubgraphContextPropagat
             }
             else
             {
-                using var bodyStream = request.Content.ReadAsStream();
-                bodyHash = Convert.ToHexStringLower(System.Security.Cryptography.SHA256.HashData(bodyStream));
+                await request.Content.LoadIntoBufferAsync(ct).ConfigureAwait(false);
+                var bodyStream = await request.Content.ReadAsStreamAsync(ct).ConfigureAwait(false);
+                var hashBytes = await System.Security.Cryptography.SHA256.HashDataAsync(bodyStream, ct).ConfigureAwait(false);
+                bodyHash = Convert.ToHexStringLower(hashBytes);
                 if (bodyStream.CanSeek)
                 {
                     bodyStream.Position = 0;

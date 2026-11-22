@@ -54,7 +54,7 @@ public sealed class Consent
     public int? ProfileItemNo { get; init; }
     public Guid? ConsentRequestId { get; init; }
     public ConsentEffect Effect { get; init; } = ConsentEffect.Allow;
-    public TenantId TenantId { get; set; }
+    public TenantId TenantId { get; init; }
     public GranteeType GranteeType { get; init; } = GranteeType.User;
     public Sid? GranteeSid { get; init; }
 

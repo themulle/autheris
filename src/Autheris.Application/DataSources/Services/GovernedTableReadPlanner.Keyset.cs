@@ -64,11 +64,11 @@ public sealed partial class GovernedTableReadPlanner
             ?? throw new KeysetStreamingUnavailableException("KEYSET_STREAMING_UNAVAILABLE: Table requires a primary key or unique index.");
         IReadOnlyList<string> pkCols = streamKey.Columns;
 
-        // Masked or denied PK columns fail closed
+        // Non-Clear PK columns fail closed
         foreach (var pk in pkCols)
         {
             var access = decision.GetEffectiveColumnAccess(pk, metadata);
-            if (access == ColumnAccessLevel.Mask || access == ColumnAccessLevel.Deny)
+            if (access != ColumnAccessLevel.Clear)
             {
                 throw new KeysetStreamingUnavailableException(
                     $"KEYSET_STREAMING_UNAVAILABLE: Primary key column '{pk}' is masked or denied for caller.");
@@ -272,6 +272,11 @@ public sealed partial class GovernedTableReadPlanner
             if (access == ColumnAccessLevel.Mask)
             {
                 throw new ArgumentException($"Filtering on masked column '{node.Field}' is rejected to prevent oracle inference attacks.");
+            }
+
+            if (access != ColumnAccessLevel.Clear)
+            {
+                throw new ArgumentException($"Column '{node.Field}' cannot be filtered.", nameof(node));
             }
 
             var quotedCol = DataApiFilterTranslator.QuoteIdentifier(colMeta.ColumnName);

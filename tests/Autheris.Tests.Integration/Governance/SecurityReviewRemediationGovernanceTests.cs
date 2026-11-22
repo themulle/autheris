@@ -79,7 +79,7 @@ public sealed class SecurityReviewRemediationGovernanceTests
         await repo.ActivateConsentForAutoApproveAsync(request.Id);
 
         // Retrieve active consents
-        var activeConsents = await repo.GetActiveConsentsForSubjectsAsync([userSid], tableId, DateTimeOffset.UtcNow);
+        var activeConsents = await repo.GetActiveConsentsForSubjectsAsync([userSid], tableId, DateTimeOffset.UtcNow, request.TenantId);
         activeConsents.Count.ShouldBe(1);
         activeConsents[0].ColumnRules.Count.ShouldBe(2); // "id" and "name"
         activeConsents[0].ColumnRules.ShouldContain(r => r.ColumnName.Equals("id", StringComparison.OrdinalIgnoreCase));

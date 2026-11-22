@@ -131,14 +131,6 @@ public partial class GovernanceRepository
         BuildLockRowsQuery("t.source_name, t.schema_name, t.table_name, c.tenant_id, c.table_id, c.effect, c.grantee_type, c.grantee_sid, c.grant_source, c.profile_assignment_id, c.valid_from, c.valid_to", "CONSENTS c", "JOIN TABLES t ON c.table_id = t.id WHERE c.id = @id AND c.consent_request_id = @reqId AND c.is_revoked = 0", null);
 
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(
-        IEnumerable<Sid> subjects,
-        TableIdentifier table,
-        DateTimeOffset atTime,
-        CancellationToken ct = default) =>
-        // Explicit cross-tenant read path of the tenant-less interface overload; the tenant overload below fails closed.
-        ActiveForSubjectsCoreAsync(subjects, table, atTime, null, ct);
-
-    public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(
         IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default) =>
         ActiveForSubjectsCoreAsync(subjects, table, atTime, TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), ct);
 
@@ -146,7 +138,7 @@ public partial class GovernanceRepository
         IEnumerable<Sid> subjects,
         TableIdentifier table,
         DateTimeOffset atTime,
-        TenantId? tenantId,
+        TenantId tenantId,
         CancellationToken ct)
     {
         var subjectEnumerated = subjects.ToList();
@@ -160,7 +152,6 @@ public partial class GovernanceRepository
         foreach (var chunk in ConsentSubjectFilter.Chunks(normalized))
         {
             await using var cmd = conn.CreateCommand();
-            var tenantFilter = tenantId != null ? " AND c.tenant_id = @tenantId" : "";
             cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                        c.grantee_sid, c.valid_from, c.valid_to,
                                        c.is_revoked, c.revoked_by_sid, c.revoked_at, c.revoke_reason,
@@ -168,7 +159,7 @@ public partial class GovernanceRepository
                                 FROM CONSENTS c
                                 JOIN TABLES t ON c.table_id = t.id
                                 WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
-                                  AND c.is_revoked = 0" + tenantFilter + ConsentSubjectFilter.InListPredicate(chunk.Count);
+                                  AND c.is_revoked = 0 AND c.tenant_id = @tenantId" + ConsentSubjectFilter.InListPredicate(chunk.Count);
             for (var si = 0; si < chunk.Count; si++)
             {
                 cmd.AddBound("@s" + si, chunk[si]);
@@ -177,10 +168,7 @@ public partial class GovernanceRepository
             cmd.AddBound("@domain", table.Domain);
             cmd.AddBound("@schema", table.Schema);
             cmd.AddBound("@table", table.TableName);
-            if (tenantId != null)
-            {
-                cmd.AddBound("@tenantId", tenantId.Value.Value);
-            }
+            cmd.AddBound("@tenantId", tenantId.Value);
 
             await using var reader = await ExecuteReaderAsync(cmd, "Consent.GetActiveForSubjects", ct).ConfigureAwait(false);
             ConsentSqlCore.ReadSubjectConsentRows(reader, table, atTime, subjectSet, seen, consents);
@@ -194,21 +182,13 @@ public partial class GovernanceRepository
     }
 
     public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(
-        IEnumerable<Sid> subjects,
-        IEnumerable<string>? roles = null,
-        DateTimeOffset? atTime = null,
-        CancellationToken ct = default) =>
-        // Explicit cross-tenant read path of the tenant-less interface overload; the tenant overload below fails closed.
-        AllActiveCoreAsync(subjects, atTime, null, ct);
-
-    public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(
         IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default) =>
         AllActiveCoreAsync(subjects, atTime, TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), ct);
 
     private async Task<IReadOnlyList<Consent>> AllActiveCoreAsync(
         IEnumerable<Sid> subjects,
         DateTimeOffset? atTime,
-        TenantId? tenantId,
+        TenantId tenantId,
         CancellationToken ct)
     {
         var effectiveAt = atTime ?? TimeProvider.System.GetUtcNow();
@@ -223,23 +203,19 @@ public partial class GovernanceRepository
         foreach (var chunk in ConsentSubjectFilter.Chunks(normalized))
         {
             await using var cmd = conn.CreateCommand();
-            var tenantFilter = tenantId != null ? " AND c.tenant_id = @tenantId" : "";
             cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                        c.grantee_sid, c.valid_from, c.valid_to,
                                        c.is_revoked, t.source_name, t.schema_name, t.table_name,
                                        c.tenant_id, " + ConsentWorkflowSql.ConsentColumns + @"
                                 FROM CONSENTS c
                                 JOIN TABLES t ON c.table_id = t.id
-                                WHERE c.is_revoked = 0" + tenantFilter + ConsentSubjectFilter.InListPredicate(chunk.Count);
+                                WHERE c.is_revoked = 0 AND c.tenant_id = @tenantId" + ConsentSubjectFilter.InListPredicate(chunk.Count);
             for (var si = 0; si < chunk.Count; si++)
             {
                 cmd.AddBound("@s" + si, chunk[si]);
             }
 
-            if (tenantId != null)
-            {
-                cmd.AddBound("@tenantId", tenantId.Value.Value);
-            }
+            cmd.AddBound("@tenantId", tenantId.Value);
 
             await using var reader = await ExecuteReaderAsync(cmd, "Consent.GetAllActiveForSubjects", ct).ConfigureAwait(false);
             ConsentSqlCore.ReadAllSubjectConsentRows(reader, effectiveAt, subjectSet, seen, consents);
@@ -472,7 +448,6 @@ public partial class GovernanceRepository
                 return false;
             }
 
-            targetConsent.TenantId = tenant;
             var revokeInput = BuildConsentGrantInput(
                 targetConsent,
                 tenant.Value,
