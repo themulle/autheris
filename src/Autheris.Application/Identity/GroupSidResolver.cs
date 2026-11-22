@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.Linq;
 using System.Security.Claims;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Identity.Caching;
@@ -238,6 +239,57 @@ public sealed class GroupSidResolver : IGroupSidResolver
     {
         var sids = new HashSet<Sid>();
         var degraded = false;
+
+        if (HasGroupOverage(principal))
+        {
+            // The group list of the token is incomplete or omitted: ignore partial token groups and answer from Graph for the validated oid only.
+            var graph = _providers.FirstOrDefault(p => string.Equals(p.ProviderId, GraphRoleProvider.Id, StringComparison.OrdinalIgnoreCase));
+            var identity = BuildIdentity(principal, realm, tenant);
+            if (graph is null || identity is null)
+            {
+                return new Outcome(sids, "entra+graph", true, true, null);
+            }
+
+            ProviderRoleResult? result;
+            try
+            {
+                result = await graph.GetRolesAsync(identity, realm, ct).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException) when (ct.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (Exception)
+            {
+                return new Outcome(sids, "entra+graph", true, true, null);
+            }
+
+            if (result is null or { Failed: true })
+            {
+                return new Outcome(sids, "entra+graph", true, true, null);
+            }
+
+            sids.Clear();
+            foreach (var value in result.Groups)
+            {
+                if (SidFormat.IsCanonical(value))
+                {
+                    sids.Add(new Sid(value));
+                }
+                else
+                {
+                    degraded = true;
+                }
+            }
+
+            if (degraded)
+            {
+                sids.Clear();
+            }
+
+            return new Outcome(sids, "entra+graph", degraded, true, null);
+        }
+
         var rejected = 0;
         foreach (var claim in principal.FindAll(c => Array.Exists(EntraGroupClaimTypes, t => string.Equals(t, c.Type, StringComparison.Ordinal))))
         {
@@ -264,43 +316,12 @@ public sealed class GroupSidResolver : IGroupSidResolver
         }
 
         RecordRejected(IdentityGroupMetrics.SourceEntra, rejected);
-        var source = "entra";
-
-        if (HasGroupOverage(principal))
+        if (degraded)
         {
-            // The group list of the token is incomplete: Graph answers for the oid of the validated token only.
-            source = "entra+graph";
-            var graph = _providers.FirstOrDefault(p => string.Equals(p.ProviderId, GraphRoleProvider.Id, StringComparison.OrdinalIgnoreCase));
-            var identity = BuildIdentity(principal, realm, tenant);
-            if (graph is null || identity is null)
-            {
-                degraded = true;
-            }
-            else
-            {
-                var result = await graph.GetRolesAsync(identity, realm, ct).ConfigureAwait(false);
-                if (result is null or { Failed: true })
-                {
-                    degraded = true;
-                }
-                else
-                {
-                    foreach (var value in result.Groups)
-                    {
-                        if (SidFormat.IsCanonical(value))
-                        {
-                            sids.Add(new Sid(value));
-                        }
-                        else
-                        {
-                            degraded = true;
-                        }
-                    }
-                }
-            }
+            sids.Clear();
         }
 
-        return new Outcome(sids, source, degraded, true, null);
+        return new Outcome(sids, "entra", degraded, true, null);
     }
 
     private async ValueTask<Outcome> ApplyScimSupplementAsync(
@@ -454,6 +475,11 @@ public sealed class GroupSidResolver : IGroupSidResolver
         }
 
         RecordRejected(IdentityGroupMetrics.SourceResolver, rejected);
+        if (degraded)
+        {
+            sids.Clear();
+        }
+
         return new Outcome(sids, "resolver", degraded, false, resolution.ExpiresAt);
     }
 
@@ -478,14 +504,76 @@ public sealed class GroupSidResolver : IGroupSidResolver
 
     /// <summary>
     /// Entra group overage: with too many groups the token carries <c>hasgroups</c> (implicit flow) or a <c>_claim_names</c> entry for
-    /// <c>groups</c> instead of the full list, so the group claims are incomplete (also when a partial <c>groups</c> claim is present).
+    /// <c>groups</c> (or <c>_claim_sources</c> without a full <c>groups</c> claim) instead of the full list, so group claims are incomplete.
     /// </summary>
-    public static bool HasGroupOverage(ClaimsPrincipal principal) =>
-        principal.HasClaim(c => string.Equals(c.Type, "hasgroups", StringComparison.OrdinalIgnoreCase)
-                                && !string.Equals(c.Value?.Trim(), "false", StringComparison.OrdinalIgnoreCase)) ||
-        principal.HasClaim(c => string.Equals(c.Type, "_claim_names", StringComparison.OrdinalIgnoreCase)
-                                && c.Value != null
-                                && c.Value.Contains("groups", StringComparison.OrdinalIgnoreCase));
+    public static bool HasGroupOverage(ClaimsPrincipal principal)
+    {
+        ArgumentNullException.ThrowIfNull(principal);
+
+        var hasClaimSources = false;
+        foreach (var claim in principal.Claims)
+        {
+            if (string.Equals(claim.Type, "hasgroups", StringComparison.OrdinalIgnoreCase))
+            {
+                var value = claim.Value?.Trim();
+                if (string.IsNullOrEmpty(value) ||
+                    (!string.Equals(value, "false", StringComparison.OrdinalIgnoreCase) &&
+                     !string.Equals(value, "0", StringComparison.Ordinal)))
+                {
+                    return true;
+                }
+            }
+            else if (string.Equals(claim.Type, "_claim_names", StringComparison.OrdinalIgnoreCase))
+            {
+                if (ClaimNamesIndicatesGroupsOverage(claim.Value))
+                {
+                    return true;
+                }
+            }
+            else if (string.Equals(claim.Type, "_claim_sources", StringComparison.OrdinalIgnoreCase))
+            {
+                hasClaimSources = true;
+            }
+        }
+
+        return hasClaimSources && !HasEntraGroupClaim(principal);
+    }
+
+    private static bool ClaimNamesIndicatesGroupsOverage(string? rawValue)
+    {
+        if (string.IsNullOrWhiteSpace(rawValue))
+        {
+            return true;
+        }
+
+        try
+        {
+            using var doc = JsonDocument.Parse(rawValue);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+            {
+                return true;
+            }
+
+            foreach (var property in doc.RootElement.EnumerateObject())
+            {
+                if (string.Equals(property.Name, TokenIdClaimGroups, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+            }
+
+            return false;
+        }
+        catch (JsonException)
+        {
+            return true;
+        }
+    }
+
+    private static bool HasEntraGroupClaim(ClaimsPrincipal principal) =>
+        principal.HasClaim(c =>
+            Array.Exists(EntraGroupClaimTypes, t => string.Equals(t, c.Type, StringComparison.Ordinal))
+            && !string.IsNullOrWhiteSpace(c.Value));
 
     private static DateTimeOffset? TokenExpiry(ClaimsPrincipal principal) =>
         long.TryParse(principal.FindFirst("exp")?.Value, NumberStyles.None, CultureInfo.InvariantCulture, out var exp)

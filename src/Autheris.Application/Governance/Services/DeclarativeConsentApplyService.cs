@@ -81,6 +81,8 @@ public sealed class DeclarativeConsentApplyService(
         // group Allow instead of skipping the self-grant check.
         var groupsDegraded = callerContext is not null
             ? callerContext.GroupResolutionStatus == GroupResolutionStatus.Degraded
+              || GroupResolutionClaims.IsMarkedDegraded(caller)
+              || GroupResolutionClaims.IsMarkedDegraded(callerContext.Principal)
             : GroupResolutionClaims.IsMarkedDegraded(caller);
 
         int totalEvaluated = 0;

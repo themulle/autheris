@@ -50,6 +50,7 @@ public sealed class IdentityPipeline : IIdentityPipeline
         [
             "autheris:group",
             "autheris:realm",
+            RequireFunctionalRightHandler.FunctionalRightClaimType,
             RoleResolutionClaims.ClaimType,
             GroupResolutionClaims.StatusClaimType,
             GroupResolutionClaims.MarkerClaimType,

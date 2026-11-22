@@ -3,6 +3,7 @@ namespace Autheris.Domain.Identity;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
+using System.Linq;
 using System.Security.Claims;
 using Autheris.Domain.Common;
 
@@ -82,6 +83,14 @@ public static class GroupResolutionClaims
             (string.Equals(c.Type, RoleResolutionClaims.ClaimType, StringComparison.OrdinalIgnoreCase)
              && string.Equals(c.Value, RoleResolutionClaims.Degraded, StringComparison.OrdinalIgnoreCase))
             || (c.Type == StatusClaimType && IsPipeline(c) && c.Value == DegradedValue)) == true;
+
+    /// <summary>True when any claim carries a role- or group-resolution degraded marker (restrictive only, regardless of issuer).</summary>
+    public static bool HasAnyDegradedClaim(IEnumerable<Claim>? claims) =>
+        claims is not null && claims.Any(static c =>
+            (string.Equals(c.Type, RoleResolutionClaims.ClaimType, StringComparison.OrdinalIgnoreCase)
+             && string.Equals(c.Value, RoleResolutionClaims.Degraded, StringComparison.OrdinalIgnoreCase))
+            || (string.Equals(c.Type, StatusClaimType, StringComparison.OrdinalIgnoreCase)
+                && string.Equals(c.Value, DegradedValue, StringComparison.OrdinalIgnoreCase)));
 
     private static bool IsPipeline(Claim claim) => string.Equals(claim.Issuer, IdentityClaimIssuers.Pipeline, StringComparison.Ordinal);
 
