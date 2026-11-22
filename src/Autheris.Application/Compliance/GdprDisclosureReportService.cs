@@ -37,8 +37,8 @@ public sealed class GdprDisclosureReportService : IGdprDisclosureReportService
     }
 
     /// <summary>
-    /// SEC M-15: Zugriffs- und Auswirkungsanalysen sind auf Data Owner/Delegierte der Tabelle,
-    /// GovernanceAdmin und PrivacyAdmin beschränkt.
+    /// M-15: Access and impact analyses are restricted to the table's Data Owner/delegates,
+    /// GovernanceAdmin, and PrivacyAdmin.
     /// </summary>
     private async Task<bool> IsAuthorizedForAccessAnalysisAsync(TableIdentifier table, CallerSecurityContext callerContext, CancellationToken ct)
     {

@@ -496,6 +496,9 @@ public sealed partial class ConsentDecisionPipeline(
                 columnRules = ApplyClearColumns(columnRules, clearPlan).ToList();
             }
 
+            var effectiveValidFrom = req.RequestedValidFrom is { } requestedFrom && requestedFrom > now
+                ? requestedFrom
+                : now;
             var consentId = Guid.NewGuid();
             var finalConsent = new Consent
             {
@@ -508,7 +511,7 @@ public sealed partial class ConsentDecisionPipeline(
                 GranteeType = req.RequestedGranteeType,
                 GranteeSid = new Sid(req.RequestedGranteeRef),
                 CreatedBySid = effectiveFinalSid,
-                ValidFrom = now,
+                ValidFrom = effectiveValidFrom,
                 ValidTo = effectiveValidTo,
                 Description = validatedDescription,
                 WriteRules = approvedWriteRules,
@@ -520,7 +523,7 @@ public sealed partial class ConsentDecisionPipeline(
                 ProfileAssignmentId = req.RequestKind == ConsentRequestKind.ProfileAssignment ? req.Id : null,
                 ClassificationAccess = clearPlan is null
                     ? []
-                    : BuildClearAccess(req, consentId, clearPlan, effectiveFinalSid, now, effectiveValidTo, DefaultMaxClearDays)
+                    : BuildClearAccess(req, consentId, clearPlan, effectiveFinalSid, effectiveValidFrom, now, effectiveValidTo, DefaultMaxClearDays)
             };
 
             var approvalStep = new ApprovalStep

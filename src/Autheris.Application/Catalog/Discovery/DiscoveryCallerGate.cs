@@ -98,20 +98,14 @@ public static class DiscoveryCallerGate
         {
             var rpm = Math.Max(1, settings.RequestsPerMinute);
             var key = $"discovery:{caller.Tenant.Value}:{sid.Value}";
-            var policy = new PostAuthSidRateLimitOptions
-            {
-                TokenBucketCapacity = rpm,
-                TokensPerSecond = Math.Max(1, rpm / 60)
-            };
-
-            var rateResult = await rateLimiter.CheckPostAuthSidAsync(key, policy, ct).ConfigureAwait(false);
-            if (!rateResult.Allowed)
+            var retryAfter = await CheckFixedCostRateAsync(rateLimiter, key, rpm, rpm / 60.0, ct).ConfigureAwait(false);
+            if (retryAfter is { } wait)
             {
                 throw new DiscoveryStatusException(
                     DiscoveryFailureKind.RateLimited,
                     "RATE_LIMIT_EXCEEDED",
                     "Discovery rate limit exceeded.",
-                    Math.Max(1, rateResult.RetryAfterSeconds));
+                    wait);
             }
         }
 
@@ -151,7 +145,7 @@ public static class DiscoveryCallerGate
     /// The one access-request limit per (tenant, sid), shared by every channel through the consent request service.
     /// Returns the retry-after seconds when the limit is exceeded, otherwise null.
     /// </summary>
-    public static async ValueTask<int?> CheckAccessRequestRateAsync(
+    public static ValueTask<int?> CheckAccessRequestRateAsync(
         TenantId tenant,
         Sid sid,
         CatalogDiscoverySettings settings,
@@ -161,13 +155,23 @@ public static class DiscoveryCallerGate
     {
         if (rateLimiter is null || gatewayOptions.Insecure.warn_disable_rate_limiting)
         {
-            return null;
+            return ValueTask.FromResult<int?>(null);
         }
 
         var perHour = Math.Max(1, settings.AccessRequestsPerHour);
         var key = $"{AccessRequestScope}:{tenant.Value}:{sid.Value}";
+        return CheckFixedCostRateAsync(rateLimiter, key, perHour, perHour / 3600.0, ct);
+    }
+
+    private static async ValueTask<int?> CheckFixedCostRateAsync(
+        IRateLimiterService rateLimiter,
+        string key,
+        int capacity,
+        double tokensPerSecond,
+        CancellationToken ct)
+    {
         var policy = new Autheris.Domain.Model.ClientQuotaPolicy(
-            Autheris.Domain.Model.ClientTier.Standard, 1, 1, perHour, perHour / 3600.0, false);
+            Autheris.Domain.Model.ClientTier.Standard, 1, 1, capacity, tokensPerSecond, false);
         var result = await rateLimiter.CheckCostQuotaAsync(key, 1, policy, ct).ConfigureAwait(false);
         return result.Allowed ? null : Math.Max(1, result.RetryAfterSeconds);
     }

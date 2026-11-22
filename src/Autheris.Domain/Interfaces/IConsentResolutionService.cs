@@ -3,7 +3,7 @@ namespace Autheris.Domain.Interfaces;
 public interface IConsentResolutionService
 {
     /// <summary>
-    /// Löst Zugriffsrechte deterministisch nach F-CONS-07 Wahrheitstabelle auf.
+    /// Resolves access rights deterministically according to the F-CONS-07 truth table.
     /// </summary>
     TableAccessDecision ResolveAccess(
         Sid userSid,

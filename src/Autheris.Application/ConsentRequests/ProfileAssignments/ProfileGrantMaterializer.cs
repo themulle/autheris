@@ -56,6 +56,9 @@ public sealed class ProfileGrantMaterializer(
         }
 
         var clearFilter = BuildApprovedClearColumnFilter(context.MaskingMode, approvedClearColumns, tenantTables, context.Items);
+        var effectiveValidFrom = req.RequestedValidFrom is { } requestedFrom && requestedFrom > decidedAt
+            ? requestedFrom
+            : decidedAt;
         var materialized = new List<Consent>(itemsToMaterialize.Count);
 
         foreach (var (item, approvingOwners) in itemsToMaterialize)
@@ -107,7 +110,7 @@ public sealed class ProfileGrantMaterializer(
                 GranteeType = req.RequestedGranteeType,
                 GranteeSid = new Sid(req.RequestedGranteeRef),
                 CreatedBySid = actorSid,
-                ValidFrom = decidedAt,
+                ValidFrom = effectiveValidFrom,
                 ValidTo = approvedValidTo,
                 Description = description,
                 GrantSource = ConsentGrantSource.AccessProfile,
@@ -151,7 +154,7 @@ public sealed class ProfileGrantMaterializer(
                 RequestId: req.Id,
                 GrantSource: ConsentGrantSource.AccessProfile,
                 ProfileAssignmentId: req.Id,
-                ValidFrom: decidedAt,
+                ValidFrom: effectiveValidFrom,
                 ValidUntil: approvedValidTo,
                 RecordType: GrantRecordType.Issued);
 

@@ -12,8 +12,8 @@ using Autheris.Domain.Model;
 public interface IAccessProfileCache
 {
     /// <summary>
-    /// Liefert die Profile des Subjekts. Wirft <see cref="Autheris.Application.Policy.Exceptions.AccessProfileSourceUnavailableException"/>,
-    /// wenn weder ein epoch-validierter Cache-Eintrag noch die DB verfügbar ist (Aufrufer: Deny).
+    /// Returns the subject's profiles. Throws <see cref="Autheris.Application.Policy.Exceptions.AccessProfileSourceUnavailableException"/>
+    /// when neither an epoch-validated cache entry nor the DB is available (caller: deny).
     /// </summary>
     ValueTask<IReadOnlyList<AccessProfile>> GetProfilesAsync(TenantId tenantId, string subject, CancellationToken ct = default);
 
@@ -31,7 +31,7 @@ public interface IAccessProfileCache
         CancellationToken ct = default);
 
     /// <summary>
-    /// Bump des Tenant-Epochs im Cluster-Store + Best-Effort-Publish. Wirft bei Store-Ausfall.
+    /// Bumps the tenant epoch in the cluster store and publishes best-effort invalidation; throws on store failure.
     /// </summary>
     Task InvalidateTenantAsync(TenantId tenantId, CancellationToken ct = default);
 }

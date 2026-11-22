@@ -49,7 +49,7 @@
   </Target>
 
   <ItemGroup>
-    <!-- Swagger UI wird lokal ausgeliefert (offline-faehig, kein CDN) -->
+    <!-- Swagger UI is served locally (offline-capable, no CDN) -->
     <EmbeddedResource Include="Assets\swagger-ui\*.css;Assets\swagger-ui\*.js;Assets\swagger-ui\*.png" LogicalName="swagger-ui/%(Filename)%(Extension)" />
     <EmbeddedResource Include="Hosting\Keys\module-release-*.pem" LogicalName="Autheris.Api.Hosting.Keys.%(Filename)%(Extension)" />
     <EmbeddedResource Include="Contracts\autheris-external-v1.openapi.json" LogicalName="Autheris.Api.Contracts.autheris-external-v1.openapi.json" />

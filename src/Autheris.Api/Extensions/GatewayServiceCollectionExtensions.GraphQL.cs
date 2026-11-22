@@ -136,7 +136,7 @@ public static partial class GatewayServiceCollectionExtensions
         var maxCost = Autheris.GraphQL.Interceptors.CostAndQuotaMiddleware.ResolveMaxAdmissionCeiling(gatewayOptions);
 
         services.AddSingleton<Autheris.GraphQL.Catalog.ICatalogRelationRegistry>(Autheris.GraphQL.Catalog.CatalogRelationRegistry.Current);
-        // SEC M-16: Singleton, damit registrierte API-Keys und der Key-Cache über Requests hinweg bestehen.
+        // M-16: Singleton so registered API keys and the key cache persist across requests.
         services.AddSingleton<IClientTierResolver, ClientTierResolver>();
         services.AddSingleton<Autheris.Application.Common.Quota.IQueryCostQuota, Autheris.Application.Common.Quota.QueryCostQuota>();
         services.AddHttpClient("OpenApiIngestion").AddSecureOutboundHandlers(EgressIntegrations.OpenApiIngestion);

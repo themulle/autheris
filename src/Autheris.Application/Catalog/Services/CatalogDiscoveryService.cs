@@ -99,14 +99,7 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
 
         if (_discovery != null)
         {
-            var page = await _discovery.ListAsync(
-                new Autheris.Application.Catalog.Discovery.DiscoveryQuery(
-                    Language: context.Language,
-                    First: Autheris.Application.Catalog.Discovery.DiscoveryService.MaxPageSize,
-                    Surface: Autheris.Application.Catalog.Discovery.DiscoverySurface.Rest),
-                CallerOf(context),
-                ct).ConfigureAwait(false);
-            return page.Items.Select(o => Autheris.Application.Catalog.Discovery.CatalogDiscoveryProjection.ToDatasetSummary(o, context.Language)).ToList();
+            return await ListAllDiscoveryDatasetsAsync(context, ct).ConfigureAwait(false);
         }
 
         var (permitted, _) = await VisibleForAsync(context, ct).ConfigureAwait(false);

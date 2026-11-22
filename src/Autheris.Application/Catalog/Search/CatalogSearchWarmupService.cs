@@ -17,8 +17,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Asynchroner Hintergrund-Dienst zum Aufwärmen und kontinuierlichen Aktualisieren des Katalog-Suchindex.
-/// Reagiert auf catalog:changed-Ereignisse und periodische Aktualisierungsintervalle (Issue #458).
+/// Asynchronous background service for warming up and continuously refreshing the catalog search index.
+/// Reacts to catalog:changed events and periodic refresh intervals (Issue #458).
 /// </summary>
 public sealed class CatalogSearchWarmupService : BackgroundService
 {
@@ -175,7 +175,7 @@ public sealed class CatalogSearchWarmupService : BackgroundService
                 }
                 catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    _logger.LogDebug(ex, "Fehler beim Prüfen der Katalog-Version für den Suchindex.");
+                    _logger.LogDebug(ex, "Error checking catalog version for search index.");
                 }
             }
 
@@ -254,7 +254,7 @@ public sealed class CatalogSearchWarmupService : BackgroundService
                 catch (Exception ex)
                 {
                     RecordOutcome(lastSuccessUtc: null, attemptUtc, CatalogSearchErrorCodes.VersionReadFailed, indexedVersion: null);
-                    _logger.LogWarning(ex, "Fehler beim Lesen der Katalog-Version vor dem Index-Neuaufbau.");
+                    _logger.LogWarning(ex, "Error reading catalog version before index rebuild.");
                     return;
                 }
             }
@@ -267,12 +267,12 @@ public sealed class CatalogSearchWarmupService : BackgroundService
 
             if (!updatedViaDelta)
             {
-                _logger.LogInformation("Starte Index-Neuaufbau für den Katalog-Suchindex...");
+                _logger.LogInformation("Starting catalog search index rebuild...");
                 var tables = await CatalogTablePageReader.ReadAllAsync(
                     _metadataRepository, new CatalogTableQuery(IncludeInactive: false), ct: ct).ConfigureAwait(false);
                 await _searchEngine.RebuildIndexAsync(tables, ct).ConfigureAwait(false);
                 _lastFullRebuildUtc = _timeProvider.GetUtcNow();
-                _logger.LogInformation("Katalog-Suchindex Neuaufbau erfolgreich beendet ({Count} Tabellen).", tables.Count);
+                _logger.LogInformation("Catalog search index rebuild completed successfully ({Count} tables).", tables.Count);
             }
 
             _lastIndexedVersion = targetVersion;
@@ -292,7 +292,7 @@ public sealed class CatalogSearchWarmupService : BackgroundService
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
-            _logger.LogInformation("Katalog-Suchindex Aufbau abgebrochen (Shutdown).");
+            _logger.LogInformation("Catalog search index build canceled (shutdown).");
         }
         catch (Exception ex)
         {
@@ -306,7 +306,7 @@ public sealed class CatalogSearchWarmupService : BackgroundService
             }
 
             RecordOutcome(lastSuccessUtc: null, attemptUtc, errorCode, indexedVersion: null);
-            _logger.LogError(ex, "Kritischer Fehler beim Aufbau des Katalog-Suchindex ({ErrorCode}).", errorCode);
+            _logger.LogError(ex, "Critical error building catalog search index ({ErrorCode}).", errorCode);
         }
         finally
         {
@@ -426,7 +426,7 @@ public sealed class CatalogSearchWarmupService : BackgroundService
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            _logger.LogDebug(ex, "Fehler beim Nachprüfen der Katalog-Version nach dem Index-Neuaufbau.");
+            _logger.LogDebug(ex, "Error re-checking catalog version after index rebuild.");
         }
     }
 

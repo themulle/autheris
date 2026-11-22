@@ -23,7 +23,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>
-/// POL-4: Lakehouse- und DeltaLake-Executor: verschiedene Pseudonyme je Mandant, keine Doppelmaskierung.
+/// POL-4: Lakehouse and DeltaLake executor: distinct pseudonyms per tenant, no double masking.
 /// </summary>
 public sealed class LakehousePseudonymizationTests
 {

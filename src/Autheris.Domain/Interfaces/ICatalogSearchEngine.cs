@@ -8,20 +8,20 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// Bereitstellung von lokalen Embedding-Vektoren für Schema-Texte und Suchanfragen.
+/// Provides local embedding vectors for schema texts and search queries.
 /// </summary>
 public interface ILocalEmbeddingGenerator
 {
-    /// <summary>Dimension des Embedding-Vektors (z. B. 384 bei all-MiniLM-L6-v2 / bge-small).</summary>
+    /// <summary>Dimension of the embedding vector (e.g. 384 for all-MiniLM-L6-v2 / bge-small).</summary>
     int EmbeddingDimensions { get; }
 
-    /// <summary>Name oder Kennung des genutzten Embedding-Modells.</summary>
+    /// <summary>Name or identifier of the embedding model in use.</summary>
     string ModelIdentifier { get; }
 
-    /// <summary>Berechnet den L2-normierten Vektor für einen Text synchron auf der CPU.</summary>
+    /// <summary>Computes the L2-normalized vector for a single text synchronously on the CPU.</summary>
     ReadOnlyMemory<float> GenerateNormalizedEmbedding(string text);
 
-    /// <summary>Stapelvektorisierung mehrerer Texte mit CPU-Parallelisierung.</summary>
+    /// <summary>Batch-embeds multiple texts with CPU parallelization.</summary>
     Task<IReadOnlyList<ReadOnlyMemory<float>>> GenerateNormalizedEmbeddingsAsync(
         IReadOnlyList<string> texts, 
         CancellationToken ct = default);
@@ -68,7 +68,7 @@ public interface ICatalogSearchStatusRecorder : ICatalogSearchStatusReader
 }
 
 /// <summary>
-/// In-Memory Hybrid Search Engine für den Datensatz- und Tabellenkatalog.
+/// In-memory hybrid search engine for the dataset and table catalog.
 /// </summary>
 /// <remarks>
 /// <c>isColumnRestricted</c> (both search members): marks tables of which the caller cannot see every column. For those tables only the
@@ -77,16 +77,16 @@ public interface ICatalogSearchStatusRecorder : ICatalogSearchStatusReader
 /// </remarks>
 public interface ICatalogSearchEngine
 {
-    /// <summary>Prüft, ob der Suchindex aufgewärmt und abfragebereit ist.</summary>
+    /// <summary>Checks whether the search index is warmed up and ready to query.</summary>
     bool IsIndexReady { get; }
 
-    /// <summary>Anzahl aktuell im Snapshot indizierter Tabellen.</summary>
+    /// <summary>Number of tables currently indexed in the snapshot.</summary>
     int IndexedTableCount { get; }
 
     /// <summary>Returns whether the current search snapshot contains the specified table.</summary>
     bool ContainsTable(TableIdentifier id) => true;
 
-    /// <summary>Zeitpunkt des letzten erfolgreichen Index-Builds.</summary>
+    /// <summary>Timestamp of the last successful index build.</summary>
     DateTimeOffset? LastIndexedAt { get; }
 
     /// <summary>Returns the current rebuild status and computed index age.</summary>
@@ -100,7 +100,7 @@ public interface ICatalogSearchEngine
     /// <summary>Returns the effective search mode string ("keyword", "semantic", or "hybrid") for the requested mode.</summary>
     string ResolveEffectiveMode(CatalogSearchMode requestedMode) => "keyword";
 
-    /// <summary>Erzeugt atomar einen neuen unveränderlichen Such-Snapshot im Speicher.</summary>
+    /// <summary>Atomically creates a new immutable search snapshot in memory.</summary>
     Task RebuildIndexAsync(IReadOnlyList<TableMetadata> tables, CancellationToken ct = default);
 
     /// <summary>Applies an incremental delta of updated/inserted tables and removed or inactive identifiers.</summary>
@@ -110,7 +110,7 @@ public interface ICatalogSearchEngine
         CancellationToken ct = default) =>
         throw new NotSupportedException($"{GetType().Name} does not support incremental delta indexing.");
 
-    /// <summary>Führt eine hochoptimierte, sperrenfreie Suche unter Berücksichtigung der Governance aus.</summary>
+    /// <summary>Executes a high-throughput, lock-free search with governance filtering applied.</summary>
     IReadOnlyList<CatalogSearchHit> Search(
         CatalogSearchQuery query, 
         Func<TableIdentifier, bool> isVisiblePredicate,

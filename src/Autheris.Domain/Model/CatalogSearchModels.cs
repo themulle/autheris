@@ -5,22 +5,22 @@ using System.Collections.Generic;
 using Autheris.Domain.Common;
 
 /// <summary>
-/// Suchmodus für die Katalog- und Schemasuche.
+/// Search mode for catalog and schema search.
 /// </summary>
 public enum CatalogSearchMode
 {
-    /// <summary>Kombiniert BM25 und Vektorsuche via Reciprocal Rank Fusion (Standard).</summary>
+    /// <summary>Combines BM25 and vector search via Reciprocal Rank Fusion (default).</summary>
     Hybrid = 0,
 
-    /// <summary>Reine semantische Vektorsuche (ideal für natürlichsprachige Intentionen).</summary>
+    /// <summary>Pure semantic vector search (ideal for natural-language intents).</summary>
     SemanticVector = 1,
 
-    /// <summary>Reine deterministische Keyword-Suche via BM25 (ideal für Tabellenkürzel).</summary>
+    /// <summary>Pure deterministic keyword search via BM25 (ideal for table abbreviations).</summary>
     KeywordBm25 = 2
 }
 
 /// <summary>
-/// Typ der Relation zwischen zwei Tabellen im Schema-Graph.
+/// Relationship type between two tables in the schema graph.
 /// </summary>
 public enum TableRelationshipType
 {
@@ -30,7 +30,7 @@ public enum TableRelationshipType
 }
 
 /// <summary>
-/// Beschreibt einen Join-Pfad oder eine Relation zwischen zwei Tabellen.
+/// Describes a join path or relationship between two tables.
 /// </summary>
 public sealed record TableRelationship(
     TableIdentifier FromTable,
@@ -41,7 +41,7 @@ public sealed record TableRelationship(
     string? Description = null);
 
 /// <summary>
-/// Parameter einer Katalog-Suchanfrage durch einen Agenten oder API-Client.
+/// Parameters for a catalog search query issued by an agent or API client.
 /// </summary>
 public sealed record CatalogSearchQuery(
     string QueryText,
@@ -55,7 +55,7 @@ public sealed record CatalogSearchQuery(
     DiscoveryAccessState? AccessStatus = null);
 
 /// <summary>
-/// Repräsentiert einen einzelnen bewerteten Treffer der Katalogsuche mit Schema- und Join-Details.
+/// Represents a single scored catalog search hit with schema and join details.
 /// </summary>
 public sealed record CatalogSearchHit(
     TableIdentifier TableIdentifier,

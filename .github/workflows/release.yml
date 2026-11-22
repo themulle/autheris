@@ -7,7 +7,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Release Tag (z. B. v1.0.0)'
+        description: 'Release Tag (e.g. v1.0.0)'
         required: true
         default: 'v1.0.0'
 
@@ -51,28 +51,37 @@ jobs:
           fi
           echo "VERSION=$VERSION" >> "$GITHUB_ENV"
 
-      - name: Nightly gate
-        env:
-          GH_TOKEN: ${{ github.token }}
-          GH_REPO: ${{ github.repository }}
-        run: |
-          WORKFLOWS=("parity-nightly.yml" "sql-compiler-gate-nightly.yml")
-          for WF in "${WORKFLOWS[@]}"; do
-            echo "Checking last completed run on main for $WF..."
-            CONCLUSION=$(gh run list --workflow "$WF" --branch main --status completed --limit 1 --json conclusion -q '.[0].conclusion')
-            if [ "$CONCLUSION" != "success" ]; then
-              echo "::error::Nightly gate failed: $WF last completed run conclusion is '$CONCLUSION' (expected 'success')" >&2
-              exit 1
-            fi
-            echo "Workflow $WF is green (conclusion: $CONCLUSION)."
-          done
-
       - name: Checkout repository
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
           # MISC-02: build exactly the tagged commit, never the dispatching branch head.
           ref: refs/tags/${{ github.event.inputs.tag || github.ref_name }}
+
+      - name: Nightly gate
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          EVENT_NAME: ${{ github.event_name }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT_NAME" = "workflow_dispatch" ]; then
+            TARGET_SHA="$(git rev-parse HEAD)"
+          else
+            TARGET_SHA="$GITHUB_SHA"
+          fi
+          WORKFLOWS=("parity-nightly.yml" "sql-compiler-gate-nightly.yml")
+          for WF in "${WORKFLOWS[@]}"; do
+            echo "Checking completed run for $WF matching commit $TARGET_SHA..."
+            RUN_JSON=$(gh run list --workflow "$WF" --commit "$TARGET_SHA" --status completed --limit 1 --json conclusion,headSha)
+            HEAD_SHA=$(jq -r '.[0].headSha // empty' <<< "$RUN_JSON")
+            CONCLUSION=$(jq -r '.[0].conclusion // empty' <<< "$RUN_JSON")
+            if [ "$HEAD_SHA" != "$TARGET_SHA" ] || [ "$CONCLUSION" != "success" ]; then
+              echo "::error::Nightly gate failed: $WF has no successful completed run for commit '$TARGET_SHA' (found headSha='$HEAD_SHA', conclusion='$CONCLUSION')" >&2
+              exit 1
+            fi
+            echo "Workflow $WF is green for $TARGET_SHA (headSha: $HEAD_SHA, conclusion: $CONCLUSION)."
+          done
 
       - name: Setup .NET
         uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0

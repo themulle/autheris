@@ -5,8 +5,8 @@ using System.Linq;
 namespace Autheris.Domain.Common;
 
 /// <summary>
-/// Repräsentiert einen zusammengesetzten Primär- oder Fremdschlüssel (Composite Key)
-/// mit struktureller Wertgleichheit und typsicherem Hashing.
+/// Represents a composite primary or foreign key
+/// with structural value equality and type-safe hashing.
 /// </summary>
 public readonly struct CompositeKey : IEquatable<CompositeKey>, IComparable<CompositeKey>
 {

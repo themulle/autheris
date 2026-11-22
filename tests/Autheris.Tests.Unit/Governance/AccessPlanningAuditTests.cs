@@ -33,6 +33,25 @@ public sealed class AccessPlanningAuditTests
     public AccessPlanningAuditTests()
     {
         _service = new AccessPlanningService(_writer, _tableRepo, _consentRepo, _totp, _totpSecrets, _secrets);
+        _consentRepo.ReplaceConsentsAsync(
+                Arg.Any<IReadOnlyList<Guid>>(),
+                Arg.Any<IReadOnlyList<Consent>>(),
+                Arg.Any<Sid>(),
+                Arg.Any<string>(),
+                Arg.Any<Autheris.Domain.Security.ConsentRevocationAuthority>(),
+                Arg.Any<IReadOnlyList<AuditLogEntry>?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(async ci =>
+            {
+                var entries = ci.ArgAt<IReadOnlyList<AuditLogEntry>?>(5);
+                if (entries is not null)
+                {
+                    foreach (var entry in entries)
+                    {
+                        await _writer.RecordRequiredAsync(entry, ci.ArgAt<CancellationToken>(6));
+                    }
+                }
+            });
         var id = Guid.NewGuid();
         _tableRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(new TableMetadata
         {

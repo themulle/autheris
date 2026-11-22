@@ -22,8 +22,8 @@ using Microsoft.Extensions.Options;
 public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
 {
     /// <summary>
-    /// SEC M-14: Obergrenze für die Lebensdauer einer WebSocket-Session, wenn kein Token-Ablauf bekannt ist
-    /// (z.B. Kerberos/Negotiate). Clients müssen sich danach neu verbinden und neu authentifizieren.
+    /// M-14: Maximum lifetime for a WebSocket session when no token expiration is known
+    /// (e.g. Kerberos/Negotiate). Clients must reconnect and re-authenticate afterwards.
     /// </summary>
     public static readonly TimeSpan DefaultMaxSessionLifetime = TimeSpan.FromHours(8);
 
@@ -88,7 +88,7 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
             var isHttpAuthenticated = httpUser?.Identity?.IsAuthenticated == true;
 
             // Read connection_init payload: {"authorization": "Bearer ..."} or {"x-api-key": "..."}
-            // SEC M-14: Payload über IOperationMessagePayload.As<T>() lesen (frühere Typprüfung auf IReadOnlyDictionary griff nie).
+            // M-14: Read payload via IOperationMessagePayload.As<T>() (previous IReadOnlyDictionary check never matched).
             var token = ExtractTokenFromPayload(connectionInitMessage);
             if (!string.IsNullOrWhiteSpace(token))
             {
@@ -320,8 +320,8 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
     }
 
     /// <summary>
-    /// SEC M-14: Ermittelt den Ablaufzeitpunkt der Session als Minimum aus <c>exp</c>-Claim,
-    /// <see cref="AuthenticationProperties.ExpiresUtc"/> und <paramref name="now"/> + <paramref name="maxLifetime"/>.
+    /// M-14: Resolves the session expiration timestamp as the minimum of the <c>exp</c> claim,
+    /// <see cref="AuthenticationProperties.ExpiresUtc"/>, and <paramref name="now"/> + <paramref name="maxLifetime"/>.
     /// </summary>
     public static DateTimeOffset ResolveSessionExpiry(
         ClaimsPrincipal? principal,
@@ -370,7 +370,7 @@ public sealed class WebSocketAuthInterceptor : DefaultSocketSessionInterceptor
             return;
         }
 
-        // SEC M-14: Bei Token-Ablauf wird die zugrunde liegende Verbindung (inkl. aller Subscriptions) beendet.
+        // M-14: On token expiration, terminate the underlying connection (including all active subscriptions).
         var expiryCts = new CancellationTokenSource(delay, _timeProvider);
         var registration = expiryCts.Token.Register(static state =>
         {

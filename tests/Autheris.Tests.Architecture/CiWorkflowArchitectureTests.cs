@@ -135,6 +135,7 @@ public sealed partial class CiWorkflowArchitectureTests
 
         script.ShouldNotContain("event == \"push\"", customMessage: "only pull_request events may be narrowed; main pushes always run the full suites");
         docOnly.ShouldNotBeEmpty();
+        docOnly.ShouldNotContain("deploy/*");
         foreach (var glob in docOnly)
         {
             glob.ShouldNotStartWith("src/");
@@ -159,7 +160,7 @@ public sealed partial class CiWorkflowArchitectureTests
     [Trait("Category", "Security")]
     public void Docs_only_filter_excludes_every_path_read_by_architecture_tests_or_architecture_job_is_unconditional()
     {
-        // The classifier lists docs/, deploy/, benchmarks/ and *.md, which architecture tests read. This is safe only while the
+        // The classifier lists docs/, benchmarks/ and *.md, which architecture tests read. This is safe only while the
         // architecture project runs on every PR: build-and-test has no changes gate and its narrowed filter keeps the whole project.
         var job = Job("ci.yml", "build-and-test");
         JobIf(job).ShouldBe("${{ !cancelled() }}");
