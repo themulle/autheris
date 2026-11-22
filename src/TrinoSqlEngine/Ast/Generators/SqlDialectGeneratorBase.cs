@@ -301,6 +301,11 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     protected virtual void GenerateQuerySpecification(QuerySpecification spec, ref ValueStringBuilder builder, SqlEmitterContext context)
     {
+        // Consume the pending Oracle subquery fence before emitting projections so nested subqueries
+        // inside SELECT (e.g. PerCell CASE WHEN EXISTS ...) cannot steal it from this query block.
+        bool emitOracleFence = context.PendingOracleWhereFence;
+        context.PendingOracleWhereFence = false;
+
         builder.Append("SELECT ");
         if (spec.Distinct)
         {
@@ -325,7 +330,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         context.InProjectionContext = false;
         try
         {
-            GenerateQuerySpecificationTail(spec, ref builder, context);
+            GenerateQuerySpecificationTail(spec, ref builder, context, emitOracleFence);
         }
         finally
         {
@@ -343,11 +348,8 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
 
     protected virtual SubqueryFenceStyle FenceStyle => SubqueryFenceStyle.None;
 
-    private void GenerateQuerySpecificationTail(QuerySpecification spec, ref ValueStringBuilder builder, SqlEmitterContext context)
+    private void GenerateQuerySpecificationTail(QuerySpecification spec, ref ValueStringBuilder builder, SqlEmitterContext context, bool emitOracleFence)
     {
-        bool emitOracleFence = context.PendingOracleWhereFence;
-        context.PendingOracleWhereFence = false;
-
         if (spec.From != null)
         {
             builder.Append(" FROM ");

@@ -1,3 +1,4 @@
 # Files in the G7 scope that legitimately have zero valid mutants. One path per line, then " # reason". An entry must be in the scope (g7-aggregate.py fails otherwise).
 src/TrinoSqlEngine/Ast/Emit/DmlAffectedRowsLimitException.cs # trivial exception type, no mutable logic
 src/TrinoSqlEngine/Ast/Emit/SqlParameterType.cs # enum, no mutable logic
+src/TrinoSqlEngine/Ast/Security/RowPolicyExpressionRejectedException.cs # trivial exception type, no mutable logic
