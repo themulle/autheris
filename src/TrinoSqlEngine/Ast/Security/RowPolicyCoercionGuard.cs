@@ -449,7 +449,7 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog, bool evaluat
         }
 
         // Under a proven optimizer evaluation fence, explicit CASTs over column expressions run strictly on visible rows.
-        if (evaluationFenced && AstReflection.Collect<ColumnReference>(result.Operand).Count > 0)
+        if (evaluationFenced && RowPolicyErrorGuard.HasColumn(result.Operand))
         {
             return result;
         }
