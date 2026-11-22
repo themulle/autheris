@@ -293,6 +293,7 @@ public static class DbtArtifactStreamingParser
                     }
                 }
 
+                var (modelSamples, modelSamplesExceeded) = ExtractSyntheticSamplesFromNode(node, columns.Keys);
                 models.Add(new DbtModelDefinition(
                     uniqueId,
                     name,
@@ -305,7 +306,13 @@ public static class DbtArtifactStreamingParser
                     columns,
                     dependsOn,
                     contractEnforced
-                ) { PhysicalName = physicalName, SyntheticSamples = ExtractSyntheticSamplesFromNode(node, columns.Keys), GoldenQueries = DbtGoldenQueryMetaReader.Read(node, uniqueId, relations) });
+                )
+                {
+                    PhysicalName = physicalName,
+                    SyntheticSamples = modelSamples,
+                    SyntheticSamplesSizeExceeded = modelSamplesExceeded,
+                    GoldenQueries = DbtGoldenQueryMetaReader.Read(node, uniqueId, relations)
+                });
             }
         }
 
@@ -369,6 +376,7 @@ public static class DbtArtifactStreamingParser
 
                 resolver.RegisterSource(uniqueId, ReadString(srcNode, "source_name") ?? "", name, ReadString(srcNode, "package_name"));
 
+                var (srcSamples, srcSamplesExceeded) = ExtractSyntheticSamplesFromNode(srcNode, columns.Keys);
                 models.Add(new DbtModelDefinition(
                     uniqueId,
                     name,
@@ -381,7 +389,13 @@ public static class DbtArtifactStreamingParser
                     columns,
                     [],
                     false
-                ) { PhysicalName = physicalName, SyntheticSamples = ExtractSyntheticSamplesFromNode(srcNode, columns.Keys), GoldenQueries = DbtGoldenQueryMetaReader.Read(srcNode, uniqueId, relations) });
+                )
+                {
+                    PhysicalName = physicalName,
+                    SyntheticSamples = srcSamples,
+                    SyntheticSamplesSizeExceeded = srcSamplesExceeded,
+                    GoldenQueries = DbtGoldenQueryMetaReader.Read(srcNode, uniqueId, relations)
+                });
             }
         }
 
@@ -832,47 +846,51 @@ public static class DbtArtifactStreamingParser
     }
 
     private const int MaxSyntheticSampleKeysPerRow = 256;
-    private const int MaxSyntheticSampleStringLength = 1024;
+    private const int MaxSyntheticSampleStringLength = 256;
+    private const int MaxSyntheticSampleRows = 50;
+    private const int MaxSyntheticSampleArtifactBytes = 64 * 1024;
 
     /// <summary>
     /// Reads the <c>meta</c> object of a node and extracts inline synthetic samples against the node's columns.
     /// </summary>
-    private static IReadOnlyList<IReadOnlyDictionary<string, object?>>? ExtractSyntheticSamplesFromNode(
+    private static (IReadOnlyList<IReadOnlyDictionary<string, object?>>? Samples, bool SizeExceeded) ExtractSyntheticSamplesFromNode(
         JsonElement node,
         IReadOnlyCollection<string> modelColumns) =>
         node.TryGetProperty("meta", out var metaProp) && metaProp.ValueKind == JsonValueKind.Object
-            ? ExtractSyntheticSamples(metaProp, modelColumns)
-            : null;
+            ? ExtractSyntheticSamplesCore(metaProp, modelColumns)
+            : (null, false);
 
     /// <summary>
-    /// Extracts inline synthetic sample rows from a dbt <c>meta</c> object (MCP-02). Only inline JSON arrays of
+    /// Extracts inline synthetic sample rows from a dbt <c>meta.synthetic_samples</c> array. Only inline JSON arrays of
     /// objects are accepted; string values (including would-be file paths) are never interpreted, so the file system
-    /// is never touched. Rows are capped, keys that are not model columns are dropped, and only scalar values of
-    /// bounded size are kept.
+    /// is never touched. Rows, cell lengths and serialized payload size are capped and unknown keys are dropped.
     /// </summary>
     internal static IReadOnlyList<IReadOnlyDictionary<string, object?>>? ExtractSyntheticSamples(
         JsonElement metaProp,
+        IReadOnlyCollection<string> modelColumns) =>
+        ExtractSyntheticSamplesCore(metaProp, modelColumns).Samples;
+
+    private static (IReadOnlyList<IReadOnlyDictionary<string, object?>>? Samples, bool SizeExceeded) ExtractSyntheticSamplesCore(
+        JsonElement metaProp,
         IReadOnlyCollection<string> modelColumns)
     {
-        if (!metaProp.TryGetProperty("synthetic_samples", out var sampleElem) &&
-            !metaProp.TryGetProperty("syntheticSamples", out sampleElem) &&
-            !metaProp.TryGetProperty("sample_rows", out sampleElem) &&
-            !metaProp.TryGetProperty("sampleRows", out sampleElem))
+        if (!metaProp.TryGetProperty("synthetic_samples", out var sampleElem))
         {
-            return null;
+            return (null, false);
         }
 
         if (sampleElem.ValueKind != JsonValueKind.Array)
         {
-            return null;
+            return (null, false);
         }
 
         var allowedColumns = new HashSet<string>(modelColumns, StringComparer.OrdinalIgnoreCase);
         var list = new List<IReadOnlyDictionary<string, object?>>();
-        const int maxExtractedSampleRows = 100;
+        var estimatedBytes = 2;
+        var sizeExceeded = false;
         foreach (var item in sampleElem.EnumerateArray())
         {
-            if (list.Count >= maxExtractedSampleRows)
+            if (list.Count >= MaxSyntheticSampleRows)
             {
                 break;
             }
@@ -916,11 +934,19 @@ public static class DbtArtifactStreamingParser
 
             if (dict.Count > 0)
             {
+                var rowBytes = JsonSerializer.SerializeToUtf8Bytes(dict).Length + 1;
+                if (estimatedBytes + rowBytes > MaxSyntheticSampleArtifactBytes)
+                {
+                    sizeExceeded = true;
+                    break;
+                }
+
+                estimatedBytes += rowBytes;
                 list.Add(dict);
             }
         }
 
-        return list.Count > 0 ? list : null;
+        return (list.Count > 0 ? list : null, sizeExceeded);
     }
 
     private static object? ConvertJsonElement(JsonElement elem) =>

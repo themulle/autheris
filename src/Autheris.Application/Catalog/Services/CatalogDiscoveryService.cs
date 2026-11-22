@@ -915,6 +915,23 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
 
         var datasourceId = $"ds-{Guid.NewGuid():N}";
 
+        var resolvedConn = Autheris.Application.Sql.Services.SqlDataSourceResolver.ResolveConnectionOptions(_gatewayOptions, request.Domain)
+            ?? Autheris.Application.Sql.Services.SqlDataSourceResolver.ResolveConnectionOptions(_gatewayOptions, request.Name);
+        if (resolvedConn is { EnforcementMode: EnforcementMode.Delegated })
+        {
+            var effectiveDefault = ProtectionClass.Confidential;
+            if (_protectionProvider is not null &&
+                TableIdentifier.TryCreate(request.Domain, "default", request.Name, out var candidateTable))
+            {
+                var snap = await _protectionProvider.GetAsync(context.TenantId, candidateTable, ct).ConfigureAwait(false);
+                Autheris.Application.Governance.Protection.DelegatedProtectionValidator.Validate(resolvedConn.EnforcementMode, request.Name, snap);
+            }
+            else
+            {
+                Autheris.Application.Governance.Protection.DelegatedProtectionValidator.Validate(resolvedConn.EnforcementMode, request.Name, effectiveDefault, null);
+            }
+        }
+
         if (!request.DryRun)
         {
             // Write-ahead: the required record exists before the secret is stored and the spec is ingested.
@@ -978,18 +995,5 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
             IsConfigured: isConfigured,
             ErrorMessage: ingestionResult.ErrorMessage
         );
-    }
-}
-
-internal static class CatalogPiiDetector
-{
-    private static readonly string[] PiiKeywords = ["name", "email", "phone", "iban", "birth", "address", "lat", "lon"];
-
-    public static bool IsPii(string columnName, bool classified = false)
-    {
-        if (classified) return true;
-        if (string.IsNullOrWhiteSpace(columnName)) return false;
-        var lower = columnName.ToLowerInvariant();
-        return PiiKeywords.Any(k => lower.Contains(k, StringComparison.OrdinalIgnoreCase));
     }
 }

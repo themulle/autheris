@@ -55,6 +55,8 @@ public sealed record GovernancePolicy
     public IReadOnlySet<string> TablesWithConsentRowFilter { get; init; } = FrozenSet<string>.Empty;
     public IReadOnlySet<string> TablesWithMaskedColumns { get; init; } = FrozenSet<string>.Empty;
     public GovernedSubqueryStrategy SubqueryStrategy { get; init; }
+    public string? PrincipalCacheKey { get; init; }
+    public long GovernanceEpoch { get; init; }
 }
 
 /// <summary>

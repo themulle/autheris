@@ -293,7 +293,7 @@
 0292 Microsoft.Extensions.Options.IValidateOptions<Autheris.Domain.Options.GatewayOptions> Singleton key=- type:Autheris.Application.Plugins.Auth.AuthPluginOptionsValidator
 0293 Autheris.Application.Policy.TypedPolicySources Singleton key=- type:Autheris.Application.Policy.TypedPolicySources
 0294 Autheris.Application.Policy.RowScopes.RowScopeCompiler Singleton key=- type:Autheris.Application.Policy.RowScopes.RowScopeCompiler
-0295 Autheris.Application.Sql.Policy.GovernancePolicyFactory Singleton key=- type:Autheris.Application.Sql.Policy.GovernancePolicyFactory
+0295 Autheris.Application.Sql.Policy.GovernancePolicyFactory Singleton key=- factory:Autheris.Application.Sql.Policy.GovernancePolicyFactory
 0296 Autheris.Application.Common.Interfaces.IRlsFilterGenerator Singleton key=- type:Autheris.Application.Services.RlsFilterGenerator
 0297 Autheris.Application.Common.Interfaces.IRowFilterSqlBuilder Singleton key=- type:Autheris.Application.Services.RowFilterSqlBuilder
 0298 Microsoft.Extensions.Options.IConfigureOptions<Autheris.Domain.Options.RestrictedScopeOptions> Transient key=- factory:Microsoft.Extensions.Options.IConfigureOptions<Autheris.Domain.Options.RestrictedScopeOptions>
@@ -725,7 +725,7 @@
 0724 Autheris.Application.OData.Interfaces.IDynamicOpenApiGenerator Singleton key=- type:Autheris.Application.OData.Services.DynamicOpenApiGenerator
 0725 Autheris.Application.OData.ODataServiceCollectionExtensions.ODataIntegrationMarker Singleton key=- instance:Autheris.Application.OData.ODataServiceCollectionExtensions.ODataIntegrationMarker
 0726 Autheris.Application.OData.IODataQueryPolicyEnforcer Scoped key=- type:Autheris.Application.OData.ODataQueryPolicyEnforcer
-0727 Autheris.Application.OData.IODataHandler Scoped key=- type:Autheris.Application.OData.ODataHandler
+0727 Autheris.Application.OData.IODataHandler Scoped key=- factory:Autheris.Application.OData.IODataHandler
 0728 Autheris.Application.Runtime.ResourceGroups.IResourceGroupManager Singleton key=- type:Autheris.Application.Runtime.ResourceGroups.ResourceGroupManager
 0729 Autheris.Application.Runtime.ResourceGroups.PersistentConnectionLimiter Singleton key=- factory:Autheris.Application.Runtime.ResourceGroups.PersistentConnectionLimiter
 0730 Autheris.Application.Observability.IGatewaySystemMetricsService Singleton key=- type:Autheris.Application.Observability.GatewaySystemMetricsService

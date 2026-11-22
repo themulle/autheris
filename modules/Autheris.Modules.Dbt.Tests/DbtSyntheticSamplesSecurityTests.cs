@@ -56,7 +56,40 @@ public sealed class DbtSyntheticSamplesSecurityTests
         var result = DbtArtifactStreamingParser.ExtractSyntheticSamples(Meta($$"""{"synthetic_samples": [{{rows}}]}"""), Columns);
 
         result.ShouldNotBeNull();
-        result!.Count.ShouldBe(100);
+        result!.Count.ShouldBe(50);
+    }
+
+    [Fact]
+    public void Row_cell_size_caps()
+    {
+        var tooManyRows = string.Join(",", Enumerable.Range(1, 65).Select(i => $"{{\"id\": {i}}}"));
+        var cappedRows = DbtArtifactStreamingParser.ExtractSyntheticSamples(Meta($$"""{"synthetic_samples": [{{tooManyRows}}]}"""), Columns);
+        cappedRows.ShouldNotBeNull();
+        cappedRows!.Count.ShouldBe(50);
+
+        var maxLenCell = new string('b', 256);
+        var oversizeCell = new string('c', 257);
+        var result = DbtArtifactStreamingParser.ExtractSyntheticSamples(
+            Meta($$"""{"synthetic_samples": [{"id": 1, "name": "{{maxLenCell}}"}, {"id": 2, "name": "{{oversizeCell}}"}]}"""),
+            Columns);
+
+        result.ShouldNotBeNull();
+        result![0]["name"].ShouldBe(maxLenCell);
+        result[1].ContainsKey("name").ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Marker_required()
+    {
+        DbtArtifactStreamingParser.ExtractSyntheticSamples(Meta("""{"examples": [{"id": 1, "name": "a"}]}"""), Columns).ShouldBeNull();
+        DbtArtifactStreamingParser.ExtractSyntheticSamples(Meta("""{"sample_rows": [{"id": 1, "name": "a"}]}"""), Columns).ShouldBeNull();
+        DbtArtifactStreamingParser.ExtractSyntheticSamples(Meta("""{"samples": [{"id": 1, "name": "a"}]}"""), Columns).ShouldBeNull();
+
+        var withMarker = DbtArtifactStreamingParser.ExtractSyntheticSamples(
+            Meta("""{"synthetic_samples": [{"id": 1, "name": "ok"}]}"""),
+            Columns);
+        withMarker.ShouldNotBeNull();
+        withMarker!.Count.ShouldBe(1);
     }
 
     [Fact]

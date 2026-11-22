@@ -157,6 +157,7 @@ public static class SecurityContextFactory
             ClusterRoles = clusterRoles,
             AuthenticationScheme = user.Identity?.AuthenticationType ?? "Unknown",
             IsAuthenticated = true,
+            RealmKind = SecurityPrincipalContext.ReadPipelineRealmKind(user),
             TenantSelectedByHeader = selectedByHeader,
             ClientIp = clientIp,
             Caller = caller,

@@ -41,6 +41,7 @@ public sealed partial class ODataHandler : IODataHandler
     private readonly Autheris.Application.DataSources.IDataSourceOptionsResolver _transportResolver;
     private readonly Autheris.Application.DataSources.IIngressTransportContext _ingress;
     private readonly IODataQueryPolicyEnforcer _policyEnforcer;
+    private readonly Autheris.Application.Governance.Caching.GovernanceEpochProvider? _epochProvider;
 
     [ActivatorUtilitiesConstructor]
     public ODataHandler(
@@ -76,6 +77,12 @@ public sealed partial class ODataHandler : IODataHandler
         _transportResolver = transportResolver;
         _ingress = ingress;
         _policyEnforcer = policyEnforcer;
+    }
+
+    internal Autheris.Application.Governance.Caching.GovernanceEpochProvider? EpochProvider
+    {
+        get => _epochProvider;
+        init => _epochProvider = value;
     }
 
     internal Func<string, TableFilterClause> ParseFilter { get; init; } = static filter => ODataFilterParser.Parse(filter);
@@ -280,9 +287,9 @@ public sealed partial class ODataHandler : IODataHandler
     /// The authorized-tables entry also depends on the transports the sources allow (they hide tables), so the key carries the
     /// generation of the options resolver: a reload that newly denies a source starts a fresh entry (Issue #447).
     /// </summary>
-    private string? AuthorizedTablesCacheKey(ClaimsPrincipal principal, Autheris.Application.Catalog.CatalogVersion version) =>
+    private string? AuthorizedTablesCacheKey(ClaimsPrincipal principal, Autheris.Application.Catalog.CatalogVersion version, long governanceEpoch) =>
         BuildAuthorizedTablesCacheKey(principal, _tenantResolver.DefaultTenant) is { } key
-            ? $"{key}:g{_transportResolver.Generation}:s{version.StructureVersion}:c{version.ContentVersion}"
+            ? $"{key}:g{_transportResolver.Generation}:s{version.StructureVersion}:c{version.ContentVersion}:e{governanceEpoch}"
             : null;
 
     private async Task<(IReadOnlyList<Autheris.Domain.Model.TableMetadata> Tables, bool Complete, Autheris.Application.Catalog.CatalogVersion Version)> GetAuthorizedTablesCoreAsync(ClaimsPrincipal? principal, CancellationToken ct)
@@ -293,7 +300,15 @@ public sealed partial class ODataHandler : IODataHandler
         }
 
         var version = await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
-        var cacheKey = AuthorizedTablesCacheKey(principal, version);
+        long governanceEpoch = 0;
+        if (_epochProvider is not null &&
+            ResolveCacheTenantId(principal, _tenantResolver.DefaultTenant) is { } rawTenant &&
+            TenantId.TryParse(rawTenant, out var epochTenant))
+        {
+            governanceEpoch = await _epochProvider.GetEpochAsync(epochTenant, ct).ConfigureAwait(false);
+        }
+
+        var cacheKey = AuthorizedTablesCacheKey(principal, version, governanceEpoch);
         if (cacheKey != null && _memoryCache.TryGetValue(cacheKey, out IReadOnlyList<Autheris.Domain.Model.TableMetadata>? cachedTables) && cachedTables != null)
         {
             return (cachedTables, true, version);

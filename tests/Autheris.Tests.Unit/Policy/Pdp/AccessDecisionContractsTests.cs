@@ -38,8 +38,8 @@ public sealed class AccessDecisionContractsTests
 
         // DecisionStep
         var steps = Enum.GetNames<DecisionStep>();
-        steps.Length.ShouldBe(5);
-        steps.ShouldBe(["Precondition", "ExplicitDeny", "Grant", "Narrowing", "DefaultDeny"]);
+        steps.Length.ShouldBe(6);
+        steps.ShouldBe(["Precondition", "Protection", "ExplicitDeny", "Grant", "Narrowing", "DefaultDeny"]);
 
         // GrantSourceKind
         var sources = Enum.GetNames<GrantSourceKind>();

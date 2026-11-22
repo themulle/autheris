@@ -283,22 +283,64 @@ internal sealed class FakeDiscoveryOwnershipRepository : IDataOwnershipRepositor
 internal sealed class FakeDiscoveryArtifactStore : IDiscoveryArtifactStore
 {
     public Dictionary<Guid, DiscoveryArtifacts> Artifacts { get; } = [];
+    public Dictionary<(Guid TableId, ArtifactProvenance Provenance), DiscoveryArtifacts> ScopedArtifacts { get; } = [];
     public bool FailOnRead { get; set; }
 
     public Task<DiscoveryArtifacts?> GetAsync(Guid tableId, CancellationToken ct = default)
     {
         if (FailOnRead) throw new InvalidOperationException("Artifact read failed.");
-        return Task.FromResult(Artifacts.TryGetValue(tableId, out var a) ? a : null);
+        return Task.FromResult(
+            ScopedArtifacts.TryGetValue((tableId, ArtifactProvenance.Upload), out var up) ? up :
+            ScopedArtifacts.TryGetValue((tableId, ArtifactProvenance.Unknown), out var unk) ? unk :
+            ScopedArtifacts.TryGetValue((tableId, ArtifactProvenance.Import), out var imp) ? imp :
+            Artifacts.TryGetValue(tableId, out var a) ? a : null);
+    }
+
+    public Task<DiscoveryArtifacts?> GetAsync(Guid tableId, ArtifactProvenance provenance, CancellationToken ct = default)
+    {
+        if (FailOnRead) throw new InvalidOperationException("Artifact read failed.");
+        if (ScopedArtifacts.TryGetValue((tableId, provenance), out var a)) return Task.FromResult<DiscoveryArtifacts?>(a);
+        return Task.FromResult(Artifacts.TryGetValue(tableId, out var legacy) && legacy.Provenance == provenance ? legacy : null);
+    }
+
+    public Task<IReadOnlyList<DiscoveryArtifacts>> GetAllAsync(Guid tableId, CancellationToken ct = default)
+    {
+        if (FailOnRead) throw new InvalidOperationException("Artifact read failed.");
+        var items = ScopedArtifacts.Where(kv => kv.Key.TableId == tableId).Select(kv => kv.Value).ToList();
+        if (items.Count == 0 && Artifacts.TryGetValue(tableId, out var legacy)) items.Add(legacy);
+        return Task.FromResult<IReadOnlyList<DiscoveryArtifacts>>(items);
     }
 
     public Task<bool> UpsertAsync(DiscoveryArtifacts artifacts, Sid actor, CancellationToken ct = default)
     {
+        if (artifacts.Provenance == ArtifactProvenance.Import && !string.IsNullOrWhiteSpace(artifacts.StatisticsJson))
+        {
+            throw new ArgumentException("Import discovery artifacts must not carry statistics.", nameof(artifacts));
+        }
+
+        ScopedArtifacts[(artifacts.TableId, artifacts.Provenance)] = artifacts;
         Artifacts[artifacts.TableId] = artifacts;
         return Task.FromResult(true);
     }
 
     public Task<bool> DeleteAsync(Guid tableId, Sid actor, CancellationToken ct = default)
-        => Task.FromResult(Artifacts.Remove(tableId));
+    {
+        var keys = ScopedArtifacts.Keys.Where(k => k.TableId == tableId).ToList();
+        var removed = Artifacts.Remove(tableId);
+        foreach (var key in keys) removed |= ScopedArtifacts.Remove(key);
+        return Task.FromResult(removed);
+    }
+
+    public Task<bool> DeleteAsync(Guid tableId, ArtifactProvenance provenance, Sid actor, CancellationToken ct = default)
+    {
+        var removed = ScopedArtifacts.Remove((tableId, provenance));
+        if (Artifacts.TryGetValue(tableId, out var legacy) && legacy.Provenance == provenance)
+        {
+            removed |= Artifacts.Remove(tableId);
+        }
+
+        return Task.FromResult(removed);
+    }
 }
 
 internal sealed class FakeAuditWriter : IAuditWriter

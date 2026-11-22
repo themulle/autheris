@@ -99,6 +99,8 @@ public sealed partial class TableAccessPolicy
     private readonly IDataOwnershipRepository? _ownershipRepository;
     private readonly Autheris.Application.Policy.Classification.ClassificationAccessResolver? _classificationResolver;
     private readonly IProtectionSnapshotProvider? _protectionProvider;
+    private readonly Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? _accessPolicySettings;
+    private readonly Autheris.Application.Identity.IIdentityRealmRegistry? _realmRegistry;
     private readonly TimeProvider _timeProvider;
 
     /// <param name="mandatoryFilters">
@@ -126,7 +128,9 @@ public sealed partial class TableAccessPolicy
         IDataOwnershipRepository? ownershipRepository = null,
         TimeProvider? timeProvider = null,
         Autheris.Application.Policy.Classification.ClassificationAccessResolver? classificationResolver = null,
-        IProtectionSnapshotProvider? protectionProvider = null)
+        IProtectionSnapshotProvider? protectionProvider = null,
+        Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? accessPolicySettings = null,
+        Autheris.Application.Identity.IIdentityRealmRegistry? realmRegistry = null)
     {
         _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
         _callerAttributes = callerAttributes;
@@ -140,6 +144,8 @@ public sealed partial class TableAccessPolicy
         _timeProvider = timeProvider ?? TimeProvider.System;
         _classificationResolver = classificationResolver;
         _protectionProvider = protectionProvider;
+        _accessPolicySettings = accessPolicySettings;
+        _realmRegistry = realmRegistry;
         _mandatoryFilters = mandatoryFilters ?? throw new ArgumentNullException(nameof(mandatoryFilters));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _resolutionService = resolutionService ?? throw new ArgumentNullException(nameof(resolutionService));
@@ -228,17 +234,17 @@ public sealed partial class TableAccessPolicy
             return TableAccessDecision.Denied(table, "identity.groups_unresolved: Group resolution unavailable (fail-closed).");
         }
 
-        if (query.Protection is null && _protectionProvider is not null)
+        var consentBypassed = _options?.IsConsentBypassed == true;
+
+        var (resolvedProtection, snapshotFailure) = await ResolveProtectionSnapshotAsync(query, required: !consentBypassed, ct).ConfigureAwait(false);
+        if (snapshotFailure is not null)
         {
-            try
-            {
-                var resolvedProtection = await _protectionProvider.GetAsync(query.Tenant, table, ct).ConfigureAwait(false);
-                query = query with { Protection = resolvedProtection };
-            }
-            catch (Exception) when (!ct.IsCancellationRequested)
-            {
-                return TableAccessDecision.Denied(table, "Protection classification unavailable (fail-closed).");
-            }
+            return snapshotFailure;
+        }
+
+        if (resolvedProtection is not null && query.Protection is null)
+        {
+            query = query with { Protection = resolvedProtection };
         }
 
         // Enforce schema contracts at query execution time using protection classes only.
@@ -247,7 +253,6 @@ public sealed partial class TableAccessPolicy
             return contractDenial;
         }
 
-        var consentBypassed = _options?.IsConsentBypassed == true;
         IReadOnlyList<AccessProfile> profiles;
         try
         {
@@ -258,16 +263,10 @@ public sealed partial class TableAccessPolicy
             return TableAccessDecision.Denied(table, $"Access profile source unavailable (fail-closed): {ex.Message}");
         }
 
-        // SR-M-07: an access profile is a masking exemption only. Consent resolution (Deny consents, purpose limits, consent row
-        // filters) always runs first; the profile is applied on top of an Allow decision and never creates one.
+        // Baseline and consent evaluation; deny consents and protection gates always decide before narrowing layers run.
         TableAccessDecision decision = consentBypassed
             ? TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true)
-            : await ResolveConsentAsync(query, ct).ConfigureAwait(false);
-
-        if (!consentBypassed && decision.IsAllowed)
-        {
-            decision = await ApplyClassificationAccessAsync(decision, query, ct).ConfigureAwait(false);
-        }
+            : await EvaluateProtectionAndConsentAsync(query, resolvedProtection, ct).ConfigureAwait(false);
 
         // 143 (-14): a query without any claims (absent, not merely without scp) has unknown token scopes and is treated as
         // holding every restricted scope with no clearance. Applied after the cache read and the rebuilds above; the cache holds the plain

@@ -10,6 +10,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Streaming.Interfaces;
 using Autheris.Application.Streaming.Services;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using HotChocolate;
 using HotChocolate.Types;
@@ -115,12 +116,37 @@ public sealed class Subscription
         var watchPolicy = RevocationWatchPolicy.From(services.GetService<IOptions<RevocationWatchOptions>>());
         var failureCounter = new RevocationFailureCounter(watchPolicy);
         ILogger? watchLogger = services.GetService<ILogger<Subscription>>();
-        using var revocationTimer = revocation == null ? null : timeProvider.CreateTimer(static state =>
+
+        var epochProvider = services.GetService<Autheris.Application.Governance.Caching.GovernanceEpochProvider>();
+        var tenantClaim = Autheris.Domain.Tenancy.TenantClaimReader.Read(principal);
+        TenantId? subTenant = tenantClaim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid ? (TenantId?)tenantClaim.Tenant : null;
+        long? observedEpoch = epochProvider != null && subTenant is { } validTenant
+            ? await epochProvider.GetEpochAsync(validTenant, ct).ConfigureAwait(false)
+            : (long?)null;
+        var epochLock = new Lock();
+
+        using var epochAdvanceSubscription = epochProvider?.OnTenantEpochAdvanced(changedTenant =>
         {
-            var (cts, svc, p, counter, logger) =
-                ((CancellationTokenSource, ITokenRevocationService, ClaimsPrincipal, RevocationFailureCounter, ILogger?))state!;
-            _ = CheckRevocationAsync(cts, svc, p, counter, logger);
-        }, (guardCts, revocation, principal, failureCounter, watchLogger), interval, interval);
+            if (subTenant is null || string.Equals(changedTenant, subTenant.Value.Value, StringComparison.OrdinalIgnoreCase))
+            {
+                _ = RevalidateSubscriptionAccessAsync(guardCts, services, principal, subTenant, tableId, watchLogger);
+            }
+        });
+
+        using var revocationTimer = (revocation == null && (epochProvider == null || subTenant is null)) ? null : timeProvider.CreateTimer(static state =>
+        {
+            var (cts, svc, epProvider, tenantOpt, p, tableOpt, counter, logger, lastEpochBox, syncLock, sProvider) =
+                ((CancellationTokenSource, ITokenRevocationService?, Autheris.Application.Governance.Caching.GovernanceEpochProvider?, TenantId?, ClaimsPrincipal, TableIdentifier?, RevocationFailureCounter, ILogger?, long[], Lock, IServiceProvider))state!;
+            if (svc != null)
+            {
+                _ = CheckRevocationAsync(cts, svc, p, counter, logger);
+            }
+
+            if (epProvider != null && tenantOpt is { } t)
+            {
+                _ = PollEpochChangeAsync(cts, epProvider, t, sProvider, p, tableOpt, lastEpochBox, syncLock, logger);
+            }
+        }, (guardCts, revocation, epochProvider, subTenant, principal, tableId, failureCounter, watchLogger, new[] { observedEpoch ?? 0L }, epochLock, services), interval, interval);
 
         // GQL-3 / GQL-4: topic admission (catalog + access decision, cdc_all for admins), per-subject limit, audit.
         var governor = services.GetService<CdcSubscriptionGovernor>()
@@ -199,7 +225,16 @@ public sealed class Subscription
             var decision = await enforcer.EvaluateAndMaskAsync(cdcEvent, subscriber, ct);
             if (!decision.IsAllowed || decision.MaskedPayload == null)
             {
-                continue; // Zero leakage: unauthorized events dropped
+                if (!string.Equals(decision.FilterReason, "Filtered by row-level security", StringComparison.Ordinal) &&
+                    (decision.FilterReason?.Contains("access", StringComparison.OrdinalIgnoreCase) == true ||
+                     decision.FilterReason?.Contains("consent", StringComparison.OrdinalIgnoreCase) == true ||
+                     decision.FilterReason?.Contains("expired", StringComparison.OrdinalIgnoreCase) == true ||
+                     decision.FilterReason?.Contains("Token", StringComparison.OrdinalIgnoreCase) == true))
+                {
+                    break;
+                }
+
+                continue; // Zero leakage: row-filtered events dropped
             }
 
             lease.CountDelivered();
@@ -259,6 +294,102 @@ public sealed class Subscription
                     // Stream already ended.
                 }
             }
+        }
+    }
+
+    internal static async Task PollEpochChangeAsync(
+        CancellationTokenSource cts,
+        Autheris.Application.Governance.Caching.GovernanceEpochProvider epochProvider,
+        TenantId tenant,
+        IServiceProvider services,
+        ClaimsPrincipal principal,
+        TableIdentifier? tableId,
+        long[] lastEpochBox,
+        Lock syncLock,
+        ILogger? logger)
+    {
+        try
+        {
+            if (cts.IsCancellationRequested)
+            {
+                return;
+            }
+
+            var current = await epochProvider.GetEpochAsync(tenant, CancellationToken.None).ConfigureAwait(false);
+            bool changed;
+            lock (syncLock)
+            {
+                changed = current != lastEpochBox[0];
+                if (changed)
+                {
+                    lastEpochBox[0] = current;
+                }
+            }
+
+            if (changed)
+            {
+                await RevalidateSubscriptionAccessAsync(cts, services, principal, tenant, tableId, logger).ConfigureAwait(false);
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "Subscription stream closed: governance epoch verification failed (fail-closed).");
+            try { cts.Cancel(); } catch (ObjectDisposedException) { }
+        }
+    }
+
+    internal static async Task RevalidateSubscriptionAccessAsync(
+        CancellationTokenSource cts,
+        IServiceProvider services,
+        ClaimsPrincipal principal,
+        TenantId? tenant,
+        TableIdentifier? tableId,
+        ILogger? logger)
+    {
+        try
+        {
+            if (cts.IsCancellationRequested || tableId is not { } tid)
+            {
+                return;
+            }
+
+            bool allowed = false;
+            var pdp = services.GetService<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>();
+            var metadataRepo = services.GetService<Autheris.Application.Common.Interfaces.ITableMetadataRepository>();
+            if (pdp != null && metadataRepo != null && tenant is { } tenantId)
+            {
+                var meta = await metadataRepo.GetTableMetadataAsync(tid, CancellationToken.None).ConfigureAwait(false);
+                if (meta is not null && meta.Table.IsActive)
+                {
+                    var ctx = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(principal, tenantId);
+                    var decision = await pdp.DecideAsync(
+                        new Autheris.Application.Policy.Pdp.AccessRequest(
+                            ctx, meta, Autheris.Application.Policy.Pdp.AccessOperation.Read, Autheris.Application.Policy.Pdp.AccessTransport.Streaming),
+                        CancellationToken.None).ConfigureAwait(false);
+                    allowed = decision.IsAllowed;
+                }
+            }
+            else if (services.GetService<ITableAccessResolver>() is { } resolver)
+            {
+                var resolved = await resolver.ResolveTableAccessAsync(principal, tid, null, null, CancellationToken.None).ConfigureAwait(false);
+                allowed = resolved.Decision.IsAllowed;
+            }
+
+            if (!allowed)
+            {
+                cts.Cancel();
+            }
+        }
+        catch (ObjectDisposedException)
+        {
+        }
+        catch (Exception ex)
+        {
+            logger?.LogWarning(ex, "Subscription stream terminated after governance policy revalidation denied or failed.");
+            try { cts.Cancel(); } catch (ObjectDisposedException) { }
         }
     }
 }

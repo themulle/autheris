@@ -620,6 +620,7 @@ public sealed record TableAccessDecision(
 public enum DecisionStep
 {
     Precondition,
+    Protection,
     ExplicitDeny,
     Grant,
     Narrowing,

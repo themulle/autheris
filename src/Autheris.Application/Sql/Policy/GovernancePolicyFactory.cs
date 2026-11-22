@@ -5,6 +5,9 @@ using System.Collections.Frozen;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security;
+using System.Security.Claims;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
@@ -48,11 +51,16 @@ public sealed record GovernedPolicyInput(
     /// (stripped before returning rows; exempted from Nullify on Deny when not explicitly Masked).
     /// </summary>
     public string? MetricViewInternalCountColumn { get; init; }
+
+    /// <summary>
+    /// Principal fingerprint (value-free SHA-256) so compiled SQL templates are isolated across principal security attributes.
+    /// </summary>
+    public string? PrincipalCacheKey { get; init; }
 }
 
 /// <summary>
-/// WP-X0l: assembles the typed <see cref="GovernancePolicy"/> of one statement from its access decisions and the verified catalog
-/// . Fail closed per table: a table is part of the policy's catalog only when its decision is allowed, its row
+/// Assembles the typed <see cref="GovernancePolicy"/> of one statement from its access decisions and the verified catalog.
+/// Fail closed per table: a table is part of the policy's catalog only when its decision is allowed, its row
 /// filter and masks exist as typed policies, and the string and typed forms agree. Every other table is unknown to the compiler, which
 /// rejects a reference to it with the same error as for a table that does not exist. The tenant predicate is not assembled here: the
 /// compiler builds it from the catalog's tenant column and its database type, with the tenant bound as
@@ -61,7 +69,8 @@ public sealed record GovernedPolicyInput(
 public sealed class GovernancePolicyFactory(
     IGovernedCatalogProvider catalogs,
     ITableMetadataRepository tables,
-    IOptions<GatewayOptions> options)
+    IOptions<GatewayOptions> options,
+    Autheris.Application.Governance.Caching.GovernanceEpochProvider? epochProvider = null)
 {
     private readonly IGovernedCatalogProvider _catalogs = catalogs ?? throw new ArgumentNullException(nameof(catalogs));
     private readonly ITableMetadataRepository _tables = tables ?? throw new ArgumentNullException(nameof(tables));
@@ -174,6 +183,11 @@ public sealed class GovernancePolicyFactory(
             }
         }
 
+        long governanceEpoch = epochProvider is not null
+            ? await epochProvider.GetEpochAsync(input.Tenant, ct).ConfigureAwait(false)
+            : 0;
+        var principalCacheKey = input.PrincipalCacheKey ?? ComputeDecisionCacheKey(input.Decisions);
+
         return new GovernancePolicy
         {
             RowFilters = new DecisionRowPolicyProvider(rowPredicates, dialect),
@@ -184,8 +198,48 @@ public sealed class GovernancePolicyFactory(
             TablesWithConsentRowFilter = consentFiltered.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             TablesWithMaskedColumns = masked.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             SubqueryStrategy = input.SubqueryStrategy,
-            Write = input.WritePermit
+            Write = input.WritePermit,
+            PrincipalCacheKey = principalCacheKey,
+            GovernanceEpoch = governanceEpoch
         };
+    }
+
+    public static string? ComputePrincipalCacheKey(ClaimsPrincipal? principal)
+    {
+        if (principal?.Identity?.IsAuthenticated != true)
+        {
+            return null;
+        }
+
+        var sid = principal.GetUserSid()?.Value ?? string.Empty;
+        var groups = string.Join(',', principal.GetGroupSids().Select(static g => g.Value).OrderBy(static x => x, StringComparer.Ordinal));
+        var roles = string.Join(',', principal.GetUserRoles().OrderBy(static x => x, StringComparer.Ordinal));
+        var scopes = string.Join(',', Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims).OrderBy(static x => x, StringComparer.Ordinal));
+        var realmKind = Autheris.Domain.Security.SecurityPrincipalContext.ReadPipelineRealmKind(principal)?.ToString() ?? string.Empty;
+        var payload = $"{sid}\n{groups}\n{roles}\n{scopes}\n{realmKind}";
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(payload));
+        return Convert.ToHexString(digest).ToLowerInvariant();
+    }
+
+    private static string ComputeDecisionCacheKey(IReadOnlyDictionary<TableIdentity, TableAccessDecision> decisions)
+    {
+        var sb = new StringBuilder(128);
+        foreach (var (table, d) in decisions.OrderBy(static kv => kv.Key.Schema, StringComparer.Ordinal).ThenBy(static kv => kv.Key.Table, StringComparer.Ordinal))
+        {
+            sb.Append(table.Schema).Append('.').Append(table.Table).Append(':').Append(d.IsAllowed ? '1' : '0');
+            if (d.ColumnAccess is { Count: > 0 })
+            {
+                foreach (var ca in d.ColumnAccess.OrderBy(static kv => kv.Key, StringComparer.OrdinalIgnoreCase))
+                {
+                    sb.Append('|').Append(ca.Key).Append('=').Append((int)ca.Value);
+                }
+            }
+
+            sb.Append(';');
+        }
+
+        var digest = SHA256.HashData(Encoding.UTF8.GetBytes(sb.ToString()));
+        return Convert.ToHexString(digest).ToLowerInvariant();
     }
 
     /// <summary>

@@ -182,12 +182,24 @@ public interface ITableMetadataRepository : Autheris.Application.Catalog.ICatalo
     Task<DiscoveryArtifacts?> GetDiscoveryArtifactsAsync(Guid tableId, CancellationToken ct = default)
         => throw new NotSupportedException($"{GetType().Name} does not implement discovery artifacts.");
 
+    /// <summary>Gets discovery artifacts for a table and provenance.</summary>
+    Task<DiscoveryArtifacts?> GetDiscoveryArtifactsAsync(Guid tableId, ArtifactProvenance provenance, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement discovery artifacts.");
+
+    /// <summary>Gets all discovery artifact rows (across provenances) for a table.</summary>
+    Task<IReadOnlyList<DiscoveryArtifacts>> GetAllDiscoveryArtifactsAsync(Guid tableId, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement discovery artifacts.");
+
     /// <summary>Upserts discovery artifacts for a table.</summary>
     Task<bool> UpsertDiscoveryArtifactsAsync(DiscoveryArtifacts artifacts, Sid actor, CancellationToken ct = default)
         => throw new NotSupportedException($"{GetType().Name} does not implement discovery artifacts.");
 
     /// <summary>Deletes discovery artifacts for a table.</summary>
     Task<bool> DeleteDiscoveryArtifactsAsync(Guid tableId, Sid actor, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement discovery artifacts.");
+
+    /// <summary>Deletes discovery artifacts for a specific table and provenance.</summary>
+    Task<bool> DeleteDiscoveryArtifactsAsync(Guid tableId, ArtifactProvenance provenance, Sid actor, CancellationToken ct = default)
         => throw new NotSupportedException($"{GetType().Name} does not implement discovery artifacts.");
 
     /// <summary>

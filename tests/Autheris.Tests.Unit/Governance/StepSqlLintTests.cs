@@ -209,7 +209,8 @@ public sealed class StepSqlLintTests
                 (36, "governance_domains_and_protection"),
                 (37, "drop_recertification"),
                 (38, "drop_table_sensitivity"),
-                (39, "data_product_container")
+                (39, "data_product_container"),
+                (40, "discovery_artifact_provenance")
             ]);
         }
     }

@@ -51,6 +51,8 @@ public sealed class IdentityPipeline : IIdentityPipeline
         [
             "autheris:group",
             "autheris:realm",
+            "autheris:realm_kind",
+            "autheris:subject_kind",
             RequireFunctionalRightHandler.FunctionalRightClaimType,
             RoleResolutionClaims.ClaimType,
             RoleResolutionClaims.AllowedGatewayRolesClaimType,
@@ -211,6 +213,12 @@ public sealed class IdentityPipeline : IIdentityPipeline
         {
             // An unregistered fallback id is not stamped: the tenant resolver treats a non-blank realm claim as an authoritative realm.
             identity.AddClaim(new Claim("autheris:realm", realmId));
+            identity.AddClaim(new Claim("autheris:realm_kind", realm.Kind.ToString(), ClaimValueTypes.String, IdentityClaimIssuers.Pipeline));
+        }
+
+        if (isServicePrincipal)
+        {
+            identity.AddClaim(new Claim("autheris:subject_kind", "sp", ClaimValueTypes.String, IdentityClaimIssuers.Pipeline));
         }
 
         var degradedReason = ClientAllowlistFailure(realm, identity);

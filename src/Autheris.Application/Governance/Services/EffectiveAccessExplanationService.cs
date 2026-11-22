@@ -128,7 +128,7 @@ public sealed class EffectiveAccessExplanationService(
                 "DENIED",
                 Array.Empty<string>(),
                 Array.Empty<string>(),
-                visible[0].Columns.Select(c => c.ColumnName).ToList(),
+                visible[0].Columns.Where(static c => !c.DiscoveryHidden).Select(c => c.ColumnName).ToList(),
                 Array.Empty<string>(),
                 decision.DeniedReasons.Count > 0 ? string.Join("; ", decision.DeniedReasons) : "No active allow consent.",
                 null

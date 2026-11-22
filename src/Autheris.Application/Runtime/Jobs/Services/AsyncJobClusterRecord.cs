@@ -22,4 +22,8 @@ public sealed record AsyncJobClusterRecord(
     string? ErrorMessage,
     string? ResultFileName,
     string OwnerNodeId,
-    System.Collections.Generic.IReadOnlyList<string>? SubmittedByGroupSids = null);
+    System.Collections.Generic.IReadOnlyList<string>? SubmittedByGroupSids = null,
+    System.Collections.Generic.IReadOnlyList<string>? SubmittedByRoles = null,
+    System.Collections.Generic.IReadOnlyList<string>? SubmittedByScopes = null,
+    long? SubmittedGovernanceEpoch = null,
+    System.Collections.Generic.IReadOnlyList<string>? TargetTables = null);

@@ -37,20 +37,53 @@ public sealed class DiscoveryArtifactServingTests
     private sealed class CapturingArtifactStore : IDiscoveryArtifactStore
     {
         public Dictionary<Guid, DiscoveryArtifacts> Items { get; } = [];
+        public Dictionary<(Guid TableId, ArtifactProvenance Provenance), DiscoveryArtifacts> ScopedItems { get; } = [];
         public List<(DiscoveryArtifacts Item, Sid Actor)> UpsertCalls { get; } = [];
 
         public Task<DiscoveryArtifacts?> GetAsync(Guid tableId, CancellationToken ct = default)
             => Task.FromResult(Items.TryGetValue(tableId, out var a) ? a : null);
 
+        public Task<DiscoveryArtifacts?> GetAsync(Guid tableId, ArtifactProvenance provenance, CancellationToken ct = default)
+        {
+            if (ScopedItems.TryGetValue((tableId, provenance), out var a)) return Task.FromResult<DiscoveryArtifacts?>(a);
+            return Task.FromResult(Items.TryGetValue(tableId, out var legacy) && legacy.Provenance == provenance ? legacy : null);
+        }
+
+        public Task<IReadOnlyList<DiscoveryArtifacts>> GetAllAsync(Guid tableId, CancellationToken ct = default)
+        {
+            var list = ScopedItems.Where(kv => kv.Key.TableId == tableId).Select(kv => kv.Value).ToList();
+            if (list.Count == 0 && Items.TryGetValue(tableId, out var legacy)) list.Add(legacy);
+            return Task.FromResult<IReadOnlyList<DiscoveryArtifacts>>(list);
+        }
+
         public Task<bool> UpsertAsync(DiscoveryArtifacts artifacts, Sid actor, CancellationToken ct = default)
         {
+            ScopedItems[(artifacts.TableId, artifacts.Provenance)] = artifacts;
             Items[artifacts.TableId] = artifacts;
             UpsertCalls.Add((artifacts, actor));
             return Task.FromResult(true);
         }
 
         public Task<bool> DeleteAsync(Guid tableId, Sid actor, CancellationToken ct = default)
-            => Task.FromResult(Items.Remove(tableId));
+        {
+            foreach (var key in ScopedItems.Keys.Where(k => k.TableId == tableId).ToList())
+            {
+                ScopedItems.Remove(key);
+            }
+
+            return Task.FromResult(Items.Remove(tableId));
+        }
+
+        public Task<bool> DeleteAsync(Guid tableId, ArtifactProvenance provenance, Sid actor, CancellationToken ct = default)
+        {
+            var removed = ScopedItems.Remove((tableId, provenance));
+            if (Items.TryGetValue(tableId, out var legacy) && legacy.Provenance == provenance)
+            {
+                removed |= Items.Remove(tableId);
+            }
+
+            return Task.FromResult(removed);
+        }
     }
 
     private sealed class NoopAuditLogRepository : IAuditLogRepository
@@ -311,7 +344,7 @@ public sealed class DiscoveryArtifactServingTests
 
         artifactStore.UpsertCalls.Count.ShouldBe(1);
         artifactStore.UpsertCalls[0].Actor.Value.ShouldBe("dbt-ingestion");
-        audit.Entries.ShouldContain(e => e.EventType == AuditEventTypes.CatalogDiscoveryArtifactsChanged);
+        audit.Entries.ShouldContain(e => e.EventType == AuditEventTypes.ImportSamplesChanged);
         var saved = artifactStore.UpsertCalls[0].Item;
         saved.UploadedBy.ShouldBe("dbt-ingestion");
         saved.SamplesJson.ShouldNotBeNullOrWhiteSpace();

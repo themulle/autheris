@@ -48,6 +48,13 @@ public sealed partial class GovernanceDomainService
             return Invalid<ProtectionWriteOutcome>(tableChange.ErrorCode ?? ProtectionWriteValidator.InvalidMaskCategoryErrorCode, tableChange.ErrorMessage ?? "Invalid protection parameters.");
         }
 
+        var remainingCols = ApplyClearedColumns(beforeCols, tableChange.ClearedRedundantColumns);
+        var candidateEffective = EffectiveProtectionResolver.Resolve(container, tableChange.NormalizedTableProtection, remainingCols, colNames);
+        if (ValidateDelegatedProtection(meta.Identifier.Domain, candidateEffective) is { } delegatedError)
+        {
+            return delegatedError;
+        }
+
         await _domains.SetTableProtectionAsync(
             tenant,
             meta.Table.Id,
@@ -56,8 +63,7 @@ public sealed partial class GovernanceDomainService
             caller.UserSid,
             ct).ConfigureAwait(false);
 
-        var remainingCols = ApplyClearedColumns(beforeCols, tableChange.ClearedRedundantColumns);
-        var afterEffective = EffectiveProtectionResolver.Resolve(container, tableChange.NormalizedTableProtection, remainingCols, colNames);
+        var afterEffective = candidateEffective;
 
         await AuditTableProtectionChangeAsync(
             tenant,
@@ -118,13 +124,17 @@ public sealed partial class GovernanceDomainService
             return Invalid<ProtectionWriteOutcome>(validation.ErrorCode ?? ProtectionWriteValidator.ColumnLooserErrorCode, validation.ErrorMessage ?? "Invalid column protection.");
         }
 
-        await _domains.SetProtectionAsync(tenant, meta.Table.Id, canonicalColumn, validation.NormalizedProtection, caller.UserSid, ct).ConfigureAwait(false);
-
         var afterCols = new Dictionary<string, ObjectProtection>(beforeCols, StringComparer.OrdinalIgnoreCase)
         {
             [canonicalColumn] = validation.NormalizedProtection
         };
         var afterEffective = EffectiveProtectionResolver.Resolve(container, beforeTable, afterCols, colNames);
+        if (ValidateDelegatedProtection(meta.Identifier.Domain, afterEffective) is { } delegatedError)
+        {
+            return delegatedError;
+        }
+
+        await _domains.SetProtectionAsync(tenant, meta.Table.Id, canonicalColumn, validation.NormalizedProtection, caller.UserSid, ct).ConfigureAwait(false);
 
         var coveringGrants = afterEffective.TableClass > beforeEffective.TableClass
             ? await CountCoveringTableGrantsAsync(tenant, meta.Identifier, canonicalColumn, ct).ConfigureAwait(false)
@@ -392,5 +402,80 @@ public sealed partial class GovernanceDomainService
         }
 
         return copy;
+    }
+
+    public async Task<DomainServiceResult<bool>> PurgeImportSamplesAsync(
+        SecurityPrincipalContext caller,
+        TenantId tenant,
+        string datasetId,
+        Autheris.Application.Catalog.Discovery.IDiscoveryArtifactStore artifactStore,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        ArgumentNullException.ThrowIfNull(artifactStore);
+
+        if (!_capabilities.IsGovernance(caller.Principal, tenant))
+        {
+            return Forbidden<bool>("Only Data Governance administrators can purge imported samples.");
+        }
+
+        var meta = await ResolveTenantTableAsync(tenant, datasetId, ct).ConfigureAwait(false);
+        if (meta is null)
+        {
+            return NotFound<bool>("RESOURCE_NOT_FOUND", "Dataset was not found.");
+        }
+
+        var before = await artifactStore.GetAsync(meta.Table.Id, ArtifactProvenance.Import, ct).ConfigureAwait(false);
+        if (before is null)
+        {
+            return Ok(false);
+        }
+
+        await artifactStore.DeleteAsync(meta.Table.Id, ArtifactProvenance.Import, caller.UserSid, ct).ConfigureAwait(false);
+        try
+        {
+            await RecordAuditAsync(tenant, caller.UserSid, AuditEventTypes.ImportSamplesPurged, meta.Identifier.ToString(), null, new
+            {
+                datasetId = meta.Identifier.ToString(),
+                tableId = meta.Table.Id,
+                provenance = ArtifactProvenance.Import.ToDbString(),
+                beforeSha256 = before.ContentSha256
+            }, ct).ConfigureAwait(false);
+        }
+        catch
+        {
+            try
+            {
+                await artifactStore.UpsertAsync(before, caller.UserSid, CancellationToken.None).ConfigureAwait(false);
+            }
+            catch
+            {
+                // Swallow secondary rollback exception so audit failure surfaces cleanly.
+            }
+
+            throw;
+        }
+
+        return Ok(true);
+    }
+
+    private DomainServiceResult<ProtectionWriteOutcome>? ValidateDelegatedProtection(string dataSourceName, EffectiveProtection protection)
+    {
+        if (_gatewayOptions is null)
+        {
+            return null;
+        }
+
+        var mode = Autheris.Application.Sql.Services.SqlDataSourceResolver.ResolveConnectionOptions(_gatewayOptions, dataSourceName)?.EnforcementMode
+            ?? Autheris.Domain.Options.EnforcementMode.AutherisEnforced;
+        try
+        {
+            DelegatedProtectionValidator.Validate(mode, dataSourceName, protection);
+            return null;
+        }
+        catch (System.ComponentModel.DataAnnotations.ValidationException ex)
+        {
+            return Invalid<ProtectionWriteOutcome>(DelegatedProtectionValidator.ErrorCode, ex.Message);
+        }
     }
 }

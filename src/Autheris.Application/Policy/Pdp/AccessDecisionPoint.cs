@@ -53,6 +53,8 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
     private readonly IDataOwnershipRepository? _ownershipRepository;
     private readonly Autheris.Application.Products.IDataProductRepository? _productRepository;
     private readonly IProtectionSnapshotProvider? _protectionProvider;
+    private readonly Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? _accessPolicySettings;
+    private readonly Autheris.Application.Identity.IIdentityRealmRegistry? _realmRegistry;
 
     public AccessDecisionPoint(
         IOptions<GatewayOptions> options,
@@ -77,10 +79,14 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         Autheris.Application.Catalog.ICatalogVersionProvider? catalogVersionProvider = null,
         IDataOwnershipRepository? ownershipRepository = null,
         Autheris.Application.Products.IDataProductRepository? productRepository = null,
-        IProtectionSnapshotProvider? protectionProvider = null)
+        IProtectionSnapshotProvider? protectionProvider = null,
+        Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? accessPolicySettings = null,
+        Autheris.Application.Identity.IIdentityRealmRegistry? realmRegistry = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _protectionProvider = protectionProvider;
+        _accessPolicySettings = accessPolicySettings;
+        _realmRegistry = realmRegistry;
         _resolutionService = resolutionService;
         _consentRepository = consentRepository;
         _cacheService = cacheService ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance;
@@ -126,7 +132,10 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
                 _catalogVersionProvider,
                 _ownershipRepository,
                 _timeProvider,
-                _typedPolicies?.ClassificationResolver);
+                _typedPolicies?.ClassificationResolver,
+                _protectionProvider,
+                _accessPolicySettings,
+                _realmRegistry);
         }
     }
 
@@ -484,27 +493,32 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
 
         var decision = await DecideAsync(request, ct).ConfigureAwait(false);
         var sourceColumns = effectiveObject.Columns;
-        var cols = sourceColumns.Count > 0
-            ? sourceColumns
-                .Select(c =>
-                {
-                    var rawLevel = decision.GetColumnAccess(c.ColumnName);
-                    var level = rawLevel == ColumnAccessLevel.RowDependent
-                        ? ColumnAccessLevel.RowDependent
-                        : decision.GetEffectiveColumnAccess(c.ColumnName, request.Object);
-                    var maskType = level is ColumnAccessLevel.Mask or ColumnAccessLevel.RowDependent
-                        ? ResolveMaskType(c.ColumnName, decision, request.Object)
-                        : null;
-                    return new ColumnStateExplanation(c.ColumnName, level, maskType);
-                })
-                .ToList()
-            : decision.ColumnAccess
-                .OrderBy(kv => kv.Key, StringComparer.Ordinal)
-                .Select(kv => new ColumnStateExplanation(
-                    kv.Key,
-                    kv.Value,
-                    kv.Value is ColumnAccessLevel.Mask or ColumnAccessLevel.RowDependent ? ResolveMaskType(kv.Key, decision, request.Object) : null))
-                .ToList();
+        var cols = !decision.IsAllowed
+            ? new List<ColumnStateExplanation>()
+            : sourceColumns.Count > 0
+                ? sourceColumns
+                    .Where(c => !c.DiscoveryHidden)
+                    .Select(c =>
+                    {
+                        var rawLevel = decision.GetColumnAccess(c.ColumnName);
+                        var level = rawLevel == ColumnAccessLevel.RowDependent
+                            ? ColumnAccessLevel.RowDependent
+                            : decision.GetEffectiveColumnAccess(c.ColumnName, request.Object);
+                        var maskType = level is ColumnAccessLevel.Mask or ColumnAccessLevel.RowDependent
+                            ? ResolveMaskType(c.ColumnName, decision, request.Object)
+                            : null;
+                        return new ColumnStateExplanation(c.ColumnName, level, maskType);
+                    })
+                    .Where(c => c.Level != ColumnAccessLevel.Deny)
+                    .ToList()
+                : decision.ColumnAccess
+                    .OrderBy(kv => kv.Key, StringComparer.Ordinal)
+                    .Where(kv => kv.Value != ColumnAccessLevel.Deny)
+                    .Select(kv => new ColumnStateExplanation(
+                        kv.Key,
+                        kv.Value,
+                        kv.Value is ColumnAccessLevel.Mask or ColumnAccessLevel.RowDependent ? ResolveMaskType(kv.Key, decision, request.Object) : null))
+                    .ToList();
 
         var groups = new EffectiveGroupsExplanation(
             request.Subject.GroupSids.Select(s => s.Value).OrderBy(v => v, StringComparer.Ordinal).ToList(),

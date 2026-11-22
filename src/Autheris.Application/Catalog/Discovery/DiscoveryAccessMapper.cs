@@ -36,14 +36,17 @@ public static class DiscoveryAccessMapper
         IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>>? repoColumnClassifications = null,
         string? tenantId = null,
         bool hideMaskedTextForRestrictedScopes = false,
-        EffectiveProtection? effectiveProtection = null)
+        EffectiveProtection? effectiveProtection = null,
+        bool importSamplesAvailable = false)
     {
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(decision);
         ArgumentNullException.ThrowIfNull(activeOwners);
 
         var (accessState, rowScope) = MapAccessAndRowScope(decision, isPendingRequest, isRecentlyExpired);
-        var (tableStats, colStatsByName) = ParseStatistics(artifacts);
+        var (tableStats, colStatsByName) = artifacts is { Provenance: not ArtifactProvenance.Import }
+            ? ParseStatistics(artifacts)
+            : (null, null);
         var visibleCols = table.Columns.Where(static c => !c.DiscoveryHidden).ToList();
 
         var defs = classificationDefinitions
@@ -124,9 +127,14 @@ public static class DiscoveryAccessMapper
                 Email: string.IsNullOrWhiteSpace(o.Email) ? null : DiscoveryTextSanitizer.SanitizeText(o.Email, DiscoveryTextSanitizer.MaxDisplayNameRunes)))
             .ToList();
 
-        var samplesAvailable = !table.Table.SamplesDisabled
-            && HasSamples(artifacts?.SamplesJson)
-            && mappedCols.Any(static c => c.State == DiscoveryColumnState.Clear);
+        var samplesAvailable = !table.Table.SamplesDisabled && (
+            importSamplesAvailable ||
+            (decision.IsAllowed &&
+             artifacts is { Provenance: not ArtifactProvenance.Import } &&
+             HasSamples(artifacts.SamplesJson) &&
+             mappedCols.Any(c => decision.ScopeClearance is not null
+                 ? c.State == DiscoveryColumnState.Clear
+                 : c.State != DiscoveryColumnState.NoAccess)));
         var writeState = MapWriteState(table, visibleCols, insertDecision, updateDecision, deleteDecision);
 
         return new DiscoveryObject(
@@ -549,4 +557,6 @@ public static class DiscoveryAccessMapper
         }
         return (pii, sep, items, clearReq);
     }
+
+    public static bool IsSampleVisibleState(DiscoveryColumnState state) => state != DiscoveryColumnState.NoAccess;
 }

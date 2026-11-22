@@ -24,6 +24,7 @@ public static class GovernanceDomainEndpoints
     public const string DomainTablesRoute = "/api/v1/governance/domains/{id:guid}/tables";
     public const string ObjectProtectionRoute = "/api/v1/governance/objects/{datasetId}/protection";
     public const string ColumnProtectionRoute = "/api/v1/governance/objects/{datasetId}/columns/{column}/protection";
+    public const string ImportSamplesRoute = "/api/v1/governance/objects/{datasetId}/import-samples";
 
     public static IEndpointRouteBuilder MapGovernanceDomainEndpoints(this IEndpointRouteBuilder app)
     {
@@ -78,6 +79,12 @@ public static class GovernanceDomainEndpoints
         app.MapPut(ColumnProtectionRoute, SetColumnProtectionAsync)
             .RequireAuthorization(GatewayPolicies.AuthenticatedCaller)
             .WithAudit(AuditLevel.Full, AuditEventTypes.ProtectionClassChanged)
+            .WithIngressTransport(DataSourceTransportFlags.Rest)
+            .WithTags("Governance");
+
+        app.MapDelete(ImportSamplesRoute, PurgeImportSamplesAsync)
+            .RequireAuthorization(GatewayPolicies.AuthenticatedCaller)
+            .WithAudit(AuditLevel.Full, AuditEventTypes.ImportSamplesPurged)
             .WithIngressTransport(DataSourceTransportFlags.Rest)
             .WithTags("Governance");
 
@@ -331,6 +338,24 @@ public static class GovernanceDomainEndpoints
             sec, sec.TenantId, decodedDataset, decodedColumn, parsedClass, request.MaskCategory, ct).ConfigureAwait(false);
 
         return ToResult(result, http, o => Results.Ok(ToProtectionDto(o)));
+    }
+
+    internal static async Task<IResult> PurgeImportSamplesAsync(
+        HttpContext http,
+        string datasetId,
+        [FromServices] GovernanceDomainService service,
+        [FromServices] Autheris.Application.Catalog.Discovery.IDiscoveryArtifactStore artifactStore,
+        CancellationToken ct)
+    {
+        var sec = http.GetSecurityContext();
+        if (!sec.IsAuthenticated || sec.TenantClaimInvalid)
+        {
+            return Results.Unauthorized();
+        }
+
+        var decodedDataset = Uri.UnescapeDataString(datasetId);
+        var result = await service.PurgeImportSamplesAsync(sec, sec.TenantId, decodedDataset, artifactStore, ct).ConfigureAwait(false);
+        return ToResult(result, http, _ => Results.NoContent());
     }
 
     private static IResult ToResult<T>(DomainServiceResult<T> result, HttpContext http, Func<T, IResult> onSuccess) =>

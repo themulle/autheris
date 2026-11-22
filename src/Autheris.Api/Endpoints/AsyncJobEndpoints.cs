@@ -198,13 +198,34 @@ public static class AsyncJobEndpoints
         AsyncJobDescriptor? job;
         try
         {
-            stream = await jobManager.GetJobResultStreamAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
+            var pdp = httpContext.RequestServices?.GetService<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>();
+            var metadataRepo = httpContext.RequestServices?.GetService<Autheris.Application.Common.Interfaces.ITableMetadataRepository>();
+            var sqlEngine = httpContext.RequestServices?.GetService<TrinoSqlEngine.ISqlEngine>();
+            if (jobManager is AsyncQueryJobManager concreteManager && pdp is not null && metadataRepo is not null)
+            {
+                stream = await concreteManager.GetJobResultStreamAsync(
+                    jobId, tenantId, httpContext.User, pdp, metadataRepo, sqlEngine, ct).ConfigureAwait(false);
+            }
+            else
+            {
+                stream = await jobManager.GetJobResultStreamAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
+            }
+
             if (stream == null)
             {
                 return Results.NotFound();
             }
 
             job = await jobManager.GetJobAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
+        }
+        catch (Autheris.Domain.Exceptions.GatewayForbiddenException ex)
+        {
+            if (stream is not null) await stream.DisposeAsync().ConfigureAwait(false);
+            return Results.Problem(
+                statusCode: StatusCodes.Status403Forbidden,
+                title: "Access to async job result is denied.",
+                detail: "Access to async job result is denied by governance policy.",
+                extensions: new Dictionary<string, object?> { ["code"] = ex.ErrorCode });
         }
         catch (ClusterStateUnavailableException)
         {
