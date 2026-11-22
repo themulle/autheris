@@ -6,6 +6,7 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
@@ -193,5 +194,52 @@ public sealed class WorkloadIdentitySubjectRoleTests : IClassFixture<WorkloadIde
 
         // A token of realm B signed with realm A's key (or the reverse) never authenticates.
         (await PostGovernanceAsync(Token(_fixture.KeyA, "kid-a", IssuerB, MappedSubject))).ShouldBe(HttpStatusCode.Unauthorized);
+    }
+
+    [Fact]
+    public async Task ForwardAuth_header_cannot_reach_it_capacity()
+    {
+        const string forwardSecret = "workload-forward-auth-secret-0123456789";
+        using var forwardFactory = _fixture.Factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Gateway:Authentication:Mode", "Upstream");
+            builder.UseSetting("Gateway:Authentication:ForwardAuth:Enabled", "true");
+            builder.UseSetting("Gateway:Authentication:ForwardAuth:RequireTrustedProxy", "true");
+            builder.UseSetting("Gateway:Authentication:ForwardAuth:TrustedProxies:0", "127.0.0.1");
+            builder.UseSetting("Gateway:Authentication:ForwardAuth:SharedSecret", forwardSecret);
+            builder.UseSetting("Gateway:Authentication:ForwardAuth:AllowedRoles:0", "Consumer");
+            builder.UseSetting("Gateway:Authentication:ForwardAuth:AllowedRoles:1", "TenantAdmin");
+            builder.UseSetting("Gateway:Authentication:ForwardAuth:AllowedRoles:2", "ClusterAdmin");
+            builder.ConfigureServices(services => services.PostConfigure<Autheris.Domain.Options.Security.IdentityRealmsOptions>(options =>
+            {
+                options.Realms["forward-auth-it"] = new Autheris.Domain.Options.Security.IdentityRealmConfigOptions
+                {
+                    Kind = Autheris.Domain.Identity.IdentityRealmKind.ForwardAuth,
+                    FixedTenantId = TenantA,
+                    GroupSource = Autheris.Domain.Identity.RealmGroupSource.None,
+                    Provisioning = Autheris.Domain.Identity.RealmProvisioningMode.None,
+                    AllowedGatewayRoles = ["Consumer", "TenantAdmin", "ClusterAdmin"]
+                };
+            }));
+        });
+
+        using var client = forwardFactory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Forwarded-User", "forward-it-escalator");
+        client.DefaultRequestHeaders.Add("X-Forwarded-Secret", forwardSecret);
+        client.DefaultRequestHeaders.Add("X-Forwarded-Roles", "Consumer,TenantAdmin,ClusterAdmin");
+
+        var login = await client.GetAsync("/api/auth/login");
+        login.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var loginJson = await login.Content.ReadFromJsonAsync<JsonElement>();
+        var roles = loginJson.GetProperty("roles").EnumerateArray().Select(r => r.GetString()).ToList();
+        roles.ShouldContain("Consumer");
+        roles.ShouldNotContain("TenantAdmin");
+        roles.ShouldNotContain("ClusterAdmin");
+
+        var usageAdminResp = await client.GetAsync("/api/v1/usage/users");
+        usageAdminResp.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+
+        var clusterAdminResp = await client.GetAsync("/api/v1/admin/authz/migration-report");
+        clusterAdminResp.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
     }
 }

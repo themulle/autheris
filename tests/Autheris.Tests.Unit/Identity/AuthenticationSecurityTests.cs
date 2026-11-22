@@ -200,7 +200,7 @@ public class AuthenticationSecurityTests
         identity.AddClaim(new Claim("roles", "SecurityAuditor"));
 
         var principal = new ClaimsPrincipal(identity);
-        var transformer = TestIdentityPipeline.Transformation(TestIdentityPipeline.TokenRealm());
+        var transformer = TestIdentityPipeline.Transformation(TestIdentityPipeline.TokenRealm(IdentityRealmKind.EntraWorkforce, Autheris.Domain.Security.GatewayRole.SecurityAuditor));
 
         var transformed = await transformer.TransformAsync(principal);
 

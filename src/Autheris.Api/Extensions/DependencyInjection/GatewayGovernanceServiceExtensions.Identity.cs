@@ -85,5 +85,6 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Governance.Policies.IPolicyEpochService, Autheris.Application.Governance.Policies.PolicyEpochService>();
         services.AddSingleton<Autheris.Application.Governance.Recertification.IRecertificationService, Autheris.Application.Governance.Recertification.RecertificationService>();
         services.AddHostedService<Autheris.Application.Governance.Recertification.RecertificationGovernorHostedService>();
+        services.AddSingleton<IGovernanceCapabilities, GovernanceCapabilities>();
     }
 }

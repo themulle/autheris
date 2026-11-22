@@ -48,9 +48,17 @@ public static class SecurityContextFactory
         var clusterRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var tenantRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         bool clusterAdminAllowed = ClusterAdminPolicy.IsCanonicalClusterAdmin(user);
+        bool hasAllowedRoles = Autheris.Domain.Identity.RoleResolutionClaims.TryReadAllowedGatewayRoles(user, out var allowedGatewayRoles);
 
         foreach (var r in rawRoles)
         {
+            if (hasAllowedRoles &&
+                GatewayRoleExtensions.TryParseGatewayRoleValue(r, out _, out var parsedRole) &&
+                !allowedGatewayRoles.Contains(parsedRole))
+            {
+                continue;
+            }
+
             if (ClusterAdminPolicy.IsClusterAdminRole(r))
             {
                 if (clusterAdminAllowed)

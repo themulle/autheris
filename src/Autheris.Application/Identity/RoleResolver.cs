@@ -136,9 +136,11 @@ public sealed class RoleResolver : IRoleResolver
 
                     foreach (var role in result.AppRoles)
                     {
-                        if (!string.IsNullOrWhiteSpace(role))
+                        if (!string.IsNullOrWhiteSpace(role) &&
+                            Autheris.Domain.Security.GatewayRoleExtensions.TryParseGatewayRoleValue(role, out _, out var parsedRole) &&
+                            realm.AllowedGatewayRoles.Contains(parsedRole))
                         {
-                            mergedAppRoles.Add(role);
+                            mergedAppRoles.Add(role.Trim());
                         }
                     }
 

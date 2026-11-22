@@ -130,6 +130,56 @@ public static class GatewayRoleExtensions
     }
 
     /// <summary>
+    /// Case-insensitive strict parser for either a global role ("GovernanceAdmin") or a single-colon
+    /// tenant-scoped role ("tenant-a:GovernanceAdmin"). Rejects numeric strings, empty parts, and multiple colons.
+    /// </summary>
+    public static bool TryParseGatewayRoleValue(string? raw, out string? tenant, out GatewayRole role)
+    {
+        tenant = null;
+        role = default;
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return false;
+        }
+
+        var trimmed = raw.Trim();
+        var colonIdx = trimmed.IndexOf(':', StringComparison.Ordinal);
+        string rolePart;
+        if (colonIdx >= 0)
+        {
+            if (colonIdx == 0 || colonIdx != trimmed.LastIndexOf(':', StringComparison.Ordinal) || colonIdx == trimmed.Length - 1)
+            {
+                return false;
+            }
+
+            var tenantPart = trimmed[..colonIdx].Trim();
+            rolePart = trimmed[(colonIdx + 1)..].Trim();
+            if (tenantPart.Length == 0 || rolePart.Length == 0)
+            {
+                return false;
+            }
+
+            tenant = tenantPart;
+        }
+        else
+        {
+            rolePart = trimmed;
+        }
+
+        foreach (var candidate in Enum.GetValues<GatewayRole>())
+        {
+            if (string.Equals(candidate.ToString(), rolePart, StringComparison.OrdinalIgnoreCase))
+            {
+                role = candidate;
+                return true;
+            }
+        }
+
+        tenant = null;
+        return false;
+    }
+
+    /// <summary>
     /// True for the roles that exist only as tenant-scoped grants ("tenant:Role") and are implied by no other role: a global claim never
     /// confers them and <see cref="Implies"/> never derives them (not even from ClusterAdmin).
     /// </summary>

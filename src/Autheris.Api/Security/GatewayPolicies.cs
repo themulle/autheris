@@ -780,6 +780,9 @@ public static class GatewayPolicies
     private static bool HasAnyExactRoleCore(ClaimsPrincipal principal, IReadOnlyList<string> roles, string? effectiveTenant)
     {
         bool isCanonicalClusterAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        bool isForwardAuth = IsForwardAuthPrincipal(principal);
+        bool hasAllowed = Autheris.Domain.Identity.RoleResolutionClaims.TryReadAllowedGatewayRoles(principal, out var allowedRoles);
+
         foreach (var raw in principal.GetUserRoles())
         {
             if (string.IsNullOrWhiteSpace(raw))
@@ -788,6 +791,19 @@ public static class GatewayPolicies
             }
 
             var trimmed = raw.Trim();
+            if (GatewayRoleExtensions.TryParseGatewayRoleValue(trimmed, out _, out var parsedGatewayRole))
+            {
+                if (isForwardAuth && parsedGatewayRole == GatewayRole.ClusterAdmin)
+                {
+                    continue;
+                }
+
+                if (hasAllowed && !allowedRoles.Contains(parsedGatewayRole))
+                {
+                    continue;
+                }
+            }
+
             if (!trimmed.Contains(':', StringComparison.Ordinal))
             {
                 if (string.Equals(trimmed, nameof(GatewayRole.ClusterAdmin), StringComparison.OrdinalIgnoreCase) &&
@@ -841,6 +857,13 @@ public static class GatewayPolicies
         {
             if (string.Equals(roleName, nameof(GatewayRole.ClusterAdmin), StringComparison.OrdinalIgnoreCase) &&
                 !isCanonicalClusterAdmin)
+            {
+                continue;
+            }
+
+            if (GatewayRoleExtensions.TryParseGatewayRoleValue(roleName, out _, out var requiredGatewayRole) &&
+                ((isForwardAuth && requiredGatewayRole == GatewayRole.ClusterAdmin) ||
+                 (hasAllowed && !allowedRoles.Contains(requiredGatewayRole))))
             {
                 continue;
             }
