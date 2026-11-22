@@ -48,11 +48,11 @@ public sealed class ProductProcedureTableSetTests
         {
             var id = call.Arg<TableIdentifier>();
             asked.Add(id);
-            // the product object needs four eyes, the plain base table does not: a denial proves the product object was the one checked
+            // the product object is inactive, the plain base table is active: a denial proves the product object was the one checked
             return new TableMetadata
             {
                 Identifier = id,
-                Table = new Table { TableName = id.TableName, IsActive = true },
+                Table = new Table { TableName = id.TableName, IsActive = !ProductSource.IsProductSource(id.Domain) },
                 Columns = ProductSource.IsProductSource(id.Domain)
                     ? [new TableColumn { ColumnName = "secret", DataType = "varchar" }]
                     : [],
@@ -85,7 +85,7 @@ public sealed class ProductProcedureTableSetTests
         asked.Clear();
         var product = await CallAsync("sales");
         product.IsSuccess.ShouldBeFalse();
-        product.ErrorMessage!.ShouldContain("Four-Eyes");
+        product.ErrorMessage!.ShouldContain("not accessible");
         asked.ShouldContain(id => ProductSource.IsProductSource(id.Domain));
         asked.ShouldNotContain(Plain);
     }
