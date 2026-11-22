@@ -531,8 +531,7 @@ public sealed class DbtTests
                 Id = Guid.NewGuid(),
                 SourceName = "postgres",
                 SchemaName = "analytics",
-                TableName = "customers",
-                Sensitivity = "NORMAL"
+                TableName = "customers"
             },
             Columns =
             [
@@ -581,7 +580,6 @@ public sealed class DbtTests
         metadataRepo.UpsertCalls.ShouldBe(1);
         var updated = await metadataRepo.GetTableMetadataAsync(targetTableId);
         updated.ShouldNotBeNull();
-        updated.Table.Sensitivity.ShouldBe("CONFIDENTIAL");
         updated.Table.DocumentationSource.ShouldBe("dbt_governance_v1");
         updated.ColumnMaskingRules.ContainsKey("email_address").ShouldBeTrue();
         ClassificationMetadata.IsColumnSensitive(updated, "email_address").ShouldBeTrue();
@@ -603,8 +601,7 @@ public sealed class DbtTests
                 Id = Guid.NewGuid(),
                 SourceName = "postgres",
                 SchemaName = "analytics",
-                TableName = "customers",
-                Sensitivity = "NORMAL"
+                TableName = "customers"
             },
             Columns =
             [
@@ -674,7 +671,7 @@ public sealed class DbtTests
         var existingMetadata = new TableMetadata
         {
             Identifier = targetTableId,
-            Table = new Table { Id = Guid.NewGuid(), SourceName = "postgres", SchemaName = "analytics", TableName = "customers", Sensitivity = "NORMAL" },
+            Table = new Table { Id = Guid.NewGuid(), SourceName = "postgres", SchemaName = "analytics", TableName = "customers" },
             Columns = [new TableColumn { ColumnName = "col_a", DataType = "varchar" }]
         };
         var metadataRepo = new InMemoryTableMetadataRepository(existingMetadata);
@@ -696,7 +693,7 @@ public sealed class DbtTests
         static TableMetadata Make(string domain, string name) => new()
         {
             Identifier = new TableIdentifier(domain, "analytics", name),
-            Table = new Table { Id = Guid.NewGuid(), SourceName = domain, SchemaName = "analytics", TableName = name, Sensitivity = "NORMAL" },
+            Table = new Table { Id = Guid.NewGuid(), SourceName = domain, SchemaName = "analytics", TableName = name },
             Columns = [new TableColumn { ColumnName = "col_a", DataType = "varchar" }]
         };
 
@@ -728,7 +725,7 @@ public sealed class DbtTests
         var existingMetadata = new TableMetadata
         {
             Identifier = targetTableId,
-            Table = new Table { Id = Guid.NewGuid(), SourceName = "postgres", SchemaName = "analytics", TableName = "customers", Sensitivity = "NORMAL" },
+            Table = new Table { Id = Guid.NewGuid(), SourceName = "postgres", SchemaName = "analytics", TableName = "customers" },
             Columns = [new TableColumn { ColumnName = "col_a", DataType = "varchar" }]
         };
         var metadataRepo = new InMemoryTableMetadataRepository(existingMetadata);
@@ -801,23 +798,27 @@ public sealed class DbtTests
         metadataRepo.UpsertCalls.ShouldBe(0);
     }
 
-    private static TableMetadata GovernanceTable(string tableName, string sensitivity, IReadOnlyDictionary<string, MaskingRule>? rules = null, bool sensitiveColumn = false) => new()
-    { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(sensitiveColumn ? new[] { "email" } : Array.Empty<string>()),
-        Identifier = new TableIdentifier("postgres", "analytics", tableName),
-        Table = new Table
+    private static TableMetadata GovernanceTable(string tableName, string sensitivity, IReadOnlyDictionary<string, MaskingRule>? rules = null, bool sensitiveColumn = false)
+    {
+        _ = sensitivity;
+        return new TableMetadata
         {
-            Id = Guid.NewGuid(),
-            SourceName = "postgres",
-            SchemaName = "analytics",
-            TableName = tableName,
-            Sensitivity = sensitivity
-        },
-        Columns =
-        [
-            new TableColumn { ColumnName = "email", DataType = "varchar" }
-        ],
-        ColumnMaskingRules = rules ?? new Dictionary<string, MaskingRule>()
-    };
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(sensitiveColumn ? new[] { "email" } : Array.Empty<string>()),
+            Identifier = new TableIdentifier("postgres", "analytics", tableName),
+            Table = new Table
+            {
+                Id = Guid.NewGuid(),
+                SourceName = "postgres",
+                SchemaName = "analytics",
+                TableName = tableName
+            },
+            Columns =
+            [
+                new TableColumn { ColumnName = "email", DataType = "varchar" }
+            ],
+            ColumnMaskingRules = rules ?? new Dictionary<string, MaskingRule>()
+        };
+    }
 
     internal static (DbtMetadataIngestionService Service, InMemoryTableMetadataRepository Repo) GovernanceService(params TableMetadata[] tables)
     {

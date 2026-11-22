@@ -197,7 +197,6 @@ public sealed class OpenMetadataSyncServiceTests
         capturedMetadata.Identifier.Domain.ShouldBe("hr_service");
         capturedMetadata.Identifier.Schema.ShouldBe("dbo");
         capturedMetadata.Identifier.TableName.ShouldBe("employees");
-        capturedMetadata.Table.Sensitivity.ShouldBe("NORMAL");
         capturedMetadata.ColumnMaskingRules.Count.ShouldBe(3);
         capturedMetadata.ColumnMaskingRules["email"].RuleType.ShouldBe("MASK_EMAIL");
         capturedMetadata.ColumnMaskingRules["ssn"].RuleType.ShouldBe("REDACT");

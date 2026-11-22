@@ -41,7 +41,7 @@ public abstract class MetadataCacheReplicaContractBase : IAsyncLifetime
         return new TableMetadata
         {
             Identifier = new TableIdentifier("ReplicaDomain", "dbo", name),
-            Table = new Table { Id = id, SourceName = "ReplicaDomain", SchemaName = "dbo", TableName = name, Sensitivity = "LOW", IsActive = active },
+            Table = new Table { Id = id, SourceName = "ReplicaDomain", SchemaName = "dbo", TableName = name, IsActive = active },
             Columns = [new TableColumn { TableId = id, ColumnName = "email", DataType = "TEXT" }],
             ColumnMaskingRules = maskedColumn == null
                 ? new Dictionary<string, MaskingRule>()

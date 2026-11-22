@@ -77,6 +77,19 @@ public sealed partial class AccessDecisionPoint
         var roles = new HashSet<string>(subject.TenantRoles.Concat(subject.ClusterRoles), StringComparer.OrdinalIgnoreCase);
         var clientIp = subject.ClientIp ?? _clientIpResolver?.ResolveClientIp() ?? IPAddress.None;
         var principal = subject.Principal ?? BuildWritePrincipal(subject);
+        EffectiveProtection? writeProtection = null;
+        if (_protectionProvider is not null)
+        {
+            try
+            {
+                writeProtection = await _protectionProvider.GetAsync(subject.TenantId, metadata.Identifier, ct).ConfigureAwait(false);
+            }
+            catch (Exception) when (!ct.IsCancellationRequested)
+            {
+                return TableAccessDecision.Denied(metadata.Identifier, "Protection classification unavailable (fail-closed).");
+            }
+        }
+
         var query = new TableAccessQuery(
             subject.UserSid,
             subject.TenantId,
@@ -89,7 +102,8 @@ public sealed partial class AccessDecisionPoint
             ObjectKind: FilterObjectKinds.Relation,
             AllUserSids: principal.GetAllUserSids(),
             Principal: principal,
-            SupplementalConsents: request.SupplementalConsents);
+            SupplementalConsents: request.SupplementalConsents,
+            Protection: writeProtection);
 
         if (TableAccessPolicy.CheckSchemaContract(query, _contractManager) is { } contractDenial)
         {

@@ -60,7 +60,6 @@ public sealed class McpGraphQlFieldLookupTests
             TableName = id.TableName,
             SchemaName = id.Schema,
             Description = "Test table",
-            Sensitivity = "NORMAL",
             DiscoveryHidden = discoveryHidden
         },
         PrimaryKeyColumns = ["id"],

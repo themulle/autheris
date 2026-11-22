@@ -175,6 +175,8 @@ public sealed class ClassificationEngine : IClassificationEngine
             {
                 var matched = matchedCategories[0];
                 var level = FindSensitivityLevelByRank(matched.DefaultSensitivityRank, options.SensitivityLevels);
+                var protectionClass = options.ResolveProtectionClass(level.Key, level.Rank);
+                var maskCategory = ResolveMaskCategory(matched);
 
                 result.Add(new ColumnClassificationProposal(
                     col.ColumnName,
@@ -185,7 +187,9 @@ public sealed class ClassificationEngine : IClassificationEngine
                     matched.DefaultMaskingRule,
                     Confidence: 0.95,
                     IsDisputed: false,
-                    Reasoning: $"Deterministic regex match for PII category '{matched.Key}'"));
+                    Reasoning: $"Deterministic regex match for PII category '{matched.Key}'",
+                    ProposedProtectionClass: protectionClass,
+                    ProposedMaskCategory: maskCategory));
             }
             else if (matchedCategories.Count > 1)
             {
@@ -200,6 +204,8 @@ public sealed class ClassificationEngine : IClassificationEngine
                 }
 
                 var level = FindSensitivityLevelByRank(highest.DefaultSensitivityRank, options.SensitivityLevels);
+                var protectionClass = options.ResolveProtectionClass(level.Key, level.Rank);
+                var maskCategory = ResolveMaskCategory(highest);
                 result.Add(new ColumnClassificationProposal(
                     col.ColumnName,
                     col.DataType,
@@ -209,11 +215,14 @@ public sealed class ClassificationEngine : IClassificationEngine
                     highest.DefaultMaskingRule,
                     Confidence: 0.65,
                     IsDisputed: true,
-                    Reasoning: $"Disputed: Multiple PII patterns matched ({string.Join(", ", matchedCategories.ConvertAll(c => c.Key))})"));
+                    Reasoning: $"Disputed: Multiple PII patterns matched ({string.Join(", ", matchedCategories.ConvertAll(c => c.Key))})",
+                    ProposedProtectionClass: protectionClass,
+                    ProposedMaskCategory: maskCategory));
             }
             else
             {
                 // No PII pattern matched -> Default sensitivity
+                var protectionClass = options.ResolveProtectionClass(defaultLevel.Key, defaultLevel.Rank);
                 result.Add(new ColumnClassificationProposal(
                     col.ColumnName,
                     col.DataType,
@@ -223,7 +232,9 @@ public sealed class ClassificationEngine : IClassificationEngine
                     ProposedMaskingRule: "NONE",
                     Confidence: 1.0,
                     IsDisputed: false,
-                    Reasoning: "No PII pattern matched; assigned default sensitivity"));
+                    Reasoning: "No PII pattern matched; assigned default sensitivity",
+                    ProposedProtectionClass: protectionClass,
+                    ProposedMaskCategory: null));
             }
         }
 
@@ -241,6 +252,21 @@ public sealed class ClassificationEngine : IClassificationEngine
         {
             return false;
         }
+    }
+
+    private static string ResolveMaskCategory(PiiCategoryDefinition category)
+    {
+        if (!string.IsNullOrWhiteSpace(category.MaskCategory))
+        {
+            return category.MaskCategory.Trim();
+        }
+
+        return (category.Key ?? string.Empty).Trim().ToUpperInvariant() switch
+        {
+            "IBAN" or "CREDIT_CARD" => ClassificationScopes.FinancialCode,
+            "HEALTH_DATA" => ClassificationScopes.PiiSpecialCode,
+            _ => ClassificationScopes.PiiCode
+        };
     }
 
     private static SensitivityLevelDefinition FindSensitivityLevel(string key, IReadOnlyList<SensitivityLevelDefinition> levels)

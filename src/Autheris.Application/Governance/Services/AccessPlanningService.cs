@@ -213,8 +213,7 @@ public class AccessPlanningService : IAccessPlanningService
             {
                 var colMeta = meta?.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, column, StringComparison.OrdinalIgnoreCase));
                 bool isPii = ClassificationMetadata.IsColumnSensitive(meta, colMeta, column) ||
-                             PiiKeywords.Any(k => column.Contains(k, StringComparison.OrdinalIgnoreCase)) ||
-                             (meta?.Table.IsHighlySensitive ?? false);
+                             PiiKeywords.Any(k => column.Contains(k, StringComparison.OrdinalIgnoreCase));
 
                 string beforeState = "none";
                 if (meta is not null && ClassificationMetadata.IsColumnSensitive(meta, colMeta, column))

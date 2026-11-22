@@ -27,6 +27,7 @@ public static partial class ClassificationAdminEndpoints
             HttpContext http,
             [FromServices] IClassificationAdminService service,
             [FromServices] IGovernanceCapabilities capabilities,
+            [FromServices] IGovernanceDomainRepository domainRepo,
             [FromServices] IClassificationRepository classificationRepo,
             [FromServices] ITableMetadataRepository tableMetadataRepo,
             CancellationToken ct) =>
@@ -36,15 +37,15 @@ public static partial class ClassificationAdminEndpoints
                 return InvalidScope(http);
             }
 
-            if (await AuthorizeColumnWriteAsync(http, columnId, capabilities, classificationRepo, tableMetadataRepo, ct).ConfigureAwait(false) is { } denied)
+            if (await AuthorizeColumnWriteAsync(http, columnId, capabilities, domainRepo, classificationRepo, tableMetadataRepo, ct).ConfigureAwait(false) is { } denied)
             {
                 return denied;
             }
 
-            var result = await service.AssignColumnClassificationAsync(BuildCaller(http), columnId, code, parsedScope, ct).ConfigureAwait(false);
+            var result = await service.AssignColumnClassificationAsync(BuildColumnCaller(http), columnId, code, parsedScope, ct).ConfigureAwait(false);
             return ToResult(result, http, static a => new { scope = a.Scope, columnId = a.TableColumnId, code = a.Code, source = a.Source });
         })
-        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .RequireAuthorization(GatewayPolicies.AuthenticatedCaller)
         .WithAudit(AuditLevel.Full, AuditEventTypes.ColumnClassificationChanged)
         .WithIngressTransport(DataSourceTransportFlags.Rest)
         .WithTags("Governance");
@@ -56,6 +57,7 @@ public static partial class ClassificationAdminEndpoints
             HttpContext http,
             [FromServices] IClassificationAdminService service,
             [FromServices] IGovernanceCapabilities capabilities,
+            [FromServices] IGovernanceDomainRepository domainRepo,
             [FromServices] IClassificationRepository classificationRepo,
             [FromServices] ITableMetadataRepository tableMetadataRepo,
             CancellationToken ct) =>
@@ -65,15 +67,15 @@ public static partial class ClassificationAdminEndpoints
                 return InvalidScope(http);
             }
 
-            if (await AuthorizeColumnWriteAsync(http, columnId, capabilities, classificationRepo, tableMetadataRepo, ct).ConfigureAwait(false) is { } denied)
+            if (await AuthorizeColumnWriteAsync(http, columnId, capabilities, domainRepo, classificationRepo, tableMetadataRepo, ct).ConfigureAwait(false) is { } denied)
             {
                 return denied;
             }
 
-            var result = await service.RemoveColumnClassificationAsync(BuildCaller(http), columnId, code, parsedScope, ct).ConfigureAwait(false);
+            var result = await service.RemoveColumnClassificationAsync(BuildColumnCaller(http), columnId, code, parsedScope, ct).ConfigureAwait(false);
             return result.IsOk ? Results.NoContent() : ToResult(result, http, static _ => new { });
         })
-        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .RequireAuthorization(GatewayPolicies.AuthenticatedCaller)
         .WithAudit(AuditLevel.Full, AuditEventTypes.ColumnClassificationChanged)
         .WithIngressTransport(DataSourceTransportFlags.Rest)
         .WithTags("Governance");
@@ -86,6 +88,7 @@ public static partial class ClassificationAdminEndpoints
             HttpContext http,
             [FromServices] IClassificationAdminService service,
             [FromServices] IGovernanceCapabilities capabilities,
+            [FromServices] IGovernanceDomainRepository domainRepo,
             [FromServices] IClassificationRepository classificationRepo,
             [FromServices] ITableMetadataRepository tableMetadataRepo,
             CancellationToken ct) =>
@@ -100,13 +103,13 @@ public static partial class ClassificationAdminEndpoints
                 return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The mask override is not valid.", http);
             }
 
-            if (await AuthorizeColumnWriteAsync(http, columnId, capabilities, classificationRepo, tableMetadataRepo, ct).ConfigureAwait(false) is { } denied)
+            if (await AuthorizeColumnWriteAsync(http, columnId, capabilities, domainRepo, classificationRepo, tableMetadataRepo, ct).ConfigureAwait(false) is { } denied)
             {
                 return denied;
             }
 
             var result = await service.UpsertMaskOverrideAsync(
-                BuildCaller(http), columnId, ClassificationAdminService.ParseOverrideCode(code), input, parsedScope, ct).ConfigureAwait(false);
+                BuildColumnCaller(http), columnId, ClassificationAdminService.ParseOverrideCode(code), input, parsedScope, ct).ConfigureAwait(false);
             return ToResult(result, http, static o => new
             {
                 scope = o.Scope,
@@ -117,7 +120,7 @@ public static partial class ClassificationAdminEndpoints
                 catalogText = ClassificationCatalogTextVisibilities.ToCode(o.CatalogText)
             });
         })
-        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .RequireAuthorization(GatewayPolicies.AuthenticatedCaller)
         .WithAudit(AuditLevel.Full, AuditEventTypes.MaskOverrideChanged)
         .WithIngressTransport(DataSourceTransportFlags.Rest)
         .WithTags("Governance");
@@ -129,6 +132,7 @@ public static partial class ClassificationAdminEndpoints
             HttpContext http,
             [FromServices] IClassificationAdminService service,
             [FromServices] IGovernanceCapabilities capabilities,
+            [FromServices] IGovernanceDomainRepository domainRepo,
             [FromServices] IClassificationRepository classificationRepo,
             [FromServices] ITableMetadataRepository tableMetadataRepo,
             CancellationToken ct) =>
@@ -138,16 +142,16 @@ public static partial class ClassificationAdminEndpoints
                 return InvalidScope(http);
             }
 
-            if (await AuthorizeColumnWriteAsync(http, columnId, capabilities, classificationRepo, tableMetadataRepo, ct).ConfigureAwait(false) is { } denied)
+            if (await AuthorizeColumnWriteAsync(http, columnId, capabilities, domainRepo, classificationRepo, tableMetadataRepo, ct).ConfigureAwait(false) is { } denied)
             {
                 return denied;
             }
 
             var result = await service.DeleteMaskOverrideAsync(
-                BuildCaller(http), columnId, ClassificationAdminService.ParseOverrideCode(code), parsedScope, ct).ConfigureAwait(false);
+                BuildColumnCaller(http), columnId, ClassificationAdminService.ParseOverrideCode(code), parsedScope, ct).ConfigureAwait(false);
             return result.IsOk ? Results.NoContent() : ToResult(result, http, static _ => new { });
         })
-        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .RequireAuthorization(GatewayPolicies.AuthenticatedCaller)
         .WithAudit(AuditLevel.Full, AuditEventTypes.MaskOverrideChanged)
         .WithIngressTransport(DataSourceTransportFlags.Rest)
         .WithTags("Governance");
@@ -155,10 +159,14 @@ public static partial class ClassificationAdminEndpoints
         return app;
     }
 
+    private static ClassificationAdminCaller BuildColumnCaller(HttpContext http) =>
+        BuildCaller(http) with { IsContainerOwnerAuthorized = true };
+
     private static async Task<IResult?> AuthorizeColumnWriteAsync(
         HttpContext http,
         string columnId,
         IGovernanceCapabilities capabilities,
+        IGovernanceDomainRepository domainRepo,
         IClassificationRepository classificationRepo,
         ITableMetadataRepository tableMetadataRepo,
         CancellationToken ct)
@@ -198,7 +206,10 @@ public static partial class ClassificationAdminEndpoints
             return ApiProblems.Forbidden(ClassificationAdminErrorCodes.AuthorityRequired, "The caller is not permitted to perform this classification change.", http);
         }
 
-        if (!await capabilities.CanClassifyAsync(security, ContainerDefaults.Unassigned.Container, objectTenant, ct).ConfigureAwait(false))
+        var containerDefaults = await domainRepo.GetContainerForTableAsync(objectTenant, meta.Table.Id, ct).ConfigureAwait(false);
+        var containerRef = containerDefaults.IsValid ? containerDefaults.Container : ContainerDefaults.Unassigned.Container;
+
+        if (!await capabilities.CanClassifyAsync(security, containerRef, objectTenant, ct).ConfigureAwait(false))
         {
             if (security.ResolvedTenant is { } callerTenant && objectTenant != callerTenant)
             {

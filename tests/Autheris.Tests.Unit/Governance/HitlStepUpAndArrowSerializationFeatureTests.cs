@@ -182,10 +182,11 @@ public sealed class HitlStepUpAndArrowSerializationFeatureTests
         {
             Table = new Table
             {
-                RequiresFourEyes = true,
                 TableName = "secrets",
                 SchemaName = "public"
             },
+            Columns = [new TableColumn { ColumnName = "secret_value" }],
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("secret_value"),
             Identifier = tableId
         };
         metaRepo.GetTableMetadataAsync(tableId, Arg.Any<CancellationToken>()).Returns(tableMeta);

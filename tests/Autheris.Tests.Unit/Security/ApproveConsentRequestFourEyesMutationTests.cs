@@ -56,7 +56,7 @@ public sealed class ApproveConsentRequestFourEyesMutationTests
         return accessor;
     }
 
-    private static TableMetadata CreateMetadata(string sensitivity, bool requiresFourEyes)
+    private static TableMetadata CreateMetadata(bool sensitive)
     {
         var tid = new TableIdentifier("finance", "dbo", "orders");
         var tableId = Guid.NewGuid();
@@ -68,15 +68,14 @@ public sealed class ApproveConsentRequestFourEyesMutationTests
                 Id = tableId,
                 SourceName = tid.Domain,
                 SchemaName = tid.Schema,
-                TableName = tid.TableName,
-                Sensitivity = sensitivity,
-                RequiresFourEyes = requiresFourEyes
+                TableName = tid.TableName
             },
             Columns = new List<TableColumn>
             {
                 new() { Id = Guid.NewGuid(), TableId = tableId, ColumnName = "id", DataType = "int" },
                 new() { Id = Guid.NewGuid(), TableId = tableId, ColumnName = "amount", DataType = "decimal" }
-            }
+            },
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(sensitive ? new[] { "amount" } : Array.Empty<string>())
         };
     }
 
@@ -116,7 +115,7 @@ public sealed class ApproveConsentRequestFourEyesMutationTests
     [Fact]
     public async Task ApproveConsentRequest_HighSensitivityWithoutFlag_FirstCallWithColumnMasking_IsRejected()
     {
-        var meta = CreateMetadata("HIGH", requiresFourEyes: false);
+        var meta = CreateMetadata(sensitive: true);
         var req = CreateRequest(meta, "PENDING");
         var (approval, ownership, consents, metadata) = CreateRepositories(meta, req);
 
@@ -129,14 +128,10 @@ public sealed class ApproveConsentRequestFourEyesMutationTests
         await consents.DidNotReceiveWithAnyArgs().CreateConsentAsync(default!, default);
     }
 
-    [Theory]
-    [InlineData("HIGH", false)]
-    [InlineData("RESTRICTED", false)]
-    [InlineData("SECRET", false)]
-    [InlineData("LOW", true)]
-    public async Task FirstStep_OfFourEyesRequest_WithColumnMasking_IsRejected_AndNothingIsWritten(string sensitivity, bool requiresFourEyes)
+    [Fact]
+    public async Task FirstStep_OfFourEyesRequest_WithColumnMasking_IsRejected_AndNothingIsWritten()
     {
-        var meta = CreateMetadata(sensitivity, requiresFourEyes);
+        var meta = CreateMetadata(sensitive: true);
         var req = CreateRequest(meta, "PENDING");
         var (approval, ownership, consents, metadata) = CreateRepositories(meta, req);
 
@@ -152,11 +147,10 @@ public sealed class ApproveConsentRequestFourEyesMutationTests
     [Fact]
     public async Task FirstStep_OfHighSensitivityTable_WithoutRestrictions_UsesTheStepPath()
     {
-        // RequiresFourEyes is false: before the fix the flag alone decided and a HIGH table counted as a single-approval table.
-        var meta = CreateMetadata("HIGH", requiresFourEyes: false);
+        var meta = CreateMetadata(sensitive: true);
         var req = CreateRequest(meta, "PENDING");
         var (approval, ownership, consents, metadata) = CreateRepositories(meta, req);
-        approval.ApproveConsentRequestStepAsync(req.Id, Approver, Arg.Any<CancellationToken>())
+        approval.ApproveConsentRequestStepAsync(req.Id, Approver, true, Arg.Any<CancellationToken>())
             .Returns(_ => { req.Status = "PENDING_SECOND_APPROVAL"; return req; });
 
         var payload = await new Mutation().ApproveConsentRequestAsync(
@@ -170,14 +164,14 @@ public sealed class ApproveConsentRequestFourEyesMutationTests
     [Fact]
     public async Task SecondStep_WithColumnMasking_UsesTheAtomicPath_AndPassesTheDescription()
     {
-        var meta = CreateMetadata("HIGH", requiresFourEyes: false);
+        var meta = CreateMetadata(sensitive: true);
         // The SQLite read model does not populate ApprovalSteps: the status alone marks the recorded first step.
         var req = CreateRequest(meta, "PENDING_SECOND_APPROVAL");
         var (approval, ownership, consents, metadata) = CreateRepositories(meta, req);
         Consent? captured = null;
         approval.ExecuteAtomicApprovalWithConsentAsync(
                 req.Id, Arg.Any<ApprovalStep>(), Arg.Do<Consent>(c => captured = c),
-                Arg.Any<IReadOnlyList<ConsentRowFilter>>(), Arg.Any<IReadOnlyList<ConsentColumnRule>>(), Arg.Any<CancellationToken>())
+                Arg.Any<IReadOnlyList<ConsentRowFilter>>(), Arg.Any<IReadOnlyList<ConsentColumnRule>>(), true, Arg.Any<CancellationToken>())
             .Returns(ci => ci.ArgAt<Consent>(2));
 
         var payload = await new Mutation().ApproveConsentRequestAsync(
@@ -193,7 +187,7 @@ public sealed class ApproveConsentRequestFourEyesMutationTests
     [Fact]
     public async Task ConsentApproveRevoke_ForeignTenantId_SameAsMissing()
     {
-        var meta = CreateMetadata("NORMAL", requiresFourEyes: false);
+        var meta = CreateMetadata(sensitive: false);
         var missingRequestId = Guid.NewGuid();
         var foreignRequestId = Guid.NewGuid();
 

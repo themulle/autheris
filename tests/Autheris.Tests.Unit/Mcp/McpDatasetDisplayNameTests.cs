@@ -35,7 +35,7 @@ public sealed class McpDatasetDisplayNameTests
     private static TableMetadata Row(string displayName, string name = "shared_t")
     {
         var t = Wp0.Table("sales", name, "Short text", ["id"]);
-        return t with { Table = t.Table with { DisplayName = displayName, Sensitivity = "INTERNAL" } };
+        return t with { Table = t.Table with { DisplayName = displayName } };
     }
 
     private static GatewayOptions Opts(params TableMetadata[] rows) => new()

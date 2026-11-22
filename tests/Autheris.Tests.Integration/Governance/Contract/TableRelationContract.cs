@@ -46,7 +46,7 @@ public abstract class TableRelationContract : GovernanceContractBase
         var table = new Table
         {
             Id = Guid.NewGuid(), SourceType = "sql", SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName,
-            DisplayName = id.TableName, Sensitivity = "LOW", RequiresFourEyes = false, IsActive = true
+            DisplayName = id.TableName, IsActive = true
         };
         await Store.TableMetadata.UpsertTableMetadataAsync(new TableMetadata
         {

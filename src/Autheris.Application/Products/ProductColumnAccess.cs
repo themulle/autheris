@@ -16,4 +16,7 @@ public static class ProductColumnAccess
             ColumnAccessLevel.Clear when columnClass != ProductColumnClass.PiiMasked => ColumnAccessLevel.Clear,
             _ => ColumnAccessLevel.Mask
         };
+
+    public static string? ToMaskCategory(ProductColumnClass columnClass) =>
+        columnClass == ProductColumnClass.NonPii ? null : ClassificationScopes.PiiCode;
 }

@@ -2,15 +2,16 @@ namespace Autheris.Application.Governance.Contracts;
 
 using System;
 using System.Collections.Generic;
+using Autheris.Domain.Security;
 
 /// <summary>
-/// F-GOV-08: Defines a schema contract slice based on @tag inclusion/exclusion and @inaccessible rules.
+/// Defines a schema contract slice based on protection classes, table allowlists, and <c>@inaccessible</c> rules.
 /// </summary>
 public sealed class SchemaContractDefinition
 {
     public string Name { get; init; } = string.Empty;
-    public HashSet<string> IncludedTags { get; init; } = new(StringComparer.OrdinalIgnoreCase);
-    public HashSet<string> ExcludedTags { get; init; } = new(StringComparer.OrdinalIgnoreCase);
+    public HashSet<ProtectionClass> IncludedClasses { get; init; } = [];
+    public HashSet<ProtectionClass> ExcludedClasses { get; init; } = [];
     public HashSet<string> AllowedTables { get; init; } = new(StringComparer.OrdinalIgnoreCase);
     public bool ExcludeInaccessible { get; init; } = true;
 
@@ -18,19 +19,19 @@ public sealed class SchemaContractDefinition
 
     public SchemaContractDefinition(
         string name,
-        IEnumerable<string>? includedTags = null,
-        IEnumerable<string>? excludedTags = null,
+        IEnumerable<ProtectionClass>? includedClasses = null,
+        IEnumerable<ProtectionClass>? excludedClasses = null,
         bool excludeInaccessible = true,
         IEnumerable<string>? allowedTables = null)
     {
         Name = name ?? throw new ArgumentNullException(nameof(name));
-        if (includedTags != null)
+        if (includedClasses != null)
         {
-            foreach (var t in includedTags) IncludedTags.Add(t);
+            foreach (var c in includedClasses) IncludedClasses.Add(c.NormalizeOrConfidential());
         }
-        if (excludedTags != null)
+        if (excludedClasses != null)
         {
-            foreach (var t in excludedTags) ExcludedTags.Add(t);
+            foreach (var c in excludedClasses) ExcludedClasses.Add(c.NormalizeOrConfidential());
         }
         if (allowedTables != null)
         {

@@ -51,10 +51,10 @@ public static partial class ProductEndpoints
         group.MapPut("{schema}/{name}", (string schema, string name, HttpContext context, DataProductService service) => PutAsync(schema, name, context, service))
             .RequireAuthorization(GatewayPolicies.ProductAccess)
             .WithRequestBodyLimit(MaxBodyBytes);
-        group.MapPost("{schema}/{name}/owner", (string schema, string name, HttpContext context, DataProductService service) => TransferAsync(schema, name, context, service))
+        group.MapPut("{schema}/{name}/owner-group", (string schema, string name, HttpContext context, DataProductService service) => SetOwnerGroupAsync(schema, name, context, service))
             .RequireAuthorization(GatewayPolicies.ProductAccess)
             .WithRequestBodyLimit(MaxBodyBytes)
-            .WithAudit(AuditLevel.Full, AuditEventTypes.ProductOwnerTransferred);
+            .WithAudit(AuditLevel.Full, AuditEventTypes.OwnerGroupAssigned);
         group.MapPost("{schema}/{name}/retire", (string schema, string name, HttpContext context, DataProductService service) => RetireAsync(schema, name, context, service))
             .RequireAuthorization(GatewayPolicies.ProductAccess)
             .WithAudit(AuditLevel.Full, AuditEventTypes.ProductRetired);
@@ -66,16 +66,6 @@ public static partial class ProductEndpoints
             .RequireAuthorization(GatewayPolicies.ProductAccess)
             .WithRequestBodyLimit(MaxBodyBytes)
             .WithAudit(AuditLevel.Full, AuditEventTypes.ProductColumnClassificationChanged);
-
-        group.MapGet("sources/{dataSource}/owners", (string dataSource, HttpContext context, DataSourceOwnerService service) => ListOwnersAsync(dataSource, context, service))
-            .RequireAuthorization(GatewayPolicies.ProductOwnerRead)
-            .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
-        group.MapPut("sources/{dataSource}/owners/{ownerSid}", (string dataSource, string ownerSid, HttpContext context, DataSourceOwnerService service) => AssignOwnerAsync(dataSource, ownerSid, context, service))
-            .RequireAuthorization(GatewayPolicies.ProductOwnerAdmin)
-            .WithAudit(AuditLevel.Full, AuditEventTypes.DataSourceOwnerAssigned);
-        group.MapDelete("sources/{dataSource}/owners/{ownerSid}", (string dataSource, string ownerSid, HttpContext context, DataSourceOwnerService service) => RemoveOwnerAsync(dataSource, ownerSid, context, service))
-            .RequireAuthorization(GatewayPolicies.ProductOwnerAdmin)
-            .WithAudit(AuditLevel.Full, AuditEventTypes.DataSourceOwnerRemoved);
 
         MapDiscoveryRoutes(group);
         MapSyncRoutes(app, group);
@@ -90,9 +80,17 @@ public static partial class ProductEndpoints
 
     internal sealed record LimitsBody(long MaxRows = 0, long MaxBytes = 0, int MaxRuntimeSeconds = 0);
 
-    internal sealed record PutBody(DataProductKind Kind, string? Definition, string? ProductOwner, LoadBody? Load, LimitsBody? Limits, string? Description);
+    internal sealed record PutBody(
+        DataProductKind Kind,
+        string? Definition,
+        string? OwnerGroupSid,
+        LoadBody? Load,
+        LimitsBody? Limits,
+        string? Description,
+        ProtectionClass? DefaultClass = null,
+        CatalogVisibilityMode? Visibility = null);
 
-    internal sealed record OwnerBody(string? Owner);
+    internal sealed record OwnerGroupBody(string? OwnerGroupSid);
 
     internal sealed record SettingsBody(string? Description, LoadBody? Load);
 
@@ -105,7 +103,8 @@ public static partial class ProductEndpoints
             security.TenantId,
             security.HasRole(GatewayRole.DataProductAdmin),
             security.HasRole(GatewayRole.DataProductSync),
-            security.HasRole(GatewayRole.SecurityAuditor));
+            security.HasRole(GatewayRole.SecurityAuditor),
+            security);
 
     private static async Task<IResult> RunAsync(HttpContext context, Func<ProductCaller, Task<IResult>> action)
     {
@@ -184,7 +183,9 @@ public static partial class ProductEndpoints
         load = p.Load,
         limits = p.Limits,
         description = p.Description,
-        product_owner = p.ProductOwner.Value,
+        owner_group_sid = p.OwnerGroupSid?.Value,
+        default_class = p.DefaultClass?.ToCanonicalName(),
+        visibility = p.Visibility.ToCanonicalName(),
         version = p.Version,
         created_at = p.CreatedAt,
         updated_at = p.UpdatedAt

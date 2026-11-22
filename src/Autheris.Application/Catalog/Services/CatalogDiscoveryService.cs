@@ -18,6 +18,7 @@ using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 using Microsoft.Extensions.Logging;
 using Autheris.Application.Catalog.Search;
 using Autheris.Application.Services;
@@ -44,6 +45,7 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
     private readonly Autheris.Application.Mcp.Interfaces.IGraphQlCatalogMap? _graphQlMap;
     private readonly Autheris.Application.Catalog.Discovery.IDiscoveryService? _discovery;
     private readonly IClassificationRepository? _classificationRepository;
+    private readonly IProtectionSnapshotProvider? _protectionProvider;
 
     /// <summary>
     /// The gateway options are required: the caller class and the visible set depend on them, so a
@@ -67,9 +69,11 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
         Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null,
         Autheris.Application.Mcp.Interfaces.IGraphQlCatalogMap? graphQlMap = null,
         Autheris.Application.Catalog.Discovery.IDiscoveryService? discoveryService = null,
-        IClassificationRepository? classificationRepository = null)
+        IClassificationRepository? classificationRepository = null,
+        IProtectionSnapshotProvider? protectionProvider = null)
     {
         _classificationRepository = classificationRepository;
+        _protectionProvider = protectionProvider;
         _discovery = discoveryService;
         _transportResolver = transportResolver;
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -210,14 +214,29 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
                 Classifications: classifications, ClearRequestable: clearRequestable, Role: c.Role?.ToWireName());
         }).ToList();
 
+        var tableClass = await ResolveTableSensitivityLabelAsync(context.TenantId, metadata, ct).ConfigureAwait(false);
         return Autheris.Application.DataSources.Services.RequiredFilterColumnProjection.WithRequiredFilters(metadata, new CatalogDatasetDetail(
             DatasetId: metadata.Identifier.ToString(), Domain: metadata.Identifier.Domain, Schema: metadata.Identifier.Schema, Table: metadata.Identifier.TableName,
-            Columns: columnDetails, PrimaryKeys: keys.PrimaryKeyColumns, Sensitivity: metadata.Table.Sensitivity.ToString(), IsActive: metadata.Table.IsActive,
+            Columns: columnDetails, PrimaryKeys: keys.PrimaryKeyColumns, Sensitivity: tableClass, IsActive: metadata.Table.IsActive,
             Indexes: keys.Indexes, DisplayName: tableDisplayName, Description: tableDescription, LongDescription: tableLongDescription, Language: lang,
             // Issue #390: parallel to PrimaryKeys; null unless a column is descending, and never for a key with a hidden column (Restrict drops it).
             PrimaryKeyDirections: KeyDirections.AnyDescending(keys.PrimaryKeyDirections) ? KeyDirections.ToWire(keys.PrimaryKeyDirections) : null,
             Size: DatasetSizeClassifier.Resolve(metadata), Kind: metadata.Table.ObjectKind.ToWireName()));
     }
+
+    private async Task<string> ResolveTableSensitivityLabelAsync(TenantId tenant, TableMetadata table, CancellationToken ct)
+    {
+        if (_protectionProvider is not null)
+        {
+            var prot = await _protectionProvider.GetAsync(tenant, table.Identifier, ct).ConfigureAwait(false);
+            return prot.TableClass.ToCanonicalName();
+        }
+
+        return FallbackSensitivityLabel(table);
+    }
+
+    private static string FallbackSensitivityLabel(TableMetadata table) =>
+        ClassificationMetadata.IsTableSensitive(table) ? "CONFIDENTIAL" : "INTERNAL";
 
     /// <summary>
     /// The columns that are Clear for the REST caller, from the same resolution as describe_dataset
@@ -520,7 +539,7 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
                 DisplayName: $"{d.Identifier.Domain}.{d.Identifier.TableName}",
                 Description: d.Table.Description,
                 Domain: d.Identifier.Domain,
-                Sensitivity: d.Table.Sensitivity.ToString(),
+                Sensitivity: FallbackSensitivityLabel(d),
                 CombinedScore: 1.0,
                 Bm25Score: 1.0,
                 VectorScore: null,
@@ -700,7 +719,7 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
             Schema: table.Identifier.Schema,
             Table: table.Identifier.TableName,
             SourceType: sourceType,
-            Sensitivity: table.Table.Sensitivity.ToString(),
+            Sensitivity: FallbackSensitivityLabel(table),
             Description: resolved?.Description ?? table.Table.Description,
             IsActive: table.Table.IsActive,
             DisplayName: resolved?.Title ?? table.Table.DisplayName,
@@ -825,7 +844,7 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
             VectorScore = vectorScore,
             Description = visible.Table.Description,
             SuggestedGraphQlField = hit.SuggestedGraphQlField,
-            Sensitivity = visible.Table.Sensitivity?.ToString() ?? "NORMAL",
+            Sensitivity = FallbackSensitivityLabel(visible),
             MatchedTerms = matchedTerms,
             RelevantColumns = relevantColumns,
             RelatedJoinPaths = relations

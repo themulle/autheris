@@ -93,8 +93,7 @@ public class DataCatalogSyncTests
 
         var upserted = _tableRepo.UpsertedTables.ShouldHaveSingleItem();
         upserted.Identifier.ShouldBe(tableId);
-        upserted.Table.Sensitivity.ShouldBe("HIGH");
-        upserted.Table.RequiresFourEyes.ShouldBeTrue();
+        ClassificationMetadata.IsTableSensitive(upserted).ShouldBeTrue();
         upserted.ColumnMaskingRules.ContainsKey("patient_email").ShouldBeTrue();
         upserted.ColumnMaskingRules["patient_email"].RuleType.ShouldBe("MASK_EMAIL");
         _epochService.InvalidatedTables.Count(t => t.Equals(tableId)).ShouldBe(1);
@@ -128,8 +127,7 @@ public class DataCatalogSyncTests
         result.Art9ProtectedTablesCount.ShouldBe(1);
         var m = _tableRepo.UpsertedTables.ShouldHaveSingleItem();
         m.Identifier.ShouldBe(tableId);
-        m.Table.Sensitivity.ShouldBe("HIGH");
-        m.Table.RequiresFourEyes.ShouldBeTrue();
+        ClassificationMetadata.IsTableSensitive(m).ShouldBeTrue();
         ClassificationMetadata.IsColumnSensitive(m, "diagnosis").ShouldBeTrue();
         ClassificationMetadata.IsColumnSensitive(m, "visit_id").ShouldBeFalse();
         m.ColumnMaskingRules.ContainsKey("diagnosis").ShouldBeTrue();

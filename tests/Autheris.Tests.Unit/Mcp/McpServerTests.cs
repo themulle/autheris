@@ -274,10 +274,10 @@ public sealed class McpServerTests
             {
                 Table = new Table
                 {
-                    Sensitivity = "HIGH",
-                    RequiresFourEyes = true,
                     IsActive = true
-                }
+                },
+                Columns = [new TableColumn { ColumnName = "email" }],
+                ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("email")
             });
 
         var guardrail = new AiDataGuardrailService(
@@ -327,9 +327,10 @@ public sealed class McpServerTests
                 SourceName = "finance",
                 SchemaName = "dbo",
                 TableName = "customers",
-                RequiresFourEyes = true,
                 IsActive = true
-            }
+            },
+            Columns = [new TableColumn { ColumnName = "email" }],
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("email")
         };
 
         metadataRepo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<System.Threading.CancellationToken>())

@@ -47,6 +47,9 @@ public sealed class WriteConsentWorkflowTests
     private static TableMetadata CreateOrdersMetadata(string sensitivity = "LOW", bool requiresFourEyes = false)
     {
         var tableId = Guid.NewGuid();
+        var sensitive = requiresFourEyes ||
+            (!string.Equals(sensitivity, "LOW", StringComparison.OrdinalIgnoreCase) &&
+             !string.Equals(sensitivity, "NORMAL", StringComparison.OrdinalIgnoreCase));
         return new TableMetadata
         {
             Identifier = OrdersId,
@@ -55,10 +58,9 @@ public sealed class WriteConsentWorkflowTests
                 Id = tableId,
                 SourceName = OrdersId.Domain,
                 SchemaName = OrdersId.Schema,
-                TableName = OrdersId.TableName,
-                Sensitivity = sensitivity,
-                RequiresFourEyes = requiresFourEyes
+                TableName = OrdersId.TableName
             },
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(sensitive ? new[] { "amount" } : Array.Empty<string>()),
             PrimaryKeyColumns = ["id"],
             Columns =
             [

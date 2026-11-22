@@ -52,6 +52,7 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
     private readonly Autheris.Application.Catalog.ICatalogVersionProvider? _catalogVersionProvider;
     private readonly IDataOwnershipRepository? _ownershipRepository;
     private readonly Autheris.Application.Products.IDataProductRepository? _productRepository;
+    private readonly IProtectionSnapshotProvider? _protectionProvider;
 
     public AccessDecisionPoint(
         IOptions<GatewayOptions> options,
@@ -75,9 +76,11 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         Autheris.Application.Policy.RowScopes.RowScopeCompiler? rowScopeCompiler = null,
         Autheris.Application.Catalog.ICatalogVersionProvider? catalogVersionProvider = null,
         IDataOwnershipRepository? ownershipRepository = null,
-        Autheris.Application.Products.IDataProductRepository? productRepository = null)
+        Autheris.Application.Products.IDataProductRepository? productRepository = null,
+        IProtectionSnapshotProvider? protectionProvider = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
+        _protectionProvider = protectionProvider;
         _resolutionService = resolutionService;
         _consentRepository = consentRepository;
         _cacheService = cacheService ?? Autheris.Application.Policy.Services.NullConsentCacheService.Instance;

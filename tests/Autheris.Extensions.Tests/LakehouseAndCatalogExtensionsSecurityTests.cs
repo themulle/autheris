@@ -599,8 +599,6 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
             SchemaName = id.Schema,
             TableName = id.TableName,
             SourceType = "SqlServer",
-            Sensitivity = "HIGH",
-            RequiresFourEyes = true,
             IsActive = false,
             DataSourceType = DataSourceType.HttpPlugin,
             PluginName = "billing-plugin"
@@ -618,8 +616,6 @@ public sealed class LakehouseAndCatalogExtensionsSecurityTests
 
     private static void AssertProtectionRetained(TableMetadata m)
     {
-        m.Table.Sensitivity.ShouldBe("HIGH");
-        m.Table.RequiresFourEyes.ShouldBeTrue();
         m.Table.IsActive.ShouldBeFalse();
         m.Table.DataSourceType.ShouldBe(DataSourceType.HttpPlugin);
         m.Table.PluginName.ShouldBe("billing-plugin");

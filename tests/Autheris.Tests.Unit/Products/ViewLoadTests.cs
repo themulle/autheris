@@ -304,7 +304,7 @@ public sealed class ViewLoadTests
 
         after.Identifier.ShouldBe(before.Identifier, "grants are keyed by the product object, which a load mode change does not touch");
         after.Table.Id.ShouldBe(before.Table.Id);
-        changed.ProductOwner.ShouldBe(product.ProductOwner);
+        changed.OwnerGroupSid.ShouldBe(product.OwnerGroupSid);
     }
 
     [Fact]

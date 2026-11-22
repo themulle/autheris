@@ -49,7 +49,7 @@ public sealed record DiscoveryKeysetQuery(
     string? Schema = null,
     DiscoveryObjectKind? Kind = null,
     string? Tag = null,
-    string? Sensitivity = null,
+    string? ProtectionClass = null,
     string? Search = null,
     string? Language = null,
     DiscoveryAccessState? Access = null,

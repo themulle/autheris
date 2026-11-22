@@ -36,7 +36,7 @@ public sealed class CatalogSearchQueryHardeningTests
         new()
         {
             Identifier = new TableIdentifier(domain, "public", tableName),
-            Table = new Table { Description = description, Sensitivity = "NORMAL" },
+            Table = new Table { Description = description },
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }],
             PrimaryKeyColumns = ["id"]
         };

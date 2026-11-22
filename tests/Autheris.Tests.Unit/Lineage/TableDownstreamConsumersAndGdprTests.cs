@@ -155,10 +155,10 @@ public class TableDownstreamConsumersAndGdprTests
             Table = new Table
             {
                 TableName = "patient_diagnoses",
-                SchemaName = "dbo",
-                Sensitivity = "GDPR_ARTICLE_9",
-                RequiresFourEyes = true
+                SchemaName = "dbo"
             },
+            Columns = [new TableColumn { ColumnName = "diagnosis_code", DataType = "varchar" }],
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("diagnosis_code"),
             ColumnMaskingRules = new Dictionary<string, MaskingRule>
             {
                 ["diagnosis_code"] = new MaskingRule { RuleType = "REDACT" }
@@ -214,8 +214,8 @@ public class TableDownstreamConsumersAndGdprTests
         report.TotalAccessEvents.ShouldBe(2);
         report.DisclosedRecipients.Count.ShouldBe(2);
 
-        // Sensitivity category classified as GDPR Art. 9
-        report.SensitivityCategories.ShouldContain(s => s.Contains("GDPR_ARTICLE_9"));
+        // Sensitivity category classified as confidential business / PII data
+        report.SensitivityCategories.ShouldContain(s => s.Contains("CONFIDENTIAL_BUSINESS_DATA"));
 
         // Recipient classification
         var svcRecipient = report.DisclosedRecipients.First(r => r.RecipientSid == "svc_ehr_sync_daemon");

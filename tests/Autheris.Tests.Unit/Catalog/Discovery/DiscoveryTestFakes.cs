@@ -100,8 +100,7 @@ internal static class DiscoveryTestBuilder
                 DiscoveryHidden = hidden,
                 SamplesDisabled = samplesDisabled,
                 DocumentationSource = virtualTable ? SemanticVirtualTables.SourceMarker : null,
-                ObjectKind = objectKind,
-                Sensitivity = "NORMAL"
+                ObjectKind = objectKind
             },
             Columns = cols,
             ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(

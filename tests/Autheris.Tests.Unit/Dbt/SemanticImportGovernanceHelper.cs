@@ -77,16 +77,12 @@ internal static class SemanticImportGovernanceHelper
                 {
                     Table = m.Table with
                     {
-                        Sensitivity = "restricted",
-                        RequiresFourEyes = true,
                         MinGroupSize = 20,
                         NonPersonal = false,
                         RequiredFilterColumns = ["status"]
                     }
                 });
                 var result = await ReimportAsync(stored);
-                result.Table.Sensitivity.ShouldBe("restricted");
-                result.Table.RequiresFourEyes.ShouldBeTrue();
                 result.Table.MinGroupSize.ShouldBe(20);
                 result.Table.RequiredFilterColumns.ShouldContain("status");
                 break;

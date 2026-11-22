@@ -57,7 +57,7 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         var table = new Table
         {
             Id = Guid.NewGuid(), SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName,
-            Sensitivity = "LOW", RequiresFourEyes = false, IsActive = true
+            IsActive = true
         };
         var meta = await Repo.UpsertTableMetadataAsync(new TableMetadata
         {

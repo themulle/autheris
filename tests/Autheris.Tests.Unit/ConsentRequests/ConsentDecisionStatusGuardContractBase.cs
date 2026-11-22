@@ -84,12 +84,13 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
         var table = new Table
         {
             Id = Guid.NewGuid(), SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName,
-            Sensitivity = "LOW", RequiresFourEyes = fourEyes, IsActive = true
+            IsActive = true
         };
         var meta = await Repo.UpsertTableMetadataAsync(new TableMetadata
         {
             Identifier = id, Table = table,
-            Columns = [new TableColumn { TableId = table.Id, ColumnName = "id", DataType = "INT" }]
+            Columns = [new TableColumn { TableId = table.Id, ColumnName = "id", DataType = "INT" }],
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(fourEyes ? new[] { "id" } : Array.Empty<string>())
         });
         _tables.Add(id);
         foreach (var approver in _approvers)

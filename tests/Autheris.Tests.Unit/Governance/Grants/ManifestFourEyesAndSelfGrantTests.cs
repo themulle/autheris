@@ -22,15 +22,16 @@ public sealed class ManifestFourEyesAndSelfGrantTests
     private static ClaimsPrincipal Caller(params Claim[] extra) => new(new ClaimsIdentity(
         [DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Role, "GovernanceAdmin"), .. extra], "test"));
 
-    private static ITableMetadataRepository Tables(string sensitivity = "NORMAL")
+    private static ITableMetadataRepository Tables(bool sensitive = false)
     {
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => new TableMetadata
             {
-                Table = new Table { Id = Guid.NewGuid(), Sensitivity = sensitivity },
+                Table = new Table { Id = Guid.NewGuid() },
                 Identifier = ci.Arg<TableIdentifier>(),
-                Columns = [new TableColumn { ColumnName = "id" }]
+                Columns = [new TableColumn { ColumnName = "id" }],
+                ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(sensitive ? new[] { "id" } : Array.Empty<string>())
             });
         return repo;
     }
@@ -46,9 +47,9 @@ public sealed class ManifestFourEyesAndSelfGrantTests
         DeclarativeConsentPolicy policy,
         ClaimsPrincipal? caller = null,
         bool dryRun = false,
-        string sensitivity = "NORMAL",
+        bool sensitive = false,
         SecurityPrincipalContext? callerContext = null) =>
-        new DeclarativeConsentApplyService(Tables(sensitivity), repo, Substitute.For<IAuditLogRepository>())
+        new DeclarativeConsentApplyService(Tables(sensitive), repo, Substitute.For<IAuditLogRepository>())
             .ApplyManifestAsync(caller ?? Caller(), new DeclarativeConsentManifest("1", [policy]), dryRun, callerContext);
 
     [Theory]
@@ -59,7 +60,7 @@ public sealed class ManifestFourEyesAndSelfGrantTests
         var repo = new FakeConsentRepository();
 
         var ex = await Should.ThrowAsync<GrantPolicyViolationException>(() =>
-            ApplyAsync(repo, Policy("User", "S-1-5-21-ALICE"), dryRun: dryRun, sensitivity: "CONFIDENTIAL"));
+            ApplyAsync(repo, Policy("User", "S-1-5-21-ALICE"), dryRun: dryRun, sensitive: true));
 
         ex.ErrorCode.ShouldBe(GrantErrorCodes.FourEyesRequired);
         ex.Decision.Class.ShouldBe(GrantClass.Sensitive);
@@ -92,7 +93,7 @@ public sealed class ManifestFourEyesAndSelfGrantTests
         var repo = new FakeConsentRepository();
 
         var ex = await Should.ThrowAsync<GrantPolicyViolationException>(() =>
-            ApplyAsync(repo, Policy("ServicePrincipal", "00000000-0000-0000-0000-00000000a11c"), dryRun: dryRun, sensitivity: "CONFIDENTIAL"));
+            ApplyAsync(repo, Policy("ServicePrincipal", "00000000-0000-0000-0000-00000000a11c"), dryRun: dryRun, sensitive: true));
 
         ex.ErrorCode.ShouldBe(GrantErrorCodes.FourEyesRequired);
         ex.Decision.Class.ShouldBe(GrantClass.ServicePrincipal);
@@ -131,7 +132,7 @@ public sealed class ManifestFourEyesAndSelfGrantTests
     {
         var repo = new FakeConsentRepository();
 
-        var result = await ApplyAsync(repo, Policy("ServicePrincipal", "00000000-0000-0000-0000-00000000a11c", effect: "Deny"), sensitivity: "CONFIDENTIAL");
+        var result = await ApplyAsync(repo, Policy("ServicePrincipal", "00000000-0000-0000-0000-00000000a11c", effect: "Deny"), sensitive: true);
 
         result.Applied.ShouldBe(1);
     }
@@ -152,7 +153,7 @@ public sealed class ManifestFourEyesAndSelfGrantTests
     {
         var repo = new FakeConsentRepository();
 
-        var result = await ApplyAsync(repo, Policy("User", "S-1-5-21-ALICE", effect: "Deny"), sensitivity: "CONFIDENTIAL");
+        var result = await ApplyAsync(repo, Policy("User", "S-1-5-21-ALICE", effect: "Deny"), sensitive: true);
 
         result.Applied.ShouldBe(1);
     }

@@ -122,7 +122,7 @@ public sealed class DatasetCatalogPrivacyEditTests
             [
                 new TableColumn { ColumnName = "secret" }
             ],
-            Table = new Table { Id = Guid.NewGuid(), Sensitivity = "NORMAL", TableName = "orders", SchemaName = "dbo", SourceName = "sales", SourceType = "sql" }
+            Table = new Table { Id = Guid.NewGuid(), TableName = "orders", SchemaName = "dbo", SourceName = "sales", SourceType = "sql" }
         }.WithPii("secret");
         _tables.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(meta);
 

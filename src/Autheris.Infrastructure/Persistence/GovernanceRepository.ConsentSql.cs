@@ -704,21 +704,6 @@ internal static class ConsentSqlCore
         DbConnection conn, DbTransaction? tx, Guid requestId, Sid approverSid,
         IReadOnlyCollection<string> approverOwnerIds, Func<IReadOnlyList<string>, Task<IReadOnlyCollection<string>>> resolveOwnerIdsAsync, CancellationToken ct)
     {
-        bool requiresFourEyes = false;
-        string? tableSensitivity = null;
-        await using (var feCmd = conn.CreateCommand())
-        {
-            feCmd.Transaction = tx;
-            feCmd.CommandText = "SELECT t.requires_four_eyes, t.sensitivity FROM TABLES t JOIN CONSENT_REQUESTS r ON t.id = r.table_id WHERE r.id = @id";
-            feCmd.AddBound("@id", requestId.ToString());
-            await using var reader = await feCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            if (await reader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                if (!reader.IsDBNull(0)) requiresFourEyes = Convert.ToInt32(reader.GetValue(0)) == 1;
-                if (!reader.IsDBNull(1)) tableSensitivity = reader.GetString(1);
-            }
-        }
-
         var existingApprovers = new List<string>();
         await using (var approversCmd = conn.CreateCommand())
         {
@@ -742,7 +727,7 @@ internal static class ConsentSqlCore
         maxCmd.AddBound("@id", requestId.ToString());
         int nextStepNumber = Convert.ToInt32(await maxCmd.ExecuteScalarAsync(ct).ConfigureAwait(false));
 
-        return (requiresFourEyes, tableSensitivity, sameApprover, nextStepNumber);
+        return (false, null, sameApprover, nextStepNumber);
     }
 
     public static async Task InsertApprovedStepAsync(DbConnection conn, DbTransaction tx, Guid stepId, Guid requestId, int stepNumber, Sid approverSid, DateTimeOffset decidedAt, CancellationToken ct)

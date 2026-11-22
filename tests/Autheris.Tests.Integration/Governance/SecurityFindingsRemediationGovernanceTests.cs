@@ -60,7 +60,6 @@ public sealed class SecurityFindingsRemediationGovernanceTests
                 SourceName = "sales",
                 SchemaName = "dbo",
                 TableName = "orders",
-                Sensitivity = "CONFIDENTIAL",
                 IsActive = true
             },
             Columns =

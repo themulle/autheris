@@ -35,7 +35,7 @@ public sealed class McpDatasetCatalogKeyVisibilityTests
         var table = new TableMetadata
         {
             Identifier = Orders,
-            Table = new Table { TableName = "orders", SchemaName = "public", Sensitivity = "INTERNAL" },
+            Table = new Table { TableName = "orders", SchemaName = "public" },
             PrimaryKeyColumns = ["id", "customer_email"],
             Indexes =
             [

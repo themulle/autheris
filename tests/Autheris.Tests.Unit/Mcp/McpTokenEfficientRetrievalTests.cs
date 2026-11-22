@@ -40,7 +40,7 @@ public sealed class McpTokenEfficientRetrievalTests
     private static TableMetadata CreateTable(TableIdentifier id, string description, params (string Name, string Type, bool Pk)[] cols) => new()
     {
         Identifier = id,
-        Table = new Table { TableName = id.TableName, SchemaName = id.Schema, Description = description, Sensitivity = "INTERNAL" },
+        Table = new Table { TableName = id.TableName, SchemaName = id.Schema, Description = description },
         PrimaryKeyColumns = cols.Where(c => c.Pk).Select(c => c.Name).ToList(),
         Columns = cols.Select(c => new TableColumn
         {

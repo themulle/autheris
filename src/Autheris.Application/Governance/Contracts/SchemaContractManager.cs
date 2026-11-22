@@ -65,8 +65,8 @@ public sealed class SchemaContractManager : ISchemaContractManager
         {
             var def = new SchemaContractDefinition(
                 name: name,
-                includedTags: opt.IncludedTags,
-                excludedTags: opt.ExcludedTags,
+                includedClasses: opt.IncludedClasses,
+                excludedClasses: opt.ExcludedClasses,
                 excludeInaccessible: opt.ExcludeInaccessible,
                 allowedTables: opt.AllowedTables
             );

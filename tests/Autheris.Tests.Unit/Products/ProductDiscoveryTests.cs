@@ -70,7 +70,7 @@ public sealed class ProductDiscoveryTests
         var item = bob.Items.ShouldHaveSingleItem();
         item.Name.ShouldBe("orders_view");
         item.Kind.ShouldBe(nameof(DataProductKind.View));
-        item.ProductOwner.ShouldBe(ProductHarness.Alice.Value);
+        item.OwnerGroupSid.ShouldBe(ProductHarness.Alice.Value);
         item.RefreshedAt.ShouldBe(Loaded);
         item.Columns.Select(c => c.Name).ShouldBe(product.Columns.Select(c => c.Name));
         item.Columns.ShouldAllBe(c => c.State == "masked" || c.State == "clear");

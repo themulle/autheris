@@ -52,7 +52,7 @@ public sealed class McpSearchCatalogTagFilterTests
     private static TableMetadata Meta(TableIdentifier id, params string[] tags) => new()
     {
         Identifier = id,
-        Table = new Table { SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName, DisplayName = id.TableName, Sensitivity = "NORMAL" },
+        Table = new Table { SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName, DisplayName = id.TableName },
         CatalogTags = tags,
         Columns = [new TableColumn { ColumnName = "id", DataType = "int" }],
         PrimaryKeyColumns = ["id"]

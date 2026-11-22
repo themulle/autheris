@@ -19,7 +19,7 @@ public sealed class ProductAuthorityTests
 
         var product = await _h.Service.PutAsync(_h.Put(_h.Caller(ProductHarness.Alice), ProductHarness.CustomerOrders));
 
-        product.ProductOwner.ShouldBe(ProductHarness.Alice);
+        product.OwnerGroupSid.ShouldBe(ProductHarness.Alice);
         product.Authority.ShouldBe(ProductCreatorAuthority.BaseOwner);
         product.CreatedBy.ShouldBe(ProductHarness.Alice);
         product.BaseObjects.ShouldBe(CustomerOrderObjects, ignoreOrder: true);
@@ -36,7 +36,7 @@ public sealed class ProductAuthorityTests
 
         decision.Allowed.ShouldBeTrue();
         decision.Authority.ShouldBe(ProductCreatorAuthority.BaseOwner);
-        decision.ProductOwner.ShouldBe(ProductHarness.Bob);
+        decision.OwnerGroupSid.ShouldBe(ProductHarness.Bob);
     }
 
     [Fact]
@@ -54,35 +54,13 @@ public sealed class ProductAuthorityTests
     }
 
     [Fact]
-    public async Task DataSourceOwner_creates_views_and_procedures_in_own_source()
-    {
-        await _h.Store.AddDataSourceOwnerAsync(new DataSourceOwner(ProductHarness.Tenant, "crm", ProductHarness.Carol, ProductHarness.Admin, DateTimeOffset.UnixEpoch));
-        var carol = _h.Caller(ProductHarness.Carol);
-
-        var view = await _h.Service.PutAsync(_h.Put(carol, ProductHarness.CustomerOrders));
-        var procedure = await _h.Service.PutAsync(_h.Put(carol, "crm.public.refresh_customers", name: "refresh", kind: DataProductKind.Procedure));
-
-        view.Authority.ShouldBe(ProductCreatorAuthority.DataSourceOwner);
-        view.ProductOwner.ShouldBe(ProductHarness.Carol);
-        procedure.Kind.ShouldBe(DataProductKind.Procedure);
-        procedure.ProductOwner.ShouldBe(ProductHarness.Carol);
-
-        var foreign = await Should.ThrowAsync<ProductException>(() =>
-            _h.Service.PutAsync(_h.Put(carol, "SELECT sku FROM erp.public.items", name: "items_view")));
-        foreign.Code.ShouldBe(ProductErrorCodes.CreationNotAuthorized);
-    }
-
-    [Fact]
     public async Task Only_datasource_owner_admin_or_sync_create_procedures()
     {
         var procedure = new[] { new TableIdentifier("crm", "public", "refresh_customers") };
         _h.Owned[ProductHarness.Alice.Value] = [procedure[0]];
-        await _h.Store.AddDataSourceOwnerAsync(new DataSourceOwner(ProductHarness.Tenant, "crm", ProductHarness.Carol, ProductHarness.Admin, DateTimeOffset.UnixEpoch));
 
         (await _h.Authority.AuthorizeCreationAsync(_h.Caller(ProductHarness.Alice), DataProductKind.Procedure, procedure, null))
             .ErrorCode.ShouldBe(ProductErrorCodes.CreationNotAuthorized);
-        (await _h.Authority.AuthorizeCreationAsync(_h.Caller(ProductHarness.Carol), DataProductKind.Procedure, procedure, null))
-            .Authority.ShouldBe(ProductCreatorAuthority.DataSourceOwner);
         (await _h.Authority.AuthorizeCreationAsync(_h.Caller(ProductHarness.Admin, admin: true), DataProductKind.Procedure, procedure, ProductHarness.Bob))
             .Authority.ShouldBe(ProductCreatorAuthority.DataProductAdmin);
         (await _h.Authority.AuthorizeCreationAsync(_h.Caller(ProductHarness.SyncIdentity, viaSync: true), DataProductKind.Procedure, procedure, ProductHarness.Bob))
@@ -99,7 +77,7 @@ public sealed class ProductAuthorityTests
         (await _h.Authority.AuthorizeCreationAsync(admin, DataProductKind.View, CustomerOrderObjects, new Sid(" "))).ErrorCode.ShouldBe(ProductErrorCodes.OwnerMustDiffer);
 
         var created = await _h.Service.PutAsync(_h.Put(admin, ProductHarness.CustomerOrders, ProductHarness.Bob));
-        created.ProductOwner.ShouldBe(ProductHarness.Bob);
+        created.OwnerGroupSid.ShouldBe(ProductHarness.Bob);
         created.Authority.ShouldBe(ProductCreatorAuthority.DataProductAdmin);
         created.CreatedBy.ShouldBe(ProductHarness.Admin);
 
@@ -117,7 +95,7 @@ public sealed class ProductAuthorityTests
         (await _h.Authority.AuthorizeCreationAsync(sync, DataProductKind.View, CustomerOrderObjects, null)).ErrorCode.ShouldBe(ProductErrorCodes.OwnerMustDiffer);
 
         var product = await _h.Service.PutAsync(_h.Put(sync, ProductHarness.CustomerOrders, ProductHarness.Alice));
-        product.ProductOwner.ShouldBe(ProductHarness.Alice);
+        product.OwnerGroupSid.ShouldBe(ProductHarness.Alice);
         product.Authority.ShouldBe(ProductCreatorAuthority.GitSync);
         product.ManagedBy.ShouldBe("Git");
         ProductAuthorityService.IsProductOwner(sync, product).ShouldBeFalse();
@@ -130,20 +108,20 @@ public sealed class ProductAuthorityTests
         await _h.Service.PutAsync(_h.Put(_h.Caller(ProductHarness.Alice), ProductHarness.CustomerOrders));
         var admin = _h.Caller(ProductHarness.Admin, admin: true);
 
-        var byOwner = await Should.ThrowAsync<ProductException>(() => _h.Service.TransferAsync(_h.Caller(ProductHarness.Alice), "sales", "orders_view", ProductHarness.Bob));
+        var byOwner = await Should.ThrowAsync<ProductException>(() => _h.Service.SetOwnerGroupAsync(_h.Caller(ProductHarness.Alice), "sales", "orders_view", ProductHarness.Bob));
         byOwner.Code.ShouldBe(ProductErrorCodes.CreationNotAuthorized);
-        var toSelf = await Should.ThrowAsync<ProductException>(() => _h.Service.TransferAsync(admin, "sales", "orders_view", ProductHarness.Admin));
+        var toSelf = await Should.ThrowAsync<ProductException>(() => _h.Service.SetOwnerGroupAsync(admin, "sales", "orders_view", ProductHarness.Admin));
         toSelf.Code.ShouldBe(ProductErrorCodes.OwnerMustDiffer);
 
-        var moved = await _h.Service.TransferAsync(admin, "sales", "orders_view", ProductHarness.Bob);
-        moved.ProductOwner.ShouldBe(ProductHarness.Bob);
-        _h.Audit.Entries.ShouldContain(e => e.EventType == AuditEventTypes.ProductOwnerTransferred && e.ActorSid == ProductHarness.Admin);
+        var moved = await _h.Service.SetOwnerGroupAsync(admin, "sales", "orders_view", ProductHarness.Bob);
+        moved.OwnerGroupSid.ShouldBe(ProductHarness.Bob);
+        _h.Audit.Entries.ShouldContain(e => e.EventType == AuditEventTypes.OwnerGroupAssigned && e.ActorSid == ProductHarness.Admin);
     }
 
     [Fact]
     public async Task Product_owner_cannot_change_definition_or_classification()
     {
-        // Bob owns the product (transferred by an admin) but holds no authority over the base objects.
+        // Bob owns the product (assigned by an admin) but holds no authority over the base objects.
         var admin = _h.Caller(ProductHarness.Admin, admin: true);
         await _h.Service.PutAsync(_h.Put(admin, ProductHarness.CustomerOrders, ProductHarness.Bob));
         var bob = _h.Caller(ProductHarness.Bob);
@@ -152,7 +130,7 @@ public sealed class ProductAuthorityTests
             _h.Service.PutAsync(_h.Put(bob, "SELECT id, total FROM crm.public.orders")));
         definition.Code.ShouldBe(ProductErrorCodes.CreationNotAuthorized);
         var classification = await Should.ThrowAsync<ProductException>(() =>
-            _h.Service.ClassifyColumnAsync(bob, "sales", "orders_view", "segment", ProductColumnClass.PiiClearEligible, "needed"));
+            _h.Service.ClassifyColumnAsync(bob, "sales", "orders_view", "segment", ProductColumnClass.PiiClearEligible, "needed for test audit"));
         classification.Code.ShouldBe(ProductErrorCodes.CreationNotAuthorized);
 
         // the product owner still manages description and load mode
@@ -180,7 +158,7 @@ public sealed class ProductAuthorityTests
         takeover.Code.ShouldBe(ProductErrorCodes.CreationNotAuthorized);
 
         var changed = await _h.Service.PutAsync(_h.Put(_h.Caller(ProductHarness.Alice), "SELECT id, total FROM crm.public.orders"));
-        changed.ProductOwner.ShouldBe(ProductHarness.Alice);
+        changed.OwnerGroupSid.ShouldBe(ProductHarness.Alice);
         changed.Version.ShouldBe(2);
         (await _h.Store.GetProductVersionsAsync(ProductHarness.Tenant, changed.Id)).Count.ShouldBe(2);
     }

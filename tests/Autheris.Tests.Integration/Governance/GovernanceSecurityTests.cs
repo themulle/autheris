@@ -382,7 +382,7 @@ public class GovernanceSecurityTests : IDisposable
         var table = new TableIdentifier("finance", "dbo", "finance_table_5");
         var meta = await _repository.GetTableMetadataAsync(table);
         meta.ShouldNotBeNull();
-        meta.Table.RequiresFourEyes.ShouldBeTrue();
+        ClassificationMetadata.IsTableSensitive(meta).ShouldBeTrue();
 
         var requester = new Sid("S-1-5-21-REQ-1");
         var approver1 = new Sid("S-1-5-21-APP-1");
@@ -424,7 +424,7 @@ public class GovernanceSecurityTests : IDisposable
         });
 
         // Step 1: Approved by Approver 1 -> Status is PENDING_SECOND_APPROVAL
-        var approvedStep1 = await _repository.ApproveConsentRequestStepAsync(req.Id, approver1);
+        var approvedStep1 = await _repository.ApproveConsentRequestStepAsync(req.Id, approver1, requireSecondApprover: true);
         approvedStep1.Status.ShouldBe("PENDING_SECOND_APPROVAL");
 
         // Step 2: Rejected by Approver 2 -> Must succeed without UNIQUE constraint violation on step_number

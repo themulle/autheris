@@ -20,8 +20,7 @@ using Xunit;
 public sealed class ConsentFourEyesSensitivityTests
 {
     private static async Task<(PostgreSqlGovernanceRepository repo, ConsentRequest request)> CreateRequestForTableAsync(
-        string sensitivity,
-        bool requiresFourEyes = false)
+        bool sensitiveColumn = false)
     {
         var repo = GovernanceTestDatabase.CreateRepository(new FakeEpochValidationService());
         var tableId = new TableIdentifier("sales", "crm", "cust_" + Guid.NewGuid().ToString("N")[..8]);
@@ -31,8 +30,6 @@ public sealed class ConsentFourEyesSensitivityTests
             SourceName = tableId.Domain,
             SchemaName = tableId.Schema,
             TableName = tableId.TableName,
-            Sensitivity = sensitivity,
-            RequiresFourEyes = requiresFourEyes,
             IsActive = true
         };
 
@@ -40,7 +37,8 @@ public sealed class ConsentFourEyesSensitivityTests
         {
             Identifier = tableId,
             Table = table,
-            Columns = [new TableColumn { TableId = table.Id, ColumnName = "email", DataType = "VARCHAR" }]
+            Columns = [new TableColumn { TableId = table.Id, ColumnName = "email", DataType = "VARCHAR" }],
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(sensitiveColumn ? new[] { "email" } : Array.Empty<string>())
         });
 
         var created = await repo.CreateConsentRequestAsync(new ConsentRequest
@@ -82,73 +80,41 @@ public sealed class ConsentFourEyesSensitivityTests
         return (repo, created);
     }
 
-    [Theory]
-    [InlineData("HIGH")]
-    [InlineData("high")]
-    [InlineData("RESTRICTED")]
-    [InlineData("restricted")]
-    [InlineData("SECRET")]
-    [InlineData("secret")]
-    [InlineData("CONFIDENTIAL")]
-    [InlineData("PII")] // Unknown rank >= 3 (fail closed)
-    public async Task PostgreSql_HighSensitivityTable_RequiresFourEyesEvenIfRequiresFourEyesIsFalse(string sensitivity)
+    [Fact]
+    public async Task PostgreSql_SensitiveTable_EnforcesFourEyesWhenRequireSecondApproverIsTrue()
     {
-        var (repo, request) = await CreateRequestForTableAsync(sensitivity, requiresFourEyes: false);
+        var (repo, request) = await CreateRequestForTableAsync(sensitiveColumn: true);
         using (repo)
         {
             var approver1 = new Sid("S-1-5-21-APPROVER-1");
             var approver2 = new Sid("S-1-5-21-APPROVER-2");
 
             // Step 1: Approver 1 approves
-            var step1Result = await repo.ApproveConsentRequestStepAsync(request.Id, approver1);
+            var step1Result = await repo.ApproveConsentRequestStepAsync(request.Id, approver1, requireSecondApprover: true);
             step1Result.Status.ShouldBe("PENDING_SECOND_APPROVAL");
 
             // Re-approval by Approver 1 must fail due to four-eyes principle
             var ex = await Should.ThrowAsync<InvalidOperationException>(() =>
-                repo.ApproveConsentRequestStepAsync(request.Id, approver1));
+                repo.ApproveConsentRequestStepAsync(request.Id, approver1, requireSecondApprover: true));
             ex.Message.ShouldContain("FOUR_EYES_SAME_APPROVER");
 
             // Step 2: Approver 2 approves
-            var step2Result = await repo.ApproveConsentRequestStepAsync(request.Id, approver2);
+            var step2Result = await repo.ApproveConsentRequestStepAsync(request.Id, approver2, requireSecondApprover: true);
             step2Result.Status.ShouldBe("APPROVED");
         }
     }
 
-    [Theory]
-    [InlineData("PUBLIC")]
-    [InlineData("LOW")]
-    [InlineData("low")]
-    [InlineData("INTERNAL")]
-    [InlineData("NORMAL")]
-    [InlineData("MEDIUM")]
-    public async Task PostgreSql_LowOrNormalSensitivityTable_SingleApprovalSufficesWhenRequiresFourEyesIsFalse(string sensitivity)
-    {
-        var (repo, request) = await CreateRequestForTableAsync(sensitivity, requiresFourEyes: false);
-        using (repo)
-        {
-            var approver1 = new Sid("S-1-5-21-APPROVER-1");
-
-            // Step 1: Approver 1 approves -> directly approved because sensitivity is not high and requires_four_eyes = false
-            var step1Result = await repo.ApproveConsentRequestStepAsync(request.Id, approver1);
-            step1Result.Status.ShouldBe("APPROVED");
-        }
-    }
-
     [Fact]
-    public async Task PostgreSql_LowSensitivityTable_WithExplicitRequiresFourEyes_EnforcesSecondApproval()
+    public async Task PostgreSql_SingleApprovalSufficesWhenRequireSecondApproverIsFalse()
     {
-        var (repo, request) = await CreateRequestForTableAsync("LOW", requiresFourEyes: true);
+        var (repo, request) = await CreateRequestForTableAsync(sensitiveColumn: false);
         using (repo)
         {
             var approver1 = new Sid("S-1-5-21-APPROVER-1");
-            var approver2 = new Sid("S-1-5-21-APPROVER-2");
 
-            var step1 = await repo.ApproveConsentRequestStepAsync(request.Id, approver1);
-            step1.Status.ShouldBe("PENDING_SECOND_APPROVAL");
-
-            var step2 = await repo.ApproveConsentRequestStepAsync(request.Id, approver2);
-
-            step2.Status.ShouldBe("APPROVED");
+            // Step 1: Approver 1 approves -> directly approved when requireSecondApprover = false
+            var step1Result = await repo.ApproveConsentRequestStepAsync(request.Id, approver1, requireSecondApprover: false);
+            step1Result.Status.ShouldBe("APPROVED");
         }
     }
 

@@ -118,8 +118,7 @@ public sealed class DiscoveryHiddenAndSecurityTests
                 DisplayName = controlChars,
                 Description = longDesc,
                 DataSourceType = table.Table.DataSourceType,
-                IsActive = true,
-                Sensitivity = table.Table.Sensitivity
+                IsActive = true
             },
             Columns = table.Columns,
             OwnerTenantId = table.OwnerTenantId,

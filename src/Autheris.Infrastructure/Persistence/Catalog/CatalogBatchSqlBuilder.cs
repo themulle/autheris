@@ -95,7 +95,7 @@ internal static class CatalogBatchSqlBuilder
             var sb = new StringBuilder();
             if (repo.IsPostgreSql)
             {
-                sb.Append(@"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id, object_kind, metric_view_count_measure) VALUES ");
+                sb.Append(@"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id, object_kind, metric_view_count_measure) VALUES ");
             }
             else
             {
@@ -116,8 +116,6 @@ internal static class CatalogBatchSqlBuilder
                   .Append(", @schema").Append(suffix)
                   .Append(", @tableName").Append(suffix)
                   .Append(", @displayName").Append(suffix)
-                  .Append(", @sensitivity").Append(suffix)
-                  .Append(", @fourEyes").Append(suffix)
                   .Append(", @active").Append(suffix)
                   .Append(", @dst").Append(suffix)
                   .Append(", @httpJson").Append(suffix)
@@ -145,8 +143,6 @@ internal static class CatalogBatchSqlBuilder
                 cmd.AddBound("@schema" + suffix, metadata.Identifier.Schema);
                 cmd.AddBound("@tableName" + suffix, metadata.Identifier.TableName);
                 cmd.AddBound("@displayName" + suffix, metadata.Table.DisplayName);
-                cmd.AddBound("@sensitivity" + suffix, metadata.Table.Sensitivity);
-                cmd.AddBound("@fourEyes" + suffix, metadata.Table.RequiresFourEyes ? 1 : 0);
                 cmd.AddBound("@active" + suffix, metadata.Table.IsActive ? 1 : 0);
                 cmd.AddBound("@dst" + suffix, (int)metadata.Table.DataSourceType);
                 cmd.AddBound("@httpJson" + suffix, (object?)httpEndpointJson ?? DBNull.Value);
@@ -177,8 +173,6 @@ internal static class CatalogBatchSqlBuilder
     schema_name = EXCLUDED.schema_name,
     table_name = EXCLUDED.table_name,
     display_name = EXCLUDED.display_name,
-    sensitivity = EXCLUDED.sensitivity,
-    requires_four_eyes = EXCLUDED.requires_four_eyes,
     is_active = EXCLUDED.is_active,
     data_source_type = EXCLUDED.data_source_type,
     http_endpoint_json = EXCLUDED.http_endpoint_json,
@@ -196,7 +190,7 @@ internal static class CatalogBatchSqlBuilder
             }
             else
             {
-                sb.Append(@") AS s (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id, object_kind, metric_view_count_measure)
+                sb.Append(@") AS s (id, source_type, source_name, schema_name, table_name, display_name, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id, object_kind, metric_view_count_measure)
 ON t.id = s.id
 WHEN MATCHED THEN UPDATE SET
     source_type = s.source_type,
@@ -204,8 +198,6 @@ WHEN MATCHED THEN UPDATE SET
     schema_name = s.schema_name,
     table_name = s.table_name,
     display_name = s.display_name,
-    sensitivity = s.sensitivity,
-    requires_four_eyes = s.requires_four_eyes,
     is_active = s.is_active,
     data_source_type = s.data_source_type,
     http_endpoint_json = s.http_endpoint_json,
@@ -220,8 +212,8 @@ WHEN MATCHED THEN UPDATE SET
     dbt_unique_id = COALESCE(s.dbt_unique_id, t.dbt_unique_id),
     object_kind = s.object_kind,
     metric_view_count_measure = s.metric_view_count_measure
-WHEN NOT MATCHED THEN INSERT (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id, object_kind, metric_view_count_measure)
-    VALUES (s.id, s.source_type, s.source_name, s.schema_name, s.table_name, s.display_name, s.sensitivity, s.requires_four_eyes, s.is_active, s.data_source_type, s.http_endpoint_json, s.plugin_name, s.description, s.long_description, s.doc_source, s.required_filter_columns_json, s.texts_json, s.min_group_size, s.non_personal, s.dbt_unique_id, s.object_kind, s.metric_view_count_measure);");
+WHEN NOT MATCHED THEN INSERT (id, source_type, source_name, schema_name, table_name, display_name, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id, object_kind, metric_view_count_measure)
+    VALUES (s.id, s.source_type, s.source_name, s.schema_name, s.table_name, s.display_name, s.is_active, s.data_source_type, s.http_endpoint_json, s.plugin_name, s.description, s.long_description, s.doc_source, s.required_filter_columns_json, s.texts_json, s.min_group_size, s.non_personal, s.dbt_unique_id, s.object_kind, s.metric_view_count_measure);");
             }
 
             cmd.CommandText = sb.ToString();

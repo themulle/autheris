@@ -59,9 +59,33 @@ public static partial class GatewayGovernanceServiceExtensions
         AddTriageAndContracts(services);
         AddIdentityAndAccessGovernance(services);
         AddDataProducts(services);
+        AddAccessPolicyAndDomainServices(services);
         AddGovernanceProtectionCaching(services);
 
         return services;
+    }
+
+    private static void AddAccessPolicyAndDomainServices(IServiceCollection services)
+    {
+        services.AddOptions<AccessPolicyOptions>()
+            .BindConfiguration(AccessPolicyOptions.SectionName)
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
+        services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<AccessPolicyOptions>, Autheris.Application.Governance.Policy.AccessPolicyOptionsValidator>();
+        services.AddSingleton<Autheris.Application.Governance.Policy.AccessPolicySettingsProvider>();
+        services.AddSingleton<Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider>(sp =>
+            sp.GetRequiredService<Autheris.Application.Governance.Policy.AccessPolicySettingsProvider>());
+        services.AddSingleton<Autheris.Application.Governance.Domains.GovernanceDomainService>(sp =>
+            new Autheris.Application.Governance.Domains.GovernanceDomainService(
+                sp.GetRequiredService<IGovernanceDomainRepository>(),
+                sp.GetRequiredService<ITableMetadataRepository>(),
+                sp.GetRequiredService<IConsentRepository>(),
+                sp.GetRequiredService<IAuditWriter>(),
+                sp.GetRequiredService<IGovernanceCapabilities>(),
+                sp.GetRequiredService<Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider>(),
+                sp.GetRequiredService<Autheris.Application.Governance.Protection.ProtectionSnapshotProvider>(),
+                sp.GetService<TimeProvider>(),
+                sp.GetService<Autheris.Application.Products.IDataProductRepository>()));
     }
 
     private static void AddGovernanceProtectionCaching(IServiceCollection services)
@@ -86,7 +110,8 @@ public static partial class GatewayGovernanceServiceExtensions
                         timeProvider: sp.GetService<TimeProvider>()),
                 sp.GetService<Microsoft.Extensions.Options.IOptions<GovernanceCacheSettings>>(),
                 sp.GetService<Autheris.Application.Governance.Caching.IGovernanceChangeNotifier>(),
-                sp.GetService<TimeProvider>()));
+                sp.GetService<TimeProvider>(),
+                sp.GetService<Autheris.Application.Products.IDataProductRepository>()));
         services.AddSingleton<IProtectionSnapshotProvider>(sp =>
             sp.GetRequiredService<Autheris.Application.Governance.Protection.ProtectionSnapshotProvider>());
         services.AddSingleton<Autheris.Application.Governance.Caching.IGovernanceCacheInvalidator>(sp =>
@@ -242,6 +267,12 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<GovernanceDomainStore>();
         services.AddSingleton<IGovernanceDomainRepository>(sp => sp.GetRequiredService<GovernanceDomainStore>());
         services.AddSingleton<Autheris.Application.Governance.Caching.IGovernanceEpochStore>(sp => sp.GetRequiredService<GovernanceDomainStore>());
+        services.AddSingleton<AccessPolicySettingsStore>(sp =>
+            new AccessPolicySettingsStore(
+                sp.GetRequiredService<IGovernanceSqlDialect>(),
+                sp.GetService<TimeProvider>(),
+                sp.GetService<Autheris.Application.Governance.Caching.IGovernanceChangeNotifier>()));
+        services.AddSingleton<IAccessPolicySettingsRepository>(sp => sp.GetRequiredService<AccessPolicySettingsStore>());
         services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IConsumerAggregationRepository>(sp => sp.GetRequiredService<TRepository>());

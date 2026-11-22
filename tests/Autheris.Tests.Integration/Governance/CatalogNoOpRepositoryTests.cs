@@ -35,7 +35,6 @@ public sealed class CatalogNoOpRepositoryTests : IDisposable
                 TableName = _identifier.TableName,
                 DisplayName = "Customers",
                 Description = description,
-                Sensitivity = "NORMAL",
                 IsActive = true
             },
             Identifier = _identifier,
@@ -149,7 +148,6 @@ public sealed class CatalogNoOpRepositoryTests : IDisposable
                 SchemaName = childId.Schema,
                 TableName = childId.TableName,
                 DisplayName = "Child",
-                Sensitivity = "NORMAL",
                 IsActive = true
             },
             Identifier = childId,

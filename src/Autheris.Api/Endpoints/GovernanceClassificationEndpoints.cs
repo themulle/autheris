@@ -8,10 +8,14 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Governance.Interfaces;
+using Autheris.Application.Security;
+using Autheris.Application.Tenancy;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
@@ -58,6 +62,7 @@ public static class GovernanceClassificationEndpoints
                         "Zero-Touch Auto-Approved"));
                 }
 
+                var transitionTenant = EndpointSecurity.GetRequestTenant(httpContext);
                 var autoRequest = new TableClassificationApprovalRequest(
                     proposal.ProposalId,
                     proposal.TableIdentifier,
@@ -65,7 +70,9 @@ public static class GovernanceClassificationEndpoints
                     "DATA_OWNER",
                     "APPROVE",
                     autoApproveDecisions,
-                    OverallComment: "Zero-Touch Low-Risk Auto-Approved by Policy");
+                    OverallComment: "Zero-Touch Low-Risk Auto-Approved by Policy",
+                    TenantId: transitionTenant,
+                    Caller: httpContext.User);
 
                 var transitionResult = await stateMachine.TransitionAsync(proposal, autoRequest, ct).ConfigureAwait(false);
 
@@ -85,7 +92,10 @@ public static class GovernanceClassificationEndpoints
             HttpContext httpContext,
             IClassificationProposalStore store,
             IClassificationWorkflowStateMachine stateMachine,
-            CancellationToken ct) =>
+            IGovernanceCapabilities? capabilities = null,
+            IGovernanceDomainRepository? domainRepository = null,
+            ITableMetadataRepository? tableMetadataRepository = null,
+            CancellationToken ct = default) =>
         {
             // The proposal is always loaded server-side; a client-supplied copy is a forgery attempt.
             if (payload.Proposal != null || payload.Request == null)
@@ -99,7 +109,7 @@ public static class GovernanceClassificationEndpoints
                 return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The proposal was not found.", httpContext);
             }
 
-            var identity = ResolveReviewer(httpContext, proposal);
+            var identity = await ResolveReviewerAsync(httpContext, proposal, capabilities, domainRepository, tableMetadataRepository, ct).ConfigureAwait(false);
             if (identity.Error != null)
             {
                 return identity.Error;
@@ -118,17 +128,20 @@ public static class GovernanceClassificationEndpoints
                 return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "ReviewerRole must not be supplied or must match the role derived from the authenticated principal.", httpContext);
             }
 
+            var transitionTenant = EndpointSecurity.GetRequestTenant(httpContext);
             var request = payload.Request with
             {
                 ProposalId = proposal.ProposalId,
                 TableIdentifier = proposal.TableIdentifier,
                 ReviewerSid = identity.Sid,
-                ReviewerRole = identity.Role!
+                ReviewerRole = identity.Role!,
+                TenantId = transitionTenant,
+                Caller = httpContext.User
             };
 
             var result = await stateMachine.TransitionAsync(proposal, request, ct).ConfigureAwait(false);
             return result.Success ? Results.Ok(result) : Results.BadRequest(result);
-        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ClassificationTransitioned);
+        }).RequireAuthorization(GatewayPolicies.AuthenticatedCaller).WithAudit(AuditLevel.Full, AuditEventTypes.ClassificationTransitioned);
 
         // 3. List Pending Proposals for Review Inbox (Filtered by role or owner)
         app.MapGet("/api/governance/classification/proposals/pending", async (
@@ -159,7 +172,10 @@ public static class GovernanceClassificationEndpoints
             HttpContext httpContext,
             IClassificationProposalStore store,
             IClassificationWorkflowStateMachine stateMachine,
-            CancellationToken ct) =>
+            IGovernanceCapabilities? capabilities = null,
+            IGovernanceDomainRepository? domainRepository = null,
+            ITableMetadataRepository? tableMetadataRepository = null,
+            CancellationToken ct = default) =>
         {
             var proposal = await store.GetProposalByIdAsync(proposalId, ct).ConfigureAwait(false);
             if (proposal == null)
@@ -167,7 +183,7 @@ public static class GovernanceClassificationEndpoints
                 return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The proposal was not found.", httpContext);
             }
 
-            var identity = ResolveReviewer(httpContext, proposal);
+            var identity = await ResolveReviewerAsync(httpContext, proposal, capabilities, domainRepository, tableMetadataRepository, ct).ConfigureAwait(false);
             if (identity.Error != null)
             {
                 return identity.Error;
@@ -180,6 +196,7 @@ public static class GovernanceClassificationEndpoints
 
             var reviewerSid = identity.Sid;
             var reviewerRole = identity.Role!;
+            var transitionTenant = EndpointSecurity.GetRequestTenant(httpContext);
 
             var request = new TableClassificationApprovalRequest(
                 proposal.ProposalId,
@@ -190,7 +207,9 @@ public static class GovernanceClassificationEndpoints
                 payload.ColumnDecisions ?? Array.Empty<ColumnClassificationDecision>(),
                 OverallComment: payload.OverallComment,
                 Justification: payload.Justification,
-                StepUpAuthToken: payload.StepUpAuthToken);
+                StepUpAuthToken: payload.StepUpAuthToken,
+                TenantId: transitionTenant,
+                Caller: httpContext.User);
 
             var result = await stateMachine.TransitionAsync(proposal, request, ct).ConfigureAwait(false);
             return result.Success ? Results.Ok(result) : Results.BadRequest(result);
@@ -203,7 +222,10 @@ public static class GovernanceClassificationEndpoints
             HttpContext httpContext,
             IClassificationProposalStore store,
             IClassificationWorkflowStateMachine stateMachine,
-            CancellationToken ct) =>
+            IGovernanceCapabilities? capabilities = null,
+            IGovernanceDomainRepository? domainRepository = null,
+            ITableMetadataRepository? tableMetadataRepository = null,
+            CancellationToken ct = default) =>
         {
             var proposal = await store.GetProposalByIdAsync(proposalId, ct).ConfigureAwait(false);
             if (proposal == null)
@@ -211,7 +233,7 @@ public static class GovernanceClassificationEndpoints
                 return ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The proposal was not found.", httpContext);
             }
 
-            var identity = ResolveReviewer(httpContext, proposal);
+            var identity = await ResolveReviewerAsync(httpContext, proposal, capabilities, domainRepository, tableMetadataRepository, ct).ConfigureAwait(false);
             if (identity.Error != null)
             {
                 return identity.Error;
@@ -224,6 +246,7 @@ public static class GovernanceClassificationEndpoints
 
             var reviewerSid = identity.Sid;
             var reviewerRole = identity.Role!;
+            var transitionTenant = EndpointSecurity.GetRequestTenant(httpContext);
 
             var request = new TableClassificationApprovalRequest(
                 proposal.ProposalId,
@@ -232,7 +255,9 @@ public static class GovernanceClassificationEndpoints
                 reviewerRole,
                 "REJECT",
                 Array.Empty<ColumnClassificationDecision>(),
-                OverallComment: payload.Reason);
+                OverallComment: payload.Reason,
+                TenantId: transitionTenant,
+                Caller: httpContext.User);
 
             var result = await stateMachine.TransitionAsync(proposal, request, ct).ConfigureAwait(false);
             return result.Success ? Results.Ok(result) : Results.BadRequest(result);
@@ -279,7 +304,13 @@ public static class GovernanceClassificationEndpoints
     /// Data-owner actions require an exact, non-empty <c>DataOwnerSid</c> match (fail closed: an unset owner denies
     /// everyone, including governance admins, who must assign an owner first). Stage 2 requires a compliance role.
     /// </summary>
-    private static ReviewerIdentity ResolveReviewer(HttpContext httpContext, TableClassificationProposal proposal)
+    private static async Task<ReviewerIdentity> ResolveReviewerAsync(
+        HttpContext httpContext,
+        TableClassificationProposal proposal,
+        IGovernanceCapabilities? capabilities,
+        IGovernanceDomainRepository? domainRepository,
+        ITableMetadataRepository? tableMetadataRepository,
+        CancellationToken ct)
     {
         var user = httpContext.User;
         var callerSid = user.GetUserSid();
@@ -288,8 +319,29 @@ public static class GovernanceClassificationEndpoints
             return new ReviewerIdentity(default, null, Results.Unauthorized());
         }
 
+        var tenant = EndpointSecurity.GetRequestTenant(httpContext);
         var isCompliance = user.IsInRole("ComplianceReviewer") || user.IsInRole("ComplianceOfficer");
         var isOwnerCapable = GatewayPolicies.HasRequestRole(httpContext, Autheris.Domain.Security.GatewayRole.GovernanceAdmin) || EndpointSecurity.IsGlobalGovernanceAdmin(user);
+        if (!isOwnerCapable && capabilities is not null)
+        {
+            var containerRef = ContainerDefaults.Unassigned.Container;
+            if (tableMetadataRepository is not null && domainRepository is not null)
+            {
+                var tableMeta = await tableMetadataRepository.GetTableMetadataAsync(proposal.TableIdentifier, ct).ConfigureAwait(false);
+                if (tableMeta is not null)
+                {
+                    var defaults = await domainRepository.GetContainerForTableAsync(tenant, tableMeta.Table.Id, ct).ConfigureAwait(false);
+                    if (defaults.IsValid)
+                    {
+                        containerRef = defaults.Container;
+                    }
+                }
+            }
+
+            var callerCtx = SecurityPrincipalContext.FromPrincipal(user, tenant);
+            isOwnerCapable = await capabilities.CanClassifyAsync(callerCtx, containerRef, tenant, ct).ConfigureAwait(false);
+        }
+
         var inGovernanceStage = string.Equals(proposal.Status, "PENDING_GOVERNANCE_REVIEW", StringComparison.OrdinalIgnoreCase);
 
         string? role = null;

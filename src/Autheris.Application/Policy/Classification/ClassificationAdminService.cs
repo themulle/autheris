@@ -58,7 +58,8 @@ public sealed record ClassificationAdminCaller(
     TenantId Tenant,
     string ActorSid,
     bool IsClusterAdmin,
-    bool IsGovernanceAdmin);
+    bool IsGovernanceAdmin,
+    bool IsContainerOwnerAuthorized = false);
 
 /// <summary>Whether an administrative write targets the caller's tenant scope or the global <c>*</c> scope.</summary>
 public enum ClassificationAdminScope
@@ -484,7 +485,7 @@ public sealed class ClassificationAdminService(
             }
         }
 
-        if (!caller.IsClusterAdmin && !caller.IsGovernanceAdmin)
+        if (!caller.IsClusterAdmin && !caller.IsGovernanceAdmin && !caller.IsContainerOwnerAuthorized)
         {
             var authorized = ownershipRepository is not null
                 && !string.IsNullOrWhiteSpace(caller.ActorSid)

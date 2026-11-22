@@ -369,8 +369,8 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         await f.Service.SyncPermissionsAsync();
 
         var meta = f.Upserted.ShouldHaveSingleItem();
-        meta.Table.Sensitivity.ShouldBe("HIGH");
-        meta.Table.RequiresFourEyes.ShouldBeTrue();
+        ClassificationMetadata.IsTableSensitive(meta).ShouldBeTrue();
+        OpenMetadataSyncService.IsExcludedFromAutoGrant(meta).ShouldBeTrue();
         ClassificationMetadata.IsColumnSensitive(meta, "diagnosis").ShouldBeTrue();
         meta.ColumnMaskingRules["diagnosis"].RuleType.ShouldBe("REDACT");
         f.Created.ShouldBeEmpty();
@@ -379,13 +379,20 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
     [Fact]
     public async Task E06_HierarchicalArt9TableTag_IsRecognized()
     {
-        var f = CreateOm(Om(), [Orders(tags: [new OpenMetadataTag { TagFQN = "Classification.HealthData" }])]);
+        OpenMetadataSyncService.MatchesAnyTag("Classification.HealthData", new DataCatalogOptions().GdprArticle9Tags).ShouldBeTrue();
+
+        var f = CreateOm(Om(), [Orders(columns:
+        [
+            new OpenMetadataColumn { Name = "id", DataType = "INT" },
+            new OpenMetadataColumn { Name = "diagnosis", DataType = "VARCHAR", Tags = [new OpenMetadataTag { TagFQN = "Classification.HealthData" }] }
+        ])]);
 
         await f.Service.SyncPermissionsAsync();
 
         var meta = f.Upserted.ShouldHaveSingleItem();
-        meta.Table.Sensitivity.ShouldBe("HIGH");
-        meta.Table.RequiresFourEyes.ShouldBeTrue();
+        ClassificationMetadata.IsTableSensitive(meta).ShouldBeTrue();
+        ClassificationMetadata.IsColumnSensitive(meta, "diagnosis").ShouldBeTrue();
+        OpenMetadataSyncService.IsExcludedFromAutoGrant(meta).ShouldBeTrue();
         f.Created.ShouldBeEmpty();
     }
 
@@ -411,33 +418,33 @@ public sealed class OpenMetadataReconcileAndAlationHardeningTests
         var existing = new TableMetadata
         {
             Identifier = OrdersId,
-            Table = new Table { SourceName = "sales_svc", SchemaName = "dbo", TableName = "orders", Sensitivity = "RESTRICTED" },
-            Columns = [new TableColumn { ColumnName = "id", DataType = "INT" }]
+            Table = new Table { SourceName = "sales_svc", SchemaName = "dbo", TableName = "orders" },
+            Columns = [new TableColumn { ColumnName = "id", DataType = "INT" }],
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("id")
         };
         var f = CreateOm(Om(), [Orders()], existingMetadata: id => id.Equals(OrdersId) ? existing : null);
 
         await f.Service.SyncPermissionsAsync();
 
-        f.Upserted.ShouldHaveSingleItem().Table.Sensitivity.ShouldBe("RESTRICTED");
+        var upserted = f.Upserted.ShouldHaveSingleItem();
+        ClassificationMetadata.IsTableSensitive(upserted).ShouldBeTrue();
+        OpenMetadataSyncService.IsExcludedFromAutoGrant(upserted).ShouldBeTrue();
         f.Created.ShouldBeEmpty();
     }
 
     [Fact]
     public void E06_IsExcludedFromAutoGrant_OnlyPlainTablesAreGrantable()
     {
-        static TableMetadata Meta(string sensitivity, bool fourEyes = false, bool sensitiveColumn = false) => new()
-        { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(sensitiveColumn ? new[] { "c" } : Array.Empty<string>()),
+        static TableMetadata Meta(bool sensitiveColumn) => new()
+        {
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(sensitiveColumn ? new[] { "c" } : Array.Empty<string>()),
             Identifier = OrdersId,
-            Table = new Table { Sensitivity = sensitivity, RequiresFourEyes = fourEyes },
+            Table = new Table(),
             Columns = [new TableColumn { ColumnName = "c" }]
         };
 
-        OpenMetadataSyncService.IsExcludedFromAutoGrant(Meta("NORMAL")).ShouldBeFalse();
-        OpenMetadataSyncService.IsExcludedFromAutoGrant(Meta("HIGH")).ShouldBeTrue();
-        OpenMetadataSyncService.IsExcludedFromAutoGrant(Meta("RESTRICTED")).ShouldBeTrue();
-        OpenMetadataSyncService.IsExcludedFromAutoGrant(Meta("ART9")).ShouldBeTrue();
-        OpenMetadataSyncService.IsExcludedFromAutoGrant(Meta("NORMAL", fourEyes: true)).ShouldBeTrue();
-        OpenMetadataSyncService.IsExcludedFromAutoGrant(Meta("NORMAL", sensitiveColumn: true)).ShouldBeTrue();
+        OpenMetadataSyncService.IsExcludedFromAutoGrant(Meta(sensitiveColumn: false)).ShouldBeFalse();
+        OpenMetadataSyncService.IsExcludedFromAutoGrant(Meta(sensitiveColumn: true)).ShouldBeTrue();
     }
 
     // ------------------------------------------------------------------ E-07

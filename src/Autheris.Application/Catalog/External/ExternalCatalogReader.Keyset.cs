@@ -12,6 +12,7 @@ using Autheris.Application.Catalog.Services;
 using Autheris.Application.Tenancy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 
 public sealed partial class ExternalCatalogReader
 {
@@ -40,7 +41,8 @@ public sealed partial class ExternalCatalogReader
             versions = await _changeStore.GetObjectVersionsAsync(tenantId, ct).ConfigureAwait(false);
         }
 
-        var candidates = FilterAppCandidates(inScope, visibility, query, kindFilter, versions);
+        var protectionsByTable = await ResolveProtectionsAsync(tenantId, inScope, ct).ConfigureAwait(false);
+        var candidates = FilterAppCandidates(inScope, visibility, query, kindFilter, versions, protectionsByTable);
         candidates.Sort(static (a, b) => DiscoveryService.CompareTableKeys(a.Identifier.ToString(), b.Identifier.ToString()));
 
         var startIndex = string.IsNullOrEmpty(afterKey) ? 0 : DiscoveryService.FindFirstIndexAfter(candidates, afterKey);
@@ -135,7 +137,13 @@ public sealed partial class ExternalCatalogReader
                     ? null
                     : await _artifactStore.GetAsync(table.Table.Id, ct).ConfigureAwait(false);
                 versions.TryGetValue(table.Identifier.ToString(), out var ver);
-                dtos.Add(MapAppObject(table, owners, artifacts, ver?.Seq, CanViewHiddenColumns(table, visibility)));
+                dtos.Add(MapAppObject(
+                    table,
+                    owners,
+                    artifacts,
+                    ver?.Seq,
+                    CanViewHiddenColumns(table, visibility),
+                    protectionsByTable.GetValueOrDefault(table.Identifier)));
             }
         }
 
@@ -207,7 +215,7 @@ public sealed partial class ExternalCatalogReader
             Schema: string.IsNullOrWhiteSpace(query.Schema) ? null : query.Schema.Trim(),
             Kind: kindFilter,
             Tag: string.IsNullOrWhiteSpace(query.Tag) ? null : query.Tag.Trim(),
-            Sensitivity: string.IsNullOrWhiteSpace(query.Sensitivity) ? null : query.Sensitivity.Trim(),
+            ProtectionClass: string.IsNullOrWhiteSpace(query.ProtectionClass) ? null : query.ProtectionClass.Trim(),
             MetadataPredicate: metadataPredicate,
             ProjectedPredicate: projectedPredicate,
             CountTotal: !cursorCount.HasValue,
@@ -239,7 +247,10 @@ public sealed partial class ExternalCatalogReader
             {
                 pageTables.Add(item.Table);
                 versions.TryGetValue(item.Table.Identifier.ToString(), out var ver);
-                dtos.Add(MapUserObject(item.Object, item.Table, ver?.Seq, CanViewHiddenColumns(item.Table, pageVisibility)));
+                var protection = _protectionProvider is null
+                    ? null
+                    : await _protectionProvider.GetAsync(tenantId, item.Table.Identifier, ct).ConfigureAwait(false);
+                dtos.Add(MapUserObject(item.Object, item.Table, ver?.Seq, CanViewHiddenColumns(item.Table, pageVisibility), protection));
             }
 
             await AttachRowScopeDescriptionsAsync(dtos, pageTables, user, tenantId, ct).ConfigureAwait(false);
@@ -285,17 +296,37 @@ public sealed partial class ExternalCatalogReader
         return new CallerVisibility(false, allHiddenAllowed, ownedHidden);
     }
 
+    private async Task<Dictionary<TableIdentifier, EffectiveProtection>> ResolveProtectionsAsync(
+        TenantId tenantId,
+        IReadOnlyList<TableMetadata> tables,
+        CancellationToken ct)
+    {
+        var result = new Dictionary<TableIdentifier, EffectiveProtection>(tables.Count);
+        if (_protectionProvider is null || tables.Count == 0)
+        {
+            return result;
+        }
+
+        foreach (var table in tables)
+        {
+            result[table.Identifier] = await _protectionProvider.GetAsync(tenantId, table.Identifier, ct).ConfigureAwait(false);
+        }
+
+        return result;
+    }
+
     private static List<TableMetadata> FilterAppCandidates(
         IReadOnlyList<TableMetadata> inScope,
         CallerVisibility visibility,
         ExternalCatalogListQuery query,
         DiscoveryObjectKind? kindFilter,
-        IReadOnlyDictionary<string, CatalogObjectVersionRow>? versions)
+        IReadOnlyDictionary<string, CatalogObjectVersionRow>? versions,
+        IReadOnlyDictionary<TableIdentifier, EffectiveProtection> protectionsByTable)
     {
         var d = string.IsNullOrWhiteSpace(query.Domain) ? null : query.Domain.Trim();
         var s = string.IsNullOrWhiteSpace(query.Schema) ? null : query.Schema.Trim();
         var tag = string.IsNullOrWhiteSpace(query.Tag) ? null : query.Tag.Trim();
-        var sens = string.IsNullOrWhiteSpace(query.Sensitivity) ? null : query.Sensitivity.Trim();
+        var classFilter = string.IsNullOrWhiteSpace(query.ProtectionClass) ? null : query.ProtectionClass.Trim();
         var minSeq = query.ChangedSince;
 
         var matched = new List<TableMetadata>(inScope.Count);
@@ -326,9 +357,13 @@ public sealed partial class ExternalCatalogReader
                 continue;
             }
 
-            if (sens is not null && !string.Equals(table.Table.Sensitivity, sens, StringComparison.OrdinalIgnoreCase))
+            if (classFilter is not null)
             {
-                continue;
+                var tableClass = (protectionsByTable.GetValueOrDefault(table.Identifier)?.TableClass ?? ProtectionClass.Confidential).ToCanonicalName();
+                if (!string.Equals(tableClass, classFilter, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
             }
 
             if (minSeq is { } seqBound)

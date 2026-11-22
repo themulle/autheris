@@ -33,9 +33,9 @@ internal static class ProductColumnClassifications
             {
                 Scope = ClassificationScopes.Global,
                 TableColumnId = id,
-                Code = ClassificationScopes.PiiCode,
+                Code = ProductColumnAccess.ToMaskCategory(column.Class) ?? ClassificationScopes.PiiCode,
                 Source = ClassificationSource,
-                AssignedBy = product.ProductOwner.Value,
+                AssignedBy = (product.OwnerGroupSid ?? product.CreatedBy).Value,
                 AssignedAt = now
             }, ct).ConfigureAwait(false);
         }

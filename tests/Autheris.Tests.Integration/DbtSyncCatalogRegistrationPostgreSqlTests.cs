@@ -112,7 +112,7 @@ public sealed class DbtSyncCatalogRegistrationPostgreSqlTests : IClassFixture<Po
             {
                 Id = current.Table.Id, SourceType = current.Table.SourceType, SourceName = current.Table.SourceName,
                 SchemaName = current.Table.SchemaName, TableName = current.Table.TableName, DisplayName = current.Table.DisplayName,
-                Description = current.Table.Description, Sensitivity = current.Table.Sensitivity, IsActive = true
+                Description = current.Table.Description, IsActive = true
             };
             await repo.UpsertTableMetadataAsync(new TableMetadata { Identifier = id, Table = activated, Columns = current.Columns });
         }

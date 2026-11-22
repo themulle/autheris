@@ -68,7 +68,7 @@ public sealed record ProductDiscoveryItem(
     string Status,
     string LoadMode,
     string? Description,
-    string ProductOwner,
+    string? OwnerGroupSid,
     DateTimeOffset? RefreshedAt,
     IReadOnlyList<ProductDiscoveryColumn> Columns);
 
@@ -130,7 +130,7 @@ public sealed class ProductDiscoveryService(
 
             items.Add(new ProductDiscoveryItem(
                 product.Schema, product.Name, product.Kind.ToString(), product.Status.ToString(), product.Load.Mode.ToString(), product.Description,
-                product.ProductOwner.Value, refreshTimes.LoadedAt(product),
+                product.OwnerGroupSid?.Value, refreshTimes.LoadedAt(product),
                 [.. product.Columns.Select(c => new ProductDiscoveryColumn(c.Name, c.DataType, c.Class.ToString(), StateOf(view, c.Name)))]));
         }
 

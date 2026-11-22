@@ -135,7 +135,7 @@ public abstract class TableObjectKindContractBase
             await MigrateAsync(cs, null);
             await using var raw = OpenRaw(cs);
             var badId = Guid.NewGuid().ToString("D");
-            var act = () => ExecAsync(raw, $"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, object_kind) VALUES ('{badId}', 'Test', 'kind_896', 'sales', 'bad', 'bad', 'NORMAL', 0, 1, 'procedure')");
+            var act = () => ExecAsync(raw, $"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, is_active, object_kind) VALUES ('{badId}', 'Test', 'kind_896', 'sales', 'bad', 'bad', 1, 'procedure')");
             var ex = await Should.ThrowAsync<DbException>(act);
             AssertObjectKindCheckConstraint(ex);
 

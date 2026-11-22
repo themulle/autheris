@@ -157,7 +157,7 @@ public sealed class ProductSyncWebhookTests
         var product = (await _h.Store.GetProductAsync(ProductHarness.Tenant, "sales", "orders_view"))!;
         product.Authority.ShouldBe(ProductCreatorAuthority.GitSync);
         product.ManagedBy.ShouldBe("Git");
-        product.ProductOwner.ShouldBe(ProductHarness.Alice);
+        product.OwnerGroupSid.ShouldBe(ProductHarness.Alice);
         product.BaseObjects.ShouldBe([ProductHarness.Orders, ProductHarness.Customers], ignoreOrder: true);
     }
 

@@ -62,11 +62,11 @@ public sealed class CatalogNoOpSecurityTests
     public void ClassificationChangeOnly_BumpsEpoch()
     {
         var before = Meta();
-        var after = before with { Table = before.Table with { Sensitivity = "HIGH" } };
-        var four = before with { Table = before.Table with { RequiresFourEyes = true } };
+        var after = before with { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("name") };
+        var nonPersonal = before with { Table = before.Table with { NonPersonal = true } };
 
         Classify(before, after).ShouldBe(CatalogWriteClassification.Restrictive);
-        Classify(before, four).ShouldBe(CatalogWriteClassification.Restrictive);
+        Classify(before, nonPersonal).ShouldBe(CatalogWriteClassification.Restrictive);
     }
 
     [Fact]
@@ -132,8 +132,6 @@ public sealed class CatalogNoOpSecurityTests
             ["Table.Description"] = baseline with { Table = baseline.Table with { Description = "Other" } },
             ["Table.LongDescription"] = baseline with { Table = baseline.Table with { LongDescription = "Other" } },
             ["Table.DocumentationSource"] = baseline with { Table = baseline.Table with { DocumentationSource = "dbt" } },
-            ["Table.Sensitivity"] = baseline with { Table = baseline.Table with { Sensitivity = "HIGH" } },
-            ["Table.RequiresFourEyes"] = baseline with { Table = baseline.Table with { RequiresFourEyes = true } },
             ["Table.IsActive"] = baseline with { Table = baseline.Table with { IsActive = false } },
             ["Table.DataSourceType"] = baseline with { Table = baseline.Table with { DataSourceType = DataSourceType.HttpDeclarative } },
             ["Table.HttpEndpoint"] = baseline with { Table = baseline.Table with { HttpEndpoint = new HttpEndpointDescriptor { Id = Guid.Empty, Name = "ep", BaseUrl = "https://api.example.test", PathTemplate = "/v1" } } },

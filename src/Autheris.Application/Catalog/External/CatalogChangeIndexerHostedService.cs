@@ -36,6 +36,7 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _interval;
     private readonly ILogger<CatalogChangeIndexerHostedService> _logger;
+    private readonly IProtectionSnapshotProvider? _protectionProvider;
     private IDisposable? _eventSubscription;
 
     public CatalogChangeIndexerHostedService(
@@ -49,7 +50,8 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
         IEventBus? eventBus = null,
         TimeProvider? timeProvider = null,
         ILogger<CatalogChangeIndexerHostedService>? logger = null,
-        TimeSpan? interval = null)
+        TimeSpan? interval = null,
+        IProtectionSnapshotProvider? protectionProvider = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -62,6 +64,7 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
         _timeProvider = timeProvider ?? TimeProvider.System;
         _interval = interval ?? DefaultInterval;
         _logger = logger ?? NullLogger<CatalogChangeIndexerHostedService>.Instance;
+        _protectionProvider = protectionProvider;
     }
 
     public override Task StartAsync(CancellationToken cancellationToken)
@@ -172,7 +175,10 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
             var artifacts = _artifactStore is null
                 ? null
                 : await _artifactStore.GetAsync(table.Table.Id, ct).ConfigureAwait(false);
-            var hash = ExternalCatalogReader.ComputeAdminRepresentationHash(table, owners, artifacts);
+            var protection = _protectionProvider is null
+                ? null
+                : await _protectionProvider.GetAsync(tenantId, table.Identifier, ct).ConfigureAwait(false);
+            var hash = ExternalCatalogReader.ComputeAdminRepresentationHash(table, owners, artifacts, protection);
 
             if (!existingVersions.TryGetValue(objectId, out var prev)
                 || prev.Removed

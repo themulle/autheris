@@ -375,7 +375,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                     c.Id,
                     displayName,
                     description,
-                    t.Table.Sensitivity,
+                    ClassificationMetadata.IsTableSensitive(t) ? "CONFIDENTIAL" : "INTERNAL",
                     VisibleColumnCount(principal, t, activeConsents, isAdmin, status),
                     graphQl?.QueryField,
                     Tags: t.CatalogTags,
@@ -388,13 +388,13 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             {
                 var def = proc.Definition;
                 int columnCount = 0;
-                string sensitivity = "NORMAL";
+                string sensitivity = "CONFIDENTIAL";
                 if (def.ResultTableIdentifier is { } resId)
                 {
                     var resMeta = await _metadataRepository.GetTableMetadataAsync(resId, ct).ConfigureAwait(false);
                     if (resMeta != null)
                     {
-                        sensitivity = resMeta.Table.Sensitivity ?? "NORMAL";
+                        sensitivity = ClassificationMetadata.IsTableSensitive(resMeta) ? "CONFIDENTIAL" : "INTERNAL";
                         var levels = ResolveColumnLevels(principal, resMeta, activeConsents, isAdmin, isGranted: true, bypass: options?.Value.IsMcpAuthBypassed == true);
                         columnCount = resMeta.Columns.Count(col => levels.TryGetValue(col.ColumnName, out var lvl) && lvl != ColumnAccessLevel.Deny);
                     }
@@ -547,8 +547,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                 id.TableName,
                 tableResolvedBrief?.Description ?? table.Table.Description,
                 LongDescription: null,
-                table.Table.Sensitivity,
-                table.Table.RequiresFourEyes,
+                ClassificationMetadata.IsTableSensitive(table) ? "CONFIDENTIAL" : "INTERNAL",
+                RequiresApproval: false,
                 briefColumns,
                 Examples: [],
                 GraphQl: null,
@@ -619,8 +619,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             id.TableName,
             tableDescription,
             tableLongDescription,
-            table.Table.Sensitivity,
-            table.Table.RequiresFourEyes,
+            ClassificationMetadata.IsTableSensitive(table) ? "CONFIDENTIAL" : "INTERNAL",
+            RequiresApproval: false,
             columns,
             examples,
             graphQl == null ? null : await GraphQlAccessAsync(principal, graphQl, columns, ct, hiddenCols).ConfigureAwait(false),
@@ -765,8 +765,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             Table: def.Name,
             Description: def.Summary,
             LongDescription: def.Description,
-            Sensitivity: resMeta.Table.Sensitivity ?? "NORMAL",
-            RequiresApproval: resMeta.Table.RequiresFourEyes,
+            Sensitivity: ClassificationMetadata.IsTableSensitive(resMeta) ? "CONFIDENTIAL" : "INTERNAL",
+            RequiresApproval: false,
             Columns: projectedColumns,
             Examples: [],
             GraphQl: null,

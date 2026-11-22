@@ -39,7 +39,6 @@ internal sealed class InMemoryConsentStore(
             Id = Guid.NewGuid(),
             SchemaName = "public",
             TableName = "orders",
-            Sensitivity = "LOW",
             Description = "Orders"
         },
         Identifier = new TableIdentifier("pg", "public", "orders"),

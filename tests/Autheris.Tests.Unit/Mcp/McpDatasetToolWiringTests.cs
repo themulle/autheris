@@ -108,7 +108,9 @@ public sealed class McpDatasetToolWiringTests
         var metadataRepo = new InMemoryTableMetadataRepository(new TableMetadata
         {
             Identifier = Orders,
-            Table = new Table { TableName = "orders", RequiresFourEyes = true }
+            Table = new Table { TableName = "orders" },
+            Columns = [new TableColumn { ColumnName = "email" }],
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("email")
         });
         var executor = new StubMcpQueryExecutor("""{"id":"sales.public.orders"}""");
 
@@ -434,7 +436,13 @@ public sealed class McpDatasetToolWiringTests
     private sealed class AnyTableMetadataRepo(bool requiresFourEyes) : ITableMetadataRepository
     {
         public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
-            => Task.FromResult<TableMetadata?>(new TableMetadata { Identifier = table, Table = new Table { RequiresFourEyes = requiresFourEyes } });
+            => Task.FromResult<TableMetadata?>(new TableMetadata
+            {
+                Identifier = table,
+                Table = new Table(),
+                Columns = requiresFourEyes ? [new TableColumn { ColumnName = "email" }] : [],
+                ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(requiresFourEyes ? new[] { "email" } : Array.Empty<string>())
+            });
 
         public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<TableMetadata>>([]);

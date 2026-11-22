@@ -40,7 +40,7 @@ public sealed class DbtGovernanceOwnerImportTests : IDisposable
 
     private void SeedTable(TableIdentifier id)
     {
-        var table = new Table { Id = Guid.NewGuid(), SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName, Description = "original", Sensitivity = "NORMAL", IsActive = true };
+        var table = new Table { Id = Guid.NewGuid(), SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName, Description = "original", IsActive = true };
         _repo.UpsertTableMetadataAsync(new TableMetadata
         {
             Identifier = id, Table = table, Columns = [new TableColumn { TableId = table.Id, ColumnName = "id", DataType = "INT" }]

@@ -62,7 +62,6 @@ public sealed class Issue805807DiscoveryKeysAndFiltersTests
                 Description = baseTable.Table.Description,
                 DataSourceType = baseTable.Table.DataSourceType,
                 IsActive = true,
-                Sensitivity = baseTable.Table.Sensitivity,
                 RequiredFilterColumns = requiredFilterColumns ?? ["device"],
                 RequiredFilterColumnGroups = requiredFilterColumnGroups ?? [["ts"], ["reading", "site"]]
             },

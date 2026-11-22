@@ -70,7 +70,6 @@ public sealed class McpSqlNameTests
             SchemaName = id.Schema,
             DisplayName = id.TableName,
             Description = "Mixed case view",
-            Sensitivity = "NORMAL",
             IsActive = true,
             DiscoveryHidden = discoveryHidden
         },

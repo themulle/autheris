@@ -207,7 +207,9 @@ public sealed class StepSqlLintTests
                 (34, "virtual_filter_key_set_max_keys"),
                 (35, "drop_consent_row_filter_key_set_columns"),
                 (36, "governance_domains_and_protection"),
-                (37, "drop_recertification")
+                (37, "drop_recertification"),
+                (38, "drop_table_sensitivity"),
+                (39, "data_product_container")
             ]);
         }
     }

@@ -68,7 +68,6 @@ public sealed class Issue799BriefAndCompactTests(ITestOutputHelper output)
                 Description = "One row per company with validity date, name, financial year and many accounting settings. Loaded nightly.",
                 DataSourceType = DataSourceType.Sql,
                 IsActive = true,
-                Sensitivity = "CONFIDENTIAL",
                 RequiredFilterColumns = ["t_col002"]
             },
             Columns = columns,
@@ -184,8 +183,7 @@ public sealed class Issue799BriefAndCompactTests(ITestOutputHelper output)
                     Description = $"One row per time type {i}, settlement domain and overtime type with the derived new time type. "
                         + "Controls how overtime is assigned in service settlement. Only in company 184 and only live in the ERP.",
                     DataSourceType = DataSourceType.Sql,
-                    IsActive = true,
-                    Sensitivity = "INTERNAL"
+                    IsActive = true
                 }
             };
         }).ToList();

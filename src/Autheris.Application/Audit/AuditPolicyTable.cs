@@ -91,7 +91,6 @@ public static class AuditPolicyTable
         [AuditEventTypes.ProductCreated] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ProductDefinitionChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ProductRetired] = AuditFailurePolicy.FailClosed,
-        [AuditEventTypes.ProductOwnerTransferred] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ProductSettingsChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ProductColumnClassificationChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ProductAccessDenied] = AuditFailurePolicy.BestEffort,
@@ -104,8 +103,6 @@ public static class AuditPolicyTable
         [AuditEventTypes.ProductSyncRejected] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ProductSyncWebhookReceived] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ProductSyncWebhookRejected] = AuditFailurePolicy.BestEffort,
-        [AuditEventTypes.DataSourceOwnerAssigned] = AuditFailurePolicy.FailClosed,
-        [AuditEventTypes.DataSourceOwnerRemoved] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.DatasourceTested] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.DatasourceTestRequested] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.DatasourceRegistered] = AuditFailurePolicy.FailClosed,
@@ -169,6 +166,12 @@ public static class AuditPolicyTable
         [AuditEventTypes.UsageTariffVersionAdded] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.UsageReportRead] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.UsageDataErased] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.PolicyChanged] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.GovernanceDomainChanged] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.OwnerGroupAssigned] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ProtectionClassChanged] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.MaskCategoryChanged] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ViewDowngraded] = AuditFailurePolicy.FailClosed,
     };
 
     public static IReadOnlyDictionary<string, AuditFailurePolicy> All => Table;

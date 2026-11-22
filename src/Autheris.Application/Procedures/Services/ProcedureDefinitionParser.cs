@@ -320,7 +320,7 @@ public static partial class ProcedureDefinitionParser
             RowScopeKeyTable = scopeTableColumns,
             ErrorCodes = ParseErrorCodes(model.ErrorCodes),
             ProductSchema = string.IsNullOrWhiteSpace(model.Schema) ? null : RequireIdentifier(model.Schema.Trim(), "schema"),
-            ProductOwner = string.IsNullOrWhiteSpace(model.ProductOwner) ? null : model.ProductOwner.Trim(),
+            ProductOwner = string.IsNullOrWhiteSpace(model.OwnerGroupSid ?? model.ProductOwner) ? null : (model.OwnerGroupSid ?? model.ProductOwner)!.Trim(),
             ClearedReason = string.IsNullOrWhiteSpace(model.ClearedReason) ? null : Sanitize(model.ClearedReason)
         };
     }
@@ -636,6 +636,9 @@ public sealed class ProcedureYamlModel
 
     /// <summary>Product schema when the procedure is exposed as a data product.</summary>
     public string? Schema { get; set; }
+
+    /// <summary>The container owner group SID (or legacy product owner SID) governing grants on the product.</summary>
+    public string? OwnerGroupSid { get; set; }
 
     /// <summary>The product owner (a SID) that decides the grants on the product.</summary>
     public string? ProductOwner { get; set; }

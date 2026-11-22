@@ -49,8 +49,6 @@ public static class CatalogGovernanceRatchet
             LongDescription = inTable.LongDescription ?? exTable.LongDescription,
             Texts = inTable.Texts is { IsEmpty: false } ? inTable.Texts : exTable.Texts,
             DocumentationSource = inTable.DocumentationSource ?? exTable.DocumentationSource,
-            Sensitivity = StricterSensitivity(exTable.Sensitivity, inTable.Sensitivity),
-            RequiresFourEyes = exTable.RequiresFourEyes || inTable.RequiresFourEyes,
             IsActive = exTable.IsActive && inTable.IsActive,
             DataSourceType = exTable.DataSourceType != DataSourceType.Sql ? exTable.DataSourceType : inTable.DataSourceType,
             EnforcementMode = exTable.EnforcementMode != Autheris.Domain.Options.EnforcementMode.AutherisEnforced ? exTable.EnforcementMode : inTable.EnforcementMode,
@@ -361,16 +359,6 @@ public static class CatalogGovernanceRatchet
             ? incoming
             : existing ?? string.Empty;
     }
-
-    public static string StricterSensitivity(string? existing, string? incoming)
-    {
-        if (string.IsNullOrWhiteSpace(existing)) return string.IsNullOrWhiteSpace(incoming) ? "NORMAL" : incoming;
-        if (string.IsNullOrWhiteSpace(incoming)) return existing;
-        return SensitivityRank(incoming) > SensitivityRank(existing) ? incoming : existing;
-    }
-
-    // D-4: one ranking for the ratchet and Table.IsSensitivityHigh (unknown classifications rank like HIGH).
-    private static int SensitivityRank(string sensitivity) => Table.SensitivityRank(sensitivity);
 
     public static int MaskingRuleStrength(MaskingRule rule) => (rule.RuleType ?? string.Empty).Trim().ToUpperInvariant() switch
     {

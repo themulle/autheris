@@ -184,7 +184,8 @@ internal static partial class ProductSyncFileParser
             throw new ProductSyncRejectedException(ProductSyncReasons.YamlInvalid, index);
         }
 
-        if (model is null || string.IsNullOrWhiteSpace(model.Definition) || string.IsNullOrWhiteSpace(model.ProductOwner))
+        var ownerRaw = string.IsNullOrWhiteSpace(model.OwnerGroupSid) ? model.ProductOwner : model.OwnerGroupSid;
+        if (model is null || string.IsNullOrWhiteSpace(model.Definition) || string.IsNullOrWhiteSpace(ownerRaw))
         {
             throw new ProductSyncRejectedException(ProductSyncReasons.FieldInvalid, index);
         }
@@ -199,7 +200,7 @@ internal static partial class ProductSyncFileParser
 
         var columns = ParseColumns(model.Columns, index);
         return new ProductSyncEntry(
-            index, schema, name, kind, model.Definition.Trim(), new Sid(model.ProductOwner.Trim()), ParseLoad(model.Load, index), ParseLimits(model.Limits), model.Description, columns);
+            index, schema, name, kind, model.Definition.Trim(), new Sid(ownerRaw.Trim()), ParseLoad(model.Load, index), ParseLimits(model.Limits), model.Description, columns);
     }
 
     private static IReadOnlyList<ProductSyncClassification> ParseColumns(List<ColumnYamlModel>? columns, int index)
@@ -261,6 +262,7 @@ internal sealed class ProductYamlModel
     public string? Name { get; set; }
     public string? Kind { get; set; }
     public string? Definition { get; set; }
+    public string? OwnerGroupSid { get; set; }
     public string? ProductOwner { get; set; }
     public string? Description { get; set; }
     public LoadYamlModel? Load { get; set; }

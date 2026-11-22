@@ -33,7 +33,6 @@ public static class VirtualSystemTables
             TableName = "datasources",
             DisplayName = "Data Sources",
             Description = "Configured and active data sources in the Autheris gateway.",
-            Sensitivity = "INTERNAL",
             DataSourceType = DataSourceType.Sql,
             IsActive = true
         },
@@ -62,7 +61,6 @@ public static class VirtualSystemTables
             TableName = "policies",
             DisplayName = "Governance Policies",
             Description = "Column-level masking and sensitivity classification policies.",
-            Sensitivity = "INTERNAL",
             DataSourceType = DataSourceType.Sql,
             IsActive = true
         },
@@ -88,7 +86,6 @@ public static class VirtualSystemTables
             TableName = "virtual_filters",
             DisplayName = "Virtual Row Filters",
             Description = "Active mandatory row-level security filters applied at query time.",
-            Sensitivity = "INTERNAL",
             DataSourceType = DataSourceType.Sql,
             IsActive = true
         },
@@ -113,7 +110,6 @@ public static class VirtualSystemTables
             TableName = "audit_trail",
             DisplayName = "Audit Trail",
             Description = "WORM-signed security and access audit logs.",
-            Sensitivity = "CONFIDENTIAL",
             DataSourceType = DataSourceType.Sql,
             IsActive = true
         },

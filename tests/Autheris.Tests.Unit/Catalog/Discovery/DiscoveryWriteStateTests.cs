@@ -311,7 +311,6 @@ public sealed class DiscoveryWriteStateTests
                 TableName = name,
                 DisplayName = name,
                 IsActive = true,
-                Sensitivity = "NORMAL",
                 ObjectKind = DiscoveryObjectKind.Table
             },
             Columns =

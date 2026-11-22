@@ -14,10 +14,12 @@ internal sealed class InMemoryDataProductRepository : IDataProductRepository, IO
 {
     private readonly Dictionary<(string Tenant, string Schema, string Name), DataProduct> _products = [];
     private readonly Dictionary<(string Tenant, Guid Product), List<DataProductVersion>> _versions = [];
-    private readonly HashSet<(string Tenant, string Source, string Owner)> _owners = [];
 
     public Task<DataProduct?> GetProductAsync(TenantId tenant, string schema, string name, CancellationToken ct = default) =>
         Task.FromResult(_products.GetValueOrDefault((tenant.Value, schema, name)));
+
+    public Task<DataProduct?> GetProductByIdAsync(TenantId tenant, Guid productId, CancellationToken ct = default) =>
+        Task.FromResult(_products.Values.FirstOrDefault(p => p.Tenant == tenant && p.Id == productId));
 
     public Task<IReadOnlyList<DataProduct>> ListProductsAsync(TenantId tenant, string? afterKey, int limit, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<DataProduct>>(_products.Values.Where(p => p.Tenant == tenant)
@@ -77,19 +79,6 @@ internal sealed class InMemoryDataProductRepository : IDataProductRepository, IO
 
     public Task<IReadOnlyList<DataProductVersion>> GetProductVersionsAsync(TenantId tenant, Guid productId, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<DataProductVersion>>(_versions.GetValueOrDefault((tenant.Value, productId)) ?? []);
-
-    public Task<bool> IsDataSourceOwnerAsync(TenantId tenant, string dataSource, Sid ownerSid, CancellationToken ct = default) =>
-        Task.FromResult(_owners.Contains((tenant.Value, dataSource.ToLowerInvariant(), ownerSid.Value.ToLowerInvariant())));
-
-    public Task<IReadOnlyList<DataSourceOwner>> GetDataSourceOwnersAsync(TenantId tenant, string dataSource, CancellationToken ct = default) =>
-        Task.FromResult<IReadOnlyList<DataSourceOwner>>(_owners.Where(o => o.Tenant == tenant.Value && string.Equals(o.Source, dataSource, StringComparison.OrdinalIgnoreCase))
-            .Select(o => new DataSourceOwner(tenant, o.Source, new Sid(o.Owner), new Sid("admin"), DateTimeOffset.UnixEpoch)).ToList());
-
-    public Task<bool> AddDataSourceOwnerAsync(DataSourceOwner owner, CancellationToken ct = default) =>
-        Task.FromResult(_owners.Add((owner.Tenant.Value, owner.DataSource.ToLowerInvariant(), owner.OwnerSid.Value.ToLowerInvariant())));
-
-    public Task<bool> RemoveDataSourceOwnerAsync(TenantId tenant, string dataSource, Sid ownerSid, CancellationToken ct = default) =>
-        Task.FromResult(_owners.Remove((tenant.Value, dataSource.ToLowerInvariant(), ownerSid.Value.ToLowerInvariant())));
 }
 
 internal sealed class RecordingAuditWriter : IAuditWriter

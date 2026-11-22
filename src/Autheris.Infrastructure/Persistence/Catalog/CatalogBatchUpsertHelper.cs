@@ -798,15 +798,15 @@ internal static class CatalogBatchUpsertHelper
         }
     }
 
-    private const string InsertTableIfAbsentSqlPg = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id, object_kind, metric_view_count_measure)
-VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson, @minGroupSize, @nonPersonal, @dbtUniqueId, @objectKind, @metricViewCountMeasure)
+    private const string InsertTableIfAbsentSqlPg = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id, object_kind, metric_view_count_measure)
+VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson, @minGroupSize, @nonPersonal, @dbtUniqueId, @objectKind, @metricViewCountMeasure)
 ON CONFLICT DO NOTHING";
 
     private const string InsertTableIfAbsentSqlSs = @"MERGE dbo.TABLES WITH (HOLDLOCK) AS t
 USING (SELECT @domain AS source_name, @schema AS schema_name, @tableName AS table_name) AS s
 ON LOWER(t.source_name) = LOWER(s.source_name) AND LOWER(t.schema_name) = LOWER(s.schema_name) AND LOWER(t.table_name) = LOWER(s.table_name)
-WHEN NOT MATCHED THEN INSERT (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id, object_kind, metric_view_count_measure)
-    VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @sensitivity, @fourEyes, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson, @minGroupSize, @nonPersonal, @dbtUniqueId, @objectKind, @metricViewCountMeasure);";
+WHEN NOT MATCHED THEN INSERT (id, source_type, source_name, schema_name, table_name, display_name, is_active, data_source_type, http_endpoint_json, plugin_name, description, long_description, doc_source, required_filter_columns_json, texts_json, min_group_size, non_personal, dbt_unique_id, object_kind, metric_view_count_measure)
+    VALUES (@id, @sourceType, @domain, @schema, @tableName, @displayName, @active, @dst, @httpJson, @plugin, @desc, @longDesc, @docSource, @requiredFilterColumnsJson, @textsJson, @minGroupSize, @nonPersonal, @dbtUniqueId, @objectKind, @metricViewCountMeasure);";
 
     private static async Task<int> ExecuteTableWriteRowAsync(
         DbConnection conn,
@@ -830,8 +830,6 @@ WHEN NOT MATCHED THEN INSERT (id, source_type, source_name, schema_name, table_n
         upsertCmd.AddBound("@schema", metadata.Identifier.Schema);
         upsertCmd.AddBound("@tableName", metadata.Identifier.TableName);
         upsertCmd.AddBound("@displayName", metadata.Table.DisplayName);
-        upsertCmd.AddBound("@sensitivity", metadata.Table.Sensitivity);
-        upsertCmd.AddBound("@fourEyes", metadata.Table.RequiresFourEyes ? 1 : 0);
         upsertCmd.AddBound("@active", metadata.Table.IsActive ? 1 : 0);
         upsertCmd.AddBound("@dst", (int)metadata.Table.DataSourceType);
         upsertCmd.AddBound("@httpJson", (object?)httpEndpointJson ?? DBNull.Value);

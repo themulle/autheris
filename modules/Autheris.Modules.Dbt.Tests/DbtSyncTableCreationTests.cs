@@ -241,9 +241,9 @@ public sealed class DbtSyncTableCreationTests
         h.Store[id.ToString()] = new TableMetadata
         {
             Identifier = id,
-            Table = new Table { Id = Guid.NewGuid(), SourceName = "warehouse", SchemaName = "public", TableName = "orders", Sensitivity = "HIGH", IsActive = true },
+            Table = new Table { Id = Guid.NewGuid(), SourceName = "warehouse", SchemaName = "public", TableName = "orders", IsActive = true },
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
-        };
+        }.WithPii("id");
 
         var result = await Sync(h.Service, Manifest(Model()));
 
@@ -251,7 +251,7 @@ public sealed class DbtSyncTableCreationTests
         result.SkippedItems.ShouldBeEmpty();
         var stored = h.Store[id.ToString()];
         stored.Table.IsActive.ShouldBeTrue();
-        stored.Table.Sensitivity.ShouldBe("HIGH");
+        ClassificationMetadata.IsTableSensitive(stored).ShouldBeTrue();
         stored.Columns.Single().DataType.ShouldBe("int");
     }
 
@@ -270,11 +270,10 @@ public sealed class DbtSyncTableCreationTests
                 SourceName = "warehouse",
                 SchemaName = "public",
                 TableName = "orders",
-                Sensitivity = "HIGH",
                 IsActive = true
             },
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
-        };
+        }.WithPii("id");
 
         // Initial GetTableMetadataAsync returns null (not yet present), then InsertTableMetadataIfAbsentAsync
         // sees a concurrent writer won the race and returns Unchanged with the existing entry.
@@ -294,10 +293,10 @@ public sealed class DbtSyncTableCreationTests
         result.SkippedItems.ShouldBeEmpty();
         await h.Repo.Received(1).InsertTableMetadataIfAbsentAsync(Arg.Any<TableMetadata>(), Arg.Any<CancellationToken>());
         await h.Repo.DidNotReceive().UpsertTableMetadataAsync(
-            Arg.Is<TableMetadata>(m => !m.Table.IsActive || m.Table.Sensitivity != "HIGH"),
+            Arg.Is<TableMetadata>(m => !m.Table.IsActive || !ClassificationMetadata.IsTableSensitive(m)),
             Arg.Any<CancellationToken>());
         h.Store[id.ToString()].Table.IsActive.ShouldBeTrue();
-        h.Store[id.ToString()].Table.Sensitivity.ShouldBe("HIGH");
+        ClassificationMetadata.IsTableSensitive(h.Store[id.ToString()]).ShouldBeTrue();
     }
 
     [Fact]
@@ -306,14 +305,14 @@ public sealed class DbtSyncTableCreationTests
         var h = new Harness(Options());
         await Sync(h.Service, Manifest(Model()));
         var table = h.Store["warehouse.public.orders"].Table;
-        var activated = new Table { Id = table.Id, SourceType = table.SourceType, SourceName = table.SourceName, SchemaName = "public", TableName = "orders", Sensitivity = "HIGH", IsActive = true };
-        h.Store["warehouse.public.orders"] = new TableMetadata { Identifier = h.Store["warehouse.public.orders"].Identifier, Table = activated, Columns = h.Store["warehouse.public.orders"].Columns };
+        var activated = new Table { Id = table.Id, SourceType = table.SourceType, SourceName = table.SourceName, SchemaName = "public", TableName = "orders", IsActive = true };
+        h.Store["warehouse.public.orders"] = new TableMetadata { Identifier = h.Store["warehouse.public.orders"].Identifier, Table = activated, Columns = h.Store["warehouse.public.orders"].Columns }.WithPii("id");
 
         var second = await Sync(h.Service, Manifest(Model()));
 
         second.CreatedTables.ShouldBeEmpty();
         h.Store["warehouse.public.orders"].Table.IsActive.ShouldBeTrue();
-        h.Store["warehouse.public.orders"].Table.Sensitivity.ShouldBe("HIGH");
+        ClassificationMetadata.IsTableSensitive(h.Store["warehouse.public.orders"]).ShouldBeTrue();
     }
 
     // SEC-282-2
@@ -326,8 +325,7 @@ public sealed class DbtSyncTableCreationTests
 
         var created = h.Store["warehouse.public.orders"];
         created.Table.IsActive.ShouldBeFalse();
-        created.Table.Sensitivity.ShouldBe("NORMAL");
-        created.Table.RequiresFourEyes.ShouldBeFalse();
+        ClassificationMetadata.IsTableSensitive(created).ShouldBeFalse();
         created.ColumnMaskingRules.ShouldBeEmpty();
         created.Table.RlsExpression.ShouldBeNull();
     }
@@ -526,9 +524,9 @@ public sealed class DbtSyncTableCreationTests
         var existing = new TableMetadata
         {
             Identifier = id,
-            Table = new Table { Id = Guid.NewGuid(), SourceName = "warehouse", SchemaName = "public", TableName = "orders", Sensitivity = "HIGH", IsActive = true },
+            Table = new Table { Id = Guid.NewGuid(), SourceName = "warehouse", SchemaName = "public", TableName = "orders", IsActive = true },
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
-        };
+        }.WithPii("id");
         var repo = Substitute.For<ITableMetadataRepository>();
         // First read: missing. Every later read: the row another writer created meanwhile.
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
@@ -541,7 +539,7 @@ public sealed class DbtSyncTableCreationTests
 
         result.CreatedTables.ShouldBeEmpty();
         await repo.DidNotReceive().UpsertTableMetadataAsync(
-            Arg.Is<TableMetadata>(m => m.Table.IsActive == false || m.Table.Sensitivity == "NORMAL"), Arg.Any<CancellationToken>());
+            Arg.Is<TableMetadata>(m => m.Table.IsActive == false || !ClassificationMetadata.IsTableSensitive(m)), Arg.Any<CancellationToken>());
     }
 
     // SEC-282-6

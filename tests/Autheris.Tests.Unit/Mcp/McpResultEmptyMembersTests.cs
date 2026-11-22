@@ -86,8 +86,7 @@ public sealed class McpResultEmptyMembersTests
         {
             TableName = Orders.TableName,
             SchemaName = Orders.Schema,
-            Description = "Customer orders with amount, currency and sales channel, one row per order.",
-            Sensitivity = "INTERNAL"
+            Description = "Customer orders with amount, currency and sales channel, one row per order."
         },
         PrimaryKeyColumns = ["id"],
         Columns = ColumnNames

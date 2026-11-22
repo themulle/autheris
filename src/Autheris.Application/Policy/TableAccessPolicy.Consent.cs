@@ -125,7 +125,11 @@ public sealed partial class TableAccessPolicy
 
             if (catalogVersionStable)
             {
-                var ttl = ConsentResolutionService.ComputeDecisionCacheTtl(query.Metadata.Table.IsHighlySensitive, activeConsents, _timeProvider.GetUtcNow());
+                var isHigh = ClassificationMetadata.IsTableSensitive(query.Metadata) ||
+                             (query.Protection is not null
+                                 ? query.Protection.TableClass > Autheris.Domain.Security.ProtectionClass.Internal
+                                 : _protectionProvider is null);
+                var ttl = ConsentResolutionService.ComputeDecisionCacheTtl(isHigh, activeConsents, _timeProvider.GetUtcNow());
                 await _cacheService!.SetCachedDecisionAsync(query.Tenant, query.UserSid, table, decision, ttl, contextHash!, epochAtLoad, ct).ConfigureAwait(false);
             }
         }

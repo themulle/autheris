@@ -26,7 +26,7 @@
           { "name": "schema", "in": "query", "schema": { "type": "string" } },
           { "name": "owner", "in": "query", "schema": { "type": "string" } },
           { "name": "tag", "in": "query", "schema": { "type": "string" } },
-          { "name": "sensitivity", "in": "query", "schema": { "type": "string" } },
+          { "name": "protectionClass", "in": "query", "schema": { "type": "string", "enum": ["PUBLIC", "INTERNAL", "CONFIDENTIAL", "SECRET"] } },
           { "name": "pii", "in": "query", "schema": { "type": "boolean" } },
           { "name": "changedSince", "in": "query", "schema": { "type": "integer", "format": "int64" } },
           { "name": "cursor", "in": "query", "description": "Opaque HMAC-authenticated keyset cursor returned as nextCursor on the previous page (at most 512 characters). Bound to all active query filters, tenant and caller scope; passing a malformed, stale-version or mismatched cursor returns 400 INVALID_CURSOR.", "schema": { "type": "string", "maxLength": 512 } },
@@ -447,14 +447,14 @@
       },
       "ExternalCatalogColumnDto": {
         "type": "object",
-        "required": ["name", "dataType", "tags", "sensitivity", "pii", "defaultMaskingState", "columnSecurity", "hidden", "writeProtected", "clearInSomeRows"],
+        "required": ["name", "dataType", "tags", "protectionClass", "pii", "defaultMaskingState", "columnSecurity", "hidden", "writeProtected", "clearInSomeRows"],
         "properties": {
           "name": { "type": "string" },
           "displayName": { "type": "string", "nullable": true },
           "dataType": { "type": "string" },
           "description": { "type": "string", "nullable": true },
           "tags": { "type": "array", "items": { "type": "string" } },
-          "sensitivity": { "type": "string" },
+          "protectionClass": { "type": "string" },
           "pii": { "type": "boolean" },
           "defaultMaskingState": { "type": "string", "enum": ["clear", "masked", "pseudonymised"] },
           "columnSecurity": { "type": "boolean" },
@@ -470,7 +470,7 @@
       },
       "ExternalCatalogObjectDto": {
         "type": "object",
-        "required": ["objectId", "kind", "domain", "schema", "name", "tags", "sensitivity", "owners", "linkedDocuments", "write", "statisticsAvailable", "samplesAvailable", "hidden", "columns"],
+        "required": ["objectId", "kind", "domain", "schema", "name", "tags", "protectionClass", "owners", "linkedDocuments", "write", "statisticsAvailable", "samplesAvailable", "hidden", "columns"],
         "properties": {
           "objectId": { "type": "string" },
           "kind": { "type": "string", "enum": ["table", "view", "procedure", "metric_view"] },
@@ -480,7 +480,7 @@
           "displayName": { "type": "string", "nullable": true },
           "description": { "type": "string", "nullable": true },
           "tags": { "type": "array", "items": { "type": "string" } },
-          "sensitivity": { "type": "string" },
+          "protectionClass": { "type": "string" },
           "owners": { "type": "array", "items": { "$ref": "#/components/schemas/ExternalCatalogOwnerDto" } },
           "linkedDocuments": { "type": "array", "items": { "type": "string" } },
           "write": { "type": "object" },

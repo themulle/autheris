@@ -32,10 +32,17 @@ public static partial class GatewayGovernanceServiceExtensions
             sp.GetService<IProductRefreshTimes>() ?? NoProductRefreshTimes.Instance,
             sp.GetService<TimeProvider>(),
             sp.GetService<ProductUsageTracker>()));
+        services.AddSingleton(sp => new ViewDowngradeGuard(
+            sp.GetRequiredService<IGovernanceCapabilities>(),
+            sp.GetRequiredService<IAuditWriter>(),
+            sp.GetService<TimeProvider>()));
         services.AddSingleton(sp => new ProductAuthorityService(
             sp.GetRequiredService<IDataOwnershipRepository>(),
             sp.GetRequiredService<IDataProductRepository>(),
-            sp.GetService<TimeProvider>()));
+            sp.GetService<TimeProvider>(),
+            sp.GetService<IGovernanceCapabilities>(),
+            sp.GetService<IGovernanceDomainRepository>(),
+            sp.GetService<ITableMetadataRepository>()));
         services.AddSingleton(sp => new DataProductService(
             sp.GetRequiredService<IDataProductRepository>(),
             sp.GetRequiredService<ProductAuthorityService>(),
@@ -47,7 +54,10 @@ public static partial class GatewayGovernanceServiceExtensions
             sp.GetService<TimeProvider>(),
             sp.GetService<ILogger<DataProductService>>(),
             sp.GetService<IProductCatalogOwnerStore>() is { } ownerStore ? new ProductOwnershipSync(ownerStore) : null,
-            sp.GetService<IProductCatalogStore>()));
+            sp.GetService<IProductCatalogStore>(),
+            sp.GetService<ViewDowngradeGuard>(),
+            sp.GetService<Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider>(),
+            sp.GetService<Autheris.Application.Governance.Caching.IGovernanceCacheInvalidator>()));
         services.AddSingleton(sp => new ProductSyncService(
             sp.GetRequiredService<DataProductService>(),
             sp.GetRequiredService<IDataProductRepository>(),
@@ -57,10 +67,6 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton(sp => new ProductSyncWebhookService(
             sp.GetService<IKeyVaultSecretProvider>(),
             sp.GetService<IDistributedClusterStateProvider>(),
-            sp.GetRequiredService<IAuditWriter>(),
-            sp.GetService<TimeProvider>()));
-        services.AddSingleton(sp => new DataSourceOwnerService(
-            sp.GetRequiredService<IDataProductRepository>(),
             sp.GetRequiredService<IAuditWriter>(),
             sp.GetService<TimeProvider>()));
     }

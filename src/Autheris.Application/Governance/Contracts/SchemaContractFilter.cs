@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Text;
 using System.Text.RegularExpressions;
+using Autheris.Domain.Security;
 
 /// <summary>
 /// F-GOV-08: High-performance GraphQL Schema Slicing &amp; Contract Filter.
@@ -77,13 +78,14 @@ public static class SchemaContractFilter
                         continue;
                     }
 
-                    if (typeTags.Any(t => contract.ExcludedTags.Contains(t)))
+                    var typeClasses = ExtractClasses(typeTags);
+                    if (typeClasses.Any(contract.ExcludedClasses.Contains))
                     {
                         continue;
                     }
 
-                    if (contract.IncludedTags.Count > 0 && typeTags.Count > 0 &&
-                        !typeTags.Any(t => contract.IncludedTags.Contains(t)))
+                    if (contract.IncludedClasses.Count > 0 && typeClasses.Count > 0 &&
+                        !typeClasses.Any(contract.IncludedClasses.Contains))
                     {
                         continue;
                     }
@@ -145,21 +147,36 @@ public static class SchemaContractFilter
         }
 
         var tags = ExtractTags(fieldLine);
-        if (tags.Any(t => contract.ExcludedTags.Contains(t)))
+        var classes = ExtractClasses(tags);
+        if (classes.Any(contract.ExcludedClasses.Contains))
         {
             return false;
         }
 
-        if (contract.IncludedTags.Count > 0)
+        if (contract.IncludedClasses.Count > 0)
         {
-            // If contract specifies included tags, only fields tagged with one of them are allowed
-            if (tags.Count > 0 && !tags.Any(t => contract.IncludedTags.Contains(t)))
+            // When classes are specified on the contract, any classified field not matching them is excluded.
+            if (classes.Count > 0 && !classes.Any(contract.IncludedClasses.Contains))
             {
                 return false;
             }
         }
 
         return true;
+    }
+
+    private static List<ProtectionClass> ExtractClasses(List<string> tags)
+    {
+        var result = new List<ProtectionClass>(tags.Count);
+        foreach (var tag in tags)
+        {
+            if (ProtectionClassExtensions.TryParse(tag, out var cls))
+            {
+                result.Add(cls);
+            }
+        }
+
+        return result;
     }
 
     private static List<string> ExtractTags(string text)

@@ -827,7 +827,7 @@ public sealed partial class ProfileAssignmentRequestService(
     {
         var items = itemFilter is null ? snapshot.Items : snapshot.Items.Where(i => itemFilter.Contains(i.ItemNo));
         var matched = items.SelectMany(i => ProfileGrantMaterializer.MatchTablesForItem(i, tenantTables)).ToList();
-        if (matched.Any(t => t.Table.IsHighlySensitive || t.Table.RequiresFourEyes) ||
+        if (matched.Any(ClassificationMetadata.IsTableSensitive) ||
             (snapshot.MaskingMode == MaskingPolicyMode.Unmasked && req.RequestedGranteeType is GranteeType.User or GranteeType.ServicePrincipal))
         {
             return true;

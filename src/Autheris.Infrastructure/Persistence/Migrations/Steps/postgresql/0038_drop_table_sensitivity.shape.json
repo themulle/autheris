@@ -1,0 +1,6 @@
+{
+  "ops": [
+    { "op": "dropColumn", "table": "tables", "name": "sensitivity" },
+    { "op": "dropColumn", "table": "tables", "name": "requires_four_eyes" }
+  ]
+}

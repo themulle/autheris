@@ -34,8 +34,8 @@ public sealed class Issue390OutputDirectionTests
     { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("secret_key"),
         Identifier = Readings,
         Table = forCatalog
-            ? new Table { TableName = "readings", SchemaName = "public", Sensitivity = "INTERNAL", DataSourceType = DataSourceType.HttpDeclarative, IsActive = true }
-            : new Table { TableName = "readings", SchemaName = "public", Sensitivity = "INTERNAL" },
+            ? new Table { TableName = "readings", SchemaName = "public", DataSourceType = DataSourceType.HttpDeclarative, IsActive = true }
+            : new Table { TableName = "readings", SchemaName = "public" },
         PrimaryKeyColumns = pk,
         PrimaryKeyDirections = directions,
         Indexes = indexes ?? [],

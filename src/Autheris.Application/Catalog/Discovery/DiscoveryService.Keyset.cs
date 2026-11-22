@@ -10,6 +10,7 @@ using Autheris.Application.Catalog.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 
 public sealed partial class DiscoveryService
 {
@@ -45,7 +46,7 @@ public sealed partial class DiscoveryService
                 query.Schema,
                 query.Kind,
                 query.Tag,
-                query.Sensitivity,
+                query.ProtectionClass,
                 searchText,
                 query.Mode,
                 query.Language,
@@ -167,7 +168,7 @@ public sealed partial class DiscoveryService
         string? schema,
         DiscoveryObjectKind? kind,
         string? tag,
-        string? sensitivity,
+        string? protectionClass,
         string? search,
         string? mode,
         string? language,
@@ -180,7 +181,7 @@ public sealed partial class DiscoveryService
         var trimmedSchema = string.IsNullOrWhiteSpace(schema) ? null : schema.Trim();
         var scoped = await LoadScopedCatalogAsync(caller, sid, scopeKey, trimmedDomain, trimmedSchema, ct).ConfigureAwait(false);
         var trimmedTag = string.IsNullOrWhiteSpace(tag) ? null : tag.Trim();
-        var trimmedSensitivity = string.IsNullOrWhiteSpace(sensitivity) ? null : sensitivity.Trim();
+        var trimmedClass = string.IsNullOrWhiteSpace(protectionClass) ? null : protectionClass.Trim();
         var trimmedSearch = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
 
         var matched = new List<TableMetadata>(scoped.VisibleTables.Count);
@@ -206,9 +207,16 @@ public sealed partial class DiscoveryService
                 continue;
             }
 
-            if (trimmedSensitivity is not null && !string.Equals(table.Table.Sensitivity, trimmedSensitivity, StringComparison.OrdinalIgnoreCase))
+            if (trimmedClass is not null)
             {
-                continue;
+                var resolved = _protectionProvider is null
+                    ? null
+                    : await _protectionProvider.GetAsync(caller.Tenant, table.Identifier, ct).ConfigureAwait(false);
+                var tableClass = (resolved?.TableClass ?? Autheris.Domain.Security.ProtectionClass.Confidential).ToCanonicalName();
+                if (!string.Equals(tableClass, trimmedClass, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
             }
 
             if (metadataPredicate is not null && !metadataPredicate(table))
@@ -395,7 +403,7 @@ public sealed partial class DiscoveryService
         if (!string.IsNullOrWhiteSpace(query.Schema)) names.Add("schema");
         if (query.Kind.HasValue) names.Add("kind");
         if (!string.IsNullOrWhiteSpace(query.Tag)) names.Add("tag");
-        if (!string.IsNullOrWhiteSpace(query.Sensitivity)) names.Add("sensitivity");
+        if (!string.IsNullOrWhiteSpace(query.ProtectionClass)) names.Add("protectionClass");
         if (query.Access.HasValue) names.Add("accessStatus");
         if (searchText is not null) names.Add("q");
         if (!string.IsNullOrEmpty(query.AfterKey)) names.Add("cursor");

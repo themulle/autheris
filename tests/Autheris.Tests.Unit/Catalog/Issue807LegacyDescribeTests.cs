@@ -34,7 +34,7 @@ public sealed class Issue807LegacyDescribeTests
     internal static TableMetadata Table(ImmutableArray<string> required, ImmutableArray<ImmutableArray<string>> groups) => new()
     {
         Identifier = Readings,
-        Table = new Table { TableName = "readings", SchemaName = "public", Sensitivity = "INTERNAL", RequiredFilterColumns = required, RequiredFilterColumnGroups = groups },
+        Table = new Table { TableName = "readings", SchemaName = "public", RequiredFilterColumns = required, RequiredFilterColumnGroups = groups },
         ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("secret_key"),
         PrimaryKeyColumns = ["device_id", "ts"],
         PrimaryKeyDirections = [KeyColumnDirection.Ascending, KeyColumnDirection.Descending],

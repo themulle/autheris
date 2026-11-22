@@ -60,7 +60,7 @@ public sealed class AccessPlanApplyGrantTests
         var meta = new TableMetadata
         { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(sensitive ? new[] { "amount" } : Array.Empty<string>()),
             Identifier = new TableIdentifier("sales", "public", "orders"),
-            Table = new Table { Id = id, SchemaName = "public", TableName = "orders", Sensitivity = "INTERNAL", IsActive = true },
+            Table = new Table { Id = id, SchemaName = "public", TableName = "orders", IsActive = true },
             Columns =
             [
                 new TableColumn { TableId = id, ColumnName = "id", DataType = "int" },

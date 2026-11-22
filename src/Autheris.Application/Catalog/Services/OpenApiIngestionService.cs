@@ -393,7 +393,7 @@ public sealed class OpenApiIngestionService : IOpenApiIngestionService
                 tableMetadata = ApplyKeyExtensions(tableMetadata, schemaObj);
 
                 // SEC M-30: an OpenAPI (re-)ingestion must never weaken governance of an existing table
-                // (RequiresFourEyes, Sensitivity, IsActive, column classifications, masking rules) nor re-route it
+                // (protection state, IsActive, column classifications, masking rules) nor re-route it
                 // (DataSourceType / HttpEndpoint of existing tables are preserved).
                 if (existing != null)
                 {

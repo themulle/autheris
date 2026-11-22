@@ -447,12 +447,13 @@ public sealed class ConsentDecisionResolverTests : IDisposable
     private async Task<TableIdentifier> NewTableAsync(bool fourEyes)
     {
         var id = new TableIdentifier("sales", "crm", "w5_" + Guid.NewGuid().ToString("N")[..8]);
-        var table = new Table { Id = Guid.NewGuid(), SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName, Sensitivity = "LOW", RequiresFourEyes = fourEyes, IsActive = true };
+        var table = new Table { Id = Guid.NewGuid(), SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName, IsActive = true };
         await _repository.UpsertTableMetadataAsync(new TableMetadata
         {
             Identifier = id,
             Table = table,
-            Columns = [new TableColumn { TableId = table.Id, ColumnName = "id", DataType = "INT" }]
+            Columns = [new TableColumn { TableId = table.Id, ColumnName = "id", DataType = "INT" }],
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(fourEyes ? new[] { "id" } : Array.Empty<string>())
         });
         await EnsureTableOwnerAsync("S-1-5-21-FE-APPROVER-A", id);
         await EnsureTableOwnerAsync("S-1-5-21-FE-APPROVER-B", id);

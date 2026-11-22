@@ -112,6 +112,8 @@ public sealed class GatewaySecurityOptionsValidator : IValidateOptions<GatewayOp
             failures.Add("NF-SEC-03 violation: Outside Development, HmacSecretKeyVaultRef must be a valid Key Vault secret reference.");
         }
 
+        failures.AddRange(Autheris.Application.Governance.Policy.AccessPolicyOptionsValidator.ValidateCore(opts.Governance.AccessPolicy));
+
         return failures.Count > 0
             ? ValidateOptionsResult.Fail(failures)
             : ValidateOptionsResult.Success;

@@ -85,8 +85,6 @@ internal static class DbtCatalogTableFactory
             DisplayName = model.Name,
             DbtUniqueId = model.UniqueId,
             Description = model.Description,
-            Sensitivity = "NORMAL",
-            RequiresFourEyes = false,
             IsActive = options.Dbt.ActivateNewTables,
             DataSourceType = DataSourceType.Sql,
             ObjectKind = objectKind,

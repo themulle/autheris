@@ -388,9 +388,10 @@ public sealed partial class ConsentDecisionPipeline(
                 string.Equals(grantDecision.ErrorCode, GrantErrorCodes.FourEyesRequired, StringComparison.Ordinal);
         }
 
+        bool tableSensitive = meta is not null && ClassificationMetadata.IsTableSensitive(meta);
         bool stewardGate = clearPlan is { NeedsSteward: true };
-        bool requiresFourEyes = (meta?.Table.IsHighlySensitive ?? false) || stewardGate || grantRequiresFourEyes;
-        bool needsSecondApproverOverride = (stewardGate || grantRequiresFourEyes) && !(meta?.Table.IsHighlySensitive ?? false);
+        bool requiresFourEyes = tableSensitive || stewardGate || grantRequiresFourEyes;
+        bool needsSecondApproverOverride = requiresFourEyes;
         bool requireSecondApprover = needsSecondApproverOverride && command.Channel == ConsentDecisionChannel.Internal;
 
         var distinctIndependentApprovers = SeparationOfDutiesService.CountDistinctIndependentApprovers(

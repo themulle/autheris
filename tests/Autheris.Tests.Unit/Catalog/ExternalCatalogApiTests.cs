@@ -416,8 +416,7 @@ public sealed class ExternalCatalogApiTests
                 DataSourceType = table.Table.DataSourceType,
                 IsActive = true,
                 DiscoveryHidden = true,
-                ObjectKind = table.Table.ObjectKind,
-                Sensitivity = table.Table.Sensitivity
+                ObjectKind = table.Table.ObjectKind
             }
         });
         harness.Clock.Advance(TimeSpan.FromMinutes(1));
@@ -480,7 +479,6 @@ public sealed class ExternalCatalogApiTests
             "finance",
             "payroll_entries",
             ownerTenantId: "tenant-a",
-            sensitivity: "HIGH",
             columns:
             [
                 ("id", Sensitive: false, Hidden: false),
@@ -490,7 +488,6 @@ public sealed class ExternalCatalogApiTests
             "finance",
             "cost_centers",
             ownerTenantId: "tenant-a",
-            sensitivity: "LOW",
             columns: [("id", Sensitive: false, Hidden: false)]);
 
         harness.Pdp.Decide = req =>
@@ -523,7 +520,7 @@ public sealed class ExternalCatalogApiTests
         page2.StatusCode.Should().Be(StatusCodes.Status200OK);
         page2.ReadJson().GetProperty("items").GetArrayLength().Should().Be(1);
 
-        var piiFiltered = await harness.ListObjectsAsync(userCaller, pii: true, sensitivity: "HIGH");
+        var piiFiltered = await harness.ListObjectsAsync(userCaller, pii: true, protectionClass: "CONFIDENTIAL");
         piiFiltered.StatusCode.Should().Be(StatusCodes.Status200OK);
         var piiItem = piiFiltered.ReadJson().GetProperty("items").EnumerateArray().Single();
         piiItem.GetProperty("objectId").GetString().Should().Be(tableOne.Identifier.ToString());

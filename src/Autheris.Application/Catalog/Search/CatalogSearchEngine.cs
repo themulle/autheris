@@ -843,7 +843,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
                     DisplayName: resolvedDisplayName,
                     Description: resolvedDescription,
                     Domain: kvp.Key.Domain,
-                    Sensitivity: meta?.Table.Sensitivity ?? "NORMAL",
+                    Sensitivity: meta is not null && ClassificationMetadata.IsTableSensitive(meta) ? "CONFIDENTIAL" : "INTERNAL",
                     CombinedScore: kvp.Value.Score,
                     Bm25Score: kvp.Value.Bm25,
                     VectorScore: kvp.Value.Vec,

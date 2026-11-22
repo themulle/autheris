@@ -11,6 +11,7 @@ using Autheris.Application.DataSources.Services;
 using Autheris.Application.Policy.Classification;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 
 /// <summary>
 /// Pure mapper that projects a <see cref="TableMetadata"/>, PDP <see cref="TableAccessDecision"/>,
@@ -34,7 +35,8 @@ public static class DiscoveryAccessMapper
         IReadOnlyDictionary<string, DataClassification>? classificationDefinitions = null,
         IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>>? repoColumnClassifications = null,
         string? tenantId = null,
-        bool hideMaskedTextForRestrictedScopes = false)
+        bool hideMaskedTextForRestrictedScopes = false,
+        EffectiveProtection? effectiveProtection = null)
     {
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(decision);
@@ -134,7 +136,7 @@ public static class DiscoveryAccessMapper
             Name: table.Identifier.TableName,
             DisplayName: string.IsNullOrEmpty(tableDisplayName) ? null : tableDisplayName,
             Description: tableDescription,
-            Sensitivity: table.Table.Sensitivity,
+            Sensitivity: (effectiveProtection?.TableClass ?? ProtectionClass.Confidential).ToCanonicalName(),
             Tags: tags,
             Owners: owners,
             Access: accessState,

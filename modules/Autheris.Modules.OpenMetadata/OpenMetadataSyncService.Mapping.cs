@@ -95,12 +95,6 @@ public sealed partial class OpenMetadataSyncService
             }
         }
 
-        // SEC E-06: Art. 9 on the table or on any column => HIGH + four-eyes (same rule as the catalog sync);
-        // table-level PII / "Sensitive" tags => HIGH.
-        var isArt9 = anyArt9Column || omTable.Tags.Any(t => MatchesAnyTag(t.TagFQN, art9Tags));
-        var isHigh = isArt9 ||
-                     omTable.Tags.Any(t => t.TagFQN.Contains("Sensitive", StringComparison.OrdinalIgnoreCase) || MatchesAnyTag(t.TagFQN, piiTags));
-
         var tableEntity = new Table
         {
             Id = tableGuid,
@@ -109,8 +103,6 @@ public sealed partial class OpenMetadataSyncService
             SchemaName = tableId.Schema,
             TableName = tableId.TableName,
             DisplayName = omTable.DisplayName ?? omTable.Name,
-            Sensitivity = isHigh ? "HIGH" : "NORMAL",
-            RequiresFourEyes = isArt9 || omTable.Tags.Any(t => t.TagFQN.Contains("FourEyes", StringComparison.OrdinalIgnoreCase)),
             // SEC E-09 / EX-06: new tables stay inactive until a gateway admin activates them (OpenMetadata.ActivateNewTables).
             // Existing tables keep their persisted state through the tighten-only ratchet.
             IsActive = !isNewTable || omOptions.ActivateNewTables

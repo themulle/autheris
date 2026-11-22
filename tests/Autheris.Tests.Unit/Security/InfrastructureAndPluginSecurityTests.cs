@@ -625,8 +625,6 @@ public sealed partial class InfrastructureAndPluginSecurityTests : IDisposable
             {
                 SchemaName = "api",
                 TableName = "payment",
-                Sensitivity = "HIGH",
-                RequiresFourEyes = true,
                 DataSourceType = DataSourceType.HttpDeclarative,
                 HttpEndpoint = new HttpEndpointDescriptor { BaseUrl = "https://payments.internal.corp", PathTemplate = "/api/v1/payments", TenantIdHeaderName = "X-Tenant" }
             },
@@ -664,8 +662,6 @@ public sealed partial class InfrastructureAndPluginSecurityTests : IDisposable
 
         result.Success.ShouldBeTrue();
         var merged = upserted.Single();
-        merged.Table.RequiresFourEyes.ShouldBeTrue();
-        merged.Table.Sensitivity.ShouldBe("HIGH");
         ClassificationMetadata.IsColumnSensitive(merged, "pan").ShouldBeTrue();
         merged.ColumnMaskingRules.ShouldContainKey("pan");
         merged.HttpEndpoint!.BaseUrl.ShouldBe("https://payments.internal.corp");

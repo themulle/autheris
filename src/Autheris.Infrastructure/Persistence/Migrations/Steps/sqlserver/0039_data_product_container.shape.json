@@ -1,0 +1,43 @@
+{
+  "ops": [
+    {
+      "op": "addColumn",
+      "table": "DATA_PRODUCTS",
+      "column": {
+        "name": "owner_group_sid",
+        "type": "NVARCHAR",
+        "family": "string",
+        "nullable": true
+      }
+    },
+    {
+      "op": "addColumn",
+      "table": "DATA_PRODUCTS",
+      "column": {
+        "name": "default_class",
+        "type": "NVARCHAR",
+        "family": "string",
+        "nullable": true
+      }
+    },
+    {
+      "op": "addColumn",
+      "table": "DATA_PRODUCTS",
+      "column": {
+        "name": "visibility",
+        "type": "NVARCHAR",
+        "family": "string",
+        "nullable": false
+      }
+    },
+    {
+      "op": "dropColumn",
+      "table": "DATA_PRODUCTS",
+      "name": "product_owner"
+    },
+    {
+      "op": "dropTable",
+      "table": "DATA_SOURCE_OWNERS"
+    }
+  ]
+}

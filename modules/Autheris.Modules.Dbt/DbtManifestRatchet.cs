@@ -130,8 +130,8 @@ internal static class DbtManifestRatchet
         var incSens = incomingMeta.TryGetValue("sensitivity", out var ins) ? ins : null;
         if (!string.IsNullOrWhiteSpace(incSens))
         {
-            var storedRank = Table.SensitivityRank(storedSens);
-            var incRank = Table.SensitivityRank(incSens);
+            var storedRank = ClassifySensitivityRank(storedSens);
+            var incRank = ClassifySensitivityRank(incSens);
             if (incRank > storedRank)
             {
                 // Tightening sensitivity: allowed!
@@ -214,4 +214,13 @@ internal static class DbtManifestRatchet
             return true;
         return false;
     }
+
+    internal static int ClassifySensitivityRank(string? value) => (value ?? string.Empty).Trim().ToUpperInvariant() switch
+    {
+        "PUBLIC" or "1_PUBLIC" or "LOW" => 1,
+        "" or "NORMAL" or "INTERNAL" or "2_INTERNAL" => 2,
+        "MEDIUM" or "CONFIDENTIAL" or "3_CONFIDENTIAL" or "HIGH" or "RESTRICTED" => 3,
+        "SECRET" or "4_SECRET" or "STRICTLY_CONFIDENTIAL" => 4,
+        _ => 3
+    };
 }

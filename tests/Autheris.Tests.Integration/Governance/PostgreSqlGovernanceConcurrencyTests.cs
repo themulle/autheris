@@ -101,7 +101,7 @@ public sealed class PostgreSqlGovernanceConcurrencyTests : IDisposable
         var approvals = Enumerable.Range(0, 6).Select(n => Task.Run(async () =>
         {
             var request = await NewFourEyesRequestAsync($"S-1-5-21-REQ-CHAIN-{n}");
-            await _repository.ApproveConsentRequestStepAsync(request.Id, new Sid("S-1-5-21-1000-1000-1000-1002"));
+            await _repository.ApproveConsentRequestStepAsync(request.Id, new Sid("S-1-5-21-1000-1000-1000-1002"), requireSecondApprover: true);
         }));
 
         await Task.WhenAll(auditWriters.Concat(approvals));
@@ -121,7 +121,7 @@ public sealed class PostgreSqlGovernanceConcurrencyTests : IDisposable
         var approver = new Sid("S-1-5-21-1000-1000-1000-1002");
 
         var attempts = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
-            TryAsync(() => _repository.ApproveConsentRequestStepAsync(request.Id, approver)))));
+            TryAsync(() => _repository.ApproveConsentRequestStepAsync(request.Id, approver, requireSecondApprover: true)))));
 
         attempts.Count(succeeded => succeeded).ShouldBe(1, "the four-eyes check and its write are atomic");
         Scalar("SELECT COUNT(*) FROM APPROVAL_STEPS WHERE consent_request_id = @id", ("@id", request.Id.ToString())).ShouldBe(1);
@@ -136,7 +136,7 @@ public sealed class PostgreSqlGovernanceConcurrencyTests : IDisposable
 
         var results = await Task.WhenAll(
             Enumerable.Range(0, 6).Select(n => Task.Run(() =>
-                TryAsync(() => _repository.ApproveConsentRequestStepAsync(request.Id, new Sid(n % 2 == 0 ? "S-1-5-21-1000-1000-1000-1002" : "S-1-5-21-1000-1000-1000-1003"))))));
+                TryAsync(() => _repository.ApproveConsentRequestStepAsync(request.Id, new Sid(n % 2 == 0 ? "S-1-5-21-1000-1000-1000-1002" : "S-1-5-21-1000-1000-1000-1003"), requireSecondApprover: true)))));
 
         results.Count(r => r).ShouldBe(2, "exactly one step per distinct approver");
         Scalar("SELECT COUNT(DISTINCT approver_sid) FROM APPROVAL_STEPS WHERE consent_request_id = @id", ("@id", request.Id.ToString())).ShouldBe(2);
@@ -149,7 +149,7 @@ public sealed class PostgreSqlGovernanceConcurrencyTests : IDisposable
         {
             var request = await NewFourEyesRequestAsync($"S-1-5-21-REQ-RACE-{round}");
 
-            var approve = Task.Run(() => TryAsync(() => _repository.ApproveConsentRequestStepAsync(request.Id, new Sid("S-1-5-21-1000-1000-1000-1002"))));
+            var approve = Task.Run(() => TryAsync(() => _repository.ApproveConsentRequestStepAsync(request.Id, new Sid("S-1-5-21-1000-1000-1000-1002"), requireSecondApprover: true)));
             var reject = Task.Run(() => TryAsync(() => _repository.RejectConsentRequestAsync(request.Id, new Sid("S-1-5-21-1000-1000-1000-1003"), "race")));
             var approved = await approve;
             var rejected = await reject;
@@ -256,7 +256,7 @@ public sealed class PostgreSqlGovernanceConcurrencyTests : IDisposable
         var approvals = Enumerable.Range(0, 5).Select(n => Task.Run(async () =>
         {
             var request = await repository.CreateConsentRequestAsync(NewRequest(meta, $"S-1-5-21-REQ-CHANNEL-{n}"));
-            await repository.ApproveConsentRequestStepAsync(request.Id, new Sid("S-1-5-21-1000-1000-1000-1002"));
+            await repository.ApproveConsentRequestStepAsync(request.Id, new Sid("S-1-5-21-1000-1000-1000-1002"), requireSecondApprover: true);
         }));
         var flushAndVerify = Task.Run(async () =>
         {

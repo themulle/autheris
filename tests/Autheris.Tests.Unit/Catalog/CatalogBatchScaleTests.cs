@@ -143,7 +143,6 @@ public sealed class CatalogBatchScaleTests
                     SchemaName = "dbo",
                     TableName = $"tbl_{i:D5}",
                     DisplayName = $"tbl_{i:D5}",
-                    Sensitivity = "NORMAL",
                     IsActive = true,
                     DataSourceType = DataSourceType.Sql
                 },

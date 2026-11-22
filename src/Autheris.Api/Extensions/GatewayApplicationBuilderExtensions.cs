@@ -210,7 +210,7 @@ public static class GatewayApplicationBuilderExtensions
                     // The strict CSP (connect-src 'self') blocks the vendor telemetry calls anyway; do not attempt them.
                     nitro.DisableTelemetry = true;
                     nitro.Title = "Autheris GraphQL";
-                    nitro.Document = "{\n  catalog(first: 5) {\n    domain\n    schema\n    tableName\n    sensitivity\n  }\n}\n";
+                    nitro.Document = "{\n  catalog(first: 5) {\n    domain\n    schema\n    tableName\n    description\n  }\n}\n";
                 })
                 .WithAuditExemption("Embedded developer tool UI");
 
@@ -228,6 +228,8 @@ public static class GatewayApplicationBuilderExtensions
         app.MapAuthEndpoints();
         app.MapWebhookEndpoints(gatewayOptions);
         app.MapGovernanceEndpoints();
+        app.MapAccessPolicyEndpoints();
+        app.MapGovernanceDomainEndpoints();
         app.MapAuthorizationExplainEndpoints();
         app.MapEffectiveAccessEndpoints();
         app.MapDataContractEndpoints();

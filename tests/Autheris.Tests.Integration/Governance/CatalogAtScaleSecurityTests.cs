@@ -91,13 +91,13 @@ public sealed class CatalogAtScaleSecurityTests : IAsyncDisposable
 
         var meta1 = new TableMetadata
         {
-            Table = new Table { Id = t1Id, SourceName = "sales", SchemaName = "crm", TableName = "t1", DisplayName = "T1", Sensitivity = "NORMAL" },
+            Table = new Table { Id = t1Id, SourceName = "sales", SchemaName = "crm", TableName = "t1", DisplayName = "T1" },
             Identifier = id1,
             Columns = Array.Empty<TableColumn>()
         };
         var meta2 = new TableMetadata
         {
-            Table = new Table { Id = t2Id, SourceName = "sales", SchemaName = "crm", TableName = "t2", DisplayName = "T2", Sensitivity = "NORMAL" },
+            Table = new Table { Id = t2Id, SourceName = "sales", SchemaName = "crm", TableName = "t2", DisplayName = "T2" },
             Identifier = id2,
             Columns = Array.Empty<TableColumn>()
         };
@@ -252,13 +252,13 @@ public sealed class CatalogAtScaleSecurityTests : IAsyncDisposable
 
         var metaAllowed = new TableMetadata
         {
-            Table = new Table { SourceName = "sales", SchemaName = "crm", TableName = "allowed_table", DisplayName = "Allowed Customers", Sensitivity = "NORMAL", Description = "Customers account info" },
+            Table = new Table { SourceName = "sales", SchemaName = "crm", TableName = "allowed_table", DisplayName = "Allowed Customers", Description = "Customers account info" },
             Identifier = idAllowed,
             Columns = new List<TableColumn> { new() { ColumnName = "customer_name", DataType = "TEXT" } }
         };
         var metaForbidden = new TableMetadata
         {
-            Table = new Table { SourceName = "sales", SchemaName = "crm", TableName = "forbidden_table", DisplayName = "Forbidden Customers", Sensitivity = "NORMAL", Description = "Secret Customers records" },
+            Table = new Table { SourceName = "sales", SchemaName = "crm", TableName = "forbidden_table", DisplayName = "Forbidden Customers", Description = "Secret Customers records" },
             Identifier = idForbidden,
             Columns = new List<TableColumn> { new() { ColumnName = "secret_id", DataType = "TEXT" } }
         };
@@ -353,7 +353,6 @@ public sealed class CatalogAtScaleSecurityTests : IAsyncDisposable
                 SchemaName = "crm",
                 TableName = "customers",
                 DisplayName = "Customers",
-                Sensitivity = "NORMAL",
                 IsActive = true
             },
             Identifier = new TableIdentifier("sales", "crm", "customers"),
@@ -392,7 +391,6 @@ public sealed class CatalogAtScaleSecurityTests : IAsyncDisposable
                 SchemaName = "crm",
                 TableName = "orders",
                 DisplayName = "Orders",
-                Sensitivity = "NORMAL",
                 IsActive = true
             },
             Identifier = new TableIdentifier("sales", "crm", "orders"),

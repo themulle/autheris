@@ -455,7 +455,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                 return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Access denied to tool '{tool.Name}': target dataset is not accessible.");
             }
 
-            if (meta?.Table.RequiresFourEyes == true)
+            if (meta is not null && ClassificationMetadata.IsTableSensitive(meta))
             {
                 bool isAdmin = IsUnrestrictedCatalogCaller(sessionContext);
 

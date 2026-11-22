@@ -57,8 +57,6 @@ public static class GatewayPolicies
     public const string VirtualFilterSyncApply = "VirtualFilterSyncApply";
     public const string EffectiveFilterInspect = "EffectiveFilterInspect";
     public const string ProductAccess = "ProductAccess";
-    public const string ProductOwnerRead = "ProductOwnerRead";
-    public const string ProductOwnerAdmin = "ProductOwnerAdmin";
     public const string ProductSync = "ProductSync";
     public const string OpenApiPublish = "OpenApiPublish";
     public const string ProfileAdmin = "ProfileAdmin";
@@ -97,8 +95,6 @@ public static class GatewayPolicies
     public static readonly string[] VirtualFilterSyncPlanRoles = ["FilterSync", "FilterAdmin"];
     public static readonly string[] VirtualFilterSyncApplyRoles = ["FilterSync"];
     public static readonly string[] EffectiveFilterInspectRoles = ["FilterAdmin", "GovernanceAdmin", "SecurityAuditor"];
-    public static readonly string[] ProductOwnerReadRoles = ["GovernanceAdmin", "TenantAdmin", "SecurityAuditor", "DataProductAdmin"];
-    public static readonly string[] ProductOwnerAdminRoles = ["GovernanceAdmin", "TenantAdmin"];
     public static readonly string[] ProductSyncRoles = ["DataProductSync"];
     public static readonly string[] OpenApiPublishRoles = ["GovernanceAdmin", "SchemaPublisher", "TenantAdmin"];
     public static readonly string[] ProfileAdminRoles = ["TenantAdmin", "GovernanceAdmin"];
@@ -404,10 +400,6 @@ public static class GatewayPolicies
         options.AddPolicy(ProductAccess, policy => policy
             .RequireAuthenticatedUser()
             .RequireAssertion(AllowsProductAccess));
-        AddSecurityRolePolicy(options, ProductOwnerRead,
-            [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor, GatewayRole.DataProductAdmin]);
-        AddSecurityRolePolicy(options, ProductOwnerAdmin,
-            [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin]);
         AddSecurityRolePolicy(options, ProductSync,
             [GatewayRole.DataProductSync]);
 
@@ -480,8 +472,6 @@ public static class GatewayPolicies
             VirtualFilterSyncPlan => VirtualFilterSyncPlanRoles,
             VirtualFilterSyncApply => VirtualFilterSyncApplyRoles,
             EffectiveFilterInspect => EffectiveFilterInspectRoles,
-            ProductOwnerRead => ProductOwnerReadRoles,
-            ProductOwnerAdmin => ProductOwnerAdminRoles,
             ProductSync => ProductSyncRoles,
             OpenApiPublish => OpenApiPublishRoles,
             ProfileAdmin => ProfileAdminRoles,

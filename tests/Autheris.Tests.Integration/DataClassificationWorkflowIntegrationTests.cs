@@ -12,6 +12,7 @@ using Autheris.Api.Endpoints;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.Configuration;
@@ -86,12 +87,14 @@ public class DataClassificationWorkflowIntegrationTests : IClassFixture<DataClas
         proposal.DataOwnerSid.ShouldBe("S-1-5-21-DATA-OWNER-ALICE");
         proposal.Columns.Count.ShouldBe(5);
 
-        // Verify deterministic PII pattern detection & masking recommendations
+        // Verify deterministic PII pattern detection, protection class mapping & mask categories
         var emailCol = proposal.Columns.FirstOrDefault(c => c.ColumnName == "email_address");
         emailCol.ShouldNotBeNull();
         emailCol.DetectedPiiCategoryKey.ShouldBe("EMAIL");
         emailCol.ProposedSensitivityKey.ShouldBe("L2_INTERNAL");
         emailCol.ProposedSensitivityRank.ShouldBe(2);
+        emailCol.ProposedProtectionClass.ShouldBe(ProtectionClass.Internal);
+        emailCol.ProposedMaskCategory.ShouldBe(ClassificationScopes.PiiCode);
         emailCol.ProposedMaskingRule.ShouldBe("EMAIL_DOMAIN_RETAIN");
 
         var ibanCol = proposal.Columns.FirstOrDefault(c => c.ColumnName == "iban_code");
@@ -99,6 +102,8 @@ public class DataClassificationWorkflowIntegrationTests : IClassFixture<DataClas
         ibanCol.DetectedPiiCategoryKey.ShouldBe("IBAN");
         ibanCol.ProposedSensitivityKey.ShouldBe("L3_CONFIDENTIAL");
         ibanCol.ProposedSensitivityRank.ShouldBe(3);
+        ibanCol.ProposedProtectionClass.ShouldBe(ProtectionClass.Confidential);
+        ibanCol.ProposedMaskCategory.ShouldBe(ClassificationScopes.FinancialCode);
         ibanCol.ProposedMaskingRule.ShouldBe("IBAN_STANDARD_4_4");
 
         var ccCol = proposal.Columns.FirstOrDefault(c => c.ColumnName == "credit_card_no");
@@ -106,6 +111,8 @@ public class DataClassificationWorkflowIntegrationTests : IClassFixture<DataClas
         ccCol.DetectedPiiCategoryKey.ShouldBe("CREDIT_CARD");
         ccCol.ProposedSensitivityKey.ShouldBe("L4_STRICTLY_CONFIDENTIAL");
         ccCol.ProposedSensitivityRank.ShouldBe(4);
+        ccCol.ProposedProtectionClass.ShouldBe(ProtectionClass.Secret);
+        ccCol.ProposedMaskCategory.ShouldBe(ClassificationScopes.FinancialCode);
         ccCol.ProposedMaskingRule.ShouldBe("CREDIT_CARD_LAST_4");
 
         // 2. Verify WORM configuration hash endpoint

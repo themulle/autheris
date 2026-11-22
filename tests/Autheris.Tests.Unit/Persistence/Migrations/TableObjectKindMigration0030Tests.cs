@@ -76,8 +76,7 @@ public sealed class TableObjectKindMigration0030Tests
         (string Name, Type Type)[] columns =
         [
             ("id", typeof(string)), ("source_type", typeof(string)), ("source_name", typeof(string)), ("schema_name", typeof(string)),
-            ("table_name", typeof(string)), ("display_name", typeof(string)), ("sensitivity", typeof(string)),
-            ("requires_four_eyes", typeof(int)), ("is_active", typeof(int)), ("data_source_type", typeof(int)),
+            ("table_name", typeof(string)), ("display_name", typeof(string)), ("is_active", typeof(int)), ("data_source_type", typeof(int)),
             ("http_endpoint_json", typeof(string)), ("plugin_name", typeof(string)), ("description", typeof(string)),
             ("long_description", typeof(string)), ("doc_source", typeof(string)), ("required_filter_columns_json", typeof(string)),
             ("texts_json", typeof(string)), ("min_group_size", typeof(int)), ("non_personal", typeof(int)), ("dbt_unique_id", typeof(string)),
@@ -95,8 +94,6 @@ public sealed class TableObjectKindMigration0030Tests
         row["schema_name"] = "s";
         row["table_name"] = "t";
         row["display_name"] = "t";
-        row["sensitivity"] = "NORMAL";
-        row["requires_four_eyes"] = 0;
         row["is_active"] = 1;
         row["data_source_type"] = 0;
         row["object_kind"] = (object?)kind ?? DBNull.Value;

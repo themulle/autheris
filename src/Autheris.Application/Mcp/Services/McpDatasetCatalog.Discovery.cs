@@ -231,13 +231,13 @@ public sealed partial class McpDatasetCatalog
     {
         var def = proc.Definition;
         int columnCount = 0;
-        string sensitivity = "NORMAL";
+        string sensitivity = "CONFIDENTIAL";
         if (def.ResultTableIdentifier is { } resId)
         {
             var resMeta = await _metadataRepository.GetTableMetadataAsync(resId, ct).ConfigureAwait(false);
             if (resMeta != null)
             {
-                sensitivity = resMeta.Table.Sensitivity ?? "NORMAL";
+                sensitivity = ClassificationMetadata.IsTableSensitive(resMeta) ? "CONFIDENTIAL" : "INTERNAL";
                 var (activeConsents, _, isAdmin) = await GetCallerConsentsAndRequestsAsync(principal, ct).ConfigureAwait(false);
                 var levels = ResolveColumnLevels(principal, resMeta, activeConsents, isAdmin, isGranted: true, bypass: IsBypassed);
                 columnCount = resMeta.Columns.Count(col => levels.TryGetValue(col.ColumnName, out var lvl) && lvl != Autheris.Domain.Interfaces.ColumnAccessLevel.Deny);

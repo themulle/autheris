@@ -161,7 +161,7 @@ public sealed class AccessPlanningAtomicityTests
         return new TableMetadata
         {
             Identifier = new TableIdentifier("sales", "public", "orders"),
-            Table = new Table { Id = id, SchemaName = "public", TableName = "orders", Sensitivity = "INTERNAL", IsActive = true },
+            Table = new Table { Id = id, SchemaName = "public", TableName = "orders", IsActive = true },
             Columns = [new TableColumn { TableId = id, ColumnName = "id", DataType = "int" }],
             PrimaryKeyColumns = ["id"]
         };

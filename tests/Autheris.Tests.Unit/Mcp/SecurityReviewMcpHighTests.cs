@@ -51,7 +51,13 @@ public sealed class SecurityReviewMcpHighTests
                 var id = ci.Arg<TableIdentifier>();
                 if (id.Equals(Secret))
                 {
-                    return new TableMetadata { Identifier = id, Table = new Table { TableName = "secret", RequiresFourEyes = true, IsActive = true } };
+                    return new TableMetadata
+                    {
+                        Identifier = id,
+                        Table = new Table { TableName = "secret", IsActive = true },
+                        Columns = [new TableColumn { ColumnName = "ssn" }],
+                        ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("ssn")
+                    };
                 }
 
                 return id.Equals(Pub)

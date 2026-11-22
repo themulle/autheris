@@ -326,14 +326,14 @@ public sealed class CatalogPagedReadSecurityTests
                     .Select(t => new object?[]
                     {
                         t.Id.ToString(), "sql", t.Domain, t.Schema, t.TableName,
-                        t.TableName, "NORMAL", 0, t.IsActive ? 1 : 0, 0,
+                        t.TableName, t.IsActive ? 1 : 0, 0,
                         null, null, t.Description, null, null, null, null, null, 0, null
                     })
                     .ToList();
                 return new StubDbDataReader(
                     [
                         "id", "source_type", "source_name", "schema_name", "table_name",
-                        "display_name", "sensitivity", "requires_four_eyes", "is_active", "data_source_type",
+                        "display_name", "is_active", "data_source_type",
                         "http_endpoint_json", "plugin_name", "description", "long_description", "doc_source",
                         "required_filter_columns_json", "texts_json", "min_group_size", "non_personal", "dbt_unique_id"
                     ],
