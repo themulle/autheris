@@ -1,6 +1,7 @@
 namespace Autheris.Api.Middleware;
 
 using Autheris.Api.Errors;
+using Autheris.Api.Security;
 using System;
 using System.Linq;
 using System.Text.Json;
@@ -34,7 +35,7 @@ public sealed class ReadOnlyTokenMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        if (!context.User.IsReadOnly() || IsPermitted(context.Request))
+        if (!context.User.IsReadOnly() || IsPermitted(context))
         {
             await _next(context).ConfigureAwait(false);
             return;
@@ -43,10 +44,11 @@ public sealed class ReadOnlyTokenMiddleware
         await ApiProblems.WriteAsync(context, StatusCodes.Status403Forbidden, ApiErrorCodes.ReadOnlyToken, "This token only permits read access.", context.RequestAborted).ConfigureAwait(false);
     }
 
-    private bool IsPermitted(HttpRequest request)
+    private bool IsPermitted(HttpContext context)
     {
-        // SG-17: When ext_authz or reverse proxies probe with GET/HEAD/OPTIONS, check original method headers.
-        // #484: DELETE is accepted only on statement cancel paths.
+        var request = context.Request;
+        // When ext_authz or reverse proxies probe with GET/HEAD/OPTIONS, check original method headers.
+        // DELETE is accepted only on statement cancel paths.
         if (request.Headers.TryGetValue("X-Original-Method", out var origMethod) && !string.IsNullOrWhiteSpace(origMethod))
         {
             var om = origMethod.ToString().Trim().ToUpperInvariant();
@@ -71,6 +73,14 @@ public sealed class ReadOnlyTokenMiddleware
             HttpMethods.IsOptions(request.Method))
         {
             return true;
+        }
+
+        if (context.GetEndpoint()?.Metadata.GetMetadata<ReadOnlyTokenAccessMetadata>() is { } accessMeta &&
+            string.Equals(request.Method, accessMeta.Method, StringComparison.OrdinalIgnoreCase))
+        {
+            return !accessMeta.StrictRawPath ||
+                   (!GatewayEndpointMetadata.HasUnsafeRawDelimiters(request.Path.Value) &&
+                    request.Path.Value?.TrimEnd('/').EndsWith("/openapi.json", StringComparison.OrdinalIgnoreCase) != true);
         }
 
         if (HttpMethods.IsDelete(request.Method))

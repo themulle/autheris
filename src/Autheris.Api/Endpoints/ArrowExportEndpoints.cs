@@ -45,6 +45,7 @@ public static class ArrowExportEndpoints
         ingress.MapPost("/api/v1/export/arrow", HandleArrowExportAsync)
             .WithName("ExportTableToArrow")
             .WithSummary("Exports governed tabular rows directly into Apache Arrow IPC streaming format")
+            .WithReadOnlyTokenAccess(HttpMethods.Post)
             .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         return endpoints;

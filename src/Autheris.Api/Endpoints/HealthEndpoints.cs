@@ -8,6 +8,7 @@ using Autheris.Domain.Options;
 using Autheris.Api.Endpoints.Health;
 using Autheris.Api.Extensions;
 using Autheris.Api.Hosting.Warmup;
+using Autheris.Api.Security;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Mvc;
@@ -50,7 +51,7 @@ public static class HealthEndpoints
                 status = "Live",
                 timestamp = DateTimeOffset.UtcNow
             });
-        }).AllowAnonymous().WithAuditExemption("Operational health probe");
+        }).AllowAnonymous().WithHealthProbe().WithAuditExemption("Operational health probe");
 
         app.MapGet("/health/ready", (
             ITrafficDrainController controller,
@@ -58,7 +59,7 @@ public static class HealthEndpoints
             [FromServices] IGraphQlExecutorGate? executorGate,
             [FromServices] IStartupWarmupState? warmupState,
             CancellationToken ct) => HandleReadyAsync(controller, readinessProbe, executorGate, warmupState, gatewayOptions, environment, ct))
-        .AllowAnonymous().WithAuditExemption("Operational health probe");
+        .AllowAnonymous().WithHealthProbe().WithAuditExemption("Operational health probe");
 
         return app;
     }

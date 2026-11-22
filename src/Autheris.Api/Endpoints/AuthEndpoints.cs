@@ -36,7 +36,7 @@ public static class AuthEndpoints
                 groups = groups,
                 authenticationType = principal.Identity?.AuthenticationType ?? "Basic"
             });
-        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuthSucceeded);
+        }).RequireAuthorization().WithCsrfLoginExempt().WithAudit(AuditLevel.Full, AuditEventTypes.AuthSucceeded);
 
         app.MapPost("/api/auth/login", (ClaimsPrincipal principal) =>
         {
@@ -54,7 +54,7 @@ public static class AuthEndpoints
                 groups = groups,
                 authenticationType = principal.Identity?.AuthenticationType ?? "Basic"
             });
-        }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuthSucceeded);
+        }).RequireAuthorization().WithCsrfLoginExempt().WithAudit(AuditLevel.Full, AuditEventTypes.AuthSucceeded);
 
         // F-AUTH-DX: effective identity of the current request (works for every scheme, incl. the session cookie).
         app.MapGet("/api/auth/session", GetSession).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuthSucceeded);

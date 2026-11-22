@@ -221,6 +221,57 @@ public sealed class AuthSchemeSelectionTests
     }
 
     [Fact]
+    public async Task EdgeHeaderStripping_StripsOnlyExplicitInternalHeaders_AllowsCustomAndWebhookHeaders()
+    {
+        var internalHeaders = new[]
+        {
+            "X-Autheris-Transport", "X-Autheris-Domain", "X-Autheris-Principal", "X-Autheris-Tenant",
+            "X-Autheris-Decision", "X-Autheris-Denial-Reason", "X-Autheris-Rls-Filter", "X-Autheris-Roles",
+            "X-Autheris-Groups", "X-Autheris-Signature", "X-Autheris-Nonce", "X-Autheris-Signature-Version",
+            "X-Autheris-Body-Sha256", "X-Autheris-Event-Id", "X-Autheris-Event-Type", "X-Autheris-Mode",
+            "X-Autheris-Truncated", "X-Autheris-Cache", "X-Autheris-Debug", "X-Autheris-Internal",
+            "X-Autheris-User", "X-Autheris-Scopes", "X-Autheris-Subject", "X-Autheris-Realm"
+        };
+
+        var context = new DefaultHttpContext();
+        foreach (var header in internalHeaders)
+        {
+            context.Request.Headers[header] = "spoofed";
+        }
+        context.Request.Headers["X-Autheris-Custom"] = "client-value";
+        context.Request.Headers["X-Autheris-Timestamp"] = "1700000000";
+        context.Request.Headers["X-Autheris-Delivery"] = "deliv-1";
+        context.Request.Headers["X-Autheris-Signature-256"] = "sha256=abcd";
+        context.Request.Headers["X-Autheris-App"] = "shop/1";
+
+        var middleware = new EdgeHeaderStrippingMiddleware(_ => Task.CompletedTask, Microsoft.Extensions.Options.Options.Create(Options(AuthenticationMode.Upstream)));
+        await middleware.InvokeAsync(context);
+
+        foreach (var header in internalHeaders)
+        {
+            context.Request.Headers.ContainsKey(header).ShouldBeFalse($"Expected internal header '{header}' to be stripped.");
+        }
+
+        context.Request.Headers["X-Autheris-Custom"].ToString().ShouldBe("client-value");
+        context.Request.Headers["X-Autheris-Timestamp"].ToString().ShouldBe("1700000000");
+        context.Request.Headers["X-Autheris-Delivery"].ToString().ShouldBe("deliv-1");
+        context.Request.Headers["X-Autheris-Signature-256"].ToString().ShouldBe("sha256=abcd");
+        context.Request.Headers["X-Autheris-App"].ToString().ShouldBe("shop/1");
+
+        // Verify case-insensitive stripping and Direct mode ForwardAuth stripping while preserving X-Autheris-Custom.
+        var directCtx = new DefaultHttpContext();
+        directCtx.Request.Headers["x-autheris-principal"] = "spoofed";
+        directCtx.Request.Headers["X-Forwarded-User"] = "alice";
+        directCtx.Request.Headers["X-Autheris-Custom"] = "kept-in-direct";
+        var directMiddleware = new EdgeHeaderStrippingMiddleware(_ => Task.CompletedTask, Microsoft.Extensions.Options.Options.Create(Options(AuthenticationMode.Direct)));
+        await directMiddleware.InvokeAsync(directCtx);
+
+        directCtx.Request.Headers.ContainsKey("x-autheris-principal").ShouldBeFalse();
+        directCtx.Request.Headers.ContainsKey("X-Forwarded-User").ShouldBeFalse();
+        directCtx.Request.Headers["X-Autheris-Custom"].ToString().ShouldBe("kept-in-direct");
+    }
+
+    [Fact]
     [Trait("Category", "Security")]
     public void ProductWebhookHeaderReader_AcceptsSingleFamily_RejectsMixedOrMultiValued()
     {

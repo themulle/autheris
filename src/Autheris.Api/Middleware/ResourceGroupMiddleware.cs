@@ -9,6 +9,7 @@ using Autheris.Application.Runtime.ResourceGroups;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Options.DataSources;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.Features;
@@ -42,8 +43,8 @@ public sealed class ResourceGroupMiddleware
         var path = context.Request.Path;
 
         // Skip system, metrics, and health endpoints so observability is never starved
-        if (path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase) ||
-            path.StartsWithSegments("/metrics", StringComparison.OrdinalIgnoreCase) ||
+        if (GatewayEndpointMetadata.IsHealthProbe(context) ||
+            GatewayEndpointMetadata.IsMetricsEndpoint(context) ||
             path.StartsWithSegments("/api/governance/system", StringComparison.OrdinalIgnoreCase))
         {
             await _next(context);
@@ -129,7 +130,8 @@ public sealed class ResourceGroupMiddleware
             return true;
         }
 
-        bool isMcpRequest = McpPathResolver.IsMcpRequest(context.Request.Path, options);
+        bool isMcpRequest = GatewayEndpointMetadata.HasTransport(context, DataSourceTransportFlags.Mcp) ||
+                            McpPathResolver.IsMcpRequest(context.Request.Path, options);
 
         // MCP streamable-HTTP POSTs advertise text/event-stream but are short-lived tool calls: keep them in the slots.
         var accept = context.Request.Headers.Accept.ToString();
@@ -230,12 +232,14 @@ public sealed class ResourceGroupMiddleware
 
     private static ResourceGroupTier ResolvePathTier(HttpContext context, GatewayOptions? options)
     {
-        if (McpPathResolver.IsMcpRequest(context.Request.Path, options))
+        if (GatewayEndpointMetadata.HasTransport(context, DataSourceTransportFlags.Mcp) ||
+            McpPathResolver.IsMcpRequest(context.Request.Path, options))
         {
             return ResourceGroupTier.AutonomousAgents;
         }
 
-        if (context.Request.Path.StartsWithSegments("/odata", StringComparison.OrdinalIgnoreCase))
+        if (GatewayEndpointMetadata.HasTransport(context, DataSourceTransportFlags.OData) ||
+            context.Request.Path.StartsWithSegments("/odata", StringComparison.OrdinalIgnoreCase))
         {
             return ResourceGroupTier.BulkAnalytics;
         }

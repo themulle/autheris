@@ -6,6 +6,7 @@ using System.Diagnostics;
 using System.Globalization;
 using System.Threading.Tasks;
 using Autheris.Api.Errors;
+using Autheris.Api.Security;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.DataSources;
 using Autheris.Application.Usage;
@@ -36,7 +37,7 @@ public sealed class UsageMeteringMiddleware
     {
         ArgumentNullException.ThrowIfNull(context);
 
-        if (IsSkippedPath(context.Request.Path))
+        if (IsSkippedRequest(context))
         {
             return _next(context);
         }
@@ -178,9 +179,9 @@ public sealed class UsageMeteringMiddleware
     private static bool IsQuotaExemptPath(PathString path) =>
         path.StartsWithSegments("/api/v1/usage/me", StringComparison.OrdinalIgnoreCase);
 
-    private static bool IsSkippedPath(PathString path) =>
-        path.StartsWithSegments("/health", StringComparison.OrdinalIgnoreCase) ||
-        path.StartsWithSegments("/alive", StringComparison.OrdinalIgnoreCase) ||
-        path.StartsWithSegments("/ready", StringComparison.OrdinalIgnoreCase) ||
-        path.StartsWithSegments("/metrics", StringComparison.OrdinalIgnoreCase);
+    private static bool IsSkippedRequest(HttpContext context) =>
+        GatewayEndpointMetadata.IsHealthProbe(context) ||
+        GatewayEndpointMetadata.IsMetricsEndpoint(context) ||
+        context.Request.Path.StartsWithSegments("/alive", StringComparison.OrdinalIgnoreCase) ||
+        context.Request.Path.StartsWithSegments("/ready", StringComparison.OrdinalIgnoreCase);
 }

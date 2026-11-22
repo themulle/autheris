@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Extensions;
+using Autheris.Api.Security;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.Governance.Analysis;
 using Autheris.Application.Governance.Grants;
@@ -57,6 +58,7 @@ public static class QueryAnalysisAndProfilingEndpoints
         {
             app.MapPost("/api/v1/governance/queries/analyze", HandleAnalyzeQueriesAsync)
                 .WithName("AnalyzeQueriesStatic")
+                .WithReadOnlyTokenAccess(HttpMethods.Post)
                 .RequireAuthorization()
                 .WithAudit(AuditLevel.Summarized, AuditEventTypes.QueryAnalysisEvaluated);
         }

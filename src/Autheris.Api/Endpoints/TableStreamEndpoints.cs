@@ -16,6 +16,7 @@ using System.Threading.Tasks;
 using Apache.Arrow.Ipc;
 using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
+using Autheris.Api.Security;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.State.Caching.Interfaces;
 using Autheris.Application.DataSources;
@@ -62,12 +63,14 @@ public static class TableStreamEndpoints
         // Canonical: POST /api/v1/data/{domain}/{schema}/{table}/stream
         ingress.MapPost("/api/v1/data/{domain}/{schema}/{table}/stream", HandleBulkStreamAsync)
             .WithName("StreamDatasetBulkKeyset")
+            .WithReadOnlyTokenAccess(HttpMethods.Post, strictRawPath: true)
             .RequireAuthorization()
             .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         // Alias: POST /api/v1/data/{domain}/{schema}/{table}/bulk
         ingress.MapPost("/api/v1/data/{domain}/{schema}/{table}/bulk", HandleBulkStreamAsync)
             .WithName("StreamDatasetBulkKeysetAlias")
+            .WithReadOnlyTokenAccess(HttpMethods.Post, strictRawPath: true)
             .RequireAuthorization()
             .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
