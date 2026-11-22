@@ -277,6 +277,127 @@ public sealed class GoldenQueryMetaImportTests
         fixture.Store.ReplaceCalls.ShouldBe(0);
     }
 
+    [Fact]
+    public async Task Tables_without_golden_queries_and_no_default_tenant_emit_zero_tenant_unresolved_warnings()
+    {
+        var fixture = new Fixture(ownerTenantId: null);
+        fixture.Tables.Seed(new TableMetadata
+        {
+            Identifier = new TableIdentifier("warehouse", "dbo", "customers"),
+            Table = new Table
+            {
+                Id = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                SourceName = "warehouse",
+                SchemaName = "dbo",
+                TableName = "customers",
+                SourceType = "PostgreSql",
+                IsActive = true
+            },
+            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }],
+            PrimaryKeyColumns = ["id"],
+            OwnerTenantId = null
+        });
+
+        var manifest = """
+        {
+          "metadata": { "dbt_version": "1.8.0" },
+          "nodes": {
+            "model.proj.orders": {
+              "name": "orders", "database": "warehouse", "schema": "dbo", "description": "orders",
+              "config": { "materialized": "table", "meta": {} },
+              "columns": {
+                "id": { "name": "id", "data_type": "int", "meta": {}, "tags": [] }
+              },
+              "depends_on": { "nodes": [] }
+            },
+            "model.proj.customers": {
+              "name": "customers", "database": "warehouse", "schema": "dbo", "description": "customers",
+              "config": { "materialized": "table" },
+              "columns": {
+                "id": { "name": "id", "data_type": "int", "meta": {}, "tags": [] }
+              },
+              "depends_on": { "nodes": [] }
+            }
+          }
+        }
+        """;
+
+        var result = await fixture.SyncAsync(manifest);
+
+        result.Success.ShouldBeTrue();
+        result.Warnings.ShouldNotContain(w => w.Contains("TENANT_UNRESOLVED", StringComparison.Ordinal));
+        fixture.Logger.Messages.ShouldNotContain(m => m.Contains("TENANT_UNRESOLVED", StringComparison.Ordinal));
+        fixture.Store.ReplaceCalls.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Explicit_golden_queries_without_resolved_tenant_emit_tenant_unresolved_warning()
+    {
+        var fixture = new Fixture(ownerTenantId: null);
+        fixture.Tables.Seed(new TableMetadata
+        {
+            Identifier = new TableIdentifier("warehouse", "dbo", "customers"),
+            Table = new Table
+            {
+                Id = Guid.Parse("22222222-2222-2222-2222-222222222222"),
+                SourceName = "warehouse",
+                SchemaName = "dbo",
+                TableName = "customers",
+                SourceType = "PostgreSql",
+                IsActive = true
+            },
+            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }],
+            PrimaryKeyColumns = ["id"],
+            OwnerTenantId = null
+        });
+
+        // customers omits meta.golden_queries -> skipped silently; orders explicitly declares golden_queries -> warns once for orders.
+        var manifest = """
+        {
+          "metadata": { "dbt_version": "1.8.0" },
+          "nodes": {
+            "model.proj.orders": {
+              "name": "orders", "database": "warehouse", "schema": "dbo", "description": "orders",
+              "config": { "materialized": "table", "meta": { "golden_queries": [ { "title": "Open", "query": "{ orders { id } }" } ] } },
+              "columns": {
+                "id": { "name": "id", "data_type": "int", "meta": {}, "tags": [] }
+              },
+              "depends_on": { "nodes": [] }
+            },
+            "model.proj.customers": {
+              "name": "customers", "database": "warehouse", "schema": "dbo", "description": "customers",
+              "config": { "materialized": "table", "meta": {} },
+              "columns": {
+                "id": { "name": "id", "data_type": "int", "meta": {}, "tags": [] }
+              },
+              "depends_on": { "nodes": [] }
+            }
+          }
+        }
+        """;
+
+        var result = await fixture.SyncAsync(manifest);
+
+        var unresolvedWarnings = result.Warnings.Where(w => w.Contains("TENANT_UNRESOLVED", StringComparison.Ordinal)).ToList();
+        unresolvedWarnings.Count.ShouldBe(1);
+        unresolvedWarnings[0].ShouldContain("orders");
+        fixture.Logger.Messages.Count(m => m.Contains("TENANT_UNRESOLVED", StringComparison.Ordinal)).ShouldBe(1);
+        fixture.Store.ReplaceCalls.ShouldBe(0);
+    }
+
+    [Fact]
+    public void Meta_reader_distinguishes_absent_declaration_from_explicit_empty_or_null()
+    {
+        var absent = JsonDocument.Parse("""{ "config": { "meta": {} } }""").RootElement;
+        var explicitEmpty = JsonDocument.Parse("""{ "config": { "meta": { "golden_queries": [] } } }""").RootElement;
+        var explicitNull = JsonDocument.Parse("""{ "config": { "meta": { "golden_queries": null } } }""").RootElement;
+
+        var collector = new RelationCollector();
+        DbtGoldenQueryMetaReader.Read(absent, "model.a", collector).HasDeclaration.ShouldBeFalse();
+        DbtGoldenQueryMetaReader.Read(explicitEmpty, "model.b", collector).HasDeclaration.ShouldBeTrue();
+        DbtGoldenQueryMetaReader.Read(explicitNull, "model.c", collector).HasDeclaration.ShouldBeTrue();
+    }
+
     private static (string Title, string Query, string? Description, string? Variables) Entry(string title, string query, string? description = null, string? variables = null) =>
         (title, query, description, variables);
 
@@ -326,7 +447,7 @@ public sealed class GoldenQueryMetaImportTests
 
     private sealed class Fixture
     {
-        public Fixture(bool withStore = true)
+        public Fixture(bool withStore = true, string? ownerTenantId = TenantA)
         {
             Tables.Seed(new TableMetadata
             {
@@ -342,7 +463,7 @@ public sealed class GoldenQueryMetaImportTests
                 },
                 Columns = [new TableColumn { ColumnName = "id", DataType = "int" }, new TableColumn { ColumnName = "amount", DataType = "int" }],
                 PrimaryKeyColumns = ["id"],
-                OwnerTenantId = TenantA
+                OwnerTenantId = ownerTenantId
             });
             Service = new DbtMetadataIngestionService(
                 new InMemoryProposalRepo(), Tables, new InMemoryLineageStore(),
