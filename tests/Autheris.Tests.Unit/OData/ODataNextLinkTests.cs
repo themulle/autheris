@@ -35,7 +35,7 @@ public sealed class ODataNextLinkTests
         var execution = Substitute.For<IGatewayExecutionService>();
         execution.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
             .Returns(new TableQueryPage(Rows(rows), TableAccessDecision.Allowed(table, Access), null, unordered));
-        return new ODataHandler(new InMemoryTableMetadataRepository(), execution, NullLogger<ODataHandler>.Instance);
+        return ODataHandlerTestFactory.Create(new InMemoryTableMetadataRepository(), execution, NullLogger<ODataHandler>.Instance);
     }
 
     [Fact]

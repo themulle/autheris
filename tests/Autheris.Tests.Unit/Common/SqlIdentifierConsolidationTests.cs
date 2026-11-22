@@ -28,7 +28,7 @@ public sealed class SqlIdentifierConsolidationTests
     [InlineData("id_\u00E9")]
     public async Task ODataHandler_SelectAndOrderBy_UseSqlIdentifierGuard(string invalidIdentifier)
     {
-        var handler = new ODataHandler(
+        var handler = ODataHandlerTestFactory.Create(
             new InMemoryTableMetadataRepository(),
             new StubGatewayExecutionService(),
             NullLogger<ODataHandler>.Instance);

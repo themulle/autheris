@@ -179,12 +179,11 @@ public sealed class PolicyCoreConsentUnionAndRlsSecurityTests
             Masking.MaskValue(Arg.Any<string>(), Arg.Any<object?>(), Arg.Any<MaskingRule>()).Returns("***");
         }
 
-        public StreamRlsPolicyEnforcer Create() => new(
+        public StreamRlsPolicyEnforcer Create() => Autheris.Tests.Unit.TestDoubles.StreamRlsPolicyEnforcerTestFactory.Create(
             Policy,
             Metadata,
             Masking,
             Substitute.For<IEpochValidationService>(),
-            NullLogger<StreamRlsPolicyEnforcer>.Instance,
             Consents,
             new ConsentResolutionService(),
             Cache);

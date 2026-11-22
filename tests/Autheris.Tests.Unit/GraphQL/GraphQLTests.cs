@@ -77,12 +77,14 @@ public class GraphQLTests
 
 
     [Fact]
-    public async Task DynamicTableType_WhenColumnIsBigint_MapsToLongType()
+    public async Task CatalogGraphQlTypeModule_WhenColumnIsBigint_MapsToLongType()
     {
         var table = new Table
         {
             SchemaName = "dbo",
             TableName = "transactions",
+            SourceType = "PostgreSql",
+            IsActive = true,
             DisplayName = "Transactions"
         };
         var columns = new[]
@@ -97,18 +99,20 @@ public class GraphQLTests
             Columns = columns
         };
 
-        var masking = NSubstitute.Substitute.For<IColumnMaskingProvider>();
+        using var module = new Autheris.GraphQL.Catalog.CatalogGraphQlTypeModule(
+            new InMemoryTableMetadataRepository(meta),
+            new InMemoryTableRelationRepository());
 
         var schema = await new ServiceCollection()
             .AddGraphQLServer()
             .AddQueryType(d => d.Name("Query").Field("test").Resolve(_ => "ok"))
-            .AddType(new Autheris.GraphQL.DynamicTypes.DynamicTableType(meta, masking))
+            .AddTypeModule(_ => module)
             .BuildSchemaAsync();
 
-        var dynamicType = schema.Types.GetType<IObjectTypeDefinition>("finance_transactions");
-        dynamicType.ShouldNotBeNull();
-        ((INameProvider)dynamicType.Fields["tx_id"].Type).Name.ShouldBe("Long");
-        ((INameProvider)dynamicType.Fields["quantity"].Type).Name.ShouldBe("Int");
+        var entityType = schema.Types.GetType<IObjectTypeDefinition>("finance_dbo_transactions");
+        entityType.ShouldNotBeNull();
+        ((INameProvider)entityType.Fields["tx_id"].Type).Name.ShouldBe("Long");
+        ((INameProvider)entityType.Fields["quantity"].Type).Name.ShouldBe("Int");
     }
 
     [Fact]

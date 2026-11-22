@@ -222,8 +222,8 @@ public sealed class Issue143ScopeBlindPathTests
                     return Task.CompletedTask;
                 });
 
-            return new StreamRlsPolicyEnforcer(
-                policy, metadataRepo, masking, Substitute.For<IEpochValidationService>(), NullLogger<StreamRlsPolicyEnforcer>.Instance,
+            return Autheris.Tests.Unit.TestDoubles.StreamRlsPolicyEnforcerTestFactory.Create(
+                policy, metadataRepo, masking, Substitute.For<IEpochValidationService>(),
                 consentRepo, new ConsentResolutionService(), cache, time: Time);
         }
 

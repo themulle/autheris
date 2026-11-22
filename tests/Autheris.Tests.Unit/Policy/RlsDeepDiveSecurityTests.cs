@@ -195,12 +195,11 @@ public sealed class RlsDeepDiveSecurityTests
                 Arg.Any<TableIdentifier>(), Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>())
             .Returns(TableAccessDecision.Allowed(_testTable, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true));
 
-        var enforcer = new StreamRlsPolicyEnforcer(
+        var enforcer = Autheris.Tests.Unit.TestDoubles.StreamRlsPolicyEnforcerTestFactory.Create(
             policyEnforcement,
             metadataRepo,
             maskingProvider,
             epochService,
-            NullLogger<StreamRlsPolicyEnforcer>.Instance,
             consentRepo,
             resolution,
             Substitute.For<IConsentCacheService>());

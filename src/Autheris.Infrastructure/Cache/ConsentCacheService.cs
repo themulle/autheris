@@ -500,19 +500,6 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
         _memoryCache.Set(cacheKey, envelope, cacheEntryOptions);
     }
 
-    public Task EvictTableDecisionsAsync(TableIdentifier table, CancellationToken ct = default)
-    {
-        var tableKey = NormalizeTableKey(table);
-        if (_tableCacheKeys.TryRemove(tableKey, out var keys))
-        {
-            foreach (var key in keys.Keys)
-            {
-                _memoryCache.Remove(key);
-            }
-        }
-        return Task.CompletedTask;
-    }
-
     public Task ClearL1CacheAsync(CancellationToken ct = default)
     {
         lock (_syncLock)

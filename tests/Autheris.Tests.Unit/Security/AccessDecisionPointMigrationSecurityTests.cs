@@ -237,7 +237,7 @@ public sealed class AccessDecisionPointMigrationSecurityTests
 
         // Revocation: the epoch bump (eviction) must stop the cached allow from being served.
         consents.Clear();
-        await cache.EvictTableDecisionsAsync(Orders);
+        cache.InvalidateTable(Orders);
         (await pdp.DecideReadAsync(Meta(), Subject(), AccessTransport.Rest, null, null, CancellationToken.None)).IsAllowed.ShouldBeFalse();
     }
 
@@ -389,15 +389,13 @@ public sealed class AccessDecisionPointMigrationSecurityTests
             return SetCachedDecisionAsync(tenant, userSid, table, decision, ttl, contextHash, ct);
         }
 
-        public Task EvictTableDecisionsAsync(TableIdentifier table, CancellationToken ct = default)
+        public void InvalidateTable(TableIdentifier table)
         {
             BumpEpoch(table);
             foreach (var key in _entries.Keys.Where(k => k.EndsWith($"|{table}", StringComparison.Ordinal)).ToList())
             {
                 _entries.Remove(key);
             }
-
-            return Task.CompletedTask;
         }
 
         public Task ClearL1CacheAsync(CancellationToken ct = default) => Task.CompletedTask;

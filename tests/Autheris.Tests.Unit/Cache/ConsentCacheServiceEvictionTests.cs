@@ -113,9 +113,9 @@ public sealed class ConsentCacheServiceEvictionTests
 
         cache.GetTrackedKeyCount(Table).ShouldBe(1);
 
-        await cache.EvictTableDecisionsAsync(Table);
-        var afterEvict = await cache.GetCachedDecisionAsync(Autheris.Tests.Common.TestTenants.Default, user, Table);
-        afterEvict.ShouldBeNull();
+        var latest = await cache.GetCachedDecisionAsync(Autheris.Tests.Common.TestTenants.Default, user, Table);
+        latest.ShouldNotBeNull();
+        latest!.ColumnAccess["col1"].ShouldBe(ColumnAccessLevel.Clear);
     }
 
     private sealed class CallbackTrackingMemoryCache(

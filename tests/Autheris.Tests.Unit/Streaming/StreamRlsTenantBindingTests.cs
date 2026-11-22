@@ -56,12 +56,11 @@ public sealed class StreamRlsTenantBindingTests : IDisposable
                 Arg.Any<IReadOnlySet<Sid>?>(), Arg.Any<IReadOnlySet<string>?>())
             .Returns(TableAccessDecision.Allowed(TestTable, new Dictionary<string, ColumnAccessLevel>()));
 
-        _sut = new StreamRlsPolicyEnforcer(
+        _sut = Autheris.Tests.Unit.TestDoubles.StreamRlsPolicyEnforcerTestFactory.Create(
             _policyEnforcement,
             _metadataRepo,
             _maskingProvider,
             _epochService,
-            NullLogger<StreamRlsPolicyEnforcer>.Instance,
             _consentRepo,
             _resolution,
             _cache);

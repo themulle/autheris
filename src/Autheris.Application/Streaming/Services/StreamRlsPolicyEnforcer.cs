@@ -15,6 +15,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -36,14 +37,15 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
     private readonly IConsentRepository _consentRepository;
     private readonly IConsentResolutionService _resolutionService;
     private readonly IConsentCacheService _cacheService;
-    private readonly IClientIpResolver? _clientIpResolver;
-    private readonly GatewayOptions? _options;
+    private readonly IClientIpResolver _clientIpResolver;
+    private readonly GatewayOptions _options;
     private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
 
     private readonly Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver _mandatoryFilters;
-    private readonly Autheris.Application.Identity.Attributes.ICallerAttributeResolver? _callerAttributes;
+    private readonly Autheris.Application.Identity.Attributes.ICallerAttributeResolver _callerAttributes;
     private readonly TimeProvider _time;
 
+    [ActivatorUtilitiesConstructor]
     public StreamRlsPolicyEnforcer(
         Autheris.Application.Policy.Pdp.IAccessDecisionPoint decisionPoint,
         ITableMetadataRepository metadataRepository,
@@ -53,27 +55,43 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         IConsentRepository consentRepository,
         IConsentResolutionService resolutionService,
         IConsentCacheService cacheService,
-        IClientIpResolver? clientIpResolver = null,
-        IOptions<GatewayOptions>? options = null,
-        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver? mandatoryFilters = null,
-        Autheris.Application.Identity.Attributes.ICallerAttributeResolver? callerAttributes = null,
-        TimeProvider? time = null,
-        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
+        IClientIpResolver clientIpResolver,
+        IOptions<GatewayOptions> options,
+        Autheris.Application.VirtualFilters.IMandatoryRowFilterResolver mandatoryFilters,
+        Autheris.Application.Identity.Attributes.ICallerAttributeResolver callerAttributes,
+        TimeProvider time,
+        Autheris.Application.DataSources.IDataSourceTransportGate transportGate)
     {
-        _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
-        _callerAttributes = callerAttributes;
-        _time = time ?? TimeProvider.System;
-        _mandatoryFilters = mandatoryFilters ?? Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance;
-        _decisionPoint = decisionPoint ?? throw new ArgumentNullException(nameof(decisionPoint));
-        _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
-        _maskingProvider = maskingProvider ?? throw new ArgumentNullException(nameof(maskingProvider));
-        _epochValidationService = epochValidationService ?? throw new ArgumentNullException(nameof(epochValidationService));
-        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
-        _resolutionService = resolutionService ?? throw new ArgumentNullException(nameof(resolutionService));
-        _cacheService = cacheService ?? throw new ArgumentNullException(nameof(cacheService));
+        ArgumentNullException.ThrowIfNull(decisionPoint);
+        ArgumentNullException.ThrowIfNull(metadataRepository);
+        ArgumentNullException.ThrowIfNull(maskingProvider);
+        ArgumentNullException.ThrowIfNull(epochValidationService);
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(consentRepository);
+        ArgumentNullException.ThrowIfNull(resolutionService);
+        ArgumentNullException.ThrowIfNull(cacheService);
+        ArgumentNullException.ThrowIfNull(clientIpResolver);
+        ArgumentNullException.ThrowIfNull(options);
+        ArgumentNullException.ThrowIfNull(options.Value, nameof(options));
+        ArgumentNullException.ThrowIfNull(mandatoryFilters);
+        ArgumentNullException.ThrowIfNull(callerAttributes);
+        ArgumentNullException.ThrowIfNull(time);
+        ArgumentNullException.ThrowIfNull(transportGate);
+
+        _decisionPoint = decisionPoint;
+        _metadataRepository = metadataRepository;
+        _maskingProvider = maskingProvider;
+        _epochValidationService = epochValidationService;
+        _logger = logger;
+        _consentRepository = consentRepository;
+        _resolutionService = resolutionService;
+        _cacheService = cacheService;
         _clientIpResolver = clientIpResolver;
-        _options = options?.Value;
+        _options = options.Value;
+        _mandatoryFilters = mandatoryFilters;
+        _callerAttributes = callerAttributes;
+        _time = time;
+        _transportGate = transportGate;
     }
 
     public async ValueTask<StreamSecurityDecision> EvaluateAndMaskAsync(
@@ -314,7 +332,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
 
         // 8. In-Stream Column Masking and Redaction (Consent level + catalog sensitivity)
         var maskedResult = new Dictionary<string, object?>(rawPayload.Count, StringComparer.OrdinalIgnoreCase);
-        bool maskingDisabled = _options?.IsColumnMaskingDisabled == true;
+        bool maskingDisabled = _options.IsColumnMaskingDisabled;
 
         foreach (var (columnName, rawValue) in rawPayload)
         {
@@ -355,7 +373,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
 
                         // SEC D-3: HMAC pseudonyms are tenant-scoped.
                         rule = Autheris.Application.Services.GatewayExecutionService.ScopeRuleForTenant(
-                            rule, tenantId.Value, _options?.DataMasking?.HmacKeyId);
+                            rule, tenantId.Value, _options.DataMasking?.HmacKeyId);
                         maskedResult[columnName] = _maskingProvider.MaskValue(columnName, rawValue, rule);
                     }
                     else
@@ -384,7 +402,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         TableMetadata metadata,
         CancellationToken ct)
     {
-        if (_options?.IsConsentBypassed == true)
+        if (_options.IsConsentBypassed)
         {
             return TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true);
         }
@@ -443,7 +461,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         TableAccessDecision decision, ClaimsPrincipal subscriber, TenantId tenantId, TableMetadata metadata,
         IReadOnlyDictionary<string, object?> payload, CancellationToken ct)
     {
-        if (_callerAttributes is not { IsEnabled: true } resolver || decision.ConsentFilterRecipe is not { } recipe)
+        if (!_callerAttributes.IsEnabled || decision.ConsentFilterRecipe is not { } recipe)
         {
             return null;
         }
@@ -469,12 +487,12 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
             if (entry is null || entry.Tenant != tenantId)
             {
                 // One immutable pair swapped by a single reference write: a concurrent event never sees a subject with a foreign tenant.
-                entry = new SubjectEntry(tenantId, resolver.CreateSubject(subscriber, tenantId, longLived: true));
+                entry = new SubjectEntry(tenantId, _callerAttributes.CreateSubject(subscriber, tenantId, longLived: true));
                 cached.Entry = entry;
             }
 
             var subject = entry.Subject;
-            var (set, padding) = await Autheris.Application.Identity.Attributes.CallerAttributeRecipes.ResolveAsync(resolver, subject, names, ct).ConfigureAwait(false);
+            var (set, padding) = await Autheris.Application.Identity.Attributes.CallerAttributeRecipes.ResolveAsync(_callerAttributes, subject, names, ct).ConfigureAwait(false);
             var predicate = new Autheris.Application.Sql.Policy.TypedRowFilterBuilder().BuildCombined(
                 recipe.Allow, recipe.Deny, default, Autheris.Application.Sql.Policy.PolicyParameterNamer.ToTargetDialect(metadata.Dialect), set, padding);
             if (predicate is null)
@@ -497,7 +515,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
         IPAddress? resolved = null;
         try
         {
-            resolved = _clientIpResolver?.ResolveClientIp();
+            resolved = _clientIpResolver.ResolveClientIp();
         }
         catch (InvalidOperationException)
         {

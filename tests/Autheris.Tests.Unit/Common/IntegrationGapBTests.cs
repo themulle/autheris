@@ -157,49 +157,6 @@ public sealed class IntegrationGapBTests
         await audit.DidNotReceive().RecordAuditEventAsync(Arg.Is<AuditLogEntry>(e => e.Decision == "ALLOW"), Arg.Any<CancellationToken>());
     }
 
-    [Fact]
-    public async Task GAP07_ForbiddenExecutorResult_SetsIsErrorInToolsCallResponse()
-    {
-        var errorJson = GatewayMcpQueryExecutor.CreateErrorResult("tenant-alpha", "query_customers", McpErrorCodes.Forbidden, "Access denied by data governance policy.");
-        var executor = Substitute.For<IMcpQueryExecutor>();
-        executor.ExecuteOperationAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(errorJson));
-
-        var registry = new McpToolRegistry();
-        var guardrail = new AiDataGuardrailService(registry, Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executor, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
-        var handler = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), registry, guardrail, NullLogger<McpProtocolHandler>.Instance);
-        var session = handler.CreateSession("svc-agent", "tenant-alpha", userSid: null);
-
-        var response = await handler.HandleMessageAsync(session.SessionId,
-            """{"jsonrpc":"2.0","id":7,"method":"tools/call","params":{"name":"query_customers","arguments":{}}}""");
-
-        using var doc = JsonDocument.Parse(response);
-        var result = doc.RootElement.GetProperty("result");
-        result.GetProperty("isError").GetBoolean().ShouldBeTrue();
-        var text = result.GetProperty("content")[0].GetProperty("text").GetString();
-        text.ShouldNotBeNull();
-        text.ShouldContain("FORBIDDEN");
-    }
-
-    [Fact]
-    public async Task GAP07_SuccessfulExecutorResult_KeepsIsErrorFalse()
-    {
-        var executor = Substitute.For<IMcpQueryExecutor>();
-        executor.ExecuteOperationAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult("""{"items":[{"id":"1"}],"isError":false}"""));
-
-        var registry = new McpToolRegistry();
-        var guardrail = new AiDataGuardrailService(registry, Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, executor, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
-        var handler = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), registry, guardrail, NullLogger<McpProtocolHandler>.Instance);
-        var session = handler.CreateSession("svc-agent", "tenant-alpha", userSid: null);
-
-        var response = await handler.HandleMessageAsync(session.SessionId,
-            """{"jsonrpc":"2.0","id":8,"method":"tools/call","params":{"name":"query_customers","arguments":{}}}""");
-
-        using var doc = JsonDocument.Parse(response);
-        doc.RootElement.GetProperty("result").GetProperty("isError").GetBoolean().ShouldBeFalse();
-    }
-
     // ---------------------------------------------------------------- PART-WS (M-14)
 
     [Fact]

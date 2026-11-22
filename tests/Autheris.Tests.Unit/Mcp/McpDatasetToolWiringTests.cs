@@ -266,17 +266,10 @@ public sealed class McpDatasetToolWiringTests
     }
 
     [Fact]
-    public async Task Initialize_TellsAgentsToQueryDataWithGraphQl()
+    public void Initialize_TellsAgentsToQueryDataWithGraphQl()
     {
-        var registry = new McpToolRegistry(Options.Create(new GatewayOptions()), new FixedDemoData(false));
-        var guardrail = new AiDataGuardrailService(registry, Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
-        var handler = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), registry, guardrail, NullLogger<McpProtocolHandler>.Instance);
-        var session = handler.CreateSession("agent", "tenant-a", userSid: null);
+        var instructions = McpDatasetTools.BuildServerInstructions(ReadPathSwitches.From(new GatewayOptions()));
 
-        var response = await handler.HandleMessageAsync(session.SessionId, """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}""");
-
-        using var doc = JsonDocument.Parse(response);
-        var instructions = doc.RootElement.GetProperty("result").GetProperty("instructions").GetString();
         instructions.ShouldNotBeNull();
         instructions.ShouldContain("query_graphql");
         instructions.ShouldContain("list_datasets");

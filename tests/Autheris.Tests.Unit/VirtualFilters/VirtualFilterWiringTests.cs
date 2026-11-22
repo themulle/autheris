@@ -7,6 +7,7 @@ using System.Linq;
 using System.Reflection;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
+using Autheris.Api.Extensions.DependencyInjection;
 using Autheris.Application.DataSources.Connectors.CrossDomain;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
@@ -15,6 +16,7 @@ using Autheris.Application.Services;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
@@ -37,10 +39,14 @@ public sealed class VirtualFilterWiringTests
             GovernanceDb = new GovernanceDbOptions { Provider = "PostgreSql", ConnectionString = Autheris.Tests.Common.Governance.GovernanceTestConnectionStrings.NonConnectingPostgreSql }
         };
         IHostEnvironment env = new TestHostEnvironment("Development");
+        var configuration = new ConfigurationBuilder().Build();
         services.AddSingleton(env);
+        services.AddSingleton<IConfiguration>(configuration);
         services.AddSingleton(Options.Create(options));
+        services.AddSingleton<IOptionsMonitor<GatewayOptions>>(new StaticOptionsMonitor<GatewayOptions>(options));
         services.AddLogging();
         services.AddHttpContextAccessor();
+        services.AddDataSourceHierarchicalConfiguration(configuration);
         services.AddGatewayInfrastructure(options);
         return services.BuildServiceProvider();
     }

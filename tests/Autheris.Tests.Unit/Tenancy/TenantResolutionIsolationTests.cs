@@ -157,12 +157,11 @@ public class TenantResolutionIsolationTests
         var maskingProvider = Substitute.For<IColumnMaskingProvider>();
         var epochService = Substitute.For<IEpochValidationService>();
 
-        var enforcer = new StreamRlsPolicyEnforcer(
+        var enforcer = Autheris.Tests.Unit.TestDoubles.StreamRlsPolicyEnforcerTestFactory.Create(
             policyEnforcement,
             metadataRepo,
             maskingProvider,
             epochService,
-            NullLogger<StreamRlsPolicyEnforcer>.Instance,
             new InMemoryConsentRepository(),
             Substitute.For<IConsentResolutionService>(),
             Substitute.For<IConsentCacheService>());

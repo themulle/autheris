@@ -29,8 +29,6 @@ public sealed class UnwiredCodeArchitectureTests
     {
         Type[] sessionFactoryTypes =
         [
-            typeof(IMcpProtocolHandler),
-            typeof(McpProtocolHandler),
             typeof(IMcpSessionStore),
             typeof(McpSessionStore)
         ];

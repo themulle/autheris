@@ -210,7 +210,7 @@ public sealed class ODataTests
                 : Task.FromResult(new TableQueryPage([], TableAccessDecision.Denied(table, "Not found"), null))
         };
 
-        var handler = new ODataHandler(metadataRepo, execService, logger);
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, execService, logger);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             principal: null,
@@ -258,7 +258,7 @@ public sealed class ODataTests
 
         var execService = StubGatewayExecutionService.WithPage(new TableQueryPage(sampleRows, decision, null));
 
-        var handler = new ODataHandler(metadataRepo, execService, logger);
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, execService, logger);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             principal: null,
@@ -296,7 +296,7 @@ public sealed class ODataTests
 
         var execService = StubGatewayExecutionService.WithPage(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null));
 
-        var handler = new ODataHandler(metadataRepo, execService, logger, DevEnv());
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, execService, logger, DevEnv());
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             principal: null,
@@ -335,8 +335,8 @@ public sealed class ODataTests
 
         foreach (var handler in new[]
         {
-            new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance, DevEnv("Production")),
-            new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance)
+            ODataHandlerTestFactory.Create(metadataRepo, execService, NullLogger<ODataHandler>.Instance, DevEnv("Production")),
+            ODataHandlerTestFactory.Create(metadataRepo, execService, NullLogger<ODataHandler>.Instance, DevEnv("Staging"))
         })
         {
             var denied = await handler.ExecuteEntitySetQueryAsync(null, "https://gateway/odata/v4", new TableIdentifier("sales", "dbo", "invoices"), 10, 0, null, false, null);
@@ -526,7 +526,7 @@ public sealed class ODataTests
 
         var execService = StubGatewayExecutionService.WithPage(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null));
 
-        var handler = new ODataHandler(metadataRepo, execService, logger);
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, execService, logger);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             principal: null,
@@ -562,7 +562,7 @@ public sealed class ODataTests
 
         var execService = StubGatewayExecutionService.WithPage(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null));
 
-        var handler = new ODataHandler(metadataRepo, execService, logger);
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, execService, logger);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             principal: null,
@@ -591,7 +591,7 @@ public sealed class ODataTests
     {
         var metadataRepo = new InMemoryTableMetadataRepository();
         var execService = new StubGatewayExecutionService();
-        var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             principal: null,
@@ -622,7 +622,7 @@ public sealed class ODataTests
 
         var execService = StubGatewayExecutionService.WithPage(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null));
 
-        var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             principal: null,
@@ -652,7 +652,7 @@ public sealed class ODataTests
     {
         var metadataRepo = new InMemoryTableMetadataRepository();
         var execService = new StubGatewayExecutionService();
-        var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             principal: null,
@@ -679,7 +679,7 @@ public sealed class ODataTests
         var metadataRepo = new InMemoryTableMetadataRepository();
         var execService = StubGatewayExecutionService.Throwing(new TimeoutException("Database command timed out."));
 
-        var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             principal: null,
@@ -704,7 +704,7 @@ public sealed class ODataTests
         var metadataRepo = new InMemoryTableMetadataRepository();
         var execService = StubGatewayExecutionService.Throwing(new TestDbTimeoutException("SqlException: Execution Timeout Expired. The timeout period elapsed."));
 
-        var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             principal: null,
@@ -728,7 +728,7 @@ public sealed class ODataTests
         var metadataRepo = new InMemoryTableMetadataRepository();
         var execService = StubGatewayExecutionService.Throwing(new InvalidOperationException("Fatal unexpected engine crash"));
 
-        var handlerDev = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance, DevEnv("Development"));
+        var handlerDev = ODataHandlerTestFactory.Create(metadataRepo, execService, NullLogger<ODataHandler>.Instance, DevEnv("Development"));
         var resultDev = await handlerDev.ExecuteEntitySetQueryAsync(null, "https://gateway/odata/v4", new TableIdentifier("sales", "dbo", "invoices"), 10, 0, null, false, null);
 
         resultDev.Success.ShouldBeFalse();
@@ -736,7 +736,7 @@ public sealed class ODataTests
         resultDev.ErrorCode.ShouldBe("INTERNAL_ERROR");
         resultDev.ErrorMessage.ShouldNotBeNull().ShouldContain("Fatal unexpected engine crash");
 
-        var handlerProd = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance, DevEnv("Production"));
+        var handlerProd = ODataHandlerTestFactory.Create(metadataRepo, execService, NullLogger<ODataHandler>.Instance, DevEnv("Production"));
         var resultProd = await handlerProd.ExecuteEntitySetQueryAsync(null, "https://gateway/odata/v4", new TableIdentifier("sales", "dbo", "invoices"), 10, 0, null, false, null);
 
         resultProd.Success.ShouldBeFalse();
@@ -751,7 +751,7 @@ public sealed class ODataTests
         var metadataRepo = new InMemoryTableMetadataRepository();
         var execService = StubGatewayExecutionService.Throwing(new Autheris.Domain.Exceptions.GatewayUnauthorizedException("Authentication required"));
 
-        var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(null, "https://gateway/odata/v4", new TableIdentifier("sales", "dbo", "invoices"), 10, 0, null, false, null);
 
@@ -767,7 +767,7 @@ public sealed class ODataTests
         var metadataRepo = new InMemoryTableMetadataRepository();
         var execService = StubGatewayExecutionService.Throwing(new Autheris.Domain.Exceptions.GatewaySecurityException("Zero-Trust policy violation"));
 
-        var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance, DevEnv("Development"));
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, execService, NullLogger<ODataHandler>.Instance, DevEnv("Development"));
 
         var result = await handler.ExecuteEntitySetQueryAsync(null, "https://gateway/odata/v4", new TableIdentifier("sales", "dbo", "invoices"), 10, 0, null, false, null);
 
@@ -785,7 +785,7 @@ public sealed class ODataTests
     {
         var metadataRepo = new InMemoryTableMetadataRepository();
         var execService = new StubGatewayExecutionService();
-        var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
         await Should.ThrowAsync<ArgumentException>(() =>
             handler.ExecuteEntitySetQueryAsync(null, rootUrl!, new TableIdentifier("sales", "dbo", "invoices"), 10, 0, null, false, null));
@@ -803,7 +803,7 @@ public sealed class ODataTests
 
         var execService = StubGatewayExecutionService.WithPage(new TableQueryPage(Array.Empty<IReadOnlyDictionary<string, object?>>(), decision, null));
 
-        var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
         var headers = new Dictionary<string, string[]> { ["X-Tenant-ID"] = ["tenant_abc"] };
 
         var result = await handler.ExecuteEntitySetQueryAsync(null, "https://gateway/odata/v4", new TableIdentifier("sales", "dbo", "invoices"), 10, 0, null, false, headers);
@@ -821,7 +821,7 @@ public sealed class ODataTests
     }
 
     private static ODataHandler CreateHandlerThrowing(Exception exception, IGatewayExecutionService? execService = null) =>
-        new(
+        ODataHandlerTestFactory.Create(
             new InMemoryTableMetadataRepository(),
             execService ?? StubGatewayExecutionService.Throwing(exception),
             NullLogger<ODataHandler>.Instance,
@@ -849,7 +849,7 @@ public sealed class ODataTests
         var rows = new List<IReadOnlyDictionary<string, object?>> { new Dictionary<string, object?> { ["id"] = 1 } };
         var decision = TableAccessDecision.Allowed(new TableIdentifier("lwetem_prod", "fms", "air1"), new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
         var execService = StubGatewayExecutionService.WithPage(new TableQueryPage(rows, decision, TotalCount: null));
-        var handler = new ODataHandler(new InMemoryTableMetadataRepository(), execService, NullLogger<ODataHandler>.Instance);
+        var handler = ODataHandlerTestFactory.Create(new InMemoryTableMetadataRepository(), execService, NullLogger<ODataHandler>.Instance);
 
         var result = await QueryAsync(handler, includeCount: true);
 
@@ -863,7 +863,7 @@ public sealed class ODataTests
     public async Task ODataHandler_SkipAboveMaximum_Returns400()
     {
         var execService = new StubGatewayExecutionService();
-        var handler = new ODataHandler(new InMemoryTableMetadataRepository(), execService, NullLogger<ODataHandler>.Instance);
+        var handler = ODataHandlerTestFactory.Create(new InMemoryTableMetadataRepository(), execService, NullLogger<ODataHandler>.Instance);
 
         var result = await QueryAsync(handler, skip: ODataHandler.MaxSkip + 1);
 
@@ -979,10 +979,9 @@ public sealed class ODataTests
             }
         );
 
-        var execService = StubGatewayExecutionService.WithAccessDecision(
-            m => m.Identifier == sampleTable.Identifier ? decision : TableAccessDecision.Denied(m.Identifier, "Denied"));
-
-        var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
+        var execService = new StubGatewayExecutionService();
+        var policyEnforcer = PolicyOf(m => m.Identifier == sampleTable.Identifier ? decision : TableAccessDecision.Denied(m.Identifier, "Denied"));
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, execService, NullLogger<ODataHandler>.Instance, policyEnforcer: policyEnforcer);
 
         var xml = await handler.GetMetadataCsdlAsync(user);
 
@@ -1007,11 +1006,11 @@ public sealed class ODataTests
         var user = CreateAuthenticatedUser("sales");
 
         // table1 allowed, table2 denied
-        var execService = StubGatewayExecutionService.WithAccessDecision(m => m.Identifier == table1.Identifier
+        var execService = new StubGatewayExecutionService();
+        var policyEnforcer = PolicyOf(m => m.Identifier == table1.Identifier
             ? TableAccessDecision.Allowed(table1.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
             : TableAccessDecision.Denied(table2.Identifier, "Forbidden"));
-
-        var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, execService, NullLogger<ODataHandler>.Instance, policyEnforcer: policyEnforcer);
 
         var doc = (Dictionary<string, object?>)await handler.GetServiceDocumentAsync("https://gateway/odata/v4", user);
 
@@ -1027,15 +1026,13 @@ public sealed class ODataTests
         var sampleTable = CreateSampleTable();
         var metadataRepo = new InMemoryTableMetadataRepository(sampleTable);
         var shouldThrow = true;
-        var execService = new StubGatewayExecutionService
-        {
-            OnCheckMetadataAccess = (_, _, _, _) => shouldThrow
-                ? Task.FromException<TableAccessDecision>(new InvalidOperationException("boom"))
-                : Task.FromResult(TableAccessDecision.Allowed(sampleTable.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true))
-        };
+        var execService = new StubGatewayExecutionService();
+        var policyEnforcer = new DelegatingODataQueryPolicyEnforcer((_, _, _, _) => shouldThrow
+            ? ValueTask.FromException<TableAccessDecision>(new InvalidOperationException("boom"))
+            : ValueTask.FromResult(TableAccessDecision.Allowed(sampleTable.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
         using var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions { SizeLimit = 1024 * 1024 });
 
-        var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance, environment: null, memoryCache: memoryCache);
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, execService, NullLogger<ODataHandler>.Instance, memoryCache: memoryCache, policyEnforcer: policyEnforcer);
         var user = CreateAuthenticatedUser("sales");
 
         var xml = await handler.GetMetadataCsdlAsync(user);
@@ -1052,9 +1049,9 @@ public sealed class ODataTests
     public async Task SR_M_16_Metadata_NullDecision_TableOmitted()
     {
         var metadataRepo = new InMemoryTableMetadataRepository(CreateSampleTable());
-        var execService = new StubGatewayExecutionService
-        { OnCheckMetadataAccess = (_, _, _, _) => Task.FromResult<TableAccessDecision>(null!) };
-        var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
+        var execService = new StubGatewayExecutionService();
+        var policyEnforcer = new DelegatingODataQueryPolicyEnforcer((_, _, _, _) => ValueTask.FromResult<TableAccessDecision>(null!));
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, execService, NullLogger<ODataHandler>.Instance, policyEnforcer: policyEnforcer);
         var xml = await handler.GetMetadataCsdlAsync(CreateAuthenticatedUser("sales"));
         xml.ShouldNotContain("sales_dbo_invoices");
     }
@@ -1064,12 +1061,12 @@ public sealed class ODataTests
     {
         var sampleTable = CreateSampleTable();
         var metadataRepo = new InMemoryTableMetadataRepository(sampleTable);
-        var execService = StubGatewayExecutionService.WithAccessDecision(m => m.Identifier == sampleTable.Identifier
+        var execService = new StubGatewayExecutionService();
+        var policyEnforcer = PolicyOf(m => m.Identifier == sampleTable.Identifier
             ? TableAccessDecision.Allowed(sampleTable.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
             : TableAccessDecision.Denied(m.Identifier, "Denied"));
         using var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions { SizeLimit = 1024 * 1024 });
-
-        var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance, environment: null, memoryCache: memoryCache);
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, execService, NullLogger<ODataHandler>.Instance, memoryCache: memoryCache, policyEnforcer: policyEnforcer);
         var user = CreateAuthenticatedUser("sales");
 
         (await handler.GetMetadataCsdlAsync(user)).ShouldContain("sales_dbo_invoices");
@@ -1144,28 +1141,27 @@ public sealed class ODataTests
             new Dictionary<string, ColumnAccessLevel>(),
             hasUnconstrainedColumnAllow: true);
 
-        var execService = StubGatewayExecutionService.WithAccessDecision(m => m.Identifier == sampleTable.Identifier
-            ? decision
-            : TableAccessDecision.Denied(m.Identifier, "Denied"));
+        var execService = new StubGatewayExecutionService();
+        var enforcerCalls = 0;
+        var policyEnforcer = PolicyOf(m => { enforcerCalls++; return m.Identifier == sampleTable.Identifier ? decision : TableAccessDecision.Denied(m.Identifier, "Denied"); });
 
-        var handler = new ODataHandler(metadataRepo, execService, logger, environment: null, memoryCache: memoryCache);
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, execService, logger, memoryCache: memoryCache, policyEnforcer: policyEnforcer);
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-12345678-500"), new Claim("tenant", "sales")], "TestAuth"));
 
-        // First call: resolves via fast-path check with recordAudit: false
+        // First call: resolves via policy enforcer without execution-path per-table audit
         var xml1 = await handler.GetMetadataCsdlAsync(principal);
         xml1.ShouldContain("EntityType Name=\"sales_dbo_invoices\"");
 
-        execService.MetadataAccessCalls.Count.ShouldBe(1);
-        execService.MetadataAccessCalls[0].Metadata.Identifier.ShouldBe(sampleTable.Identifier);
-        execService.MetadataAccessCalls[0].RecordAudit.ShouldBeFalse();
+        enforcerCalls.ShouldBe(1);
+        execService.MetadataAccessCalls.Count.ShouldBe(0);
 
         // Second call: served directly from IMemoryCache without re-evaluating access
         var xml2 = await handler.GetMetadataCsdlAsync(principal);
         xml2.ShouldBe(xml1);
 
-        // Verify CheckTableAccessAsync was NOT called a second time
-        execService.MetadataAccessCalls.Count.ShouldBe(1);
+        // Verify EnforceAsync was NOT called a second time
+        enforcerCalls.ShouldBe(1);
     }
 
     [Fact]
@@ -1181,11 +1177,11 @@ public sealed class ODataTests
             new Dictionary<string, ColumnAccessLevel>(),
             hasUnconstrainedColumnAllow: true);
 
-        var execService = StubGatewayExecutionService.WithAccessDecision(m => m.Identifier == sampleTable.Identifier
-            ? decision
-            : TableAccessDecision.Denied(m.Identifier, "Denied"));
+        var execService = new StubGatewayExecutionService();
+        var enforcerCalls = 0;
+        var policyEnforcer = PolicyOf(m => { enforcerCalls++; return m.Identifier == sampleTable.Identifier ? decision : TableAccessDecision.Denied(m.Identifier, "Denied"); });
 
-        var handler = new ODataHandler(metadataRepo, execService, logger, environment: null, memoryCache: memoryCache);
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, execService, logger, memoryCache: memoryCache, policyEnforcer: policyEnforcer);
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.PrimarySid, "S-1-5-21-12345678-500"), new Claim("tenant", "sales")], "TestAuth"));
 
@@ -1193,16 +1189,18 @@ public sealed class ODataTests
         var doc1 = await handler.GetServiceDocumentAsync("https://gateway/odata/v4", principal);
         doc1.ShouldNotBeNull();
 
-        execService.MetadataAccessCalls.Count.ShouldBe(1);
-        execService.MetadataAccessCalls[0].Metadata.Identifier.ShouldBe(sampleTable.Identifier);
-        execService.MetadataAccessCalls[0].RecordAudit.ShouldBeFalse();
+        enforcerCalls.ShouldBe(1);
+        execService.MetadataAccessCalls.Count.ShouldBe(0);
 
         // Second call should hit the cache
         var doc2 = await handler.GetServiceDocumentAsync("https://gateway/odata/v4", principal);
         doc2.ShouldBeSameAs(doc1);
 
-        // Still only 1 invocation to CheckTableAccessAsync
-        execService.MetadataAccessCalls.Count.ShouldBe(1);
+        // Still only 1 invocation to EnforceAsync
+        enforcerCalls.ShouldBe(1);
     }
+
+    private static DelegatingODataQueryPolicyEnforcer PolicyOf(Func<TableMetadata, TableAccessDecision> decide) =>
+        new((_, m, _, _) => ValueTask.FromResult(decide(m)));
 }
 
