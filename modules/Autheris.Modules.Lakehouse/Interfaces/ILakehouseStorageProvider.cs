@@ -1,5 +1,7 @@
 namespace Autheris.Extensions.Lakehouse.Interfaces;
 
+using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -23,4 +25,10 @@ public interface ILakehouseStorageProvider
     /// Checks whether a file exists at the specified storage location.
     /// </summary>
     ValueTask<bool> ExistsAsync(string location, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Lists child object locations directly under the specified directory/prefix location.
+    /// </summary>
+    ValueTask<IReadOnlyList<string>> ListAsync(string prefixLocation, CancellationToken cancellationToken = default)
+        => ValueTask.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
 }

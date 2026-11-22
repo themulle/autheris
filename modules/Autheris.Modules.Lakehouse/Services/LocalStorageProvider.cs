@@ -1,6 +1,7 @@
 namespace Autheris.Extensions.Lakehouse.Services;
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Threading;
 using System.Threading.Tasks;
@@ -86,6 +87,34 @@ public sealed class LocalStorageProvider : ILakehouseStorageProvider
         if (string.IsNullOrWhiteSpace(location)) return ValueTask.FromResult(false);
         var resolvedPath = ResolvePath(location);
         return ValueTask.FromResult(File.Exists(resolvedPath));
+    }
+
+    public ValueTask<IReadOnlyList<string>> ListAsync(string prefixLocation, CancellationToken cancellationToken = default)
+    {
+        cancellationToken.ThrowIfCancellationRequested();
+        if (string.IsNullOrWhiteSpace(prefixLocation))
+        {
+            return ValueTask.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+        }
+
+        var resolvedDir = ResolvePath(prefixLocation);
+        if (!Directory.Exists(resolvedDir))
+        {
+            return ValueTask.FromResult<IReadOnlyList<string>>(Array.Empty<string>());
+        }
+
+        var fullBasePath = Path.GetFullPath(_basePath!);
+        var normalizedPrefix = prefixLocation.TrimEnd('/');
+        var results = new List<string>();
+        foreach (var filePath in Directory.EnumerateFiles(resolvedDir, "*", SearchOption.TopDirectoryOnly))
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+            EnsureNoSymbolicLinks(filePath, fullBasePath, prefixLocation);
+            var fileName = Path.GetFileName(filePath);
+            results.Add(string.IsNullOrEmpty(normalizedPrefix) ? fileName : $"{normalizedPrefix}/{fileName}");
+        }
+
+        return ValueTask.FromResult<IReadOnlyList<string>>(results);
     }
 
     private static bool IsDevelopment(Microsoft.Extensions.Hosting.IHostEnvironment environment) =>

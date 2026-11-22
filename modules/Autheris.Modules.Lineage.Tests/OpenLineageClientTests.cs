@@ -9,6 +9,7 @@ using System.Net.Http.Headers;
 using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Lineage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -106,7 +107,8 @@ public sealed class OpenLineageClientTests
         IHostEnvironment? environment = null,
         CapturingHttpHandler? handler = null,
         RecordingLogger<OpenLineageClient>? logger = null,
-        ILineageGraphStore? graphStore = null)
+        ILineageGraphStore? graphStore = null,
+        IKeyVaultSecretProvider? secretProvider = null)
     {
         var options = Options.Create(new LineageModuleOptions
         {
@@ -124,7 +126,8 @@ public sealed class OpenLineageClientTests
             options,
             logger ?? new RecordingLogger<OpenLineageClient>(),
             gatewayOptions,
-            environment);
+            environment,
+            secretProvider: secretProvider);
     }
 
     [Fact]
@@ -306,11 +309,16 @@ public sealed class OpenLineageClientTests
     public async Task Https_endpoint_outside_development_sends_bearer_key()
     {
         var handler = new CapturingHttpHandler();
+        var secretProvider = new StubSecretProvider(reference =>
+            reference == "kv://openlineage-prod-token"
+                ? Encoding.UTF8.GetBytes("prod-token")
+                : throw new InvalidOperationException($"Unknown secret '{reference}'"));
         var client = CreateClient(
             "https://openlineage.example.com/api/v1/lineage",
-            apiKey: "prod-token",
+            apiKey: "kv://openlineage-prod-token",
             environment: new StubHostEnvironment(Environments.Production),
-            handler: handler);
+            handler: handler,
+            secretProvider: secretProvider);
 
         var result = await client.PushLineageEventAsync(SampleEvent());
 
@@ -319,5 +327,49 @@ public sealed class OpenLineageClientTests
         handler.Requests[0].Authorization.ShouldNotBeNull();
         handler.Requests[0].Authorization!.Scheme.ShouldBe("Bearer");
         handler.Requests[0].Authorization!.Parameter.ShouldBe("prod-token");
+    }
+
+    [Fact]
+    public async Task PlaintextApiKey_InProduction_FailsClosedWithoutSending()
+    {
+        var handler = new CapturingHttpHandler();
+        var client = CreateClient(
+            "https://openlineage.example.com/api/v1/lineage",
+            apiKey: "plaintext-prod-token",
+            environment: new StubHostEnvironment(Environments.Production),
+            handler: handler);
+
+        await Should.ThrowAsync<System.Security.SecurityException>(() => client.PushLineageEventAsync(SampleEvent()));
+
+        handler.Requests.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task UnresolvableSecretReference_InProduction_FailsClosedWithoutSending()
+    {
+        var handler = new CapturingHttpHandler();
+        var logger = new RecordingLogger<OpenLineageClient>();
+        const string secretRef = "kv://missing-openlineage-secret";
+        var secretProvider = new StubSecretProvider(_ =>
+            throw new InvalidOperationException($"Failed to read secret 'raw-secret-leak-sentinel' at {secretRef}"));
+        var client = CreateClient(
+            "https://openlineage.example.com/api/v1/lineage",
+            apiKey: secretRef,
+            environment: new StubHostEnvironment(Environments.Production),
+            handler: handler,
+            logger: logger,
+            secretProvider: secretProvider);
+
+        var ex = await Should.ThrowAsync<System.Security.SecurityException>(() => client.PushLineageEventAsync(SampleEvent()));
+
+        ex.Message.ShouldNotContain("raw-secret-leak-sentinel");
+        handler.Requests.ShouldBeEmpty();
+        logger.Entries.ShouldNotBeEmpty();
+        logger.Entries.ShouldAllBe(e => e.Exception == null && !e.Message.Contains("raw-secret-leak-sentinel"));
+    }
+
+    private sealed class StubSecretProvider(Func<string, byte[]> resolver) : IKeyVaultSecretProvider
+    {
+        public byte[] GetSecretBytes(string secretRef) => resolver(secretRef);
     }
 }

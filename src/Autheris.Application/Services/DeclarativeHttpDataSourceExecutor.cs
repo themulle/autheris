@@ -112,27 +112,7 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
             string url;
             if (config.Strategy == HttpPaginationStrategy.NextLinkUrl && !string.IsNullOrWhiteSpace(currentNextLink))
             {
-                if (Uri.TryCreate(currentNextLink, UriKind.Absolute, out var absNextUri))
-                {
-                    if (config.EnforceSameHost && baseUri != null)
-                    {
-                        if (!string.Equals(absNextUri.Host, baseUri.Host, StringComparison.OrdinalIgnoreCase) ||
-                            absNextUri.Scheme != baseUri.Scheme ||
-                            absNextUri.Port != baseUri.Port)
-                        {
-                            throw new SecurityException($"NextLink host spoofing detected: '{absNextUri.Host}' does not match registered host '{baseUri.Host}'.");
-                        }
-                    }
-                    url = absNextUri.ToString();
-                }
-                else if (baseUri != null)
-                {
-                    url = new Uri(baseUri, currentNextLink).ToString();
-                }
-                else
-                {
-                    url = currentNextLink;
-                }
+                url = ResolveNextLinkUrl(currentNextLink, baseUri, config.EnforceSameHost);
             }
             else
             {
@@ -226,6 +206,78 @@ public sealed class DeclarativeHttpDataSourceExecutor : IDataSourceExecutor
         }
 
         return allRows;
+    }
+
+    internal static string ResolveNextLinkUrl(string currentNextLink, Uri? baseUri, bool enforceSameHost)
+    {
+        var rawNext = currentNextLink.Trim();
+        if (rawNext.StartsWith("\\", StringComparison.Ordinal) || rawNext.StartsWith("/\\", StringComparison.Ordinal))
+        {
+            throw new SecurityException($"Disallowed NextLink path prefix in '{currentNextLink}'.");
+        }
+
+        Uri resolvedUri;
+
+        if (rawNext.StartsWith("//", StringComparison.Ordinal))
+        {
+            if (baseUri == null || !Uri.TryCreate(baseUri, rawNext, out var netPathUri))
+            {
+                throw new SecurityException($"Invalid NextLink URI '{currentNextLink}'.");
+            }
+
+            resolvedUri = netPathUri;
+        }
+        else if (rawNext.StartsWith("/", StringComparison.Ordinal))
+        {
+            if (baseUri == null || !Uri.TryCreate(baseUri, rawNext, out var rootRelativeUri))
+            {
+                throw new SecurityException($"Cannot resolve root-relative NextLink '{currentNextLink}' without a valid BaseUrl.");
+            }
+
+            resolvedUri = rootRelativeUri;
+        }
+        else if (!Uri.TryCreate(rawNext, UriKind.RelativeOrAbsolute, out var parsed))
+        {
+            throw new SecurityException($"Invalid NextLink URI '{currentNextLink}'.");
+        }
+        else if (parsed.IsAbsoluteUri)
+        {
+            if (!string.Equals(parsed.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(parsed.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase))
+            {
+                throw new SecurityException($"Disallowed NextLink URI scheme '{parsed.Scheme}'.");
+            }
+
+            resolvedUri = parsed;
+        }
+        else
+        {
+            if (baseUri == null || !Uri.TryCreate(baseUri, parsed, out var relativeUri))
+            {
+                throw new SecurityException($"Cannot resolve relative NextLink '{currentNextLink}' without a valid BaseUrl.");
+            }
+
+            resolvedUri = relativeUri;
+        }
+
+        if (!resolvedUri.IsAbsoluteUri ||
+            (!string.Equals(resolvedUri.Scheme, Uri.UriSchemeHttp, StringComparison.OrdinalIgnoreCase) &&
+             !string.Equals(resolvedUri.Scheme, Uri.UriSchemeHttps, StringComparison.OrdinalIgnoreCase)))
+        {
+            throw new SecurityException($"Disallowed NextLink URI scheme '{(resolvedUri.IsAbsoluteUri ? resolvedUri.Scheme : string.Empty)}'.");
+        }
+
+        if (enforceSameHost && baseUri != null)
+        {
+            if (!string.Equals(resolvedUri.IdnHost, baseUri.IdnHost, StringComparison.OrdinalIgnoreCase) ||
+                !string.Equals(resolvedUri.Scheme, baseUri.Scheme, StringComparison.OrdinalIgnoreCase) ||
+                resolvedUri.Port != baseUri.Port)
+            {
+                throw new SecurityException($"NextLink host spoofing detected: '{resolvedUri.Host}' does not match registered host '{baseUri.Host}'.");
+            }
+        }
+
+        return resolvedUri.ToString();
     }
 
     private static string? ExtractJsonValue(JsonElement root, string path)
