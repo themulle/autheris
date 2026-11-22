@@ -110,6 +110,39 @@ public sealed class IdentityRealmOptionsValidator : IValidateOptions<IdentityRea
                 }
             }
         }
+
+        foreach (var (realmId, config) in options.Realms)
+        {
+            foreach (var roleName in config.AllowedGatewayRoles ?? [])
+            {
+                if (!SubjectRoleMapper.TryParseRoleName(roleName, out _))
+                {
+                    throw new ValidationException(
+                        $"Authentication:Realms:Realms:{realmId}:AllowedGatewayRoles contains an unknown, removed, or numeric gateway role name '{roleName}'.");
+                }
+            }
+
+            if (config.SubjectRoles != null)
+            {
+                for (var i = 0; i < config.SubjectRoles.Count; i++)
+                {
+                    var entryRoles = config.SubjectRoles[i]?.Roles;
+                    if (entryRoles == null)
+                    {
+                        continue;
+                    }
+
+                    foreach (var entryRole in entryRoles)
+                    {
+                        if (!SubjectRoleMapper.TryParseRoleName(entryRole, out _))
+                        {
+                            throw new ValidationException(
+                                $"Authentication:Realms:Realms:{realmId}:SubjectRoles:{i}:Roles contains an unknown, removed, or numeric gateway role name '{entryRole}'.");
+                        }
+                    }
+                }
+            }
+        }
     }
 
     public static void ValidateRealm(IdentityRealm realm, TenantId? workforceCorporateTenantId = null)

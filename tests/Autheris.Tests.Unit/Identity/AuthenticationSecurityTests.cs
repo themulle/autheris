@@ -200,7 +200,7 @@ public class AuthenticationSecurityTests
         identity.AddClaim(new Claim("roles", "SecurityAuditor"));
 
         var principal = new ClaimsPrincipal(identity);
-        var transformer = TestIdentityPipeline.Transformation(TestIdentityPipeline.TokenRealm());
+        var transformer = TestIdentityPipeline.Transformation(TestIdentityPipeline.TokenRealm(IdentityRealmKind.EntraWorkforce, Autheris.Domain.Security.GatewayRole.SecurityAuditor));
 
         var transformed = await transformer.TransformAsync(principal);
 
@@ -336,7 +336,7 @@ public class AuthenticationSecurityTests
                     Enabled = true,
                     RequireTrustedProxy = true,
                     TrustedProxies = ["10.0.0.1"],
-                    AllowedRoles = ["Analyst", "GatewayAdmin", "PlatformAdmin"] // admin entries must still be ignored
+                    AllowedRoles = ["Consumer", "TenantAdmin", "GovernanceAdmin"] // admin entries must still be ignored
                 }
             }
         };
@@ -345,7 +345,7 @@ public class AuthenticationSecurityTests
         context.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("10.0.0.1");
         context.Request.Headers["X-Forwarded-User"] = "alice";
         context.Request.Headers["X-Forwarded-Groups"] = "S-1-5-21-1004336348-1177238915-682003330-512,finance";
-        context.Request.Headers["X-Forwarded-Roles"] = "Analyst,DataOwner,GatewayAdmin,PlatformAdmin,ClusterAdmin,tenant-a:ClusterAdmin";
+        context.Request.Headers["X-Forwarded-Roles"] = "Consumer,TenantAdmin,GovernanceAdmin,ClusterAdmin,tenant-a:ClusterAdmin";
 
         var result = await handler.AuthenticateAsync();
 
@@ -353,10 +353,9 @@ public class AuthenticationSecurityTests
         result.Principal!.GetGroupSids().ShouldBeEmpty();
 
         var roles = result.Principal.GetUserRoles();
-        roles.ShouldContain("Analyst");
-        roles.ShouldNotContain("DataOwner");
-        roles.ShouldNotContain("GatewayAdmin");
-        roles.ShouldNotContain("PlatformAdmin");
+        roles.ShouldContain("Consumer");
+        roles.ShouldNotContain("TenantAdmin");
+        roles.ShouldNotContain("GovernanceAdmin");
         roles.ShouldNotContain("ClusterAdmin");
         roles.ShouldNotContain("tenant-a:ClusterAdmin");
     }
@@ -364,7 +363,8 @@ public class AuthenticationSecurityTests
     [Fact]
     public void API_09_ForwardAuth_DataProtectionOfficer_IsForbiddenFromHeaders()
     {
-        ForwardAuthAuthenticationHandler.IsHeaderForbiddenRole("DataProtectionOfficer").ShouldBeTrue();
+        ForwardAuthAuthenticationHandler.IsHeaderForbiddenRole("TenantAdmin").ShouldBeTrue();
+        new ForwardAuthOptions().GetEffectiveAllowedRoles().ShouldNotContain("DataProtectionOfficer");
     }
 
     [Fact]

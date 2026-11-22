@@ -135,10 +135,10 @@ public sealed class ColumnlessCatalogTableStartupTests : IDisposable
     [Trait("Category", "Security")]
     public async Task Health_NonAdminAllowedRole_GetsCountWithoutTableNames()
     {
-        // SEC-BUG157-02 / T-BUG157-S03: SecurityAdmin passes the existing gate (default roles) but does not imply GovernanceAdmin.
+        // ClusterAdmin passes SystemMetrics default roles, and does not imply GovernanceAdmin.
         using var factory = await StartSeededAsync(omitted: 2);
 
-        var (_, body) = await HealthAsync(Client(factory, "SecurityAdmin"));
+        var (_, body) = await HealthAsync(Client(factory, "ClusterAdmin"));
 
         using var doc = JsonDocument.Parse(body);
         var catalog = doc.RootElement.GetProperty("graphQlCatalog");

@@ -489,7 +489,12 @@ public sealed partial class AdvisoryRegressionTests
             "forward-realm",
             Autheris.Domain.Identity.IdentityRealmKind.ForwardAuth,
             new Autheris.Domain.Identity.TenantBindingSpecification(Autheris.Domain.Identity.TenantBindingKind.Fixed, FixedTenantId: TenantA),
-            groupSource: Autheris.Domain.Identity.RealmGroupSource.Resolver);
+            groupSource: Autheris.Domain.Identity.RealmGroupSource.Resolver,
+            allowedGatewayRoles: new HashSet<Autheris.Domain.Security.GatewayRole>
+            {
+                Autheris.Domain.Security.GatewayRole.ClusterAdmin,
+                Autheris.Domain.Security.GatewayRole.GovernanceAdmin
+            });
         var resolver = Substitute.For<Autheris.Application.Identity.IRoleResolver>();
         TestIdentityPipeline.StubResolution(
             resolver,

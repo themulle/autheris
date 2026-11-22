@@ -360,11 +360,10 @@ public static partial class UsageEndpoints
             return tenantErr!;
         }
 
-        bool isUsageAdmin = IsUsageAdmin(httpContext.User);
+        bool isUsageAdmin = IsUsageAdmin(httpContext);
         if (!isUsageAdmin)
         {
-            if (!GatewayPolicies.HasRole(httpContext.User, GatewayRole.DataOwner)
-                || !TableIdentifier.TryParse(tableId.Trim(), out var parsedTable))
+            if (!TableIdentifier.TryParse(tableId.Trim(), out var parsedTable))
             {
                 return ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, "Usage report for this table requires UsageAdmin or table ownership.", httpContext);
             }
@@ -445,7 +444,7 @@ public static partial class UsageEndpoints
         }
 
         string trimmedGrantId = grantId.Trim();
-        if (!IsUsageAdmin(httpContext.User))
+        if (!IsUsageAdmin(httpContext))
         {
             bool authorized = await IsAuthorizedForGrantReportAsync(httpContext, secContext, targetTenant, trimmedGrantId, ct).ConfigureAwait(false);
             if (!authorized)
@@ -548,14 +547,11 @@ public static partial class UsageEndpoints
             return false;
         }
 
-        if (GatewayPolicies.HasRole(httpContext.User, GatewayRole.DataOwner))
+        var ownershipRepo = httpContext.RequestServices?.GetService<IDataOwnershipRepository>();
+        if (ownershipRepo is not null
+            && await ownershipRepo.IsAuthorizedApproverForTableAsync(consent.TableIdentifier, secContext.UserSid, ct).ConfigureAwait(false))
         {
-            var ownershipRepo = httpContext.RequestServices?.GetService<IDataOwnershipRepository>();
-            if (ownershipRepo is not null
-                && await ownershipRepo.IsAuthorizedApproverForTableAsync(consent.TableIdentifier, secContext.UserSid, ct).ConfigureAwait(false))
-            {
-                return true;
-            }
+            return true;
         }
 
         if (consent.GranteeSid is not { } granteeSid)
@@ -620,8 +616,9 @@ public static partial class UsageEndpoints
         }
     }
 
-    private static bool IsUsageAdmin(ClaimsPrincipal principal) =>
-        GatewayPolicies.HasAnyRole(principal, GatewayPolicies.UsageAdminRoles);
+    private static bool IsUsageAdmin(HttpContext httpContext) =>
+        ClusterAdminPolicy.IsCanonicalClusterAdmin(httpContext.User) ||
+        GatewayPolicies.HasAnyRequestRole(httpContext, GatewayPolicies.UsageAdminRoles);
 
     private static bool TryGetAuthenticatedCaller(HttpContext httpContext, out SecurityPrincipalContext secContext, out IResult? error)
     {

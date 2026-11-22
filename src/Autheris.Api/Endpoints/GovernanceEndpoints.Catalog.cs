@@ -70,7 +70,7 @@ public static partial class GovernanceEndpoints
         IDeclarativeConsentApplyService applyService,
         CancellationToken ct)
     {
-        var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin]);
+        var isPrivileged = GatewayPolicies.HasRequestRole(context, GatewayRole.GovernanceAdmin);
         if (!isPrivileged)
         {
             return ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, "You do not have permission to apply declarative consent manifests.", context);

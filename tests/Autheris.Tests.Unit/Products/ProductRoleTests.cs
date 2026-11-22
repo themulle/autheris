@@ -39,7 +39,7 @@ public sealed class ProductRoleTests
             product.Implies(product).ShouldBeTrue();
         }
 
-        GatewayRole.ClusterAdmin.Implies(GatewayRole.DataOwner).ShouldBeTrue("the exception must not weaken the other implications");
+        GatewayRole.ClusterAdmin.Implies(GatewayRole.TenantAdmin).ShouldBeTrue("the exception must not weaken the other implications");
         GatewayRole.DataProductAdmin.Implies(GatewayRole.Consumer).ShouldBeFalse();
     }
 

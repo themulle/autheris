@@ -10,8 +10,6 @@ public readonly record struct FunctionalRight(string Value)
     public static readonly FunctionalRight ClusterAdmin = new("ClusterAdmin");
     public static readonly FunctionalRight TenantAdmin = new("TenantAdmin");
     public static readonly FunctionalRight GovernanceAdmin = new("GovernanceAdmin");
-    public static readonly FunctionalRight DataOwner = new("DataOwner");
-    public static readonly FunctionalRight DataSteward = new("DataSteward");
     public static readonly FunctionalRight SchemaPublisher = new("SchemaPublisher");
     public static readonly FunctionalRight Consumer = new("Consumer");
 

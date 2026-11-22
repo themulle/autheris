@@ -398,7 +398,7 @@ public sealed class AuthPluginSecurityTests
         var guard = new AuthPluginRoleEscalationGuard(options, NullLogger<AuthPluginRoleEscalationGuard>.Instance);
 
         var rawResult = new PluginRoleEnrichmentResult(
-            addedRoles: ["ClusterAdmin", "GovernanceAdmin", "SecurityAdmin", "Analyst"]);
+            addedRoles: ["ClusterAdmin", "GovernanceAdmin", "TenantAdmin", "Consumer"]);
 
         var context = new PluginSecurityContext
         {
@@ -414,8 +414,8 @@ public sealed class AuthPluginSecurityTests
 
         sanitized.AddedRoles.ShouldNotContain("ClusterAdmin");
         sanitized.AddedRoles.ShouldNotContain("GovernanceAdmin");
-        sanitized.AddedRoles.ShouldNotContain("SecurityAdmin");
-        sanitized.AddedRoles.ShouldContain("Analyst");
+        sanitized.AddedRoles.ShouldNotContain("TenantAdmin");
+        sanitized.AddedRoles.ShouldContain("Consumer");
         sanitized.AddedRoles.Count.ShouldBe(1);
     }
 

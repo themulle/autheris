@@ -4,8 +4,10 @@ using System.Security.Cryptography;
 using System.Text;
 using System.Text.Encodings.Web;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Identity;
 using Autheris.Domain.Common;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Authentication;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.Extensions.Hosting;
@@ -21,6 +23,7 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
     private readonly GatewayOptions _gatewayOptions;
     private readonly IKeyVaultSecretProvider? _secretProvider;
     private readonly ITrustedProxyValidator _proxyValidator;
+    private readonly IIdentityRealmRegistry? _realmRegistry;
     private readonly bool _isDevelopment;
     private readonly byte[]? _precomputedSharedSecretBytes;
 
@@ -31,12 +34,14 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
         IOptions<GatewayOptions> gatewayOptions,
         ITrustedProxyValidator proxyValidator,
         IKeyVaultSecretProvider? secretProvider = null,
-        IWebHostEnvironment? environment = null)
+        IWebHostEnvironment? environment = null,
+        IIdentityRealmRegistry? realmRegistry = null)
         : base(options, logger, encoder)
     {
         _gatewayOptions = gatewayOptions?.Value ?? new GatewayOptions();
         _proxyValidator = proxyValidator;
         _secretProvider = secretProvider;
+        _realmRegistry = realmRegistry;
         _isDevelopment = environment?.IsDevelopment() ?? false;
 
         var configuredSecret = _gatewayOptions.Authentication.ForwardAuth.SharedSecret;
@@ -330,6 +335,15 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
                     continue;
                 }
 
+                var realm = _realmRegistry?.ResolveRealmForScheme(null, SchemeName);
+                if (realm is not null &&
+                    GatewayRoleExtensions.TryParseGatewayRoleValue(baseRole, out _, out var gatewayRole) &&
+                    !realm.AllowedGatewayRoles.Contains(gatewayRole))
+                {
+                    DiscardRole("not_allowed_by_realm");
+                    continue;
+                }
+
                 claims.Add(new Claim(ClaimTypes.Role, r));
                 hasRole = true;
             }
@@ -380,8 +394,7 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
 
     private static readonly HashSet<string> HeaderForbiddenRoles = new(StringComparer.OrdinalIgnoreCase)
     {
-        "ClusterAdmin", "PlatformAdmin", "GatewayAdmin", "GovernanceAdmin", "SecurityAdmin",
-        "PrivacyAdmin", "BreakGlassOperator", "DataProtectionOfficer"
+        "ClusterAdmin", "GovernanceAdmin", "TenantAdmin", "BreakGlassOperator"
     };
 
     /// <summary>RR-L2-02: Administrative roles are never accepted from proxy headers (even if listed in AllowedRoles).</summary>

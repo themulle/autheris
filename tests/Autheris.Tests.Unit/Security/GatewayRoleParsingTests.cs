@@ -23,8 +23,8 @@ public class GatewayRoleParsingTests
         "tenant-1:",
         ":",
         "a:b:ClusterAdmin",
-        "a:b:DataOwner",
-        ":DataOwner",
+        "a:b:SchemaPublisher",
+        ":SchemaPublisher",
         "tenant-1:ClusterAdmin:"
     };
 
@@ -58,7 +58,7 @@ public class GatewayRoleParsingTests
         var user = PrincipalWith(raw);
 
         _evaluator.HasRole(user, "ClusterAdmin").ShouldBeFalse();
-        _evaluator.HasRole(user, "DataOwner", "tenant-1").ShouldBeFalse();
+        _evaluator.HasRole(user, "SchemaPublisher", "tenant-1").ShouldBeFalse();
     }
 
     [Fact]
@@ -86,29 +86,30 @@ public class GatewayRoleParsingTests
 
         context.IsClusterAdmin.ShouldBeFalse();
         context.HasRole(GatewayRole.ClusterAdmin).ShouldBeFalse();
-        context.HasRole(GatewayRole.DataOwner).ShouldBeFalse();
+        context.HasRole(GatewayRole.SchemaPublisher).ShouldBeFalse();
     }
 
     [Fact]
     public void GetEffectiveRoles_WellFormedValues_StillResolve()
     {
         var user = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.Role, "ClusterAdmin"), new Claim(ClaimTypes.Role, "tenant-1:DataOwner"), new Claim(ClaimTypes.Role, "*:Consumer")],
+            [new Claim(ClaimTypes.Role, "ClusterAdmin"), new Claim(ClaimTypes.Role, "tenant-1:SchemaPublisher"), new Claim(ClaimTypes.Role, "*:Consumer")],
             "Test"));
 
         var global = _evaluator.GetEffectiveRoles(user);
         global.Count.ShouldBe(1);
         global.ShouldContain(GatewayRole.ClusterAdmin);
-        _evaluator.GetEffectiveRoles(user, "tenant-1").ShouldContain(GatewayRole.DataOwner);
+        _evaluator.GetEffectiveRoles(user, "tenant-1").ShouldContain(GatewayRole.SchemaPublisher);
         _evaluator.GetEffectiveRoles(user, "tenant-2").ShouldContain(GatewayRole.Consumer);
-        _evaluator.GetEffectiveRoles(user, "tenant-2").ShouldNotContain(GatewayRole.DataOwner);
+        _evaluator.GetEffectiveRoles(user, "tenant-2").ShouldNotContain(GatewayRole.SchemaPublisher);
     }
 
     [Theory]
-    [InlineData("DataOwner", true)]
-    [InlineData(" DataOwner ", true)]
-    [InlineData(":DataOwner", false)]
-    [InlineData("t:DataOwner", false)]
+    [InlineData("SchemaPublisher", true)]
+    [InlineData(" SchemaPublisher ", true)]
+    [InlineData(":SchemaPublisher", false)]
+    [InlineData("t:SchemaPublisher", false)]
+    [InlineData("DataOwner", false)]
     [InlineData("", false)]
     [InlineData("Unknown", false)]
     public void TryParseGlobalRole_IsStrict(string input, bool expected)
@@ -116,18 +117,19 @@ public class GatewayRoleParsingTests
         GatewayRoleExtensions.TryParseGlobalRole(input, out var role).ShouldBe(expected);
         if (expected)
         {
-            role.ShouldBe(GatewayRole.DataOwner);
+            role.ShouldBe(GatewayRole.SchemaPublisher);
         }
     }
 
     [Theory]
-    [InlineData("t1:DataOwner", true)]
+    [InlineData("t1:SchemaPublisher", true)]
     [InlineData("*:Consumer", true)]
-    [InlineData(":DataOwner", false)]
+    [InlineData("t1:DataOwner", false)]
+    [InlineData(":SchemaPublisher", false)]
     [InlineData("t1:", false)]
     [InlineData(":", false)]
-    [InlineData("a:b:DataOwner", false)]
-    [InlineData("DataOwner", false)]
+    [InlineData("a:b:SchemaPublisher", false)]
+    [InlineData("SchemaPublisher", false)]
     [InlineData("t1:Nope", false)]
     public void TryParseTenantScopedRole_RequiresExactlyOneColonAndNonEmptyParts(string input, bool expected)
     {

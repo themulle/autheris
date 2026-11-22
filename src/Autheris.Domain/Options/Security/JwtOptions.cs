@@ -116,17 +116,17 @@ public sealed class ForwardAuthOptions
     public List<string> TrustedNetworks { get; init; } = [];
 
     /// <summary>
-    /// RR-L2-02: Allowlist of roles accepted from the (proxy-asserted) roles header. Matching uses the role name
-    /// after an optional "tenant:" prefix. Administrative roles (ClusterAdmin, PlatformAdmin, GatewayAdmin,
-    /// GovernanceAdmin, SecurityAdmin, PrivacyAdmin, BreakGlassOperator) are never accepted from headers.
-    /// When not configured, GatewayUser, Consumer, Analyst and Developer are accepted; a configured list replaces that
+    /// Allowlist of roles accepted from the (proxy-asserted) roles header. Matching uses the role name
+    /// after an optional "tenant:" prefix. Administrative roles (ClusterAdmin, TenantAdmin,
+    /// GovernanceAdmin, BreakGlassOperator) are never accepted from headers.
+    /// When not configured, GatewayUser and Consumer are accepted; a configured list replaces that
     /// default entirely. Nullable on purpose: the configuration binder appends to pre-filled lists, so a non-empty
     /// default could not be narrowed. An empty JSON array aborts the start (it would silently apply the default); a list containing only a
     /// role name that no proxy asserts accepts no header role.
     /// </summary>
     public List<string>? AllowedRoles { get; init; }
 
-    private static readonly string[] DefaultAllowedRoles = ["GatewayUser", "Consumer", "Analyst", "Developer"];
+    private static readonly string[] DefaultAllowedRoles = ["GatewayUser", "Consumer"];
 
     /// <summary>Configured <see cref="AllowedRoles"/> or the default list.</summary>
     public IReadOnlyList<string> GetEffectiveAllowedRoles() => AllowedRoles ?? (IReadOnlyList<string>)DefaultAllowedRoles;

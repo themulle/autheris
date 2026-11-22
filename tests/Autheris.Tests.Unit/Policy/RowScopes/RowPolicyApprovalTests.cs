@@ -33,10 +33,10 @@ public sealed class RowPolicyApprovalTests
         new(GovAuthor, IsSync: false, Roles: new HashSet<string>([nameof(GatewayRole.GovernanceAdmin)], StringComparer.OrdinalIgnoreCase));
 
     private static readonly VirtualFilterActor PartialOwnerActor =
-        new(PartialOwner, IsSync: false, Roles: new HashSet<string>([nameof(GatewayRole.DataOwner)], StringComparer.OrdinalIgnoreCase));
+        new(PartialOwner, IsSync: false, Roles: new HashSet<string>([nameof(GatewayRole.Consumer)], StringComparer.OrdinalIgnoreCase));
 
     private static readonly VirtualFilterActor FullOwnerActor =
-        new(FullOwnerDelegate, IsSync: false, Roles: new HashSet<string>([nameof(GatewayRole.DataOwner)], StringComparer.OrdinalIgnoreCase));
+        new(FullOwnerDelegate, IsSync: false, Roles: new HashSet<string>([nameof(GatewayRole.Consumer)], StringComparer.OrdinalIgnoreCase));
 
     private static readonly TableIdentifier ClientTable = new("lwetem_prod", "conf", "client");
     private static readonly TableIdentifier CraneTable = new("lwetem_prod", "md", "crane");
@@ -186,7 +186,7 @@ public sealed class RowPolicyApprovalTests
         await Should.ThrowAsync<UnauthorizedAccessException>(() => service.SaveFilterAsync(SqlPolicy(), filterAdmin));
 
         var sqlBody = new { source = "lwetem_prod", sql = SqlPolicy().Sql };
-        foreach (var forbiddenRole in new[] { "FilterAdmin", "DataOwner", "Consumer" })
+        foreach (var forbiddenRole in new[] { "FilterAdmin", "ClusterAdmin", "Consumer" })
         {
             var ctx = HttpCtx(new Sid("S-1-5-21-CALLER"), forbiddenRole, sqlBody);
             var res = await VirtualFilterEndpoints.PutFilterAsync("active_cranes_sql", ctx, service);

@@ -55,7 +55,7 @@ public static partial class VirtualFilterEndpoints
     internal static Task<IResult> ApproveFilterAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
         ExecuteAsync(context, requiredRole: null, async (security, actor) =>
         {
-            if (!security.HasRole(GatewayRole.GovernanceAdmin) && !security.HasRole(GatewayRole.DataOwner))
+            if (!security.HasRole(GatewayRole.GovernanceAdmin))
             {
                 return await AuditDeniedAsync(context, security, GatewayRole.GovernanceAdmin).ConfigureAwait(false);
             }
@@ -64,16 +64,6 @@ public static partial class VirtualFilterEndpoints
             if (tenant == null)
             {
                 return Forbidden();
-            }
-
-            if (!security.HasRole(GatewayRole.GovernanceAdmin))
-            {
-                var snapshot = await service.GetSnapshotAsync(context.RequestAborted).ConfigureAwait(false);
-                var target = snapshot.Filters.FirstOrDefault(f => f.TenantId == tenant.Value && string.Equals(f.Name, name, StringComparison.Ordinal));
-                if ((target?.Draft ?? target)?.Sql == null)
-                {
-                    return await AuditDeniedAsync(context, security, GatewayRole.GovernanceAdmin).ConfigureAwait(false);
-                }
             }
 
             // VF-05: no hash, no approval; a mismatch stays a 409.

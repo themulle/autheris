@@ -41,8 +41,6 @@ public sealed partial class Query
 
         bool isClusterAdmin = callerContext.IsClusterAdmin;
         bool canAccessForeignReports = isClusterAdmin || callerContext.Roles.Any(r =>
-            r.Equals("PrivacyAdmin", StringComparison.OrdinalIgnoreCase) ||
-            r.Equals("DataProtectionOfficer", StringComparison.OrdinalIgnoreCase) ||
             r.Equals("GovernanceAdmin", StringComparison.OrdinalIgnoreCase));
 
         // Effective SID: If subjectSid is omitted, default to callerContext.UserSid unless caller is a privacy officer
@@ -52,7 +50,7 @@ public sealed partial class Query
         {
             throw new GraphQLException(ErrorBuilder.New()
                 .SetCode("FORBIDDEN")
-                .SetMessage("GDPR access reports for other identities require PrivacyAdmin or GovernanceAdmin rights.")
+                .SetMessage("GDPR access reports for other identities require GovernanceAdmin rights.")
                 .Build());
         }
 

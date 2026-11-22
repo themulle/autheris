@@ -9,6 +9,7 @@ using Autheris.Application.Identity;
 using Autheris.Application.Tenancy;
 using Autheris.Domain.Identity;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -32,13 +33,14 @@ internal static class TestIdentityPipeline
     }
 
     /// <summary>A registry whose default realm takes groups from the token and binds the fixed tenant <c>tenant-a</c>.</summary>
-    public static IIdentityRealmRegistry TokenRealm(IdentityRealmKind kind = IdentityRealmKind.EntraWorkforce)
+    public static IIdentityRealmRegistry TokenRealm(IdentityRealmKind kind = IdentityRealmKind.EntraWorkforce, params GatewayRole[] allowedGatewayRoles)
     {
         var realm = new IdentityRealm(
             "token-realm",
             kind,
             new TenantBindingSpecification(TenantBindingKind.Fixed, FixedTenantId: new TenantId("tenant-a")),
-            groupSource: RealmGroupSource.Token);
+            groupSource: RealmGroupSource.Token,
+            allowedGatewayRoles: allowedGatewayRoles.Length == 0 ? null : new HashSet<GatewayRole>(allowedGatewayRoles));
         return new FakeIdentityRealmRegistry(realm);
     }
 

@@ -135,8 +135,7 @@ public sealed class TestAuthHandler : AuthenticationHandler<AuthenticationScheme
         {
             claims.Add(new Claim(ClaimTypes.Role, "ClusterAdmin"));
             claims.Add(new Claim(ClaimTypes.Role, "GovernanceAdmin"));
-            claims.Add(new Claim(ClaimTypes.Role, "DataOwner"));
-            claims.Add(new Claim(ClaimTypes.Role, "Developer"));
+            claims.Add(new Claim(ClaimTypes.Role, "Consumer"));
         }
 
         var testTenant = headers.TryGetValue("X-Test-Tenant", out var tenantVal) && !string.IsNullOrWhiteSpace(tenantVal)

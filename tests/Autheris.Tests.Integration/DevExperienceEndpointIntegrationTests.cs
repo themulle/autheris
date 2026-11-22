@@ -25,8 +25,8 @@ public sealed class DevExperienceEndpointIntegrationTests
                 Session = new BasicAuthSessionOptions { Enabled = true, AllowedEnvironments = ["Development"] },
                 Users =
                 [
-                    new BasicAuthUserConfig { Username = "owner", Password = "s3cret-pw", Sid = "S-1-5-21-1000-1000-1000-1001", Roles = ["DataOwner"] },
-                    new BasicAuthUserConfig { Username = "analyst-b", Password = "$pbkdf2$600000$x", TenantId = "tenant-b", Roles = ["Analyst"] }
+                    new BasicAuthUserConfig { Username = "owner", Password = "s3cret-pw", Sid = "S-1-5-21-1000-1000-1000-1001", Roles = ["GovernanceAdmin"] },
+                    new BasicAuthUserConfig { Username = "analyst-b", Password = "$pbkdf2$600000$x", TenantId = "tenant-b", Roles = ["Consumer"] }
                 ]
             }
         }

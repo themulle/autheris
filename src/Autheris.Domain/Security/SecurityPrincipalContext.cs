@@ -132,31 +132,38 @@ public sealed record SecurityPrincipalContext
             return false;
         }
 
-        if (IsClusterAdmin) return true;
-
-        // Cluster roles can satisfy any role (global scope), but roles containing ':' are tenant-scoped and must be ignored for global checks
+        // Cluster roles evaluate the role implication matrix at global scope; colon-prefixed roles are tenant-scoped and skipped here.
         foreach (var r in ClusterRoles)
         {
             if (r.Contains(':', StringComparison.Ordinal)) continue;
-            if (GatewayRoleExtensions.TryParseGlobalRole(r, out var parsed) && parsed.Implies(role))
+            if (GatewayRoleExtensions.TryParseGlobalRole(r, out var parsed))
             {
-                return true;
+                if (parsed == GatewayRole.ClusterAdmin &&
+                    string.Equals(AuthenticationScheme, ClusterAdminPolicy.ForwardAuthScheme, StringComparison.OrdinalIgnoreCase))
+                {
+                    continue;
+                }
+
+                if (parsed.Implies(role))
+                {
+                    return true;
+                }
             }
         }
 
-        // Global administrative roles (ClusterAdmin, GovernanceAdmin) can NEVER be satisfied by tenant-scoped roles
-        if (role is GatewayRole.ClusterAdmin or GatewayRole.GovernanceAdmin)
+        // Global administrative role (ClusterAdmin) can NEVER be satisfied by tenant-scoped roles
+        if (role == GatewayRole.ClusterAdmin)
         {
             return false;
         }
 
-        // Tenant-scoped roles can only satisfy domain/tenant-scoped roles; ignore prefixed roles containing ':'
+        // Tenant-scoped roles can satisfy tenant/governance roles; ignore prefixed roles containing ':'
         foreach (var r in TenantRoles)
         {
             if (r.Contains(':', StringComparison.Ordinal)) continue;
             if (GatewayRoleExtensions.TryParseGlobalRole(r, out var parsed))
             {
-                if (parsed is GatewayRole.ClusterAdmin or GatewayRole.GovernanceAdmin)
+                if (parsed == GatewayRole.ClusterAdmin)
                 {
                     continue;
                 }
@@ -220,9 +227,17 @@ public sealed record SecurityPrincipalContext
         var clusterRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var tenantRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         bool clusterAdminAllowed = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        bool hasAllowedRoles = Autheris.Domain.Identity.RoleResolutionClaims.TryReadAllowedGatewayRoles(principal, out var allowedGatewayRoles);
 
         foreach (var r in rawRoles)
         {
+            if (hasAllowedRoles &&
+                GatewayRoleExtensions.TryParseGatewayRoleValue(r, out _, out var parsedRole) &&
+                !allowedGatewayRoles.Contains(parsedRole))
+            {
+                continue;
+            }
+
             if (ClusterAdminPolicy.IsClusterAdminRole(r))
             {
                 if (clusterAdminAllowed)

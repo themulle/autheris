@@ -188,7 +188,7 @@ public sealed class IdentityRealmRegistry : IIdentityRealmRegistry
                             ? strictRole
                             : throw new InvalidOperationException($"Realm '{realmId}': AllowedGatewayRoles contains an unknown or numeric role name."));
                     }
-                    else if (Enum.TryParse<GatewayRole>(r, true, out var role))
+                    else if (SubjectRoleMapper.TryParseRoleName(r, out var role))
                     {
                         allowedRoles.Add(role);
                     }

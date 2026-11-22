@@ -28,6 +28,12 @@ public static class ClusterAdminPolicy
             return false;
         }
 
+        if (Autheris.Domain.Identity.RoleResolutionClaims.TryReadAllowedGatewayRoles(principal, out var allowedGatewayRoles) &&
+            !allowedGatewayRoles.Contains(GatewayRole.ClusterAdmin))
+        {
+            return false;
+        }
+
         return principal.Claims
             .Where(c => c.Type == ClaimTypes.Role || c.Type == "role" || c.Type == "roles")
             .Any(c => IsClusterAdminRole(c.Value));

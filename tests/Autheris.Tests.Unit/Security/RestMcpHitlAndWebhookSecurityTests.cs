@@ -158,8 +158,9 @@ public class RestMcpHitlAndWebhookSecurityTests
     public void C05_ApproverRole_IsRequired()
     {
         EndpointSecurity.IsApprover(CreateContext("tenant-a", ["Developer"]).User).ShouldBeFalse();
-        EndpointSecurity.IsApprover(CreateContext("tenant-a", ["DataSteward"]).User).ShouldBeTrue();
-        EndpointSecurity.IsApprover(CreateContext("tenant-a", ["DataOwner"]).User).ShouldBeTrue();
+        EndpointSecurity.IsApprover(CreateContext("tenant-a", ["DataSteward"]).User).ShouldBeFalse();
+        EndpointSecurity.IsApprover(CreateContext("tenant-a", ["DataOwner"]).User).ShouldBeFalse();
+        EndpointSecurity.IsApprover(CreateContext("tenant-a", ["ClusterAdmin"]).User).ShouldBeFalse();
         EndpointSecurity.IsApprover(CreateContext("tenant-a", ["GovernanceAdmin"]).User).ShouldBeTrue();
     }
 

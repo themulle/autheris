@@ -66,7 +66,8 @@ public sealed class RequiredWritePrivilegesTests
             consents,
             time);
         var (clusterStatus, _) = await ExecuteResultAsync(clusterAdminResult);
-        clusterStatus.ShouldBe(StatusCodes.Status200OK);
+        // ClusterAdmin does not imply GovernanceAdmin; the route and handler require GovernanceAdmin.
+        clusterStatus.ShouldBe(StatusCodes.Status403Forbidden);
     }
 
     [Fact]

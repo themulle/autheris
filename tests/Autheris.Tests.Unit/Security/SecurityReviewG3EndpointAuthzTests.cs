@@ -43,45 +43,49 @@ public class SecurityReviewG3EndpointAuthzTests
     [Fact]
     public void A1_PlatformAdmin_IsTenantScopedNotCdcClusterAdmin()
     {
-        var user = Ctx("tenant-a", ["PlatformAdmin"]).User;
+        var user = Ctx("tenant-a", ["TenantAdmin"]).User;
         StreamingCdcEndpoints.IsCdcClusterAdmin(user).ShouldBeFalse();
         StreamingCdcEndpoints.IsAuthorizedCdcIngestion(user).ShouldBeTrue();
+        StreamingCdcEndpoints.IsAuthorizedCdcIngestion(Ctx("tenant-a", ["PlatformAdmin"]).User).ShouldBeFalse();
         StreamingCdcEndpoints.IsCdcClusterAdmin(Ctx("tenant-a", ["ClusterAdmin"]).User).ShouldBeTrue();
     }
 
     [Fact]
     public async Task A2_OwnerOrAuditRoleAuthorizationMatrix_ForAuditRoutes()
     {
-        foreach (var role in new[] { "GovernanceAdmin", "ClusterAdmin", "PrivacyAdmin", "Auditor" })
+        foreach (var role in new[] { "GovernanceAdmin", "ClusterAdmin", "TenantAdmin", "SecurityAuditor" })
         {
             (await GovernanceEndpoints.IsAuthorizedForSimulationAsync(Ctx("t", [role]), null)).ShouldBeTrue(role);
         }
 
+        (await GovernanceEndpoints.IsAuthorizedForSimulationAsync(Ctx("t", ["PrivacyAdmin"]), null)).ShouldBeFalse();
+        (await GovernanceEndpoints.IsAuthorizedForSimulationAsync(Ctx("t", ["Auditor"]), null)).ShouldBeFalse();
         (await GovernanceEndpoints.IsAuthorizedForSimulationAsync(Ctx("t", ["Reader"]), "t.dbo.x")).ShouldBeFalse();
 
         var repo = Substitute.For<IDataOwnershipRepository>();
         repo.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>()).Returns(true);
-        (await GovernanceEndpoints.IsAuthorizedForSimulationAsync(Ctx("t", ["DataOwner"], repo), null)).ShouldBeFalse();
-        (await GovernanceEndpoints.IsAuthorizedForSimulationAsync(Ctx("t", ["DataOwner"], repo), "t.dbo.x")).ShouldBeTrue();
+        (await GovernanceEndpoints.IsAuthorizedForSimulationAsync(Ctx("t", ["Consumer"], repo), null)).ShouldBeFalse();
+        (await GovernanceEndpoints.IsAuthorizedForSimulationAsync(Ctx("t", ["Consumer"], repo), "t.dbo.x")).ShouldBeTrue();
 
         var denyRepo = Substitute.For<IDataOwnershipRepository>();
         denyRepo.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>()).Returns(false);
-        (await GovernanceEndpoints.IsAuthorizedForSimulationAsync(Ctx("t", ["DataOwner"], denyRepo), "t.dbo.x")).ShouldBeFalse();
+        (await GovernanceEndpoints.IsAuthorizedForSimulationAsync(Ctx("t", ["Consumer"], denyRepo), "t.dbo.x")).ShouldBeFalse();
     }
 
     [Fact]
     public void Gateway_NameListRoleCheck_IsExactNotHierarchical()
     {
-        var analyst = Ctx("t", ["Analyst"]).User;
-        GatewayPolicies.HasAnyRole(analyst, GatewayPolicies.SchemaPublisherRoles).ShouldBeFalse();
-        GatewayPolicies.HasAnyRole(analyst, GatewayPolicies.SchemaAdminRoles).ShouldBeFalse();
+        var consumer = Ctx("t", ["Consumer"]).User;
+        GatewayPolicies.HasAnyRole(consumer, GatewayPolicies.SchemaPublisherRoles).ShouldBeFalse();
+        GatewayPolicies.HasAnyRole(consumer, GatewayPolicies.ItAdminRoles).ShouldBeFalse();
 
-        GatewayPolicies.HasAnyRole(Ctx("t", ["SchemaPublisher"]).User, GatewayPolicies.SchemaAdminRoles).ShouldBeFalse();
-        GatewayPolicies.HasAnyRole(Ctx("t", ["PrivacyAdmin"]).User, GatewayPolicies.SchemaAdminRoles).ShouldBeFalse();
+        GatewayPolicies.HasAnyRole(Ctx("t", ["SchemaPublisher"]).User, GatewayPolicies.ItAdminRoles).ShouldBeFalse();
+        GatewayPolicies.HasAnyRole(Ctx("t", ["GovernanceAdmin"]).User, GatewayPolicies.ItAdminRoles).ShouldBeFalse();
 
-        GatewayPolicies.HasAnyRole(Ctx("t", ["SchemaAdmin"]).User, GatewayPolicies.SchemaPublisherRoles).ShouldBeTrue();
-        GatewayPolicies.HasAnyRole(Ctx("t", ["ClusterAdmin"]).User, GatewayPolicies.SchemaAdminRoles).ShouldBeTrue();
-        GatewayPolicies.HasAnyRole(Ctx("t", ["Developer"]).User, GatewayPolicies.SchemaPublisherRoles).ShouldBeTrue();
+        GatewayPolicies.HasAnyRole(Ctx("t", ["TenantAdmin"]).User, GatewayPolicies.SchemaPublisherRoles).ShouldBeTrue();
+        GatewayPolicies.HasAnyRole(Ctx("t", ["TenantAdmin"]).User, GatewayPolicies.ItAdminRoles).ShouldBeTrue();
+        GatewayPolicies.HasAnyRole(Ctx("t", ["ClusterAdmin"]).User, GatewayPolicies.ItAdminRoles).ShouldBeFalse();
+        GatewayPolicies.HasAnyRole(Ctx("t", ["SchemaPublisher"]).User, GatewayPolicies.SchemaPublisherRoles).ShouldBeTrue();
     }
 
     [Fact]
@@ -103,7 +107,7 @@ public class SecurityReviewG3EndpointAuthzTests
     [Fact]
     public void OpenApi_TenantScopedRolesAreNotAdmins()
     {
-        foreach (var r in new[] { "DataOwner", "SchemaAdmin", "CatalogReader", "PlatformAdmin", "GovernanceAdmin" })
+        foreach (var r in new[] { "TenantAdmin", "SchemaPublisher", "Consumer", "SecurityAuditor", "GovernanceAdmin" })
         {
             ODataEndpoints.IsOpenApiAdmin(Ctx("t", [r]).User).ShouldBeFalse(r);
         }

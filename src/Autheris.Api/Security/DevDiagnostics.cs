@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Autheris.Domain.Common;
+using Autheris.Domain.Tenancy;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Authorization.Policy;
 using Microsoft.AspNetCore.Http;
@@ -25,7 +26,8 @@ public static class DevDiagnostics
         };
         problem.Extensions["user"] = user.Identity?.Name;
         problem.Extensions["sid"] = user.GetUserSid()?.Value;
-        problem.Extensions["tenant"] = user.FindFirst("tenant_id")?.Value;
+        var tenantClaim = TenantClaimReader.Read(user);
+        problem.Extensions["tenant"] = tenantClaim.Kind == ClaimTenantKind.Valid ? tenantClaim.Tenant.Value : null;
         problem.Extensions["roles"] = user.GetUserRoles().ToList();
         problem.Extensions["traceId"] = context.TraceIdentifier;
 
@@ -71,6 +73,11 @@ public sealed class DevAuthorizationResultHandler : IAuthorizationMiddlewareResu
             {
                 return $"Policy '{name}' requires one of the roles [{string.Join(", ", required)}]. Caller roles: [{haveText}].";
             }
+        }
+
+        if (policyNames.Count > 0)
+        {
+            return $"Policy '{string.Join(", ", policyNames)}' requirements were not satisfied. Caller roles: [{haveText}].";
         }
 
         var requirements = string.Join(", ", policy.Requirements.Select(r => r.GetType().Name));

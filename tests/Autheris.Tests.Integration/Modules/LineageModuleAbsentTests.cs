@@ -61,7 +61,7 @@ public sealed class LineageModuleAbsentTests : IClassFixture<LineageModuleAbsent
 
         using var modOwner = _withModule.CreateClient();
         modOwner.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-LINEAGE-OWNER");
-        modOwner.DefaultRequestHeaders.Add("X-Test-Roles", "DataOwner");
+        modOwner.DefaultRequestHeaders.Add("X-Test-Roles", "Consumer");
         modOwner.DefaultRequestHeaders.Add("X-Test-Tenant-Id", "tenant-lineage");
         using var ownerDenied = await modOwner.PostAsync("/modules/lineage/openlineage/sync", content: null);
         ownerDenied.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
@@ -109,7 +109,7 @@ public sealed class LineageModuleAbsentTests : IClassFixture<LineageModuleAbsent
 
         using var admin = _absent.CreateClient();
         admin.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-PRIVACY-ADMIN");
-        admin.DefaultRequestHeaders.Add("X-Test-Roles", "PrivacyAdmin,ClusterAdmin");
+        admin.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin,ClusterAdmin");
         admin.DefaultRequestHeaders.Add("X-Test-Tenant-Id", "tenant-lineage");
         using var response = await admin.GetAsync("/api/governance/gdpr/export-pdf?domain=finance&schema=dbo&table=invoices");
         response.StatusCode.ShouldNotBe(HttpStatusCode.NotFound);

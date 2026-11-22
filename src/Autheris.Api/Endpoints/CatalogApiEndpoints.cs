@@ -66,8 +66,8 @@ public static partial class CatalogApiEndpoints
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // Data sources disclose endpoint base URLs and authentication state: administrators only. A tenant-scoped GovernanceAdmin
-        // is further confined to the tables of its tenant by the service. A GovernanceAdmin without a resolvable tenant is
-        // answered with a stable 403 that names the option instead of a misleading empty list.
+        // is further confined to the tables of its tenant by the service. Any authenticated caller without a resolvable scope
+        // (such as a tenantless GovernanceAdmin or TenantAdmin) is answered with a stable 403 instead of a 500 or empty list.
         group.MapGet("/datasources", async (
             ICatalogDiscoveryService discoveryService,
             IOptions<GatewayOptions> gatewayOptions,
@@ -75,8 +75,7 @@ public static partial class CatalogApiEndpoints
             CancellationToken ct) =>
         {
             var scope = CallerScopeResolver.Resolve(httpContext.User, TenantResolver.EffectiveDefaultOf(gatewayOptions.Value.Tenancy));
-            if (scope == CallerScope.None && httpContext.User.Identity?.IsAuthenticated == true &&
-                CallerScopeResolver.HoldsGovernanceAdminRole(httpContext.User))
+            if (scope == CallerScope.None && httpContext.User.Identity?.IsAuthenticated == true)
             {
                 return CallerScopeResolver.HasInvalidTenantClaim(httpContext.User)
                     ? ApiProblems.Forbidden(ApiErrorCodes.TenantClaimInvalid, "The tenant claim of the caller is invalid.", httpContext)
@@ -86,11 +85,35 @@ public static partial class CatalogApiEndpoints
                         httpContext);
             }
 
-            var context = CreateRequestContext(httpContext);
+            RequestContext context;
+            if (scope == CallerScope.Global)
+            {
+                TenantId globalTenant;
+                try
+                {
+                    globalTenant = EndpointSecurity.GetRequestTenant(httpContext);
+                }
+                catch (TenantUnresolvedException)
+                {
+                    globalTenant = TenantId.Platform;
+                }
+
+                context = new RequestContext(
+                    globalTenant,
+                    httpContext.User.GetUserSid() ?? new Sid("anonymous"),
+                    httpContext.User.GetUserRoles(),
+                    httpContext.TraceIdentifier,
+                    httpContext.User);
+            }
+            else
+            {
+                context = CreateRequestContext(httpContext);
+            }
+
             var datasources = await discoveryService.ListDatasourcesAsync(context, ct);
             return Results.Ok(datasources);
         })
-        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
+        .RequireAuthorization(GatewayPolicies.AdminOnly)
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         group.MapPost("/datasources", RegisterDatasourceHandler)

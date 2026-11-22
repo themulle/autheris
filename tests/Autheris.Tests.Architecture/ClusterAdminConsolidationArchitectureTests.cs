@@ -78,4 +78,58 @@ public sealed class ClusterAdminConsolidationArchitectureTests
 
         offenders.ShouldBeEmpty("Route ClusterAdmin checks through ClusterAdminPolicy instead of raw string comparisons.");
     }
+
+    [Fact]
+    public void No_ClusterAdmin_literal_in_role_arrays()
+    {
+        var gatewayPoliciesText = RepositoryScan.ReadText("src/Autheris.Api/Security/GatewayPolicies.cs");
+        var offenders = new List<string>();
+        var lines = gatewayPoliciesText.Split('\n');
+        for (var i = 0; i < lines.Length; i++)
+        {
+            var line = lines[i];
+            if (line.TrimStart().StartsWith("//", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (line.Contains("Roles =", StringComparison.Ordinal) &&
+                line.Contains("\"ClusterAdmin\"", StringComparison.Ordinal))
+            {
+                offenders.Add($"src/Autheris.Api/Security/GatewayPolicies.cs:{i + 1}");
+            }
+        }
+
+        var externalApiPermissionsText = RepositoryScan.ReadText("src/Autheris.Api/Security/ExternalApiPermissions.cs");
+        if (externalApiPermissionsText.Contains("\"ClusterAdmin\"", StringComparison.Ordinal))
+        {
+            offenders.Add("src/Autheris.Api/Security/ExternalApiPermissions.cs");
+        }
+
+        offenders.ShouldBeEmpty("Remove 'ClusterAdmin' literals from role arrays and evaluate via ClusterAdminPolicy.IsCanonicalClusterAdmin.");
+    }
+
+    [Fact]
+    public void No_IsInRole_ClusterAdmin()
+    {
+        var offenders = new List<string>();
+        foreach (var file in RepositoryScan.ProductionFiles)
+        {
+            if (file.RelativePath.EndsWith("ClusterAdminPolicy.cs", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            foreach (var line in RepositoryScan.CodeLines(file.Text))
+            {
+                if (IsInRoleClusterAdminRegex.IsMatch(line))
+                {
+                    offenders.Add(file.RelativePath);
+                    break;
+                }
+            }
+        }
+
+        offenders.ShouldBeEmpty("Use ClusterAdminPolicy.IsCanonicalClusterAdmin instead of IsInRole(\"ClusterAdmin\") outside ClusterAdminPolicy.cs.");
+    }
 }

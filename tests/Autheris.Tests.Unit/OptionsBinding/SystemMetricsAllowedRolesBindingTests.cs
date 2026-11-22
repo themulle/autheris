@@ -26,7 +26,7 @@ public class SystemMetricsAllowedRolesBindingTests
     public void NothingConfigured_UsesDocumentedDefault()
     {
         Bind(new() { ["Enabled"] = "true" })
-            .GetEffectiveAllowedRoles().ToArray().ShouldBe(["GovernanceAdmin", "ClusterAdmin", "SecurityAdmin"]);
+            .GetEffectiveAllowedRoles().ToArray().ShouldBe(["GovernanceAdmin", "ClusterAdmin"]);
     }
 
     [Fact]

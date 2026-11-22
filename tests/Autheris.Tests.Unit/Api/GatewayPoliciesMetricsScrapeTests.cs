@@ -45,6 +45,6 @@ public sealed class GatewayPoliciesMetricsScrapeTests
     public void MetricsScrape_PolicyRoles_AreRegisteredForDiagnostics()
     {
         GatewayPolicies.TryGetPolicyRoles(GatewayPolicies.MetricsScrape, out var roles).ShouldBeTrue();
-        roles.ShouldBe(["MetricsScraper", "ClusterAdmin"]);
+        roles.ShouldBe(["MetricsScraper"]);
     }
 }

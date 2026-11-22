@@ -95,7 +95,8 @@ public sealed class UsageReportAuthorizationTests
         GatewayPolicies.HasAnyRole(consumer, GatewayPolicies.UsageAdminRoles).ShouldBeFalse();
         GatewayPolicies.HasAnyRole(govAdmin, GatewayPolicies.UsageAdminRoles).ShouldBeFalse();
         GatewayPolicies.HasAnyRole(tenantAdmin, GatewayPolicies.UsageAdminRoles).ShouldBeTrue();
-        GatewayPolicies.HasAnyRole(clusterAdmin, GatewayPolicies.UsageAdminRoles).ShouldBeTrue();
+        GatewayPolicies.HasRole(clusterAdmin, Autheris.Domain.Security.GatewayRole.TenantAdmin).ShouldBeTrue();
+        Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(clusterAdmin).ShouldBeTrue();
     }
 
     [Fact]
@@ -111,7 +112,7 @@ public sealed class UsageReportAuthorizationTests
         (await ExecuteAsync(await UsageEndpoints.HandleEraseUserAsync(BobSid.Value, c2, harness.Service, "tenant-b", CancellationToken.None), c2))
             .Status.ShouldBe(StatusCodes.Status403Forbidden);
 
-        var c3 = harness.CreateHttpContext("DataOwner", "tenant-a", OwnerSid.Value);
+        var c3 = harness.CreateHttpContext("Consumer", "tenant-a", OwnerSid.Value);
         (await ExecuteAsync(await UsageEndpoints.HandleTableReportAsync("default.public.orders", c3, harness.Service, harness.Options, null, null, null, "tenant-b", null, null, null, CancellationToken.None), c3))
             .Status.ShouldBe(StatusCodes.Status403Forbidden);
     }
@@ -145,11 +146,11 @@ public sealed class UsageReportAuthorizationTests
         harness.Ownership.Owned[(ownedTable, OwnerSid)] = true;
         harness.Repo.Rows.Add(MakeRow(Today, "pg-main", tableId: "default.sales.orders", allowCount: 5, queries: 5));
 
-        var okCtx = harness.CreateHttpContext("DataOwner", "tenant-a", OwnerSid.Value);
+        var okCtx = harness.CreateHttpContext("Consumer", "tenant-a", OwnerSid.Value);
         (await ExecuteAsync(await UsageEndpoints.HandleTableReportAsync("default.sales.orders", okCtx, harness.Service, harness.Options, null, null, null, null, null, null, null, CancellationToken.None), okCtx))
             .Status.ShouldBe(StatusCodes.Status200OK);
 
-        var deniedCtx = harness.CreateHttpContext("DataOwner", "tenant-a", OwnerSid.Value);
+        var deniedCtx = harness.CreateHttpContext("Consumer", "tenant-a", OwnerSid.Value);
         (await ExecuteAsync(await UsageEndpoints.HandleTableReportAsync("default.hr.salaries", deniedCtx, harness.Service, harness.Options, null, null, null, null, null, null, null, CancellationToken.None), deniedCtx))
             .Status.ShouldBe(StatusCodes.Status403Forbidden);
     }
@@ -160,13 +161,13 @@ public sealed class UsageReportAuthorizationTests
         var ownedTable = TableIdentifier.Parse("default.sales.orders");
         var harnessDenied = new ReportHarness(dataOwnersSeeUsers: false);
         harnessDenied.Ownership.Owned[(ownedTable, OwnerSid)] = true;
-        var deniedCtx = harnessDenied.CreateHttpContext("DataOwner", "tenant-a", OwnerSid.Value);
+        var deniedCtx = harnessDenied.CreateHttpContext("Consumer", "tenant-a", OwnerSid.Value);
         (await ExecuteAsync(await UsageEndpoints.HandleTableReportAsync("default.sales.orders", deniedCtx, harnessDenied.Service, harnessDenied.Options, null, null, "user", null, null, null, null, CancellationToken.None), deniedCtx))
             .Status.ShouldBe(StatusCodes.Status403Forbidden);
 
         var harnessAllowed = new ReportHarness(dataOwnersSeeUsers: true);
         harnessAllowed.Ownership.Owned[(ownedTable, OwnerSid)] = true;
-        var okCtx = harnessAllowed.CreateHttpContext("DataOwner", "tenant-a", OwnerSid.Value);
+        var okCtx = harnessAllowed.CreateHttpContext("Consumer", "tenant-a", OwnerSid.Value);
         (await ExecuteAsync(await UsageEndpoints.HandleTableReportAsync("default.sales.orders", okCtx, harnessAllowed.Service, harnessAllowed.Options, null, null, "user", null, null, null, null, CancellationToken.None), okCtx))
             .Status.ShouldBe(StatusCodes.Status200OK);
     }
@@ -215,11 +216,11 @@ public sealed class UsageReportAuthorizationTests
         harness.Consents.Items[ownedGrantId] = MakeConsent(ownedGrantId, "tenant-a", "default.sales.orders", GranteeType.User, BobSid);
         harness.Consents.Items[foreignTableGrantId] = MakeConsent(foreignTableGrantId, "tenant-a", "default.hr.salaries", GranteeType.User, BobSid);
 
-        var ownedCtx = harness.CreateHttpContext("DataOwner", "tenant-a", OwnerSid.Value);
+        var ownedCtx = harness.CreateHttpContext("Consumer", "tenant-a", OwnerSid.Value);
         (await ExecuteAsync(await UsageEndpoints.HandleGrantReportAsync(ownedGrantId.ToString(), ownedCtx, harness.Service, null, null, null, null, null, null, CancellationToken.None), ownedCtx))
             .Status.ShouldBe(StatusCodes.Status200OK);
 
-        var foreignCtx = harness.CreateHttpContext("DataOwner", "tenant-a", OwnerSid.Value);
+        var foreignCtx = harness.CreateHttpContext("Consumer", "tenant-a", OwnerSid.Value);
         (await ExecuteAsync(await UsageEndpoints.HandleGrantReportAsync(foreignTableGrantId.ToString(), foreignCtx, harness.Service, null, null, null, null, null, null, CancellationToken.None), foreignCtx))
             .Status.ShouldBe(StatusCodes.Status403Forbidden);
     }

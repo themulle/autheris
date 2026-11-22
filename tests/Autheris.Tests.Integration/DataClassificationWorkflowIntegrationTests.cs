@@ -198,7 +198,7 @@ public class DataClassificationWorkflowIntegrationTests : IClassFixture<DataClas
     [Fact]
     public async Task SR_H_04_Approve_WithUnsetDataOwner_IsForbidden()
     {
-        var client = CreateClient(new Sid("S-1-5-21-ADMIN-1"), ["DataOwner", "GovernanceAdmin"]);
+        var client = CreateClient(new Sid("S-1-5-21-ADMIN-1"), ["GovernanceAdmin"]);
         var proposal = await SeedProposalAsync(ownerSid: null, rank: 1, status: "UNCLASSIFIED");
 
         var resp = await client.PostAsJsonAsync(
@@ -215,7 +215,7 @@ public class DataClassificationWorkflowIntegrationTests : IClassFixture<DataClas
     [Fact]
     public async Task SR_H_04_Approve_ByMatchingOwner_ClassifiesLowRiskProposal()
     {
-        var client = CreateClient(new Sid("S-1-5-21-OWNER-ZED"), ["DataOwner"]);
+        var client = CreateClient(new Sid("S-1-5-21-OWNER-ZED"), ["GovernanceAdmin"]);
         var proposal = await SeedProposalAsync("S-1-5-21-OWNER-ZED", rank: 1);
 
         var resp = await client.PostAsJsonAsync(

@@ -202,7 +202,7 @@ public class TableDownstreamConsumersAndGdprTests
         var callerContext = new CallerSecurityContext(
             new Sid("S-1-5-21-PRIVACY-OFFICER"),
             [],
-            ["PrivacyAdmin"],
+            ["GovernanceAdmin"],
             Autheris.Tests.Common.TestTenants.Default,
             IsGovernanceAdmin: false,
             IsClusterAdmin: false);

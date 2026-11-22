@@ -51,11 +51,11 @@ public static partial class ConsentWorkflowAdminEndpoints
         group.MapPost("/requests:reroute", RerouteRequestsAsync);
 
         app.MapGet("/api/v1/admin/consent/grant-records/{grantId:guid}/export", ExportGrantRecordAsync)
-            .RequireAuthorization(GatewayPolicies.AuditorOrAbove)
+            .RequireAuthorization(GatewayPolicies.AuditRead)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.AuditExport);
 
         app.MapPost("/api/v1/admin/consent/grant-records:verify", VerifyGrantRecordsAsync)
-            .RequireAuthorization(GatewayPolicies.AuditorOrAbove)
+            .RequireAuthorization(GatewayPolicies.AuditRead)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.AuditRead);
 
         return app;

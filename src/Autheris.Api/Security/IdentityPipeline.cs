@@ -18,6 +18,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Autheris.Domain.Tenancy;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -52,6 +53,7 @@ public sealed class IdentityPipeline : IIdentityPipeline
             "autheris:realm",
             RequireFunctionalRightHandler.FunctionalRightClaimType,
             RoleResolutionClaims.ClaimType,
+            RoleResolutionClaims.AllowedGatewayRolesClaimType,
             GroupResolutionClaims.StatusClaimType,
             GroupResolutionClaims.MarkerClaimType,
             GroupResolutionClaims.ExpiresAtClaimType
@@ -187,7 +189,7 @@ public sealed class IdentityPipeline : IIdentityPipeline
 
         // DT-A-3 / DT-SC-05 / CRIT-01: the one tenant decision of the ingress.
         var resolution = TenantStamping.Apply(identity, _tenantResolver, realm != null && !tenantByClaims);
-        if (realm == null || tenantByClaims)
+        if (realm == null && !tenantByClaims)
         {
             identity.AddClaim(new Claim("autheris:realm", realmId));
         }
@@ -217,9 +219,19 @@ public sealed class IdentityPipeline : IIdentityPipeline
             }
         }
 
+        var isForwardAuth = string.Equals(scheme, ClusterAdminPolicy.ForwardAuthScheme, StringComparison.OrdinalIgnoreCase)
+            || normalized.Identities.Any(i =>
+                i.IsAuthenticated &&
+                string.Equals(i.AuthenticationType, ClusterAdminPolicy.ForwardAuthScheme, StringComparison.OrdinalIgnoreCase));
+
         if (degradedReason is null && realm is { GroupSource: RealmGroupSource.Resolver } && !IsScimScheme(scheme))
         {
-            degradedReason = await AddRolesAndRightsAsync(identity, normalized, realm, realmId, resolution.Tenant, groups, ct).ConfigureAwait(false);
+            degradedReason = await AddRolesAndRightsAsync(identity, normalized, realm, realmId, resolution.Tenant, groups, isForwardAuth, ct).ConfigureAwait(false);
+        }
+
+        if (!tenantByClaims && !IsScimScheme(scheme))
+        {
+            ApplyRealmRoleOrigin(identity, realm, isForwardAuth);
         }
 
         if (!tenantByClaims && !IsScimScheme(scheme) && clientCert is null && !BindRealmSubjectSid(identity, realm, realmId, isServicePrincipal))
@@ -361,7 +373,7 @@ public sealed class IdentityPipeline : IIdentityPipeline
     }
 
     private async ValueTask<string?> AddRolesAndRightsAsync(
-        ClaimsIdentity identity, ClaimsPrincipal normalized, IdentityRealm realm, string realmId, TenantId? tenant, HashSet<Sid> groups, CancellationToken ct)
+        ClaimsIdentity identity, ClaimsPrincipal normalized, IdentityRealm realm, string realmId, TenantId? tenant, HashSet<Sid> groups, bool isForwardAuth, CancellationToken ct)
     {
         // Roles come from the realm's own provider chain (Resolver realms only); the ForwardAuth GroupSource override above applies to groups, never to roles.
         if (_roleResolver is null || tenant is not { Value: not null } tenantId)
@@ -391,17 +403,22 @@ public sealed class IdentityPipeline : IIdentityPipeline
             return "role provider unavailable";
         }
 
-        var isForwardAuth = normalized.Identities.Any(i =>
-            i.IsAuthenticated &&
-            string.Equals(i.AuthenticationType, Autheris.Domain.Security.ClusterAdminPolicy.ForwardAuthScheme, StringComparison.OrdinalIgnoreCase));
-
         var roles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var role in rolesResolution.Roles)
         {
-            if (isForwardAuth && Autheris.Domain.Security.ClusterAdminPolicy.IsClusterAdminRole(role))
+            if (GatewayRoleExtensions.TryParseGatewayRoleValue(role, out _, out var parsedRole))
             {
-                _logger.LogWarning("ForwardAuth identity dropped resolved ClusterAdmin role from realm role resolver for realm {RealmId}.", realmId);
-                continue;
+                if (isForwardAuth && parsedRole == GatewayRole.ClusterAdmin)
+                {
+                    _logger.LogWarning("ForwardAuth identity dropped resolved ClusterAdmin role from realm role resolver for realm {RealmId}.", realmId);
+                    continue;
+                }
+
+                if (!realm.AllowedGatewayRoles.Contains(parsedRole))
+                {
+                    _logger.LogWarning("Identity pipeline dropped resolved gateway role outside AllowedGatewayRoles for realm {RealmId}.", realmId);
+                    continue;
+                }
             }
 
             if (roles.Add(role))
@@ -413,7 +430,7 @@ public sealed class IdentityPipeline : IIdentityPipeline
         // Workload subject mapping: additive only, audited on every authentication (role cache hits included) before any mapped role is applied.
         foreach (var mappedRole in await ResolveMappedRolesAsync(identity, realm, realmId, tenantId, ct).ConfigureAwait(false))
         {
-            if (isForwardAuth && Autheris.Domain.Security.ClusterAdminPolicy.IsClusterAdminRole(mappedRole))
+            if (isForwardAuth && ClusterAdminPolicy.IsClusterAdminRole(mappedRole))
             {
                 _logger.LogWarning("ForwardAuth identity dropped mapped ClusterAdmin role for realm {RealmId}.", realmId);
                 continue;
@@ -590,5 +607,46 @@ public sealed class IdentityPipeline : IIdentityPipeline
         identity.AddClaim(IdentityClaimIssuers.CreatePrimarySidClaim(value));
     }
 
+    private static void ApplyRealmRoleOrigin(ClaimsIdentity identity, IdentityRealm? realm, bool isForwardAuth)
+    {
+        var effectiveAllowed = realm is not null
+            ? new HashSet<GatewayRole>(realm.AllowedGatewayRoles)
+            : [];
+
+        if (isForwardAuth)
+        {
+            effectiveAllowed.Remove(GatewayRole.ClusterAdmin);
+        }
+
+        identity.AddClaim(RoleResolutionClaims.CreateAllowedGatewayRolesClaim(effectiveAllowed));
+
+        var toRemove = new List<Claim>();
+        foreach (var claim in identity.Claims)
+        {
+            if (!IsRoleOriginClaimType(claim.Type, identity.RoleClaimType))
+            {
+                continue;
+            }
+
+            if (GatewayRoleExtensions.TryParseGatewayRoleValue(claim.Value, out _, out var parsedRole) &&
+                !effectiveAllowed.Contains(parsedRole))
+            {
+                toRemove.Add(claim);
+            }
+        }
+
+        foreach (var claim in toRemove)
+        {
+            identity.RemoveClaim(claim);
+        }
+    }
+
+    private static bool IsRoleOriginClaimType(string claimType, string roleClaimType) =>
+        string.Equals(claimType, roleClaimType, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(claimType, ClaimTypes.Role, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(claimType, "role", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(claimType, "roles", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(claimType, "http://schemas.microsoft.com/ws/2008/06/identity/claims/role", StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(claimType, "gateway_role", StringComparison.OrdinalIgnoreCase);
     private static ClaimsPrincipal Unauthenticated() => new(new ClaimsIdentity());
 }

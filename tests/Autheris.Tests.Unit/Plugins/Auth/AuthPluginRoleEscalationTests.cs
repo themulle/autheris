@@ -30,8 +30,8 @@ public sealed class AuthPluginRoleEscalationTests
     [InlineData("CLUSTERADMIN")]
     [InlineData("GovernanceAdmin")]
     [InlineData("governanceadmin")]
-    [InlineData("SecurityAdmin")]
-    [InlineData("securityadmin")]
+    [InlineData("TenantAdmin")]
+    [InlineData("tenantadmin")]
     public void Sanitize_WhenProhibitedRolesSupplied_StripsThemAndEmitsAlert(string prohibitedRole)
     {
         var options = new AuthPluginOptions();
@@ -55,19 +55,14 @@ public sealed class AuthPluginRoleEscalationTests
     [InlineData("FilterSync")]
     [InlineData("CallerAttributeApprover")]
     [InlineData("CallerAttributeInspector")]
-    [InlineData("DataOwner")]
-    [InlineData("DataSteward")]
+    [InlineData("CatalogArtifactUploader")]
+    [InlineData("DataProductAdmin")]
+    [InlineData("DataProductSync")]
     [InlineData("DbtAdmin")]
     [InlineData("SCIM_PROVISIONER")]
     [InlineData("scim_provisioner")]
     [InlineData("SchemaPublisher")]
-    [InlineData("SchemaAdmin")]
-    [InlineData("PrivacyAdmin")]
-    [InlineData("DataProtectionOfficer")]
-    [InlineData("GatewayAdmin")]
-    [InlineData("PlatformAdmin")]
     [InlineData("SecurityAuditor")]
-    [InlineData("Auditor")]
     [InlineData("MetricsScraper")]
     [InlineData("BreakGlassOperator")]
     [InlineData("CLUSTER_ADMIN")]
@@ -77,7 +72,7 @@ public sealed class AuthPluginRoleEscalationTests
     [InlineData("admin")]
     [InlineData("governance:simulate")]
     [InlineData("governance:admin")]
-    [InlineData("tenant-1:DataOwner")]
+    [InlineData("tenant-1:FilterAdmin")]
     [InlineData("tenant-1:GovernanceAdmin")]
     [InlineData("a:b:ClusterAdmin")]
     public void Sanitize_PrivilegedApproverAndSodRoles_AreStripped(string privilegedRole)
@@ -101,7 +96,7 @@ public sealed class AuthPluginRoleEscalationTests
         var guard = new AuthPluginRoleEscalationGuard(new AuthPluginOptions(), NullLogger<AuthPluginRoleEscalationGuard>.Instance);
 
         guard.IsProhibitedRole("tenant-1:FilterAdmin").ShouldBeTrue();
-        guard.IsProhibitedRole(" dataowner ").ShouldBeTrue();
+        guard.IsProhibitedRole(" tenantadmin ").ShouldBeTrue();
         guard.IsProhibitedRole("Analyst").ShouldBeFalse();
         guard.IsProhibitedRole("BillingViewer").ShouldBeFalse();
         guard.IsProhibitedRole("support.tier-1").ShouldBeFalse();

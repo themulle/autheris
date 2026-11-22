@@ -49,7 +49,7 @@ public static partial class GovernanceEndpoints
         ISchemaSunsettingService sunsettingService,
         HttpContext context)
     {
-        var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher, GatewayRole.DataOwner, GatewayRole.Consumer]);
+        var isPrivileged = GatewayPolicies.HasAnyRequestRole(context, [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher, GatewayRole.Consumer]);
         if (!isPrivileged)
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);

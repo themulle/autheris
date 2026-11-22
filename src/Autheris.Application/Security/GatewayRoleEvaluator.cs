@@ -4,14 +4,17 @@ using System;
 using System.Collections.Generic;
 using System.Security.Claims;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Identity;
 using Autheris.Domain.Common;
+using Autheris.Domain.Identity;
 using Autheris.Domain.Security;
 
 /// <summary>
-/// K-K10: Canonical RBAC evaluator implementing hierarchy and tenant-scoped role checks.
+/// Canonical RBAC evaluator implementing hierarchy and tenant-scoped role checks.
 /// </summary>
-public sealed class GatewayRoleEvaluator : IGatewayRoleEvaluator
+public sealed class GatewayRoleEvaluator(IIdentityRealmRegistry? realmRegistry = null) : IGatewayRoleEvaluator
 {
+    private readonly IIdentityRealmRegistry? _realmRegistry = realmRegistry;
     public bool HasRole(ClaimsPrincipal? principal, GatewayRole role, string? tenantId = null)
     {
         if (principal?.Identity?.IsAuthenticated != true)
@@ -97,10 +100,42 @@ public sealed class GatewayRoleEvaluator : IGatewayRoleEvaluator
             return false;
         }
 
+        bool isForwardAuth = IsForwardAuthPrincipal(principal);
+        bool hasAllowed = TryGetAllowedGatewayRoles(principal, _realmRegistry, out var allowedRoles);
+
+        if (GatewayRoleExtensions.TryParseGatewayRoleValue(roleName, out _, out var targetRole))
+        {
+            if (isForwardAuth && targetRole == GatewayRole.ClusterAdmin)
+            {
+                return false;
+            }
+
+            if (hasAllowed && !allowedRoles.Contains(targetRole))
+            {
+                return false;
+            }
+        }
+        else if (hasAllowed)
+        {
+            return false;
+        }
+
         var rawRoles = principal.GetUserRoles();
         foreach (var raw in rawRoles)
         {
             if (string.IsNullOrWhiteSpace(raw))
+            {
+                continue;
+            }
+
+            if (isForwardAuth && ClusterAdminPolicy.IsClusterAdminRole(raw))
+            {
+                continue;
+            }
+
+            if (hasAllowed &&
+                GatewayRoleExtensions.TryParseGatewayRoleValue(raw, out _, out var rawGatewayRole) &&
+                !allowedRoles.Contains(rawGatewayRole))
             {
                 continue;
             }
@@ -159,6 +194,8 @@ public sealed class GatewayRoleEvaluator : IGatewayRoleEvaluator
 
         var result = new HashSet<GatewayRole>();
         var rawRoles = principal.GetUserRoles();
+        bool isForwardAuth = IsForwardAuthPrincipal(principal);
+        bool hasAllowed = TryGetAllowedGatewayRoles(principal, _realmRegistry, out var allowedRoles);
 
         foreach (var raw in rawRoles)
         {
@@ -169,8 +206,8 @@ public sealed class GatewayRoleEvaluator : IGatewayRoleEvaluator
 
             if (raw.Contains(':', StringComparison.Ordinal))
             {
-                // Strict tenant-scoped form "tenant1:DataOwner": exactly one colon, non-empty parts, exact role name.
-                // Anything else containing ':' (":ClusterAdmin", "a:b:DataOwner", "tenant:") is malformed and grants nothing.
+                // Strict tenant-scoped form "tenant1:Consumer": exactly one colon, non-empty parts, exact role name.
+                // Anything else containing ':' (":ClusterAdmin", "a:b:Consumer", "tenant:") is malformed and grants nothing.
                 if (!GatewayRoleExtensions.TryParseTenantScopedRole(raw, out var roleTenant, out var parsedRole))
                 {
                     continue;
@@ -197,15 +234,192 @@ public sealed class GatewayRoleEvaluator : IGatewayRoleEvaluator
                     continue;
                 }
 
+                if (hasAllowed && !allowedRoles.Contains(parsedRole))
+                {
+                    continue;
+                }
+
                 result.Add(parsedRole);
             }
             else if (GatewayRoleExtensions.TryParseGlobalRole(raw, out var globalRole) && !globalRole.IsTenantScopedOnly())
             {
+                if (isForwardAuth && globalRole == GatewayRole.ClusterAdmin)
+                {
+                    continue;
+                }
+
+                if (hasAllowed && !allowedRoles.Contains(globalRole))
+                {
+                    continue;
+                }
+
                 // Global role (applies across all tenants)
                 result.Add(globalRole);
             }
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// Evaluates whether the principal holds <paramref name="roleName"/> unprefixed or scoped to the
+    /// effective tenant (never matching wildcard prefixes, and failing closed on invalid or mismatched tenant claims).
+    /// </summary>
+    public static bool HasTenantBoundRole(ClaimsPrincipal? principal, string roleName, string? tenantId = null) =>
+        HasTenantBoundRole(principal, roleName, tenantId, null);
+
+    public static bool HasTenantBoundRole(
+        ClaimsPrincipal? principal,
+        string roleName,
+        string? tenantId,
+        IIdentityRealmRegistry? realmRegistry)
+    {
+        if (principal?.Identity?.IsAuthenticated != true || string.IsNullOrWhiteSpace(roleName))
+        {
+            return false;
+        }
+
+        bool isForwardAuth = IsForwardAuthPrincipal(principal);
+        bool hasAllowed = TryGetAllowedGatewayRoles(principal, realmRegistry, out var allowedRoles);
+        if (GatewayRoleExtensions.TryParseGatewayRoleValue(roleName, out _, out var targetRole))
+        {
+            if (isForwardAuth && targetRole == GatewayRole.ClusterAdmin)
+            {
+                return false;
+            }
+
+            if (hasAllowed && !allowedRoles.Contains(targetRole))
+            {
+                return false;
+            }
+        }
+        else if (hasAllowed)
+        {
+            return false;
+        }
+
+        var claim = Autheris.Domain.Tenancy.TenantClaimReader.Read(principal);
+        if (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Invalid)
+        {
+            return false;
+        }
+
+        string? effectiveTenant;
+        if (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid)
+        {
+            if (!string.IsNullOrWhiteSpace(tenantId) &&
+                !string.Equals(claim.Tenant.Value, tenantId.Trim(), StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            effectiveTenant = string.IsNullOrWhiteSpace(tenantId) ? claim.Tenant.Value : tenantId.Trim();
+        }
+        else
+        {
+            effectiveTenant = string.IsNullOrWhiteSpace(tenantId) ? null : tenantId.Trim();
+        }
+
+        foreach (var raw in principal.GetUserRoles())
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                continue;
+            }
+
+            var trimmed = raw.Trim();
+            if (isForwardAuth && ClusterAdminPolicy.IsClusterAdminRole(trimmed))
+            {
+                continue;
+            }
+
+            if (!trimmed.Contains(':', StringComparison.Ordinal))
+            {
+                if (string.Equals(trimmed, roleName, StringComparison.OrdinalIgnoreCase))
+                {
+                    return true;
+                }
+
+                continue;
+            }
+
+            if (string.IsNullOrEmpty(effectiveTenant))
+            {
+                continue;
+            }
+
+            var firstColon = trimmed.IndexOf(':', StringComparison.Ordinal);
+            var lastColon = trimmed.LastIndexOf(':', StringComparison.Ordinal);
+            if (firstColon <= 0 || firstColon != lastColon || firstColon == trimmed.Length - 1)
+            {
+                continue;
+            }
+
+            var roleTenant = trimmed[..firstColon];
+            var parsedRoleName = trimmed[(firstColon + 1)..];
+            if (roleTenant != "*" &&
+                string.Equals(roleTenant, effectiveTenant, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(parsedRoleName, roleName, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    internal static bool IsForwardAuthPrincipal(ClaimsPrincipal principal) =>
+        principal.Identities.Any(i =>
+            i.IsAuthenticated &&
+            string.Equals(i.AuthenticationType, ClusterAdminPolicy.ForwardAuthScheme, StringComparison.OrdinalIgnoreCase));
+
+    internal static bool TryGetAllowedGatewayRoles(
+        ClaimsPrincipal principal,
+        IIdentityRealmRegistry? realmRegistry,
+        out HashSet<GatewayRole> allowedRoles)
+    {
+        bool hasClaim = RoleResolutionClaims.TryReadAllowedGatewayRoles(principal, out var fromClaim);
+        bool hasRealm = false;
+        IReadOnlySet<GatewayRole>? fromRealm = null;
+
+        if (realmRegistry is not null)
+        {
+            var realmId = principal.FindFirst("autheris:realm")?.Value;
+            if (!string.IsNullOrWhiteSpace(realmId))
+            {
+                hasRealm = true;
+                fromRealm = realmRegistry.GetRealm(realmId)?.AllowedGatewayRoles;
+            }
+        }
+
+        if (hasClaim && hasRealm)
+        {
+            allowedRoles = new HashSet<GatewayRole>(fromClaim);
+            if (fromRealm is null)
+            {
+                allowedRoles.Clear();
+            }
+            else
+            {
+                allowedRoles.IntersectWith(fromRealm);
+            }
+
+            return true;
+        }
+
+        if (hasClaim)
+        {
+            allowedRoles = fromClaim;
+            return true;
+        }
+
+        if (hasRealm)
+        {
+            allowedRoles = fromRealm is null ? [] : new HashSet<GatewayRole>(fromRealm);
+            return true;
+        }
+
+        allowedRoles = [];
+        return false;
     }
 }

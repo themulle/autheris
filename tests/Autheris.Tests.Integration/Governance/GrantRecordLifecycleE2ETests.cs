@@ -147,7 +147,7 @@ public sealed class GrantRecordLifecycleE2ETests(GovernancePostgresFixture fixtu
 
         // 4. Verify via endpoint handler & service -> signed ISSUED record + correlated audit entry
         var exportService = store.Services.GetRequiredService<IGrantRecordExportService>();
-        var verifyCtx = BuildHttpContext(tenant, "Auditor");
+        var verifyCtx = BuildHttpContext(tenant, "SecurityAuditor");
         var verifyHttp = await ConsentWorkflowAdminEndpoints.VerifyGrantRecordsAsync(
             new GrantRecordVerifyRequest(GrantId: grantId),
             verifyCtx,

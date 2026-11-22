@@ -109,26 +109,26 @@ public static class DevConfiguration
                 [G + "Authentication:BasicAuth:Users:1:Username"] = "owner",
                 [G + "Authentication:BasicAuth:Users:1:Password"] = "dev",
                 [G + "Authentication:BasicAuth:Users:1:Sid"] = "S-1-5-21-1000-1000-1000-1001",
-                [G + "Authentication:BasicAuth:Users:1:Roles:0"] = "DataOwner",
+                [G + "Authentication:BasicAuth:Users:1:Roles:0"] = "GovernanceAdmin",
 
                 [G + "Authentication:BasicAuth:Users:2:Username"] = "approver-a",
                 [G + "Authentication:BasicAuth:Users:2:Password"] = "dev",
                 [G + "Authentication:BasicAuth:Users:2:Sid"] = "S-1-5-21-1000-1000-1000-1002",
-                [G + "Authentication:BasicAuth:Users:2:Roles:0"] = "DataOwner",
+                [G + "Authentication:BasicAuth:Users:2:Roles:0"] = "GovernanceAdmin",
 
                 [G + "Authentication:BasicAuth:Users:3:Username"] = "approver-b",
                 [G + "Authentication:BasicAuth:Users:3:Password"] = "dev",
                 [G + "Authentication:BasicAuth:Users:3:Sid"] = "S-1-5-21-1000-1000-1000-1003",
-                [G + "Authentication:BasicAuth:Users:3:Roles:0"] = "DataOwner",
+                [G + "Authentication:BasicAuth:Users:3:Roles:0"] = "GovernanceAdmin",
 
                 [G + "Authentication:BasicAuth:Users:4:Username"] = "analyst",
                 [G + "Authentication:BasicAuth:Users:4:Password"] = "dev",
-                [G + "Authentication:BasicAuth:Users:4:Roles:0"] = "Analyst",
+                [G + "Authentication:BasicAuth:Users:4:Roles:0"] = "Consumer",
 
                 [G + "Authentication:BasicAuth:Users:5:Username"] = "analyst-b",
                 [G + "Authentication:BasicAuth:Users:5:Password"] = "dev",
                 [G + "Authentication:BasicAuth:Users:5:TenantId"] = "tenant-b",
-                [G + "Authentication:BasicAuth:Users:5:Roles:0"] = "Analyst",
+                [G + "Authentication:BasicAuth:Users:5:Roles:0"] = "Consumer",
             };
 
             foreach (var (k, v) in defaultUsers)

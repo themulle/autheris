@@ -89,7 +89,7 @@ public sealed class ExternalSystemRequirementHandler(
             return;
         }
 
-        if (GatewayPolicies.HasAnyRole(user, GatewayPolicies.ApproverRoles))
+        if (GatewayPolicies.HasAnyRole(user, GatewayPolicies.GovernanceAdminRoles))
         {
             context.Succeed(requirement);
         }
@@ -101,7 +101,7 @@ public sealed class ExternalSystemRequirementHandler(
         System.Security.Claims.ClaimsPrincipal user)
     {
         if (ExternalApiPermissions.HasDelegatedScope(user, ExternalApiPermissions.GrantsRevoke)
-            && !GatewayPolicies.HasAnyRole(user, GatewayPolicies.ApproverRoles)
+            && !Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(user)
             && !GatewayPolicies.HasAnyRole(user, GatewayPolicies.AdminOnlyRoles))
         {
             return;
@@ -120,7 +120,7 @@ public sealed class ExternalSystemRequirementHandler(
 
         // Interactive human caller: grantee self-revocation, table data-owner, or admin is verified against the target grant in the handler.
         if (!ExternalApiPermissions.HasAnyExternalScope(user)
-            || GatewayPolicies.HasAnyRole(user, GatewayPolicies.ApproverRoles)
+            || Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(user)
             || GatewayPolicies.HasAnyRole(user, GatewayPolicies.AdminOnlyRoles))
         {
             context.Succeed(requirement);
