@@ -79,7 +79,7 @@ public sealed class ProtectionWriteValidatorTests
 
         result.IsValid.ShouldBeTrue();
         result.ErrorCode.ShouldBeNull();
-        result.NormalizedProtection?.MaskCategory.ShouldBeNull();
+        result.NormalizedProtection.ShouldBe(new ObjectProtection(null, null));
     }
 
     [Fact]
@@ -153,5 +153,26 @@ public sealed class ProtectionWriteValidatorTests
         result.IsValid.ShouldBeTrue();
         result.IsLooserThanContainer.ShouldBeFalse();
         result.ClearedRedundantColumns.ShouldBe(["col_conf", "col_internal", "col_public"]);
+    }
+
+    [Fact]
+    public void ApplyTableChange_case_colliding_column_overrides_preserve_strictest_and_deduplicate()
+    {
+        var caseSensitiveExisting = new Dictionary<string, ObjectProtection>(StringComparer.Ordinal)
+        {
+            ["ssn"] = new(ProtectionClass.Internal),
+            ["SSN"] = new(ProtectionClass.Secret),
+            ["email"] = new(ProtectionClass.Public),
+            ["EMAIL"] = new(ProtectionClass.Internal)
+        };
+
+        var result = ProtectionWriteValidator.ApplyTableChange(
+            ProtectionClass.Internal,
+            ProtectionClass.Confidential,
+            null,
+            caseSensitiveExisting);
+
+        result.IsValid.ShouldBeTrue();
+        result.ClearedRedundantColumns.ShouldBe(["email"]);
     }
 }

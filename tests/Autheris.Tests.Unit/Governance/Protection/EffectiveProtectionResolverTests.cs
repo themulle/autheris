@@ -224,4 +224,34 @@ public sealed class EffectiveProtectionResolverTests
         resolved.Columns["SALARY"].EffectiveMaskCategory.ShouldBe("COMPENSATION");
         resolved.Columns["salary"].EffectiveClass.ShouldBe(ProtectionClass.Secret);
     }
+
+    [Fact]
+    public void Case_colliding_column_overrides_merge_fail_closed_to_strictest_class()
+    {
+        var container = new ContainerDefaults(
+            HrDomainRef,
+            HrOwnerGroup,
+            ProtectionClass.Internal,
+            CatalogVisibilityMode.OnRequest);
+        var caseSensitiveOverrides = new Dictionary<string, ObjectProtection>(StringComparer.Ordinal)
+        {
+            ["ssn"] = new(ProtectionClass.Internal),
+            ["SSN"] = new(ProtectionClass.Secret, "  PII_SSN  "),
+            ["email"] = new(ProtectionClass.Public, "  PII_EMAIL  "),
+            ["EMAIL"] = new(ProtectionClass.Confidential, "ALT_EMAIL")
+        };
+
+        var resolved = EffectiveProtectionResolver.Resolve(
+            container,
+            table: new ObjectProtection(ProtectionClass.Internal),
+            caseSensitiveOverrides,
+            columnNames: ["ssn", "SSN", "email", "EMAIL"]);
+
+        resolved.Columns.Count.ShouldBe(2);
+        resolved.TableClass.ShouldBe(ProtectionClass.Secret);
+        resolved.Columns["ssn"].EffectiveClass.ShouldBe(ProtectionClass.Secret);
+        resolved.Columns["SSN"].EffectiveMaskCategory.ShouldBe("PII_SSN");
+        resolved.Columns["email"].EffectiveClass.ShouldBe(ProtectionClass.Confidential);
+        resolved.Columns["EMAIL"].EffectiveMaskCategory.ShouldBe("PII_EMAIL");
+    }
 }

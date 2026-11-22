@@ -24,7 +24,7 @@ public static class ProtectionWriteValidator
     {
         if (string.IsNullOrWhiteSpace(maskCategory))
         {
-            return new ProtectionWriteResult(true);
+            return new ProtectionWriteResult(true, NormalizedProtection: new ObjectProtection(null, null));
         }
 
         if (maskCategory.Any(char.IsControl))
@@ -93,15 +93,16 @@ public static class ProtectionWriteValidator
 
     private static IReadOnlyList<string> CollectRedundantColumns(IReadOnlyDictionary<string, ObjectProtection>? existingColumnOverrides, ProtectionClass newDeclaredTable)
     {
-        if (existingColumnOverrides is not { Count: > 0 })
+        var normalizedOverrides = EffectiveProtectionResolver.BuildCaseInsensitiveOverrides(existingColumnOverrides);
+        if (normalizedOverrides is null)
         {
             return [];
         }
 
         var cleared = new List<string>();
-        foreach (var (colName, colOverride) in existingColumnOverrides)
+        foreach (var (colName, colOverride) in normalizedOverrides)
         {
-            if (!string.IsNullOrWhiteSpace(colName) && colOverride?.Class is { } colClass && colClass.NormalizeOrConfidential() <= newDeclaredTable)
+            if (colOverride.Class is { } colClass && colClass.NormalizeOrConfidential() <= newDeclaredTable)
             {
                 cleared.Add(colName);
             }

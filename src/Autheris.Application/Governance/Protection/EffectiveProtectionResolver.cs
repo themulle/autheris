@@ -1,4 +1,3 @@
-using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 
@@ -43,7 +42,7 @@ public static class EffectiveProtectionResolver
         return new EffectiveProtection(containerRef, ownerGroupSid, rolledUpTableClass, declaredTableClass, tableMaskCategory, columns.AsReadOnly(), visibility);
     }
 
-    private static Dictionary<string, ObjectProtection>? BuildCaseInsensitiveOverrides(IReadOnlyDictionary<string, ObjectProtection>? columnOverrides)
+    internal static Dictionary<string, ObjectProtection>? BuildCaseInsensitiveOverrides(IReadOnlyDictionary<string, ObjectProtection>? columnOverrides)
     {
         if (columnOverrides is not { Count: > 0 })
         {
