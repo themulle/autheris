@@ -165,4 +165,60 @@ public sealed class InMemoryGatewayEventBusQueueTests
 
         await second.Task.WaitAsync(TimeSpan.FromSeconds(5));
     }
+
+    [Fact]
+    public async Task ConcurrentPublishAndUnsubscribe_NeverLeavesPendingOrStallsDrain()
+    {
+        for (int round = 0; round < 300; round++)
+        {
+            using var bus = NewBus(capacity: 4, timeout: TimeSpan.FromSeconds(5));
+            var sub = bus.Subscribe<AccessPlanCreatedEvent>((_, _) => Task.CompletedTask);
+            var start = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+            var pubTask = Task.Run(async () =>
+            {
+                await start.Task.ConfigureAwait(false);
+                for (int i = 0; i < 8; i++)
+                {
+                    await bus.PublishAsync(Ev($"r{round}-e{i}")).ConfigureAwait(false);
+                }
+            });
+
+            var unsubTask = Task.Run(async () =>
+            {
+                await start.Task.ConfigureAwait(false);
+                sub.Dispose();
+            });
+
+            start.SetResult();
+            await Task.WhenAll(pubTask, unsubTask).WaitAsync(TimeSpan.FromSeconds(5));
+
+            using var drainCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+            await bus.DrainAsync(drainCts.Token);
+        }
+    }
+
+    [Fact]
+    public async Task Unsubscribe_WithBlockedHandlerAndQueuedItems_DrainCompletesPromptly()
+    {
+        using var bus = NewBus(capacity: 8, timeout: TimeSpan.FromSeconds(30));
+        var handlerStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var neverCompletes = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var sub = bus.Subscribe<AccessPlanCreatedEvent>((_, _) =>
+        {
+            handlerStarted.TrySetResult();
+            return neverCompletes.Task;
+        });
+
+        await bus.PublishAsync(Ev("e1"));
+        await handlerStarted.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        await bus.PublishAsync(Ev("e2"));
+        await bus.PublishAsync(Ev("e3"));
+
+        sub.Dispose();
+
+        using var drainCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await bus.DrainAsync(drainCts.Token);
+    }
 }

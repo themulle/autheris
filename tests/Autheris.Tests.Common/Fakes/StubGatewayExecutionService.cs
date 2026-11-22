@@ -83,7 +83,23 @@ public sealed class StubGatewayExecutionService : IGatewayExecutionService
             return OnExecutePage(principal, table, request, ct);
         }
 
+        if (OnExecuteQuery is not null)
+        {
+            return ExecuteFromQueryFallbackAsync(principal, table, request, ct);
+        }
+
         return Task.FromResult(new TableQueryPage([], TableAccessDecision.Denied(table, "Not configured"), TotalCount: null));
+    }
+
+    private async Task<TableQueryPage> ExecuteFromQueryFallbackAsync(
+        ClaimsPrincipal? principal,
+        TableIdentifier table,
+        TablePageRequest request,
+        CancellationToken ct)
+    {
+        var (rows, decision) = await OnExecuteQuery!(
+            principal, table, request.First, request.After, null, request.RequestedFields, request.RequestHeaders, ct).ConfigureAwait(false);
+        return new TableQueryPage(rows, decision, TotalCount: null);
     }
 
     public Task<TableAccessDecision> CheckTableAccessAsync(

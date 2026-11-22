@@ -54,6 +54,8 @@ public sealed partial class ODataHandler(
     private readonly Autheris.Application.DataSources.IDataSourceOptionsResolver? _transportResolver = transportResolver;
     private readonly Autheris.Application.DataSources.IIngressTransportContext? _ingress = ingress;
 
+    internal Func<string, TableFilterClause> ParseFilter { get; init; } = static filter => ODataFilterParser.Parse(filter);
+
     /// <summary>
     /// DT-A-7: the default tenant is the catalog owner and may see every active table as a candidate (each still passes the table access
     /// check); every other tenant only its domain and the shared <c>default</c> domain. An unresolved tenant (no claim, no default,
@@ -402,7 +404,7 @@ public sealed partial class ODataHandler(
         {
             try
             {
-                filterClause = ODataFilterParser.Parse(filter);
+                filterClause = ParseFilter(filter);
             }
             catch (Autheris.Domain.Exceptions.GatewayInvalidQueryException)
             {
@@ -410,7 +412,8 @@ public sealed partial class ODataHandler(
             }
             catch (Exception ex)
             {
-                return Error(400, "InvalidQueryOption", $"Invalid $filter expression: {ex.Message}");
+                _logger.LogWarning(ex, "Invalid OData $filter expression for {Table}.", table);
+                return Error(400, "InvalidQueryOption", "Invalid $filter expression.");
             }
         }
 

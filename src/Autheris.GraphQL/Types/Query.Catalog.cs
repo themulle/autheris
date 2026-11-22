@@ -62,8 +62,38 @@ public sealed partial class Query
             throw InvalidTableArgument();
         }
 
-        var (rows, decision) = await executionService.ExecuteTableQueryAsync(
-            principal, tableId, first, after, queryArguments: null, requestedFields: null, requestHeaders: headers, ct: ct);
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows;
+        TableAccessDecision decision;
+        long? totalCount = null;
+        try
+        {
+            var page = await executionService.ExecuteTablePageAsync(
+                principal,
+                tableId,
+                new TablePageRequest(
+                    First: first,
+                    After: after,
+                    IncludeTotalCount: true,
+                    RequestHeaders: headers,
+                    RequireTotalCount: false),
+                ct).ConfigureAwait(false);
+            if (page is not null)
+            {
+                (rows, decision, totalCount) = (page.Rows, page.Decision, page.TotalCount);
+            }
+            else
+            {
+                (rows, decision) = await executionService.ExecuteTableQueryAsync(
+                    principal, tableId, first, after, queryArguments: null, requestedFields: null, requestHeaders: headers, ct: ct)
+                    .ConfigureAwait(false);
+            }
+        }
+        catch (NotSupportedException)
+        {
+            (rows, decision) = await executionService.ExecuteTableQueryAsync(
+                principal, tableId, first, after, queryArguments: null, requestedFields: null, requestHeaders: headers, ct: ct)
+                .ConfigureAwait(false);
+        }
 
         PropagateCdnCacheFlags(httpContext, decision);
 
@@ -71,7 +101,9 @@ public sealed partial class Query
         return new TableRecordPayload
         {
             TableName = tableId.ToString(),
-            TotalCount = jsonList.Count,
+            TotalCount = totalCount.HasValue
+                ? (int)Math.Clamp(totalCount.Value, 0L, int.MaxValue)
+                : jsonList.Count,
             JsonRows = jsonList
         };
     }
