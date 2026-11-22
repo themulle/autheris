@@ -52,69 +52,166 @@ public static class RowPolicyErrorGuard
     /// <see cref="QuerySpecification"/> carrying an injected <see cref="SecurityPredicateExpression"/> in its <c>WHERE</c>
     /// or <c>SELECT</c> list is the immediate body of a fenced <see cref="SubqueryTableSource"/>.
     /// </summary>
-    internal static bool AreAllPolicyTablesFenced(SqlStatement secured)
+    internal static bool AreAllPolicyTablesFenced(SqlStatement secured) =>
+        secured is SelectStatement select && CheckSelect(select, isSubqueryFenced: false);
+
+    private static bool CheckNodeFenced(SqlNode node, bool enclosingSubqueryFenced)
     {
-        if (secured is not SelectStatement)
+        while (true)
+        {
+            switch (node)
+            {
+                case SecurityPredicateExpression:
+                    // Gateway-injected policy predicate (including PolicySubquery); caller expressions cannot sit inside it.
+                    return true;
+                case ColumnReference
+                    or LiteralExpression
+                    or ParameterReference
+                    or PolicyParameterExpression
+                    or NamedBindMarkerExpression
+                    or PageOffsetParameterExpression
+                    or CurrentDateTimeExpression
+                    or TypedLiteralExpression
+                    or IntervalLiteralExpression
+                    or SqlIdentifier
+                    or SqlQualifiedName
+                    or WildcardSelectItem
+                    or NamedTableSource
+                    or UsingJoinCondition:
+                    return true;
+                case ColumnSelectItem col:
+                    node = col.Expression;
+                    continue;
+                case ParenthesizedExpression paren:
+                    node = paren.Expression;
+                    continue;
+                case BinaryExpression binary:
+                    if (!CheckNodeFenced(binary.Right, enclosingSubqueryFenced: false))
+                    {
+                        return false;
+                    }
+
+                    node = binary.Left;
+                    continue;
+                case InListExpression inList:
+                    if (!CheckNodeFenced(inList.Operand, enclosingSubqueryFenced: false))
+                    {
+                        return false;
+                    }
+
+                    var items = inList.Items;
+                    for (int i = 0; i < items.Count; i++)
+                    {
+                        if (!CheckNodeFenced(items[i], enclosingSubqueryFenced: false))
+                        {
+                            return false;
+                        }
+                    }
+
+                    return true;
+                case JoinedTableSource join:
+                    if (!CheckNodeFenced(join.Left, enclosingSubqueryFenced: false) ||
+                        !CheckNodeFenced(join.Right, enclosingSubqueryFenced: false))
+                    {
+                        return false;
+                    }
+
+                    if (join.Condition is OnJoinCondition on)
+                    {
+                        node = on.Predicate;
+                        continue;
+                    }
+
+                    if (join.Condition is null)
+                    {
+                        return true;
+                    }
+
+                    node = join.Condition;
+                    continue;
+                case SelectStatement select:
+                    return CheckSelect(select, isSubqueryFenced: false);
+                case SubqueryTableSource sub:
+                    return CheckSelect(sub.Subquery, sub.EvaluationFence);
+                case QuerySpecification spec:
+                    if (!enclosingSubqueryFenced && HasDirectSecurityPredicate(spec))
+                    {
+                        return false;
+                    }
+
+                    if (spec.From is not null && !CheckNodeFenced(spec.From, enclosingSubqueryFenced: false))
+                    {
+                        return false;
+                    }
+
+                    if (spec.Where is not null && !CheckNodeFenced(spec.Where, enclosingSubqueryFenced: false))
+                    {
+                        return false;
+                    }
+
+                    if (spec.GroupBy is not null && !CheckNodeFenced(spec.GroupBy, enclosingSubqueryFenced: false))
+                    {
+                        return false;
+                    }
+
+                    if (spec.Having is not null && !CheckNodeFenced(spec.Having, enclosingSubqueryFenced: false))
+                    {
+                        return false;
+                    }
+
+                    var projections = spec.Projections;
+                    for (int i = 0; i < projections.Count; i++)
+                    {
+                        if (!CheckNodeFenced(projections[i], enclosingSubqueryFenced: false))
+                        {
+                            return false;
+                        }
+                    }
+
+                    return true;
+                default:
+                    foreach (var child in node.EnumerateChildren())
+                    {
+                        if (!CheckNodeFenced(child, enclosingSubqueryFenced: false))
+                        {
+                            return false;
+                        }
+                    }
+
+                    return true;
+            }
+        }
+    }
+
+    private static bool CheckSelect(SelectStatement select, bool isSubqueryFenced)
+    {
+        if (select.With is not null && !CheckNodeFenced(select.With, enclosingSubqueryFenced: false))
         {
             return false;
         }
 
-        return CheckNodeFenced(secured, enclosingSubqueryFenced: false);
-    }
-
-    private static bool CheckNodeFenced(SqlNode node, bool enclosingSubqueryFenced)
-    {
-        switch (node)
-        {
-            case SecurityPredicateExpression:
-                // Gateway-injected policy predicate (including PolicySubquery); caller expressions cannot sit inside it.
-                return true;
-            case SubqueryTableSource sub:
-                return CheckSelectInsideSubquery(sub.Subquery, sub.EvaluationFence);
-            case QuerySpecification spec:
-                if (HasDirectSecurityPredicate(spec) && !enclosingSubqueryFenced)
-                {
-                    return false;
-                }
-
-                foreach (var child in node.EnumerateChildren())
-                {
-                    if (!CheckNodeFenced(child, enclosingSubqueryFenced: false))
-                    {
-                        return false;
-                    }
-                }
-                return true;
-            default:
-                foreach (var child in node.EnumerateChildren())
-                {
-                    if (!CheckNodeFenced(child, enclosingSubqueryFenced: false))
-                    {
-                        return false;
-                    }
-                }
-                return true;
-        }
-    }
-
-    private static bool CheckSelectInsideSubquery(SelectStatement select, bool isSubqueryFenced)
-    {
-        if (select.With is not null)
-        {
-            if (!CheckNodeFenced(select.With, enclosingSubqueryFenced: false)) return false;
-        }
-
         if (select.Body is QuerySpecification spec)
         {
-            if (!CheckNodeFenced(spec, enclosingSubqueryFenced: isSubqueryFenced)) return false;
+            if (!CheckNodeFenced(spec, enclosingSubqueryFenced: isSubqueryFenced))
+            {
+                return false;
+            }
         }
         else if (!CheckNodeFenced(select.Body, enclosingSubqueryFenced: false))
         {
             return false;
         }
 
-        if (select.OrderBy is not null && !CheckNodeFenced(select.OrderBy, enclosingSubqueryFenced: false)) return false;
-        if (select.Pagination is not null && !CheckNodeFenced(select.Pagination, enclosingSubqueryFenced: false)) return false;
+        if (select.OrderBy is not null && !CheckNodeFenced(select.OrderBy, enclosingSubqueryFenced: false))
+        {
+            return false;
+        }
+
+        if (select.Pagination is not null && !CheckNodeFenced(select.Pagination, enclosingSubqueryFenced: false))
+        {
+            return false;
+        }
+
         return true;
     }
 
@@ -125,9 +222,10 @@ public static class RowPolicyErrorGuard
             return true;
         }
 
-        foreach (var item in spec.Projections)
+        var projections = spec.Projections;
+        for (int i = 0; i < projections.Count; i++)
         {
-            if (ContainsSecurityPredicateOutsideSubqueries(item))
+            if (ContainsSecurityPredicateOutsideSubqueries(projections[i]))
             {
                 return true;
             }
@@ -138,35 +236,78 @@ public static class RowPolicyErrorGuard
 
     private static bool ContainsSecurityPredicateOutsideSubqueries(SqlNode node)
     {
-        if (node is SecurityPredicateExpression) return true;
-        if (node is SelectStatement) return false;
-        foreach (var child in node.EnumerateChildren())
+        while (true)
         {
-            if (ContainsSecurityPredicateOutsideSubqueries(child)) return true;
+            switch (node)
+            {
+                case SecurityPredicateExpression:
+                    return true;
+                case ColumnReference
+                    or LiteralExpression
+                    or ParameterReference
+                    or PolicyParameterExpression
+                    or NamedBindMarkerExpression
+                    or PageOffsetParameterExpression
+                    or CurrentDateTimeExpression
+                    or TypedLiteralExpression
+                    or IntervalLiteralExpression
+                    or SqlIdentifier
+                    or SqlQualifiedName
+                    or WildcardSelectItem
+                    or SelectStatement:
+                    return false;
+                case ColumnSelectItem col:
+                    node = col.Expression;
+                    continue;
+                case ParenthesizedExpression paren:
+                    node = paren.Expression;
+                    continue;
+                case BinaryExpression binary:
+                    if (ContainsSecurityPredicateOutsideSubqueries(binary.Right))
+                    {
+                        return true;
+                    }
+
+                    node = binary.Left;
+                    continue;
+                case InListExpression inList:
+                    if (ContainsSecurityPredicateOutsideSubqueries(inList.Operand))
+                    {
+                        return true;
+                    }
+
+                    var items = inList.Items;
+                    for (int i = 0; i < items.Count; i++)
+                    {
+                        if (ContainsSecurityPredicateOutsideSubqueries(items[i]))
+                        {
+                            return true;
+                        }
+                    }
+
+                    return false;
+                default:
+                    foreach (var child in node.EnumerateChildren())
+                    {
+                        if (ContainsSecurityPredicateOutsideSubqueries(child))
+                        {
+                            return true;
+                        }
+                    }
+
+                    return false;
+            }
         }
-        return false;
     }
 
     private static bool IsAllowed(Expression expression, bool evaluationFenced)
     {
-        if (evaluationFenced)
+        if (IsAllowedStrict(expression))
         {
-            if (expression is LiteralExpression lit)
-            {
-                return IsConsistentLiteral(lit);
-            }
-
-            if (HasColumn(expression))
-            {
-                return true;
-            }
-
-            // Column-free expressions must still be safe against plan-time constant evaluation hazards
-            // (overflow, division by zero, negative sqrt, invalid constant casts).
-            return IsAllowedConstantUnderFence(expression);
+            return true;
         }
 
-        return IsAllowedStrict(expression);
+        return evaluationFenced && (HasColumn(expression) || IsAllowedConstantUnderFence(expression));
     }
 
     private static bool IsAllowedConstantUnderFence(Expression expression) => expression switch
@@ -175,7 +316,7 @@ public static class RowPolicyErrorGuard
         BinaryExpression b when b.Operator is BinaryOperator.Add or BinaryOperator.Subtract && IsTemporalIntervalBinary(b) => true,
         FunctionCallExpression call when call.Name.Parts.Count == 1
             && call.Name.Parts[0].Value.ToLowerInvariant() is "row_number" or "rank" or "dense_rank" or "ntile" => true,
-        _ => IsAllowedStrict(expression)
+        _ => false
     };
 
     private static bool IsTemporalIntervalBinary(BinaryExpression binary) =>
@@ -397,7 +538,115 @@ public static class RowPolicyErrorGuard
         }
     }
 
-    private static bool HasColumn(Expression expression) => AstReflection.Collect<ColumnReference>(expression).Count > 0;
+    internal static bool HasColumn(Expression expression)
+    {
+        while (true)
+        {
+            switch (expression)
+            {
+                case ColumnReference:
+                    return true;
+                case LiteralExpression
+                    or ParameterReference
+                    or NamedBindMarkerExpression
+                    or PolicyParameterExpression
+                    or PageOffsetParameterExpression
+                    or CurrentDateTimeExpression
+                    or TypedLiteralExpression
+                    or IntervalLiteralExpression:
+                    return false;
+                case ParenthesizedExpression p:
+                    expression = p.Expression;
+                    continue;
+                case UnaryExpression u:
+                    expression = u.Operand;
+                    continue;
+                case CastExpression c:
+                    expression = c.Operand;
+                    continue;
+                case ExtractExpression ext:
+                    expression = ext.Source;
+                    continue;
+                case DateFunctionExpression dt:
+                    expression = dt.Source;
+                    continue;
+                case BinaryExpression b:
+                    if (HasColumn(b.Right)) return true;
+                    expression = b.Left;
+                    continue;
+                case IsDistinctFromExpression d:
+                    if (HasColumn(d.Right)) return true;
+                    expression = d.Left;
+                    continue;
+                case BetweenExpression bt:
+                    if (HasColumn(bt.Operand) || HasColumn(bt.Lower)) return true;
+                    expression = bt.Upper;
+                    continue;
+                case LikeExpression lk:
+                    if (HasColumn(lk.Operand) || HasColumn(lk.Pattern)) return true;
+                    if (lk.Escape is null) return false;
+                    expression = lk.Escape;
+                    continue;
+                case SubstringExpression sub:
+                    if (HasColumn(sub.Source) || HasColumn(sub.Start)) return true;
+                    if (sub.Length is null) return false;
+                    expression = sub.Length;
+                    continue;
+                case TrimExpression tr:
+                    if (HasColumn(tr.Source)) return true;
+                    if (tr.Characters is null) return false;
+                    expression = tr.Characters;
+                    continue;
+                case InListExpression inList:
+                    if (HasColumn(inList.Operand)) return true;
+                    return AnyHasColumn(inList.Items);
+                case FunctionCallExpression call:
+                    if (AnyHasColumn(call.Arguments)) return true;
+                    if (call.Filter is not null && HasColumn(call.Filter)) return true;
+                    if (call.OrderWithin is not null && HasColumnInOrderBy(call.OrderWithin)) return true;
+                    if (call.Window is not null)
+                    {
+                        if (call.Window.PartitionBy is not null && AnyHasColumn(call.Window.PartitionBy)) return true;
+                        if (call.Window.OrderBy is not null && HasColumnInOrderBy(call.Window.OrderBy)) return true;
+                    }
+                    return false;
+                case CaseExpression c:
+                    if (c.Operand is not null && HasColumn(c.Operand)) return true;
+                    var clauses = c.WhenClauses;
+                    for (int i = 0; i < clauses.Count; i++)
+                    {
+                        var when = clauses[i];
+                        if (HasColumn(when.Condition) || HasColumn(when.Result)) return true;
+                    }
+                    if (c.ElseResult is null) return false;
+                    expression = c.ElseResult;
+                    continue;
+                default:
+                    return AstReflection.Collect<ColumnReference>(expression).Count > 0;
+            }
+        }
+    }
+
+    private static bool AnyHasColumn(IReadOnlyList<Expression> expressions)
+    {
+        for (int i = 0; i < expressions.Count; i++)
+        {
+            if (HasColumn(expressions[i])) return true;
+        }
+
+        return false;
+    }
+
+    private static bool HasColumnInOrderBy(OrderByClause orderBy)
+    {
+        var elements = orderBy.Elements;
+        for (int i = 0; i < elements.Count; i++)
+        {
+            if (HasColumn(elements[i].Expression)) return true;
+        }
+
+        return false;
+    }
 
     private static bool IsConstant(Expression expression) => expression is LiteralExpression or ParameterReference or NamedBindMarkerExpression or PolicyParameterExpression;
 

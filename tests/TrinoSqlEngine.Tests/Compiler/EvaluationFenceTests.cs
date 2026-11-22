@@ -310,6 +310,151 @@ public sealed class EvaluationFenceTests
         Assert.Equal(-1, compiled.Sql.IndexOf("AND ROWNUM >= 1", secondFence + 1, StringComparison.Ordinal));
     }
 
+    [Fact]
+    public void HasColumn_CoversAllFastAndFallbackExpressionKinds()
+    {
+        var col = new ColumnReference(new SqlQualifiedName([new SqlIdentifier("Id")]));
+        var lit = new LiteralExpression(1L, LiteralType.Integer);
+        var fnName = new SqlQualifiedName([new SqlIdentifier("f")]);
+
+        Expression[] noCol =
+        [
+            lit,
+            new ParameterReference("p"),
+            new NamedBindMarkerExpression("p"),
+            new PolicyParameterExpression("__pol", SqlParameterType.String),
+            new PageOffsetParameterExpression(),
+            new CurrentDateTimeExpression(CurrentDateTimeKind.CurrentDate),
+            new TypedLiteralExpression(TypedLiteralKind.Date, "2024-01-01"),
+            new IntervalLiteralExpression("1", "DAY"),
+            new ParenthesizedExpression(lit),
+            new UnaryExpression(UnaryOperator.Negate, lit),
+            new CastExpression(lit, "int"),
+            new ExtractExpression("year", lit),
+            new DateFunctionExpression(DateFunctionKind.Trunc, DateUnit.Day, 0, lit),
+            new BinaryExpression(lit, BinaryOperator.Add, lit),
+            new IsDistinctFromExpression(lit, lit, false),
+            new BetweenExpression(lit, lit, lit, false),
+            new LikeExpression(lit, lit),
+            new LikeExpression(lit, lit, lit),
+            new SubstringExpression(lit, lit, null),
+            new SubstringExpression(lit, lit, lit),
+            new TrimExpression(TrimSpecification.Both, lit, null),
+            new TrimExpression(TrimSpecification.Both, lit, lit),
+            new InListExpression(lit, [lit, lit], false),
+            new FunctionCallExpression(fnName, [lit]),
+            new FunctionCallExpression(fnName, [lit], Window: new WindowSpecification([lit], new OrderByClause([new OrderByElement(lit)])), Filter: lit, OrderWithin: new OrderByClause([new OrderByElement(lit)])),
+            new CaseExpression(null, [new WhenClause(lit, lit)], null),
+            new CaseExpression(lit, [new WhenClause(lit, lit)], lit),
+            new ArrayConstructorExpression([lit])
+        ];
+
+        foreach (var expr in noCol)
+        {
+            Assert.False(RowPolicyErrorGuard.HasColumn(expr), expr.ToString());
+        }
+
+        Expression[] withCol =
+        [
+            col,
+            new ParenthesizedExpression(col),
+            new UnaryExpression(UnaryOperator.Negate, col),
+            new CastExpression(col, "int"),
+            new ExtractExpression("year", col),
+            new DateFunctionExpression(DateFunctionKind.Add, DateUnit.Day, 1, col),
+            new BinaryExpression(col, BinaryOperator.Add, lit),
+            new BinaryExpression(lit, BinaryOperator.Add, col),
+            new IsDistinctFromExpression(col, lit, false),
+            new IsDistinctFromExpression(lit, col, false),
+            new BetweenExpression(col, lit, lit, false),
+            new BetweenExpression(lit, col, lit, false),
+            new BetweenExpression(lit, lit, col, false),
+            new LikeExpression(col, lit),
+            new LikeExpression(lit, col),
+            new LikeExpression(lit, lit, col),
+            new SubstringExpression(col, lit, null),
+            new SubstringExpression(lit, col, null),
+            new SubstringExpression(lit, lit, col),
+            new TrimExpression(TrimSpecification.Both, col, null),
+            new TrimExpression(TrimSpecification.Both, lit, col),
+            new InListExpression(col, [lit], false),
+            new InListExpression(lit, [lit, col], false),
+            new FunctionCallExpression(fnName, [col]),
+            new FunctionCallExpression(fnName, [lit], Filter: col),
+            new FunctionCallExpression(fnName, [lit], OrderWithin: new OrderByClause([new OrderByElement(col)])),
+            new FunctionCallExpression(fnName, [lit], Window: new WindowSpecification([col], null)),
+            new FunctionCallExpression(fnName, [lit], Window: new WindowSpecification(null, new OrderByClause([new OrderByElement(col)]))),
+            new CaseExpression(col, [new WhenClause(lit, lit)], null),
+            new CaseExpression(null, [new WhenClause(col, lit)], null),
+            new CaseExpression(null, [new WhenClause(lit, col)], null),
+            new CaseExpression(null, [new WhenClause(lit, lit)], col),
+            new ArrayConstructorExpression([col])
+        ];
+
+        foreach (var expr in withCol)
+        {
+            Assert.True(RowPolicyErrorGuard.HasColumn(expr), expr.ToString());
+        }
+    }
+
+    [Fact]
+    public void AreAllPolicyTablesFenced_CoversFastPathsAndUnfencedShapes()
+    {
+        var tbl = new NamedTableSource(new SqlQualifiedName([new SqlIdentifier("Orders")]), null);
+        var col = new ColumnReference(new SqlQualifiedName([new SqlIdentifier("Id")]));
+        var lit = new LiteralExpression(1L, LiteralType.Integer);
+        var sec = new SecurityPredicateExpression(new BinaryExpression(col, BinaryOperator.Equal, lit), new SecurityPredicateId("Orders", 0), SecurityScope.Root);
+
+        Assert.False(RowPolicyErrorGuard.AreAllPolicyTablesFenced(new DeleteStatement(tbl, sec)));
+
+        var fencedSub = new SubqueryTableSource(
+            new SelectStatement(null, new QuerySpecification(false, [new WildcardSelectItem(null)], tbl, sec, null, null), null, null),
+            new SqlIdentifier("s")) { EvaluationFence = true };
+        var unfencedSub = new SubqueryTableSource(
+            new SelectStatement(null, new QuerySpecification(false, [new ColumnSelectItem(col, null)], tbl, sec, null, null), null, null),
+            new SqlIdentifier("u")) { EvaluationFence = false };
+
+        SelectStatement WrapFrom(TableSource from, Expression? where = null, IReadOnlyList<SelectItem>? projections = null) =>
+            new(null,
+                new QuerySpecification(false, projections ?? [new ColumnSelectItem(col, null)], from, where, new GroupByClause([col]), new BinaryExpression(col, BinaryOperator.Equal, lit)),
+                new OrderByClause([new OrderByElement(col)]),
+                new PaginationClause(null, lit));
+
+        Assert.True(RowPolicyErrorGuard.AreAllPolicyTablesFenced(WrapFrom(
+            new JoinedTableSource(fencedSub, JoinType.Inner, fencedSub, new OnJoinCondition(new BinaryExpression(col, BinaryOperator.Equal, col))),
+            new BinaryExpression(new ParenthesizedExpression(new InListExpression(col, [lit], false)), BinaryOperator.And, new BinaryExpression(col, BinaryOperator.Equal, lit)))));
+        Assert.True(RowPolicyErrorGuard.AreAllPolicyTablesFenced(WrapFrom(new JoinedTableSource(fencedSub, JoinType.Inner, tbl, new UsingJoinCondition([new SqlIdentifier("Id")])))));
+        Assert.True(RowPolicyErrorGuard.AreAllPolicyTablesFenced(WrapFrom(new JoinedTableSource(fencedSub, JoinType.Cross, tbl, null))));
+
+        Assert.False(RowPolicyErrorGuard.AreAllPolicyTablesFenced(WrapFrom(new JoinedTableSource(unfencedSub, JoinType.Cross, fencedSub, null))));
+        Assert.False(RowPolicyErrorGuard.AreAllPolicyTablesFenced(WrapFrom(new JoinedTableSource(fencedSub, JoinType.Cross, unfencedSub, null))));
+        Assert.False(RowPolicyErrorGuard.AreAllPolicyTablesFenced(WrapFrom(fencedSub, where: new BinaryExpression(new ParenthesizedExpression(sec), BinaryOperator.And, lit))));
+        Assert.False(RowPolicyErrorGuard.AreAllPolicyTablesFenced(WrapFrom(fencedSub, where: new BinaryExpression(lit, BinaryOperator.And, sec))));
+        Assert.False(RowPolicyErrorGuard.AreAllPolicyTablesFenced(WrapFrom(fencedSub, where: new InListExpression(sec, [lit], false))));
+        Assert.False(RowPolicyErrorGuard.AreAllPolicyTablesFenced(WrapFrom(fencedSub, where: new InListExpression(col, [lit, sec], false))));
+        Assert.False(RowPolicyErrorGuard.AreAllPolicyTablesFenced(WrapFrom(fencedSub, projections: [new ColumnSelectItem(sec, null)])));
+        Assert.False(RowPolicyErrorGuard.AreAllPolicyTablesFenced(WrapFrom(new JoinedTableSource(fencedSub, JoinType.Inner, tbl,
+            new OnJoinCondition(new BinaryExpression(col, BinaryOperator.Equal, new ScalarSubqueryExpression(
+                new SelectStatement(null, new QuerySpecification(false, [new ColumnSelectItem(lit, null)], tbl, sec, null, null), null, null))))))));
+    }
+
+    [Fact]
+    public void FencedDialects_AllowConstantUnderFenceShapes()
+    {
+        string[] constantFenceQueries =
+        [
+            "SELECT Id FROM Orders WHERE (SELECT 1 FROM Lookup) = 1",
+            "SELECT Id, row_number() OVER (ORDER BY Id) FROM Orders WHERE CURRENT_DATE + INTERVAL '1' DAY > DATE '2020-01-01'",
+            "SELECT Id FROM Orders WHERE Id IN (1, 2) AND (Status = 'open')"
+        ];
+
+        foreach (var sql in constantFenceQueries)
+        {
+            var compiled = _engine.Compile(sql.AsMemory(), Request(TargetSqlDialect.PostgreSql), CancellationToken.None);
+            Assert.False(string.IsNullOrWhiteSpace(compiled.Sql));
+        }
+    }
+
     // Helper types placed after all [Fact]/[Theory] methods so SecurityTestInventoryTests records outer class FQN cleanly.
     private sealed class StaticPerCellProvider(TableIdentity target, PerCellTablePolicy policy) : IPerCellColumnProvider
     {
