@@ -28,6 +28,7 @@ using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Dialects;
 using Autheris.Infrastructure.Persistence.Migrations;
 using Autheris.Infrastructure.Security;
+using Microsoft.AspNetCore.DataProtection;
 using Autheris.Infrastructure.Streaming;
 using Microsoft.Extensions.DependencyInjection;
 
@@ -76,6 +77,7 @@ public static partial class GatewayGovernanceServiceExtensions
             .ValidateDataAnnotations()
             .ValidateOnStart();
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<AccessPolicyOptions>, Autheris.Application.Governance.Policy.AccessPolicyOptionsValidator>();
+        services.AddDataProtection().SetApplicationName("Autheris.Gateway");
         services.AddSingleton<Autheris.Application.Governance.Notifications.INotificationWebhookUrlProtector, DataProtectionNotificationWebhookUrlProtector>();
         services.AddSingleton<Autheris.Application.Governance.Notifications.AdaptiveCardPayloadFormatter>();
         services.AddSingleton<Autheris.Application.Governance.Policy.AccessPolicySettingsProvider>();
