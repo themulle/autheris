@@ -371,6 +371,71 @@ public sealed class SubgraphFieldMaskingExecutorTests
         firstItem["note"].ShouldBe("[REDACTED]");
     }
 
+    [Fact]
+    public async Task MaskResultDataAsync_CatalogUnavailable_NonIDictionaryReadOnlyDictionaryAndObjectList_ArePreservedAndMasked()
+    {
+        var maskingProvider = new Autheris.Tests.Common.Fakes.StubColumnMaskingProvider((_, _, _) => "[REDACTED]");
+        var gatewayOptions = new GatewayOptions
+        {
+            Federation = new FederationOptions
+            {
+                Enabled = true,
+                EnableResultMasking = true,
+                DefaultMaskUnknownSensitiveScalars = true
+            }
+        };
+
+        var masker = new SubgraphResultMasker(
+            maskingProvider,
+            Options.Create(gatewayOptions),
+            NullLogger<SubgraphResultMasker>.Instance,
+            catalog: new FailingMaskingCatalog());
+
+        var profile = new NonLegacyReadOnlyMap(new Dictionary<string, object?>
+        {
+            ["id"] = "u-1",
+            ["secretNote"] = "classified"
+        });
+        var entry = new NonLegacyReadOnlyMap(new Dictionary<string, object?>
+        {
+            ["id"] = "item-1",
+            ["secretField"] = "classified-item"
+        });
+
+        var raw = new Dictionary<string, object?>
+        {
+            ["profile"] = profile,
+            ["entries"] = new List<object?> { entry }
+        };
+
+        var masked = await masker.MaskResultDataAsync(raw, CreateNonAdminUser(), null) as IReadOnlyDictionary<string, object?>;
+        masked.ShouldNotBeNull();
+
+        var maskedProfile = masked["profile"].ShouldBeAssignableTo<IReadOnlyDictionary<string, object?>>();
+        maskedProfile.ShouldNotBeNull();
+        maskedProfile["id"].ShouldBe("u-1");
+        maskedProfile["secretNote"].ShouldBe("[REDACTED]");
+
+        var maskedEntries = masked["entries"].ShouldBeAssignableTo<IReadOnlyList<object?>>();
+        maskedEntries.ShouldNotBeNull();
+        var maskedEntry = maskedEntries[0].ShouldBeAssignableTo<IReadOnlyDictionary<string, object?>>();
+        maskedEntry.ShouldNotBeNull();
+        maskedEntry["id"].ShouldBe("item-1");
+        maskedEntry["secretField"].ShouldBe("[REDACTED]");
+    }
+
+    private sealed class NonLegacyReadOnlyMap(IReadOnlyDictionary<string, object?> inner) : IReadOnlyDictionary<string, object?>
+    {
+        public object? this[string key] => inner[key];
+        public IEnumerable<string> Keys => inner.Keys;
+        public IEnumerable<object?> Values => inner.Values;
+        public int Count => inner.Count;
+        public bool ContainsKey(string key) => inner.ContainsKey(key);
+        public IEnumerator<KeyValuePair<string, object?>> GetEnumerator() => inner.GetEnumerator();
+        public bool TryGetValue(string key, out object? value) => inner.TryGetValue(key, out value);
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => ((System.Collections.IEnumerable)inner).GetEnumerator();
+    }
+
     private sealed class FailingMaskingCatalog : IFederatedMaskingCatalog
     {
         public ValueTask<IReadOnlyDictionary<string, MaskingRule>> GetClassificationsAsync(TenantId tenant, CancellationToken ct = default)

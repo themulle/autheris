@@ -337,6 +337,112 @@ public sealed class TableCacheManagerTests
         loaded.OfflinePolicy.ShouldBe(TableCacheOfflinePolicy.FailClosed);
     }
 
+    [Fact]
+    public async Task Manager_SingleFlight_ForceRefreshCoalescedWithFailingGetOrLoad_DoesNotReturnStaleFallback()
+    {
+        var t0 = new DateTimeOffset(2026, 11, 21, 12, 0, 0, TimeSpan.Zero);
+        var clock = new FakeTimeProvider(t0);
+        var catalog = new TableCacheCatalog();
+        var store = new StubTableCacheStore(clock);
+        var table = new TableIdentifier("crm", "public", "stale_table");
+
+        var staleLastRefreshed = t0.AddSeconds(-20);
+        catalog.Upsert(new TableCacheEntryMetadata(
+            table, TableCacheStorageTier.DuckDbDisk, "/path", "view", 1,
+            staleLastRefreshed, t0.AddSeconds(-10), 1, 64, null, true, null, ["id"], null, TableCacheOfflinePolicy.ServeStaleWithWarning));
+
+        int calls = 0;
+        var started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var gate = new TaskCompletionSource<TableCacheLoadResult>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var loader = new DelegateUpstreamLoader(async (_, _) =>
+        {
+            Interlocked.Increment(ref calls);
+            started.TrySetResult();
+            return await gate.Task.ConfigureAwait(false);
+        });
+
+        var options = new TableCacheOptions { MaxStaleSurvivalSeconds = 300 };
+        var manager = new TableCacheManager(catalog, store, Options.Create(options), loader, clock);
+
+        var getTask = manager.GetOrLoadAsync(table).AsTask();
+        await started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var forceTask = manager.ForceRefreshAsync(table);
+        Volatile.Read(ref calls).ShouldBe(1);
+
+        gate.TrySetException(new InvalidOperationException("upstream down"));
+
+        var getResult = await getTask.WaitAsync(TimeSpan.FromSeconds(5));
+        getResult.ShouldNotBeNull();
+        getResult.LastRefreshedAt.ShouldBe(staleLastRefreshed);
+
+        await Should.ThrowAsync<InvalidOperationException>(async () => await forceTask.WaitAsync(TimeSpan.FromSeconds(5)));
+    }
+
+    [Fact]
+    public async Task Manager_SingleFlight_WaiterJoiningRetiringFlight_WaitsForRetirementAndRespectsOwnCancellation()
+    {
+        var catalog = new TableCacheCatalog();
+        var store = new StubTableCacheStore();
+        var table = new TableIdentifier("crm", "public", "retiring_table");
+
+        int calls = 0;
+        var call1Started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var call1CaughtCancel = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var allowCall1Unwind = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var call1Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var call2Started = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var loader = new DelegateUpstreamLoader(async (_, ct) =>
+        {
+            var n = Interlocked.Increment(ref calls);
+            if (n == 1)
+            {
+                call1Started.TrySetResult();
+                try
+                {
+                    await call1Gate.Task.WaitAsync(ct).ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    call1CaughtCancel.TrySetResult();
+                    await allowCall1Unwind.Task.ConfigureAwait(false);
+                    throw;
+                }
+            }
+
+            call2Started.TrySetResult();
+            return GateUpstreamLoader.EmptyResult();
+        });
+
+        var manager = new TableCacheManager(catalog, store, Options.Create(new TableCacheOptions()), loader, new FakeTimeProvider());
+
+        using var cts1 = new CancellationTokenSource();
+        var task1 = manager.GetOrLoadAsync(table, cts1.Token).AsTask();
+        await call1Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        await cts1.CancelAsync();
+        await Should.ThrowAsync<OperationCanceledException>(async () => await task1.WaitAsync(TimeSpan.FromSeconds(5)));
+        await call1CaughtCancel.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        // Flight 1 is retiring; a cancelling waiter waiting on RetiredTask must cancel immediately.
+        using var ctsCancelWhileRetiring = new CancellationTokenSource();
+        var cancellingWaiter = manager.GetOrLoadAsync(table, ctsCancelWhileRetiring.Token).AsTask();
+        await ctsCancelWhileRetiring.CancelAsync();
+        await Should.ThrowAsync<OperationCanceledException>(async () => await cancellingWaiter.WaitAsync(TimeSpan.FromSeconds(5)));
+
+        // Healthy waiter waits for flight 1 retirement (still only 1 upstream call), then starts flight 2 cleanly.
+        var waiter2Task = manager.GetOrLoadAsync(table).AsTask();
+        Volatile.Read(ref calls).ShouldBe(1);
+
+        allowCall1Unwind.TrySetResult();
+        await call2Started.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        var result2 = await waiter2Task.WaitAsync(TimeSpan.FromSeconds(5));
+        result2.ShouldNotBeNull();
+        result2.Table.ShouldBe(table);
+        Volatile.Read(ref calls).ShouldBe(2);
+    }
+
     private sealed class StubTableCacheStore(TimeProvider? clock = null) : ITableCacheStore
     {
         public TableCacheStorageTier StorageTier => TableCacheStorageTier.DuckDbDisk;

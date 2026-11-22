@@ -117,27 +117,55 @@ public sealed class TableCacheManager : ITableCacheManager
     {
         while (true)
         {
-            if (_inFlightLoads.TryGetValue(table, out var existingFlight) && existingFlight.TryAcquireWaiter())
+            if (_inFlightLoads.TryGetValue(table, out var existingFlight))
             {
-                return await AwaitFlightAsync(existingFlight, ct).ConfigureAwait(false);
+                if (existingFlight.TryAcquireWaiter())
+                {
+                    return await AwaitFlightAsync(table, existingFlight, allowStaleFallback, now, ct).ConfigureAwait(false);
+                }
+
+                await existingFlight.RetiredTask.WaitAsync(ct).ConfigureAwait(false);
+                continue;
             }
 
             var newFlight = new InFlightLoad();
             if (_inFlightLoads.TryAdd(table, newFlight))
             {
-                _ = RunSingleFlightLoadAsync(table, newFlight, allowStaleFallback, now);
-                return await AwaitFlightAsync(newFlight, ct).ConfigureAwait(false);
+                _ = RunSingleFlightLoadAsync(table, newFlight);
+                return await AwaitFlightAsync(table, newFlight, allowStaleFallback, now, ct).ConfigureAwait(false);
             }
 
-            newFlight.MarkCompletedAndDispose();
+            newFlight.Retire();
         }
     }
 
-    private static async Task<TableCacheEntryMetadata> AwaitFlightAsync(InFlightLoad flight, CancellationToken ct)
+    private async Task<TableCacheEntryMetadata> AwaitFlightAsync(
+        TableIdentifier table,
+        InFlightLoad flight,
+        bool allowStaleFallback,
+        DateTimeOffset now,
+        CancellationToken ct)
     {
         try
         {
             return await flight.Tcs.Task.WaitAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception) when (allowStaleFallback && !ct.IsCancellationRequested)
+        {
+            if (_catalog.TryGet(table, out var stale) &&
+                stale is not null &&
+                stale.OfflinePolicy == TableCacheOfflinePolicy.ServeStaleWithWarning)
+            {
+                var staleDuration = now - stale.LastRefreshedAt;
+                var maxStale = TimeSpan.FromSeconds(_options.MaxStaleSurvivalSeconds);
+                if (staleDuration <= maxStale)
+                {
+                    Interlocked.Increment(ref _totalStaleServes);
+                    return stale;
+                }
+            }
+
+            throw;
         }
         finally
         {
@@ -147,44 +175,30 @@ public sealed class TableCacheManager : ITableCacheManager
 
     private async Task RunSingleFlightLoadAsync(
         TableIdentifier table,
-        InFlightLoad flight,
-        bool allowStaleFallback,
-        DateTimeOffset now)
+        InFlightLoad flight)
     {
         try
         {
             var freshMetadata = await ExecuteUpstreamLoadAsync(table, flight.Cts.Token).ConfigureAwait(false);
             _catalog.Upsert(freshMetadata);
             Interlocked.Increment(ref _totalRefreshes);
+            flight.MarkCompleted();
             flight.Tcs.TrySetResult(freshMetadata);
         }
         catch (OperationCanceledException oce) when (flight.Cts.IsCancellationRequested)
         {
+            flight.MarkCompleted();
             flight.Tcs.TrySetCanceled(oce.CancellationToken.IsCancellationRequested ? oce.CancellationToken : flight.Cts.Token);
         }
         catch (Exception ex)
         {
-            if (allowStaleFallback &&
-                _catalog.TryGet(table, out var stale) &&
-                stale is not null &&
-                stale.OfflinePolicy == TableCacheOfflinePolicy.ServeStaleWithWarning)
-            {
-                var staleDuration = now - stale.LastRefreshedAt;
-                var maxStale = TimeSpan.FromSeconds(_options.MaxStaleSurvivalSeconds);
-                if (staleDuration <= maxStale)
-                {
-                    Interlocked.Increment(ref _totalStaleServes);
-                    flight.Tcs.TrySetResult(stale);
-                    return;
-                }
-            }
-
+            flight.MarkCompleted();
             flight.Tcs.TrySetException(ex);
         }
         finally
         {
             _inFlightLoads.TryRemove(new KeyValuePair<TableIdentifier, InFlightLoad>(table, flight));
-            flight.MarkCompletedAndDispose();
+            flight.Retire();
         }
     }
 
@@ -311,6 +325,7 @@ public sealed class TableCacheManager : ITableCacheManager
     private sealed class InFlightLoad
     {
         private readonly object _sync = new();
+        private readonly TaskCompletionSource _retiredTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
         private int _waiters = 1;
         private bool _completed;
         private bool _disposed;
@@ -318,6 +333,7 @@ public sealed class TableCacheManager : ITableCacheManager
         public CancellationTokenSource Cts { get; } = new();
         public TaskCompletionSource<TableCacheEntryMetadata> Tcs { get; } =
             new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task RetiredTask => _retiredTcs.Task;
 
         public bool TryAcquireWaiter()
         {
@@ -344,7 +360,15 @@ public sealed class TableCacheManager : ITableCacheManager
             }
         }
 
-        public void MarkCompletedAndDispose()
+        public void MarkCompleted()
+        {
+            lock (_sync)
+            {
+                _completed = true;
+            }
+        }
+
+        public void Retire()
         {
             lock (_sync)
             {
@@ -355,6 +379,8 @@ public sealed class TableCacheManager : ITableCacheManager
                     Cts.Dispose();
                 }
             }
+
+            _retiredTcs.TrySetResult();
         }
     }
 

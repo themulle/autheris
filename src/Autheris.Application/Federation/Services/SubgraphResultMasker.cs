@@ -212,7 +212,7 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
         if (!shouldMask)
         {
             // GHSA-xpw9-4m63-69pf: nested value masking
-            if (value is IDictionary or IReadOnlyDictionary<string, object?>)
+            if (value is IDictionary or IReadOnlyDictionary<string, object?> or IDictionary<string, object?>)
             {
                 var maskedDict = MaskRecursive(value, null, null, ctx);
                 masked = !ReferenceEquals(maskedDict, value);
@@ -304,20 +304,12 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
 
         if (node is IReadOnlyDictionary<string, object?> dict)
         {
-            var result = new Dictionary<string, object?>(dict.Count, StringComparer.OrdinalIgnoreCase);
-            foreach (var (k, v) in dict)
-            {
-                var childPath = AppendPath(path, k);
-                if (ShouldMaskField(k, childPath, v, aliasToFieldMap, ctx, out var rule))
-                {
-                    result[k] = ApplyMaskToValue(k, v, rule);
-                }
-                else
-                {
-                    result[k] = MaskRecursive(v, aliasToFieldMap, childPath, ctx);
-                }
-            }
-            return result;
+            return MaskDictionaryEntries(dict, dict.Count, aliasToFieldMap, path, ctx);
+        }
+
+        if (node is IDictionary<string, object?> genericDict)
+        {
+            return MaskDictionaryEntries(genericDict, genericDict.Count, aliasToFieldMap, path, ctx);
         }
 
         if (node is IDictionary legacyDict)
@@ -430,6 +422,30 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
         return IsMaskedFieldName(fieldName, out rule);
     }
 
+    private Dictionary<string, object?> MaskDictionaryEntries(
+        IEnumerable<KeyValuePair<string, object?>> entries,
+        int capacity,
+        IReadOnlyDictionary<string, string>? aliasToFieldMap,
+        string? path,
+        MaskContext ctx)
+    {
+        var result = new Dictionary<string, object?>(capacity, StringComparer.OrdinalIgnoreCase);
+        foreach (var (k, v) in entries)
+        {
+            var childPath = AppendPath(path, k);
+            if (ShouldMaskField(k, childPath, v, aliasToFieldMap, ctx, out var rule))
+            {
+                result[k] = ApplyMaskToValue(k, v, rule);
+            }
+            else
+            {
+                result[k] = MaskRecursive(v, aliasToFieldMap, childPath, ctx);
+            }
+        }
+
+        return result;
+    }
+
     private static bool IsScalarLeaf(object? value)
     {
         if (value == null)
@@ -442,7 +458,7 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
             return true;
         }
 
-        if (value is IDictionary)
+        if (value is IDictionary or IReadOnlyDictionary<string, object?> or IDictionary<string, object?>)
         {
             return false;
         }

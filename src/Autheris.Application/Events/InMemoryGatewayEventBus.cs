@@ -238,10 +238,11 @@ public sealed class InMemoryGatewayEventBus : IGatewayEventBus, IGatewayEventBus
             }
 
             _matchCache.Clear();
+
+            // Complete writer under _lock before cancelling token so Dispose() and PublishAsync cannot race between _all removal and writer completion.
+            sub.Queue?.Writer.TryComplete();
         }
 
-        // Complete writer before cancelling token so in-flight writers fail before the reader loop exits.
-        sub.Queue?.Writer.TryComplete();
         sub.Cts?.Cancel();
     }
 

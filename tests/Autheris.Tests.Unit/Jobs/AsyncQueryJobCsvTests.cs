@@ -8,7 +8,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Runtime.Jobs.Services;
 using Autheris.Application.Sql.Interfaces;
-using Autheris.Application.Usage;
 using Autheris.Tests.Common;
 using Shouldly;
 using Xunit;
