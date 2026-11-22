@@ -3,6 +3,7 @@ namespace Autheris.Api.Endpoints;
 using System.Linq;
 using System.Threading.Tasks;
 using Autheris.Api.Extensions;
+using Autheris.Api.Security;
 using Autheris.Application.Products;
 using Autheris.Domain.Audit;
 using Microsoft.AspNetCore.Builder;
@@ -15,10 +16,13 @@ public static partial class ProductEndpoints
     private static void MapDiscoveryRoutes(RouteGroupBuilder group)
     {
         group.MapGet("discovery", (HttpContext context, ProductDiscoveryService service) => DiscoverAsync(context, service))
+            .RequireAuthorization(GatewayPolicies.ProductAccess)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         group.MapGet("{schema}/{name}/explain", (string schema, string name, HttpContext context, ProductDiscoveryService service) => ExplainProductAsync(schema, name, context, service))
+            .RequireAuthorization(GatewayPolicies.ProductAccess)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         group.MapGet("{schema}/{name}/usage", (string schema, string name, HttpContext context, ProductDiscoveryService service) => UsageProductAsync(schema, name, context, service))
+            .RequireAuthorization(GatewayPolicies.ProductAccess)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
     }
 

@@ -92,7 +92,7 @@ public sealed class GovernedConnectorReaderVirtualFilterTests
             session.Items["VirtualFilterEnforcement"] = injected;
             session.Items[typeof(VirtualFilterEnforcement).FullName!] = injected;
             session.Items["VirtualFilterFederationHandled"] = true;
-            session.Items[GovernedConnectorReader.RlsPushdownExecutedKey] = true;
+            session.Attestation = new ConnectorSecurityAttestation(RlsPushdownExecuted: true);
         });
 
         await Should.ThrowAsync<GatewayForbiddenException>(() =>

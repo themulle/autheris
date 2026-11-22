@@ -226,9 +226,9 @@ public static partial class GovernanceEndpoints
     private static void MapAuditAndComplianceEndpoints(IEndpointRouteBuilder app)
     {
         app.MapGet("/api/v1/governance/audit", ListAuditPageAsync)
-            .RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.AuditRead);
+            .RequireAuthorization(GatewayPolicies.GovernanceAuditRead).WithAudit(AuditLevel.Summarized, AuditEventTypes.AuditRead);
         app.MapGet("/api/v1/governance/grants", ListGrantsPageAsync)
-            .RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.AuditRead);
+            .RequireAuthorization(GatewayPolicies.GovernanceAuditRead).WithAudit(AuditLevel.Summarized, AuditEventTypes.AuditRead);
 
         // P11: Automated Schema Deprecation & Client-Impact Sunsetting (Smart Sunsetting Engine)
         app.MapGet("/api/governance/sunsetting/rules", async (
@@ -243,18 +243,18 @@ public static partial class GovernanceEndpoints
 
             var rules = await sunsettingService.GetRulesAsync(context.RequestAborted);
             return Results.Ok(rules);
-        }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+        }).RequireAuthorization(GatewayPolicies.SunsettingRead).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         app.MapPost("/api/governance/sunsetting/rules", (
             FieldSunsettingRule? rule,
             ISchemaSunsettingService sunsettingService,
             HttpContext context) => RegisterSunsettingRuleAsync(rule, sunsettingService, context))
-            .RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
+            .RequireAuthorization(GatewayPolicies.ClusterAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         app.MapPost("/api/governance/sunsetting/evaluate", (
             EvaluateFieldSunsettingRequest? request,
             ISchemaSunsettingService sunsettingService,
-            HttpContext context) => EvaluateSunsettingAsync(request, sunsettingService, context)).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.AuthSucceeded);
+            HttpContext context) => EvaluateSunsettingAsync(request, sunsettingService, context)).RequireAuthorization(GatewayPolicies.SunsettingEvaluate).WithAudit(AuditLevel.Full, AuditEventTypes.AuthSucceeded);
 
         // F-AI-12-B: EU AI Act Article 10 Compliance Certificate Endpoint
         app.MapGet("/api/governance/eu-ai-act/article-10-certificate", async (
@@ -280,7 +280,7 @@ public static partial class GovernanceEndpoints
             context.Response.Headers["X-Certificate-Id"] = cert.CertificateId;
             context.Response.Headers["X-Integrity-Seal"] = cert.IntegritySealSha256;
             return Results.Ok(cert);
-        }).RequireAuthorization()
+        }).RequireAuthorization(GatewayPolicies.ComplianceCertificateRead)
           .WithAudit(AuditLevel.Full, AuditEventTypes.MetadataExport);
 
         // GDPR Article 15 PDF Export for Data Protection Officers (DSB)
@@ -294,7 +294,7 @@ public static partial class GovernanceEndpoints
             IGdprAuditReportExporter pdfExporter,
             HttpContext context,
             CancellationToken ct) => ExportGdprPdfAsync(domain, schema, table, subjectSid, timeWindowDays, gdprService, pdfExporter, context, ct))
-          .RequireAuthorization()
+          .RequireAuthorization(GatewayPolicies.AuthenticatedCaller)
           .WithAudit(AuditLevel.Full, AuditEventTypes.AuditExport);
     }
 

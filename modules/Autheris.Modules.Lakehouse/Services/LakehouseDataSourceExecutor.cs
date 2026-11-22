@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Connectors;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -87,6 +88,7 @@ public sealed class LakehouseDataSourceExecutor : ILakehouseDataSourceExecutor, 
 
         // SEC EX-04: Evaluate RLS row-filter BEFORE column masking so that comparison predicates
         // (such as "region <> 'US'") evaluate against raw, unmasked values instead of "REDACTED" / "0".
+        var rlsExecuted = false;
         if (!string.IsNullOrWhiteSpace(context.AccessDecision.CombinedRowFilterSql))
         {
             Autheris.Application.Services.GatewayExecutionService.EnsureInMemoryFilterIsEnforceable(context.AccessDecision);
@@ -94,7 +96,7 @@ public sealed class LakehouseDataSourceExecutor : ILakehouseDataSourceExecutor, 
                 rawRows,
                 context.AccessDecision,
                 context.Metadata);
-            context.Items["RlsPushdownExecuted"] = true;
+            rlsExecuted = true;
         }
 
         bool maskingDisabled = _options.Value.IsColumnMaskingDisabled;
@@ -134,7 +136,9 @@ public sealed class LakehouseDataSourceExecutor : ILakehouseDataSourceExecutor, 
             filteredRows.Add(cleanRow);
         }
 
-        context.Items["InDbColumnMaskingExecuted"] = true;
+        context.Attestation = new ConnectorSecurityAttestation(
+            RlsPushdownExecuted: rlsExecuted,
+            InDbColumnMaskingExecuted: true);
         return filteredRows;
     }
 

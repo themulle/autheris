@@ -68,9 +68,6 @@ public sealed class ConnectorRowLimitExceededException : InvalidOperationExcepti
 /// </summary>
 public static class GovernedConnectorReader
 {
-    public const string RlsPushdownExecutedKey = "RlsPushdownExecuted";
-    public const string InDbColumnMaskingExecutedKey = "InDbColumnMaskingExecuted";
-
     public static async Task<GovernedReadResult> ReadAsync(
         IAutherisConnector connector,
         ConnectorSessionContext session,
@@ -108,7 +105,7 @@ public static class GovernedConnectorReader
 
         // An HTTP API cannot evaluate the gateway's row filter or masking rules, so a declarative HTTP
         // connector never relaxes enforcement by self-attestation; the gateway always filters and masks its rows.
-        var mayAttest = MayAttest(metadata);
+        var mayAttest = ConnectorSecurityAttestation.MayAttest(metadata);
 
         // CR-10 (D-12): a table that cannot attest and carries a Virtual Filter predicate without an enforcement (OData, REST
         // and the other channels, which do not federate) is denied before the upstream is read: no egress for nothing and
@@ -128,8 +125,9 @@ public static class GovernedConnectorReader
             rawRows = enforcement.Apply(rawRows);
         }
 
-        var pushedDown = mayAttest && IsSet(session.Items, RlsPushdownExecutedKey);
-        var masked = mayAttest && IsSet(session.Items, InDbColumnMaskingExecutedKey);
+        var attestation = mayAttest ? session.Attestation : default;
+        var pushedDown = attestation.RlsPushdownExecuted;
+        var masked = attestation.InDbColumnMaskingExecuted;
         var rows = Apply(rawRows, metadata, decision, session.Tenant?.Value, pushedDown, masked, policy);
         return new GovernedReadResult(rows, pushedDown, masked, rowsBeforeVirtualFilter);
     }
@@ -241,8 +239,6 @@ public static class GovernedConnectorReader
             GatewayExecutionService.EnsureInMemoryFilterIsEnforceable(effectiveDecision);
         }
 
-        var pushedDown = mayAttest && IsSet(session.Items, RlsPushdownExecutedKey);
-        var masked = mayAttest && IsSet(session.Items, InDbColumnMaskingExecutedKey);
         long cumulativeEstimatedBytes = 0;
 
         await foreach (var rawRow in StreamRawAsync(connector, session, metadata, policy.MaxRows, ct).ConfigureAwait(false))
@@ -256,7 +252,9 @@ public static class GovernedConnectorReader
                 row = filtered[0];
             }
 
-            if (!pushedDown && !string.IsNullOrWhiteSpace(effectiveDecision.CombinedRowFilterSql))
+            // Re-read attestation after splits/batches execute so attestations stamped during GetSplitsAsync or ReadBatchAsync take effect.
+            var attestation = mayAttest ? session.Attestation : default;
+            if (!attestation.RlsPushdownExecuted && !string.IsNullOrWhiteSpace(effectiveDecision.CombinedRowFilterSql))
             {
                 var singleList = new List<IReadOnlyDictionary<string, object?>>(1) { row };
                 var filtered = GatewayExecutionService.FilterRows(singleList, effectiveDecision, metadata);
@@ -264,7 +262,7 @@ public static class GovernedConnectorReader
                 row = filtered[0];
             }
 
-            var projected = ProjectRow(row, metadata, effectiveDecision, session.Tenant?.Value, policy, masked);
+            var projected = ProjectRow(row, metadata, effectiveDecision, session.Tenant?.Value, policy, attestation.InDbColumnMaskingExecuted);
 
             if (policy.MaxBytes is { } maxBytes)
             {
@@ -406,10 +404,4 @@ public static class GovernedConnectorReader
 
         return estimatedBytes;
     }
-
-    internal static bool MayAttest(TableMetadata metadata) =>
-        metadata.Table?.DataSourceType != DataSourceType.HttpDeclarative;
-
-    private static bool IsSet(IDictionary<string, object?> items, string key) =>
-        items.TryGetValue(key, out var value) && value is true;
 }

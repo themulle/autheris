@@ -1,5 +1,6 @@
 using System.Security.Claims;
 using Autheris.Domain.Common;
+using Autheris.Domain.Connectors;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 
@@ -41,4 +42,6 @@ public sealed record DataSourceExecutionContext(
 )
 {
     public IDictionary<string, object?> Items { get; init; } = Items ?? new Dictionary<string, object?>();
+
+    public ConnectorSecurityAttestation Attestation { get; set; }
 }

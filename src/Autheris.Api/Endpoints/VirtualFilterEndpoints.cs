@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Threading.Tasks;
 using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
+using Autheris.Api.Security;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.VirtualFilters;
 using Autheris.Application.VirtualFilters.Federation;
@@ -36,31 +37,42 @@ public static partial class VirtualFilterEndpoints
     {
         ArgumentNullException.ThrowIfNull(app);
         var group = app.MapGroup("/api/v1/governance")
-            .RequireAuthorization()
             .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         group.MapGet("/virtual-filters", (HttpContext context, VirtualFilterAdministrationService service) => ListAsync(context, service))
+            .RequireAuthorization(GatewayPolicies.VirtualFilterRead)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
-        group.MapPut("/virtual-filters/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => PutFilterAsync(name, context, service));
+        group.MapPut("/virtual-filters/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => PutFilterAsync(name, context, service))
+            .RequireAuthorization(GatewayPolicies.VirtualFilterWrite);
         group.MapPost("/virtual-filters/{name}/approve", (string name, HttpContext context, VirtualFilterAdministrationService service) => ApproveFilterAsync(name, context, service))
+            .RequireAuthorization(GatewayPolicies.VirtualFilterApprove)
             .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
         group.MapDelete("/virtual-filters/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => DeleteFilterAsync(name, context, service))
+            .RequireAuthorization(GatewayPolicies.FilterAdmin)
             .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRevoked);
-        group.MapPut("/access-profiles/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => PutProfileAsync(name, context, service));
+        group.MapPut("/access-profiles/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => PutProfileAsync(name, context, service))
+            .RequireAuthorization(GatewayPolicies.FilterAdmin);
         group.MapPost("/access-profiles/{name}/approve", (string name, HttpContext context, VirtualFilterAdministrationService service) => ApproveProfileAsync(name, context, service))
+            .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
             .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
         group.MapDelete("/access-profiles/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => DeleteProfileAsync(name, context, service))
+            .RequireAuthorization(GatewayPolicies.FilterAdmin)
             .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRevoked);
-        group.MapPost("/virtual-filters/sync/plan", (HttpContext context, VirtualFilterAdministrationService service) => PlanSyncAsync(context, service));
-        group.MapPost("/virtual-filters/sync/apply", (HttpContext context, VirtualFilterAdministrationService service) => ApplySyncAsync(context, service));
+        group.MapPost("/virtual-filters/sync/plan", (HttpContext context, VirtualFilterAdministrationService service) => PlanSyncAsync(context, service))
+            .RequireAuthorization(GatewayPolicies.VirtualFilterSyncPlan);
+        group.MapPost("/virtual-filters/sync/apply", (HttpContext context, VirtualFilterAdministrationService service) => ApplySyncAsync(context, service))
+            .RequireAuthorization(GatewayPolicies.VirtualFilterSyncApply);
         group.MapGet("/config-sync/status", (HttpContext context, VirtualFilterAdministrationService service, IOptions<GatewayOptions>? options) =>
             ConfigSyncStatusAsync(context, service, options))
+            .RequireAuthorization(GatewayPolicies.VirtualFilterRead)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         group.MapGet("/virtual-filters/sync/status", (HttpContext context, VirtualFilterAdministrationService service, IOptions<GatewayOptions>? options) =>
             ConfigSyncStatusAsync(context, service, options))
+            .RequireAuthorization(GatewayPolicies.VirtualFilterRead)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         group.MapGet("/effective-filters", (HttpContext context, IEffectiveFilterInspector inspector) =>
             EffectiveFiltersAsync(context, inspector))
+            .RequireAuthorization(GatewayPolicies.EffectiveFilterInspect)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         // GitOps Webhook Triggers (GitHub push events)

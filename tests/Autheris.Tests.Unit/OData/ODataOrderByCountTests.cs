@@ -63,7 +63,7 @@ public sealed class ODataOrderByCountTests
         public Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ExecuteAsync(DataSourceExecutionContext context, CancellationToken ct = default)
         {
             Last = context;
-            context.Items["RlsPushdownExecuted"] = true;
+            context.Attestation = new Autheris.Domain.Connectors.ConnectorSecurityAttestation(RlsPushdownExecuted: true);
             if (totalCount.HasValue && context.Items.ContainsKey(TableQueryItems.CountTotal))
             {
                 context.Items[TableQueryItems.TotalCount] = totalCount.Value;

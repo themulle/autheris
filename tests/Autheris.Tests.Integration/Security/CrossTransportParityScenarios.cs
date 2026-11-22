@@ -399,7 +399,7 @@ internal sealed partial class CrossTransportParityHarness
         {
             // Like the SQL table executor, this source filters in the database and attests it; without the attestation the gateway refuses
             // a mandatory Virtual Filter (an in-memory filter cannot evaluate its subquery).
-            context.Items["RlsPushdownExecuted"] = true;
+            context.Attestation = new Autheris.Domain.Connectors.ConnectorSecurityAttestation(RlsPushdownExecuted: true);
             return Task.FromResult<IReadOnlyList<IReadOnlyDictionary<string, object?>>>(
             [
                 new Dictionary<string, object?> { ["id"] = 1, ["region"] = "EMEA", ["ssn"] = "123-45-6789", ["tenant_id"] = "tenant-a" }

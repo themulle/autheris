@@ -319,4 +319,34 @@ public sealed class AuthorizationArchitectureTests
         violations.ShouldBeEmpty(
             $"Row-scope predicates for consents and write grants may only be constructed in RowScopeCompiler: {string.Join(", ", violations)}");
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void No_string_keyed_attestation_flags_in_production_code()
+    {
+        var forbiddenKeys = new[]
+        {
+            "\"RlsPushdown" + "Executed\"",
+            "\"InDbColumnMasking" + "Executed\""
+        };
+
+        var moduleProductionFiles = RepositoryScan.EnumerateFiles("modules", "*.cs")
+            .Where(path => !path.Contains(".Tests/", StringComparison.OrdinalIgnoreCase))
+            .Select(path => (RelativePath: path, Text: RepositoryScan.ReadText(path)));
+
+        var offenders = new List<string>();
+        foreach (var file in RepositoryScan.ProductionFiles.Select(f => (f.RelativePath, f.Text)).Concat(moduleProductionFiles))
+        {
+            foreach (var key in forbiddenKeys)
+            {
+                if (file.Text.Contains(key, StringComparison.Ordinal))
+                {
+                    offenders.Add($"{file.RelativePath} ({key})");
+                }
+            }
+        }
+
+        offenders.ShouldBeEmpty(
+            $"String-keyed security attestation flags must not be used in production code; use ConnectorSecurityAttestation instead: {string.Join(", ", offenders)}");
+    }
 }

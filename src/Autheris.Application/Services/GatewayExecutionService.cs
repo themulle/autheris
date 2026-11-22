@@ -292,7 +292,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IReadOnlyList<IReadOnlyDictionary<string, object?>> rawRows;
         bool rlsPushdownAlreadyOccurred = false;
         bool inDbMaskingAlreadyOccurred = false;
-        var mayAttest = Autheris.Application.DataSources.Connectors.GovernedConnectorReader.MayAttest(metadata);
+        var mayAttest = Autheris.Domain.Connectors.ConnectorSecurityAttestation.MayAttest(metadata);
         Autheris.Application.Usage.SourceExecutionStats sourceStats = default;
 
         Autheris.Application.DataSources.Connectors.IAutherisConnector? connector = null;
@@ -321,8 +321,9 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
             rawRows = await Autheris.Application.DataSources.Connectors.GovernedConnectorReader.ReadRawAsync(connector, session, metadata, maxRows: null, ct).ConfigureAwait(false);
 
-            rlsPushdownAlreadyOccurred = mayAttest && session.Items.TryGetValue(Autheris.Application.DataSources.Connectors.GovernedConnectorReader.RlsPushdownExecutedKey, out var p1) && p1 is true;
-            inDbMaskingAlreadyOccurred = mayAttest && session.Items.TryGetValue(Autheris.Application.DataSources.Connectors.GovernedConnectorReader.InDbColumnMaskingExecutedKey, out var m1) && m1 is true;
+            var attestation = mayAttest ? session.Attestation : default;
+            rlsPushdownAlreadyOccurred = attestation.RlsPushdownExecuted;
+            inDbMaskingAlreadyOccurred = attestation.InDbColumnMaskingExecuted;
             if (session.Items.TryGetValue(Autheris.Application.Usage.ISourceExecutionStatsProvider.ItemKey, out var s1) && s1 is Autheris.Application.Usage.SourceExecutionStats st1)
             {
                 sourceStats = st1;
@@ -354,8 +355,9 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
             rawRows = await executor.ExecuteAsync(execContext, ct);
 
-            rlsPushdownAlreadyOccurred = mayAttest && execContext.Items.TryGetValue("RlsPushdownExecuted", out var p2) && p2 is true;
-            inDbMaskingAlreadyOccurred = mayAttest && execContext.Items.TryGetValue("InDbColumnMaskingExecuted", out var m2) && m2 is true;
+            var attestation = mayAttest ? execContext.Attestation : default;
+            rlsPushdownAlreadyOccurred = attestation.RlsPushdownExecuted;
+            inDbMaskingAlreadyOccurred = attestation.InDbColumnMaskingExecuted;
             if (execContext.Items.TryGetValue(Autheris.Application.Usage.ISourceExecutionStatsProvider.ItemKey, out var s2) && s2 is Autheris.Application.Usage.SourceExecutionStats st2)
             {
                 sourceStats = st2;

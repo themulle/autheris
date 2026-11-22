@@ -8,6 +8,7 @@ using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
+using Autheris.Api.Security;
 using Autheris.Application.Products;
 using Autheris.Application.Products.Sync;
 using Autheris.Domain.Audit;
@@ -39,32 +40,41 @@ public static partial class ProductEndpoints
         ArgumentNullException.ThrowIfNull(app);
         var group = app.MapGroup("/api/v1/products")
             .WithIngressTransport(Autheris.Domain.Options.DataSources.DataSourceTransportFlags.Rest)
-            .RequireAuthorization()
             .WithAudit(AuditLevel.Full, AuditEventTypes.ProductDefinitionChanged);
 
         group.MapGet("/", (HttpContext context, DataProductService service) => ListAsync(context, service))
+            .RequireAuthorization(GatewayPolicies.ProductAccess)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         group.MapGet("{schema}/{name}", (string schema, string name, HttpContext context, DataProductService service) => GetAsync(schema, name, context, service))
+            .RequireAuthorization(GatewayPolicies.ProductAccess)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         group.MapPut("{schema}/{name}", (string schema, string name, HttpContext context, DataProductService service) => PutAsync(schema, name, context, service))
+            .RequireAuthorization(GatewayPolicies.ProductAccess)
             .WithRequestBodyLimit(MaxBodyBytes);
         group.MapPost("{schema}/{name}/owner", (string schema, string name, HttpContext context, DataProductService service) => TransferAsync(schema, name, context, service))
+            .RequireAuthorization(GatewayPolicies.ProductAccess)
             .WithRequestBodyLimit(MaxBodyBytes)
             .WithAudit(AuditLevel.Full, AuditEventTypes.ProductOwnerTransferred);
         group.MapPost("{schema}/{name}/retire", (string schema, string name, HttpContext context, DataProductService service) => RetireAsync(schema, name, context, service))
+            .RequireAuthorization(GatewayPolicies.ProductAccess)
             .WithAudit(AuditLevel.Full, AuditEventTypes.ProductRetired);
         group.MapPost("{schema}/{name}/settings", (string schema, string name, HttpContext context, DataProductService service) => SettingsAsync(schema, name, context, service))
+            .RequireAuthorization(GatewayPolicies.ProductAccess)
             .WithRequestBodyLimit(MaxBodyBytes)
             .WithAudit(AuditLevel.Full, AuditEventTypes.ProductSettingsChanged);
         group.MapPost("{schema}/{name}/columns/{column}/classification", (string schema, string name, string column, HttpContext context, DataProductService service) => ClassifyAsync(schema, name, column, context, service))
+            .RequireAuthorization(GatewayPolicies.ProductAccess)
             .WithRequestBodyLimit(MaxBodyBytes)
             .WithAudit(AuditLevel.Full, AuditEventTypes.ProductColumnClassificationChanged);
 
         group.MapGet("sources/{dataSource}/owners", (string dataSource, HttpContext context, DataSourceOwnerService service) => ListOwnersAsync(dataSource, context, service))
+            .RequireAuthorization(GatewayPolicies.ProductOwnerRead)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         group.MapPut("sources/{dataSource}/owners/{ownerSid}", (string dataSource, string ownerSid, HttpContext context, DataSourceOwnerService service) => AssignOwnerAsync(dataSource, ownerSid, context, service))
+            .RequireAuthorization(GatewayPolicies.ProductOwnerAdmin)
             .WithAudit(AuditLevel.Full, AuditEventTypes.DataSourceOwnerAssigned);
         group.MapDelete("sources/{dataSource}/owners/{ownerSid}", (string dataSource, string ownerSid, HttpContext context, DataSourceOwnerService service) => RemoveOwnerAsync(dataSource, ownerSid, context, service))
+            .RequireAuthorization(GatewayPolicies.ProductOwnerAdmin)
             .WithAudit(AuditLevel.Full, AuditEventTypes.DataSourceOwnerRemoved);
 
         MapDiscoveryRoutes(group);

@@ -142,9 +142,17 @@ public sealed class SqlConnector : IAutherisConnector
             var executor = scope.ServiceProvider.GetServices<IDataSourceExecutor>().FirstOrDefault(e => e.SupportedType == DataSourceType.Sql)
                 ?? throw new InvalidOperationException("No SQL table read executor is registered.");
 
-            await foreach (var row in executor.StreamAsync(dsContext, ct).WithCancellation(ct).ConfigureAwait(false))
+            try
             {
-                yield return row;
+                await foreach (var row in executor.StreamAsync(dsContext, ct).WithCancellation(ct).ConfigureAwait(false))
+                {
+                    session.Attestation = dsContext.Attestation;
+                    yield return row;
+                }
+            }
+            finally
+            {
+                session.Attestation = dsContext.Attestation;
             }
         }
 
@@ -161,6 +169,7 @@ public sealed class SqlConnector : IAutherisConnector
             var executor = scope.ServiceProvider.GetServices<IDataSourceExecutor>().FirstOrDefault(e => e.SupportedType == DataSourceType.Sql)
                 ?? throw new InvalidOperationException("No SQL table read executor is registered.");
             var rows = await executor.ExecuteAsync(dsContext, ct);
+            session.Attestation = dsContext.Attestation;
             if (dsContext.Items.TryGetValue(Autheris.Application.Usage.ISourceExecutionStatsProvider.ItemKey, out var statsObj) &&
                 statsObj is Autheris.Application.Usage.SourceExecutionStats sourceStats)
             {
@@ -220,7 +229,10 @@ public sealed class SqlConnector : IAutherisConnector
                 Limit: clampedLimit,
                 Offset: Math.Max(0, session.Offset ?? 0),
                 Tenant: session.Tenant,
-                Items: session.Items);
+                Items: session.Items)
+            {
+                Attestation = session.Attestation
+            };
         }
     }
 }

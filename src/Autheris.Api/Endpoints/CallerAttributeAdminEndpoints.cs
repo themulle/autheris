@@ -8,6 +8,7 @@ using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Extensions;
+using Autheris.Api.Security;
 using Autheris.Application.Identity.Attributes;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -33,23 +34,32 @@ public static class CallerAttributeAdminEndpoints
     {
         ArgumentNullException.ThrowIfNull(app);
         var group = app.MapGroup("/api/v1/governance/caller-attributes")
-            .RequireAuthorization()
             .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         group.MapGet("", (HttpContext context, CallerAttributeAdministrationService service) => ListAsync(context, service))
+            .RequireAuthorization(GatewayPolicies.CallerAttributeRead)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
-        group.MapPut("/{name}", (string name, HttpContext context, CallerAttributeAdministrationService service) => PutDefinitionAsync(name, context, service));
-        group.MapDelete("/{name}", (string name, HttpContext context, CallerAttributeAdministrationService service) => DeleteDefinitionAsync(name, context, service));
+        group.MapPut("/{name}", (string name, HttpContext context, CallerAttributeAdministrationService service) => PutDefinitionAsync(name, context, service))
+            .RequireAuthorization(GatewayPolicies.GovernanceAdmin);
+        group.MapDelete("/{name}", (string name, HttpContext context, CallerAttributeAdministrationService service) => DeleteDefinitionAsync(name, context, service))
+            .RequireAuthorization(GatewayPolicies.GovernanceAdmin);
         group.MapPost("/{name}/approve", (string name, HttpContext context, CallerAttributeAdministrationService service) => ApproveDefinitionAsync(name, context, service))
+            .RequireAuthorization(GatewayPolicies.CallerAttributeApprove)
             .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
-        group.MapPost("/{name}/reject", (string name, HttpContext context, CallerAttributeAdministrationService service) => RejectDefinitionAsync(name, context, service));
+        group.MapPost("/{name}/reject", (string name, HttpContext context, CallerAttributeAdministrationService service) => RejectDefinitionAsync(name, context, service))
+            .RequireAuthorization(GatewayPolicies.CallerAttributeApprove);
         group.MapGet("/service-sets", (HttpContext context, CallerAttributeAdministrationService service) => ListServiceSetsAsync(context, service))
+            .RequireAuthorization(GatewayPolicies.CallerAttributeRead)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
-        group.MapPut("/service-sets", (HttpContext context, CallerAttributeAdministrationService service) => PutServiceSetAsync(context, service));
+        group.MapPut("/service-sets", (HttpContext context, CallerAttributeAdministrationService service) => PutServiceSetAsync(context, service))
+            .RequireAuthorization(GatewayPolicies.GovernanceAdmin);
         group.MapPost("/service-sets/approve", (HttpContext context, CallerAttributeAdministrationService service) => ApproveServiceSetAsync(context, service))
+            .RequireAuthorization(GatewayPolicies.CallerAttributeApprove)
             .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
-        group.MapPost("/service-sets/reject", (HttpContext context, CallerAttributeAdministrationService service) => RejectServiceSetAsync(context, service));
+        group.MapPost("/service-sets/reject", (HttpContext context, CallerAttributeAdministrationService service) => RejectServiceSetAsync(context, service))
+            .RequireAuthorization(GatewayPolicies.CallerAttributeApprove);
         group.MapPost("/simulate", (HttpContext context, CallerAttributeSimulationService simulation) => SimulateAsync(context, simulation))
+            .RequireAuthorization(GatewayPolicies.CallerAttributeSimulate)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CallerAttributeSimulationRead);
         return app;
     }

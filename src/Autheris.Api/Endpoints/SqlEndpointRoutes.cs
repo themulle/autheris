@@ -39,30 +39,30 @@ public static class SqlEndpointRoutes
 
         group.MapGet("/", HandleListEndpoints)
              .WithName("ListSqlEndpoints")
-             .RequireAuthorization()
+             .RequireAuthorization(GatewayPolicies.AuthenticatedCaller)
              .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         group.MapPost("/", (RegisterSqlEndpointRequest? request, ISqlEndpointRegistry registry, HttpContext context) => HandleRegisterEndpoint(request, registry, context))
              .WithName("RegisterSqlEndpoint")
-             .RequireAuthorization()
+             .RequireAuthorization(GatewayPolicies.SqlEndpointRegister)
              .WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
         group.MapGet("/openapi.json", HandleOpenApiSpec)
              .WithName("GetSqlEndpointsOpenApiSpec")
-             .RequireAuthorization()
+             .RequireAuthorization(GatewayPolicies.AuthenticatedCaller)
              .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
         group.MapGet("/{name}", HandleGetEndpoint)
              .WithName("ExecuteSqlEndpointGet")
              .WithMetadata(new ParquetOutputSupportedMetadata())
-             .RequireAuthorization()
+             .RequireAuthorization(GatewayPolicies.AuthenticatedCaller)
              .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         group.MapPost("/{name}", HandlePostEndpoint)
              .WithName("ExecuteSqlEndpointPost")
              .WithMetadata(new ParquetOutputSupportedMetadata())
              .WithReadOnlyTokenAccess(HttpMethods.Post)
-             .RequireAuthorization()
+             .RequireAuthorization(GatewayPolicies.AuthenticatedCaller)
              .WithAudit(AuditLevel.Full, AuditEventTypes.TableQuery);
 
         return app;

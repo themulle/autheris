@@ -110,10 +110,10 @@ public sealed class SqlTableReadExecutorTests
         await executor.ExecuteAsync(clear);
         await executor.ExecuteAsync(masked);
 
-        clear.Items["RlsPushdownExecuted"].ShouldBe(true);
-        clear.Items.ContainsKey("InDbColumnMaskingExecuted").ShouldBeFalse();
-        masked.Items["RlsPushdownExecuted"].ShouldBe(true);
-        masked.Items["InDbColumnMaskingExecuted"].ShouldBe(true);
+        clear.Attestation.RlsPushdownExecuted.ShouldBeTrue();
+        clear.Attestation.InDbColumnMaskingExecuted.ShouldBeFalse();
+        masked.Attestation.RlsPushdownExecuted.ShouldBeTrue();
+        masked.Attestation.InDbColumnMaskingExecuted.ShouldBeTrue();
     }
 
     [Fact]

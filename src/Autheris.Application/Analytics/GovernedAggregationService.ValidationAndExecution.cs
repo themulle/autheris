@@ -331,7 +331,8 @@ public sealed partial class GovernedAggregationService
                 throw new AggregationRowCapExceededException();
             }
 
-            bool rlsAlreadyPushedDown = execContext.Items.TryGetValue("RlsPushdownExecuted", out var pushed) && pushed is true;
+            bool rlsAlreadyPushedDown = Autheris.Domain.Connectors.ConnectorSecurityAttestation.MayAttest(metadata)
+                && execContext.Attestation.RlsPushdownExecuted;
             var rlsRows = rlsAlreadyPushedDown
                 ? rawRows.ToList()
                 : InMemoryRowFilterEvaluator.FilterRows(rawRows.ToList(), decision, metadata);

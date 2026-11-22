@@ -65,7 +65,7 @@ public sealed class ODataHardeningTests
         public Task<IReadOnlyList<IReadOnlyDictionary<string, object?>>> ExecuteAsync(DataSourceExecutionContext context, CancellationToken ct = default)
         {
             RequestedFields.Add(context.RequestedFields);
-            context.Items["RlsPushdownExecuted"] = true;
+            context.Attestation = new Autheris.Domain.Connectors.ConnectorSecurityAttestation(RlsPushdownExecuted: true);
             return Task.FromResult<IReadOnlyList<IReadOnlyDictionary<string, object?>>>([]);
         }
     }

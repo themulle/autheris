@@ -7,6 +7,7 @@ using System.Text.Json.Serialization;
 using System.Threading.Tasks;
 using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
+using Autheris.Api.Security;
 using Autheris.Application.Products;
 using Autheris.Application.Products.Sync;
 using Autheris.Domain.Audit;
@@ -27,9 +28,11 @@ public static partial class ProductEndpoints
     private static void MapSyncRoutes(IEndpointRouteBuilder app, RouteGroupBuilder group)
     {
         group.MapPost("sync/plan", (HttpContext context, ProductSyncService service) => SyncAsync(context, service, apply: false))
+            .RequireAuthorization(GatewayPolicies.ProductSync)
             .WithRequestBodyLimit(MaxSyncBodyBytes)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         group.MapPost("sync/apply", (HttpContext context, ProductSyncService service) => SyncAsync(context, service, apply: true))
+            .RequireAuthorization(GatewayPolicies.ProductSync)
             .WithRequestBodyLimit(MaxSyncBodyBytes)
             .WithAudit(AuditLevel.Full, AuditEventTypes.ProductSyncApplied);
         app.MapPost("/api/v1/products/sync/webhook/{tenant}", (string tenant, HttpContext context, ProductSyncWebhookService service) => WebhookAsync(tenant, context, service))
