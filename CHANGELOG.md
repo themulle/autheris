@@ -6,15 +6,43 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
-## [1.10.3] - 2026-11-21
+## [1.10.3] - 2026-11-22
+
+### Added
+- `EnglishOnlySourceRatchetTests` enforcing English-only code, comments, workflows, and deployment configurations across source, modules, `.github/`, and `deploy/` (#999, #1014).
+- Testcontainers real-Redis integration coverage for Redis rate-limiting and cluster lease Lua scripts (#1000, #1001).
 
 ### Changed
 - Excluded transitive host native runtime assets (`runtime;native`) from module project references so signed modules reuse the host's native libraries (`libduckdb`, `libonnxruntime`) instead of bundling multi-platform copies (#989).
 - Retired completed `docs/plans/` documents and moved planning/coordination to GitHub Issues (#990).
+- Replaced hardcoded route-prefix checks in edge and middleware routing with endpoint metadata (`GatewayEndpointMetadata`) and replaced broad prefix stripping with an explicit internal deny-list (`InternalHeadersToStrip`) (#1016).
+- Hardened CI, deployment, and repository hygiene: bound `release.yml` nightly verification gates to the exact tagged commit SHA, updated Compose image digests and Azurite healthcheck failure behavior, removed `deploy/*` from documentation-only CI skips in `.github/scripts/ci-changes.py`, and translated remaining non-English source comments and deployment text (#999, #1014).
+- Architectural security consolidations (#1000):
+  - Unified GraphQL caller-principal resolution across resolvers and interceptors via `GraphQlCallerPrincipal` (#1004).
+  - Unified consent workflow routing and submission controls across consent endpoints, profile assignments, and bundled consent requests via `ConsentSubmissionPipeline` (#1005).
+  - Unified separation-of-duties evaluation (`SeparationOfDutiesService`) and hardened four-eyes approval and TOTP verification controls (#1006).
+  - Consolidated SQL identifier validation and quoting into `SqlIdentifierGuard` (#1018, #1022) and unified row-filter representation around `DecisionRowFilter` (#1022).
+  - Enforced required constructor dependencies on `ODataHandler` and `StreamRlsPolicyEnforcer` (#1020).
+  - Standardized endpoint authorization on declarative named `GatewayPolicies` and typed `ConnectorSecurityAttestation` (#1021).
+
+### Removed
+- Unwired legacy security types and obsolete protocol/cache members (`PolicyShapeAnalyzer`, `SubgraphSecurityValidator`, `DynamicTableType`, `IMcpProtocolHandler`, and `IConsentCacheService.EvictTableDecisionsAsync`) (#998, #1019).
+- Unbuilt drifted `Dockerfile.production` and `Dockerfile.staging` files (#999, #1014).
 
 ### Fixed
 - Packaged and signed all 5 release modules (`lakehouse`, `dbt`, `openmetadata`, `events`, `lineage`) into the `autheris-full` container image and trimmed non-Linux module runtimes in release archives (#989).
 - Regenerated `Autheris.Tests.Simulation` NuGet lockfile for `Simulation nightly` (#988, #991).
+- Cross-source federation: hardened subtree compilation, per-subtree parameter isolation, pushdown identifier quoting, and dialect function policy enforcement (#993, #1008).
+- Webhooks: preserved inbound product-sync webhook headers (`X-Autheris-Timestamp`, `X-Autheris-Delivery`, `X-Autheris-Signature-256`) at the edge header-stripping middleware and ensured webhook audit attribution (#994, #1002, #1016).
+- Concurrency and resource limits: added atomic WebSQL statement session slot reservation, `McpPathResolver`-based MCP/GraphQL workload-tier and audit-channel routing, async SQL analysis (`McpDataTargetResolver`) and async parse budgets (`FastSqlEngine`), bounded GraphQL paging and batch previews, linear-time PII regex evaluation, and request body, DuckDB pool, and query cost limits (#995, #1011, #1012, #1016).
+- Lakehouse and connectors: fixed S3 SigV4 RFC 3986 URI and query encoding, hardened Iceberg metadata discovery via `version-hint.text` and storage listing with fail-closed loading, refused unsigned Azure Blob requests by default, routed `OpenLineageApiKey` through `SecretReferenceResolver` with fail-closed resolution outside Development and URI/path log sanitization, and hardened relative and root-relative `@odata.nextLink` resolution with HTTP(S)-only scheme checks and post-resolution host matching (#996, #1010).
+- Query and runtime correctness: fixed coalesced table-cache single-flight and fallback handling (`TableCacheManager`), federated result masking for read-only dictionaries (`SubgraphResultMasker`), event bus unsubscription under lock (`InMemoryGatewayEventBus`), and catalog discovery, grant-validity, Databricks token cache, and CDC/OData query correctness defects (#997, #1013, #1015).
+- Redis rate limiting: fixed Redis Lua script key and value parameter passing and decimal fence-token preservation (#1000, #1001).
+
+### Security
+- Hardened persistent DuckDB table cache metadata with HMAC verification and per-table DEK derivation, made MCP session `Touch` atomic without resurrecting expired sessions, switched MCP table fast-path dispatch from tool names to explicit `TargetTable`, gated Fusion subgraph client registration on `Federation.Enabled`, and tightened latent fail-closed guards across policy, analysis, and endpoint paths (#998, #1017, #1019).
+- Enforced canonical `ClusterAdmin` evaluation and tightened MCP golden examples and discovery sample visibility (#1000, #1003).
+- Enforced realm `UserKeyClaim` identity binding (`RealmUserKeyResolver`), tenant request scoping, and role-resolver cache isolation and prefix-aware key bounds (`RoleResolverCache`) (#1000, #1007).
 
 ## [1.10.2] - 2026-11-21
 
