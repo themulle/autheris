@@ -63,7 +63,7 @@ public sealed class TotpLockoutIntegrationTests : IClassFixture<TotpLockoutInteg
     {
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", ApproverSid);
-        client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "ClusterAdmin,GovernanceAdmin");
         client.DefaultRequestHeaders.Add("X-Test-Tenant", Tenant);
         return client;
     }
