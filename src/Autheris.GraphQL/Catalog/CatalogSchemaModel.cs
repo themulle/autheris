@@ -334,7 +334,7 @@ public sealed partial class CatalogSchemaModel
 
                 // R-GQL-13: the tree compiler only accepts plain column names; others (e.g. "a-b") were offered in the
                 // schema under a sanitized name but could never be queried.
-                if (!QueryableColumnNameRegex().IsMatch(col.ColumnName))
+                if (!SqlIdentifierGuard.IsValidIdentifier(col.ColumnName))
                 {
                     logger?.LogInformation("GraphQL catalog schema: column '{Column}' of '{Table}' is not a plain identifier and is omitted.", col.ColumnName, meta.Identifier.ToQualifiedName());
                     continue;
@@ -725,9 +725,6 @@ public sealed partial class CatalogSchemaModel
         }
         return string.IsNullOrEmpty(res) ? "_" : res;
     }
-
-    [System.Text.RegularExpressions.GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
-    private static partial System.Text.RegularExpressions.Regex QueryableColumnNameRegex();
 
     public static CatalogFieldType MapDataType(string? dataType) => ColumnValueKinds.FromDataType(dataType) switch
     {

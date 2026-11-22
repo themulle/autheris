@@ -446,9 +446,6 @@ public sealed class DiscoveryWriteStateTests
     {
         public List<Consent> Consents { get; } = [];
 
-        public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default)
-            => GetActiveConsentsForSubjectsAsync(subjects, table, atTime, null, ct);
-
         public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default)
         {
             var subjectSet = subjects.ToHashSet();
@@ -460,9 +457,6 @@ public sealed class DiscoveryWriteStateTests
                             (!tenantId.HasValue || c.TenantId == tenantId.Value))
                 .ToList());
         }
-
-        public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles = null, DateTimeOffset? atTime = null, CancellationToken ct = default)
-            => GetAllActiveConsentsForSubjectsAsync(subjects, roles, atTime, null, ct);
 
         public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<Consent>>(Consents);

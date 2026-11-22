@@ -134,13 +134,7 @@ public sealed class TableAccessPolicyCallerAttributeIntegrationTests
 
     private sealed class StaticConsentRepository(Consent consent) : IConsentRepository
     {
-        public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<Consent>>([consent]);
-
         public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<Consent>>([consent]);
-
-        public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles = null, DateTimeOffset? atTime = null, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<Consent>>([consent]);
 
         public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default) =>

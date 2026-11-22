@@ -91,7 +91,7 @@ public sealed class SubgraphSecurityDelegatingHandler : DelegatingHandler
         }
 
         // Apply Zero-Trust Security headers (Subject SID, Tenant, Roles) & SSRF check
-        _propagationService.ApplySecurityHeaders(request, _subgraphName, principal, tenantId);
+        await _propagationService.ApplySecurityHeadersAsync(request, _subgraphName, principal, tenantId, cancellationToken).ConfigureAwait(false);
 
         // Forward Authorization Bearer token downstream ONLY if explicitly configured on the subgraph AND NOT an MCP request
         bool isMcp = httpContext?.Items.ContainsKey("IsMcpRequest") == true ||

@@ -19,7 +19,7 @@ public sealed class SubgraphQuerySignatureVf09Tests
 {
     private const string Secret = "super-secret-signing-key-for-subgraphs-123!";
 
-    private static (string Sig, string Ts, string Nonce, string BodyHash) Sign(string url)
+    private static async Task<(string Sig, string Ts, string Nonce, string BodyHash)> SignAsync(string url)
     {
         var options = new GatewayOptions
         {
@@ -36,7 +36,7 @@ public sealed class SubgraphQuerySignatureVf09Tests
         var service = new SubgraphContextPropagationService(Options.Create(options), NullLogger<SubgraphContextPropagationService>.Instance);
         var request = new HttpRequestMessage(HttpMethod.Get, url);
         var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-FED-USER")], "Test"));
-        service.ApplySecurityHeaders(request, "products", user, "tenant_alpha");
+        await service.ApplySecurityHeadersAsync(request, "products", user, "tenant_alpha");
         return (
             request.Headers.GetValues("X-Autheris-Signature").First(),
             request.Headers.GetValues("X-Autheris-Timestamp").First(),
@@ -60,17 +60,17 @@ public sealed class SubgraphQuerySignatureVf09Tests
             bodySha256: s.BodyHash);
 
     [Fact]
-    public void SignedQueryString_Validates()
+    public async Task SignedQueryString_Validates()
     {
-        var signed = Sign("https://subgraph.internal/graphql?query=%7Ba%7D");
+        var signed = await SignAsync("https://subgraph.internal/graphql?query=%7Ba%7D");
 
         Validate(signed, "/graphql?query=%7Ba%7D").ShouldBeTrue();
     }
 
     [Fact]
-    public void TamperedQueryString_IsRejected()
+    public async Task TamperedQueryString_IsRejected()
     {
-        var signed = Sign("https://subgraph.internal/graphql?query=%7Ba%7D");
+        var signed = await SignAsync("https://subgraph.internal/graphql?query=%7Ba%7D");
 
         Validate(signed, "/graphql?query=%7Bevil%7D").ShouldBeFalse();
     }

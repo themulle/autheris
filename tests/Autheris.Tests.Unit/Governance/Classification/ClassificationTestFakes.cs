@@ -78,9 +78,6 @@ internal sealed class TestNoOpConsentCache : IConsentCacheService
 
 internal sealed class TestInMemoryConsentRepository(IReadOnlyList<Consent> consents, bool filterWindow = true) : IConsentRepository
 {
-    public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default) =>
-        GetActiveConsentsForSubjectsAsync(subjects, table, atTime, null, ct);
-
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default)
     {
         if (!filterWindow)
@@ -96,8 +93,6 @@ internal sealed class TestInMemoryConsentRepository(IReadOnlyList<Consent> conse
             (c.GranteeSid is null || sids.Contains(c.GranteeSid.Value))).ToList());
     }
 
-    public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles = null, DateTimeOffset? atTime = null, CancellationToken ct = default) =>
-        Task.FromResult(consents);
     public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default) =>
         Task.FromResult(consents);
     public Task<Consent> CreateConsentAsync(Consent consent, CancellationToken ct = default) => Task.FromResult(consent);

@@ -70,26 +70,8 @@ public sealed record AttributeTableSpec(
     /// <summary>
     /// <c>^[A-Za-z_][A-Za-z0-9_]{0,127}$</c>: no <c>#</c> (SQL Server temp tables), no <c>$</c>, no dot, quote, bracket, comment marker or unicode (BC-129-11).
     /// </summary>
-    public static bool IsSafeIdentifier(string identifier)
-    {
-        if (string.IsNullOrEmpty(identifier) || identifier.Length > 128)
-        {
-            return false;
-        }
-
-        for (int i = 0; i < identifier.Length; i++)
-        {
-            char c = identifier[i];
-            bool letter = (c is >= 'A' and <= 'Z') || (c is >= 'a' and <= 'z') || c == '_';
-            bool digit = c is >= '0' and <= '9';
-            if (!(letter || (digit && i > 0)))
-            {
-                return false;
-            }
-        }
-
-        return true;
-    }
+    public static bool IsSafeIdentifier(string identifier) =>
+        SqlIdentifierGuard.IsValidIdentifier(identifier);
 }
 
 /// <summary>The statement and its bound parameters.</summary>

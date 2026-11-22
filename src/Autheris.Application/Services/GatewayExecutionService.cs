@@ -1,5 +1,4 @@
 using System.Security.Claims;
-using System.Text.RegularExpressions;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Tenancy;
@@ -34,9 +33,6 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
     /// <summary>O10: Retry-After for a throttled read; the typical duration of a slow read is the query timeout.</summary>
     private const int ThrottledRetryAfterSeconds = 2;
-
-    [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,127}$")]
-    private static partial Regex EchoableColumnNameRegex();
 
     [ActivatorUtilitiesConstructor]
     public GatewayExecutionService(
@@ -296,6 +292,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IReadOnlyList<IReadOnlyDictionary<string, object?>> rawRows;
         bool rlsPushdownAlreadyOccurred = false;
         bool inDbMaskingAlreadyOccurred = false;
+        var mayAttest = Autheris.Application.DataSources.Connectors.GovernedConnectorReader.MayAttest(metadata);
         Autheris.Application.Usage.SourceExecutionStats sourceStats = default;
 
         Autheris.Application.DataSources.Connectors.IAutherisConnector? connector = null;
@@ -324,8 +321,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
             rawRows = await Autheris.Application.DataSources.Connectors.GovernedConnectorReader.ReadRawAsync(connector, session, metadata, maxRows: null, ct).ConfigureAwait(false);
 
-            rlsPushdownAlreadyOccurred = session.Items.TryGetValue(Autheris.Application.DataSources.Connectors.GovernedConnectorReader.RlsPushdownExecutedKey, out var p1) && p1 is true;
-            inDbMaskingAlreadyOccurred = session.Items.TryGetValue(Autheris.Application.DataSources.Connectors.GovernedConnectorReader.InDbColumnMaskingExecutedKey, out var m1) && m1 is true;
+            rlsPushdownAlreadyOccurred = mayAttest && session.Items.TryGetValue(Autheris.Application.DataSources.Connectors.GovernedConnectorReader.RlsPushdownExecutedKey, out var p1) && p1 is true;
+            inDbMaskingAlreadyOccurred = mayAttest && session.Items.TryGetValue(Autheris.Application.DataSources.Connectors.GovernedConnectorReader.InDbColumnMaskingExecutedKey, out var m1) && m1 is true;
             if (session.Items.TryGetValue(Autheris.Application.Usage.ISourceExecutionStatsProvider.ItemKey, out var s1) && s1 is Autheris.Application.Usage.SourceExecutionStats st1)
             {
                 sourceStats = st1;
@@ -357,8 +354,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
             rawRows = await executor.ExecuteAsync(execContext, ct);
 
-            rlsPushdownAlreadyOccurred = execContext.Items.TryGetValue("RlsPushdownExecuted", out var p2) && p2 is true;
-            inDbMaskingAlreadyOccurred = execContext.Items.TryGetValue("InDbColumnMaskingExecuted", out var m2) && m2 is true;
+            rlsPushdownAlreadyOccurred = mayAttest && execContext.Items.TryGetValue("RlsPushdownExecuted", out var p2) && p2 is true;
+            inDbMaskingAlreadyOccurred = mayAttest && execContext.Items.TryGetValue("InDbColumnMaskingExecuted", out var m2) && m2 is true;
             if (execContext.Items.TryGetValue(Autheris.Application.Usage.ISourceExecutionStatsProvider.ItemKey, out var s2) && s2 is Autheris.Application.Usage.SourceExecutionStats st2)
             {
                 sourceStats = st2;
@@ -625,14 +622,14 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                     usageRecorder: _usageRecorder,
                     dataSource: metadata.Table.SourceName).ConfigureAwait(false);
 
-                var echo = trimmed != null && EchoableColumnNameRegex().IsMatch(trimmed) ? trimmed : "(invalid name)";
+                var echo = SqlIdentifierGuard.IsValidIdentifier(trimmed) ? trimmed : "(invalid name)";
                 throw new GatewayInvalidQueryException($"The property '{echo}' does not exist or is not accessible.");
             }
 
             var catalogName = authorizedColumns.FirstOrDefault(c => string.Equals(c, trimmed, StringComparison.OrdinalIgnoreCase));
             if (catalogName == null)
             {
-                var echo = trimmed != null && EchoableColumnNameRegex().IsMatch(trimmed) ? trimmed : "(invalid name)";
+                var echo = SqlIdentifierGuard.IsValidIdentifier(trimmed) ? trimmed : "(invalid name)";
                 throw new GatewayInvalidQueryException($"The property '{echo}' does not exist or is not accessible.");
             }
             if (seen.Add(catalogName))

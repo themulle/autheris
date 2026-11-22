@@ -594,7 +594,7 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
                     _options.Value.DataSources?.TenantColumnExemptTables);
             if (tenantColumn != null)
             {
-                if (!System.Text.RegularExpressions.Regex.IsMatch(tenantColumn, "^[A-Za-z_][A-Za-z0-9_]{0,127}$"))
+                if (!SqlIdentifierGuard.IsValidIdentifier(tenantColumn))
                 {
                     throw new InvalidOperationException($"The tenant column '{tenantColumn}' of {target.FullName} is not a plain identifier; the query is refused (fail-closed).");
                 }

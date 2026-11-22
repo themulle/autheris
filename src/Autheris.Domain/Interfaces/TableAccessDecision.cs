@@ -12,7 +12,7 @@ public sealed record TableWriteDecision(
     IReadOnlyList<string> GrantIds,
     string? DenyCode = null);
 
-public record TableAccessDecision(
+public sealed record TableAccessDecision(
     TableIdentifier Table,
     bool IsAllowed,
     IReadOnlyDictionary<string, ColumnAccessLevel> ColumnAccess,
@@ -24,6 +24,8 @@ public record TableAccessDecision(
     IReadOnlyList<string>? AppliedVirtualFilters = null
 )
 {
+    public IReadOnlyDictionary<string, ColumnAccessLevel> ColumnAccess { get; init; } = NormalizeColumnAccess(ColumnAccess);
+
     /// <summary>Error code of a Virtual Filter that is applied but not (provably) enforced (F-GOV-14).</summary>
     public const string VirtualFilterEnforcementIncompleteCode = "VF_ENFORCEMENT_INCOMPLETE";
 
@@ -31,7 +33,7 @@ public record TableAccessDecision(
     /// The typed row policy (02 item 3). When set,<see cref="CombinedRowFilterSql"/> is its text projection and
     /// <see cref="RowFilterParameters"/> carries its values. It is only ever changed through the typed helpers below.
     /// </summary>
-    public IRowPolicy? RowPolicy { get; init; }
+    public IRowPolicy? RowPolicy { get; internal init; }
 
     /// <summary>
     /// The inputs of the consent row filter (WP-X0l). The decision cache keeps them, so a cached decision can be turned into a typed
@@ -81,13 +83,13 @@ public record TableAccessDecision(
     public TableWriteDecision? WriteGrant { get; init; }
 
     /// <summary>The typed Virtual Filter policy behind <see cref="MandatoryRowPredicateSql"/> (null when it was added as text).</summary>
-    public IRowPolicy? MandatoryRowPolicy { get; init; }
+    public IRowPolicy? MandatoryRowPolicy { get; internal init; }
 
     /// <summary>The typed row policy before the Virtual Filter policy was added.</summary>
-    public IRowPolicy? RowPolicyBeforeVirtualFilters { get; init; }
+    public IRowPolicy? RowPolicyBeforeVirtualFilters { get; internal init; }
 
     /// <summary>Typed row policies added after the Virtual Filter policy, in order.</summary>
-    public IReadOnlyList<IRowPolicy>? RowPoliciesAfterVirtualFilters { get; init; }
+    public IReadOnlyList<IRowPolicy>? RowPoliciesAfterVirtualFilters { get; internal init; }
 
     /// <summary>
     /// Column names whose effective access varies per row (overlapping grants with different masking rules); discovery
@@ -482,7 +484,7 @@ public record TableAccessDecision(
 
     public ColumnAccessLevel GetColumnAccess(string columnName)
     {
-        if (ColumnAccess.TryGetValue(columnName, out var lvl))
+        if (TryGetColumnAccess(columnName, out var lvl))
         {
             return lvl;
         }
@@ -490,7 +492,71 @@ public record TableAccessDecision(
     }
 
     public bool HasExplicitClear(string columnName) =>
-        ColumnAccess.TryGetValue(columnName, out var lvl) && lvl == ColumnAccessLevel.Clear;
+        TryGetColumnAccess(columnName, out var lvl) && lvl == ColumnAccessLevel.Clear;
+
+    private bool TryGetColumnAccess(string columnName, out ColumnAccessLevel level)
+    {
+        if (ColumnAccess.TryGetValue(columnName, out level))
+        {
+            return true;
+        }
+
+        if (ColumnAccess is Dictionary<string, ColumnAccessLevel> dict &&
+            ReferenceEquals(dict.Comparer, StringComparer.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var found = false;
+        var strictest = ColumnAccessLevel.Clear;
+        foreach (var (key, value) in ColumnAccess)
+        {
+            if (string.Equals(key, columnName, StringComparison.OrdinalIgnoreCase) &&
+                (!found || RestrictivenessRank(value) < RestrictivenessRank(strictest)))
+            {
+                strictest = value;
+                found = true;
+            }
+        }
+
+        level = strictest;
+        return found;
+    }
+
+    private static IReadOnlyDictionary<string, ColumnAccessLevel> NormalizeColumnAccess(
+        IReadOnlyDictionary<string, ColumnAccessLevel>? raw)
+    {
+        if (raw is null)
+        {
+            return new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
+        }
+
+        if (raw is Dictionary<string, ColumnAccessLevel> dict &&
+            ReferenceEquals(dict.Comparer, StringComparer.OrdinalIgnoreCase))
+        {
+            return dict;
+        }
+
+        var normalized = new Dictionary<string, ColumnAccessLevel>(raw.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var (key, value) in raw)
+        {
+            if (!normalized.TryGetValue(key, out var existing) || RestrictivenessRank(value) < RestrictivenessRank(existing))
+            {
+                normalized[key] = value;
+            }
+        }
+
+        return normalized;
+    }
+
+    private static int RestrictivenessRank(ColumnAccessLevel level) => level switch
+    {
+        ColumnAccessLevel.Deny => 0,
+        ColumnAccessLevel.Mask => 1,
+        ColumnAccessLevel.RowDependent => 2,
+        ColumnAccessLevel.Clear => 3,
+        _ => -1
+    };
 
     /// <summary>
     /// SEC H-10/C-03: Single source of truth for the effective access level of a column, used for projection AND filtering.
@@ -535,7 +601,7 @@ public record TableAccessDecision(
         && !clearance.Permits(columnName);
 
     public static TableAccessDecision Denied(TableIdentifier table, params string[] reasons) =>
-        new(table, false, new Dictionary<string, ColumnAccessLevel>(), null, reasons, false) { DenialKind = TableAccessDenialKind.Policy };
+        new(table, false, new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase), null, reasons, false) { DenialKind = TableAccessDenialKind.Policy };
 
     public static TableAccessDecision Allowed(
         TableIdentifier table,

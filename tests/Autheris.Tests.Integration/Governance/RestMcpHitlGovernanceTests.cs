@@ -66,7 +66,7 @@ public sealed class RestMcpHitlGovernanceTests
         await repo.ActivateConsentForAutoApproveAsync(created.Id);
         await repo.ActivateConsentForAutoApproveAsync(created.Id);
 
-        var active = await repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-H06")], tableId, DateTimeOffset.UtcNow);
+        var active = await repo.GetActiveConsentsForSubjectsAsync([new Sid("S-1-5-21-H06")], tableId, DateTimeOffset.UtcNow, new TenantId("tenant-a"));
         active.Count.ShouldBe(1);
         (await repo.GetConsentRequestAsync(created.Id))!.Status.ShouldBe("APPROVED");
     }

@@ -24,7 +24,7 @@ public sealed class SubgraphFederationSecurityTests
     private const string Secret = "super-secret-signing-key-for-subgraphs-123!";
 
     [Fact]
-    public void ApplySecurityHeaders_SignsContextHeaders_AndValidatorConfirmsSignature()
+    public async Task ApplySecurityHeaders_SignsContextHeaders_AndValidatorConfirmsSignature()
     {
         var options = new GatewayOptions
         {
@@ -46,7 +46,7 @@ public sealed class SubgraphFederationSecurityTests
         var request = new HttpRequestMessage(HttpMethod.Post, "https://subgraph.internal/graphql");
         var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-FED-USER")], "Test"));
 
-        service.ApplySecurityHeaders(request, "products", user, "tenant_alpha");
+        await service.ApplySecurityHeadersAsync(request, "products", user, "tenant_alpha");
 
         // Verify headers are present
         request.Headers.Contains("X-Autheris-Signature").ShouldBeTrue();
@@ -77,7 +77,7 @@ public sealed class SubgraphFederationSecurityTests
     }
 
     [Fact]
-    public void SubgraphSecurityValidator_TamperedTenant_ReturnsFalse()
+    public async Task SubgraphSecurityValidator_TamperedTenant_ReturnsFalse()
     {
         var options = new GatewayOptions
         {
@@ -97,7 +97,7 @@ public sealed class SubgraphFederationSecurityTests
         var request = new HttpRequestMessage(HttpMethod.Post, "https://subgraph.internal/graphql");
         var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-FED-USER")], "Test"));
 
-        service.ApplySecurityHeaders(request, "products", user, "tenant_alpha");
+        await service.ApplySecurityHeadersAsync(request, "products", user, "tenant_alpha");
 
         var sig = request.Headers.GetValues("X-Autheris-Signature").First();
         var ts = request.Headers.GetValues("X-Autheris-Timestamp").First();
@@ -123,7 +123,7 @@ public sealed class SubgraphFederationSecurityTests
     }
 
     [Fact]
-    public void SubgraphSecurityValidator_TamperedRoles_ReturnsFalse()
+    public async Task SubgraphSecurityValidator_TamperedRoles_ReturnsFalse()
     {
         var options = new GatewayOptions
         {
@@ -146,7 +146,7 @@ public sealed class SubgraphFederationSecurityTests
             new Claim(ClaimTypes.Role, "Reader")
         ], "Test"));
 
-        service.ApplySecurityHeaders(request, "products", user, "tenant_alpha");
+        await service.ApplySecurityHeadersAsync(request, "products", user, "tenant_alpha");
 
         var sig = request.Headers.GetValues("X-Autheris-Signature").First();
         var ts = request.Headers.GetValues("X-Autheris-Timestamp").First();
@@ -172,7 +172,7 @@ public sealed class SubgraphFederationSecurityTests
     }
 
     [Fact]
-    public void SubgraphSecurityValidator_TamperedSubgraph_ReturnsFalse()
+    public async Task SubgraphSecurityValidator_TamperedSubgraph_ReturnsFalse()
     {
         var options = new GatewayOptions
         {
@@ -192,7 +192,7 @@ public sealed class SubgraphFederationSecurityTests
         var request = new HttpRequestMessage(HttpMethod.Post, "https://subgraph.internal/graphql");
         var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-FED-USER")], "Test"));
 
-        service.ApplySecurityHeaders(request, "products", user, "tenant_alpha");
+        await service.ApplySecurityHeadersAsync(request, "products", user, "tenant_alpha");
 
         var sig = request.Headers.GetValues("X-Autheris-Signature").First();
         var ts = request.Headers.GetValues("X-Autheris-Timestamp").First();
@@ -310,7 +310,7 @@ public sealed class SubgraphFederationSecurityTests
         isValid.ShouldBeFalse();
     }
 
-    private static HttpRequestMessage SignedRequest(HttpContent? content, out string sig, out string ts, out string nonce, out string bodyHash, string roleA = "B", string roleB = "A")
+    private static async Task<(HttpRequestMessage Request, string Sig, string Ts, string Nonce, string BodyHash)> SignedRequestAsync(HttpContent? content, string roleA = "B", string roleB = "A")
     {
         var options = new GatewayOptions
         {
@@ -320,18 +320,18 @@ public sealed class SubgraphFederationSecurityTests
         var request = new HttpRequestMessage(HttpMethod.Post, "https://subgraph.internal/graphql") { Content = content };
         var user = new ClaimsPrincipal(new ClaimsIdentity([
             new Claim(ClaimTypes.PrimarySid, "S-1"), new Claim(ClaimTypes.Role, roleA), new Claim(ClaimTypes.Role, roleB)], "Test"));
-        service.ApplySecurityHeaders(request, "products", user, "tenant_alpha");
-        sig = request.Headers.GetValues("X-Autheris-Signature").First();
-        ts = request.Headers.GetValues("X-Autheris-Timestamp").First();
-        nonce = request.Headers.GetValues("X-Autheris-Nonce").First();
-        bodyHash = request.Headers.GetValues("X-Autheris-Body-Sha256").First();
-        return request;
+        await service.ApplySecurityHeadersAsync(request, "products", user, "tenant_alpha");
+        var sig = request.Headers.GetValues("X-Autheris-Signature").First();
+        var ts = request.Headers.GetValues("X-Autheris-Timestamp").First();
+        var nonce = request.Headers.GetValues("X-Autheris-Nonce").First();
+        var bodyHash = request.Headers.GetValues("X-Autheris-Body-Sha256").First();
+        return (request, sig, ts, nonce, bodyHash);
     }
 
     [Fact]
-    public void SR_M_18_BodyIsBoundToSignature()
+    public async Task SR_M_18_BodyIsBoundToSignature()
     {
-        var request = SignedRequest(new StringContent("{\"query\":\"{a}\"}"), out var sig, out var ts, out var nonce, out var bodyHash);
+        var (request, sig, ts, nonce, bodyHash) = await SignedRequestAsync(new StringContent("{\"query\":\"{a}\"}"));
         var expected = Autheris.Application.Federation.Services.FederationContextSignature.HashBody(System.Text.Encoding.UTF8.GetBytes("{\"query\":\"{a}\"}"));
         bodyHash.ShouldBe(expected);
         var roles = string.Join(",", request.Headers.GetValues("X-Gateway-Roles"));
@@ -347,9 +347,9 @@ public sealed class SubgraphFederationSecurityTests
     }
 
     [Fact]
-    public void SR_M_18_RolesHeaderIsSortedCanonical_AndLegacyOrMissingVersionRejected()
+    public async Task SR_M_18_RolesHeaderIsSortedCanonical_AndLegacyOrMissingVersionRejected()
     {
-        var request = SignedRequest(null, out var sig, out var ts, out var nonce, out var bodyHash);
+        var (request, sig, ts, nonce, bodyHash) = await SignedRequestAsync(null);
         var roles = string.Join(",", request.Headers.GetValues("X-Gateway-Roles"));
         roles.ShouldBe("A,B");
 
@@ -371,7 +371,7 @@ public sealed class SubgraphFederationSecurityTests
     public async Task SR_M_18_ReplayDetectedViaDistributedClusterState()
     {
         SubgraphSecurityValidator.ResetReplayCache();
-        var request = SignedRequest(null, out var sig, out var ts, out var nonce, out var bodyHash);
+        var (request, sig, ts, nonce, bodyHash) = await SignedRequestAsync(null);
         var roles = string.Join(",", request.Headers.GetValues("X-Gateway-Roles"));
         var cluster = NSubstitute.Substitute.For<Autheris.Application.State.IDistributedClusterStateProvider>();
         cluster.IncrementAsync(Arg.Any<string>(), Arg.Any<long>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
@@ -388,7 +388,7 @@ public sealed class SubgraphFederationSecurityTests
     public async Task ReplayCheck_WhenClusterStateUnavailable_FailsClosedOnlyWhenClusterWide(bool clusterWide, bool expectedOk)
     {
         SubgraphSecurityValidator.ResetReplayCache();
-        var request = SignedRequest(null, out var sig, out var ts, out var nonce, out var bodyHash);
+        var (request, sig, ts, nonce, bodyHash) = await SignedRequestAsync(null);
         var roles = string.Join(",", request.Headers.GetValues("X-Gateway-Roles"));
         var cluster = NSubstitute.Substitute.For<Autheris.Application.State.IDistributedClusterStateProvider>();
         cluster.IncrementAsync(Arg.Any<string>(), Arg.Any<long>(), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>())
@@ -432,6 +432,7 @@ public sealed class SubgraphFederationSecurityTests
             Federation = new FederationOptions
             {
                 Enabled = true,
+                SigningKey = Secret,
                 Subgraphs = [new SubgraphEndpointOptions { Name = "products", Url = "https://products.internal/graphql", ForwardClientBearerToken = false }]
             }
         };
@@ -472,6 +473,7 @@ public sealed class SubgraphFederationSecurityTests
             Federation = new FederationOptions
             {
                 Enabled = true,
+                SigningKey = Secret,
                 Subgraphs = [new SubgraphEndpointOptions { Name = "products", Url = "https://products.internal/graphql", ForwardClientBearerToken = true }]
             }
         };
@@ -513,6 +515,7 @@ public sealed class SubgraphFederationSecurityTests
             Federation = new FederationOptions
             {
                 Enabled = true,
+                SigningKey = Secret,
                 Subgraphs = [new SubgraphEndpointOptions { Name = "products", Url = "https://products.internal/graphql", ForwardClientBearerToken = true }]
             }
         };
@@ -546,7 +549,7 @@ public sealed class SubgraphFederationSecurityTests
     }
 
     [Fact]
-    public void ApplySecurityHeaders_OutsideDevelopment_WithDefaultSecret_ThrowsInvalidOperationException()
+    public async Task ApplySecurityHeaders_OutsideDevelopment_WithDefaultSecret_ThrowsInvalidOperationException()
     {
         var options = new GatewayOptions
         {
@@ -569,13 +572,13 @@ public sealed class SubgraphFederationSecurityTests
         var request = new HttpRequestMessage(HttpMethod.Post, "https://subgraph.internal/graphql");
         var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-FED-USER")], "Test"));
 
-        Should.Throw<InvalidOperationException>(() =>
-            service.ApplySecurityHeaders(request, "products", user, "tenant_alpha"))
-            .Message.ShouldContain("prohibited outside the Development environment");
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() =>
+            service.ApplySecurityHeadersAsync(request, "products", user, "tenant_alpha"));
+        ex.Message.ShouldContain("prohibited outside the Development environment");
     }
 
     [Fact]
-    public void ApplySecurityHeaders_OutsideDevelopment_WithShortSecret_ThrowsInvalidOperationException()
+    public async Task ApplySecurityHeaders_OutsideDevelopment_WithShortSecret_ThrowsInvalidOperationException()
     {
         var options = new GatewayOptions
         {
@@ -598,9 +601,9 @@ public sealed class SubgraphFederationSecurityTests
         var request = new HttpRequestMessage(HttpMethod.Post, "https://subgraph.internal/graphql");
         var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-5-21-FED-USER")], "Test"));
 
-        Should.Throw<InvalidOperationException>(() =>
-            service.ApplySecurityHeaders(request, "products", user, "tenant_alpha"))
-            .Message.ShouldContain("must be at least 32 bytes long");
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() =>
+            service.ApplySecurityHeadersAsync(request, "products", user, "tenant_alpha"));
+        ex.Message.ShouldContain("must be at least 32 bytes long");
     }
 
     [Fact]

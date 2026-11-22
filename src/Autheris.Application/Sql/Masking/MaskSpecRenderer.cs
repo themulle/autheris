@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.RegularExpressions;
+using Autheris.Domain.Common;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Generators;
@@ -19,12 +20,9 @@ public sealed record RenderedMask(string Sql, IReadOnlyDictionary<string, object
 /// rules, bind limits and the emitted-SQL invariants); the constant frame is measured with a probe column and cut off again. Each
 /// mask parameter becomes the caller's marker (<c>@name</c> by default) and its value goes into <see cref="RenderedMask.Parameters"/>.
 /// </summary>
-public sealed partial class MaskSpecRenderer
+public sealed class MaskSpecRenderer
 {
     private const string ProbeColumn = "mask_probe_col";
-
-    [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_]{0,127}\z", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 100)]
-    private static partial Regex SafeNameRegex();
 
     /// <param name="markerFormatter">Marker text for a parameter name; defaults to <c>@name</c>. Must be injective.</param>
     /// <exception cref="ArgumentOutOfRangeException">The dialect has no generator (no silent ANSI fallback).</exception>
@@ -71,7 +69,7 @@ public sealed partial class MaskSpecRenderer
         var markers = new Dictionary<string, string>(StringComparer.Ordinal);
         foreach (var bound in compiled.Parameters)
         {
-            if (bound.Origin != ParameterOrigin.Mask || bound.SourceName is null || !SafeNameRegex().IsMatch(bound.SourceName))
+            if (bound.Origin != ParameterOrigin.Mask || !SqlIdentifierGuard.IsValidIdentifier(bound.SourceName))
             {
                 // Fail closed: only declared mask parameters with a safe name are rendered (a literal would be a value in text).
                 throw new InvalidOperationException("The column mask references a value that is not a declared mask parameter.");

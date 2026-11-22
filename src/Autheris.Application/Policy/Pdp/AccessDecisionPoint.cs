@@ -226,6 +226,12 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
             {
                 decision = ApplyMetricViewMeasureDefaults(decision, metadata);
             }
+            if ((isProduct || metadata.Table.ObjectKind == DiscoveryObjectKind.MetricView) &&
+                decision.IsAllowed &&
+                _typedPolicies?.MaskPolicies != null)
+            {
+                decision = decision with { ColumnMasks = _typedPolicies.MaskPolicies.ForDecision(decision, metadata, subject.TenantId, decision.ColumnMasks) };
+            }
 
             return decision with { EvaluatedByPdp = true };
         }
@@ -272,10 +278,6 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
                     allowed = allowed.WithMandatoryPredicate(mandatory.PredicateSql, mandatory.AppliedFilters, mandatory.AppliedBindings);
                 }
             }
-            if (_typedPolicies?.MaskPolicies != null)
-            {
-                allowed = allowed with { ColumnMasks = _typedPolicies.MaskPolicies.ForDecision(allowed, metadata, subject.TenantId) };
-            }
             if (isProduct)
             {
                 allowed = await ApplyProductColumnClassesAsync(allowed, subject.TenantId, ct).ConfigureAwait(false);
@@ -283,6 +285,10 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
             if (metadata.Table.ObjectKind == DiscoveryObjectKind.MetricView)
             {
                 allowed = ApplyMetricViewMeasureDefaults(allowed, metadata);
+            }
+            if (_typedPolicies?.MaskPolicies != null && allowed.IsAllowed)
+            {
+                allowed = allowed with { ColumnMasks = _typedPolicies.MaskPolicies.ForDecision(allowed, metadata, subject.TenantId) };
             }
 
             return allowed with { EvaluatedByPdp = true };
@@ -331,6 +337,20 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
             if (resolved != level)
             {
                 access[column] = resolved;
+                tightened = true;
+            }
+        }
+
+        // Under unconstrained column allow (e.g. consent bypass or ColumnSetMode.All), unlisted PiiMasked columns must still be masked.
+        foreach (var column in product.Columns)
+        {
+            var current = access.TryGetValue(column.Name, out var existing)
+                ? existing
+                : (decision.HasUnconstrainedColumnAllow ? ColumnAccessLevel.Clear : ColumnAccessLevel.Deny);
+            var resolved = Autheris.Application.Products.ProductColumnAccess.Resolve(column.Class, current);
+            if (resolved != current)
+            {
+                access[column.Name] = resolved;
                 tightened = true;
             }
         }

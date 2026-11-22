@@ -2,7 +2,7 @@ namespace Autheris.Application.Sql.Policy;
 
 using System;
 using System.Collections.Generic;
-using System.Text.RegularExpressions;
+using Autheris.Domain.Common;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Generators;
 using TrinoSqlEngine.Ast.Nodes;
@@ -14,19 +14,16 @@ using TrinoSqlEngine.Governance;
 /// policy parameter becomes the named marker <c>@__gql_rls_N</c> (the shape the string consumers already bind) and its value goes into
 /// <see cref="RenderedPolicyPredicate.Parameters"/>; no value is ever rendered into the text.
 /// </summary>
-public sealed partial class PolicyPredicateRenderer : IPolicyPredicateRenderer
+public sealed class PolicyPredicateRenderer : IPolicyPredicateRenderer
 {
     private const string FrameName = "policy_frame_probe";
     private const string Marker = "@" + FrameName;
-
-    [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_]{0,127}\z", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 100)]
-    private static partial Regex SafeNameRegex();
 
     public RenderedPolicyPredicate Render(PolicyPredicate predicate, TargetSqlDialect dialect, string targetAlias)
     {
         ArgumentNullException.ThrowIfNull(predicate);
         ArgumentNullException.ThrowIfNull(targetAlias);
-        if (!SafeNameRegex().IsMatch(targetAlias))
+        if (!SqlIdentifierGuard.IsValidIdentifier(targetAlias))
         {
             throw new ArgumentException("The target alias must be a plain identifier.", nameof(targetAlias));
         }
@@ -61,7 +58,7 @@ public sealed partial class PolicyPredicateRenderer : IPolicyPredicateRenderer
             switch (node)
             {
                 case PolicyParameterExpression parameter:
-                    if (!SafeNameRegex().IsMatch(parameter.Name) || !values.TryGetValue(parameter.Name, out var value))
+                    if (!SqlIdentifierGuard.IsValidIdentifier(parameter.Name) || !values.TryGetValue(parameter.Name, out var value))
                     {
                         // Fail closed: a parameter node without a value (or with an unsafe name) is never rendered.
                         throw new InvalidOperationException("The row predicate references a policy parameter without a valid value.");

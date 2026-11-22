@@ -182,8 +182,8 @@ public sealed partial class VirtualFilterAdministrationService
     {
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(actor);
-        if (actor.Roles != null && filter.Sql != null && !actor.IsSync &&
-            !actor.Roles.Contains(nameof(Autheris.Domain.Security.GatewayRole.GovernanceAdmin)))
+        if (filter.Sql != null && !actor.IsSync &&
+            actor.Roles?.Contains(nameof(Autheris.Domain.Security.GatewayRole.GovernanceAdmin), StringComparer.OrdinalIgnoreCase) != true)
         {
             throw new UnauthorizedAccessException("Only GovernanceAdmin may author a SQL virtual filter.");
         }

@@ -132,7 +132,7 @@ public class GovernanceSecurityTests : IDisposable
         var result = await _mutation.RevokeConsentAsync(consent.Id, "Legitimate owner revocation", _repository, accessor);
         result.ShouldBeTrue();
 
-        var activeConsents = await _repository.GetActiveConsentsForSubjectsAsync(new[] { granteeSid }, table, DateTimeOffset.UtcNow);
+        var activeConsents = await _repository.GetActiveConsentsForSubjectsAsync(new[] { granteeSid }, table, DateTimeOffset.UtcNow, Autheris.Tests.Common.TestTenants.Default);
         activeConsents.ShouldBeEmpty();
 
         var auditEntries = await _repository.GetAuditLogEntriesAsync(10);

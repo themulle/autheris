@@ -199,8 +199,15 @@ public class TableDownstreamConsumersAndGdprTests
             ct: Arg.Any<CancellationToken>())
             .Returns(auditLogs);
 
+        var callerContext = new CallerSecurityContext(
+            new Sid("S-1-5-21-PRIVACY-OFFICER"),
+            [],
+            ["PrivacyAdmin"],
+            Autheris.Tests.Common.TestTenants.Default,
+            IsGovernanceAdmin: false,
+            IsClusterAdmin: false);
         var gdprService = new GdprDisclosureReportService(_ownershipRepo, _auditRepo, _tableMetadataRepo);
-        var report = await gdprService.GetGdprDataDisclosureReportAsync(table, subjectSid: null, timeWindowDays: 365);
+        var report = await gdprService.GetGdprDataDisclosureReportAsync(table, subjectSid: null, timeWindowDays: 365, callerContext: callerContext);
 
         report.ShouldNotBeNull();
         report.TargetTable.ShouldBe("healthcare.dbo.patient_diagnoses");

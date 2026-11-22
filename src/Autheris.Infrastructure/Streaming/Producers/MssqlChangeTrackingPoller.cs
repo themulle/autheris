@@ -74,16 +74,12 @@ public sealed class MssqlChangeTrackingPoller : IMssqlChangeTrackingPoller
         _time = timeProvider ?? TimeProvider.System;
     }
 
-    private static readonly System.Text.RegularExpressions.Regex IdentifierRegex =
-        new(@"^[a-zA-Z_][a-zA-Z0-9_]*$", System.Text.RegularExpressions.RegexOptions.Compiled, TimeSpan.FromMilliseconds(200));
-
-    public static void ValidateSqlIdentifier(string identifier, string paramName)
-    {
-        if (string.IsNullOrWhiteSpace(identifier) || !IdentifierRegex.IsMatch(identifier))
-        {
-            throw new ArgumentException($"Security error: Invalid SQL identifier '{identifier}'. Only alphanumeric characters and underscores are allowed.", paramName);
-        }
-    }
+    public static void ValidateSqlIdentifier(string identifier, string paramName) =>
+        SqlIdentifierGuard.ValidateIdentifier(
+            identifier,
+            paramName,
+            maxLength: null,
+            message: $"Security error: Invalid SQL identifier '{identifier}'. Only alphanumeric characters and underscores are allowed.");
 
     /// <summary>
     /// Polls one table and appends its changes (and control events) to the stream; returns the number of appended events. Only complete

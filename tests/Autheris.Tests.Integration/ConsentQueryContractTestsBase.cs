@@ -141,12 +141,12 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         var seed = await SeedAsync();
         var sids = subjects.Select(s => new Sid(s)).ToArray();
 
-        foreach (var tenant in new TenantId?[] { TenantA, TenantB, null })
+        foreach (var tenant in new[] { TenantA, TenantB })
         {
-            var actual = (tenant.HasValue
-                ? await Repo.GetActiveConsentsForSubjectsAsync(sids, seed.Table, seed.Now, tenant.Value)
-                : await Repo.GetActiveConsentsForSubjectsAsync(sids, seed.Table, seed.Now)).Select(c => c.Id).ToHashSet();
-            actual.ShouldBe(Oracle(seed, subjects, tenant), ignoreOrder: true, customMessage: $"tenant={tenant?.Value ?? "<none>"}");
+            var actual = (await Repo.GetActiveConsentsForSubjectsAsync(sids, seed.Table, seed.Now, tenant))
+                .Select(c => c.Id)
+                .ToHashSet();
+            actual.ShouldBe(Oracle(seed, subjects, tenant), ignoreOrder: true, customMessage: $"tenant={tenant.Value}");
         }
     }
 

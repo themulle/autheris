@@ -7,8 +7,8 @@ namespace Autheris.Tests.Architecture;
 
 /// <summary>
 /// SEC-SC-01 (WP-SC-01): every request path loads consents with a tenant predicate. The tenant-less overloads of
-/// <c>IConsentRepository.GetActiveConsentsForSubjectsAsync</c> / <c>GetAllActiveConsentsForSubjectsAsync</c> remain for repository
-/// forwarding and tests only; no production code outside the repositories may call them.
+/// <c>IConsentRepository.GetActiveConsentsForSubjectsAsync</c> / <c>GetAllActiveConsentsForSubjectsAsync</c> have been removed;
+/// only the tenant-aware overloads remain.
 /// </summary>
 public sealed class ConsentQueryTenantArchitectureTests
 {
@@ -63,7 +63,7 @@ public sealed class ConsentQueryTenantArchitectureTests
         var iface = module.GetType("Autheris.Application.Common.Interfaces.IConsentRepository");
         var guarded = iface.Methods.Where(m => Guarded.Contains(m.Name)).ToList();
 
-        guarded.Count(m => IsTenantLess(m)).ShouldBe(2);
+        guarded.Count(m => IsTenantLess(m)).ShouldBe(0);
         guarded.Count(m => !IsTenantLess(m)).ShouldBe(2);
     }
 }

@@ -4,23 +4,40 @@ namespace Autheris.Domain.Common;
 
 public readonly record struct TableIdentifier : IEquatable<TableIdentifier>
 {
-    public string Domain { get; init; }
-    public string Schema { get; init; }
-    public string TableName { get; init; }
+    private readonly string _domain = null!;
+    private readonly string _schema = null!;
+    private readonly string _tableName = null!;
+
+    public string Domain
+    {
+        get => _domain;
+        init => _domain = NormalizeComponent(value, nameof(Domain));
+    }
+
+    public string Schema
+    {
+        get => _schema;
+        init => _schema = NormalizeComponent(value, nameof(Schema));
+    }
+
+    public string TableName
+    {
+        get => _tableName;
+        init => _tableName = NormalizeComponent(value, nameof(TableName));
+    }
 
     public TableIdentifier(string domain, string schema, string tableName)
     {
-        ArgumentException.ThrowIfNullOrWhiteSpace(domain);
-        ArgumentException.ThrowIfNullOrWhiteSpace(schema);
-        ArgumentException.ThrowIfNullOrWhiteSpace(tableName);
+        _domain = NormalizeComponent(domain, nameof(domain));
+        _schema = NormalizeComponent(schema, nameof(schema));
+        _tableName = NormalizeComponent(tableName, nameof(tableName));
+    }
 
-        ValidateComponent(domain, nameof(domain));
-        ValidateComponent(schema, nameof(schema));
-        ValidateComponent(tableName, nameof(tableName));
-
-        Domain = domain.Trim();
-        Schema = schema.Trim();
-        TableName = tableName.Trim();
+    private static string NormalizeComponent(string value, string paramName)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(value, paramName);
+        ValidateComponent(value, paramName);
+        return value.Trim();
     }
 
     /// <summary>

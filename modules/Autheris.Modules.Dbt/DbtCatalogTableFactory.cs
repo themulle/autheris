@@ -2,7 +2,6 @@ namespace Autheris.Modules.Dbt;
 
 using System;
 using System.Collections.Generic;
-using System.Text.RegularExpressions;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -11,17 +10,13 @@ using Autheris.Domain.Options;
 /// Issue #282: builds the catalog entry for a dbt model or source that has none yet. Pure data mapping: no connection is opened,
 /// no SQL is run and no manifest text is interpolated into SQL. Every failure is a fixed reason code (fail-closed).
 /// </summary>
-internal static partial class DbtCatalogTableFactory
+internal static class DbtCatalogTableFactory
 {
     /// <summary>columns per registered table; a larger manifest entry is skipped as a whole.</summary>
     internal const int MaxColumnsPerTable = 1000;
 
-    // explicit ASCII classes, \z (not $, which admits a trailing newline), no \w / \d (Unicode letters and digits).
-    [GeneratedRegex(@"^[A-Za-z_][A-Za-z0-9_]{0,127}\z", RegexOptions.None)]
-    private static partial Regex IdentifierRegex();
-
     internal static bool IsValidCatalogIdentifier(string? value)
-        => !string.IsNullOrEmpty(value) && IdentifierRegex().IsMatch(value);
+        => SqlIdentifierGuard.IsValidIdentifier(value);
 
     internal static bool TryBuild(
         DbtModelDefinition model,

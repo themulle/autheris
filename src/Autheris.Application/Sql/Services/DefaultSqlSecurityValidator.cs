@@ -3,6 +3,7 @@ namespace Autheris.Application.Sql.Services;
 using System;
 using System.Text.RegularExpressions;
 using Autheris.Application.Sql.Interfaces;
+using Autheris.Domain.Common;
 
 /// <summary>
 /// Default implementation of <see cref="ISqlSecurityValidator"/> providing AST-level and token-level
@@ -10,9 +11,6 @@ using Autheris.Application.Sql.Interfaces;
 /// </summary>
 public sealed partial class DefaultSqlSecurityValidator : ISqlSecurityValidator
 {
-    [GeneratedRegex(@"^[a-zA-Z_][a-zA-Z0-9_]*$")]
-    private static partial Regex ValidIdentifierRegex();
-
     [GeneratedRegex(@"^[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?(?:\s+(?:ASC|DESC))?(?:\s*,\s*[a-zA-Z_][a-zA-Z0-9_]*(?:\.[a-zA-Z_][a-zA-Z0-9_]*)?(?:\s+(?:ASC|DESC))?)*$", RegexOptions.IgnoreCase)]
     private static partial Regex ValidOrderByRegex();
 
@@ -52,7 +50,7 @@ public sealed partial class DefaultSqlSecurityValidator : ISqlSecurityValidator
         }
 
         string trimmed = parameterName.TrimStart('@');
-        if (!ValidIdentifierRegex().IsMatch(trimmed))
+        if (!SqlIdentifierGuard.IsValidIdentifier(trimmed, maxLength: null))
         {
             throw new ArgumentException($"Parameter name '{parameterName}' in '{fieldName}' contains invalid identifier characters.", fieldName);
         }

@@ -101,9 +101,6 @@ internal sealed class FakeConsentRepository : IConsentRepository, IConsentDescri
         ObjectPattern = c.ObjectPattern, DataSource = c.DataSource, ColumnSetMode = c.ColumnSetMode
     };
 
-    public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default) =>
-        GetActiveConsentsForSubjectsAsync(subjects, table, atTime, null, ct);
-
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default)
     {
         var set = subjects.Select(s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -113,9 +110,6 @@ internal sealed class FakeConsentRepository : IConsentRepository, IConsentDescri
             && c.GranteeSid is { } g && set.Contains(g.Value) && (tenantId is null || c.TenantId == tenantId.Value)).ToList();
         return Task.FromResult(r);
     }
-
-    public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles = null, DateTimeOffset? atTime = null, CancellationToken ct = default) =>
-        GetAllActiveConsentsForSubjectsAsync(subjects, roles, atTime, null, ct);
 
     public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default)
     {

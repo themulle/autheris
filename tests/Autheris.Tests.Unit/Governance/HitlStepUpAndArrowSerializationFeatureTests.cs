@@ -49,7 +49,7 @@ public sealed class HitlStepUpAndArrowSerializationFeatureTests
         Assert.Equal(HitLApprovalStatus.Pending, ticket.Status);
 
         // Approve by a different user (Data Steward Alice)
-        var approveResult = await service.ApproveStepUpRequestAsync(ticket.ApprovalId, "steward-alice");
+        var approveResult = await service.ApproveStepUpRequestAsync(ticket.ApprovalId, new HitLApproverContext("steward-alice", ["steward-alice"], "tenant-a"));
         Assert.True(approveResult.IsApproved);
         Assert.Equal(HitLApprovalStatus.Approved, approveResult.Ticket.Status);
         Assert.Equal("steward-alice", approveResult.Ticket.ApproverSid);
@@ -75,7 +75,7 @@ public sealed class HitlStepUpAndArrowSerializationFeatureTests
         await WaitHelper.WaitUntil(() => service.GetPendingTickets("tenant-a").Count > 0, WaitHelper.HangGuard, "the step-up ticket was never registered");
 
         var ticket = Assert.Single(service.GetPendingTickets("tenant-a"));
-        var rejectResult = await service.RejectStepUpRequestAsync(ticket.ApprovalId, "steward-alice", "Unauthorized access to payroll.");
+        var rejectResult = await service.RejectStepUpRequestAsync(ticket.ApprovalId, new HitLApproverContext("steward-alice", ["steward-alice"], "tenant-a"), "Unauthorized access to payroll.");
 
         Assert.False(rejectResult.IsApproved);
         Assert.Equal(HitLApprovalStatus.Rejected, rejectResult.Ticket.Status);
@@ -103,14 +103,14 @@ public sealed class HitlStepUpAndArrowSerializationFeatureTests
         var ticket = Assert.Single(service.GetPendingTickets("tenant-a"));
 
         // Attacker attempts to approve their own request!
-        var approveResult = await service.ApproveStepUpRequestAsync(ticket.ApprovalId, "user-attacker");
+        var approveResult = await service.ApproveStepUpRequestAsync(ticket.ApprovalId, new HitLApproverContext("user-attacker", ["user-attacker"], "tenant-a"));
 
         Assert.False(approveResult.IsApproved);
         Assert.Contains("Self-approval is strictly prohibited", approveResult.Message);
         Assert.Equal(HitLApprovalStatus.Pending, ticket.Status); // Ticket remains pending
 
         // Clean up by rejecting
-        await service.RejectStepUpRequestAsync(ticket.ApprovalId, "admin", "Cleanup");
+        await service.RejectStepUpRequestAsync(ticket.ApprovalId, new HitLApproverContext("admin", ["admin"], "tenant-a"), "Cleanup");
         await requestTask;
     }
 
@@ -131,11 +131,11 @@ public sealed class HitlStepUpAndArrowSerializationFeatureTests
         var ticket = Assert.Single(service.GetPendingTickets("tenant-a"));
 
         // First approval succeeds
-        var firstApproval = await service.ApproveStepUpRequestAsync(ticket.ApprovalId, "steward-1");
+        var firstApproval = await service.ApproveStepUpRequestAsync(ticket.ApprovalId, new HitLApproverContext("steward-1", ["steward-1"], "tenant-a"));
         Assert.True(firstApproval.IsApproved);
 
         // Second approval attempt (Replay / Race) MUST fail
-        var secondApproval = await service.ApproveStepUpRequestAsync(ticket.ApprovalId, "steward-2");
+        var secondApproval = await service.ApproveStepUpRequestAsync(ticket.ApprovalId, new HitLApproverContext("steward-2", ["steward-2"], "tenant-a"));
         Assert.False(secondApproval.IsApproved);
         Assert.Contains("already in status", secondApproval.Message);
 
@@ -214,7 +214,7 @@ public sealed class HitlStepUpAndArrowSerializationFeatureTests
         var ticket = Assert.Single(pending);
 
         // Approve by Steward Alice
-        await hitlService.ApproveStepUpRequestAsync(ticket.ApprovalId, "steward-alice");
+        await hitlService.ApproveStepUpRequestAsync(ticket.ApprovalId, new HitLApproverContext("steward-alice", ["steward-alice"], "tenant-1"));
 
         var result = await guardrailTask;
         Assert.True(result.IsSuccess);

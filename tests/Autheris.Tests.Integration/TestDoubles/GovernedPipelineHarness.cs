@@ -170,9 +170,7 @@ internal static class GovernedPipelineHarness
 
     internal sealed class SingleConsentRepo(IReadOnlyList<Consent> consents) : IConsentRepository
     {
-        public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> s, TableIdentifier t, DateTimeOffset at, CancellationToken ct = default) => Task.FromResult(consents);
         public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> s, TableIdentifier t, DateTimeOffset at, TenantId? tid, CancellationToken ct = default) => Task.FromResult(consents);
-        public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> s, IEnumerable<string>? r = null, DateTimeOffset? at = null, CancellationToken ct = default) => Task.FromResult(consents);
         public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> s, IEnumerable<string>? r, DateTimeOffset? at, TenantId? tid, CancellationToken ct = default) => Task.FromResult(consents);
         public Task<Consent> CreateConsentAsync(Consent consent, CancellationToken ct = default) => Task.FromResult(consent);
         public Task<Consent?> GetConsentByIdAsync(Guid id, CancellationToken ct = default) => Task.FromResult<Consent?>(null);
