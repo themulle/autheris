@@ -1,8 +1,11 @@
 namespace Autheris.Tests.Integration;
 
 using System;
+using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -97,9 +100,11 @@ public sealed class PostgreSqlGovernanceLeastPrivilegeTests : IClassFixture<Post
 
     private string _runtimeConnectionString => _fx.RuntimeConnectionString;
 
-    private async Task<PostgresException> RuntimeFailsAsync(string sql)
+    private Task<PostgresException> RuntimeFailsAsync(string sql) => RuntimeFailsAsync(_runtimeConnectionString, sql);
+
+    private static async Task<PostgresException> RuntimeFailsAsync(string connectionString, string sql)
     {
-        await using var conn = new NpgsqlConnection(_runtimeConnectionString);
+        await using var conn = new NpgsqlConnection(connectionString);
         await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
@@ -283,6 +288,155 @@ public sealed class PostgreSqlGovernanceLeastPrivilegeTests : IClassFixture<Post
         (await repository.ReplaceDatasetTagsAsync(identifier, [], DatasetTagSource.Admin, actor)).ShouldNotBeNull();
         (await repository.ReplaceDatasetTagsAsync(identifier, [], DatasetTagSource.Dbt, actor)).ShouldNotBeNull();
         (await repository.GetTableMetadataAsync(identifier))!.CatalogTags.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task App_role_cannot_update_delete_truncate_audit()
+    {
+        var scriptRole = "autheris_sql_" + Guid.NewGuid().ToString("N")[..12];
+        await using (var admin = new NpgsqlConnection(_db.ConnectionString))
+        {
+            await admin.OpenAsync();
+            await using var create = admin.CreateCommand();
+            create.CommandText = $"CREATE ROLE \"{scriptRole}\" LOGIN PASSWORD '{Password}' NOSUPERUSER NOCREATEDB NOCREATEROLE NOBYPASSRLS NOINHERIT;";
+            await create.ExecuteNonQueryAsync();
+        }
+
+        try
+        {
+            var rawSql = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "deploy", "sql", "governance-app-role.postgresql.sql"));
+            var stripped = Regex.Replace(rawSql, @"(?ms)^\\if\s+:\{\?app_role\}.*?^\\endif\r?\n?", string.Empty);
+            var sql = string.Join('\n', stripped.Split('\n').Where(l => !l.TrimStart().StartsWith('\\')));
+            var doIndex = sql.IndexOf("DO $do$", StringComparison.Ordinal);
+            doIndex.ShouldBeGreaterThan(0);
+            var setConfigSql = sql[..doIndex].Replace(":'app_role'", "@app_role", StringComparison.Ordinal);
+            var doBlockSql = sql[doIndex..];
+
+            await using (var admin = new NpgsqlConnection(_db.ConnectionString))
+            {
+                await admin.OpenAsync();
+                // Execute twice to verify idempotency of the shipped PostgreSQL app-role grant script.
+                for (var run = 0; run < 2; run++)
+                {
+                    await using (var setCmd = admin.CreateCommand())
+                    {
+                        setCmd.Parameters.AddWithValue("app_role", scriptRole);
+                        setCmd.CommandText = setConfigSql;
+                        await setCmd.ExecuteNonQueryAsync();
+                    }
+
+                    await using var doCmd = admin.CreateCommand();
+                    doCmd.CommandText = doBlockSql;
+                    await doCmd.ExecuteNonQueryAsync();
+                }
+            }
+
+            var scriptRuntimeCs = new NpgsqlConnectionStringBuilder(_db.ConnectionString)
+            {
+                Username = scriptRole,
+                Password = Password,
+                Pooling = false
+            }.ConnectionString;
+
+            await VerifyLeastPrivilegeRuntimeAsync(scriptRuntimeCs);
+        }
+        finally
+        {
+            NpgsqlConnection.ClearAllPools();
+            await using var admin = new NpgsqlConnection(_db.ConnectionString);
+            await admin.OpenAsync();
+            await using var drop = admin.CreateCommand();
+            drop.CommandText = $"DROP OWNED BY \"{scriptRole}\"; DROP ROLE IF EXISTS \"{scriptRole}\";";
+            await drop.ExecuteNonQueryAsync();
+        }
+    }
+
+    private async Task VerifyLeastPrivilegeRuntimeAsync(string runtimeConnectionString)
+    {
+        var options = GovernanceSchemaTestSupport.PostgreSqlOptions(runtimeConnectionString, GovernanceMigrationMode.Verify);
+        using var repository = GovernanceSchemaTestSupport.UnmigratedPostgreSql(options);
+        await new PostgreSqlGovernanceMigrationRunner(repository, options).RunAsync();
+        await repository.InitializeAsync();
+
+        var tenant = new TenantId("tenant-lp-audit");
+        var traceId = "lp-audit-" + Guid.NewGuid().ToString("N");
+        await repository.RecordAuditEventAsync(new AuditLogEntry
+        {
+            TenantId = tenant,
+            EventType = AuditEventTypes.AuditConfigChanged,
+            ActorSid = new Sid("S-1-5-21-lp"),
+            TargetTable = "lpsource.dbo.audit_test",
+            Decision = "ALLOW",
+            TraceId = traceId
+        });
+
+        var auditRows = await repository.GetAuditLogEntriesAsync(limit: 20, tenantId: tenant);
+        auditRows.ShouldContain(e => e.TraceId == traceId);
+
+        var domainTenant = "lp-0036-" + Guid.NewGuid().ToString("N")[..12];
+        var domainId = Guid.NewGuid().ToString("D");
+        await using (var conn = new NpgsqlConnection(runtimeConnectionString))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.Parameters.AddWithValue("t", domainTenant);
+            cmd.Parameters.AddWithValue("id", domainId);
+            cmd.CommandText = """
+                INSERT INTO governance_domains (tenant_id, id, name, description, contact, owner_group_sid, default_class, visibility, is_system, version, created_by, created_at, updated_at)
+                VALUES (@t, @id, 'LP Domain', NULL, NULL, NULL, 'CONFIDENTIAL', 'ON_REQUEST', FALSE, 1, 'lp-test', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP);
+                UPDATE governance_domains SET description = 'updated' WHERE tenant_id = @t AND id = @id;
+                INSERT INTO object_protection (tenant_id, table_id, column_name, protection_class, mask_category, updated_by, updated_at)
+                VALUES (@t, 'tbl-lp', 'ssn', 'CONFIDENTIAL', 'PII', 'lp-test', CURRENT_TIMESTAMP);
+                UPDATE object_protection SET protection_class = 'SECRET' WHERE tenant_id = @t AND table_id = 'tbl-lp' AND column_name = 'ssn';
+                """;
+            await cmd.ExecuteNonQueryAsync();
+
+            cmd.CommandText = "SELECT COUNT(*) FROM object_protection WHERE tenant_id = @t AND protection_class = 'SECRET'";
+            Convert.ToInt64(await cmd.ExecuteScalarAsync()).ShouldBe(1L);
+
+            cmd.CommandText = """
+                DELETE FROM object_protection WHERE tenant_id = @t;
+                DELETE FROM governance_domains WHERE tenant_id = @t AND id = @id;
+                """;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        foreach (var sql in new[]
+                 {
+                     "UPDATE audit_log_entries SET decision = 'DENY'",
+                     "DELETE FROM audit_log_entries",
+                     "TRUNCATE audit_log_entries",
+                     "ALTER TABLE audit_log_entries DISABLE TRIGGER trg_audit_append_only_row",
+                     "ALTER TABLE audit_log_entries DISABLE TRIGGER trg_audit_append_only_trunc",
+                     "DROP TRIGGER trg_audit_append_only_row ON audit_log_entries",
+                     "DROP TRIGGER trg_audit_append_only_trunc ON audit_log_entries"
+                 })
+        {
+            var failure = await RuntimeFailsAsync(runtimeConnectionString, sql);
+            failure.SqlState.ShouldBe(PostgresErrorCodes.InsufficientPrivilege, sql);
+        }
+
+        await using (var adminConn = new NpgsqlConnection(_db.ConnectionString))
+        {
+            await adminConn.OpenAsync();
+            await using var cmd = adminConn.CreateCommand();
+            cmd.CommandText = PostgreSqlGovernanceMigrationRunner.AuditTriggerPostConditionSql;
+            Convert.ToInt64(await cmd.ExecuteScalarAsync()).ShouldBe(2L);
+        }
+
+        await GovernanceSchemaTestSupport.RunPostgreSqlAsync(_db.ConnectionString, GovernanceMigrationMode.Verify);
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "Autheris.sln")))
+        {
+            dir = dir.Parent;
+        }
+
+        return dir?.FullName ?? throw new InvalidOperationException("Repository root (Autheris.sln) not found.");
     }
 
 }

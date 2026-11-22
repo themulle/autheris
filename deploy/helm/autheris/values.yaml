@@ -201,13 +201,17 @@ gateway:
 # Optional governance schema migration job (WP-ARC-B-12): a Helm pre-install/pre-upgrade hook that runs
 # "Autheris.Api --migrate-governance" (always applies, whatever Migrations:Mode says) before the new application pods roll out;
 # databases from v1.5.0 upgrade automatically, older ones fail with GOVERNANCE_SCHEMA_UNSUPPORTED_BASE.
-# When enabled, the application runs with Migrations:Mode=Verify. The job needs the same secrets as the application
-# (governance connection string, audit and masking keys).
+# When enabled, the application runs with Migrations:Mode=Verify and requires separate DDL migration credentials
+# distinct from the runtime INSERT-only application account (Gateway:GovernanceDb:MigrationConnectionString).
 governanceMigrationJob:
   enabled: false
-  # Optional secret key (in gateway.governanceDb.existingSecret) with a DDL-capable connection string for the migration only
-  # (Gateway:GovernanceDb:MigrationConnectionString). Empty: the job uses the application connection string.
-  migrationConnectionStringSecretKey: ""
+  # Optional Kubernetes Secret name holding the DDL-capable migration connection string.
+  # When empty, falls back to gateway.governanceDb.existingSecret.
+  existingSecret: ""
+  # Secret key holding a DDL-capable connection string for schema migrations only
+  # (Gateway:GovernanceDb:MigrationConnectionString). Must be distinct from gateway.governanceDb.connectionStringSecretKey
+  # when sharing gateway.governanceDb.existingSecret, or stored in governanceMigrationJob.existingSecret.
+  migrationConnectionStringSecretKey: "migrationConnectionString"
   backoffLimit: 0
   activeDeadlineSeconds: 600
   ttlSecondsAfterFinished: 3600

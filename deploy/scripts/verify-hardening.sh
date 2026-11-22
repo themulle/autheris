@@ -238,6 +238,39 @@ if command -v helm >/dev/null 2>&1; then
     expect_failure "grace above application range" "terminationGracePeriodSeconds must be between 20 and 300" "${BASE[@]}" "${ENTRA[@]}" --set terminationGracePeriodSeconds=301
     expect_failure "non-numeric shutdown" "gateway.shutdownTimeoutSeconds must be a positive" "${BASE[@]}" "${ENTRA[@]}" --set-string gateway.shutdownTimeoutSeconds=abc
     expect_failure "unset query timeout" "gateway.queryTimeoutSeconds must be a positive" "${BASE[@]}" "${ENTRA[@]}" --set gateway.queryTimeoutSeconds=null
+
+    # Governance migration job credential separation: requires distinct DDL migration credentials when enabled,
+    # and never injects Gateway__GovernanceDb__MigrationConnectionString into the runtime Deployment.
+    expect_failure "migration job empty secret key" "governanceMigrationJob.migrationConnectionStringSecretKey must reference DDL migration credentials separate" \
+        "${BASE[@]}" "${ENTRA[@]}" --set governanceMigrationJob.enabled=true --set governanceMigrationJob.migrationConnectionStringSecretKey=
+    expect_failure "migration job whitespace secret key" "governanceMigrationJob.migrationConnectionStringSecretKey must reference DDL migration credentials separate" \
+        "${BASE[@]}" "${ENTRA[@]}" --set governanceMigrationJob.enabled=true --set 'governanceMigrationJob.migrationConnectionStringSecretKey=   '
+    expect_failure "migration job same secret and key as runtime" "governanceMigrationJob.migrationConnectionStringSecretKey must reference DDL migration credentials separate" \
+        "${BASE[@]}" "${ENTRA[@]}" --set governanceMigrationJob.enabled=true --set governanceMigrationJob.migrationConnectionStringSecretKey=connectionString
+    expect_failure "migration job padded same secret and key as runtime" "governanceMigrationJob.migrationConnectionStringSecretKey must reference DDL migration credentials separate" \
+        "${BASE[@]}" "${ENTRA[@]}" --set governanceMigrationJob.enabled=true --set 'governanceMigrationJob.existingSecret= autheris-db-secrets ' --set 'governanceMigrationJob.migrationConnectionStringSecretKey= connectionString '
+    expect_failure "migration job empty runtime secret key" "gateway.governanceDb.connectionStringSecretKey is required" \
+        "${BASE[@]}" "${ENTRA[@]}" --set governanceMigrationJob.enabled=true --set gateway.governanceDb.connectionStringSecretKey=
+    expect_success "migration job with distinct secret and key" \
+        "${BASE[@]}" "${ENTRA[@]}" --set governanceMigrationJob.enabled=true --set governanceMigrationJob.existingSecret=autheris-mig-secrets --set governanceMigrationJob.migrationConnectionStringSecretKey=connectionString
+    if ! MIGOUT="$(render "${BASE[@]}" "${ENTRA[@]}" --set governanceMigrationJob.enabled=true)"; then
+        echo "ERROR: production Helm render with governanceMigrationJob.enabled=true failed: ${MIGOUT}" >&2
+        FAILURES=$((FAILURES + 1))
+    else
+        grep -q 'name: Gateway__GovernanceDb__MigrationConnectionString$' <<<"${MIGOUT}" || { echo "ERROR: migration job render missing Gateway__GovernanceDb__MigrationConnectionString" >&2; FAILURES=$((FAILURES + 1)); }
+        grep -q 'key: migrationConnectionString$' <<<"${MIGOUT}" || { echo "ERROR: migration job render missing migrationConnectionString secret key" >&2; FAILURES=$((FAILURES + 1)); }
+        DEP_BLOCK="$(awk '/^kind: Deployment$/{flag=1} /^---$/{flag=0} flag' <<<"${MIGOUT}")"
+        if [ -z "${DEP_BLOCK}" ]; then
+            echo "ERROR: migration job render did not contain a Deployment manifest" >&2
+            FAILURES=$((FAILURES + 1))
+        else
+            grep -q 'value: "Verify"' <<<"${DEP_BLOCK}" || { echo "ERROR: Deployment render must set runtime Migrations__Mode=Verify" >&2; FAILURES=$((FAILURES + 1)); }
+            if grep -q 'Gateway__GovernanceDb__MigrationConnectionString' <<<"${DEP_BLOCK}"; then
+                echo "ERROR: Deployment pod must never receive Gateway__GovernanceDb__MigrationConnectionString" >&2
+                FAILURES=$((FAILURES + 1))
+            fi
+        fi
+    fi
 else
     echo "--> helm not installed; skipping Helm render checks (CI job helm-render runs them)."
 fi

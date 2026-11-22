@@ -1,5 +1,18 @@
 {{- if .Values.governanceMigrationJob.enabled }}
-{{- $governanceSecret := required "gateway.governanceDb.existingSecret is required (secret holding the governance connection string)" .Values.gateway.governanceDb.existingSecret }}
+{{- $governanceSecret := .Values.gateway.governanceDb.existingSecret | default "" | toString | trim }}
+{{- if not $governanceSecret }}
+{{- fail "gateway.governanceDb.existingSecret is required (secret holding the governance connection string)" -}}
+{{- end }}
+{{- $govKey := .Values.gateway.governanceDb.connectionStringSecretKey | default "" | toString | trim }}
+{{- if not $govKey }}
+{{- fail "gateway.governanceDb.connectionStringSecretKey is required when governanceMigrationJob is enabled" -}}
+{{- end }}
+{{- $migSecretRaw := .Values.governanceMigrationJob.existingSecret | default "" | toString | trim }}
+{{- $migSecret := default $governanceSecret $migSecretRaw }}
+{{- $migKey := .Values.governanceMigrationJob.migrationConnectionStringSecretKey | default "" | toString | trim }}
+{{- if or (not $migKey) (and (eq $migSecret $governanceSecret) (eq $migKey $govKey)) }}
+{{- fail "governanceMigrationJob.migrationConnectionStringSecretKey must reference DDL migration credentials separate from gateway.governanceDb.connectionStringSecretKey" -}}
+{{- end }}
 apiVersion: v1
 kind: ConfigMap
 metadata:
@@ -61,13 +74,11 @@ spec:
             {{- include "autheris.gatewayEnv" . | nindent 12 }}
             - name: Gateway__GovernanceDb__Migrations__Mode
               value: "Apply"
-            {{- if .Values.governanceMigrationJob.migrationConnectionStringSecretKey }}
             - name: Gateway__GovernanceDb__MigrationConnectionString
               valueFrom:
                 secretKeyRef:
-                  name: {{ $governanceSecret }}
-                  key: {{ .Values.governanceMigrationJob.migrationConnectionStringSecretKey }}
-            {{- end }}
+                  name: {{ $migSecret }}
+                  key: {{ $migKey }}
           envFrom:
             - configMapRef:
                 name: {{ include "autheris.fullname" . }}-migrate

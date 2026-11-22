@@ -6,7 +6,7 @@ namespace Autheris.Tests.Architecture;
 /// <summary>SEC-SIMPL-05: shipped deploy files carry no literal database password (only env/secret references or placeholders).</summary>
 public sealed partial class DeployHygieneTests
 {
-    private static readonly string[] Extensions = [".yaml", ".yml", ".json", ".sh", ".ps1", ".py", ".tpl", ".env", ".example"];
+    private static readonly string[] Extensions = [".yaml", ".yml", ".json", ".sh", ".ps1", ".py", ".tpl", ".env", ".example", ".sql"];
     private static readonly string[] ExtensionlessNames = ["Makefile", "Dockerfile"];
 
     [GeneratedRegex(@"(?<![\w{])[""']?(?<k>\w*password|pwd)[""']?\s*[:=]\s*[""']?(?<v>[^""'\s;]+)", RegexOptions.IgnoreCase)]
