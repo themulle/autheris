@@ -74,7 +74,7 @@ public sealed class VirtualFilterSideChannelTests
     {
         var metadata = Substitute.For<ITableMetadataRepository>();
         metadata.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(Meta());
-        var enforcer = new StreamRlsPolicyEnforcer(
+        var enforcer = Autheris.Tests.Unit.TestDoubles.StreamRlsPolicyEnforcerTestFactory.Create(
             Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), metadata, Substitute.For<IColumnMaskingProvider>(), Substitute.For<IEpochValidationService>(),
             NullLogger<StreamRlsPolicyEnforcer>.Instance, Substitute.For<IConsentRepository>(), AllowAll(), Substitute.For<IConsentCacheService>(),
             mandatoryFilters: new FixedOutcome(Outcome(outcome)));

@@ -125,11 +125,12 @@ public sealed class DefaultTenantCatalogReviewFindingsTests
             Substitute.For<ITableMetadataRepository>());
         repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(tables));
         var exec = Substitute.For<IGatewayExecutionService>();
-        exec.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), false, Arg.Any<CancellationToken>())
-            .Returns(ci => Task.FromResult(TableAccessDecision.Allowed(
-                ci.Arg<TableMetadata>().Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
+        var policyEnforcer = new Autheris.Tests.Common.Fakes.DelegatingODataQueryPolicyEnforcer((_, tableMeta, _, _) =>
+            ValueTask.FromResult(TableAccessDecision.Allowed(
+                tableMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
         var resolver = new TenantResolver(() => new TenancyOptions { DefaultTenantId = D.Value }, null, NullLogger<TenantResolver>.Instance);
-        var handler = new ODataHandler(repo, exec, NullLogger<ODataHandler>.Instance, tenantResolver: resolver);
+        var handler = Autheris.Tests.Common.Fakes.ODataHandlerTestFactory.Create(
+            repo, exec, NullLogger<ODataHandler>.Instance, tenantResolver: resolver, policyEnforcer: policyEnforcer);
 
         var csdl = await handler.GetMetadataCsdlAsync(OwnerAdmin());
 

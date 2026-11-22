@@ -32,12 +32,13 @@ public sealed class ODataCsdlKeyVisibilityTests
             Substitute.For<ITableMetadataRepository>());
         repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>([table]));
         var exec = Substitute.For<IGatewayExecutionService>();
-        exec.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), false, Arg.Any<CancellationToken>())
-            .Returns(ci => Task.FromResult(TableAccessDecision.Allowed(
+        var policyEnforcer = new Autheris.Tests.Common.Fakes.DelegatingODataQueryPolicyEnforcer((_, _, _, _) =>
+            ValueTask.FromResult(TableAccessDecision.Allowed(
                 Id,
                 deniedColumns.ToDictionary(c => c, _ => ColumnAccessLevel.Deny, StringComparer.OrdinalIgnoreCase),
                 hasUnconstrainedColumnAllow: true)));
-        var handler = new ODataHandler(repo, exec, NullLogger<ODataHandler>.Instance);
+        var handler = Autheris.Tests.Common.Fakes.ODataHandlerTestFactory.Create(
+            repo, exec, NullLogger<ODataHandler>.Instance, policyEnforcer: policyEnforcer);
         var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim("tenant_id", "corp")], "TestAuth"));
 
         var csdl = await handler.GetMetadataCsdlAsync(user);

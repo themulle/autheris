@@ -170,7 +170,7 @@ public sealed class ODataOrderByCountTests
         var execution = Substitute.For<IGatewayExecutionService>();
         execution.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
             .Returns(page);
-        return (new ODataHandler(new InMemoryTableMetadataRepository(), execution, NullLogger<ODataHandler>.Instance), execution);
+        return (Autheris.Tests.Common.Fakes.ODataHandlerTestFactory.Create(new InMemoryTableMetadataRepository(), execution, NullLogger<ODataHandler>.Instance), execution);
     }
 
     [Fact]
@@ -226,7 +226,7 @@ public sealed class ODataOrderByCountTests
         var execution = Substitute.For<IGatewayExecutionService>();
         execution.ExecuteTablePageAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableIdentifier>(), Arg.Any<TablePageRequest>(), Arg.Any<CancellationToken>())
             .Returns<Task<TableQueryPage>>(_ => throw new GatewayNotImplementedException("The total row count cannot be determined for this data source."));
-        var handler = new ODataHandler(new InMemoryTableMetadataRepository(), execution, NullLogger<ODataHandler>.Instance);
+        var handler = Autheris.Tests.Common.Fakes.ODataHandlerTestFactory.Create(new InMemoryTableMetadataRepository(), execution, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(User(), "https://gw/odata/v4", Invoices, null, null, null, true, null);
 

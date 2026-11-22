@@ -30,7 +30,7 @@ public sealed class ODataTopZeroAndNavigationTests
     {
         var rows = Enumerable.Range(1, 3).Select(i => (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?> { ["id"] = i }).ToList();
         var execution = StubGatewayExecutionService.WithPage(new TableQueryPage(rows, TableAccessDecision.Allowed(Plain, Access), 42, false));
-        var handler = new ODataHandler(new InMemoryTableMetadataRepository(), execution, NullLogger<ODataHandler>.Instance);
+        var handler = ODataHandlerTestFactory.Create(new InMemoryTableMetadataRepository(), execution, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             User(), "https://gw/odata/v4", Plain, top: 0, skip: null, select: null, includeCount: true, headers: null);

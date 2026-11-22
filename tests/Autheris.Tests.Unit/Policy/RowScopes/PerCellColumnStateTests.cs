@@ -542,7 +542,7 @@ public sealed class PerCellColumnStateTests
     {
         var policy = CreateTableAccessPolicy(consents);
         var opts = Options.Create(DefaultOptions());
-        return new StreamRlsPolicyEnforcer(
+        return Autheris.Tests.Unit.TestDoubles.StreamRlsPolicyEnforcerTestFactory.Create(
             new PolicyBackedPdp(policy),
             new FakeTableMetadataRepository([OrdersMetadata(), AclMetadata()]),
             new ColumnMaskingProvider(opts),

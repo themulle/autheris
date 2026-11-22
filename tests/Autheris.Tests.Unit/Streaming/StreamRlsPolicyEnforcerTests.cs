@@ -35,7 +35,7 @@ public sealed class StreamRlsPolicyEnforcerTests
                 Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<Consent>>(Array.Empty<Consent>()));
 
-        _sut = new StreamRlsPolicyEnforcer(
+        _sut = Autheris.Tests.Unit.TestDoubles.StreamRlsPolicyEnforcerTestFactory.Create(
             _policyEnforcement,
             _metadataRepo,
             _maskingProvider,
@@ -221,7 +221,7 @@ public sealed class StreamRlsPolicyEnforcerTests
             table, true,
             new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["id"] = ColumnAccessLevel.Clear, ["ssn"] = ColumnAccessLevel.Deny },
             null, Array.Empty<string>()));
-        var sut = new StreamRlsPolicyEnforcer(
+        var sut = Autheris.Tests.Unit.TestDoubles.StreamRlsPolicyEnforcerTestFactory.Create(
             pdp, _metadataRepo, _maskingProvider, _epochService, NullLogger<StreamRlsPolicyEnforcer>.Instance, _consentRepo, _resolution, _cache);
 
         var result = await sut.EvaluateAndMaskAsync(cdcEvent, subscriber);

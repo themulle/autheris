@@ -173,10 +173,11 @@ public sealed class TransportDiscoveryTests
             Substitute.For<ITableMetadataRepository>());
         repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(tables));
         var exec = Substitute.For<IGatewayExecutionService>();
-        exec.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), false, Arg.Any<CancellationToken>())
-            .Returns(ci => Task.FromResult(TableAccessDecision.Allowed(
-                ci.ArgAt<TableMetadata>(1).Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
-        return new ODataHandler(repo, exec, NullLogger<ODataHandler>.Instance, transportResolver: resolver, ingress: Ingress(ingress));
+        var policyEnforcer = new Autheris.Tests.Common.Fakes.DelegatingODataQueryPolicyEnforcer((_, tableMeta, _, _) =>
+            ValueTask.FromResult(TableAccessDecision.Allowed(
+                tableMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
+        return Autheris.Tests.Common.Fakes.ODataHandlerTestFactory.Create(
+            repo, exec, NullLogger<ODataHandler>.Instance, transportResolver: resolver, ingress: Ingress(ingress), policyEnforcer: policyEnforcer);
     }
 
     private static ClaimsPrincipal ODataUser() =>

@@ -236,7 +236,7 @@ public sealed class Batch4AdvisoriesSecurityTests
         };
         var metaRepo = new InMemoryTableMetadataRepository(meta);
 
-        var enforcer = new StreamRlsPolicyEnforcer(
+        var enforcer = Autheris.Tests.Unit.TestDoubles.StreamRlsPolicyEnforcerTestFactory.Create(
             PdpTestDoubles.AllowAll(),
             metaRepo,
             StubColumnMaskingProvider.Null,

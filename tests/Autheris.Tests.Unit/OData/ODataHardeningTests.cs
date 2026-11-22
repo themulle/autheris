@@ -145,7 +145,7 @@ public sealed class ODataHardeningTests
     {
         var metadataRepo = new InMemoryTableMetadataRepository();
         var execService = new StubGatewayExecutionService();
-        var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             CreateUser(),
@@ -169,7 +169,7 @@ public sealed class ODataHardeningTests
     {
         var (service, _, _) = CreateExecutionService();
         var metadataRepo = new InMemoryTableMetadataRepository();
-        var handler = new ODataHandler(metadataRepo, service, NullLogger<ODataHandler>.Instance);
+        var handler = ODataHandlerTestFactory.Create(metadataRepo, service, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             CreateUser(),
@@ -233,7 +233,7 @@ public sealed class ODataHardeningTests
     public async Task O6_ODataHandler_SkipExceedingMaxSkip_Returns400()
     {
         var execService = new StubGatewayExecutionService();
-        var handler = new ODataHandler(new InMemoryTableMetadataRepository(), execService, NullLogger<ODataHandler>.Instance);
+        var handler = ODataHandlerTestFactory.Create(new InMemoryTableMetadataRepository(), execService, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             CreateUser(),
@@ -268,7 +268,7 @@ public sealed class ODataHardeningTests
     {
         var execService = StubGatewayExecutionService.Throwing(new FakeDbException(number, internalDbMessage));
 
-        var handler = new ODataHandler(new InMemoryTableMetadataRepository(), execService, NullLogger<ODataHandler>.Instance);
+        var handler = ODataHandlerTestFactory.Create(new InMemoryTableMetadataRepository(), execService, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             CreateUser(),
@@ -300,7 +300,7 @@ public sealed class ODataHardeningTests
     {
         var execService = StubGatewayExecutionService.Throwing(new FakeDbException(number, internalDbMessage));
 
-        var handler = new ODataHandler(new InMemoryTableMetadataRepository(), execService, NullLogger<ODataHandler>.Instance);
+        var handler = ODataHandlerTestFactory.Create(new InMemoryTableMetadataRepository(), execService, NullLogger<ODataHandler>.Instance);
 
         var result = await handler.ExecuteEntitySetQueryAsync(
             CreateUser(),
@@ -424,7 +424,18 @@ public sealed class ODataHardeningTests
         var metadataRepo = new InMemoryTableMetadataRepository(CreateSampleMetadata());
         var execService = new StubGatewayExecutionService();
         var devEnv = new ProdWebEnv { EnvironmentName = Microsoft.Extensions.Hosting.Environments.Development };
-        var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance, environment: devEnv)
+        using var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions());
+        var handler = new ODataHandler(
+            metadataRepo,
+            execService,
+            NullLogger<ODataHandler>.Instance,
+            devEnv,
+            memoryCache,
+            StaticCatalogVersionProvider.Instance,
+            new Autheris.Application.Tenancy.TenantResolver(() => new TenancyOptions(), null, NullLogger<Autheris.Application.Tenancy.TenantResolver>.Instance),
+            PermissiveDataSourceOptionsResolver.Instance,
+            new Autheris.Application.DataSources.IngressTransportContext(),
+            DenyAllODataQueryPolicyEnforcer.Instance)
         {
             ParseFilter = _ => throw new InvalidOperationException("SECRET_PARSER_INTERNAL_STATE")
         };

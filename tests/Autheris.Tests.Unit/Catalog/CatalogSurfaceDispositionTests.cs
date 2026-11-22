@@ -12,7 +12,7 @@ using Xunit;
 /// service, pinned so that a regression (a name reaching a non-administrator) fails here.
 /// <list type="table">
 /// <item><term>DynamicOpenApiGenerator</term><description>out of scope, admin-gated: every OpenAPI route requires a global administrator (the spec lists all tenants, not filtered per caller).</description></item>
-/// <item><term>OData service document / $metadata</term><description>consent-only by design (OQ-3): tables are kept only after the data-path decision (<c>CheckTableAccessAsync</c>), per caller; never the discovery tiers.</description></item>
+/// <item><term>OData service document / $metadata</term><description>consent-only by design (OQ-3): tables are kept only after the data-path decision (<c>IODataQueryPolicyEnforcer.EnforceAsync</c>), per caller; never the discovery tiers.</description></item>
 /// <item><term>CatalogVersionProvider</term><description>out of scope: returns a count and a hash digest, no table name.</description></item>
 /// <item><term>EffectiveAccessExplanationService</term><description>consent-only by design (S12, DataAccess surface through the engine; call-site guards).</description></item>
 /// <item><term>AccessPlanningService</term><description>out of scope: governance mutation by id, identical generic not-found text.</description></item>
@@ -75,7 +75,7 @@ public sealed class CatalogSurfaceDispositionTests
         start.ShouldBeGreaterThan(0);
         var body = source[start..Math.Min(source.Length, start + 4000)];
 
-        body.ShouldContain("CheckTableAccessAsync(principal, tableMeta");
+        body.ShouldContain("_policyEnforcer.EnforceAsync(principal, tableMeta");
         body.ShouldContain("if (decision == null)");
         body.ShouldContain("if (!decision.IsAllowed)");
         body.IndexOf("authorizedTables.Add", StringComparison.Ordinal).ShouldBeGreaterThan(body.IndexOf("if (!decision.IsAllowed)", StringComparison.Ordinal));

@@ -30,17 +30,18 @@ public sealed class DefaultTenantOwnerChannelsTests
     private static TenantResolver Resolver(string? defaultTenant) =>
         new(() => new TenancyOptions { DefaultTenantId = defaultTenant }, null, NullLogger<TenantResolver>.Instance);
 
-    private static async Task<string[]> CsdlEntitiesAsync(ClaimsPrincipal user, ITenantResolver? resolver)
+    private static async Task<string[]> CsdlEntitiesAsync(ClaimsPrincipal user, ITenantResolver resolver)
     {
         var tables = new[] { Wp0.Table("alpha", "t_alpha"), Wp0.Table("beta", "t_beta"), Wp0.Table("default", "t_shared") };
         var repo = global::Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
             Substitute.For<ITableMetadataRepository>());
         repo.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(tables));
         var exec = Substitute.For<IGatewayExecutionService>();
-        exec.CheckTableAccessAsync(Arg.Any<ClaimsPrincipal?>(), Arg.Any<TableMetadata>(), false, Arg.Any<CancellationToken>())
-            .Returns(ci => Task.FromResult(TableAccessDecision.Allowed(
-                ci.Arg<TableMetadata>().Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
-        var handler = new ODataHandler(repo, exec, NullLogger<ODataHandler>.Instance, tenantResolver: resolver);
+        var policyEnforcer = new Autheris.Tests.Common.Fakes.DelegatingODataQueryPolicyEnforcer((_, tableMeta, _, _) =>
+            ValueTask.FromResult(TableAccessDecision.Allowed(
+                tableMeta.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)));
+        var handler = Autheris.Tests.Common.Fakes.ODataHandlerTestFactory.Create(
+            repo, exec, NullLogger<ODataHandler>.Instance, tenantResolver: resolver, policyEnforcer: policyEnforcer);
 
         var csdl = await handler.GetMetadataCsdlAsync(user);
         var ns = XNamespace.Get("http://docs.oasis-open.org/odata/ns/edm");
@@ -68,7 +69,6 @@ public sealed class DefaultTenantOwnerChannelsTests
     public async Task OData_Claimless_Without_Default_Sees_Nothing()
     {
         (await CsdlEntitiesAsync(Wp0.User("u", null), Resolver(null))).ShouldBeEmpty();
-        (await CsdlEntitiesAsync(Wp0.User("u", null), null)).ShouldBeEmpty();
     }
 
     [Fact]

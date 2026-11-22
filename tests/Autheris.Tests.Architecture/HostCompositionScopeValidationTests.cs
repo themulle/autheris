@@ -96,6 +96,10 @@ public sealed class HostCompositionScopeValidationTests
             _ = app.Services.GetServices<IHostedService>().ToList();
             await using var scope = app.Services.CreateAsyncScope();
             scope.ServiceProvider.ShouldNotBeNull();
+            scope.ServiceProvider.GetRequiredService<Autheris.Application.OData.IODataHandler>()
+                .ShouldBeOfType<Autheris.Application.OData.ODataHandler>();
+            scope.ServiceProvider.GetRequiredService<Autheris.Application.Streaming.Interfaces.IStreamRlsPolicyEnforcer>()
+                .ShouldBeOfType<Autheris.Application.Streaming.Services.StreamRlsPolicyEnforcer>();
         }
         finally
         {

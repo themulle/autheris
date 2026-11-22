@@ -13,19 +13,10 @@ using System.Text.RegularExpressions;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
-public sealed partial class ODataHandler(
-    ITableMetadataRepository metadataRepo,
-    IGatewayExecutionService executionService,
-    ILogger<ODataHandler> logger,
-    Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
-    Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache = null,
-    Autheris.Application.Catalog.ICatalogVersionProvider? versionProvider = null,
-    Autheris.Application.Tenancy.ITenantResolver? tenantResolver = null,
-    Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null,
-    Autheris.Application.DataSources.IIngressTransportContext? ingress = null,
-    IODataQueryPolicyEnforcer? policyEnforcer = null) : IODataHandler
+public sealed partial class ODataHandler : IODataHandler
 {
     private const string GenericDenied = "Access denied.";
 
@@ -40,26 +31,63 @@ public sealed partial class ODataHandler(
     private const int TimeoutRetryAfterSeconds = 5;
 
     // G3 / RR-L3: detailed denial and not-found messages are only returned in Development (fail-closed when unknown).
-    private readonly bool _verboseErrors = string.Equals(environment?.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
+    private readonly bool _verboseErrors;
 
     [GeneratedRegex("^[a-zA-Z_][a-zA-Z0-9_]*$")]
     private static partial Regex SafeIdentifierRegex();
 
-    private readonly ITableMetadataRepository _metadataRepo = metadataRepo ?? throw new ArgumentNullException(nameof(metadataRepo));
-    private readonly IGatewayExecutionService _executionService = executionService ?? throw new ArgumentNullException(nameof(executionService));
-    private readonly ILogger<ODataHandler> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache? _memoryCache = memoryCache;
-    private readonly Autheris.Application.Catalog.ICatalogVersionProvider? _versionProvider = versionProvider;
-    private readonly Autheris.Application.Tenancy.ITenantResolver? _tenantResolver = tenantResolver;
-    private readonly Autheris.Application.DataSources.IDataSourceOptionsResolver? _transportResolver = transportResolver;
-    private readonly Autheris.Application.DataSources.IIngressTransportContext? _ingress = ingress;
+    private readonly ITableMetadataRepository _metadataRepo;
+    private readonly IGatewayExecutionService _executionService;
+    private readonly ILogger<ODataHandler> _logger;
+    private readonly Microsoft.Extensions.Caching.Memory.IMemoryCache _memoryCache;
+    private readonly Autheris.Application.Catalog.ICatalogVersionProvider _versionProvider;
+    private readonly Autheris.Application.Tenancy.ITenantResolver _tenantResolver;
+    private readonly Autheris.Application.DataSources.IDataSourceOptionsResolver _transportResolver;
+    private readonly Autheris.Application.DataSources.IIngressTransportContext _ingress;
+    private readonly IODataQueryPolicyEnforcer _policyEnforcer;
+
+    [ActivatorUtilitiesConstructor]
+    public ODataHandler(
+        ITableMetadataRepository metadataRepo,
+        IGatewayExecutionService executionService,
+        ILogger<ODataHandler> logger,
+        Microsoft.Extensions.Hosting.IHostEnvironment environment,
+        Microsoft.Extensions.Caching.Memory.IMemoryCache memoryCache,
+        Autheris.Application.Catalog.ICatalogVersionProvider versionProvider,
+        Autheris.Application.Tenancy.ITenantResolver tenantResolver,
+        Autheris.Application.DataSources.IDataSourceOptionsResolver transportResolver,
+        Autheris.Application.DataSources.IIngressTransportContext ingress,
+        IODataQueryPolicyEnforcer policyEnforcer)
+    {
+        ArgumentNullException.ThrowIfNull(metadataRepo);
+        ArgumentNullException.ThrowIfNull(executionService);
+        ArgumentNullException.ThrowIfNull(logger);
+        ArgumentNullException.ThrowIfNull(environment);
+        ArgumentNullException.ThrowIfNull(memoryCache);
+        ArgumentNullException.ThrowIfNull(versionProvider);
+        ArgumentNullException.ThrowIfNull(tenantResolver);
+        ArgumentNullException.ThrowIfNull(transportResolver);
+        ArgumentNullException.ThrowIfNull(ingress);
+        ArgumentNullException.ThrowIfNull(policyEnforcer);
+
+        _metadataRepo = metadataRepo;
+        _executionService = executionService;
+        _logger = logger;
+        _verboseErrors = string.Equals(environment.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase);
+        _memoryCache = memoryCache;
+        _versionProvider = versionProvider;
+        _tenantResolver = tenantResolver;
+        _transportResolver = transportResolver;
+        _ingress = ingress;
+        _policyEnforcer = policyEnforcer;
+    }
 
     internal Func<string, TableFilterClause> ParseFilter { get; init; } = static filter => ODataFilterParser.Parse(filter);
 
     /// <summary>
     /// DT-A-7: the default tenant is the catalog owner and may see every active table as a candidate (each still passes the table access
     /// check); every other tenant only its domain and the shared <c>default</c> domain. An unresolved tenant (no claim, no default,
-    /// invalid claim, no resolver) has no candidates (fail closed).
+    /// invalid claim) has no candidates (fail closed).
     /// </summary>
     internal static bool IsExposableObjectKind(DiscoveryObjectKind kind) =>
         kind != DiscoveryObjectKind.MetricView && kind != DiscoveryObjectKind.Procedure;
@@ -68,18 +96,18 @@ public sealed partial class ODataHandler(
         ClaimsPrincipal principal, IEnumerable<Autheris.Domain.Model.TableMetadata> allTables)
     {
         var resolution = Autheris.Application.Catalog.Services.CallerScopeResolver.ResolutionOf(
-            principal, _tenantResolver?.DefaultTenant);
+            principal, _tenantResolver.DefaultTenant);
         if (resolution.Tenant is not { } tenant || tenant.Value is null ||
             resolution.Outcome is Autheris.Domain.Tenancy.TenantResolutionOutcome.Invalid or Autheris.Domain.Tenancy.TenantResolutionOutcome.Unresolved)
         {
             return [];
         }
 
-        var isOwner = _tenantResolver?.IsDefaultTenant(tenant) == true;
+        var isOwner = _tenantResolver.IsDefaultTenant(tenant);
         // DT-SC-08: the owner's widening is physical metadata only; other tenants' virtual tables are never candidates (shared rule).
         // Issue #447: a source that does not allow the ingress transport is not a candidate (hidden, never an error);
         // no ingress leaves the list unfiltered. The cached documents are keyed by the filtered tables.
-        var transport = _ingress?.Current ?? Autheris.Domain.Options.DataSources.DataSourceTransportFlags.None;
+        var transport = _ingress.Current;
         return Autheris.Application.Services.CatalogVisibility.DropForeignVirtualTables(allTables, tenant)
             .Where(t => t.Table.IsActive &&
                         IsExposableObjectKind(t.Table.ObjectKind) &&
@@ -92,11 +120,10 @@ public sealed partial class ODataHandler(
 
     public async Task<string> GetMetadataCsdlAsync(ClaimsPrincipal? principal = null, CancellationToken ct = default)
     {
-        if (principal?.Identity?.IsAuthenticated == true && _memoryCache != null)
+        if (principal?.Identity?.IsAuthenticated == true &&
+            ResolveCacheTenantId(principal, _tenantResolver.DefaultTenant) is { } tenantId)
         {
-            var (tables, complete) = await GetAuthorizedTablesCoreAsync(principal, ct).ConfigureAwait(false);
-            var tenantId = principal.GetTenantId().Value;
-            var version = _versionProvider != null ? await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false) : new Autheris.Application.Catalog.CatalogVersion(1, 0);
+            var (tables, complete, version) = await GetAuthorizedTablesCoreAsync(principal, ct).ConfigureAwait(false);
             // EXT-01: Key by column visibility and keys shape hash rather than table identifiers alone
             var shapeHash = ComputeShapeHash(tables);
             var cacheKey = $"odata:csdl:{tenantId}:s{version.StructureVersion}:c{version.ContentVersion}:{shapeHash}";
@@ -122,11 +149,10 @@ public sealed partial class ODataHandler(
     public async Task<object> GetServiceDocumentAsync(string serviceRootUrl, ClaimsPrincipal? principal = null, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(serviceRootUrl);
-        if (principal?.Identity?.IsAuthenticated == true && _memoryCache != null)
+        if (principal?.Identity?.IsAuthenticated == true &&
+            ResolveCacheTenantId(principal, _tenantResolver.DefaultTenant) is { } tenantId)
         {
-            var (tables, complete) = await GetAuthorizedTablesCoreAsync(principal, ct).ConfigureAwait(false);
-            var tenantId = principal.GetTenantId().Value;
-            var version = _versionProvider != null ? await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false) : new Autheris.Application.Catalog.CatalogVersion(1, 0);
+            var (tables, complete, version) = await GetAuthorizedTablesCoreAsync(principal, ct).ConfigureAwait(false);
             var visibilityHash = Autheris.Application.Catalog.Search.CatalogVisibleBitSet.ComputeSha256(tables.Select(t => t.Identifier));
             var cacheKey = $"odata:servicedoc:{tenantId}:s{version.StructureVersion}:c{version.ContentVersion}:{visibilityHash}:{serviceRootUrl}";
 
@@ -155,7 +181,7 @@ public sealed partial class ODataHandler(
     /// The shared L1 cache has a SizeLimit, so every entry must declare a Size. Sizes are rough byte estimates.
     /// </summary>
     private void SetCache(string key, object value, long size) =>
-        _memoryCache?.Set(key, value, new MemoryCacheEntryOptions
+        _memoryCache.Set(key, value, new MemoryCacheEntryOptions
         {
             AbsoluteExpirationRelativeToNow = TimeSpan.FromSeconds(15),
             Size = Math.Max(1, size)
@@ -214,11 +240,25 @@ public sealed partial class ODataHandler(
         return Convert.ToHexString(hashBytes).ToLowerInvariant();
     }
 
+    private static string? ResolveCacheTenantId(ClaimsPrincipal principal, TenantId? defaultTenant)
+    {
+        var resolution = Autheris.Application.Catalog.Services.CallerScopeResolver.ResolutionOf(principal, defaultTenant);
+        return resolution.Outcome is Autheris.Domain.Tenancy.TenantResolutionOutcome.FromClaim
+                or Autheris.Domain.Tenancy.TenantResolutionOutcome.FromRealm
+                or Autheris.Domain.Tenancy.TenantResolutionOutcome.DefaultAssigned &&
+            resolution.Tenant is { Value: not null } tenant
+            ? tenant.Value
+            : null;
+    }
+
     /// <summary>
     /// EXT-02: the access decision depends on the whole principal, so the key is a fingerprint of tenant, SID, group SIDs, roles and
     /// token scopes (not the SID alone). A principal without a SID is never cached (no shared "empty SID" key).
     /// </summary>
-    internal static string? BuildAuthorizedTablesCacheKey(ClaimsPrincipal principal)
+    internal static string? BuildAuthorizedTablesCacheKey(ClaimsPrincipal principal) =>
+        BuildAuthorizedTablesCacheKey(principal, defaultTenant: null);
+
+    private static string? BuildAuthorizedTablesCacheKey(ClaimsPrincipal principal, TenantId? defaultTenant)
     {
         var sid = principal.GetUserSid()?.Value;
         if (string.IsNullOrWhiteSpace(sid))
@@ -226,45 +266,41 @@ public sealed partial class ODataHandler(
             return null;
         }
 
+        var tenantId = ResolveCacheTenantId(principal, defaultTenant);
+        if (tenantId is null)
+        {
+            return null;
+        }
+
         var groups = string.Join(',', principal.GetGroupSids().Select(g => g.Value).OrderBy(x => x, StringComparer.Ordinal));
         var roles = string.Join(',', principal.GetUserRoles().OrderBy(x => x, StringComparer.Ordinal));
         var scopes = string.Join(',', Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims).OrderBy(x => x, StringComparer.Ordinal));
-        var fingerprint = $"{principal.GetTenantId().Value}\n{sid}\ng:{groups}\nr:{roles}\ns:{scopes}";
+        var fingerprint = $"{tenantId}\n{sid}\ng:{groups}\nr:{roles}\ns:{scopes}";
         var hash = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(fingerprint))).ToLowerInvariant();
-        return $"odata:tables:{principal.GetTenantId().Value}:{hash}";
+        return $"odata:tables:{tenantId}:{hash}";
     }
 
     /// <summary>
     /// The authorized-tables entry also depends on the transports the sources allow (they hide tables), so the key carries the
     /// generation of the options resolver: a reload that newly denies a source starts a fresh entry (Issue #447).
     /// </summary>
-    private string? AuthorizedTablesCacheKey(ClaimsPrincipal principal, Autheris.Application.Catalog.CatalogVersion? version = null) =>
-        BuildAuthorizedTablesCacheKey(principal) is { } key
-            ? (version.HasValue
-                ? $"{key}:g{_transportResolver?.Generation ?? 0}:s{version.Value.StructureVersion}:c{version.Value.ContentVersion}"
-                : $"{key}:g{_transportResolver?.Generation ?? 0}")
+    private string? AuthorizedTablesCacheKey(ClaimsPrincipal principal, Autheris.Application.Catalog.CatalogVersion version) =>
+        BuildAuthorizedTablesCacheKey(principal, _tenantResolver.DefaultTenant) is { } key
+            ? $"{key}:g{_transportResolver.Generation}:s{version.StructureVersion}:c{version.ContentVersion}"
             : null;
 
-    private async Task<(IReadOnlyList<Autheris.Domain.Model.TableMetadata> Tables, bool Complete)> GetAuthorizedTablesCoreAsync(ClaimsPrincipal? principal, CancellationToken ct)
+    private async Task<(IReadOnlyList<Autheris.Domain.Model.TableMetadata> Tables, bool Complete, Autheris.Application.Catalog.CatalogVersion Version)> GetAuthorizedTablesCoreAsync(ClaimsPrincipal? principal, CancellationToken ct)
     {
         if (principal?.Identity?.IsAuthenticated != true)
         {
-            return (Array.Empty<Autheris.Domain.Model.TableMetadata>(), true);
+            return (Array.Empty<Autheris.Domain.Model.TableMetadata>(), true, default);
         }
 
-        Autheris.Application.Catalog.CatalogVersion? version = null;
-        if (_versionProvider != null)
+        var version = await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
+        var cacheKey = AuthorizedTablesCacheKey(principal, version);
+        if (cacheKey != null && _memoryCache.TryGetValue(cacheKey, out IReadOnlyList<Autheris.Domain.Model.TableMetadata>? cachedTables) && cachedTables != null)
         {
-            version = await _versionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
-        }
-
-        if (_memoryCache != null)
-        {
-            var cacheKey = AuthorizedTablesCacheKey(principal, version);
-            if (cacheKey != null && _memoryCache.TryGetValue(cacheKey, out IReadOnlyList<Autheris.Domain.Model.TableMetadata>? cachedTables) && cachedTables != null)
-            {
-                return (cachedTables, true);
-            }
+            return (cachedTables, true, version);
         }
 
         var complete = true;
@@ -280,9 +316,7 @@ public sealed partial class ODataHandler(
         {
             try
             {
-                TableAccessDecision? decision = policyEnforcer != null
-                    ? await policyEnforcer.EnforceAsync(principal, tableMeta, requestedColumns: null, ct).ConfigureAwait(false)
-                    : await _executionService.CheckTableAccessAsync(principal, tableMeta, recordAudit: false, ct).ConfigureAwait(false);
+                TableAccessDecision? decision = await _policyEnforcer.EnforceAsync(principal, tableMeta, requestedColumns: null, ct).ConfigureAwait(false);
 
                 // SR-M-16: fail closed. A null decision is treated as deny.
                 if (decision == null)
@@ -319,16 +353,12 @@ public sealed partial class ODataHandler(
             }
         }
 
-        if (_memoryCache != null && complete)
+        if (complete && cacheKey != null)
         {
-            var cacheKey = AuthorizedTablesCacheKey(principal, version);
-            if (cacheKey != null)
-            {
-                SetCache(cacheKey, (IReadOnlyList<Autheris.Domain.Model.TableMetadata>)authorizedTables, EstimateTablesSize(authorizedTables));
-            }
+            SetCache(cacheKey, (IReadOnlyList<Autheris.Domain.Model.TableMetadata>)authorizedTables, EstimateTablesSize(authorizedTables));
         }
 
-        return (authorizedTables, complete);
+        return (authorizedTables, complete, version);
     }
 
     public Task<ODataQueryResult> ExecuteEntitySetQueryAsync(

@@ -581,9 +581,7 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
         IConsentResolutionService resolution, IOptions<GatewayOptions> options, IMandatoryRowFilterResolver mandatory,
         IClientIpResolver? ipResolver, ParityScenario s, CancellationToken ct)
     {
-        var enforcer = new StreamRlsPolicyEnforcer(pdp, metaRepo, new PassthroughMaskingProvider(),
-            new Autheris.Tests.Common.FakeEpochValidationService(), NullLogger<StreamRlsPolicyEnforcer>.Instance, consentRepo, resolution,
-            NullConsentCacheService.Instance, ipResolver, options, mandatory, transportGate: AllowingTransportGate.Instance);
+        var enforcer = new StreamRlsPolicyEnforcer(pdp, metaRepo, new PassthroughMaskingProvider(), new Autheris.Tests.Common.FakeEpochValidationService(), NullLogger<StreamRlsPolicyEnforcer>.Instance, consentRepo, resolution, NullConsentCacheService.Instance, ipResolver ?? Autheris.Tests.Common.Fakes.NullClientIpResolver.Instance, options, mandatory, Autheris.Tests.Common.Fakes.DisabledCallerAttributeResolver.Instance, TimeProvider.System, AllowingTransportGate.Instance);
         var evt = new CdcEvent("evt_1", s.Table.Identifier, CdcOperation.Insert, s.EffectiveTenant.Value,
             null, new Dictionary<string, object?> { ["id"] = 1, ["region"] = "EMEA", ["ssn"] = "123-45-6789" }, DateTimeOffset.UtcNow);
         var decision = await enforcer.EvaluateAndMaskAsync(evt, s.Principal, ct);

@@ -75,7 +75,7 @@ public sealed class MetricViewDiscoveryAndODataTests
             .Returns(Task.FromResult<TableMetadata?>(mv));
         var execService = Substitute.For<IGatewayExecutionService>();
 
-        var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
+        var handler = Autheris.Tests.Common.Fakes.ODataHandlerTestFactory.Create(metadataRepo, execService, NullLogger<ODataHandler>.Instance);
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.PrimarySid, "S-USER"), new Claim("tenant_id", "default")], "Test"));
 
