@@ -67,11 +67,12 @@ public static class AppOnlyPrincipal
             && !HasAnyClaim(principal, PersonIdClaimTypes);
     }
 
-    /// <summary>The client id of an application token (<c>azp</c>, <c>appid</c> or <c>client_id</c>), or null.</summary>
+    /// <summary>The client id of an application token or identity (<c>azp</c>, <c>appid</c> or <c>client_id</c>), or null.</summary>
     public static string? GetClientId(ClaimsPrincipal? principal) =>
-        principal?.FindFirst("azp")?.Value
-        ?? principal?.FindFirst("appid")?.Value
-        ?? principal?.FindFirst("client_id")?.Value;
+        principal?.FindFirst("azp")?.Value ?? principal?.FindFirst("appid")?.Value ?? principal?.FindFirst("client_id")?.Value;
+
+    public static string? GetClientId(ClaimsIdentity? identity) =>
+        identity?.FindFirst("azp")?.Value ?? identity?.FindFirst("appid")?.Value ?? identity?.FindFirst("client_id")?.Value;
 
     /// <summary>True when the principal carries a non-empty value for any of the claim types.</summary>
     public static bool HasAnyClaim(ClaimsPrincipal principal, IEnumerable<string> claimTypes)

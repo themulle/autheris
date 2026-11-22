@@ -66,16 +66,16 @@ public static class ScimRequestValidator
         }
     }
 
-    public static void ValidateGroupCreate(ScimGroup group)
+    public static void ValidateGroupCreate(ScimGroup group, bool allowRealmGroupKey = false)
     {
         ArgumentNullException.ThrowIfNull(group);
-        ValidateGroupCore(group.DisplayName, group.ExternalId, group.ResolvedObjectSid, group.Members);
+        ValidateGroupCore(group.DisplayName, group.ExternalId, group.ResolvedObjectSid, group.Members, allowRealmGroupKey);
     }
 
-    public static void ValidateGroupUpdate(ScimGroup group)
+    public static void ValidateGroupUpdate(ScimGroup group, bool allowRealmGroupKey = false)
     {
         ArgumentNullException.ThrowIfNull(group);
-        ValidateGroupCore(group.DisplayName, group.ExternalId, group.ResolvedObjectSid, group.Members);
+        ValidateGroupCore(group.DisplayName, group.ExternalId, group.ResolvedObjectSid, group.Members, allowRealmGroupKey);
     }
 
     public static void ValidateGroupRequest(ScimGroupRequest request)
@@ -84,7 +84,27 @@ public static class ScimRequestValidator
         ValidateGroupCore(request.DisplayName, request.ExternalId, request.ResolvedObjectSid, request.Members);
     }
 
-    public static void ValidatePatchRequest(ScimPatchRequest patch, bool isGroup = false)
+    internal static bool UsesRealmBoundGroupKey(IdentityRealm? realm) =>
+        realm is not null && !SidFormat.UsesWorkforceAdSids(realm.Kind);
+
+    internal static string ResolveAndValidateGroupObjectSid(string realmId, string groupId, string? providedObjectSid, IdentityRealm? realm)
+    {
+        if (UsesRealmBoundGroupKey(realm))
+        {
+            if (!SidFormat.TryFormatRealmGroupKey(realmId, groupId, out var expected))
+                throw new ValidationException("SCIM Group realm-bound key exceeds maximum SID length.");
+            if (!string.IsNullOrWhiteSpace(providedObjectSid) && !string.Equals(providedObjectSid.Trim(), expected, StringComparison.Ordinal))
+                throw new ValidationException("SCIM Group objectSid cannot specify external SIDs or foreign realm identifiers.");
+            return expected;
+        }
+
+        ValidateGroupObjectSid(providedObjectSid);
+        if (realm is not null && SidFormat.IsEntraCloudSid(providedObjectSid) && !SidFormat.HasTenantBoundEntraIssuers(realm))
+            throw new ValidationException("SCIM Group cloud objectSid requires a tenant-bound Entra realm.");
+        return providedObjectSid!.Trim();
+    }
+
+    public static void ValidatePatchRequest(ScimPatchRequest patch, bool isGroup = false, bool allowRealmGroupKey = false)
     {
         ArgumentNullException.ThrowIfNull(patch);
         if (patch.Operations is null)
@@ -126,7 +146,7 @@ public static class ScimRequestValidator
             if (string.Equals(op.Op, "add", StringComparison.OrdinalIgnoreCase)
                 || string.Equals(op.Op, "replace", StringComparison.OrdinalIgnoreCase))
             {
-                ValidatePatchCorrelationValue(path, op.Value, isGroup);
+                ValidatePatchCorrelationValue(path, op.Value, isGroup, allowRealmGroupKey);
             }
         }
     }
@@ -218,11 +238,16 @@ public static class ScimRequestValidator
         }
     }
 
-    internal static void ValidateGroupObjectSid(string? objectSid)
+    internal static void ValidateGroupObjectSid(string? objectSid, bool allowRealmGroupKey = false)
     {
         if (string.IsNullOrWhiteSpace(objectSid))
         {
             throw new ValidationException("Group objectSid is required in urn:ietf:params:scim:schemas:extension:autheris:2.0:Group.");
+        }
+
+        if (allowRealmGroupKey && SidFormat.IsRealmGroupKey(objectSid))
+        {
+            return;
         }
 
         ValidateCanonicalNonPrivilegedSid(objectSid, "Group");
@@ -253,7 +278,8 @@ public static class ScimRequestValidator
         string displayName,
         string? externalId,
         string? objectSid,
-        IReadOnlyList<ScimGroupMember>? members)
+        IReadOnlyList<ScimGroupMember>? members,
+        bool allowRealmGroupKey = false)
     {
         if (string.IsNullOrWhiteSpace(displayName) || displayName.Length > 256 || displayName.Any(char.IsControl))
         {
@@ -261,7 +287,7 @@ public static class ScimRequestValidator
         }
 
         ValidateOptionalBoundedText(externalId, 128, "externalId");
-        ValidateGroupObjectSid(objectSid);
+        ValidateGroupObjectSid(objectSid, allowRealmGroupKey);
 
         if (members is null)
         {
@@ -312,14 +338,14 @@ public static class ScimRequestValidator
                 : $"{ScimSchemaUris.AutherisUserExtension}:objectSid",
             StringComparison.OrdinalIgnoreCase);
 
-    private static void ValidatePatchCorrelationValue(string path, object? value, bool isGroup)
+    private static void ValidatePatchCorrelationValue(string path, object? value, bool isGroup, bool allowRealmGroupKey = false)
     {
         if (IsObjectSidPath(path, isGroup))
         {
             var sidValue = ExtractString(value);
             if (isGroup)
             {
-                ValidateGroupObjectSid(sidValue);
+                ValidateGroupObjectSid(sidValue, allowRealmGroupKey);
             }
             else if (sidValue is not null)
             {

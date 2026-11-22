@@ -93,24 +93,23 @@ public sealed class GraphRoleProvider : IRoleProvider
                 return ProviderRoleResult.FailedResult;
             }
 
-            // Accepted: canonical SIDs (on-premises SID of a synced group) and object-id GUIDs (cloud group, or a synced group
-            // without on-premises SID) converted to the cloud SID. Anything else is dropped and makes the answer incomplete.
+            var tokenIssuer = FirstClaimValue(identity.RawClaims, "iss");
+            if (!Autheris.Domain.Tenancy.TenantClaimReader.TryReadEntraDirectoryId(identity.RawClaims, out var tokenTid)
+                || !SidFormat.HasTenantBoundEntraIssuers(realm, tokenIssuer, tokenTid))
+                return ProviderRoleResult.FailedResult;
+
+            // Accepted: canonical SIDs and object-id GUIDs converted to cloud SIDs for tenant-bound Entra realms.
             var sids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
             var incomplete = false;
             foreach (var group in groups)
             {
                 if (SidFormat.IsCanonical(group))
-                {
                     sids.Add(group);
-                }
-                else if (Guid.TryParseExact(group, "D", out var objectId) && SidFormat.TryFromEntraObjectId(objectId, out var cloudSid))
-                {
+                else if (Guid.TryParseExact(group, "D", out var objectId)
+                    && SidFormat.TryFromEntraObjectId(objectId, realm, tokenIssuer, out var cloudSid, tokenTid))
                     sids.Add(cloudSid.Value);
-                }
                 else
-                {
                     incomplete = true;
-                }
             }
 
             var result = new ProviderRoleResult(
@@ -156,4 +155,7 @@ public sealed class GraphRoleProvider : IRoleProvider
             _circuitBreakerOpenUntil = DateTimeOffset.MinValue;
         }
     }
+
+    private static string? FirstClaimValue(IReadOnlyList<System.Security.Claims.Claim> claims, string type) =>
+        claims.FirstOrDefault(c => string.Equals(c.Type, type, StringComparison.Ordinal) && !string.IsNullOrWhiteSpace(c.Value))?.Value;
 }

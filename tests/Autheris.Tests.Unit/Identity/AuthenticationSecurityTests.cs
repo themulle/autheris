@@ -206,9 +206,9 @@ public class AuthenticationSecurityTests
 
         var userSid = transformed.GetUserSid();
         userSid.ShouldNotBeNull();
-        userSid.Value.Value.ShouldBe("00000000-0000-0000-0000-000000000001");
+        userSid.Value.Value.ShouldBe("token-realm|00000000-0000-0000-0000-000000000001");
 
-        transformed.FindFirst(ClaimTypes.PrimarySid)?.Value.ShouldBe("00000000-0000-0000-0000-000000000001");
+        transformed.FindFirst(ClaimTypes.PrimarySid)?.Value.ShouldBe("token-realm|00000000-0000-0000-0000-000000000001");
         transformed.GetGroupSids().Select(g => g.Value).ShouldContain("S-1-5-21-1-2-3-123");
         transformed.GetUserRoles().ShouldContain("SecurityAuditor");
     }
@@ -228,9 +228,9 @@ public class AuthenticationSecurityTests
 
         var userSid = transformed.GetUserSid();
         userSid.ShouldNotBeNull();
-        userSid.Value.Value.ShouldBe("S-1-5-21-ADFS-USER-999");
+        userSid.Value.Value.ShouldBe("token-realm|S-1-5-21-ADFS-USER-999");
 
-        transformed.FindFirst(ClaimTypes.PrimarySid)?.Value.ShouldBe("S-1-5-21-ADFS-USER-999");
+        transformed.FindFirst(ClaimTypes.PrimarySid)?.Value.ShouldBe("token-realm|S-1-5-21-ADFS-USER-999");
         transformed.GetGroupSids().Select(g => g.Value).ShouldContain("S-1-5-21-1-2-3-888");
         transformed.GetUserRoles().ShouldContain("DataSteward");
     }

@@ -39,13 +39,13 @@ public sealed class ScimGroupMembershipValidator
         _thresholdPercentage = thresholdPercentage;
     }
 
+    public Task ValidateMembershipChangeAsync(
+        TenantId tenantId, string realmId, string groupId, int currentMemberCount, int membersBeingRemovedCount, CancellationToken ct = default) =>
+        ValidateMembershipChangeAsync(tenantId, realmId, groupId, currentMemberCount, membersBeingRemovedCount, null, null, ct);
+
     public async Task ValidateMembershipChangeAsync(
-        TenantId tenantId,
-        string realmId,
-        string groupId,
-        int currentMemberCount,
-        int membersBeingRemovedCount,
-        CancellationToken ct = default)
+        TenantId tenantId, string realmId, string groupId, int currentMemberCount, int membersBeingRemovedCount,
+        string? groupObjectSid, string? previousGroupObjectSid = null, CancellationToken ct = default)
     {
         if (currentMemberCount == 0 || membersBeingRemovedCount == 0)
         {
@@ -61,8 +61,13 @@ public sealed class ScimGroupMembershipValidator
         // Check if group is mapped to any privileged right
         if (_functionalRightRepository != null)
         {
+            var groupKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { groupId };
+            if (SidFormat.TryFormatRealmGroupKey(realmId, groupId, out var realmKey)) groupKeys.Add(realmKey);
+            if (!string.IsNullOrWhiteSpace(groupObjectSid)) groupKeys.Add(groupObjectSid.Trim());
+            if (!string.IsNullOrWhiteSpace(previousGroupObjectSid)) groupKeys.Add(previousGroupObjectSid.Trim());
+
             var mappings = await _functionalRightRepository.GetApprovedMappingsForGroupsAndRolesAsync(
-                tenantId, realmId, [groupId], ct).ConfigureAwait(false);
+                tenantId, realmId, groupKeys.ToArray(), ct).ConfigureAwait(false);
 
             bool isPrivileged = false;
             foreach (var m in mappings)

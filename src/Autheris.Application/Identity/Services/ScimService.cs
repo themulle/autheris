@@ -25,6 +25,7 @@ public sealed class ScimService : IScimService
     private readonly ScimMassChangeGuard? _massChangeGuard;
     private readonly IScimSyncStateTracker? _syncStateTracker;
     private readonly IAuditWriter? _auditWriter;
+    private readonly IIdentityRealmRegistry? _realmRegistry;
     private readonly TimeProvider _timeProvider;
 
     public ScimService(
@@ -35,7 +36,8 @@ public sealed class ScimService : IScimService
         ScimMassChangeGuard? massChangeGuard = null,
         TimeProvider? timeProvider = null,
         IScimSyncStateTracker? syncStateTracker = null,
-        IAuditWriter? auditWriter = null)
+        IAuditWriter? auditWriter = null,
+        IIdentityRealmRegistry? realmRegistry = null)
     {
         _massChangeGuard = massChangeGuard;
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
@@ -45,6 +47,7 @@ public sealed class ScimService : IScimService
         _timeProvider = timeProvider ?? TimeProvider.System;
         _syncStateTracker = syncStateTracker;
         _auditWriter = auditWriter;
+        _realmRegistry = realmRegistry;
     }
 
     public async Task<ScimUser?> GetUserAsync(TenantId tenantId, string realmId, string userKey, CancellationToken ct = default)
@@ -311,11 +314,11 @@ public sealed class ScimService : IScimService
     public async Task<ScimGroup> CreateGroupAsync(TenantId tenantId, string realmId, ScimGroup group, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(group);
-        ScimRequestValidator.ValidateGroupCreate(group);
+        var realm = _realmRegistry?.GetRealm(realmId);
+        var groupId = string.IsNullOrWhiteSpace(group.Id) ? (group.ExternalId ?? Guid.NewGuid().ToString("N")) : group.Id;
+        var resolvedObjectSid = ScimRequestValidator.ResolveAndValidateGroupObjectSid(realmId, groupId, group.ResolvedObjectSid, realm);
 
         var now = _timeProvider.GetUtcNow();
-        var groupId = string.IsNullOrWhiteSpace(group.Id) ? (group.ExternalId ?? Guid.NewGuid().ToString("N")) : group.Id;
-
         ValidateNoSelfNesting(groupId, group.Members);
 
         var entity = new ScimGroup(
@@ -325,7 +328,8 @@ public sealed class ScimService : IScimService
             Members: group.Members,
             CreatedAt: group.CreatedAt ?? now,
             UpdatedAt: now,
-            ObjectSid: group.ResolvedObjectSid);
+            ObjectSid: resolvedObjectSid);
+        ScimRequestValidator.ValidateGroupCreate(entity, ScimRequestValidator.UsesRealmBoundGroupKey(realm));
 
         await RecordRequiredScimAuditAsync(
             tenantId,
@@ -374,7 +378,9 @@ public sealed class ScimService : IScimService
     public async Task<ScimGroup?> UpdateGroupAsync(TenantId tenantId, string realmId, string groupId, ScimGroup group, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(group);
-        ScimRequestValidator.ValidateGroupUpdate(group);
+        var realm = _realmRegistry?.GetRealm(realmId);
+        var resolvedObjectSid = ScimRequestValidator.ResolveAndValidateGroupObjectSid(realmId, groupId, group.ResolvedObjectSid, realm);
+        ScimRequestValidator.ValidateGroupUpdate(group with { ObjectSid = resolvedObjectSid }, ScimRequestValidator.UsesRealmBoundGroupKey(realm));
         ValidateNoSelfNesting(groupId, group.Members);
 
         var existing = await _repository.GetGroupAsync(tenantId, realmId, groupId, ct).ConfigureAwait(false);
@@ -391,7 +397,7 @@ public sealed class ScimService : IScimService
             Members: group.Members,
             CreatedAt: existing.CreatedAt,
             UpdatedAt: now,
-            ObjectSid: group.ResolvedObjectSid);
+            ObjectSid: resolvedObjectSid);
 
         List<string> usersToRemove = [];
         List<string> addedUsers = [];
@@ -420,7 +426,7 @@ public sealed class ScimService : IScimService
             if (_membershipValidator != null && usersToRemove.Count > 0)
             {
                 await _membershipValidator.ValidateMembershipChangeAsync(
-                    tenantId, realmId, groupId, currentUsers.Count, usersToRemove.Count, ct).ConfigureAwait(false);
+                    tenantId, realmId, groupId, currentUsers.Count, usersToRemove.Count, updated.ObjectSid, existing.ObjectSid, ct).ConfigureAwait(false);
             }
         }
 
@@ -498,7 +504,9 @@ public sealed class ScimService : IScimService
     public async Task<ScimGroup?> PatchGroupAsync(TenantId tenantId, string realmId, string groupId, ScimPatchRequest patch, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(patch);
-        ScimRequestValidator.ValidatePatchRequest(patch, isGroup: true);
+        var realm = _realmRegistry?.GetRealm(realmId);
+        var allowRealmGroupKey = ScimRequestValidator.UsesRealmBoundGroupKey(realm);
+        ScimRequestValidator.ValidatePatchRequest(patch, isGroup: true, allowRealmGroupKey: allowRealmGroupKey);
 
         var existing = await _repository.GetGroupAsync(tenantId, realmId, groupId, ct).ConfigureAwait(false);
         if (existing == null)
@@ -575,10 +583,12 @@ public sealed class ScimService : IScimService
         ScimGroup? updatedGroup = null;
         if (metadataChanged)
         {
-            updatedGroup = existing with { DisplayName = newDisplayName, ObjectSid = newObjectSid, UpdatedAt = now };
-            ScimRequestValidator.ValidateGroupUpdate(updatedGroup);
+            var resolvedSid = ScimRequestValidator.ResolveAndValidateGroupObjectSid(realmId, groupId, newObjectSid, realm);
+            updatedGroup = existing with { DisplayName = newDisplayName, ObjectSid = resolvedSid, UpdatedAt = now };
+            ScimRequestValidator.ValidateGroupUpdate(updatedGroup, allowRealmGroupKey);
         }
 
+        var effectiveGroupSid = updatedGroup?.ObjectSid ?? existing.ObjectSid;
         var userRemovals = membersToRemove
             .Where(m => m.ExplicitType is null || m.ExplicitType == ScimMemberTypes.User)
             .Select(m => m.Value)
@@ -587,10 +597,9 @@ public sealed class ScimService : IScimService
         if (_membershipValidator != null && userRemovals.Count > 0)
         {
             await _membershipValidator.ValidateMembershipChangeAsync(
-                tenantId, realmId, groupId, currentUserMembers.Count, userRemovals.Count, ct).ConfigureAwait(false);
+                tenantId, realmId, groupId, currentUserMembers.Count, userRemovals.Count, effectiveGroupSid, existing.ObjectSid, ct).ConfigureAwait(false);
         }
 
-        var effectiveGroupSid = updatedGroup?.ObjectSid ?? existing.ObjectSid;
         var currentUserSet = currentUserMembers.ToHashSet(StringComparer.Ordinal);
         if (membersToRemove.Count == 0 && membersToAdd.Count == 0 && metadataChanged)
         {
