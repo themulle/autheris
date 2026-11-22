@@ -32,14 +32,6 @@ public sealed partial class SqlIdentifierConsolidationArchitectureTests
         "EchoableColumnNameRegex"
     };
 
-    // Transitional exemptions solely for active parallel branches excluded by conflict-avoidance rules.
-    private static readonly HashSet<string> TransitionalAllowlistedFiles = new(StringComparer.Ordinal)
-    {
-        "src/Autheris.Application/OData/ODataHandler.cs",
-        "src/Autheris.Application/Sql/Tree/TreeSqlCompiler.cs",
-        "src/Autheris.Application/DataSources/Services/GovernedTableReadPlanner.Keyset.cs"
-    };
-
     private const string IdentifierStartClass = @"\[(?:a-zA-Z|A-Za-z)_\]";
     private const string IdentifierRestClass = @"\[(?:a-zA-Z|A-Za-z)0-9_\]";
     private const string Quantifier = @"(?:\*|\+|\{\d+,\d+\})";
@@ -56,7 +48,6 @@ public sealed partial class SqlIdentifierConsolidationArchitectureTests
     {
         var files = RepositoryScan.ProductionFiles
             .Where(f => ScannedRoots.Any(root => f.RelativePath.StartsWith(root, StringComparison.Ordinal)))
-            .Where(f => !TransitionalAllowlistedFiles.Contains(f.RelativePath))
             .ToList();
 
         files.ShouldNotBeEmpty("Scanner must inspect Autheris.Infrastructure and Autheris.Application C# files.");

@@ -3,10 +3,12 @@ namespace Autheris.Application.DataSources.Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
-using Autheris.Application.Policy;
+using Autheris.Application.Sql.Policy;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using TrinoSqlEngine.Ast.Emit;
+using TrinoSqlEngine.Governance;
 
 /// <summary>
 /// MISC-03/MISC-04: the one definition of "a required filter column is satisfied" (RequiredFilterColumns / RequiredFilterColumnGroups).
@@ -17,6 +19,45 @@ using TrinoSqlEngine.Ast.Emit;
 /// </summary>
 internal static class RequiredFilterColumnRule
 {
+    private readonly record struct RowFilterColumnResolution(
+        PolicyPredicate? TypedPredicate,
+        IReadOnlySet<string>? TextIdentifiers)
+    {
+        public bool Contains(string requiredColumn)
+        {
+            if (TypedPredicate is not null)
+            {
+                return TypedPredicate.ReferencedColumns.Contains(requiredColumn.ToLowerInvariant());
+            }
+
+            return TextIdentifiers is not null && TextIdentifiers.Contains(requiredColumn);
+        }
+    }
+
+    private static RowFilterColumnResolution ResolveRowFilterColumns(TableAccessDecision decision)
+    {
+        if (!decision.HasRowFilter)
+        {
+            return default;
+        }
+
+        if (decision.RowPolicy is not null)
+        {
+            try
+            {
+                return DecisionRowFilter.TryResolveTypedPredicate(decision, out var typed)
+                    ? new RowFilterColumnResolution(typed, null)
+                    : default;
+            }
+            catch (GatewaySecurityException)
+            {
+                return default;
+            }
+        }
+
+        return new RowFilterColumnResolution(null, ReferencedIdentifiers(decision.CombinedRowFilterSql));
+    }
+
     /// <summary>Throws <see cref="TrinoSqlEngine.Ast.Emit.RequiredFilterColumnMissingException"/> unless the rule is satisfied for <paramref name="metadata"/>.</summary>
     public static void Enforce(
         TableMetadata metadata,
@@ -45,8 +86,8 @@ internal static class RequiredFilterColumnRule
             return true;
         }
 
-        var rowFilterColumns = ReferencedIdentifiers(decision.CombinedRowFilterSql);
-        bool Column(string column) => IsColumnSatisfied(column, metadata, decision, rowFilterColumns, clientConstrainedColumns, tenantColumnCounts);
+        var rowFilterColumns = ResolveRowFilterColumns(decision);
+        bool Column(string column) => IsColumnSatisfied(column, metadata, rowFilterColumns, clientConstrainedColumns, tenantColumnCounts);
 
         if (metadata.RequiredFilterColumnGroups.Length > 0)
         {
@@ -76,25 +117,18 @@ internal static class RequiredFilterColumnRule
         TableAccessDecision decision,
         IEnumerable<string>? clientConstrainedColumns,
         bool tenantColumnCounts) =>
-        IsColumnSatisfied(requiredColumn, metadata, decision, ReferencedIdentifiers(decision.CombinedRowFilterSql), clientConstrainedColumns, tenantColumnCounts);
+        IsColumnSatisfied(requiredColumn, metadata, ResolveRowFilterColumns(decision), clientConstrainedColumns, tenantColumnCounts);
 
     private static bool IsColumnSatisfied(
         string requiredColumn,
         TableMetadata metadata,
-        TableAccessDecision decision,
-        IReadOnlySet<string> rowFilterColumns,
+        RowFilterColumnResolution rowFilterColumns,
         IEnumerable<string>? clientConstrainedColumns,
         bool tenantColumnCounts)
     {
         if (tenantColumnCounts &&
             metadata.TenantColumnName != null &&
             string.Equals(metadata.TenantColumnName, requiredColumn, StringComparison.OrdinalIgnoreCase))
-        {
-            return true;
-        }
-
-        if (decision.RowPolicy is PolicyPredicateRowPolicy rls &&
-            rls.Predicate.ReferencedColumns.Contains(requiredColumn.ToLowerInvariant()))
         {
             return true;
         }

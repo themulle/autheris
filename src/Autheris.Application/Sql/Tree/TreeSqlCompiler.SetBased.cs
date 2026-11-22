@@ -152,7 +152,7 @@ public static partial class TreeSqlCompiler
         foreach (var column in columns)
         {
             var name = meta.GetColumn(column)?.ColumnName;
-            if (name is null || !SafeNameRegex().IsMatch(name) ||
+            if (name is null || !SqlIdentifierGuard.IsValidIdentifier(name) ||
                 decision.GetEffectiveColumnAccess(name, meta) != ColumnAccessLevel.Clear)
             {
                 return null;

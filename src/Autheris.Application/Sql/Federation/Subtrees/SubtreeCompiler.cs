@@ -36,15 +36,6 @@ public static class SubtreeCompiler
 {
     private const int MaxAstTraversalDepth = 128;
 
-    private static readonly SqlTokenSecurityOptions SubtreeRowFilterTokenOptions = new()
-    {
-        RejectComments = true,
-        RejectEscapedStringLiterals = true,
-        RejectDollarQuoting = true,
-        RejectTimeTravelQueries = true,
-        RejectVariableSubstitutionSequences = true
-    };
-
     /// <summary>Asserts that member row filters do not reference tables or columns in other databases.</summary>
     public static void ValidatePolicyIsolation(
         IReadOnlyList<ResolvedSourceTable> tables,
@@ -56,25 +47,28 @@ public static class SubtreeCompiler
         foreach (var table in tables)
         {
             var id = table.Metadata.Identifier;
-            if (!decisions.TryGetValue(id, out var dec) || dec == null || string.IsNullOrWhiteSpace(dec.CombinedRowFilterSql))
+            if (!decisions.TryGetValue(id, out var dec) || dec == null || !dec.HasRowFilter)
                 continue;
 
             var currentDb = table.Metadata.Table.PhysicalDatabaseName ?? id.Domain;
             var externalTables = tables.Where(o => !string.Equals(
                 currentDb, o.Metadata.Table.PhysicalDatabaseName ?? o.Metadata.Identifier.Domain, StringComparison.OrdinalIgnoreCase)).ToList();
-            if (externalTables.Count == 0) continue;
+            if (externalTables.Count == 0)
+            {
+                if (dec.RowPolicy is not null)
+                {
+                    DecisionRowFilter.TryResolveTypedPredicate(dec, out _);
+                }
+
+                continue;
+            }
 
             Expression expr;
             try
             {
-                var (tree, _) = FastSqlEngine.Default.ParseExpression(NormalizeRowFilterForAst(dec.CombinedRowFilterSql).AsMemory(), SubtreeRowFilterTokenOptions);
-                expr = new SqlAstBuilder(new AstBuilderOptions
-                {
-                    EnforceReadOnlyQueries = true,
-                    EnforceFunctionPolicy = true,
-                    AllowedFunctions = SqlDialectMapper.AllSafeDialectFunctions,
-                    RejectTimeTravelQueries = true
-                }).BuildStandaloneExpression(tree);
+                if (!DecisionRowFilter.TryResolveExpression(dec, SqlDialectMapper.AllSafeDialectFunctions, out var resolved))
+                    continue;
+                expr = resolved;
             }
             catch (GatewaySecurityException) { throw; }
             catch (Exception ex)
@@ -252,65 +246,36 @@ public static class SubtreeCompiler
             if (policies.ContainsKey(tid)) continue;
 
             var dec = memberDecisions[member.Metadata.Identifier];
-            if (string.IsNullOrWhiteSpace(dec.CombinedRowFilterSql)) continue;
-
-            if (dec.RowPolicy is PolicyPredicateRowPolicy typedRowPolicy &&
-                string.Equals(dec.CombinedRowFilterSql, typedRowPolicy.Project().Sql, StringComparison.Ordinal))
+            if (!DecisionRowFilter.TryResolve(
+                    dec,
+                    policyAllowlist,
+                    out var resolved,
+                    sqlEngine,
+                    translateTrinoDateFunctions: true,
+                    ct))
             {
-                if (typedRowPolicy.Predicate.Parameters.Count == 0)
-                {
-                    policies[tid] = typedRowPolicy.Predicate;
-                }
-                else
-                {
-                    var renamer = new PrefixParameterRenamer(typedRowPolicy.Predicate.Parameters, $"__sub_rls_{idx}_");
-                    policies[tid] = PolicyPredicate.Create((Expression)renamer.Visit(typedRowPolicy.Predicate.Expression), renamer.Values);
-                }
                 continue;
             }
 
-            var (exprTree, _) = sqlEngine.ParseExpression(NormalizeRowFilterForAst(dec.CombinedRowFilterSql).AsMemory(), SubtreeRowFilterTokenOptions, ct);
-            var parsedExpr = new SqlAstBuilder(new AstBuilderOptions
+            if (resolved.TypedPredicate is { } typedPredicate)
             {
-                EnforceReadOnlyQueries = true, EnforceFunctionPolicy = true,
-                AllowedFunctions = policyAllowlist, TranslateTrinoDateFunctions = true, RejectTimeTravelQueries = true
-            }).BuildStandaloneExpression(exprTree);
+                if (typedPredicate.Parameters.Count == 0)
+                {
+                    policies[tid] = typedPredicate;
+                }
+                else
+                {
+                    var renamer = new PrefixParameterRenamer(typedPredicate.Parameters, $"__sub_rls_{idx}_");
+                    policies[tid] = PolicyPredicate.Create((Expression)renamer.Visit(typedPredicate.Expression), renamer.Values);
+                }
+
+                continue;
+            }
 
             var shaper = new SubtreeRlsShaper(member, dec.RowFilterParameters, $"__sub_rls_{idx}_");
-            policies[tid] = PolicyPredicate.Create((Expression)shaper.Visit(parsedExpr), shaper.Values);
+            policies[tid] = PolicyPredicate.Create((Expression)shaper.Visit(resolved.Expression), shaper.Values);
         }
         return policies;
-    }
-
-    private static string NormalizeRowFilterForAst(string sql)
-    {
-        var sb = new StringBuilder(sql.Length + 16);
-        int i = 0;
-        while (i < sql.Length)
-        {
-            if (TrySkipLiteralOrComment(sql, i, allowBrackets: false, out int next))
-            {
-                sb.Append(sql, i, next - i); i = next; continue;
-            }
-            char c = sql[i];
-            if (c == '[' && (i == 0 || sql[i - 1] is '.' or '(' or ',' or '=' or '<' or '>' or '+' or '-' or '*' or '/' or '%' or '|' or '!' || char.IsWhiteSpace(sql[i - 1])))
-            {
-                int end = ScanDelimited(sql, i + 1, ']', out var ident);
-                sb.Append('"').Append(ident.Replace("\"", "\"\"", StringComparison.Ordinal)).Append('"');
-                i = end; continue;
-            }
-            if (c == '@' && i + 1 < sql.Length && IsIdentStart(sql[i + 1]) && (i == 0 || !IsIdentContinue(sql[i - 1])))
-            {
-                int j = i + 2;
-                while (j < sql.Length && IsIdentContinue(sql[j])) j++;
-                sb.Append("__param_").Append(sql, i + 1, j - (i + 1));
-                i = j; continue;
-            }
-            if (sql.AsSpan(i).StartsWith("__param_", StringComparison.OrdinalIgnoreCase) && (i == 0 || !IsIdentContinue(sql[i - 1])))
-                throw new GatewaySecurityException("Row filter SQL contains a reserved parameter identifier prefix.", GovernedSqlErrorCodes.PolicyDenied);
-            sb.Append(c); i++;
-        }
-        return sb.ToString();
     }
 
     private static (string Sql, Dictionary<string, object?> Parameters) IsolateCompiledParameters(CompiledSql compiled, string subtreeId, TargetSqlDialect dialect)
@@ -332,7 +297,7 @@ public static class SubtreeCompiler
         int i = 0;
         while (i < sql.Length)
         {
-            if (TrySkipLiteralOrComment(sql, i, caps.IdentifierOpenQuote == '[', out int next))
+            if (DecisionRowFilter.TrySkipLiteralOrComment(sql, i, caps.IdentifierOpenQuote == '[', out int next))
             {
                 sb.Append(sql, i, next - i); i = next; continue;
             }
@@ -356,72 +321,21 @@ public static class SubtreeCompiler
         return (sb.ToString(), isolatedParams);
     }
 
-    private static bool TrySkipLiteralOrComment(string sql, int i, bool allowBrackets, out int next)
-    {
-        char c = sql[i];
-        if (c is '\'' or '"' or '`') { next = ScanDelimited(sql, i + 1, c, out _); return true; }
-        if (c == '[' && allowBrackets) { next = ScanDelimited(sql, i + 1, ']', out _); return true; }
-        if (c == '-' && i + 1 < sql.Length && sql[i + 1] == '-')
-        {
-            int lf = sql.AsSpan(i + 2).IndexOf('\n');
-            next = lf >= 0 ? i + 2 + lf + 1 : sql.Length;
-            return true;
-        }
-        if (c == '/' && i + 1 < sql.Length && sql[i + 1] == '*')
-        {
-            int end = sql.IndexOf("*/", i + 2, StringComparison.Ordinal);
-            next = end >= 0 ? end + 2 : sql.Length;
-            return true;
-        }
-        if (c == '$' && i + 1 < sql.Length && !char.IsAsciiDigit(sql[i + 1]))
-        {
-            int k = i + 1;
-            while (k < sql.Length && IsIdentContinue(sql[k])) k++;
-            if (k < sql.Length && sql[k] == '$')
-            {
-                int close = sql.IndexOf(sql[i..(k + 1)], k + 1, StringComparison.Ordinal);
-                next = close >= 0 ? close + (k - i + 1) : sql.Length;
-                return true;
-            }
-        }
-        next = i;
-        return false;
-    }
-
-    private static int ScanDelimited(string sql, int i, char close, out string content)
-    {
-        var sb = close == ']' ? new StringBuilder() : null;
-        while (i < sql.Length)
-        {
-            if (sql[i] == close)
-            {
-                if (i + 1 < sql.Length && sql[i + 1] == close) { sb?.Append(close); i += 2; continue; }
-                content = sb?.ToString() ?? string.Empty;
-                return i + 1;
-            }
-            sb?.Append(sql[i]);
-            i++;
-        }
-        if (close == ']') throw new GatewaySecurityException("Unterminated bracket identifier in SQL.", GovernedSqlErrorCodes.PolicyDenied);
-        content = string.Empty;
-        return sql.Length;
-    }
-
     private static bool TryReadMarkerToken(string sql, int i, ParameterMarkerStyle style, out int end)
     {
         end = i;
-        if (i > 0 && IsIdentContinue(sql[i - 1])) return false;
+        if (i > 0 && DecisionRowFilter.IsIdentContinue(sql[i - 1])) return false;
         char c = sql[i];
         switch (style)
         {
             case ParameterMarkerStyle.AtNamedOrdinal when c == '@':
-                if (i + 1 >= sql.Length || sql[i + 1] == '@' || !IsIdentStart(sql[i + 1]))
+                if (i + 1 >= sql.Length || sql[i + 1] == '@' || !DecisionRowFilter.IsIdentStart(sql[i + 1]))
                     throw new GatewaySecurityException("Invalid '@' parameter marker in compiled subtree SQL.", GovernedSqlErrorCodes.PolicyDenied);
-                end = i + 2; while (end < sql.Length && IsIdentContinue(sql[end])) end++;
+                end = i + 2; while (end < sql.Length && DecisionRowFilter.IsIdentContinue(sql[end])) end++;
                 return true;
             case ParameterMarkerStyle.DollarOrdinal when c == '$' && i + 1 < sql.Length && char.IsAsciiDigit(sql[i + 1]):
                 end = i + 2; while (end < sql.Length && char.IsAsciiDigit(sql[end])) end++;
-                if (end < sql.Length && IsIdentContinue(sql[end]))
+                if (end < sql.Length && DecisionRowFilter.IsIdentContinue(sql[end]))
                     throw new GatewaySecurityException("Malformed '$' parameter marker in compiled subtree SQL.", GovernedSqlErrorCodes.PolicyDenied);
                 return true;
             case ParameterMarkerStyle.QuestionOrdinal when c == '?':
@@ -430,17 +344,14 @@ public static class SubtreeCompiler
                 end = i + 2; while (end < sql.Length && char.IsAsciiDigit(sql[end])) end++;
                 return true;
             case ParameterMarkerStyle.ColonNamedOrdinal or ParameterMarkerStyle.ColonOrdinal when c == ':':
-                if ((i > 0 && sql[i - 1] == ':') || (i + 1 < sql.Length && sql[i + 1] is ':' or '=') || i + 1 >= sql.Length || !IsIdentContinue(sql[i + 1]))
+                if ((i > 0 && sql[i - 1] == ':') || (i + 1 < sql.Length && sql[i + 1] is ':' or '=') || i + 1 >= sql.Length || !DecisionRowFilter.IsIdentContinue(sql[i + 1]))
                     return false;
-                end = i + 2; while (end < sql.Length && IsIdentContinue(sql[end])) end++;
+                end = i + 2; while (end < sql.Length && DecisionRowFilter.IsIdentContinue(sql[end])) end++;
                 return true;
             default:
                 return false;
         }
     }
-
-    private static bool IsIdentStart(char c) => char.IsAsciiLetter(c) || c == '_';
-    private static bool IsIdentContinue(char c) => char.IsAsciiLetterOrDigit(c) || c == '_';
 
     private static void ValidateExpressionPolicyIsolation(
         Expression expr, TableIdentifier currentId, ResolvedSourceTable currentTable, string currentDb, List<ResolvedSourceTable> externalTables)

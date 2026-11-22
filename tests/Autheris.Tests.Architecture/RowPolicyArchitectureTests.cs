@@ -129,4 +129,66 @@ public sealed class RowPolicyArchitectureTests
 
         violations.ShouldBeEmpty(string.Join(Environment.NewLine, violations));
     }
+
+    // ---- Unified DecisionRowFilter enforcement across consumers ----
+
+    private static readonly string[] UnifiedRowFilterConsumerPaths =
+    [
+        "src/Autheris.Application/Sql/Security/MetricViewStatementGuard.cs",
+        "src/Autheris.Application/Sql/Federation/Subtrees/SubtreeCompiler.cs",
+        "src/Autheris.Application/Sql/Tree/TreeSqlCompiler.cs"
+    ];
+
+    internal static List<string> FindRowFilterConsolidationViolations(IEnumerable<(string RelativePath, string Text)> files)
+    {
+        var violations = new List<string>();
+        foreach (var (relativePath, text) in files)
+        {
+            if (text.Contains("SELECT 1 FROM t WHERE", StringComparison.OrdinalIgnoreCase))
+            {
+                violations.Add($"{relativePath}: contains legacy 'SELECT 1 FROM t WHERE' string-splicing");
+            }
+
+            if (!string.Equals(relativePath, "src/Autheris.Application/Sql/Policy/DecisionRowFilter.cs", StringComparison.Ordinal) &&
+                text.Contains("NormalizeRowFilterForAst", StringComparison.Ordinal))
+            {
+                violations.Add($"{relativePath}: duplicates NormalizeRowFilterForAst outside DecisionRowFilter");
+            }
+        }
+
+        return violations;
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void RowFilterScanner_DetectsPlantedStringSpliceAndDuplicateNormalizer()
+    {
+        var hits = FindRowFilterConsolidationViolations([
+            ("src/Autheris.Application/Sql/Security/MetricViewStatementGuard.cs", "ParserEngine.Parse($\"SELECT 1 FROM t WHERE {sql}\")"),
+            ("src/Autheris.Application/Sql/Federation/Subtrees/SubtreeCompiler.cs", "private static string NormalizeRowFilterForAst(string s) => s;")
+        ]);
+
+        hits.Count.ShouldBe(2);
+        hits.ShouldContain(h => h.Contains("SELECT 1 FROM t WHERE", StringComparison.Ordinal));
+        hits.ShouldContain(h => h.Contains("NormalizeRowFilterForAst", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void RowFilterConsumers_RouteThroughDecisionRowFilterWithoutSpliceOrDuplicateNormalizer()
+    {
+        var targets = RepositoryScan.ProductionFiles
+            .Where(f => UnifiedRowFilterConsumerPaths.Contains(f.RelativePath, StringComparer.Ordinal))
+            .Select(f => (f.RelativePath, f.Text))
+            .ToList();
+
+        targets.Count.ShouldBe(UnifiedRowFilterConsumerPaths.Length);
+        foreach (var target in targets)
+        {
+            target.Text.ShouldContain("DecisionRowFilter", Case.Sensitive, customMessage: $"{target.RelativePath} must route row-filter inspection through DecisionRowFilter.");
+        }
+
+        var violations = FindRowFilterConsolidationViolations(targets);
+        violations.ShouldBeEmpty(string.Join(Environment.NewLine, violations));
+    }
 }

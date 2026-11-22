@@ -1,7 +1,7 @@
 using System.Collections;
 using System.Globalization;
 using System.Text;
-using System.Text.RegularExpressions;
+using Autheris.Application.Sql.Policy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
@@ -38,9 +38,6 @@ public static partial class TreeSqlCompiler
     /// </summary>
     public static bool SupportsTreeCompile(DatabaseDialect dialect) =>
         dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql;
-
-    [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_]{0,127}\z")]
-    private static partial Regex SafeNameRegex();
 
     public static CompiledTreeQuery Compile(
         TreeQueryNode root,
@@ -357,7 +354,7 @@ public static partial class TreeSqlCompiler
                 (path.Count == 0 || defaultOrdering.Kind != Autheris.Application.DataSources.Services.DefaultOrderingKind.ClearColumnComposite);
             if (useDefault)
             {
-                if (!defaultOrdering.Terms.All(t => SafeNameRegex().IsMatch(t.Name)))
+                if (!defaultOrdering.Terms.All(t => SqlIdentifierGuard.IsValidIdentifier(t.Name)))
                 {
                     // Fail closed (like the table-read planner): never silently drop the ORDER BY, which would make paging unstable.
                     throw new GatewayInvalidQueryException("The table cannot be read in a stable order.");
@@ -387,7 +384,7 @@ public static partial class TreeSqlCompiler
         var children = new List<(TreeRelationNode Relation, NodePlan Child)>();
         foreach (var relation in node.Relations)
         {
-            if (!SafeNameRegex().IsMatch(relation.ResponseKey))
+            if (!SqlIdentifierGuard.IsValidIdentifier(relation.ResponseKey))
             {
                 throw new GatewayInvalidQueryException("Invalid relation name.");
             }
@@ -441,7 +438,7 @@ public static partial class TreeSqlCompiler
     private static string ResolveReadableColumn(TableMetadata metadata, TableAccessDecision decision, string requested)
     {
         var column = metadata.GetColumn(requested?.Trim() ?? string.Empty)?.ColumnName;
-        if (column == null || !SafeNameRegex().IsMatch(column) || decision.GetEffectiveColumnAccess(column, metadata) == ColumnAccessLevel.Deny)
+        if (column == null || !SqlIdentifierGuard.IsValidIdentifier(column) || decision.GetEffectiveColumnAccess(column, metadata) == ColumnAccessLevel.Deny)
         {
             throw new GatewayInvalidQueryException($"The property '{Echo(requested)}' does not exist or is not accessible.", "INVALID_QUERY");
         }
@@ -452,7 +449,7 @@ public static partial class TreeSqlCompiler
     private static string ResolveClearColumn(TableMetadata metadata, TableAccessDecision decision, string requested)
     {
         var column = metadata.GetColumn(requested?.Trim() ?? string.Empty)?.ColumnName;
-        if (column == null || !SafeNameRegex().IsMatch(column))
+        if (column == null || !SqlIdentifierGuard.IsValidIdentifier(column))
         {
             throw new GatewayInvalidQueryException($"The property '{Echo(requested)}' cannot be used for filtering, sorting or joining.", "INVALID_QUERY");
         }
@@ -514,10 +511,20 @@ public static partial class TreeSqlCompiler
             }
 
             // 2. Active RLS
-            if (tableAccess.Decision.RowPolicy is Autheris.Application.Policy.PolicyPredicateRowPolicy rlsPolicy &&
-                rlsPolicy.Predicate.ReferencedColumns.Contains(reqCol.ToLowerInvariant()))
+            if (tableAccess.Decision.RowPolicy is not null)
             {
-                return true;
+                try
+                {
+                    if (DecisionRowFilter.TryResolveTypedPredicate(tableAccess.Decision, out var rlsPredicate) &&
+                        rlsPredicate.ReferencedColumns.Contains(reqCol.ToLowerInvariant()))
+                    {
+                        return true;
+                    }
+                }
+                catch (GatewaySecurityException)
+                {
+                    // Drifted or unsupported row policy satisfies nothing.
+                }
             }
 
             // 3. Relation join keys (Issue #221)
@@ -571,7 +578,7 @@ public static partial class TreeSqlCompiler
         TreeFilterClauseBuilder.ExtractConstrainedColumns(filter).Contains(column);
 
     private static string Echo(string? name) =>
-        name != null && SafeNameRegex().IsMatch(name.Trim()) ? name.Trim() : "(invalid name)";
+        name != null && SqlIdentifierGuard.IsValidIdentifier(name.Trim()) ? name.Trim() : "(invalid name)";
 
     private static bool IsHmacRule(MaskingRule rule) => rule.IsHmac;
 
@@ -615,13 +622,8 @@ public static partial class TreeSqlCompiler
     /// </summary>
     internal static bool RowPolicyRequiresEnginePipeline(TableAccessDecision decision)
     {
-        if (string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
-        {
-            return false;
-        }
-
-        return decision.RowPolicy is not Autheris.Application.Policy.PolicyPredicateRowPolicy typed
-            || Autheris.Application.Sql.Policy.PolicyPredicateSubqueryDetector.ContainsSubquery(typed.Predicate.Expression);
+        ArgumentNullException.ThrowIfNull(decision);
+        return decision.HasRowFilter && !DecisionRowFilter.IsInlineEligiblePolicyPredicate(decision);
     }
 
     private static List<string> BuildInnerPredicates(
@@ -643,8 +645,7 @@ public static partial class TreeSqlCompiler
             where.Add($"{target}.{Q(context, tenantColumn)} = {context.AddParameter(plan.Access.TenantValue)}");
         }
 
-        var rowFilter = plan.Access.Decision.CombinedRowFilterSql;
-        if (!string.IsNullOrWhiteSpace(rowFilter) && securedSource == null)
+        if (plan.Access.Decision.HasRowFilter && securedSource == null)
         {
             // SQLA-06: the spliced text carries no tenant wrapper for policy subqueries (the engine pipeline adds it); deny instead of emitting it.
             if (RowPolicyRequiresEnginePipeline(plan.Access.Decision))
@@ -652,6 +653,7 @@ public static partial class TreeSqlCompiler
                 throw new GatewaySecurityException("The row policy of this table is not supported in tree queries.", "TREE_ROW_POLICY_UNSUPPORTED");
             }
 
+            var rowFilter = plan.Access.Decision.CombinedRowFilterSql!;
             SqlSecurityValidator.ValidateRowFilter(plan.Access.Decision);
             where.Add($"({context.BindRowFilter(rowFilter, plan.Access.Decision.RowFilterParameters)})");
         }
@@ -865,7 +867,7 @@ public static partial class TreeSqlCompiler
 
     private static string FormatPostgresJsonKey(string key, DatabaseDialect dialect)
     {
-        if (string.IsNullOrEmpty(key) || !SafeNameRegex().IsMatch(key))
+        if (!SqlIdentifierGuard.IsValidIdentifier(key))
         {
             throw new GatewayInvalidQueryException("Invalid property name.");
         }

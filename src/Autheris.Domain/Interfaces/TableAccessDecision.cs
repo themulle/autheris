@@ -36,6 +36,11 @@ public sealed record TableAccessDecision(
     public IRowPolicy? RowPolicy { get; internal init; }
 
     /// <summary>
+    /// True when the decision carries any row-level restriction (typed <see cref="RowPolicy"/> or text <see cref="CombinedRowFilterSql"/>).
+    /// </summary>
+    public bool HasRowFilter => RowPolicy is not null || !string.IsNullOrWhiteSpace(CombinedRowFilterSql);
+
+    /// <summary>
     /// The inputs of the consent row filter (WP-X0l). The decision cache keeps them, so a cached decision can be turned into a typed
     /// <see cref="RowPolicy"/> again; null when the consents did not restrict rows.
     /// </summary>
