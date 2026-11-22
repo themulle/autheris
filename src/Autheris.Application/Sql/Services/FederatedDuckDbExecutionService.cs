@@ -632,7 +632,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
                 resolved.Metadata,
                 _options.Value.DataSources?.RequireTenantColumn == true,
                 _options.Value.DataSources?.TenantColumnExemptTables);
-            if (tenantColumn != null && !System.Text.RegularExpressions.Regex.IsMatch(tenantColumn, "^[A-Za-z_][A-Za-z0-9_]{0,127}$"))
+            if (tenantColumn != null && !SqlIdentifierGuard.IsValidIdentifier(tenantColumn))
             {
                 throw new InvalidOperationException($"The tenant column '{tenantColumn}' of {resolved.Target.FullName} is not a plain identifier; the query is refused (fail-closed).");
             }
@@ -739,7 +739,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
                 resolved.Metadata,
                 _options.Value.DataSources?.RequireTenantColumn == true,
                 _options.Value.DataSources?.TenantColumnExemptTables);
-            if (tenantColumn != null && !System.Text.RegularExpressions.Regex.IsMatch(tenantColumn, "^[A-Za-z_][A-Za-z0-9_]{0,127}$"))
+            if (tenantColumn != null && !SqlIdentifierGuard.IsValidIdentifier(tenantColumn))
             {
                 throw new InvalidOperationException($"The tenant column '{tenantColumn}' of {resolved.Target.FullName} is not a plain identifier; the query is refused (fail-closed).");
             }

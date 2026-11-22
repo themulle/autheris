@@ -7,7 +7,6 @@ using System.Collections.Generic;
 using System.Globalization;
 using System.IO;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Domain.Model;
@@ -23,7 +22,7 @@ using Parquet.Schema;
 /// The service is a pure output transformation: it only sees rows that already passed RLS, masking, consent and
 /// column governance and never reads data on its own.
 /// </summary>
-public sealed partial class ParquetExportService : IParquetExportService
+public sealed class ParquetExportService : IParquetExportService
 {
     public const string ParquetContentType = "application/vnd.apache.parquet";
 
@@ -35,9 +34,6 @@ public sealed partial class ParquetExportService : IParquetExportService
     private const decimal MaxDefaultDecimalMagnitude = 100000000000000000000m;
 
     private static readonly JsonSerializerOptions NestedJsonOptions = new() { WriteIndented = false };
-
-    [GeneratedRegex(@"^[a-zA-Z0-9_]+$", RegexOptions.Compiled)]
-    private static partial Regex SafeIdentifierRegex();
 
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<ParquetExportService> _logger;
@@ -74,13 +70,13 @@ public sealed partial class ParquetExportService : IParquetExportService
 
         // VULN-02: Path Traversal & CRLF-Injection defense in table and file name
         var tableName = request.Table.TableName;
-        if (string.IsNullOrWhiteSpace(tableName) || !SafeIdentifierRegex().IsMatch(tableName))
+        if (!SqlIdentifierGuard.IsValidIdentifier(tableName, maxLength: null, allowLeadingDigit: true))
         {
             throw new ArgumentException($"Invalid or unsafe table name '{tableName}'. Table names must match safe identifier pattern [a-zA-Z0-9_]+.", nameof(request));
         }
 
         var domainName = request.Table.Domain;
-        if (!string.IsNullOrWhiteSpace(domainName) && !SafeIdentifierRegex().IsMatch(domainName))
+        if (!string.IsNullOrWhiteSpace(domainName) && !SqlIdentifierGuard.IsValidIdentifier(domainName, maxLength: null, allowLeadingDigit: true))
         {
             throw new ArgumentException($"Invalid or unsafe domain name '{domainName}'. Domain names must match safe identifier pattern [a-zA-Z0-9_]+.", nameof(request));
         }

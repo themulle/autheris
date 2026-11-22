@@ -3,7 +3,6 @@ namespace Autheris.Application.Sql.Policy;
 using System;
 using System.Collections.Generic;
 using System.Text.Json;
-using System.Text.RegularExpressions;
 using Autheris.Domain.Common;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Emit;
@@ -15,12 +14,10 @@ using TrinoSqlEngine.Governance;
 /// is only ever reachable as a <see cref="PolicyParameterExpression"/> node plus an entry here (INV-5); no producer renders a value
 /// into text. Names are positional per predicate, so two independently built predicates merge only when they use distinct prefixes.
 /// </summary>
-internal sealed partial class PolicyParameterNamer
+internal sealed class PolicyParameterNamer
 {
     internal const string DefaultPrefix = "__gql_rls_";
-
-    [GeneratedRegex(@"\A[A-Za-z_][A-Za-z0-9_]{0,40}\z", RegexOptions.CultureInvariant, matchTimeoutMilliseconds: 100)]
-    private static partial Regex SafePrefixRegex();
+    private const int MaxPrefixLength = 41;
 
     private readonly string _prefix;
     private readonly Dictionary<string, PolicyValue> _values = new(StringComparer.Ordinal);
@@ -28,7 +25,7 @@ internal sealed partial class PolicyParameterNamer
 
     public PolicyParameterNamer(string prefix = DefaultPrefix)
     {
-        if (!SafePrefixRegex().IsMatch(prefix))
+        if (!SqlIdentifierGuard.IsValidIdentifier(prefix, maxLength: MaxPrefixLength))
         {
             throw new ArgumentException("The policy parameter prefix is not a safe identifier prefix.", nameof(prefix));
         }

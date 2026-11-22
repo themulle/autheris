@@ -2,6 +2,7 @@ namespace Autheris.Infrastructure.Persistence.Dialects;
 
 using System;
 using System.Data.Common;
+using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 
 /// <summary>
@@ -25,17 +26,21 @@ public interface IGovernanceSqlDialect
 }
 
 /// <summary>Strict validation of dialect SQL-fragment inputs.</summary>
-internal static partial class GovernanceSqlInput
+internal static class GovernanceSqlInput
 {
     private static readonly string[] Separators = [",", ", ", ";", "|", " "];
-
-    [System.Text.RegularExpressions.GeneratedRegex("^[A-Za-z0-9_.]+$")]
-    private static partial System.Text.RegularExpressions.Regex Safe();
 
     public static string Identifier(string value, string name)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(value, name);
-        return Safe().IsMatch(value) ? value : throw new ArgumentException("Unsafe SQL identifier or path.", name);
+        return SqlIdentifierGuard.ValidateQualifiedIdentifier(
+            value,
+            name,
+            minSegments: 1,
+            maxSegments: null,
+            maxSegmentLength: null,
+            allowLeadingDigit: true,
+            message: "Unsafe SQL identifier or path.");
     }
 
     public static string Separator(string? separator)

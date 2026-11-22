@@ -1,7 +1,7 @@
 using System.Globalization;
-using System.Text.RegularExpressions;
 using Autheris.Application.Analytics;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using HotChocolate.Language;
 
@@ -19,12 +19,9 @@ internal sealed record ParsedAggregateArguments(
 /// #112 A-2 / A-4 / C-4: argument shape, alias rules and the function/type matrix, decided before the engine is called. Errors carry
 /// fixed messages and stable codes and never echo a client value.
 /// </summary>
-internal static partial class AggregateArgumentParser
+internal static class AggregateArgumentParser
 {
     public const int DefaultLimit = 100;
-
-    [GeneratedRegex("^[A-Za-z_][A-Za-z0-9_]{0,63}$", RegexOptions.CultureInvariant | RegexOptions.NonBacktracking)]
-    private static partial Regex AliasPattern();
 
     public static ParsedAggregateArguments Parse(
         CatalogTableType table,
@@ -264,7 +261,7 @@ internal static partial class AggregateArgumentParser
             }
 
             var alias = aliasValue.Value;
-            if (!AliasPattern().IsMatch(alias) ||
+            if (!SqlIdentifierGuard.IsValidIdentifier(alias, maxLength: 64) ||
                 string.Equals(alias, "count", StringComparison.OrdinalIgnoreCase) ||
                 alias.StartsWith("__", StringComparison.Ordinal) ||
                 !aliases.Add(alias) ||
