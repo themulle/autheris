@@ -105,7 +105,7 @@ public static class GovernedConnectorReader
 
         // An HTTP API cannot evaluate the gateway's row filter or masking rules, so a declarative HTTP
         // connector never relaxes enforcement by self-attestation; the gateway always filters and masks its rows.
-        var mayAttest = MayAttest(metadata);
+        var mayAttest = ConnectorSecurityAttestation.MayAttest(metadata);
 
         // CR-10 (D-12): a table that cannot attest and carries a Virtual Filter predicate without an enforcement (OData, REST
         // and the other channels, which do not federate) is denied before the upstream is read: no egress for nothing and
@@ -404,7 +404,4 @@ public static class GovernedConnectorReader
 
         return estimatedBytes;
     }
-
-    internal static bool MayAttest(TableMetadata metadata) =>
-        metadata.Table?.DataSourceType != DataSourceType.HttpDeclarative;
 }

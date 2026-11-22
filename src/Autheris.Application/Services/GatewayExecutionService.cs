@@ -292,7 +292,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IReadOnlyList<IReadOnlyDictionary<string, object?>> rawRows;
         bool rlsPushdownAlreadyOccurred = false;
         bool inDbMaskingAlreadyOccurred = false;
-        var mayAttest = Autheris.Application.DataSources.Connectors.GovernedConnectorReader.MayAttest(metadata);
+        var mayAttest = Autheris.Domain.Connectors.ConnectorSecurityAttestation.MayAttest(metadata);
         Autheris.Application.Usage.SourceExecutionStats sourceStats = default;
 
         Autheris.Application.DataSources.Connectors.IAutherisConnector? connector = null;

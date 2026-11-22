@@ -389,17 +389,7 @@ public static class GatewayPolicies
             security = EndpointSecurity.GetSecurityContext(httpContext);
             return true;
         }
-        catch (UnauthorizedAccessException)
-        {
-            security = null;
-            return false;
-        }
-        catch (SecurityException)
-        {
-            security = null;
-            return false;
-        }
-        catch (ArgumentException)
+        catch (Exception ex) when (ex is UnauthorizedAccessException or SecurityException or ArgumentException)
         {
             security = null;
             return false;

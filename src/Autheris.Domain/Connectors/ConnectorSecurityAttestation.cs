@@ -6,4 +6,8 @@ namespace Autheris.Domain.Connectors;
 /// </summary>
 public readonly record struct ConnectorSecurityAttestation(
     bool RlsPushdownExecuted = false,
-    bool InDbColumnMaskingExecuted = false);
+    bool InDbColumnMaskingExecuted = false)
+{
+    public static bool MayAttest(Autheris.Domain.Model.TableMetadata metadata) =>
+        metadata.Table?.DataSourceType != Autheris.Domain.Model.DataSourceType.HttpDeclarative;
+}
