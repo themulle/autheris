@@ -92,7 +92,8 @@ public sealed class RoleResolverDegradedTests
         var resolution = await sut.ResolveAsync(Identity, Realm);
 
         resolution.Status.ShouldBe(RoleResolutionStatus.Degraded);
-        resolution.Groups.ShouldContain("S-1-5-21-1-2-3-4002");
+        resolution.Groups.ShouldBeEmpty();
+        resolution.AppRoles.ShouldBeEmpty();
         await _cache.DidNotReceiveWithAnyArgs().SetAsync(default!, default!, default!, default);
     }
 

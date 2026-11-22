@@ -213,7 +213,9 @@ public sealed record SecurityPrincipalContext
         ArgumentNullException.ThrowIfNull(principal);
 
         var userSid = principal.GetUserSid() ?? new Sid(principal.Identity?.Name ?? "ANONYMOUS");
-        var groupSids = principal.GetGroupSids();
+        var groupSids = Autheris.Domain.Identity.GroupResolutionClaims.IsMarkedDegraded(principal)
+            ? new HashSet<Sid>()
+            : principal.GetGroupSids();
         var rawRoles = principal.GetUserRoles();
         var clusterRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var tenantRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

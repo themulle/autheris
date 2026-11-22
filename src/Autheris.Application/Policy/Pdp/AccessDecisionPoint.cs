@@ -158,7 +158,8 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
 
         if ((subject.IsAuthenticated && subject.GroupResolutionStatus != GroupResolutionStatus.Complete)
             || (!subject.IsAuthenticated && !consentBypassed && subject.GroupResolutionStatus != GroupResolutionStatus.Complete)
-            || (subject.Principal != null && GroupResolutionClaims.IsMarkedDegraded(subject.Principal)))
+            || (subject.Principal != null && GroupResolutionClaims.IsMarkedDegraded(subject.Principal))
+            || GroupResolutionClaims.HasAnyDegradedClaim(subject.Claims))
         {
             return PreconditionDenied(table, "GROUPS_DEGRADED", "Identity", null, "identity.groups_unresolved: Group resolution unavailable (fail-closed).");
         }

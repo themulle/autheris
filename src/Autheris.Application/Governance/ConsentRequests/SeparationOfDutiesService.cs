@@ -90,7 +90,9 @@ public sealed class SeparationOfDutiesService(
         if (targetForms.Count == 0) return SodDecision.Allow();
 
         if (IsDegradedGroupOrRoleResolution(principal) ||
-            callerContext?.GroupResolutionStatus == GroupResolutionStatus.Degraded)
+            IsDegradedGroupOrRoleResolution(callerContext?.Principal) ||
+            callerContext?.GroupResolutionStatus == GroupResolutionStatus.Degraded ||
+            GroupResolutionClaims.HasAnyDegradedClaim(callerContext?.Claims))
             return SodDecision.Deny(SodViolationKind.SelfApproval, "Separation of duties violated: group or role resolution is degraded; denied fail-closed.");
 
         var directSids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -136,9 +138,11 @@ public sealed class SeparationOfDutiesService(
     public static bool IsDegradedGroupOrRoleResolution(ClaimsPrincipal? principal) =>
         principal is not null &&
         (GroupResolutionClaims.IsMarkedDegraded(principal) ||
-         principal.HasClaim(c =>
-             string.Equals(c.Type, GroupResolutionClaims.StatusClaimType, StringComparison.OrdinalIgnoreCase) &&
-             string.Equals(c.Value, GroupResolutionClaims.DegradedValue, StringComparison.OrdinalIgnoreCase)));
+         GroupResolutionClaims.HasAnyDegradedClaim(principal.Claims) ||
+         (GroupResolutionClaims.HasPipelineMarker(principal) &&
+          GroupResolutionClaims.Read(principal) != GroupResolutionStatus.Complete) ||
+         (!GroupResolutionClaims.HasPipelineMarker(principal) &&
+          GroupSidResolver.HasGroupOverage(principal)));
 
     public static HashSet<string> CollectSubjectIdentifiers(
         ClaimsPrincipal? principal, string? fallbackSid = null, IEnumerable<string>? additional = null)

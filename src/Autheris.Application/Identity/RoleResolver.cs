@@ -110,7 +110,7 @@ public sealed class RoleResolver : IRoleResolver
             try
             {
                 var result = await provider.GetRolesAsync(identity, realm, cancellationToken).ConfigureAwait(false);
-                if (result is { Failed: true })
+                if (result is null or { Failed: true })
                 {
                     degraded = true;
                 }
@@ -166,8 +166,15 @@ public sealed class RoleResolver : IRoleResolver
         if (mergedGroups.Count > _maxGroups)
         {
             // Never truncated: a dropped group could carry a deny.
-            mergedGroups.Clear();
             degraded = true;
+        }
+
+        if (degraded)
+        {
+            // Never surface partial groups, app roles, or attributes when any provider failed or exceeded bounds.
+            mergedGroups.Clear();
+            mergedAppRoles.Clear();
+            mergedAttributes.Clear();
         }
 
         var ttlMinutes = _ttlMinutes;
