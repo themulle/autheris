@@ -9,13 +9,15 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 
 /// <summary>Constant SQL of the data product store. Every statement carries the tenant predicate (the tenant is part of every key).</summary>
 internal static class DataProductStoreSql
 {
-    private const string Columns = "id, product_schema, product_name, kind, definition, definition_hash, base_objects_json, columns_json, created_by, authority, status, managed_by, load_json, limits_json, description, product_owner, version, created_at, updated_at";
+    private const string Columns = "id, product_schema, product_name, kind, definition, definition_hash, base_objects_json, columns_json, created_by, authority, status, managed_by, load_json, limits_json, description, owner_group_sid, default_class, visibility, version, created_at, updated_at";
 
     public const string GetSql = "SELECT " + Columns + " FROM DATA_PRODUCTS WHERE tenant_id = @tenant_id AND product_schema = @product_schema AND product_name = @product_name";
+    public const string GetByIdSql = "SELECT " + Columns + " FROM DATA_PRODUCTS WHERE tenant_id = @tenant_id AND id = @id";
     public const string ListPgSql = "SELECT " + Columns + " FROM DATA_PRODUCTS WHERE tenant_id = @tenant_id AND (product_schema > @after_schema OR (product_schema = @after_schema AND product_name > @after_name)) ORDER BY product_schema, product_name LIMIT @limit";
     public const string ListSsSql = "SELECT TOP (@limit) " + Columns + " FROM DATA_PRODUCTS WHERE tenant_id = @tenant_id AND (product_schema > @after_schema OR (product_schema = @after_schema AND product_name > @after_name)) ORDER BY product_schema, product_name";
     // The one cross-tenant read: the schedule worker enumerates every tenant's scheduled views (keyset on tenant, schema, name).
@@ -23,16 +25,11 @@ internal static class DataProductStoreSql
     public const string ListScheduledPgSql = "SELECT tenant_id, " + Columns + ScheduledWhere + " LIMIT @limit";
     public const string ListScheduledSsSql = "SELECT TOP (@limit) tenant_id, " + Columns + ScheduledWhere;
     public const string ExistsSql = "SELECT 1 FROM DATA_PRODUCTS WHERE tenant_id = @tenant_id AND product_schema = @product_schema AND product_name = @product_name";
-    public const string InsertSql = "INSERT INTO DATA_PRODUCTS (tenant_id, " + Columns + ") VALUES (@tenant_id, @id, @product_schema, @product_name, @kind, @definition, @definition_hash, @base_objects_json, @columns_json, @created_by, @authority, @status, @managed_by, @load_json, @limits_json, @description, @product_owner, @version, @created_at, @updated_at)";
-    public const string UpdateSql = "UPDATE DATA_PRODUCTS SET definition = @definition, definition_hash = @definition_hash, base_objects_json = @base_objects_json, columns_json = @columns_json, status = @status, managed_by = @managed_by, load_json = @load_json, limits_json = @limits_json, description = @description, product_owner = @product_owner, version = @version, updated_at = @updated_at WHERE tenant_id = @tenant_id AND id = @id AND product_schema = @product_schema AND product_name = @product_name AND version = @expected_version";
+    public const string InsertSql = "INSERT INTO DATA_PRODUCTS (tenant_id, " + Columns + ") VALUES (@tenant_id, @id, @product_schema, @product_name, @kind, @definition, @definition_hash, @base_objects_json, @columns_json, @created_by, @authority, @status, @managed_by, @load_json, @limits_json, @description, @owner_group_sid, @default_class, @visibility, @version, @created_at, @updated_at)";
+    public const string UpdateSql = "UPDATE DATA_PRODUCTS SET definition = @definition, definition_hash = @definition_hash, base_objects_json = @base_objects_json, columns_json = @columns_json, status = @status, managed_by = @managed_by, load_json = @load_json, limits_json = @limits_json, description = @description, owner_group_sid = @owner_group_sid, default_class = @default_class, visibility = @visibility, version = @version, updated_at = @updated_at WHERE tenant_id = @tenant_id AND id = @id AND product_schema = @product_schema AND product_name = @product_name AND version = @expected_version";
 
     public const string InsertVersionSql = "INSERT INTO DATA_PRODUCT_VERSIONS (tenant_id, product_id, version, definition_hash, definition, author, authority, created_at) VALUES (@tenant_id, @product_id, @version, @definition_hash, @definition, @author, @authority, @created_at)";
     public const string SelectVersionsSql = "SELECT product_id, version, definition_hash, definition, author, authority, created_at FROM DATA_PRODUCT_VERSIONS WHERE tenant_id = @tenant_id AND product_id = @product_id ORDER BY version";
-
-    public const string IsOwnerSql = "SELECT 1 FROM DATA_SOURCE_OWNERS WHERE tenant_id = @tenant_id AND data_source = @data_source AND owner_sid = @owner_sid";
-    public const string SelectOwnersSql = "SELECT data_source, owner_sid, assigned_by, assigned_at FROM DATA_SOURCE_OWNERS WHERE tenant_id = @tenant_id AND data_source = @data_source ORDER BY owner_sid";
-    public const string InsertOwnerSql = "INSERT INTO DATA_SOURCE_OWNERS (tenant_id, data_source, owner_sid, assigned_by, assigned_at) VALUES (@tenant_id, @data_source, @owner_sid, @assigned_by, @assigned_at)";
-    public const string DeleteOwnerSql = "DELETE FROM DATA_SOURCE_OWNERS WHERE tenant_id = @tenant_id AND data_source = @data_source AND owner_sid = @owner_sid";
 
     private static readonly JsonSerializerOptions Json = new() { Converters = { new JsonStringEnumConverter() } };
 
@@ -65,7 +62,9 @@ internal static class DataProductStoreSql
         cmd.AddBound("@load_json", JsonSerializer.Serialize(p.Load, Json));
         cmd.AddBound("@limits_json", JsonSerializer.Serialize(p.Limits, Json));
         cmd.AddBound("@description", (object?)p.Description ?? DBNull.Value, DbType.String);
-        cmd.AddBound("@product_owner", p.ProductOwner.Value);
+        cmd.AddBound("@owner_group_sid", (object?)p.OwnerGroupSid?.Value ?? DBNull.Value, DbType.String);
+        cmd.AddBound("@default_class", (object?)p.DefaultClass?.ToCanonicalName() ?? DBNull.Value, DbType.String);
+        cmd.AddBound("@visibility", p.Visibility.NormalizeOrOnRequest().ToCanonicalName(), DbType.String);
         cmd.AddBound("@version", p.Version, DbType.Int32);
         cmd.AddBound("@created_at", p.CreatedAt.ToUniversalTime(), DbType.DateTimeOffset);
         cmd.AddBound("@updated_at", p.UpdatedAt.ToUniversalTime(), DbType.DateTimeOffset);
@@ -100,10 +99,12 @@ internal static class DataProductStoreSql
         JsonSerializer.Deserialize<LoadSettings>(r.GetString(12 + o), Json)!,
         JsonSerializer.Deserialize<ProductLimits>(r.GetString(13 + o), Json)!,
         r.IsDBNull(14 + o) ? null : r.GetString(14 + o),
-        new Sid(r.GetString(15 + o)),
-        r.GetInt32(16 + o),
-        r.GetFieldValue<DateTimeOffset>(17 + o),
-        r.GetFieldValue<DateTimeOffset>(18 + o));
+        r.IsDBNull(15 + o) || string.IsNullOrWhiteSpace(r.GetString(15 + o)) ? (Sid?)null : new Sid(r.GetString(15 + o)),
+        r.IsDBNull(16 + o) ? (ProtectionClass?)null : ProtectionClassExtensions.ParseOrConfidential(r.GetString(16 + o)),
+        CatalogVisibilityModeExtensions.ParseOrOnRequest(r.IsDBNull(17 + o) ? null : r.GetString(17 + o)),
+        r.GetInt32(18 + o),
+        r.GetFieldValue<DateTimeOffset>(19 + o),
+        r.GetFieldValue<DateTimeOffset>(20 + o));
 
     public static DataProductVersion ReadVersion(DbDataReader r) => new(
         Guid.Parse(r.GetString(0)), r.GetInt32(1), r.GetString(2), r.GetString(3), new Sid(r.GetString(4)),

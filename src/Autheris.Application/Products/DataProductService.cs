@@ -8,14 +8,17 @@ using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests.Events;
+using Autheris.Application.Governance.Caching;
+using Autheris.Application.Governance.Policy;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 using Microsoft.Extensions.Logging;
 using TrinoSqlEngine;
 
 /// <summary>
-/// A create or definition change (PUT). Admin and sync creations must name <see cref="ProductOwner"/>. A <see cref="DryRun"/> runs every
+/// A create or definition change (PUT). Admin and sync creations must name <see cref="OwnerGroupSid"/>. A <see cref="DryRun"/> runs every
 /// check, including the creation authority, and returns the product that would be stored without writing, notifying or auditing it.
 /// </summary>
 public sealed record ProductPutRequest(
@@ -24,14 +27,16 @@ public sealed record ProductPutRequest(
     string Name,
     DataProductKind Kind,
     string Definition,
-    Sid? ProductOwner = null,
+    Sid? OwnerGroupSid = null,
     LoadSettings? Load = null,
     ProductLimits? Limits = null,
     string? Description = null,
-    bool DryRun = false);
+    bool DryRun = false,
+    ProtectionClass? DefaultClass = null,
+    CatalogVisibilityMode? Visibility = null);
 
 /// <summary>
-/// Administration of data products: creation authority, product-owner rules, base-owner notification and column classification.
+/// Administration of data products: creation authority, container owner-group rules, base-owner notification and column classification.
 /// Every mutation is audited before it is reported as done; refused operations are audited as denials.
 /// </summary>
 public sealed partial class DataProductService(
@@ -45,10 +50,16 @@ public sealed partial class DataProductService(
     TimeProvider? timeProvider = null,
     ILogger<DataProductService>? logger = null,
     IProductOwnershipSync? ownershipSync = null,
-    IProductCatalogStore? catalogStore = null)
+    IProductCatalogStore? catalogStore = null,
+    ViewDowngradeGuard? downgradeGuard = null,
+    IAccessPolicySettingsProvider? policyProvider = null,
+    IGovernanceCacheInvalidator? cacheInvalidator = null)
 {
     private readonly IProductCatalogStore? _catalogStore = catalogStore;
     private readonly IProductOwnershipSync? _ownershipSync = ownershipSync;
+    private readonly ViewDowngradeGuard? _downgradeGuard = downgradeGuard;
+    private readonly IAccessPolicySettingsProvider? _policyProvider = policyProvider;
+    private readonly IGovernanceCacheInvalidator? _cacheInvalidator = cacheInvalidator;
     private readonly IDataProductRepository _products = products ?? throw new ArgumentNullException(nameof(products));
     private readonly ProductAuthorityService _authority = authority ?? throw new ArgumentNullException(nameof(authority));
     private readonly IProductCatalogColumns _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
@@ -84,6 +95,16 @@ public sealed partial class DataProductService(
 
         var load = ValidatedLoad(command.Kind, command.Load);
         var limits = ValidatedLimits(command.Limits);
+        if (command.DefaultClass is { } requestedClass && !Enum.IsDefined(requestedClass))
+        {
+            throw Invalid();
+        }
+
+        if (command.Visibility is { } requestedVisibility && !Enum.IsDefined(requestedVisibility))
+        {
+            throw Invalid();
+        }
+
         var existing = await _products.GetProductAsync(caller.Tenant, schema, name, ct).ConfigureAwait(false);
         if (existing is not null)
         {
@@ -106,21 +127,25 @@ public sealed partial class DataProductService(
         var analysis = await AnalyzeAsync(caller.Tenant, command.Kind, command.Definition, ct).ConfigureAwait(false);
         var authorityObjects = existing is null ? analysis.BaseObjects : analysis.BaseObjects.Concat(existing.BaseObjects).Distinct().ToList();
         var decision = await _authority.AuthorizeCreationAsync(
-            caller, command.Kind, authorityObjects, existing?.ProductOwner ?? command.ProductOwner, ct).ConfigureAwait(false);
+            caller, command.Kind, authorityObjects, existing?.OwnerGroupSid ?? command.OwnerGroupSid, ct).ConfigureAwait(false);
         if (!decision.Allowed)
         {
-            throw await DenyAsync(caller, schema, name, decision.ErrorCode!, ProductFailure.Forbidden, ct).ConfigureAwait(false);
+            var failure = decision.ErrorCode == ProductErrorCodes.DefinitionInvalid ? ProductFailure.Invalid : ProductFailure.Forbidden;
+            throw await DenyAsync(caller, schema, name, decision.ErrorCode!, failure, ct).ConfigureAwait(false);
         }
 
         var now = _time.GetUtcNow();
         var hash = ProductDefinitions.Hash(command.Definition);
         // A declassification belongs to one definition: any change of the definition falls back to the lineage default.
         var columns = ProductColumnClassifier.Classify(analysis.Columns, analysis.IsPii, existing is not null && existing.DefinitionHash == hash ? existing.Columns : null);
+        var visibility = command.Visibility ?? existing?.Visibility ?? await ResolveDefaultVisibilityAsync(caller.Tenant, ct).ConfigureAwait(false);
+        var defaultClass = command.DefaultClass ?? existing?.DefaultClass;
         var product = new DataProduct(
             existing?.Id ?? Guid.NewGuid(), caller.Tenant, schema, name, command.Kind, command.Definition.Trim(), hash, analysis.BaseObjects, columns,
             existing?.CreatedBy ?? caller.Sid, existing?.Authority ?? decision.Authority!.Value, DataProductStatus.Active,
             existing?.ManagedBy ?? (caller.ViaSyncPath ? "Git" : null), load, limits, command.Description ?? existing?.Description,
-            existing?.ProductOwner ?? decision.ProductOwner!.Value, existing is null ? 1 : existing.Version + 1,
+            existing?.OwnerGroupSid ?? decision.OwnerGroupSid, defaultClass, visibility,
+            existing is null ? 1 : existing.Version + 1,
             existing?.CreatedAt ?? now, now);
         if (command.DryRun)
         {
@@ -140,11 +165,12 @@ public sealed partial class DataProductService(
 
         var stored = outcome.Product ?? product;
         await PersistCatalogAsync(stored, ct).ConfigureAwait(false);
-        if (_ownershipSync is not null && (existing is null || existing.ProductOwner != stored.ProductOwner))
+        if (_ownershipSync is not null && (existing is null || existing.OwnerGroupSid != stored.OwnerGroupSid))
         {
             await _ownershipSync.SyncAsync(stored, ct).ConfigureAwait(false);
         }
 
+        _cacheInvalidator?.InvalidateTenant(caller.Tenant.Value);
         var notified = definitionChanged
             ? await NotifyBaseOwnersAsync(stored, existing is null ? ProductEventTypes.Created : ProductEventTypes.Changed, now, ct).ConfigureAwait(false)
             : 0;
@@ -154,7 +180,7 @@ public sealed partial class DataProductService(
         return stored;
     }
 
-    /// <summary>Retires the product (it stays in the store as a tombstone). Allowed for the product owner and for creation-authority holders.</summary>
+    /// <summary>Retires the product (it stays in the store as a tombstone). Allowed for owner-group members and creation-authority holders.</summary>
     public async Task<DataProduct> RetireAsync(ProductCaller caller, string schema, string name, CancellationToken ct = default)
     {
         var product = await LoadAsync(caller, schema, name, ct).ConfigureAwait(false);
@@ -163,12 +189,13 @@ public sealed partial class DataProductService(
             throw new ProductException(ProductFailure.Conflict, ProductErrorCodes.Retired);
         }
 
-        if (product.ManagedBy is not null && !caller.ViaSyncPath && !ProductAuthorityService.IsProductOwner(caller, product))
+        var isOwner = await _authority.IsProductOwnerAsync(caller, product, ct).ConfigureAwait(false);
+        if (product.ManagedBy is not null && !caller.ViaSyncPath && !isOwner)
         {
             throw await DenyAsync(caller, product.Schema, product.Name, ProductErrorCodes.ManagedByGit, ProductFailure.Conflict, ct).ConfigureAwait(false);
         }
 
-        if (!ProductAuthorityService.IsProductOwner(caller, product) && !await HasDefinitionAuthorityAsync(caller, product, ct).ConfigureAwait(false))
+        if (!isOwner && !await HasDefinitionAuthorityAsync(caller, product, ct).ConfigureAwait(false))
         {
             throw await DenyAsync(caller, product.Schema, product.Name, ProductErrorCodes.CreationNotAuthorized, ProductFailure.Forbidden, ct).ConfigureAwait(false);
         }
@@ -181,19 +208,21 @@ public sealed partial class DataProductService(
             await _ownershipSync.SyncAsync(retired, ct).ConfigureAwait(false);
         }
 
+        _cacheInvalidator?.InvalidateTenant(caller.Tenant.Value);
         var notified = await NotifyBaseOwnersAsync(retired, ProductEventTypes.Retired, now, ct).ConfigureAwait(false);
         await AuditAsync(AuditEventTypes.ProductRetired, caller, retired, new { baseOwnersNotified = notified }, now, ct).ConfigureAwait(false);
         return retired;
     }
 
-    /// <summary>Transfers the product to another owner; only a <c>DataProductAdmin</c>, never to themselves.</summary>
-    public async Task<DataProduct> TransferAsync(ProductCaller caller, string schema, string name, Sid newOwner, CancellationToken ct = default)
+    /// <summary>Assigns or replaces the container owner group; only <c>DataProductAdmin</c> or Data Governance, never to caller's own SID.</summary>
+    public async Task<DataProduct> SetOwnerGroupAsync(ProductCaller caller, string schema, string name, Sid newOwnerGroupSid, CancellationToken ct = default)
     {
         var product = await LoadAsync(caller, schema, name, ct).ConfigureAwait(false);
-        var decision = ProductAuthorityService.AuthorizeTransfer(caller, product, newOwner);
+        var decision = _authority.AuthorizeOwnerGroupChange(caller, product, newOwnerGroupSid);
         if (!decision.Allowed)
         {
-            throw await DenyAsync(caller, product.Schema, product.Name, decision.ErrorCode!, ProductFailure.Forbidden, ct).ConfigureAwait(false);
+            var failure = decision.ErrorCode == ProductErrorCodes.DefinitionInvalid ? ProductFailure.Invalid : ProductFailure.Forbidden;
+            throw await DenyAsync(caller, product.Schema, product.Name, decision.ErrorCode!, failure, ct).ConfigureAwait(false);
         }
 
         if (product.Status == DataProductStatus.Retired)
@@ -202,22 +231,31 @@ public sealed partial class DataProductService(
         }
 
         var now = _time.GetUtcNow();
-        var moved = await ReplaceAsync(product with { ProductOwner = newOwner, UpdatedAt = now, Version = product.Version + 1 }, product.Version, ct).ConfigureAwait(false);
-        await PersistCatalogAsync(moved, ct).ConfigureAwait(false);
+        var updated = await ReplaceAsync(
+            product with { OwnerGroupSid = decision.OwnerGroupSid, UpdatedAt = now, Version = product.Version + 1 },
+            product.Version, ct).ConfigureAwait(false);
+        await PersistCatalogAsync(updated, ct).ConfigureAwait(false);
         if (_ownershipSync is not null)
         {
-            await _ownershipSync.SyncAsync(moved, ct).ConfigureAwait(false);
+            await _ownershipSync.SyncAsync(updated, ct).ConfigureAwait(false);
         }
 
-        await AuditAsync(AuditEventTypes.ProductOwnerTransferred, caller, moved, new { previousOwner = product.ProductOwner.Value, newOwner = newOwner.Value }, now, ct).ConfigureAwait(false);
-        return moved;
+        _cacheInvalidator?.InvalidateTenant(caller.Tenant.Value);
+        await AuditAsync(
+            AuditEventTypes.OwnerGroupAssigned,
+            caller,
+            updated,
+            new { previousOwnerGroupSid = product.OwnerGroupSid?.Value, newOwnerGroupSid = updated.OwnerGroupSid?.Value },
+            now,
+            ct).ConfigureAwait(false);
+        return updated;
     }
 
-    /// <summary>The product owner changes the description and the load mode; the definition stays with the creation-authority holders.</summary>
+    /// <summary>The owner group changes the description and the load mode; the definition stays with the creation-authority holders.</summary>
     public async Task<DataProduct> UpdateSettingsAsync(ProductCaller caller, string schema, string name, string? description, LoadSettings? load, CancellationToken ct = default)
     {
         var product = await LoadAsync(caller, schema, name, ct).ConfigureAwait(false);
-        if (!ProductAuthorityService.IsProductOwner(caller, product))
+        if (!await _authority.IsProductOwnerAsync(caller, product, ct).ConfigureAwait(false))
         {
             throw await DenyAsync(caller, product.Schema, product.Name, ProductErrorCodes.OwnerOnlyOperation, ProductFailure.Forbidden, ct).ConfigureAwait(false);
         }
@@ -242,8 +280,8 @@ public sealed partial class DataProductService(
     }
 
     /// <summary>
-    /// Changes the class of one column. Only creation-authority holders may (never the product owner); lowering the protection needs a
-    /// reason and is audited with the actor.
+    /// Changes the class of one column. Downgrades from stricter PII classes go through <see cref="ViewDowngradeGuard"/> (DG or
+    /// container owner group, IT refused, justification >= 10 chars, audited <c>VIEW_DOWNGRADED</c>).
     /// </summary>
     public async Task<DataProduct> ClassifyColumnAsync(
         ProductCaller caller, string schema, string name, string column, ProductColumnClass target, string? reason, CancellationToken ct = default)
@@ -254,31 +292,45 @@ public sealed partial class DataProductService(
             throw await DenyAsync(caller, product.Schema, product.Name, ProductErrorCodes.ManagedByGit, ProductFailure.Conflict, ct).ConfigureAwait(false);
         }
 
-        if (!await HasDefinitionAuthorityAsync(caller, product, ct).ConfigureAwait(false))
-        {
-            throw await DenyAsync(caller, product.Schema, product.Name, ProductErrorCodes.CreationNotAuthorized, ProductFailure.Forbidden, ct).ConfigureAwait(false);
-        }
-
         var index = product.Columns.ToList().FindIndex(c => string.Equals(c.Name, column, StringComparison.OrdinalIgnoreCase));
         if (index < 0)
         {
             throw new ProductException(ProductFailure.NotFound, ProductErrorCodes.NotFound);
         }
 
-        var result = ProductColumnClassifier.Declassify(product.Columns[index], target, reason, caller.Sid);
-        if (result.Column is null)
+        var existingColumn = product.Columns[index];
+        DataProductColumn classifiedColumn;
+        if (!caller.ViaSyncPath && ViewDowngradeGuard.IsDowngrade(existingColumn.Class, target) && _downgradeGuard is not null)
         {
-            throw await DenyAsync(caller, product.Schema, product.Name, result.ErrorCode!, ProductFailure.Invalid, ct).ConfigureAwait(false);
+            var principal = caller.PrincipalContext
+                            ?? throw await DenyAsync(caller, product.Schema, product.Name, ProductErrorCodes.CreationNotAuthorized, ProductFailure.Forbidden, ct).ConfigureAwait(false);
+            classifiedColumn = await _downgradeGuard.GuardAndAuditAsync(principal, product, existingColumn, target, reason, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            if (!await HasDefinitionAuthorityAsync(caller, product, ct).ConfigureAwait(false))
+            {
+                throw await DenyAsync(caller, product.Schema, product.Name, ProductErrorCodes.CreationNotAuthorized, ProductFailure.Forbidden, ct).ConfigureAwait(false);
+            }
+
+            var result = ProductColumnClassifier.Declassify(existingColumn, target, reason, caller.Sid);
+            if (result.Column is null)
+            {
+                throw await DenyAsync(caller, product.Schema, product.Name, result.ErrorCode!, ProductFailure.Invalid, ct).ConfigureAwait(false);
+            }
+
+            classifiedColumn = result.Column;
         }
 
         var columns = product.Columns.ToList();
-        columns[index] = result.Column;
+        columns[index] = classifiedColumn;
         var now = _time.GetUtcNow();
         var updated = await ReplaceAsync(product with { Columns = columns, UpdatedAt = now, Version = product.Version + 1 }, product.Version, ct).ConfigureAwait(false);
         await PersistCatalogAsync(updated, ct).ConfigureAwait(false);
+        _cacheInvalidator?.InvalidateTenant(caller.Tenant.Value);
         await AuditAsync(
             AuditEventTypes.ProductColumnClassificationChanged, caller, updated,
-            new { column = result.Column.Name, from = product.Columns[index].Class.ToString(), to = target.ToString(), reason = result.Column.DeclassificationReason }, now, ct).ConfigureAwait(false);
+            new { column = classifiedColumn.Name, from = existingColumn.Class.ToString(), to = target.ToString(), reason = classifiedColumn.DeclassificationReason }, now, ct).ConfigureAwait(false);
         return updated;
     }
 }

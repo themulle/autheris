@@ -36,8 +36,6 @@ public sealed class ConsentRevocationAuthorityTests : IDisposable
             SourceName = _table.Domain,
             SchemaName = _table.Schema,
             TableName = _table.TableName,
-            Sensitivity = "LOW",
-            RequiresFourEyes = false,
             IsActive = true
         };
         _tableId = (await _repo.UpsertTableMetadataAsync(new TableMetadata

@@ -128,7 +128,7 @@ public class DelegationAndFourEyesStressTests : IDisposable
         var table = new TableIdentifier("finance", "dbo", "finance_table_5");
         var meta = await _repository.GetTableMetadataAsync(table);
         meta.ShouldNotBeNull();
-        meta.Table.RequiresFourEyes.ShouldBeTrue();
+        ClassificationMetadata.IsTableSensitive(meta).ShouldBeTrue();
 
         var requesterSid = new Sid("S-1-5-21-REQ-LIFECYCLE");
         var approver1 = new Sid("S-1-5-21-1000-1000-1000-1002");
@@ -147,7 +147,7 @@ public class DelegationAndFourEyesStressTests : IDisposable
         });
 
         // Step 1: Approver 1 approves
-        var step1 = await _repository.ApproveConsentRequestStepAsync(req.Id, approver1);
+        var step1 = await _repository.ApproveConsentRequestStepAsync(req.Id, approver1, requireSecondApprover: true);
         step1.Status.ShouldBe("PENDING_SECOND_APPROVAL");
 
         // Step 2: Approver 2 rejects with reason
@@ -157,7 +157,7 @@ public class DelegationAndFourEyesStressTests : IDisposable
         // Attempting to approve after rejection must throw
         await Should.ThrowAsync<InvalidOperationException>(async () =>
         {
-            await _repository.ApproveConsentRequestStepAsync(req.Id, approver1);
+            await _repository.ApproveConsentRequestStepAsync(req.Id, approver1, requireSecondApprover: true);
         });
     }
 
@@ -286,7 +286,7 @@ public class DelegationAndFourEyesStressTests : IDisposable
         {
             try
             {
-                await _repository.ApproveConsentRequestStepAsync(req.Id, approver1);
+                await _repository.ApproveConsentRequestStepAsync(req.Id, approver1, requireSecondApprover: true);
                 return true;
             }
             catch (InvalidOperationException)
@@ -330,8 +330,8 @@ public class DelegationAndFourEyesStressTests : IDisposable
         });
 
         // Both distinct approvers approve simultaneously
-        var task1 = _repository.ApproveConsentRequestStepAsync(req.Id, approver1);
-        var task2 = _repository.ApproveConsentRequestStepAsync(req.Id, approver2);
+        var task1 = _repository.ApproveConsentRequestStepAsync(req.Id, approver1, requireSecondApprover: true);
+        var task2 = _repository.ApproveConsentRequestStepAsync(req.Id, approver2, requireSecondApprover: true);
 
         await Task.WhenAll(task1, task2);
 

@@ -91,7 +91,7 @@ public sealed class Issue116ScopeOnlyColumnRuleConsistencyTests
             Table = new Table
             {
                 SourceName = "sales", SchemaName = "public", TableName = "orders",
-                DisplayName = "sales.orders", Sensitivity = "NORMAL",
+                DisplayName = "sales.orders",
             },
             Columns =
             [

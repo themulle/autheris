@@ -45,7 +45,13 @@ public sealed class McpUnderlyingTableFourEyesTests
                 var id = ci.Arg<TableIdentifier>();
                 if (id.Equals(Secret))
                 {
-                    return new TableMetadata { Identifier = id, Table = new Table { TableName = "secret", RequiresFourEyes = true, IsActive = true } };
+                    return new TableMetadata
+                    {
+                        Identifier = id,
+                        Table = new Table { TableName = "secret", IsActive = true },
+                        Columns = [new TableColumn { ColumnName = "ssn" }],
+                        ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("ssn")
+                    };
                 }
 
                 if (id.Equals(Inactive))
@@ -114,9 +120,9 @@ public sealed class McpUnderlyingTableFourEyesTests
         guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpDatasetTools.CallProcedure, args), Session());
 
     [Theory]
-    [InlineData("dbo.secret", null)]
-    [InlineData("dbo.pub", "dbo.secret")]
-    public async Task CallProcedure_FourEyesTableBehindTheProcedure_NeedsApproval(string resultTable, string? referencedTable)
+    [InlineData("dbo.inactive", null)]
+    [InlineData("dbo.pub", "dbo.inactive")]
+    public async Task CallProcedure_InactiveTableBehindTheProcedure_FailsClosed(string resultTable, string? referencedTable)
     {
         var executor = Executor();
         var guardrail = Guardrail(executor, Procedure("GetData", resultTable, referencedTable == null ? null : [referencedTable]));
@@ -124,8 +130,22 @@ public sealed class McpUnderlyingTableFourEyesTests
         var result = await CallProcedure(guardrail, """{"procedure_name":"GetData"}""");
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("Four-Eyes");
+        result.ErrorMessage!.ShouldContain("not accessible");
         await executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
+    }
+
+    [Theory]
+    [InlineData("dbo.secret", null)]
+    [InlineData("dbo.pub", "dbo.secret")]
+    public async Task CallProcedure_SensitiveActiveTable_ExecutesWithoutFourEyesGate(string resultTable, string? referencedTable)
+    {
+        var executor = Executor();
+        var guardrail = Guardrail(executor, Procedure("GetData", resultTable, referencedTable == null ? null : [referencedTable]));
+
+        var result = await CallProcedure(guardrail, """{"procedure_name":"GetData"}""");
+
+        result.IsSuccess.ShouldBeTrue(result.ErrorMessage);
+        await executor.ReceivedWithAnyArgs(1).ExecuteOperationAsync(default!, default!, default!, default);
     }
 
     [Fact]
@@ -203,12 +223,12 @@ public sealed class McpUnderlyingTableFourEyesTests
     {
         // The executor runs "procedure_name"; an alias argument naming a harmless procedure must not be what the gate checks.
         var executor = Executor();
-        var guardrail = Guardrail(executor, Procedure("GetSecret", "dbo.secret"));
+        var guardrail = Guardrail(executor, Procedure("GetInactive", "dbo.inactive"));
 
-        var result = await CallProcedure(guardrail, """{"procedure":"Harmless","procedure_name":"GetSecret"}""");
+        var result = await CallProcedure(guardrail, """{"procedure":"Harmless","procedure_name":"GetInactive"}""");
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("Four-Eyes");
+        result.ErrorMessage!.ShouldContain("not accessible");
     }
 
     [Fact]
@@ -253,16 +273,28 @@ public sealed class McpUnderlyingTableFourEyesTests
         guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpSemanticTools.QueryMetrics, args), Session());
 
     [Fact]
-    public async Task QueryMetrics_FourEyesBaseTable_NeedsApproval()
+    public async Task QueryMetrics_InactiveBaseTable_FailsClosed()
+    {
+        var executor = Executor();
+        var guardrail = Guardrail(executor, semanticCatalog: await CatalogOver(Inactive));
+
+        var result = await QueryMetrics(guardrail, """{"metrics":["revenue"]}""");
+
+        result.IsSuccess.ShouldBeFalse();
+        result.ErrorMessage!.ShouldContain("not accessible");
+        await executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
+    }
+
+    [Fact]
+    public async Task QueryMetrics_SensitiveActiveBaseTable_IsAllowedWithoutFourEyes()
     {
         var executor = Executor();
         var guardrail = Guardrail(executor, semanticCatalog: await CatalogOver(Secret));
 
         var result = await QueryMetrics(guardrail, """{"metrics":["revenue"]}""");
 
-        result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("Four-Eyes");
-        await executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
+        result.IsSuccess.ShouldBeTrue(result.ErrorMessage);
+        await executor.ReceivedWithAnyArgs(1).ExecuteOperationAsync(default!, default!, default!, default);
     }
 
     [Fact]

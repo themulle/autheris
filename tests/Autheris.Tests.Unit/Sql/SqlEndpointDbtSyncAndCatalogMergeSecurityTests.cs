@@ -178,8 +178,6 @@ public sealed class SqlEndpointDbtSyncAndCatalogMergeSecurityTests : IDisposable
                 SchemaName = "dbo",
                 TableName = "payroll",
                 SourceType = "SqlServer",
-                Sensitivity = "RESTRICTED",
-                RequiresFourEyes = true,
                 IsActive = false,
                 DataSourceType = DataSourceType.HttpPlugin,
                 PluginName = "payroll-plugin"
@@ -204,8 +202,6 @@ public sealed class SqlEndpointDbtSyncAndCatalogMergeSecurityTests : IDisposable
                 SchemaName = "dbo",
                 TableName = "payroll",
                 SourceType = "PostgreSQL",
-                Sensitivity = "NORMAL",
-                RequiresFourEyes = false,
                 IsActive = true
             },
             Columns =
@@ -223,8 +219,6 @@ public sealed class SqlEndpointDbtSyncAndCatalogMergeSecurityTests : IDisposable
         var merged = CatalogGovernanceRatchet.Merge(incoming, existing);
 
         merged.Table.Id.ShouldBe(existing.Table.Id);
-        merged.Table.Sensitivity.ShouldBe("RESTRICTED");
-        merged.Table.RequiresFourEyes.ShouldBeTrue();
         merged.Table.IsActive.ShouldBeFalse();
         merged.Table.DataSourceType.ShouldBe(DataSourceType.HttpPlugin);
         merged.Table.PluginName.ShouldBe("payroll-plugin");
@@ -234,20 +228,5 @@ public sealed class SqlEndpointDbtSyncAndCatalogMergeSecurityTests : IDisposable
         ClassificationMetadata.IsColumnSensitive(merged, "email").ShouldBeTrue();
         merged.ColumnMaskingRules["iban"].RuleType.ShouldBe("REDACT");
         merged.ColumnMaskingRules["email"].RuleType.ShouldBe("MASK_EMAIL");
-
-        // Tightening from the catalog is applied
-        var stricter = CatalogGovernanceRatchet.Merge(
-            new TableMetadata
-            {
-                Identifier = id,
-                Table = new Table { SourceName = "finance", SchemaName = "dbo", TableName = "payroll", Sensitivity = "HIGH", RequiresFourEyes = true },
-            },
-            new TableMetadata
-            {
-                Identifier = id,
-                Table = new Table { SourceName = "finance", SchemaName = "dbo", TableName = "payroll", Sensitivity = "NORMAL" }
-            });
-        stricter.Table.Sensitivity.ShouldBe("HIGH");
-        stricter.Table.RequiresFourEyes.ShouldBeTrue();
     }
 }

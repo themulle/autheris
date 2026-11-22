@@ -73,8 +73,11 @@
 /api/v1/governance/classifications/{code}|GET|no side effect: reads one classification definition of the caller scope
 /api/v1/governance/config-sync/status|GET|no side effect: reads virtual filter config sync status
 /api/v1/governance/contracts|GET|no side effect: lists data contracts
+/api/v1/governance/domains|GET|no side effect: lists tenant governance domains
+/api/v1/governance/domains/{id:guid}|GET|no side effect: reads single governance domain
 /api/v1/governance/effective-filters|GET|no side effect: reads effective row filters
 /api/v1/governance/grants|GET|no side effect: lists governance grants
+/api/v1/governance/policy|GET|no side effect: reads deployment-clamped tenant access policy settings
 /api/v1/governance/virtual-filters/sync/status|GET|no side effect: reads virtual filter sync status
 /api/v1/governance/virtual-filters|GET|no side effect: lists virtual filters
 /api/v1/jobs/{jobId}/result|GET|no side effect: streams completed async query job result
@@ -87,7 +90,6 @@
 /api/v1/products/discovery|GET|no side effect: lists the data products the caller may read, with columns and refresh time
 /api/v1/products/{schema}/{name}/explain|GET|no side effect: explains the caller's own access to one data product
 /api/v1/products/{schema}/{name}/usage|GET|no side effect: reads the usage counters of one data product the caller may see
-/api/v1/products/sources/{dataSource}/owners|GET|no side effect: lists data source owners of the caller's tenant
 /api/v1/products/{schema}/{name}|GET|no side effect: reads one data product of the caller's tenant
 /api/v1/products/|GET|no side effect: lists data products of the caller's tenant
 /api/v1/profiles/{id}|GET|no side effect: reads governance profile by id

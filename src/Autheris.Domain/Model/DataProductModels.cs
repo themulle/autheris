@@ -3,6 +3,7 @@ namespace Autheris.Domain.Model;
 using System;
 using System.Collections.Generic;
 using Autheris.Domain.Common;
+using Autheris.Domain.Security;
 
 /// <summary>What a data product is: a view over catalog ids or a source procedure.</summary>
 public enum DataProductKind { View, Procedure }
@@ -13,7 +14,7 @@ public enum LoadMode { Schedule, OnDemand, Live }
 public enum DataProductStatus { Active, Stale, Invalid, Retired }
 
 /// <summary>The creation authority a product was created under (decides who may change its definition).</summary>
-public enum ProductCreatorAuthority { BaseOwner, DataSourceOwner, DataProductAdmin, GitSync }
+public enum ProductCreatorAuthority { BaseOwner, DataProductAdmin, GitSync }
 
 /// <summary>Classification of a product column: masked by default, clear only with a clear rule on the caller's product grant.</summary>
 public enum ProductColumnClass { PiiMasked, PiiClearEligible, NonPii }
@@ -53,8 +54,8 @@ public sealed record ProductLimits(long MaxRows = 0, long MaxBytes = 0, int MaxR
 }
 
 /// <summary>
-/// A data product: an object defined in Autheris, never in the source database. <see cref="ProductOwner"/> decides the grants on it;
-/// the base owners are only notified. <see cref="Version"/> counts definition revisions (1 on creation).
+/// A data product: an object defined in Autheris, never in the source database. Its <see cref="OwnerGroupSid"/> container owner group
+/// manages grants, defaults, and metadata; base owners are only notified. <see cref="Version"/> counts definition revisions (1 on creation).
 /// </summary>
 public sealed record DataProduct(
     Guid Id,
@@ -73,7 +74,9 @@ public sealed record DataProduct(
     LoadSettings Load,
     ProductLimits Limits,
     string? Description,
-    Sid ProductOwner,
+    Sid? OwnerGroupSid = null,
+    ProtectionClass? DefaultClass = null,
+    CatalogVisibilityMode Visibility = CatalogVisibilityMode.OnRequest,
     int Version = 1,
     DateTimeOffset CreatedAt = default,
     DateTimeOffset UpdatedAt = default);
@@ -87,6 +90,3 @@ public sealed record DataProductVersion(
     Sid Author,
     ProductCreatorAuthority Authority,
     DateTimeOffset CreatedAt);
-
-/// <summary>The owner of a whole data source within a tenant (creation authority over every object of that source).</summary>
-public sealed record DataSourceOwner(TenantId Tenant, string DataSource, Sid OwnerSid, Sid AssignedBy, DateTimeOffset AssignedAt);

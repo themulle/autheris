@@ -71,9 +71,7 @@ public sealed class EpochRedisFailureInf1Tests
             {
                 TableName = Table.TableName,
                 SchemaName = Table.Schema,
-                SourceName = Table.Domain,
-                Sensitivity = "NORMAL", // IsHighlySensitive will be false
-                RequiresFourEyes = false
+                SourceName = Table.Domain
             },
             Columns =
             [

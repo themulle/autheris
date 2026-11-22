@@ -99,7 +99,7 @@ internal static class ExternalCatalogCursor
         AppendField(sb, Normalize(query.Schema));
         AppendField(sb, Normalize(query.Owner));
         AppendField(sb, Normalize(query.Tag));
-        AppendField(sb, Normalize(query.Sensitivity));
+        AppendField(sb, Normalize(query.ProtectionClass));
         AppendField(sb, query.Pii.HasValue ? (query.Pii.Value ? "true" : "false") : null);
         AppendField(sb, query.ChangedSince.HasValue ? query.ChangedSince.Value.ToString(CultureInfo.InvariantCulture) : null);
         AppendField(sb, Normalize(query.Mode));

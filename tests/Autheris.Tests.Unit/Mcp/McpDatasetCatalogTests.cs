@@ -65,7 +65,7 @@ public sealed class McpDatasetCatalogTests
     private static TableMetadata Table(TableIdentifier id, string description) => new()
     { ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("customer_email"),
         Identifier = id,
-        Table = new Table { TableName = id.TableName, SchemaName = id.Schema, Description = description, Sensitivity = "INTERNAL" },
+        Table = new Table { TableName = id.TableName, SchemaName = id.Schema, Description = description },
         PrimaryKeyColumns = ["id"],
         Columns =
         [
@@ -219,7 +219,7 @@ public sealed class McpDatasetCatalogTests
         var inactive = new TableMetadata
         {
             Identifier = Payroll,
-            Table = new Table { TableName = "payroll", SchemaName = "public", Description = "Salaries", Sensitivity = "INTERNAL", IsActive = false },
+            Table = new Table { TableName = "payroll", SchemaName = "public", Description = "Salaries", IsActive = false },
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
         };
         _metadata.GetTableMetadataAsync(Payroll, Arg.Any<CancellationToken>()).Returns(inactive);

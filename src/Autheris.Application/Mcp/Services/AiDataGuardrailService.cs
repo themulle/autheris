@@ -27,7 +27,7 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Enterprise Guardrail engine enforcing zero-trust data protection, access decision point enforcement,
-/// automated PII scrubbing, token budgeting, Four-Eyes justification gating, and SHA-256 tamper-evident
+/// automated PII scrubbing, token budgeting, and SHA-256 tamper-evident
 /// audit logging on all data supplied to AI agents via the Model Context Protocol (MCP).
 /// </summary>
 public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
@@ -42,7 +42,6 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
     private readonly ITableMetadataRepository? _tableMetadataRepository;
     private readonly ISemanticPromptGuardrail _promptGuardrail;
     private readonly IGoldenQueryService? _goldenQueryService;
-    private readonly IHitLStepUpApprovalService? _stepUpApprovalService;
     private readonly IGraphQlCatalogMap? _graphQlCatalogMap;
     private readonly IAccessPlanningService? _accessPlanningService;
     private readonly IDocSearchService? _docSearchService;
@@ -103,7 +102,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         _tableMetadataRepository = tableMetadataRepository;
         _promptGuardrail = promptGuardrail ?? new SemanticPromptGuardrail();
         _goldenQueryService = goldenQueryService;
-        _stepUpApprovalService = stepUpApprovalService;
+        _ = stepUpApprovalService;
         _graphQlCatalogMap = graphQlCatalogMap;
         _consentRepository = consentRepository;
         _accessPlanningService = accessPlanningService;
@@ -392,16 +391,16 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             }
         }
 
-        var needsFourEyesCheck = ToolReadsDatasetRows(tool);
+        var checksUnderlyingTables = ToolReadsDatasetRows(tool);
 
-        // call_procedure and query_metrics: the ABAC object above is a pseudo table (procedure.dbo.<name>, the semantic catalog) that
-        // never carries the four-eyes flag. The gate below runs on the real tables behind the call instead; unresolvable is fail-closed.
-        IReadOnlyList<TableIdentifier>? fourEyesTables = resolvedTables;
-        var gatesUnderlyingTables = needsFourEyesCheck && ReadsThroughUnderlyingTables(tool);
+        // call_procedure and query_metrics: the ABAC object above is a pseudo table (procedure.dbo.<name>, the semantic catalog);
+        // the inactive / metadata gate below runs on the real tables behind the call instead, failing closed if unresolvable.
+        IReadOnlyList<TableIdentifier>? gatedTables = resolvedTables;
+        var gatesUnderlyingTables = checksUnderlyingTables && ReadsThroughUnderlyingTables(tool);
         if (gatesUnderlyingTables)
         {
-            fourEyesTables = await ResolveUnderlyingTablesAsync(tool, request.ArgumentsJson, sessionContext, cancellationToken).ConfigureAwait(false);
-            if (fourEyesTables == null)
+            gatedTables = await ResolveUnderlyingTablesAsync(tool, request.ArgumentsJson, sessionContext, cancellationToken).ConfigureAwait(false);
+            if (gatedTables == null)
             {
                 activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
                 McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
@@ -410,10 +409,10 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                 return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Access denied to tool '{tool.Name}': target dataset is not accessible.");
             }
 
-            // The decision point decides the real tables behind the call, before any approval is requested for them.
+            // The decision point decides the real tables behind the call before dataset metadata checks.
             if (!_options.Value.IsMcpAuthBypassed)
             {
-                foreach (var underlying in fourEyesTables)
+                foreach (var underlying in gatedTables)
                 {
                     var denied = await DenyByDecisionAsync(activity, tool, sessionContext, underlying, cancellationToken).ConfigureAwait(false);
                     if (denied != null)
@@ -424,7 +423,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             }
         }
 
-        foreach (TableIdentifier? resolvedTable in needsFourEyesCheck ? fourEyesTables ?? [] : [])
+        foreach (TableIdentifier? resolvedTable in checksUnderlyingTables ? gatedTables ?? [] : [])
         {
             if (_tableMetadataRepository == null || resolvedTable == null ||
                 resolvedTable.Value.Equals(McpDatasetTools.CatalogTable))
@@ -453,54 +452,6 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                 _logger.LogWarning("Tool '{ToolName}' targets inactive table '{Table}'. Denying execution.", tool.Name, resolvedTable);
                 await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", $"Tool execution denied: target table {resolvedTable} is inactive.", false, false, 0, cancellationToken).ConfigureAwait(false);
                 return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Access denied to tool '{tool.Name}': target dataset is not accessible.");
-            }
-
-            if (meta?.Table.RequiresFourEyes == true)
-            {
-                bool isAdmin = IsUnrestrictedCatalogCaller(sessionContext);
-
-                if (_consentRepository != null && !_options.Value.IsMcpAuthBypassed && !isAdmin)
-                {
-                    var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
-                    var visibleTables = await McpCatalogVisibility.VisibleTablesAsync([meta], principal, _consentRepository, _options.Value, _catalogVisibility, cancellationToken).ConfigureAwait(false);
-                    bool isVisible = visibleTables.Any(t =>
-                        t.Identifier.Equals(resolvedTable.Value) ||
-                        (string.Equals(t.Identifier.Domain, resolvedTable.Value.Domain, StringComparison.OrdinalIgnoreCase) &&
-                         string.Equals(t.Identifier.TableName, resolvedTable.Value.TableName, StringComparison.OrdinalIgnoreCase)));
-
-                    if (!isVisible)
-                    {
-                        activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
-                        McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
-                        _logger.LogWarning("Tool '{ToolName}' targets dataset '{Table}' which is not visible or consented to caller '{Caller}'. Denying execution before Four-Eyes gate.", tool.Name, resolvedTable, sessionContext.ServicePrincipalId);
-                        await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", $"Tool execution denied: target dataset {resolvedTable} is not visible or consented to caller.", false, false, 0, cancellationToken).ConfigureAwait(false);
-                        return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Access denied to tool '{tool.Name}': target dataset is not accessible.");
-                    }
-                }
-
-                if (_stepUpApprovalService != null && _options.Value.HitLStepUp.Enabled)
-                {
-                    var requesterSid = sessionContext.UserSid ?? sessionContext.ServicePrincipalId;
-                    _logger.LogInformation("Tool '{ToolName}' targets table '{Table}' which requires Four-Eyes approval. Requesting step-up approval for requester '{Requester}'.", tool.Name, resolvedTable, requesterSid);
-                    var approvalResult = await _stepUpApprovalService.RequestStepUpApprovalAsync(tool.Name, sessionContext.TenantId, requesterSid, resolvedTable.Value, request.ArgumentsJson, cancellationToken).ConfigureAwait(false);
-                    if (!approvalResult.IsApproved)
-                    {
-                        activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
-                        McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
-                        _logger.LogWarning("Four-Eyes approval denied or timed out for tool '{ToolName}' on table '{Table}'. Status: {Status}", tool.Name, resolvedTable, approvalResult.Ticket?.Status.ToString() ?? "denied/timed out");
-                        await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", $"Tool execution denied: Four-Eyes approval failed or timed out. Status: {approvalResult.Ticket?.Status.ToString() ?? "denied/timed out"}. {approvalResult.Message}", false, false, 0, cancellationToken).ConfigureAwait(false);
-                        return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Tool '{tool.Name}' requires Four-Eyes approval: status is {approvalResult.Ticket?.Status.ToString() ?? "denied/timed out"}. {approvalResult.Message ?? "Approval was not granted within timeout period. Re-request with valid justification."}");
-                    }
-                    _logger.LogInformation("Four-Eyes approval granted for tool '{ToolName}' on table '{Table}' by approver '{Approver}'.", tool.Name, resolvedTable, approvalResult.Ticket.ApproverSid);
-                }
-                else
-                {
-                    activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
-                    McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
-                    _logger.LogWarning("Tool '{ToolName}' targets table '{Table}' which requires Four-Eyes approval. Denying automated AI agent execution.", tool.Name, resolvedTable);
-                    await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", $"Tool execution denied: table {resolvedTable} requires interactive Four-Eyes justification approval.", false, false, 0, cancellationToken).ConfigureAwait(false);
-                    return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Tool '{tool.Name}' requires interactive Four-Eyes justification approval for table '{resolvedTable}'. Consent ticket must be generated.");
-                }
             }
         }
 

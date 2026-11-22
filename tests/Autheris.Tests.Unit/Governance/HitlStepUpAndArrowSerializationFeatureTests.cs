@@ -162,7 +162,7 @@ public sealed class HitlStepUpAndArrowSerializationFeatureTests
     }
 
     [Fact]
-    public async Task AiDataGuardrailService_RequiresFourEyes_InvokesHitLServiceAndAllowsWhenApproved()
+    public async Task AiDataGuardrailService_SensitiveTable_CompletesWithoutHitLStepUp()
     {
         var options = Options.Create(new GatewayOptions
         {
@@ -182,10 +182,12 @@ public sealed class HitlStepUpAndArrowSerializationFeatureTests
         {
             Table = new Table
             {
-                RequiresFourEyes = true,
                 TableName = "secrets",
-                SchemaName = "public"
+                SchemaName = "public",
+                IsActive = true
             },
+            Columns = [new TableColumn { ColumnName = "secret_value" }],
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("secret_value"),
             Identifier = tableId
         };
         metaRepo.GetTableMetadataAsync(tableId, Arg.Any<CancellationToken>()).Returns(tableMeta);
@@ -205,20 +207,11 @@ public sealed class HitlStepUpAndArrowSerializationFeatureTests
         var sessionContext = new McpSessionContext("sess-1", "sp-agent", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "agent-bob");
         var request = new McpToolCallRequest("query_secret_data", "{}");
 
-        // Execute guardrail in background
-        var guardrailTask = guardrail.ExecuteToolWithGuardrailAsync(request, sessionContext);
+        var result = await guardrail.ExecuteToolWithGuardrailAsync(request, sessionContext);
 
-        // Wait for ticket
-        await WaitHelper.WaitUntil(() => hitlService.GetPendingTickets("tenant-1").Count > 0, WaitHelper.HangGuard, "the step-up ticket was never registered");
-        var pending = hitlService.GetPendingTickets("tenant-1");
-        var ticket = Assert.Single(pending);
-
-        // Approve by Steward Alice
-        await hitlService.ApproveStepUpRequestAsync(ticket.ApprovalId, new HitLApproverContext("steward-alice", ["steward-alice"], "tenant-1"));
-
-        var result = await guardrailTask;
         Assert.True(result.IsSuccess);
         Assert.Contains("secret_data_revealed", result.ContentJson);
+        Assert.Empty(hitlService.GetPendingTickets("tenant-1"));
     }
 
     // =========================================================================

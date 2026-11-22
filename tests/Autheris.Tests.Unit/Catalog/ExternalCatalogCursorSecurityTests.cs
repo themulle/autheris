@@ -121,7 +121,7 @@ public sealed class ExternalCatalogCursorSecurityTests
             Schema: "dbo",
             Owner: "Alice",
             Tag: "finance",
-            Sensitivity: "HIGH",
+            ProtectionClass: "CONFIDENTIAL",
             Pii: true,
             ChangedSince: 5,
             AccessStatus: "granted",
@@ -139,7 +139,7 @@ public sealed class ExternalCatalogCursorSecurityTests
             ("schema", baseQuery with { Schema = "public" }),
             ("owner", baseQuery with { Owner = "Bob" }),
             ("tag", baseQuery with { Tag = "pii" }),
-            ("sensitivity", baseQuery with { Sensitivity = "LOW" }),
+            ("protectionClass", baseQuery with { ProtectionClass = "INTERNAL" }),
             ("pii", baseQuery with { Pii = false }),
             ("changedSince", baseQuery with { ChangedSince = 6 })
         };

@@ -341,6 +341,7 @@ public sealed class UnknownGatewayKeyGuardTests
     private static readonly string[] ExpectedFreeFormSubtrees =
     [
         "Gateway:Catalog:TagToMaskingRuleMap",
+        "Gateway:Classification:LevelProtectionClasses",
         "Gateway:Classification:Workflow:Profiles:OwnerResolution:RuleBasedMappings",
         "Gateway:Dbt:DatabaseMappings",
         "Gateway:Federation:FieldClassifications",

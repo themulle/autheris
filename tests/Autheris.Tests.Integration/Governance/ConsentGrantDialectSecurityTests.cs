@@ -37,7 +37,7 @@ public sealed class ConsentGrantDialectSecurityTests : IDisposable
         var table = new Table
         {
             Id = Guid.NewGuid(), SourceName = _table.Domain, SchemaName = _table.Schema, TableName = _table.TableName,
-            Sensitivity = "LOW", RequiresFourEyes = false, IsActive = true
+            IsActive = true
         };
         _tableId = (await _repo.UpsertTableMetadataAsync(new TableMetadata
         {

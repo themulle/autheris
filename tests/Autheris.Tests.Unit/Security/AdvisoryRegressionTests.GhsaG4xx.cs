@@ -98,7 +98,7 @@ public sealed partial class AdvisoryRegressionTests
         return new TableMetadata
         {
             Identifier = new TableIdentifier("sales", "dbo", "orders"),
-            Table = new Table { Id = tableId, SourceName = "sales", SchemaName = "dbo", TableName = "orders", Sensitivity = highlySensitive ? "HIGH" : "NORMAL", RequiresFourEyes = highlySensitive, IsActive = true },
+            Table = new Table { Id = tableId, SourceName = "sales", SchemaName = "dbo", TableName = "orders", IsActive = true },
             Columns = [new TableColumn { Id = Guid.NewGuid(), TableId = tableId, ColumnName = "email", DataType = "VARCHAR" }],
             ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("email")
         };
@@ -285,7 +285,7 @@ public sealed partial class AdvisoryRegressionTests
         meta = new TableMetadata
         {
             Identifier = new TableIdentifier("sales", "public", "orders"),
-            Table = new Table { Id = Guid.NewGuid(), SchemaName = "public", TableName = "orders", Sensitivity = "LOW", IsActive = true },
+            Table = new Table { Id = Guid.NewGuid(), SchemaName = "public", TableName = "orders", IsActive = true },
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
         };
         await metaRepo.UpsertTableMetadataAsync(meta);
@@ -667,7 +667,7 @@ public sealed partial class AdvisoryRegressionTests
             var pubTable = new TableMetadata
             {
                 Identifier = new TableIdentifier("sales", "dbo", "orders_pub"),
-                Table = new Table { Id = Guid.NewGuid(), SourceName = "sales", SchemaName = "dbo", TableName = "orders_pub", Sensitivity = "LOW", IsActive = true },
+                Table = new Table { Id = Guid.NewGuid(), SourceName = "sales", SchemaName = "dbo", TableName = "orders_pub", IsActive = true },
                 Columns = [new TableColumn { Id = Guid.NewGuid(), ColumnName = "id", DataType = "INT" }]
             };
             var profiles = Wave2Proxy<IAccessProfileRepository>.Create((_, _) => throw new NotSupportedException());

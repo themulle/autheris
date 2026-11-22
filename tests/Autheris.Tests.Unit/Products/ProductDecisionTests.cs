@@ -214,7 +214,7 @@ public sealed class ProductDecisionTests
 
         _h.OwnerLinks.Owners[catalogObject].ShouldBe(ProductHarness.Bob);
 
-        await _h.Service.TransferAsync(admin, "sales", "orders_view", ProductHarness.Alice);
+        await _h.Service.SetOwnerGroupAsync(admin, "sales", "orders_view", ProductHarness.Alice);
         _h.OwnerLinks.Owners[catalogObject].ShouldBe(ProductHarness.Alice);
 
         await _h.Service.RetireAsync(admin, "sales", "orders_view");

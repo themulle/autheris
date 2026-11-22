@@ -29,8 +29,7 @@ public abstract class ConsentContract : GovernanceContractBase
 
     private async Task<TableMetadata> SeedTableAsync(
         string name = "orders",
-        string sensitivity = "NORMAL",
-        bool requiresFourEyes = false)
+        bool sensitive = false)
     {
         var id = new TableIdentifier("sales", "dbo", name + "_" + Guid.NewGuid().ToString("N")[..8]);
         var table = new TableMetadata
@@ -44,8 +43,6 @@ public abstract class ConsentContract : GovernanceContractBase
                 SchemaName = id.Schema,
                 TableName = id.TableName,
                 Description = "Contract test table",
-                Sensitivity = sensitivity,
-                RequiresFourEyes = requiresFourEyes,
                 IsActive = true
             },
             Columns =
@@ -63,7 +60,7 @@ public abstract class ConsentContract : GovernanceContractBase
                     DataType = "varchar"
                 }
             ],
-            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(Table.IsSensitivityHigh(sensitivity) ? new[] { "secret_col" } : Array.Empty<string>()),
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(sensitive ? new[] { "secret_col" } : Array.Empty<string>()),
             PrimaryKeyColumns = ["id"]
         };
 
@@ -301,7 +298,7 @@ public abstract class ConsentContract : GovernanceContractBase
     {
         if (!Store.IsAvailable) return;
 
-        var table = await SeedTableAsync("conflict_tbl", "HIGH", requiresFourEyes: true);
+        var table = await SeedTableAsync("conflict_tbl", sensitive: true);
         var req = await Store.ConsentApprovals.CreateConsentRequestAsync(new ConsentRequest
         {
             Id = Guid.NewGuid(),
@@ -314,9 +311,9 @@ public abstract class ConsentContract : GovernanceContractBase
             TenantId = Store.TenantA
         });
 
-        _ = await Store.ConsentApprovals.ApproveConsentRequestStepAsync(req.Id, Owner1Sid);
+        _ = await Store.ConsentApprovals.ApproveConsentRequestStepAsync(req.Id, Owner1Sid, requireSecondApprover: true);
 
-        var duplicateApprove = () => Store.ConsentApprovals.ApproveConsentRequestStepAsync(req.Id, Owner1Sid);
+        var duplicateApprove = () => Store.ConsentApprovals.ApproveConsentRequestStepAsync(req.Id, Owner1Sid, requireSecondApprover: true);
         await duplicateApprove.Should().ThrowAsync<InvalidOperationException>();
     }
 
@@ -543,7 +540,7 @@ public abstract class ConsentContract : GovernanceContractBase
     {
         if (!Store.IsAvailable) return;
 
-        var table = await SeedTableAsync("four_eyes_tbl", "HIGH", requiresFourEyes: true);
+        var table = await SeedTableAsync("four_eyes_tbl", sensitive: true);
         var req = await Store.ConsentApprovals.CreateConsentRequestAsync(new ConsentRequest
         {
             Id = Guid.NewGuid(),
@@ -556,7 +553,7 @@ public abstract class ConsentContract : GovernanceContractBase
             TenantId = Store.TenantA
         });
 
-        var selfApprove = () => Store.ConsentApprovals.ApproveConsentRequestStepAsync(req.Id, Owner1Sid);
+        var selfApprove = () => Store.ConsentApprovals.ApproveConsentRequestStepAsync(req.Id, Owner1Sid, requireSecondApprover: true);
         await selfApprove.Should().ThrowAsync<InvalidOperationException>();
 
         var req2 = await Store.ConsentApprovals.CreateConsentRequestAsync(new ConsentRequest
@@ -571,10 +568,10 @@ public abstract class ConsentContract : GovernanceContractBase
             TenantId = Store.TenantA
         });
 
-        var afterFirst = await Store.ConsentApprovals.ApproveConsentRequestStepAsync(req2.Id, Owner1Sid);
+        var afterFirst = await Store.ConsentApprovals.ApproveConsentRequestStepAsync(req2.Id, Owner1Sid, requireSecondApprover: true);
         afterFirst.Status.Should().Be("PENDING_SECOND_APPROVAL");
 
-        var afterSecond = await Store.ConsentApprovals.ApproveConsentRequestStepAsync(req2.Id, Owner2Sid);
+        var afterSecond = await Store.ConsentApprovals.ApproveConsentRequestStepAsync(req2.Id, Owner2Sid, requireSecondApprover: true);
         afterSecond.Status.Should().Be("APPROVED");
 
         await Store.ConsentApprovals.ActivateConsentAsync(req2.Id, Owner2Sid);

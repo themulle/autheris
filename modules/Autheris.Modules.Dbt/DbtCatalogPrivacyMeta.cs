@@ -86,34 +86,26 @@ internal static class DbtCatalogPrivacyMeta
         }
 
         // 4. Column personal data / PII gate: reject non_personal=true when any stored column is sensitive, masked or pii,
-        // or table sensitivity is not None/Public, or manifest has pii column.
+        // or manifest has pii column.
         if (targetNonPersonal)
         {
             if (existingMetadata != null)
             {
-                if (Table.IsSensitivityHigh(existingMetadata.Table.Sensitivity))
+                foreach (var col in existingMetadata.Columns)
                 {
-                    targetNonPersonal = false;
-                    warnings.Add($"Table '{tableId}': table sensitivity '{existingMetadata.Table.Sensitivity}' indicates personal or sensitive data; autheris.non_personal forced to false.");
-                }
-                else
-                {
-                    foreach (var col in existingMetadata.Columns)
+                    if (ClassificationMetadata.IsColumnSensitive(existingMetadata, col))
                     {
-                        if (ClassificationMetadata.IsColumnSensitive(existingMetadata, col))
-                        {
-                            targetNonPersonal = false;
-                            warnings.Add($"Table '{tableId}': stored column '{col.ColumnName}' is sensitive; autheris.non_personal forced to false.");
-                            break;
-                        }
+                        targetNonPersonal = false;
+                        warnings.Add($"Table '{tableId}': stored column '{col.ColumnName}' is sensitive; autheris.non_personal forced to false.");
+                        break;
+                    }
 
-                        if (col.Meta.TryGetValue("pii", out var piiVal) &&
-                            (string.Equals(piiVal, "true", StringComparison.OrdinalIgnoreCase) || string.Equals(piiVal, "1", StringComparison.OrdinalIgnoreCase)))
-                        {
-                            targetNonPersonal = false;
-                            warnings.Add($"Table '{tableId}': stored column '{col.ColumnName}' has meta.pii=true; autheris.non_personal forced to false.");
-                            break;
-                        }
+                    if (col.Meta.TryGetValue("pii", out var piiVal) &&
+                        (string.Equals(piiVal, "true", StringComparison.OrdinalIgnoreCase) || string.Equals(piiVal, "1", StringComparison.OrdinalIgnoreCase)))
+                    {
+                        targetNonPersonal = false;
+                        warnings.Add($"Table '{tableId}': stored column '{col.ColumnName}' has meta.pii=true; autheris.non_personal forced to false.");
+                        break;
                     }
                 }
             }

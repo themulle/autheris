@@ -2,7 +2,9 @@ namespace Autheris.Domain.Model;
 
 using System;
 using System.Collections.Generic;
+using System.Security.Claims;
 using Autheris.Domain.Common;
+using Autheris.Domain.Security;
 
 /// <summary>
 /// Strongly-typed numerical hierarchy rank for sensitivity classifications (e.g. 1 to 4).
@@ -32,7 +34,8 @@ public sealed record SensitivityLevelDefinition(
     int Rank,
     bool RequiresFourEyes = false,
     bool RequiresStepUpAuth = false,
-    int MaxConsentTtlDays = 90);
+    int MaxConsentTtlDays = 90,
+    ProtectionClass ProtectionClass = ProtectionClass.Confidential);
 
 /// <summary>
 /// Declarative PII or semantic data type category with default masking mapping and regex patterns.
@@ -43,7 +46,8 @@ public sealed record PiiCategoryDefinition(
     string Description,
     int DefaultSensitivityRank,
     string DefaultMaskingRule,
-    IReadOnlyList<string> NamePatterns);
+    IReadOnlyList<string> NamePatterns,
+    string? MaskCategory = null);
 
 /// <summary>
 /// Ingestion and owner resolution strategy.
@@ -95,7 +99,9 @@ public sealed record ColumnClassificationProposal(
     string ProposedMaskingRule,
     double Confidence,
     bool IsDisputed,
-    string? Reasoning = null);
+    string? Reasoning = null,
+    ProtectionClass ProposedProtectionClass = ProtectionClass.Confidential,
+    string? ProposedMaskCategory = null);
 
 /// <summary>
 /// Table-level classification proposal package.
@@ -120,7 +126,9 @@ public sealed record ColumnClassificationDecision(
     string EffectiveSensitivityKey,
     int EffectiveSensitivityRank,
     string EffectiveMaskingRule,
-    string? Comment = null);
+    string? Comment = null,
+    ProtectionClass? EffectiveProtectionClass = null,
+    string? EffectiveMaskCategory = null);
 
 /// <summary>
 /// Human sign-off / transition request submitted by a Data Owner or Compliance Reviewer.
@@ -134,7 +142,10 @@ public sealed record TableClassificationApprovalRequest(
     IReadOnlyList<ColumnClassificationDecision> ColumnDecisions,
     string? OverallComment = null,
     string? Justification = null,
-    string? StepUpAuthToken = null);
+    string? StepUpAuthToken = null,
+    TenantId? TenantId = null,
+    ClaimsPrincipal? Caller = null,
+    ProtectionClass? ExistingTableClass = null);
 
 /// <summary>
 /// Result of an approval pipeline transition.

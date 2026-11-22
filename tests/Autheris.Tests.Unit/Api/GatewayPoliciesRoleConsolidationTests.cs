@@ -195,8 +195,6 @@ public sealed class GatewayPoliciesRoleConsolidationTests
             GatewayPolicies.CallerAttributeRead,
             GatewayPolicies.CallerAttributeApprove,
             GatewayPolicies.CallerAttributeSimulate,
-            GatewayPolicies.ProductOwnerRead,
-            GatewayPolicies.ProductOwnerAdmin,
             GatewayPolicies.ProductSync,
             GatewayPolicies.SunsettingRead,
             GatewayPolicies.SunsettingEvaluate,

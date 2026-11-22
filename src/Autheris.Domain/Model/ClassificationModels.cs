@@ -515,7 +515,7 @@ public static class ClassificationMetadata
     }
 
     public static bool IsTableSensitive(TableMetadata? metadata) =>
-        metadata is not null && (metadata.Table.IsHighlySensitive ||
+        metadata is not null && (
             metadata.Columns.Any(c => IsColumnSensitive(metadata, c)) ||
             metadata.ColumnClassifications.Values.SelectMany(static x => x).Any(static cc => !string.Equals(cc.Code, ClassificationScopes.PublicCode, StringComparison.OrdinalIgnoreCase)) ||
             metadata.ColumnMaskingRules.Count > 0);

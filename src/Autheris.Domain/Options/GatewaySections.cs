@@ -45,6 +45,7 @@ public static class GatewaySections
     public const string RowLimits = "Gateway:RowLimits";
     public const string SystemMetrics = "Gateway:SystemMetrics";
     public const string Governance = "Gateway:Governance";
+    public const string AccessPolicy = "Gateway:Governance:AccessPolicy";
     public const string QueryAnalysis = "Gateway:Governance:QueryAnalysis";
     public const string QueryCost = "Gateway:QueryCost";
     public const string UsageAccounting = "Gateway:UsageAccounting";

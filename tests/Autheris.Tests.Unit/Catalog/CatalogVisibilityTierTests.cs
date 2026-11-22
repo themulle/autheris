@@ -120,8 +120,8 @@ public sealed class CatalogVisibilityTierTests
         var plain = Table(Shared);
         var tagged = plain with { CatalogTags = ["secret", "pii", "gdpr", "included", "excluded"] };
 
-        var excluding = new Autheris.Application.Governance.Contracts.SchemaContractDefinition("c", excludedTags: ["secret", "excluded"]);
-        var including = new Autheris.Application.Governance.Contracts.SchemaContractDefinition("c", includedTags: ["included", "secret"]);
+        var excluding = new Autheris.Application.Governance.Contracts.SchemaContractDefinition("c", excludedClasses: [Autheris.Domain.Security.ProtectionClass.Secret]);
+        var including = new Autheris.Application.Governance.Contracts.SchemaContractDefinition("c", includedClasses: [Autheris.Domain.Security.ProtectionClass.Internal]);
 
         CatalogVisibility.FilterByContract([tagged], excluding).Count.ShouldBe(CatalogVisibility.FilterByContract([plain], excluding).Count);
         CatalogVisibility.FilterByContract([tagged], excluding).Count.ShouldBe(1);

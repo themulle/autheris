@@ -76,17 +76,15 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests
         var repo = CreateRepository(harness);
 
         var zTable = BuildTable("zeta", "dbo", "t_z", description: "Z desc");
-        var aFirst = BuildTable("alpha", "dbo", "t_a", description: "Old A", sensitivity: "LOW");
+        var aFirst = BuildTable("alpha", "dbo", "t_a", description: "Old A");
         var mTable = BuildTable("mid", "dbo", "t_m", description: "M desc");
-        var aSecond = BuildTable("alpha", "dbo", "t_a", description: "Latest A", sensitivity: "HIGH");
+        var aSecond = BuildTable("alpha", "dbo", "t_a", description: "Latest A");
 
         var results = await repo.UpsertTableMetadataBatchAsync([zTable, aFirst, mTable, aSecond], CancellationToken.None);
 
         results.Count.ShouldBe(4);
         results[1].Metadata.Table.Description.ShouldBe("Latest A");
-        results[1].Metadata.Table.Sensitivity.ShouldBe("HIGH");
         results[3].Metadata.Table.Description.ShouldBe("Latest A");
-        results[3].Metadata.Table.Sensitivity.ShouldBe("HIGH");
 
         var tableInsert = harness.Commands
             .Single(c => c.Sql.StartsWith("INSERT INTO TABLES ", StringComparison.Ordinal));
@@ -396,8 +394,6 @@ public sealed partial class GovernanceRepositoryBatchUpsertTests
                 SchemaName = schema,
                 TableName = tableName,
                 DisplayName = tableName,
-                Sensitivity = sensitivity,
-                RequiresFourEyes = false,
                 IsActive = true,
                 DataSourceType = DataSourceType.Sql,
                 Description = description,

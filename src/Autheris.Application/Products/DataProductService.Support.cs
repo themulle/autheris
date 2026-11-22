@@ -110,9 +110,14 @@ public sealed partial class DataProductService
         await _products.GetProductAsync(caller.Tenant, Normalize(schema), Normalize(name), ct).ConfigureAwait(false)
         ?? throw new ProductException(ProductFailure.NotFound, ProductErrorCodes.NotFound);
 
+    private async Task<CatalogVisibilityMode> ResolveDefaultVisibilityAsync(TenantId tenant, CancellationToken ct) =>
+        _policyProvider is null
+            ? CatalogVisibilityMode.OnRequest
+            : (await _policyProvider.GetEffectiveAsync(tenant, ct).ConfigureAwait(false)).DefaultContainerVisibility;
+
     private async Task<bool> HasDefinitionAuthorityAsync(ProductCaller caller, DataProduct product, CancellationToken ct)
     {
-        var decision = await _authority.AuthorizeCreationAsync(caller, product.Kind, product.BaseObjects, product.ProductOwner, ct).ConfigureAwait(false);
+        var decision = await _authority.AuthorizeCreationAsync(caller, product.Kind, product.BaseObjects, product.OwnerGroupSid, ct).ConfigureAwait(false);
         return decision.Allowed;
     }
 
@@ -220,7 +225,7 @@ public sealed partial class DataProductService
                 kind = product.Kind.ToString(),
                 definitionHash = product.DefinitionHash,
                 version = product.Version,
-                productOwner = product.ProductOwner.Value,
+                ownerGroupSid = product.OwnerGroupSid?.Value,
                 viaSync = caller.ViaSyncPath,
                 detail = details
             }),

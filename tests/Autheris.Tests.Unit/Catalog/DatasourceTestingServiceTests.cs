@@ -62,7 +62,6 @@ public sealed class DatasourceTestingServiceTests
             SchemaName = "dbo",
             TableName = tableName,
             DataSourceType = DataSourceType.HttpDeclarative,
-            Sensitivity = "CONFIDENTIAL",
             Description = "Test HTTP table",
             IsActive = true,
             HttpEndpoint = endpoint
@@ -189,7 +188,6 @@ public sealed class DatasourceTestingServiceTests
             SchemaName = "dbo",
             TableName = "orders",
             DataSourceType = DataSourceType.Sql,
-            Sensitivity = "INTERNAL",
             Description = "SQL Orders Table",
             IsActive = true
         };

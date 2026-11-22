@@ -153,7 +153,8 @@ internal static class DiscoveryProcedureResolver
         IReadOnlyList<EligibleDiscoveryProcedure> items,
         IReadOnlySet<TableIdentifier> pendingTables,
         IReadOnlySet<TableIdentifier> expiredTables,
-        CancellationToken ct)
+        CancellationToken ct,
+        IReadOnlyDictionary<TableIdentifier, Autheris.Domain.Security.ProtectionClass>? classesByTable = null)
     {
         if (items.Count == 0)
         {
@@ -199,7 +200,7 @@ internal static class DiscoveryProcedureResolver
         var mapped = new List<DiscoveryObject>(items.Count);
         foreach (var item in items)
         {
-            mapped.Add(MapProcedure(item.Procedure, item.GovernedTables, decisionById, ownersByTable, pendingTables, expiredTables));
+            mapped.Add(MapProcedure(item.Procedure, item.GovernedTables, decisionById, ownersByTable, pendingTables, expiredTables, classesByTable));
         }
 
         return mapped;
@@ -211,7 +212,8 @@ internal static class DiscoveryProcedureResolver
         IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisionById,
         IReadOnlyDictionary<TableIdentifier, IReadOnlyList<DataOwner>> ownersByTable,
         IReadOnlySet<TableIdentifier> pendingTables,
-        IReadOnlySet<TableIdentifier> expiredTables)
+        IReadOnlySet<TableIdentifier> expiredTables,
+        IReadOnlyDictionary<TableIdentifier, Autheris.Domain.Security.ProtectionClass>? classesByTable = null)
     {
         var allAllowed = true;
         var hasRowFilters = false;
@@ -263,7 +265,7 @@ internal static class DiscoveryProcedureResolver
             Statistics: null)).ToList();
 
         var owners = CollectOwners(governedTables, ownersByTable);
-        var sensitivity = ResolveSensitivity(governedTables);
+        var sensitivity = ResolveSensitivity(governedTables, classesByTable);
 
         return new DiscoveryObject(
             Kind: DiscoveryObjectKind.Procedure,
@@ -314,28 +316,28 @@ internal static class DiscoveryProcedureResolver
         return owners;
     }
 
-    private static string ResolveSensitivity(IReadOnlyList<TableMetadata> governedTables)
+    private static string ResolveSensitivity(IReadOnlyList<TableMetadata> governedTables, IReadOnlyDictionary<TableIdentifier, ProtectionClass>? classesByTable = null)
     {
-        var best = "NORMAL";
-        var bestRank = 0;
+        if (governedTables.Count == 0 || classesByTable is null || classesByTable.Count == 0)
+        {
+            return "CONFIDENTIAL";
+        }
+
+        var strictest = ProtectionClass.Public;
+        var matchedAny = false;
         foreach (var table in governedTables)
         {
-            var s = table.Table.Sensitivity;
-            var rank = s?.ToUpperInvariant() switch
+            if (classesByTable.TryGetValue(table.Identifier, out var cls))
             {
-                "RESTRICTED" => 4,
-                "CONFIDENTIAL" => 3,
-                "INTERNAL" => 2,
-                "NORMAL" => 1,
-                _ => 0
-            };
-            if (rank > bestRank)
+                strictest = ProtectionClassExtensions.Max(strictest, cls);
+                matchedAny = true;
+            }
+            else
             {
-                bestRank = rank;
-                best = s!;
+                return "CONFIDENTIAL";
             }
         }
 
-        return best;
+        return matchedAny ? strictest.ToCanonicalName() : "CONFIDENTIAL";
     }
 }

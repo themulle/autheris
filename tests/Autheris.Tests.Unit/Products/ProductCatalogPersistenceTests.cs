@@ -116,7 +116,7 @@ public sealed class ProductCatalogPersistenceTests
         _h.CatalogObjects.Objects[ProductObject].Table.IsActive.ShouldBeTrue();
         _h.OwnerLinks.Owners[ProductObject].ShouldBe(ProductHarness.Bob);
 
-        await _h.Service.TransferAsync(_h.Caller(ProductHarness.Admin, admin: true), product.Schema, product.Name, ProductHarness.Carol);
+        await _h.Service.SetOwnerGroupAsync(_h.Caller(ProductHarness.Admin, admin: true), product.Schema, product.Name, ProductHarness.Carol);
 
         _h.OwnerLinks.Owners[ProductObject].ShouldBe(ProductHarness.Carol);
         _h.CatalogObjects.Objects[ProductObject].Table.IsActive.ShouldBeTrue();

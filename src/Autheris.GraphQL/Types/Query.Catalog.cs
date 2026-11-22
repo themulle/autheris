@@ -601,7 +601,7 @@ public sealed partial class Query
             Schema = t.Table.SchemaName,
             TableName = t.Table.TableName,
             DisplayName = resolved?.Title ?? t.Table.DisplayName,
-            Sensitivity = t.Table.Sensitivity,
+            Sensitivity = ClassificationMetadata.IsTableSensitive(t) ? "CONFIDENTIAL" : "INTERNAL",
             Description = resolved?.Description ?? t.Table.Description,
             Columns = columns,
             ColumnNames = columnNames,

@@ -39,9 +39,10 @@ public sealed class Pol9DegradedModeSensitivityTests
                 {
                     TableName = "customer_data_export_42",
                     SchemaName = "crm",
-                    SourceName = "sales",
-                    Sensitivity = "RESTRICTED"
-                }
+                    SourceName = "sales"
+                },
+                Columns = [new TableColumn { ColumnName = "email" }],
+                ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("email")
             });
 
         var options = Options.Create(new GatewayOptions

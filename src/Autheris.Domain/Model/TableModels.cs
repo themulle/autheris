@@ -134,8 +134,6 @@ public sealed record Table
     public string? LongDescription { get; init; }
     public LocalizedTexts Texts { get; init; } = LocalizedTexts.Empty;
     public string? DocumentationSource { get; init; }
-    public string Sensitivity { get; init; } = "NORMAL";
-    public bool RequiresFourEyes { get; init; }
     public bool IsActive { get; init; } = true;
     /// <summary>Issue #666: dbt unique id of the node that owns this entry; internal to the catalog, never mapped to an API.</summary>
     public string? DbtUniqueId { get; init; }
@@ -164,35 +162,6 @@ public sealed record Table
     public ImmutableArray<ImmutableArray<string>> RequiredFilterColumnGroups { get; init; } = ImmutableArray<ImmutableArray<string>>.Empty;
     /// <summary>Issue #124: Optional cardinality hint (expected row count) used for cross-source join ordering.</summary>
     public long? ExpectedRows { get; init; }
-
-    /// <summary>Rank of a sensitivity class; unknown classes rank like HIGH (fail-closed). Empty means NORMAL.</summary>
-    public static int SensitivityRank(string? sensitivity)
-    {
-        var s = (sensitivity ?? "NORMAL").Trim().ToUpperInvariant();
-        if (s.Length > 2 && char.IsAsciiDigit(s[0]) && s[1] == '_')
-        {
-            s = s[2..];
-        }
-        return s switch
-        {
-            "LOW" or "PUBLIC" => 1,
-            "" or "NORMAL" or "INTERNAL" or "MEDIUM" or "UNKNOWN_CUSTOM" => 2,
-            "CONFIDENTIAL" or "RESTRICTED" => 3,
-            "HIGH" or "SECRET" or "STRICTLY_CONFIDENTIAL" => 4,
-            _ => 4
-        };
-    }
-
-    /// <summary>
-    /// D-4 (ADR-010): CONFIDENTIAL and above count as highly sensitive (four eyes, shorter consent TTL, degraded mode):
-    /// CONFIDENTIAL, HIGH, RESTRICTED, SECRET and every unknown value (e.g. PII). PUBLIC, LOW, INTERNAL,
-    /// NORMAL and MEDIUM do not. Same ranking as the catalog governance ratchet.
-    /// </summary>
-    public static bool IsSensitivityHigh(string? sensitivity) =>
-        !string.IsNullOrWhiteSpace(sensitivity) && SensitivityRank(sensitivity) >= 3;
-
-    public bool IsHighlySensitive =>
-        RequiresFourEyes || IsSensitivityHigh(Sensitivity);
 
     /// <summary>
     /// D-1: SQL tables fail closed on an unknown source type. Other sources (HTTP, plugins, lakehouse) never send SQL to a

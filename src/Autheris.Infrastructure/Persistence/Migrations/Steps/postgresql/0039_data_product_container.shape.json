@@ -1,0 +1,43 @@
+{
+  "ops": [
+    {
+      "op": "addColumn",
+      "table": "data_products",
+      "column": {
+        "name": "owner_group_sid",
+        "type": "CHARACTER VARYING(184)",
+        "family": "string",
+        "nullable": true
+      }
+    },
+    {
+      "op": "addColumn",
+      "table": "data_products",
+      "column": {
+        "name": "default_class",
+        "type": "CHARACTER VARYING(16)",
+        "family": "string",
+        "nullable": true
+      }
+    },
+    {
+      "op": "addColumn",
+      "table": "data_products",
+      "column": {
+        "name": "visibility",
+        "type": "CHARACTER VARYING(16)",
+        "family": "string",
+        "nullable": false
+      }
+    },
+    {
+      "op": "dropColumn",
+      "table": "data_products",
+      "name": "product_owner"
+    },
+    {
+      "op": "dropTable",
+      "table": "data_source_owners"
+    }
+  ]
+}

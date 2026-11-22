@@ -32,30 +32,30 @@ internal static partial class CatalogRowHydrator
     internal static Table ReadTableEntity(DbDataReader reader, ILogger? logger = null, int o = 0)
     {
         var tableId = Guid.Parse(reader.GetString(o));
-        var dstInt = reader.IsDBNull(o + 9) ? 0 : reader.GetInt32(o + 9);
-        var httpEndpointJson = reader.IsDBNull(o + 10) ? null : reader.GetString(o + 10);
-        var pluginName = reader.IsDBNull(o + 11) ? null : reader.GetString(o + 11);
+        var dstInt = reader.IsDBNull(o + 7) ? 0 : reader.GetInt32(o + 7);
+        var httpEndpointJson = reader.IsDBNull(o + 8) ? null : reader.GetString(o + 8);
+        var pluginName = reader.IsDBNull(o + 9) ? null : reader.GetString(o + 9);
         var httpEndpoint = !string.IsNullOrWhiteSpace(httpEndpointJson)
             ? JsonSerializer.Deserialize<HttpEndpointDescriptor>(httpEndpointJson)
             : null;
-        var reqFiltersJson = reader.IsDBNull(o + 15) ? null : reader.GetString(o + 15);
+        var reqFiltersJson = reader.IsDBNull(o + 13) ? null : reader.GetString(o + 13);
         var reqFilters = string.IsNullOrWhiteSpace(reqFiltersJson)
             ? ImmutableArray<string>.Empty
             : JsonSerializer.Deserialize<ImmutableArray<string>>(reqFiltersJson);
         if (reqFilters.IsDefault) reqFilters = ImmutableArray<string>.Empty;
-        var textsJson = reader.IsDBNull(o + 16) ? null : reader.GetString(o + 16);
+        var textsJson = reader.IsDBNull(o + 14) ? null : reader.GetString(o + 14);
         var texts = CatalogLocalizationPersistence.ParseLocalizedTexts(textsJson, tableId, logger);
 
         int? minGroupSize = null;
-        if (reader.FieldCount > o + 17 && !reader.IsDBNull(o + 17))
+        if (reader.FieldCount > o + 15 && !reader.IsDBNull(o + 15))
         {
-            minGroupSize = Convert.ToInt32(reader.GetValue(o + 17), CultureInfo.InvariantCulture);
+            minGroupSize = Convert.ToInt32(reader.GetValue(o + 15), CultureInfo.InvariantCulture);
         }
 
         bool nonPersonal = false;
-        if (reader.FieldCount > o + 18 && !reader.IsDBNull(o + 18))
+        if (reader.FieldCount > o + 16 && !reader.IsDBNull(o + 16))
         {
-            var val = reader.GetValue(o + 18);
+            var val = reader.GetValue(o + 16);
             nonPersonal = val is bool b ? b : Convert.ToInt32(val, CultureInfo.InvariantCulture) == 1;
         }
 
@@ -67,22 +67,20 @@ internal static partial class CatalogRowHydrator
             SchemaName = reader.GetString(o + 3),
             TableName = reader.GetString(o + 4),
             DisplayName = reader.GetString(o + 5),
-            Sensitivity = reader.GetString(o + 6),
-            RequiresFourEyes = reader.GetInt32(o + 7) == 1,
-            IsActive = reader.GetInt32(o + 8) == 1,
+            IsActive = reader.GetInt32(o + 6) == 1,
             DataSourceType = (DataSourceType)dstInt,
             HttpEndpoint = httpEndpoint,
             PluginName = pluginName,
-            Description = reader.IsDBNull(o + 12) ? null : reader.GetString(o + 12),
-            LongDescription = reader.IsDBNull(o + 13) ? null : reader.GetString(o + 13),
+            Description = reader.IsDBNull(o + 10) ? null : reader.GetString(o + 10),
+            LongDescription = reader.IsDBNull(o + 11) ? null : reader.GetString(o + 11),
             Texts = texts,
-            DocumentationSource = reader.IsDBNull(o + 14) ? null : reader.GetString(o + 14),
+            DocumentationSource = reader.IsDBNull(o + 12) ? null : reader.GetString(o + 12),
             RequiredFilterColumns = reqFilters,
             MinGroupSize = minGroupSize,
             NonPersonal = nonPersonal,
-            DbtUniqueId = reader.FieldCount > o + 19 && !reader.IsDBNull(o + 19) ? reader.GetString(o + 19) : null,
-            ObjectKind = ParseObjectKind(reader, o + 20),
-            MetricViewCountMeasure = reader.FieldCount > o + 21 && !reader.IsDBNull(o + 21) ? reader.GetString(o + 21) : null
+            DbtUniqueId = reader.FieldCount > o + 17 && !reader.IsDBNull(o + 17) ? reader.GetString(o + 17) : null,
+            ObjectKind = ParseObjectKind(reader, o + 18),
+            MetricViewCountMeasure = reader.FieldCount > o + 19 && !reader.IsDBNull(o + 19) ? reader.GetString(o + 19) : null
         };
     }
 
@@ -671,8 +669,6 @@ internal static partial class CatalogRowHydrator
     {
         var structuralChange =
             !string.Equals(existing.SourceType, incoming.SourceType, StringComparison.OrdinalIgnoreCase) ||
-            !string.Equals(existing.Sensitivity, incoming.Sensitivity, StringComparison.OrdinalIgnoreCase) ||
-            existing.RequiresFourEyes != incoming.RequiresFourEyes ||
             existing.IsActive != incoming.IsActive ||
             existing.DataSourceType != incoming.DataSourceType ||
             existing.ObjectKind != incoming.ObjectKind ||

@@ -19,15 +19,16 @@ public sealed class ManifestIndividualGrantTests
     private static ClaimsPrincipal Admin() => new(new ClaimsIdentity(
         [DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "S-1-5-21-ADMIN"), new Claim(ClaimTypes.Role, "GovernanceAdmin")], "test"));
 
-    private static ITableMetadataRepository Tables(string sensitivity = "NORMAL")
+    private static ITableMetadataRepository Tables(bool sensitive = false)
     {
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => new TableMetadata
             {
-                Table = new Table { Id = Guid.NewGuid(), Sensitivity = sensitivity },
+                Table = new Table { Id = Guid.NewGuid() },
                 Identifier = ci.Arg<TableIdentifier>(),
-                Columns = [new TableColumn { ColumnName = "id" }]
+                Columns = [new TableColumn { ColumnName = "id" }],
+                ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(sensitive ? new[] { "id" } : Array.Empty<string>())
             });
         return repo;
     }
@@ -40,13 +41,13 @@ public sealed class ManifestIndividualGrantTests
     private static async Task<FakeConsentRepository> ApplyAsync(
         DeclarativeConsentPolicy p,
         bool dryRun = false,
-        string sensitivity = "NORMAL",
         FakeConsentRepository? repo = null,
-        IGrantValidityPolicy? validityPolicy = null)
+        IGrantValidityPolicy? validityPolicy = null,
+        bool sensitive = false)
     {
         repo ??= new FakeConsentRepository();
         var svc = new DeclarativeConsentApplyService(
-            Tables(sensitivity),
+            Tables(sensitive),
             repo,
             Substitute.For<IAuditLogRepository>(),
             grantValidityPolicy: validityPolicy);
@@ -82,11 +83,11 @@ public sealed class ManifestIndividualGrantTests
 
         var tight = new GrantValidityPolicy(Options.Create(new GrantValidityOptions { DefaultDuration = "P1D", MaxDuration = "P90D" }));
         var ex2 = await Should.ThrowAsync<GrantPolicyViolationException>(() =>
-            ApplyAsync(User(DateTimeOffset.UtcNow.AddDays(100)), sensitivity: "CONFIDENTIAL", validityPolicy: tight));
+            ApplyAsync(User(DateTimeOffset.UtcNow.AddDays(100)), sensitive: true, validityPolicy: tight));
         ex2.ErrorCode.ShouldBe(GrantErrorCodes.ExceedsMaximum);
 
         // A multi-year manifest grant is fine under the default multi-year test maximum, also for sensitive tables.
-        var repo = await ApplyAsync(User(DateTimeOffset.UtcNow.AddDays(3 * 365)), sensitivity: "NORMAL");
+        var repo = await ApplyAsync(User(DateTimeOffset.UtcNow.AddDays(3 * 365)), sensitive: false);
         repo.Active(DateTimeOffset.UtcNow).Count.ShouldBe(1);
     }
 

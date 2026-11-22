@@ -62,6 +62,7 @@ public sealed partial class DiscoveryService : IDiscoveryService
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureCatalog? _procedureCatalog;
     private readonly Autheris.Application.Docs.Services.IDocLinkDiscoveryReader? _docLinks;
     private readonly ICatalogSnapshotProvider? _snapshotProvider;
+    private readonly IProtectionSnapshotProvider? _protectionProvider;
 
     private readonly Lock _memoLock = new();
     private readonly Dictionary<ScopeMemoKey, ScopedCatalog> _scopeMemo = [];
@@ -91,10 +92,12 @@ public sealed partial class DiscoveryService : IDiscoveryService
         IClassificationRepository? classificationRepository = null,
         Autheris.Application.Procedures.Interfaces.IProcedureCatalog? procedureCatalog = null,
         Autheris.Application.Docs.Services.IDocLinkDiscoveryReader? docLinks = null,
-        ICatalogSnapshotProvider? snapshotProvider = null)
+        ICatalogSnapshotProvider? snapshotProvider = null,
+        IProtectionSnapshotProvider? protectionProvider = null)
     {
         _docLinks = docLinks;
         _snapshotProvider = snapshotProvider;
+        _protectionProvider = protectionProvider;
         ArgumentNullException.ThrowIfNull(gatewayOptions);
         _metadataRepository = metadataRepository;
         _decisionPoint = decisionPoint;
@@ -648,10 +651,14 @@ public sealed partial class DiscoveryService : IDiscoveryService
                 }
             }
 
+            var protection = _protectionProvider is null
+                ? null
+                : await _protectionProvider.GetAsync(caller.Tenant, table.Identifier, ct).ConfigureAwait(false);
             var mapped = DiscoveryAccessMapper.Map(
                 table, decision, owners, isPending, isExpired, artifacts, language,
                 isHidden: table.Table.DiscoveryHidden, insertDecisions[i], updateDecisions[i], deleteDecisions[i], defs, repoColClasses, caller.Tenant.Value,
-                hideMaskedTextForRestrictedScopes: _discoveryOptions.Discovery?.HideMaskedColumnCatalogTextForRestrictedScopes == true);
+                hideMaskedTextForRestrictedScopes: _discoveryOptions.Discovery?.HideMaskedColumnCatalogTextForRestrictedScopes == true,
+                effectiveProtection: protection);
 
             if (docLinks.TryGetValue(table.Identifier, out var linkView))
             {
@@ -711,6 +718,23 @@ public sealed partial class DiscoveryService : IDiscoveryService
         await Task.WhenAll(pendingTask, expiredTask).ConfigureAwait(false);
 
         var subject = SecurityPrincipalContext.FromPrincipal(caller.Principal!, caller.Tenant);
+        Dictionary<TableIdentifier, ProtectionClass>? classesByTable = null;
+        if (_protectionProvider is not null)
+        {
+            classesByTable = new Dictionary<TableIdentifier, ProtectionClass>();
+            foreach (var item in uncached)
+            {
+                foreach (var gt in item.Item.GovernedTables)
+                {
+                    if (!classesByTable.ContainsKey(gt.Identifier))
+                    {
+                        var prot = await _protectionProvider.GetAsync(caller.Tenant, gt.Identifier, ct).ConfigureAwait(false);
+                        classesByTable[gt.Identifier] = prot.TableClass;
+                    }
+                }
+            }
+        }
+
         var resolved = await DiscoveryProcedureResolver.ResolveBatchAsync(
             _decisionPoint!,
             _ownershipRepository,
@@ -718,7 +742,8 @@ public sealed partial class DiscoveryService : IDiscoveryService
             uncached.Select(static x => x.Item).ToList(),
             await pendingTask.ConfigureAwait(false),
             await expiredTask.ConfigureAwait(false),
-            ct).ConfigureAwait(false);
+            ct,
+            classesByTable).ConfigureAwait(false);
 
         lock (_memoLock)
         {

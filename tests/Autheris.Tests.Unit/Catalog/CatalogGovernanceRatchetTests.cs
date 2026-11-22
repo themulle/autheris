@@ -78,7 +78,7 @@ public sealed class CatalogGovernanceRatchetTests
     {
         nameof(Table.SourceType), nameof(Table.SourceName), nameof(Table.SchemaName), nameof(Table.TableName),
         nameof(Table.DisplayName), nameof(Table.Description), nameof(Table.LongDescription), nameof(Table.Texts),
-        nameof(Table.DocumentationSource), nameof(Table.Sensitivity), nameof(Table.RequiresFourEyes), nameof(Table.IsActive),
+        nameof(Table.DocumentationSource), nameof(Table.IsActive),
         nameof(Table.ObjectKind), nameof(Table.MetricViewCountMeasure)
     };
 
@@ -99,8 +99,6 @@ public sealed class CatalogGovernanceRatchetTests
             Texts = new LocalizedTexts(new Dictionary<string, LocalizedTextEntry> { ["de"] = new("Tabelle", "Beschreibung") }),
             DocumentationSource = "Admin",
             DbtUniqueId = "model.analytics.t",
-            Sensitivity = "HIGH",
-            RequiresFourEyes = true,
             IsActive = true,
             DataSourceType = DataSourceType.HttpPlugin,
             EnforcementMode = EnforcementMode.Delegated,
@@ -197,8 +195,6 @@ public sealed class CatalogGovernanceRatchetTests
         merged.Table.Texts.ShouldBeSameAs(existing.Table.Texts);
         merged.Table.Description.ShouldBe("persisted description");
         merged.Table.LongDescription.ShouldBe("persisted long description");
-        merged.Table.Sensitivity.ShouldBe("HIGH");
-        merged.Table.RequiresFourEyes.ShouldBeTrue();
         merged.Table.DocumentationSource.ShouldBe("DataCatalog");
         merged.Table.MetricViewCountMeasure.ShouldBe("row_count");
 

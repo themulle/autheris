@@ -43,6 +43,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
     private readonly IIngressTransportContext? _ingress;
     private readonly IDataSourceOptionsResolver? _transportResolver;
     private readonly ICatalogSnapshotProvider? _snapshotProvider;
+    private readonly IProtectionSnapshotProvider? _protectionProvider;
     private readonly Lock _memoLock = new();
     private readonly Dictionary<MemoKey, CatalogVisibleSet> _memo = [];
 
@@ -54,11 +55,13 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         ILogger<CatalogVisibilityService>? logger = null,
         IIngressTransportContext? ingress = null,
         IDataSourceOptionsResolver? transportResolver = null,
-        ICatalogSnapshotProvider? snapshotProvider = null)
+        ICatalogSnapshotProvider? snapshotProvider = null,
+        IProtectionSnapshotProvider? protectionProvider = null)
     {
         _ingress = ingress;
         _transportResolver = transportResolver;
         _snapshotProvider = snapshotProvider;
+        _protectionProvider = protectionProvider;
         _metadataRepository = metadataRepository;
         _consentRepository = consentRepository;
         _options = gatewayOptions?.Value;
@@ -309,9 +312,22 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
             }
             else
             {
+                Dictionary<TableIdentifier, Autheris.Domain.Security.ProtectionClass>? tableClasses = null;
+                if (contract is not null &&
+                    (contract.IncludedClasses.Count > 0 || contract.ExcludedClasses.Count > 0) &&
+                    _protectionProvider is not null)
+                {
+                    tableClasses = new Dictionary<TableIdentifier, Autheris.Domain.Security.ProtectionClass>(rows.Count);
+                    foreach (var row in rows)
+                    {
+                        var prot = await _protectionProvider.GetAsync(context.Tenant, row.Identifier, ct).ConfigureAwait(false);
+                        tableClasses[row.Identifier] = prot.TableClass;
+                    }
+                }
+
                 engineOutput = await CatalogVisibility.VisibleTablesAsync(
                     rows, context.Principal, context.Tenant, _consentRepository, contract, context.CatalogOwner, context.SharedTables,
-                    ct).ConfigureAwait(false);
+                    tableClasses, ct).ConfigureAwait(false);
             }
 
             // F-C11 / a row that does not exist for this caller class never reaches the evaluator or the memo.
@@ -367,8 +383,8 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
             '|',
             contract.Name,
             contract.ExcludeInaccessible,
-            string.Join(',', contract.IncludedTags.OrderBy(x => x, StringComparer.Ordinal)),
-            string.Join(',', contract.ExcludedTags.OrderBy(x => x, StringComparer.Ordinal)),
+            string.Join(',', contract.IncludedClasses.Select(static c => c.ToString()).OrderBy(x => x, StringComparer.Ordinal)),
+            string.Join(',', contract.ExcludedClasses.Select(static c => c.ToString()).OrderBy(x => x, StringComparer.Ordinal)),
             string.Join(',', contract.AllowedTables.OrderBy(x => x, StringComparer.Ordinal)));
 
     /// <summary>type name only; an exception message may carry a SID or a table name.</summary>

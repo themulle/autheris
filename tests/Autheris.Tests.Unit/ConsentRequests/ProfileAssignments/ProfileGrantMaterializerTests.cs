@@ -92,7 +92,6 @@ public sealed class ProfileGrantMaterializerTests
                 SourceName = "sales",
                 SchemaName = "dbo",
                 TableName = "orders",
-                Sensitivity = "LOW",
                 IsActive = true
             },
             Columns = [new TableColumn { Id = Guid.NewGuid(), ColumnName = "id", DataType = "int" }]

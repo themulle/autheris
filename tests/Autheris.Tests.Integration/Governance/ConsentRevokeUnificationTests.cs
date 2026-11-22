@@ -45,7 +45,8 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
         var table = new Table
         {
             Id = Guid.NewGuid(), SourceName = _table.Domain, SchemaName = _table.Schema, TableName = _table.TableName,
-            Sensitivity = "LOW", RequiresFourEyes = false, IsActive = true
+            Description = "before",
+            IsActive = true
         };
         _tableId = (await _repo.UpsertTableMetadataAsync(new TableMetadata
         {
@@ -296,12 +297,12 @@ public sealed class ConsentRevokeUnificationTests : IDisposable
         // DEF-01 / DEF-T-09: ReplaceConsentsAsync evicts the cached table metadata like PG/MSSQL (applied on commit).
         await EnsureTableAsync();
         var consent = await CreateConsentAsync();
-        (await _repo.GetTableMetadataAsync(_table))!.Table.Sensitivity.ShouldBe("LOW");
-        await ExecAsync("UPDATE TABLES SET sensitivity = 'HIGH' WHERE id = @id", ("@id", _tableId.ToString()));
+        (await _repo.GetTableMetadataAsync(_table))!.Table.Description.ShouldBe("before");
+        await ExecAsync("UPDATE TABLES SET description = 'evicted-and-reloaded' WHERE id = @id", ("@id", _tableId.ToString()));
 
         await _repo.ReplaceConsentsAsync([consent.Id], [], Admin, "evict", TenantAuthority(Admin, TenantA));
 
-        (await _repo.GetTableMetadataAsync(_table))!.Table.Sensitivity.ShouldBe("HIGH");
+        (await _repo.GetTableMetadataAsync(_table))!.Table.Description.ShouldBe("evicted-and-reloaded");
     }
 
     [Trait("Category", "Security")]

@@ -23,6 +23,13 @@ public static class CatalogVisibilityModeExtensions
 
     public static CatalogVisibilityMode NormalizeOrOnRequest(this CatalogVisibilityMode value) =>
         value is CatalogVisibilityMode.Open or CatalogVisibilityMode.OnRequest ? value : CatalogVisibilityMode.OnRequest;
+
+    public static string ToCanonicalName(this CatalogVisibilityMode value) =>
+        NormalizeOrOnRequest(value) switch
+        {
+            CatalogVisibilityMode.Open => "OPEN",
+            _ => "ON_REQUEST"
+        };
 }
 
 public enum ContainerKind { Domain = 0, DataProduct = 1 }

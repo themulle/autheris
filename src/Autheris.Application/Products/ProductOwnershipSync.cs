@@ -21,9 +21,8 @@ public interface IProductCatalogOwnerStore
 }
 
 /// <summary>
-/// The product owner is the data owner of <c>products.t_&lt;tenanthash&gt;.&lt;schema&gt;__&lt;name&gt;</c>, so the consent workflow, the owner
-/// grant and the TABLES-based reports see the product like any other table. <c>DATA_PRODUCTS.product_owner</c> stays the source of truth: a
-/// run replaces the owner of the object; a retired product has none. A failed sync fails the operation (no product without its owner link).
+/// The product owner group is recorded as the owner of <c>products.t_&lt;tenanthash&gt;.&lt;schema&gt;__&lt;name&gt;</c>, so catalog metadata and
+/// reports stay synchronized. <c>DATA_PRODUCTS.owner_group_sid</c> stays the source of truth: a run replaces the owner; a retired product has none.
 /// </summary>
 public sealed class ProductOwnershipSync(IProductCatalogOwnerStore store) : IProductOwnershipSync
 {
@@ -35,7 +34,7 @@ public sealed class ProductOwnershipSync(IProductCatalogOwnerStore store) : IPro
             await store.SetOwnerAsync(
                 product.Tenant,
                 ProductSource.ObjectOf(product.Tenant, product.Schema, product.Name),
-                product.Status == DataProductStatus.Retired ? (Autheris.Domain.Common.Sid?)null : product.ProductOwner,
+                product.Status == DataProductStatus.Retired ? (Autheris.Domain.Common.Sid?)null : product.OwnerGroupSid,
                 ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)

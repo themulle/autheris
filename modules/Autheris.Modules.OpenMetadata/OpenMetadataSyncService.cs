@@ -574,20 +574,12 @@ public sealed partial class OpenMetadataSyncService : IOpenMetadataSyncService, 
     private static readonly TimeSpan DenyConsentValidity = TimeSpan.FromDays(365);
     private static readonly TimeSpan DenyRefreshThreshold = TimeSpan.FromDays(30);
 
-    private static readonly HashSet<string> AutoGrantableSensitivities = new(StringComparer.OrdinalIgnoreCase) { "NORMAL", "LOW", "PUBLIC", "INTERNAL" };
-
     /// <summary>
-    /// SEC E-06: Allow consents are never created automatically for tables that require four-eyes approval, are highly
-    /// sensitive (HIGH, Art. 9, RESTRICTED or any unknown classification) or contain sensitive / masked columns.
+    /// SEC E-06: Allow consents are never created automatically for tables that contain sensitive / masked columns.
     /// </summary>
     internal static bool IsExcludedFromAutoGrant(TableMetadata metadata)
     {
-        var table = metadata.Table;
-        var sensitivity = string.IsNullOrWhiteSpace(table.Sensitivity) ? "NORMAL" : table.Sensitivity.Trim();
-        return table.RequiresFourEyes ||
-               table.IsHighlySensitive ||
-               !AutoGrantableSensitivities.Contains(sensitivity) ||
-               ClassificationMetadata.IsTableSensitive(metadata);
+        return ClassificationMetadata.IsTableSensitive(metadata);
     }
 
     public async Task<OpenMetadataWebhookOutcome> HandleVerifiedAsync(string payload, CancellationToken ct = default)

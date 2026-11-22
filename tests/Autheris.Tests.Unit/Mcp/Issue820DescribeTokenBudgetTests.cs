@@ -62,7 +62,6 @@ public sealed class Issue820DescribeTokenBudgetTests
                 Description = "One row per company with validity date, name, financial year and many accounting settings.",
                 DataSourceType = DataSourceType.Sql,
                 IsActive = true,
-                Sensitivity = "INTERNAL",
                 RequiredFilterColumns = ["t_col002"]
             },
             Columns = columns,

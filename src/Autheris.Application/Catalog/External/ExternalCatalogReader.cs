@@ -41,7 +41,8 @@ public sealed partial class ExternalCatalogReader(
     TimeProvider? timeProvider = null,
     IOptions<GovernanceTextOptions>? textOptions = null,
     IKeyVaultSecretProvider? secretProvider = null,
-    IConfiguration? configuration = null)
+    IConfiguration? configuration = null,
+    IProtectionSnapshotProvider? protectionProvider = null)
 {
     public const int DefaultPageSize = 50;
     public const int MaxPageSize = 200;
@@ -66,6 +67,7 @@ public sealed partial class ExternalCatalogReader(
         secretProvider,
         configuration);
     private readonly int _descriptionMaxLength = (textOptions?.Value ?? new GovernanceTextOptions()).ConsentDescriptionMaxLength;
+    private readonly IProtectionSnapshotProvider? _protectionProvider = protectionProvider;
 
     private const string InvalidCursorMessage = "The cursor is invalid.";
 
@@ -231,7 +233,7 @@ public sealed partial class ExternalCatalogReader(
 
         if (visibility.IsServicePrincipal)
         {
-            var dto = await MapSingleAppObjectAsync(matchedTable, versions, CanViewHiddenColumns(matchedTable, visibility), ct)
+            var dto = await MapSingleAppObjectAsync(tenantId, matchedTable, versions, CanViewHiddenColumns(matchedTable, visibility), ct)
                 .ConfigureAwait(false);
             return ExternalCatalogResult.Ok(dto);
         }
@@ -244,7 +246,8 @@ public sealed partial class ExternalCatalogReader(
         }
 
         versions.TryGetValue(matchedTable.Identifier.ToString(), out var ver);
-        var mapped = MapUserObject(discovered, matchedTable, ver?.Seq, CanViewHiddenColumns(matchedTable, visibility));
+        var protection = _protectionProvider is null ? null : await _protectionProvider.GetAsync(tenantId, matchedTable.Identifier, ct).ConfigureAwait(false);
+        var mapped = MapUserObject(discovered, matchedTable, ver?.Seq, CanViewHiddenColumns(matchedTable, visibility), protection);
         var single = new List<ExternalCatalogObjectDto> { mapped };
         await AttachRowScopeDescriptionsAsync(single, [matchedTable], user, tenantId, ct).ConfigureAwait(false);
         return ExternalCatalogResult.Ok(single[0]);
@@ -294,7 +297,8 @@ public sealed partial class ExternalCatalogReader(
     public static string ComputeAdminRepresentationHash(
         TableMetadata table,
         IReadOnlyList<DataOwner> owners,
-        DiscoveryArtifacts? artifacts)
+        DiscoveryArtifacts? artifacts,
+        EffectiveProtection? protection = null)
     {
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(owners);
@@ -308,7 +312,7 @@ public sealed partial class ExternalCatalogReader(
             name = table.Identifier.TableName,
             displayName = table.Table.DisplayName,
             description = table.Table.Description,
-            sensitivity = table.Table.Sensitivity,
+            protectionClass = (protection?.TableClass ?? ProtectionClass.Confidential).ToCanonicalName(),
             isActive = table.Table.IsActive,
             discoveryHidden = table.Table.DiscoveryHidden,
             samplesDisabled = table.Table.SamplesDisabled,
@@ -489,6 +493,7 @@ public sealed partial class ExternalCatalogReader(
     }
 
     private async Task<ExternalCatalogObjectDto> MapSingleAppObjectAsync(
+        TenantId tenantId,
         TableMetadata table,
         IReadOnlyDictionary<string, CatalogObjectVersionRow> versions,
         bool canSeeHidden,
@@ -499,8 +504,11 @@ public sealed partial class ExternalCatalogReader(
         var artifacts = _artifactStore is null
             ? null
             : await _artifactStore.GetAsync(table.Table.Id, ct).ConfigureAwait(false);
+        var protection = _protectionProvider is null
+            ? null
+            : await _protectionProvider.GetAsync(tenantId, table.Identifier, ct).ConfigureAwait(false);
         versions.TryGetValue(table.Identifier.ToString(), out var ver);
-        return MapAppObject(table, owners, artifacts, ver?.Seq, canSeeHidden);
+        return MapAppObject(table, owners, artifacts, ver?.Seq, canSeeHidden, protection);
     }
 
     private static ExternalCatalogObjectDto MapAppObject(
@@ -508,7 +516,8 @@ public sealed partial class ExternalCatalogReader(
         IReadOnlyList<DataOwner> activeOwners,
         DiscoveryArtifacts? artifacts,
         long? changeSeq,
-        bool includeHiddenColumns)
+        bool includeHiddenColumns,
+        EffectiveProtection? protection = null)
     {
         var baseObj = DiscoveryAccessMapper.Map(
             table,
@@ -523,9 +532,10 @@ public sealed partial class ExternalCatalogReader(
             isRecentlyExpired: false,
             artifacts,
             language: null,
-            isHidden: table.Table.DiscoveryHidden);
+            isHidden: table.Table.DiscoveryHidden,
+            effectiveProtection: protection);
 
-        var cols = BuildExternalColumns(table, baseObj.Columns, includeHiddenColumns, includeAccessState: false, personView: false);
+        var cols = BuildExternalColumns(table, baseObj.Columns, includeHiddenColumns, includeAccessState: false, personView: false, protection);
         var write = baseObj.Write ?? DiscoveryWriteState.None;
         return new ExternalCatalogObjectDto(
             ObjectId: table.Identifier.ToString(),
@@ -536,7 +546,7 @@ public sealed partial class ExternalCatalogReader(
             DisplayName: baseObj.DisplayName,
             Description: baseObj.Description,
             Tags: MergeTags(table, baseObj.Tags),
-            Sensitivity: baseObj.Sensitivity,
+            ProtectionClass: ResolveTableProtectionClass(baseObj.Sensitivity, protection),
             Owners: baseObj.Owners.Select(static o => new ExternalCatalogOwnerDto(o.DisplayName, o.Email)).ToArray(),
             LinkedDocuments: BuildLinkedDocuments(table),
             Write: write,
@@ -553,9 +563,10 @@ public sealed partial class ExternalCatalogReader(
         DiscoveryObject obj,
         TableMetadata table,
         long? changeSeq,
-        bool includeHiddenColumns)
+        bool includeHiddenColumns,
+        EffectiveProtection? protection = null)
     {
-        var cols = BuildExternalColumns(table, DiscoveryColumnVisibility.VisibleColumns(obj), includeHiddenColumns, includeAccessState: true, personView: true);
+        var cols = BuildExternalColumns(table, DiscoveryColumnVisibility.VisibleColumns(obj), includeHiddenColumns, includeAccessState: true, personView: true, protection);
         var callerState = new ExternalCatalogCallerStateDto(
             Access: obj.Access.ToString().ToLowerInvariant(),
             RowScope: obj.RowScope?.ToString(),
@@ -570,7 +581,7 @@ public sealed partial class ExternalCatalogReader(
             DisplayName: obj.DisplayName,
             Description: obj.Description,
             Tags: MergeTags(table, obj.Tags),
-            Sensitivity: obj.Sensitivity,
+            ProtectionClass: ResolveTableProtectionClass(obj.Sensitivity, protection),
             Owners: obj.Owners.Select(static o => new ExternalCatalogOwnerDto(o.DisplayName, o.Email)).ToArray(),
             LinkedDocuments: BuildLinkedDocuments(table),
             Write: obj.Write ?? DiscoveryWriteState.None,
@@ -581,6 +592,30 @@ public sealed partial class ExternalCatalogReader(
             CallerState: callerState,
             Columns: cols,
             ChangeSeq: changeSeq);
+    }
+
+    private static string ResolveTableProtectionClass(string? fallbackSensitivity, EffectiveProtection? protection)
+    {
+        if (protection is not null)
+        {
+            return protection.TableClass.ToCanonicalName();
+        }
+
+        return ProtectionClassExtensions.TryParse(fallbackSensitivity, out var parsed)
+            ? parsed.ToCanonicalName()
+            : ProtectionClass.Confidential.ToCanonicalName();
+    }
+
+    private static string ResolveColumnProtectionClass(string columnName, bool isPii, EffectiveProtection? protection)
+    {
+        if (protection is not null && protection.Columns.TryGetValue(columnName, out var cp))
+        {
+            return cp.EffectiveClass.ToCanonicalName();
+        }
+
+        return isPii
+            ? ProtectionClass.Confidential.ToCanonicalName()
+            : (protection?.TableClass ?? ProtectionClass.Confidential).ToCanonicalName();
     }
 
     private static string PersonAccessState(DiscoveryColumnState state) => state switch
@@ -595,7 +630,8 @@ public sealed partial class ExternalCatalogReader(
         IReadOnlyList<DiscoveryColumn> visibleCols,
         bool includeHiddenColumns,
         bool includeAccessState,
-        bool personView)
+        bool personView,
+        EffectiveProtection? protection = null)
     {
         var byName = table.Columns.ToDictionary(static c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
         var list = new List<ExternalCatalogColumnDto>(visibleCols.Count + 4);
@@ -619,7 +655,7 @@ public sealed partial class ExternalCatalogReader(
                 DataType: vc.DataType,
                 Description: vc.Description,
                 Tags: Array.Empty<string>(),
-                Sensitivity: vc.Pii ? "SENSITIVE" : "NORMAL",
+                ProtectionClass: ResolveColumnProtectionClass(vc.Name, vc.Pii, protection),
                 Pii: vc.Pii,
                 DefaultMaskingState: metaCol is not null ? DefaultMaskingState(table, metaCol) : "clear",
                 ColumnSecurity: columnSecurity,
@@ -651,7 +687,7 @@ public sealed partial class ExternalCatalogReader(
                     DataType: col.DataType,
                     Description: col.Description,
                     Tags: Array.Empty<string>(),
-                    Sensitivity: pii ? "SENSITIVE" : "NORMAL",
+                    ProtectionClass: ResolveColumnProtectionClass(col.ColumnName, pii, protection),
                     Pii: pii,
                     DefaultMaskingState: DefaultMaskingState(table, col),
                     ColumnSecurity: classified,

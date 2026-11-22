@@ -33,8 +33,6 @@ public sealed class DeclarativeConsentPruneSecurityTests : IDisposable
             SourceName = tableId.Domain,
             SchemaName = tableId.Schema,
             TableName = tableId.TableName,
-            Sensitivity = "LOW",
-            RequiresFourEyes = false,
             IsActive = true
         };
         return (await _repo.UpsertTableMetadataAsync(new TableMetadata

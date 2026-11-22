@@ -121,7 +121,6 @@ public sealed class DbtSourcesManifestIngestionTests
                 SourceName = "raw_lake",
                 SchemaName = "crm",
                 TableName = "contacts_raw",
-                Sensitivity = "NORMAL",
                 IsActive = true
             },
             Columns =

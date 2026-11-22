@@ -50,6 +50,9 @@ public sealed class ConsentDecisionPipelineTests
     {
         var tid = new TableIdentifier("sales", "dbo", "orders");
         var id = Guid.NewGuid();
+        var sensitive = fourEyes ||
+            (!string.Equals(sensitivity, "NORMAL", StringComparison.OrdinalIgnoreCase) &&
+             !string.Equals(sensitivity, "LOW", StringComparison.OrdinalIgnoreCase));
         return new TableMetadata
         {
             Identifier = tid,
@@ -58,10 +61,9 @@ public sealed class ConsentDecisionPipelineTests
                 Id = id,
                 SourceName = tid.Domain,
                 SchemaName = tid.Schema,
-                TableName = tid.TableName,
-                Sensitivity = sensitivity,
-                RequiresFourEyes = fourEyes
+                TableName = tid.TableName
             },
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(sensitive ? new[] { "amount" } : Array.Empty<string>()),
             Columns =
             [
                 new TableColumn { Id = Guid.NewGuid(), TableId = id, ColumnName = "id", DataType = "INT" },
@@ -300,7 +302,7 @@ public sealed class ConsentDecisionPipelineTests
         var (pipeline, approvals, _, _, _, _, _, _) = BuildSut(tableFourEyes: true);
         var req = Request();
         approvals.GetConsentRequestAsync(req.Id, Arg.Any<CancellationToken>()).Returns(req);
-        approvals.ApproveConsentRequestStepAsync(req.Id, Approver1Sid, Arg.Any<CancellationToken>())
+        approvals.ApproveConsentRequestStepAsync(req.Id, Approver1Sid, true, Arg.Any<CancellationToken>())
             .Returns(_ =>
             {
                 req.Status = "PENDING_SECOND_APPROVAL";
@@ -319,7 +321,7 @@ public sealed class ConsentDecisionPipelineTests
 
         approvals.ExecuteAtomicApprovalWithConsentAsync(
                 req.Id, Arg.Any<ApprovalStep>(), Arg.Any<Consent>(),
-                Arg.Any<IReadOnlyList<ConsentRowFilter>>(), Arg.Any<IReadOnlyList<ConsentColumnRule>>(), Arg.Any<CancellationToken>())
+                Arg.Any<IReadOnlyList<ConsentRowFilter>>(), Arg.Any<IReadOnlyList<ConsentColumnRule>>(), true, Arg.Any<CancellationToken>())
             .Returns(ci => ci.ArgAt<Consent>(2));
 
         var step2 = await pipeline.DecideAsync(new ConsentDecisionCommand(
@@ -495,5 +497,24 @@ public sealed class ConsentDecisionPipelineTests
             req.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, Principal(Approver1Sid),
             ApprovedValidTo: FixedNow.AddDays(4))));
         ex.StatusCode.ShouldBe(400);
+    }
+
+    [Fact]
+    public async Task DecideAsync_GroupGranteeOnSensitiveTable_ApprovesInSingleStep_AndCreatesConsentAtomically()
+    {
+        var (pipeline, approvals, _, _, _, _, _, _) = BuildSut(tableFourEyes: true);
+        var req = Request(granteeType: GranteeType.Group, granteeRef: "S-1-5-21-DATA-READERS");
+        approvals.GetConsentRequestAsync(req.Id, Arg.Any<CancellationToken>()).Returns(req);
+        approvals.ExecuteAtomicApprovalWithConsentAsync(
+                req.Id, Arg.Any<ApprovalStep>(), Arg.Any<Consent>(),
+                Arg.Any<IReadOnlyList<ConsentRowFilter>>(), Arg.Any<IReadOnlyList<ConsentColumnRule>>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.ArgAt<Consent>(2));
+
+        var result = await pipeline.DecideAsync(new ConsentDecisionCommand(
+            req.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, Principal(Approver1Sid)));
+
+        result.Request.Status.ShouldBe("APPROVED");
+        result.ActivatedConsent.ShouldNotBeNull();
+        await approvals.DidNotReceiveWithAnyArgs().ApproveConsentRequestStepAsync(default, default!, default);
     }
 }

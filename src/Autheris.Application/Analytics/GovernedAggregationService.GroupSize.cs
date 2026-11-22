@@ -4,9 +4,13 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
 using Autheris.Application.Services;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.Extensions.Logging;
 
 namespace Autheris.Application.Analytics;
@@ -18,9 +22,14 @@ public sealed partial class GovernedAggregationService
         AggregationQuery query,
         OperatorFloor operatorFloor,
         AnalyticsPrivacyOptions? privacy = null,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        EffectiveProtection? protection = null)
     {
-        return Resolve([metadata], query, operatorFloor, privacy, logger);
+        IReadOnlyDictionary<TableIdentifier, EffectiveProtection>? protections =
+            protection is null || metadata is null
+                ? null
+                : new Dictionary<TableIdentifier, EffectiveProtection> { [metadata.Identifier] = protection };
+        return Resolve([metadata!], query, operatorFloor, privacy, logger, protections);
     }
 
     internal static EffectiveMinGroupSize Resolve(
@@ -28,7 +37,8 @@ public sealed partial class GovernedAggregationService
         AggregationQuery query,
         OperatorFloor operatorFloor,
         AnalyticsPrivacyOptions? privacy = null,
-        ILogger? logger = null)
+        ILogger? logger = null,
+        IReadOnlyDictionary<TableIdentifier, EffectiveProtection>? protections = null)
     {
         if (tables is null || tables.Count == 0)
         {
@@ -66,7 +76,9 @@ public sealed partial class GovernedAggregationService
                     break;
                 }
 
-                if (!IsCatalogLoweringEligible(table, c.Value, privacy, logger))
+                EffectiveProtection? tableProtection = null;
+                protections?.TryGetValue(table.Identifier, out tableProtection);
+                if (!IsCatalogLoweringEligible(table, c.Value, privacy, logger, tableProtection))
                 {
                     allEligible = false;
                     break;
@@ -98,7 +110,8 @@ public sealed partial class GovernedAggregationService
         TableMetadata metadata,
         int candidateFloor,
         AnalyticsPrivacyOptions? privacy,
-        ILogger? logger)
+        ILogger? logger,
+        EffectiveProtection? protection = null)
     {
         try
         {
@@ -145,27 +158,30 @@ public sealed partial class GovernedAggregationService
                 return false;
             }
 
-            if (metadata.Table.IsHighlySensitive)
+            if (protection is not null)
             {
-                logger?.LogDebug("Lowering refused for table {Table}: highly sensitive", metadata.Table.TableName);
-                return false;
-            }
-
-            if (metadata.Table.Tags is { Count: > 0 } tags)
-            {
-                foreach (var tag in tags)
+                if (protection.TableClass.NormalizeOrConfidential() > ProtectionClass.Internal)
                 {
-                    if (tag.Contains("pii", StringComparison.OrdinalIgnoreCase) ||
-                        tag.Contains("sensitive", StringComparison.OrdinalIgnoreCase))
-                    {
-                        logger?.LogDebug("Lowering refused for table {Table}: table-level sensitivity tags present", metadata.Table.TableName);
-                        return false;
-                    }
+                    logger?.LogDebug("Lowering refused for table {Table}: protection class {Class} exceeds INTERNAL", metadata.Table.TableName, protection.TableClass);
+                    return false;
+                }
+
+                if (!string.IsNullOrWhiteSpace(protection.TableMaskCategory))
+                {
+                    logger?.LogDebug("Lowering refused for table {Table}: table mask category present", metadata.Table.TableName);
+                    return false;
                 }
             }
 
             foreach (var col in metadata.Columns)
             {
+                if (protection is not null && protection.Columns.TryGetValue(col.ColumnName, out var cp) &&
+                    (cp.EffectiveClass.NormalizeOrConfidential() > ProtectionClass.Internal || !string.IsNullOrWhiteSpace(cp.EffectiveMaskCategory)))
+                {
+                    logger?.LogDebug("Lowering refused for table {Table}: protected or masked columns present", metadata.Table.TableName);
+                    return false;
+                }
+
                 if (TableAccessDecision.IsCatalogSensitive(col.ColumnName, metadata))
                 {
                     logger?.LogDebug("Lowering refused for table {Table}: sensitive columns present", metadata.Table.TableName);
@@ -187,7 +203,37 @@ public sealed partial class GovernedAggregationService
         return Resolve(metadata, query, new OperatorFloor(defaultMinGroupSize, false)).Value;
     }
 
-    private EffectiveMinGroupSize ResolveEffectiveMinGroupSize(AggregationQuery query, TableMetadata metadata)
+    private async Task<EffectiveMinGroupSize> ResolveEffectiveMinGroupSizeAsync(
+        TenantId tenantId,
+        AggregationQuery query,
+        TableMetadata metadata,
+        CancellationToken ct)
+    {
+        EffectiveProtection? protection = null;
+        if (_protectionProvider is not null)
+        {
+            try
+            {
+                protection = await _protectionProvider.GetAsync(tenantId, metadata.Identifier, ct).ConfigureAwait(false);
+            }
+            catch (Exception) when (!ct.IsCancellationRequested)
+            {
+                // Fail closed: deny catalog lowering when protection metadata is unavailable.
+                protection = new EffectiveProtection(
+                    new ContainerRef(ContainerKind.Domain, Guid.Empty),
+                    null,
+                    ProtectionClass.Confidential,
+                    ProtectionClass.Confidential,
+                    null,
+                    new Dictionary<string, ColumnProtection>(),
+                    CatalogVisibilityMode.OnRequest);
+            }
+        }
+
+        return ResolveEffectiveMinGroupSize(query, metadata, protection);
+    }
+
+    private EffectiveMinGroupSize ResolveEffectiveMinGroupSize(AggregationQuery query, TableMetadata metadata, EffectiveProtection? protection = null)
     {
         int resolved = _hasExplicitAnalyticsOptions
             ? _analyticsOptions.Privacy.DefaultMinGroupSize
@@ -215,6 +261,6 @@ public sealed partial class GovernedAggregationService
         }
 
         // Issue #448: Catalog-owned minimum group size resolution with lowering support for non-personal tables.
-        return Resolve(metadata, query, new OperatorFloor(resolved, explicitOverride), _analyticsOptions.Privacy, _logger);
+        return Resolve(metadata, query, new OperatorFloor(resolved, explicitOverride), _analyticsOptions.Privacy, _logger, protection);
     }
 }

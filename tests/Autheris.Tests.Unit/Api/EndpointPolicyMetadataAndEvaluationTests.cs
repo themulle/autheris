@@ -32,7 +32,6 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
         typeof(CallerAttributeSimulationService),
         typeof(VirtualFilterAdministrationService),
         typeof(DataProductService),
-        typeof(DataSourceOwnerService),
         typeof(ProductDiscoveryService),
         typeof(ProductSyncService),
         typeof(ProductSyncWebhookService),
@@ -151,23 +150,20 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
     public void ProductEndpoints_AttachExpectedNamedPolicies_AndNoBareRequireAuthorization()
     {
         var endpoints = MapAndGetEndpoints(b => b.MapProductEndpoints());
-        endpoints.Count.ShouldBe(16);
+        endpoints.Count.ShouldBe(13);
         AssertAllProtectedRoutesHaveNamedPolicy(endpoints);
 
         const string prefix = "/api/v1/products";
         AssertProtectedRoutePolicy(endpoints, "GET", $"{prefix}/", GatewayPolicies.ProductAccess);
         AssertProtectedRoutePolicy(endpoints, "GET", $"{prefix}/{{schema}}/{{name}}", GatewayPolicies.ProductAccess);
         AssertProtectedRoutePolicy(endpoints, "PUT", $"{prefix}/{{schema}}/{{name}}", GatewayPolicies.ProductAccess);
-        AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/{{schema}}/{{name}}/owner", GatewayPolicies.ProductAccess);
+        AssertProtectedRoutePolicy(endpoints, "PUT", $"{prefix}/{{schema}}/{{name}}/owner-group", GatewayPolicies.ProductAccess);
         AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/{{schema}}/{{name}}/retire", GatewayPolicies.ProductAccess);
         AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/{{schema}}/{{name}}/settings", GatewayPolicies.ProductAccess);
         AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/{{schema}}/{{name}}/columns/{{column}}/classification", GatewayPolicies.ProductAccess);
         AssertProtectedRoutePolicy(endpoints, "GET", $"{prefix}/discovery", GatewayPolicies.ProductAccess);
         AssertProtectedRoutePolicy(endpoints, "GET", $"{prefix}/{{schema}}/{{name}}/explain", GatewayPolicies.ProductAccess);
         AssertProtectedRoutePolicy(endpoints, "GET", $"{prefix}/{{schema}}/{{name}}/usage", GatewayPolicies.ProductAccess);
-        AssertProtectedRoutePolicy(endpoints, "GET", $"{prefix}/sources/{{dataSource}}/owners", GatewayPolicies.ProductOwnerRead);
-        AssertProtectedRoutePolicy(endpoints, "PUT", $"{prefix}/sources/{{dataSource}}/owners/{{ownerSid}}", GatewayPolicies.ProductOwnerAdmin);
-        AssertProtectedRoutePolicy(endpoints, "DELETE", $"{prefix}/sources/{{dataSource}}/owners/{{ownerSid}}", GatewayPolicies.ProductOwnerAdmin);
         AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/sync/plan", GatewayPolicies.ProductSync);
         AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/sync/apply", GatewayPolicies.ProductSync);
         AssertAnonymousWebhook(endpoints, "POST", $"{prefix}/sync/webhook/{{tenant}}");
@@ -253,8 +249,6 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
     [InlineData(GatewayPolicies.VirtualFilterSyncPlan, new[] { "FilterSync", "FilterAdmin" }, "ClusterAdmin")]
     [InlineData(GatewayPolicies.VirtualFilterSyncApply, new[] { "FilterSync" }, "ClusterAdmin")]
     [InlineData(GatewayPolicies.EffectiveFilterInspect, new[] { "FilterAdmin", "GovernanceAdmin", "SecurityAuditor" }, "Consumer")]
-    [InlineData(GatewayPolicies.ProductOwnerRead, new[] { "GovernanceAdmin", "TenantAdmin", "SecurityAuditor", "DataProductAdmin" }, "Consumer")]
-    [InlineData(GatewayPolicies.ProductOwnerAdmin, new[] { "GovernanceAdmin", "TenantAdmin" }, "DataProductAdmin")]
     [InlineData(GatewayPolicies.ProductSync, new[] { "DataProductSync" }, "ClusterAdmin")]
     [InlineData(GatewayPolicies.OpenApiPublish, new[] { "GovernanceAdmin", "SchemaPublisher", "TenantAdmin" }, "Consumer")]
     [InlineData(GatewayPolicies.ProfileAdmin, new[] { "TenantAdmin", "GovernanceAdmin" }, "SecurityAuditor")]

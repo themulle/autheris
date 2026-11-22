@@ -236,10 +236,10 @@ public class InfrastructureTests : IDisposable
     [Fact]
     public async Task FourEyesWorkflow_RequiresTwoDistinctApprovers()
     {
-        // finance_table_5 has requires_four_eyes = 1 (seed: t % 5 == 0)
+        // finance_table_5 carries an encrypted/PII email column requiring four-eyes approval
         var sensitiveTable = await _repository.GetTableMetadataAsync(new TableIdentifier("finance", "dbo", "finance_table_5"));
         sensitiveTable.ShouldNotBeNull();
-        sensitiveTable.Table.RequiresFourEyes.ShouldBeTrue();
+        ClassificationMetadata.IsTableSensitive(sensitiveTable).ShouldBeTrue();
 
         var requesterSid = new Sid("S-1-5-21-REQ-4EYES");
         var approver1 = new Sid("S-1-5-21-1000-1000-1000-1002");
@@ -253,22 +253,22 @@ public class InfrastructureTests : IDisposable
             RequesterSid = requesterSid,
             RequestedGranteeType = GranteeType.User,
             RequestedGranteeRef = requesterSid.Value,
-            BusinessJustification = "Critical audit of high sensitivity table",
+            BusinessJustification = "Critical audit of sensitive table",
             RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7)
         });
 
         // Step 1: Approver 1 approves -> status becomes PENDING_SECOND_APPROVAL
-        var step1 = await _repository.ApproveConsentRequestStepAsync(request.Id, approver1);
+        var step1 = await _repository.ApproveConsentRequestStepAsync(request.Id, approver1, requireSecondApprover: true);
         step1.Status.ShouldBe("PENDING_SECOND_APPROVAL");
 
         // Same approver trying again must fail
         await Should.ThrowAsync<InvalidOperationException>(async () =>
         {
-            await _repository.ApproveConsentRequestStepAsync(request.Id, approver1);
+            await _repository.ApproveConsentRequestStepAsync(request.Id, approver1, requireSecondApprover: true);
         });
 
         // Step 2: Distinct Approver 2 approves -> status becomes APPROVED
-        var step2 = await _repository.ApproveConsentRequestStepAsync(request.Id, approver2);
+        var step2 = await _repository.ApproveConsentRequestStepAsync(request.Id, approver2, requireSecondApprover: true);
         step2.Status.ShouldBe("APPROVED");
     }
 

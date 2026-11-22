@@ -50,7 +50,7 @@ public sealed class ProductSyncTests
         result.Items.ShouldHaveSingleItem().Action.ShouldBe(ProductSyncAction.Drift);
         var stored = (await _h.Store.GetProductAsync(ProductHarness.Tenant, "sales", "orders_view"))!;
         stored.DefinitionHash.ShouldBe(manual.DefinitionHash);
-        stored.ProductOwner.ShouldBe(ProductHarness.Bob);
+        stored.OwnerGroupSid.ShouldBe(ProductHarness.Bob);
         stored.ManagedBy.ShouldBeNull();
     }
 
@@ -65,7 +65,7 @@ public sealed class ProductSyncTests
 
         var after = (await _h.Store.GetProductAsync(ProductHarness.Tenant, "sales", "orders_view"))!;
         after.Version.ShouldBe(before.Version);
-        after.ProductOwner.ShouldBe(ProductHarness.Alice);
+        after.OwnerGroupSid.ShouldBe(ProductHarness.Alice);
     }
 
     [Fact]

@@ -34,7 +34,7 @@ public sealed class ConsentQueryEquivalenceTests : IDisposable
         var table = new Table
         {
             Id = Guid.NewGuid(), SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName,
-            Sensitivity = "LOW", RequiresFourEyes = false, IsActive = true
+            IsActive = true
         };
         var meta = await _repo.UpsertTableMetadataAsync(new TableMetadata
         {

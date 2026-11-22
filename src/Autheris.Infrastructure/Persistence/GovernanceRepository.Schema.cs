@@ -131,16 +131,14 @@ public partial class GovernanceRepository
                     using (var cmd = conn.CreateCommand())
                     {
                         cmd.Transaction = trans;
-                        cmd.CommandText = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active)
-                                            VALUES (@id, 'SqlServer', @domain, @schema, @name, @disp, @sens, @four, 1)
+                        cmd.CommandText = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, is_active)
+                                            VALUES (@id, 'SqlServer', @domain, @schema, @name, @disp, 1)
                                             ON CONFLICT DO NOTHING;";
                         cmd.AddBound("@id", tableId);
                         cmd.AddBound("@domain", domain);
                         cmd.AddBound("@schema", schema);
                         cmd.AddBound("@name", tableName);
                         cmd.AddBound("@disp", $"{domain.ToUpperInvariant()} Table {t}");
-                        cmd.AddBound("@sens", (t % 5 == 0) ? "HIGH" : "NORMAL");
-                        cmd.AddBound("@four", (t % 5 == 0) ? 1 : 0);
                         cmd.ExecuteNonQuery();
                     }
 
@@ -269,8 +267,8 @@ public partial class GovernanceRepository
             using (var cmd = conn.CreateCommand())
             {
                 cmd.Transaction = trans;
-                cmd.CommandText = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active)
-                                    VALUES (@id, 'SqlServer', 'finance', 'dbo', 'finance_items', 'Finance Items', 'NORMAL', 0, 1)
+                cmd.CommandText = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, is_active)
+                                    VALUES (@id, 'SqlServer', 'finance', 'dbo', 'finance_items', 'Finance Items', 1)
                                     ON CONFLICT DO NOTHING;";
                 cmd.AddBound("@id", childTableId);
                 cmd.ExecuteNonQuery();
@@ -433,16 +431,14 @@ public partial class GovernanceRepository
                     using (var cmd = conn.CreateCommand())
                     {
                         cmd.Transaction = trans;
-                        cmd.CommandText = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active)
-                                            SELECT @id, 'SqlServer', @domain, @schema, @name, @disp, @sens, @four, 1
+                        cmd.CommandText = @"INSERT INTO TABLES (id, source_type, source_name, schema_name, table_name, display_name, is_active)
+                                            SELECT @id, 'SqlServer', @domain, @schema, @name, @disp, 1
                                             WHERE NOT EXISTS (SELECT 1 FROM TABLES WHERE source_name = @domain AND schema_name = @schema AND table_name = @name);";
                         cmd.AddBound("@id", tableId);
                         cmd.AddBound("@domain", domain);
                         cmd.AddBound("@schema", schema);
                         cmd.AddBound("@name", tableName);
                         cmd.AddBound("@disp", $"{domain.ToUpperInvariant()} Table {t}");
-                        cmd.AddBound("@sens", (t % 5 == 0) ? "HIGH" : "NORMAL");
-                        cmd.AddBound("@four", (t % 5 == 0) ? 1 : 0);
                         cmd.ExecuteNonQuery();
                     }
 

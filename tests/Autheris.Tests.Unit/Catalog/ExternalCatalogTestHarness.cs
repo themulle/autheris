@@ -214,7 +214,6 @@ internal sealed class ExternalCatalogTestHarness : IAsyncDisposable
         bool hidden = false,
         string? schema = "dbo",
         DiscoveryObjectKind kind = DiscoveryObjectKind.Table,
-        string sensitivity = "NORMAL",
         params (string Name, bool Sensitive, bool Hidden)[] columns)
     {
         var baseTable = DiscoveryTestBuilder.MakeTable(
@@ -242,8 +241,7 @@ internal sealed class ExternalCatalogTestHarness : IAsyncDisposable
                 DataSourceType = baseTable.Table.DataSourceType,
                 IsActive = true,
                 DiscoveryHidden = hidden,
-                ObjectKind = kind,
-                Sensitivity = sensitivity
+                ObjectKind = kind
             }
         };
         Tables.Tables.Add(table);
@@ -319,7 +317,7 @@ internal sealed class ExternalCatalogTestHarness : IAsyncDisposable
         string? schema = null,
         string? owner = null,
         string? tag = null,
-        string? sensitivity = null,
+        string? protectionClass = null,
         bool? pii = null,
         long? changedSince = null,
         string? cursor = null,
@@ -343,7 +341,7 @@ internal sealed class ExternalCatalogTestHarness : IAsyncDisposable
             schema,
             owner,
             tag,
-            sensitivity,
+            protectionClass,
             pii,
             changedSince,
             cursor,

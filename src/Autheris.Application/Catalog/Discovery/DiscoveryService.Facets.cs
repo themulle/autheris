@@ -50,7 +50,7 @@ public sealed partial class DiscoveryService
                 schema: null,
                 kind: null,
                 tag: null,
-                sensitivity: null,
+                protectionClass: null,
                 search: search,
                 mode: mode,
                 language: language,

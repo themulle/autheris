@@ -84,12 +84,13 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
         var table = new Table
         {
             Id = Guid.NewGuid(), SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName,
-            Sensitivity = "LOW", RequiresFourEyes = fourEyes, IsActive = true
+            IsActive = true
         };
         var meta = await Repo.UpsertTableMetadataAsync(new TableMetadata
         {
             Identifier = id, Table = table,
-            Columns = [new TableColumn { TableId = table.Id, ColumnName = "id", DataType = "INT" }]
+            Columns = [new TableColumn { TableId = table.Id, ColumnName = "id", DataType = "INT" }],
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(fourEyes ? new[] { "id" } : Array.Empty<string>())
         });
         _tables.Add(id);
         foreach (var approver in _approvers)
@@ -183,12 +184,12 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
         var first = await NewApproverAsync();
         var second = await NewApproverAsync();
         var req = await NewRequestAsync(fourEyes: true);
-        (await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(first))).Status.ShouldBe("PENDING_SECOND_APPROVAL");
+        (await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(first), requireSecondApprover: true)).Status.ShouldBe("PENDING_SECOND_APPROVAL");
 
         SetStatusUpdateSeam(ForceStatus(req.Id, "REJECTED"));
         try
         {
-            await Should.ThrowAsync<ConsentRequestStatusConflictException>(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(second)));
+            await Should.ThrowAsync<ConsentRequestStatusConflictException>(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(second), requireSecondApprover: true));
         }
         finally
         {
@@ -197,7 +198,7 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
 
         await AssertNothingPersistedAsync(req.Id, "PENDING_SECOND_APPROVAL", 1);
         // The unchanged request still completes: the guard did not poison it.
-        (await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(second))).Status.ShouldBe("APPROVED");
+        (await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(second), requireSecondApprover: true)).Status.ShouldBe("APPROVED");
     }
 
     // ---------------- W-9 (outcome of a decision on an already decided request) ----------------
@@ -260,9 +261,9 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
             sysId, "EXT-B", "APPROVED",
             new AssertedApprover("board-b", ResolvedSid: "S-1-5-21-EXT-BOARDB"), DateTimeOffset.UtcNow);
 
-        var step1 = await Repo.ApproveExternalConsentRequestStepAsync(req.Id, attrA, new Sid("S-1-5-21-EXT-BOARDA"));
+        var step1 = await Repo.ApproveExternalConsentRequestStepAsync(req.Id, attrA, new Sid("S-1-5-21-EXT-BOARDA"), requireSecondApprover: true);
         step1.Status.ShouldBe("PENDING_EXTERNAL_APPROVAL");
-        var step2 = await Repo.ApproveExternalConsentRequestStepAsync(req.Id, attrB, new Sid("S-1-5-21-EXT-BOARDB"));
+        var step2 = await Repo.ApproveExternalConsentRequestStepAsync(req.Id, attrB, new Sid("S-1-5-21-EXT-BOARDB"), requireSecondApprover: true);
         step2.Status.ShouldBe("APPROVED");
     }
 
@@ -295,8 +296,8 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
 
         // The loser sees the first step under the lock and is refused for its true reason (four-eyes), not as a status conflict.
         var results = await Task.WhenAll(
-            Attempt<InvalidOperationException>(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(approver)), exact: true),
-            Attempt<InvalidOperationException>(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(approver)), exact: true));
+            Attempt<InvalidOperationException>(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(approver), requireSecondApprover: true), exact: true),
+            Attempt<InvalidOperationException>(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(approver), requireSecondApprover: true), exact: true));
 
         results.Count(ok => ok).ShouldBe(1);
         var final = await Repo.GetConsentRequestAsync(req.Id);
@@ -312,11 +313,11 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
         var secondA = await NewApproverAsync();
         var secondB = await NewApproverAsync();
         var req = await NewRequestAsync(fourEyes: true);
-        (await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(first))).Status.ShouldBe("PENDING_SECOND_APPROVAL");
+        (await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(first), requireSecondApprover: true)).Status.ShouldBe("PENDING_SECOND_APPROVAL");
 
         var results = await Task.WhenAll(
-            Attempt<ConsentRequestStatusConflictException>(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(secondA))),
-            Attempt<ConsentRequestStatusConflictException>(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(secondB))));
+            Attempt<ConsentRequestStatusConflictException>(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(secondA), requireSecondApprover: true)),
+            Attempt<ConsentRequestStatusConflictException>(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(secondB), requireSecondApprover: true)));
 
         results.Count(ok => ok).ShouldBe(1);
         var final = await Repo.GetConsentRequestAsync(req.Id);
@@ -361,10 +362,10 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
         RequireAvailable();
         var approver = await NewApproverAsync();
         var req = await NewRequestAsync(fourEyes: true);
-        (await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(approver))).Status.ShouldBe("PENDING_SECOND_APPROVAL");
+        (await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(approver), requireSecondApprover: true)).Status.ShouldBe("PENDING_SECOND_APPROVAL");
 
         var (step, consent) = AtomicApproval(req, approver);
-        var ex = await Should.ThrowAsync<InvalidOperationException>(() => Repo.ExecuteAtomicApprovalWithConsentAsync(req.Id, step, consent, [], []));
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() => Repo.ExecuteAtomicApprovalWithConsentAsync(req.Id, step, consent, [], [], requireSecondApprover: true));
         ex.ShouldNotBeOfType<ConsentRequestStatusConflictException>();
 
         (await Repo.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("PENDING_SECOND_APPROVAL");
@@ -380,14 +381,14 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
         var req = await NewRequestAsync(fourEyes: true);
 
         var (firstStep, firstConsent) = AtomicApproval(req, first);
-        var ex = await Should.ThrowAsync<InvalidOperationException>(() => Repo.ExecuteAtomicApprovalWithConsentAsync(req.Id, firstStep, firstConsent, [], []));
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() => Repo.ExecuteAtomicApprovalWithConsentAsync(req.Id, firstStep, firstConsent, [], [], requireSecondApprover: true));
         ex.ShouldNotBeOfType<ConsentRequestStatusConflictException>();
         (await Repo.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("PENDING");
         (await CountApprovalStepsAsync(req.Id)).ShouldBe(0);
 
-        (await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(first))).Status.ShouldBe("PENDING_SECOND_APPROVAL");
+        (await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(first), requireSecondApprover: true)).Status.ShouldBe("PENDING_SECOND_APPROVAL");
         var (secondStep, secondConsent) = AtomicApproval(req, second);
-        await Repo.ExecuteAtomicApprovalWithConsentAsync(req.Id, secondStep, secondConsent, [], []);
+        await Repo.ExecuteAtomicApprovalWithConsentAsync(req.Id, secondStep, secondConsent, [], [], requireSecondApprover: true);
 
         (await Repo.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("APPROVED");
         (await CountApprovalStepsAsync(req.Id)).ShouldBe(2);

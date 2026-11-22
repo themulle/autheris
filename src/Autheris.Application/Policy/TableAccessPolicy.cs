@@ -15,6 +15,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Plugins.Auth;
+using Autheris.Domain.Security;
 
 /// <summary>
 /// One caller and one catalog table. <paramref name="Claims"/> feed the contract and restricted-scope checks;
@@ -35,7 +36,8 @@ public sealed record TableAccessQuery(
     IReadOnlySet<Sid>? AllUserSids = null,
     SchemaContractDefinition? Contract = null,
     ClaimsPrincipal? Principal = null,
-    IReadOnlyList<Consent>? SupplementalConsents = null)
+    IReadOnlyList<Consent>? SupplementalConsents = null,
+    EffectiveProtection? Protection = null)
 {
     public static TableAccessQuery ForPrincipal(
         ClaimsPrincipal principal,
@@ -44,7 +46,8 @@ public sealed record TableAccessQuery(
         TableMetadata metadata,
         IReadOnlyList<string>? requestedColumns = null,
         IReadOnlyDictionary<string, object?>? extraAttributes = null,
-        SchemaContractDefinition? contract = null)
+        SchemaContractDefinition? contract = null,
+        EffectiveProtection? protection = null)
     {
         ArgumentNullException.ThrowIfNull(principal);
         return new TableAccessQuery(
@@ -59,7 +62,8 @@ public sealed record TableAccessQuery(
             extraAttributes,
             AllUserSids: principal.GetAllUserSids(),
             Contract: contract,
-            Principal: principal);
+            Principal: principal,
+            Protection: protection);
     }
 }
 
@@ -94,6 +98,7 @@ public sealed partial class TableAccessPolicy
     private readonly Autheris.Application.Catalog.ICatalogVersionProvider? _catalogVersionProvider;
     private readonly IDataOwnershipRepository? _ownershipRepository;
     private readonly Autheris.Application.Policy.Classification.ClassificationAccessResolver? _classificationResolver;
+    private readonly IProtectionSnapshotProvider? _protectionProvider;
     private readonly TimeProvider _timeProvider;
 
     /// <param name="mandatoryFilters">
@@ -120,7 +125,8 @@ public sealed partial class TableAccessPolicy
         Autheris.Application.Catalog.ICatalogVersionProvider? catalogVersionProvider = null,
         IDataOwnershipRepository? ownershipRepository = null,
         TimeProvider? timeProvider = null,
-        Autheris.Application.Policy.Classification.ClassificationAccessResolver? classificationResolver = null)
+        Autheris.Application.Policy.Classification.ClassificationAccessResolver? classificationResolver = null,
+        IProtectionSnapshotProvider? protectionProvider = null)
     {
         _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
         _callerAttributes = callerAttributes;
@@ -133,6 +139,7 @@ public sealed partial class TableAccessPolicy
         _ownershipRepository = ownershipRepository;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _classificationResolver = classificationResolver;
+        _protectionProvider = protectionProvider;
         _mandatoryFilters = mandatoryFilters ?? throw new ArgumentNullException(nameof(mandatoryFilters));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _resolutionService = resolutionService ?? throw new ArgumentNullException(nameof(resolutionService));
@@ -221,7 +228,20 @@ public sealed partial class TableAccessPolicy
             return TableAccessDecision.Denied(table, "identity.groups_unresolved: Group resolution unavailable (fail-closed).");
         }
 
-        // SR15-51 / SG-16: Enforce schema contracts at query execution time
+        if (query.Protection is null && _protectionProvider is not null)
+        {
+            try
+            {
+                var resolvedProtection = await _protectionProvider.GetAsync(query.Tenant, table, ct).ConfigureAwait(false);
+                query = query with { Protection = resolvedProtection };
+            }
+            catch (Exception) when (!ct.IsCancellationRequested)
+            {
+                return TableAccessDecision.Denied(table, "Protection classification unavailable (fail-closed).");
+            }
+        }
+
+        // Enforce schema contracts at query execution time using protection classes only.
         if (CheckSchemaContract(query, _contractManager) is { } contractDenial)
         {
             return contractDenial;
@@ -362,26 +382,18 @@ public sealed partial class TableAccessPolicy
                 $"Schema Contract Denial: Table '{table.ToQualifiedName()}' is not permitted under contract '{contract.Name}'.");
         }
 
-        var allTableTags = (query.Metadata.Table.Tags ?? Array.Empty<string>())
-            .Concat(string.IsNullOrWhiteSpace(query.Metadata.Table.Sensitivity) ? Array.Empty<string>() : [query.Metadata.Table.Sensitivity])
-            .Where(s => !string.IsNullOrWhiteSpace(s))
-            .ToList();
+        var tableClass = (query.Protection?.TableClass ?? ProtectionClass.Confidential).NormalizeOrConfidential();
 
-        if (contract.ExcludedTags.Count > 0)
-        {
-            var matchedExcluded = allTableTags.FirstOrDefault(t => contract.ExcludedTags.Contains(t));
-            if (matchedExcluded != null)
-            {
-                return TableAccessDecision.Denied(table,
-                    $"Schema Contract Denial: Table '{table.ToQualifiedName()}' with tag '{matchedExcluded}' is excluded under contract '{contract.Name}'.");
-            }
-        }
-
-        if (contract.IncludedTags.Count > 0 &&
-            (allTableTags.Count == 0 || !allTableTags.Any(t => contract.IncludedTags.Contains(t))))
+        if (contract.ExcludedClasses.Contains(tableClass))
         {
             return TableAccessDecision.Denied(table,
-                $"Schema Contract Denial: Table '{table.ToQualifiedName()}' is not in included tags under contract '{contract.Name}'.");
+                $"Schema Contract Denial: Table '{table.ToQualifiedName()}' with class '{tableClass.ToCanonicalName()}' is excluded under contract '{contract.Name}'.");
+        }
+
+        if (contract.IncludedClasses.Count > 0 && !contract.IncludedClasses.Contains(tableClass))
+        {
+            return TableAccessDecision.Denied(table,
+                $"Schema Contract Denial: Table '{table.ToQualifiedName()}' with class '{tableClass.ToCanonicalName()}' is not in included classes under contract '{contract.Name}'.");
         }
 
         return null;
@@ -452,8 +464,7 @@ public sealed partial class TableAccessPolicy
             Roles = query.Roles,
             TableIdentifier = table,
             RequestedColumns = query.RequestedColumns,
-            TableTags = query.Metadata.Table.Tags,
-            TableSensitivity = query.Metadata.Table.Sensitivity,
+            TableClass = (query.Protection?.TableClass ?? ProtectionClass.Confidential).NormalizeOrConfidential(),
             ClientIp = query.ClientIp,
             ExtraAttributes = query.ExtraAttributes
         };

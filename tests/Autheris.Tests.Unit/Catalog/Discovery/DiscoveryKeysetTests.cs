@@ -155,8 +155,7 @@ public sealed class DiscoveryKeysetTests
                 SourceName = t1.Table.SourceName,
                 SchemaName = t1.Table.SchemaName,
                 TableName = t1.Table.TableName,
-                IsActive = true,
-                Sensitivity = "CONFIDENTIAL"
+                IsActive = true
             }
         };
         var t2 = DiscoveryTestBuilder.MakeTable("sales", "b");
@@ -169,7 +168,7 @@ public sealed class DiscoveryKeysetTests
         var page = await service.ListKeysetAsync(
             new DiscoveryKeysetQuery(
                 Tag: "finance",
-                Sensitivity: "confidential",
+                ProtectionClass: "confidential",
                 MetadataPredicate: m => m.Identifier.TableName == "a"),
             Caller());
 

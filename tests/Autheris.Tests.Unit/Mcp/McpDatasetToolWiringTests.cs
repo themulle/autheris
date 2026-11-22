@@ -28,8 +28,8 @@ using Shouldly;
 using Xunit;
 
 /// <summary>
-/// The MCP dataset tools are registered without demo data, run ABAC on the requested table, require four-eyes
-/// approval only for row reads, and are executed by the MCP query executor.
+/// The MCP dataset tools are registered without demo data, run ABAC on the requested table, block inactive tables
+/// on row reads, and are executed by the MCP query executor.
 /// </summary>
 public sealed class McpDatasetToolWiringTests
 {
@@ -103,13 +103,9 @@ public sealed class McpDatasetToolWiringTests
     [Theory]
     [InlineData("describe_dataset", true)]
     [InlineData("sample_rows", false)]
-    public async Task FourEyesTable_BlocksRowReads_ButNotTheDescription(string name, bool allowed)
+    public async Task InactiveTable_BlocksRowReads_ButNotTheDescription(string name, bool allowed)
     {
-        var metadataRepo = new InMemoryTableMetadataRepository(new TableMetadata
-        {
-            Identifier = Orders,
-            Table = new Table { TableName = "orders", RequiresFourEyes = true }
-        });
+        var metadataRepo = new AnyTableMetadataRepo(isActive: false);
         var executor = new StubMcpQueryExecutor("""{"id":"sales.public.orders"}""");
 
         var guardrail = new AiDataGuardrailService(
@@ -125,12 +121,37 @@ public sealed class McpDatasetToolWiringTests
         result.IsSuccess.ShouldBe(allowed);
         if (!allowed)
         {
-            result.ErrorMessage!.ShouldContain("Four-Eyes");
+            result.ErrorMessage!.ShouldContain("not accessible");
         }
     }
 
+    [Fact]
+    public async Task SensitiveActiveTable_AllowsSampleRowsWithoutFourEyes()
+    {
+        var metadataRepo = new InMemoryTableMetadataRepository(new TableMetadata
+        {
+            Identifier = Orders,
+            Table = new Table { TableName = "orders", IsActive = true },
+            Columns = [new TableColumn { ColumnName = "email" }],
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("email")
+        });
+        var executor = new StubMcpQueryExecutor("""{"rows":[]}""");
+
+        var guardrail = new AiDataGuardrailService(
+            new McpToolRegistry(Options.Create(new GatewayOptions()), new FixedDemoData(false)),
+            Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } }),
+            NullLogger<AiDataGuardrailService>.Instance,
+            global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, queryExecutor: executor,
+            tableMetadataRepository: metadataRepo, decisionPoint: PdpTestDoubles.AllowAll());
+
+        var session = new McpSessionContext("s1", "agent", "tenant-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-1-USER");
+        var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("sample_rows", """{"dataset":"sales.public.orders"}"""), session);
+
+        result.IsSuccess.ShouldBeTrue(result.ErrorMessage);
+    }
+
     private static (AiDataGuardrailService Guardrail, List<Autheris.Application.Policy.Pdp.AccessRequest> PolicyCalls, StubMcpQueryExecutor Executor) GraphQlGuardrail(
-        IReadOnlyList<TableIdentifier>? documentTables, bool fourEyes = false)
+        IReadOnlyList<TableIdentifier>? documentTables, bool isActive = true)
     {
         var map = new StubGraphQlCatalogMap(documentTables);
         var policyCalls = new List<Autheris.Application.Policy.Pdp.AccessRequest>();
@@ -139,7 +160,7 @@ public sealed class McpDatasetToolWiringTests
             policyCalls.Add(r);
             return TableAccessDecision.Allowed(r.Object.Identifier, new Dictionary<string, ColumnAccessLevel>());
         });
-        var metadataRepo = new AnyTableMetadataRepo(fourEyes);
+        var metadataRepo = new AnyTableMetadataRepo(isActive);
         var executor = new StubMcpQueryExecutor("""{"data":{}}""");
 
         var guardrail = new AiDataGuardrailService(
@@ -172,14 +193,14 @@ public sealed class McpDatasetToolWiringTests
     }
 
     [Fact]
-    public async Task QueryGraphQl_FourEyesTable_NeedsApproval()
+    public async Task QueryGraphQl_InactiveTable_FailsClosed()
     {
-        var (guardrail, _, executor) = GraphQlGuardrail([Orders], fourEyes: true);
+        var (guardrail, _, executor) = GraphQlGuardrail([Orders], isActive: false);
 
         var result = await CallGraphQl(guardrail, """{"query":"{ sales_public_orders { id } }"}""");
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("Four-Eyes");
+        result.ErrorMessage!.ShouldContain("not accessible");
         executor.Calls.ShouldBeEmpty();
     }
 
@@ -431,10 +452,14 @@ public sealed class McpDatasetToolWiringTests
         json.ShouldContain("FORBIDDEN");
     }
 
-    private sealed class AnyTableMetadataRepo(bool requiresFourEyes) : ITableMetadataRepository
+    private sealed class AnyTableMetadataRepo(bool isActive = true) : ITableMetadataRepository
     {
         public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
-            => Task.FromResult<TableMetadata?>(new TableMetadata { Identifier = table, Table = new Table { RequiresFourEyes = requiresFourEyes } });
+            => Task.FromResult<TableMetadata?>(new TableMetadata
+            {
+                Identifier = table,
+                Table = new Table { IsActive = isActive }
+            });
 
         public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<TableMetadata>>([]);

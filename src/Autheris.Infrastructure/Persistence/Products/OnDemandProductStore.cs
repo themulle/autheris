@@ -12,7 +12,7 @@ using Autheris.Infrastructure.Persistence.Dialects;
 /// <summary>Cross-tenant listing of the <c>onDemand</c> data product views for the cluster-wide idle drop (read only, keyset paged).</summary>
 public sealed class OnDemandProductStore(GovernanceRepository repository) : IOnDemandProductStore
 {
-    private const string Columns = "id, product_schema, product_name, kind, definition, definition_hash, base_objects_json, columns_json, created_by, authority, status, managed_by, load_json, limits_json, description, product_owner, version, created_at, updated_at";
+    private const string Columns = "id, product_schema, product_name, kind, definition, definition_hash, base_objects_json, columns_json, created_by, authority, status, managed_by, load_json, limits_json, description, owner_group_sid, default_class, visibility, version, created_at, updated_at";
     private const string Where = " FROM DATA_PRODUCTS WHERE kind = 'View' AND status <> 'Retired' AND load_json LIKE '%\"Mode\":\"OnDemand\"%' AND (tenant_id > @after_tenant OR (tenant_id = @after_tenant AND (product_schema > @after_schema OR (product_schema = @after_schema AND product_name > @after_name)))) ORDER BY tenant_id, product_schema, product_name";
     private const string PgSql = "SELECT tenant_id, " + Columns + Where + " LIMIT @limit";
     private const string SsSql = "SELECT TOP (@limit) tenant_id, " + Columns + Where;

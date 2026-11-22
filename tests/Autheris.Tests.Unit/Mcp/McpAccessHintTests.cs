@@ -50,7 +50,7 @@ public sealed class McpAccessHintTests
             new TableMetadata
             {
                 Identifier = Orders,
-                Table = new Table { TableName = "orders", SchemaName = "public", Description = "Orders", Sensitivity = "INTERNAL" },
+                Table = new Table { TableName = "orders", SchemaName = "public", Description = "Orders" },
                 PrimaryKeyColumns = ["id"],
                 Columns = [new TableColumn { ColumnName = "id", DataType = "int", Description = "Key" }]
             }

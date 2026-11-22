@@ -1292,23 +1292,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     continue;
                 }
 
-                var sensitivity = existingMeta.Table.Sensitivity;
-                if (item.TryGetProperty("sensitivity", out var sProp) && sProp.GetString() is string incomingSensitivity &&
-                    !string.IsNullOrWhiteSpace(incomingSensitivity))
-                {
-                    // Fail closed: a lower table sensitivity is not applied but rejects the import (proposal workflow). An empty stored
-                    // value is the implicit NORMAL (SensitivityRank ranks it like NORMAL), so it cannot be lowered either.
-                    if (Table.SensitivityRank(incomingSensitivity) < Table.SensitivityRank(existingMeta.Table.Sensitivity))
-                    {
-                        var storedTableSensitivity = string.IsNullOrWhiteSpace(existingMeta.Table.Sensitivity) ? "NORMAL" : existingMeta.Table.Sensitivity;
-                        rejections.Add($"Table '{tableId}': sensitivity '{incomingSensitivity}' would lower the stored sensitivity '{storedTableSensitivity}'; use the dbt proposal workflow.");
-                    }
-                    else
-                    {
-                        sensitivity = incomingSensitivity;
-                    }
-                }
-
                 var origin = item.TryGetProperty("origin", out var oProp) ? oProp.GetString() : "dbt_sample";
                 var description = item.TryGetProperty("description", out var dProp) ? dProp.GetString() : existingMeta.Table.Description;
                 var historyJson = item.TryGetProperty("history", out var hProp) ? hProp.GetRawText() : null;
@@ -1330,12 +1313,18 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                     rejections.Add($"Table '{tableId}': {relaxedGroup} requires the dbt proposal workflow.");
                 }
 
+                if (item.TryGetProperty("sensitivity", out var sProp) && sProp.GetString() is string incomingSensitivity &&
+                    !string.IsNullOrWhiteSpace(incomingSensitivity) &&
+                    DbtManifestRatchet.ClassifySensitivityRank(incomingSensitivity) < 2)
+                {
+                    rejections.Add($"Table '{tableId}': sensitivity '{incomingSensitivity}' would lower the baseline sensitivity 'NORMAL'; use the dbt proposal workflow.");
+                }
+
                 var updatedTable = existingMeta.Table with
                 {
                     Description = description,
                     LongDescription = reviewJson ?? existingMeta.Table.LongDescription,
                     DocumentationSource = origin ?? existingMeta.Table.DocumentationSource,
-                    Sensitivity = sensitivity,
                     RequiredFilterColumns = reqCols,
                     RequiredFilterColumnGroups = reqGroups
                 };
@@ -1359,11 +1348,11 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         if (colObj.TryGetProperty("sensitivity", out var csProp))
                         {
                             var cs = csProp.GetString();
-                            // B-03: Use Table.IsSensitivityHigh (SensitivityRank >= 3) instead of != "PUBLIC"
-                            var incomingHigh = Table.IsSensitivityHigh(cs);
+                            var incomingRank = DbtManifestRatchet.ClassifySensitivityRank(cs);
+                            var incomingHigh = incomingRank >= 3;
                             var storedLabel = colMeta.TryGetValue("sensitivity", out var sl) ? sl : null;
                             if ((wasSensitive && !incomingHigh) ||
-                                (!string.IsNullOrWhiteSpace(storedLabel) && Table.SensitivityRank(cs) < Table.SensitivityRank(storedLabel)))
+                                (!string.IsNullOrWhiteSpace(storedLabel) && incomingRank < DbtManifestRatchet.ClassifySensitivityRank(storedLabel)))
                             {
                                 // Fail closed: a lower column sensitivity is not applied but rejects the import (proposal workflow).
                                 rejections.Add($"Column '{tableId}.{col.ColumnName}': sensitivity '{cs}' would lower the stored sensitivity; use the dbt proposal workflow.");

@@ -16,7 +16,7 @@ public sealed class DataProductsMigration0028Tests
     public void Migration0028_ExistsPassesStepSqlLintAndKeepsTheTenantInEveryKey()
     {
         var registered = Enum.GetValues<GovernanceTable>().Select(t => t.ToSqlName()).ToHashSet(StringComparer.OrdinalIgnoreCase);
-        foreach (var table in Tables)
+        foreach (var table in new[] { "DATA_PRODUCTS", "DATA_PRODUCT_VERSIONS" })
         {
             registered.ShouldContain(table);
             GovernanceGlobalTables.IsGlobal(table).ShouldBeFalse($"{table} is tenant-scoped");

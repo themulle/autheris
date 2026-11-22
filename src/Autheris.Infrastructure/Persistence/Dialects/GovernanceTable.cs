@@ -6,6 +6,7 @@ namespace Autheris.Infrastructure.Persistence.Dialects;
 /// </summary>
 public enum GovernanceTable
 {
+    AccessPolicySettings,
     AccessProfiles,
     AccessProfileAssignments,
     ApprovalSteps,
@@ -50,7 +51,6 @@ public enum GovernanceTable
     DocLinks,
     DataProducts,
     DataProductVersions,
-    DataSourceOwners,
     DocOfficialDocuments,
     DocTenantDocuments,
     DocTenantUsage,
@@ -102,6 +102,7 @@ public static class GovernanceTableExtensions
 {
     public static string ToSqlName(this GovernanceTable table) => table switch
     {
+        GovernanceTable.AccessPolicySettings => "ACCESS_POLICY_SETTINGS",
         GovernanceTable.AccessProfiles => "ACCESS_PROFILES",
         GovernanceTable.AccessProfileAssignments => "ACCESS_PROFILE_ASSIGNMENTS",
         GovernanceTable.ApprovalSteps => "APPROVAL_STEPS",
@@ -146,7 +147,6 @@ public static class GovernanceTableExtensions
         GovernanceTable.DocLinks => "DOC_LINKS",
         GovernanceTable.DataProducts => "DATA_PRODUCTS",
         GovernanceTable.DataProductVersions => "DATA_PRODUCT_VERSIONS",
-        GovernanceTable.DataSourceOwners => "DATA_SOURCE_OWNERS",
         GovernanceTable.DocOfficialDocuments => "DOC_OFFICIAL_DOCUMENTS",
         GovernanceTable.DocTenantDocuments => "DOC_TENANT_DOCUMENTS",
         GovernanceTable.DocTenantUsage => "DOC_TENANT_USAGE",

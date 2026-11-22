@@ -38,7 +38,6 @@ internal static class CatalogProjectionTestData
             TableName = "customers",
             DisplayName = "Customers",
             Description = "Customer master data",
-            Sensitivity = "NORMAL",
             IsActive = true
         };
 

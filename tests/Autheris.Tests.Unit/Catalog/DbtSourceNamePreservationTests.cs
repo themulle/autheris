@@ -39,8 +39,6 @@ public sealed class DbtSourceNamePreservationTests
                 DataSourceType = DataSourceType.HttpPlugin,
                 PluginName = "SalesforcePlugin",
                 HttpEndpoint = new HttpEndpointDescriptor { BaseUrl = "https://salesforce.local/api" },
-                Sensitivity = "HIGH",
-                RequiresFourEyes = true,
                 DisplayName = "CRM Customers",
                 Description = "Existing core description",
                 LongDescription = "Detailed documentation",
@@ -71,8 +69,6 @@ public sealed class DbtSourceNamePreservationTests
                 DataSourceType = DataSourceType.Sql, // Must NOT override existing plugin
                 PluginName = null,
                 HttpEndpoint = null,
-                Sensitivity = "LOW", // Ratchet: cannot weaken HIGH
-                RequiresFourEyes = false, // Ratchet: cannot weaken true
                 DisplayName = "Updated Display Name",
                 Description = "Sync updated description",
                 IsActive = true
@@ -95,10 +91,6 @@ public sealed class DbtSourceNamePreservationTests
         merged.Table.DataSourceType.ShouldBe(DataSourceType.HttpPlugin);
         merged.Table.PluginName.ShouldBe("SalesforcePlugin");
         merged.Table.HttpEndpoint?.BaseUrl.ShouldBe("https://salesforce.local/api");
-
-        // Assert: Governance settings cannot be weakened
-        merged.Table.Sensitivity.ShouldBe("HIGH");
-        merged.Table.RequiresFourEyes.ShouldBeTrue();
 
         // Assert: Masking rule strength preserved (REDACT is stronger than HMAC)
         merged.ColumnMaskingRules["ssn"].RuleType.ShouldBe("REDACT");
@@ -147,8 +139,6 @@ public sealed class DbtSourceNamePreservationTests
                 DataSourceType = DataSourceType.HttpPlugin,
                 PluginName = "CustomCrmPlugin",
                 HttpEndpoint = new HttpEndpointDescriptor { BaseUrl = "https://crm.local/data" },
-                Sensitivity = "RESTRICTED",
-                RequiresFourEyes = true,
                 DisplayName = "Staging Customers",
                 Description = "Internal customer staging",
                 LongDescription = "Full staging table documentation",
@@ -181,8 +171,6 @@ public sealed class DbtSourceNamePreservationTests
         savedMetadata.Table.DataSourceType.ShouldBe(DataSourceType.HttpPlugin);
         savedMetadata.Table.PluginName.ShouldBe("CustomCrmPlugin");
         savedMetadata.Table.HttpEndpoint?.BaseUrl.ShouldBe("https://crm.local/data");
-        savedMetadata.Table.Sensitivity.ShouldBe("RESTRICTED");
-        savedMetadata.Table.RequiresFourEyes.ShouldBeTrue();
         savedMetadata.Table.DisplayName.ShouldBe("Staging Customers");
         savedMetadata.Table.Description.ShouldBe("Internal customer staging");
         savedMetadata.Table.LongDescription.ShouldBe("Full staging table documentation");

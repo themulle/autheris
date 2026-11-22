@@ -288,3 +288,4 @@ Autheris.Tests.Unit.Mcp.NoDemo.SR_H_02_ToolsList_HidesAdminToolsFromNonClusterAd
 Autheris.Tests.Unit.OkHandler.Low_McpToolsList_EscapesToolNamesAndSchemas	#998	Converted McpProtocolHandler to static principal helper and removed dead JSON-RPC handler
 Autheris.Tests.Unit.Security.OkHandler.Low_McpToolsList_EscapesToolNamesAndSchemas	#998	Converted McpProtocolHandler to static principal helper and removed dead JSON-RPC handler
 Autheris.Tests.Unit.Security.ScriptedProvider.ST_129_18_ARuleThatMentionsAPlaceholder_IsNeverShareableBetweenUsers	#998	Deleted dead PolicyShapeAnalyzer class; placeholder handling covered by TypedRowFilterBuilderAttributeTests.ST_129_18_Text_ContainsMarkersOnly_NeverAValue
+Autheris.Tests.Unit.Products.ProductAuthorityTests.DataSourceOwner_creates_views_and_procedures_in_own_source	#1009	Removed DataSourceOwner feature in WP-1009-W1-08; replaced by DataProduct container owner groups

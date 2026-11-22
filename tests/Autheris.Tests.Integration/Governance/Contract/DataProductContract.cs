@@ -1,9 +1,17 @@
 using System;
+using System.Collections.Generic;
 using System.Linq;
+using System.Security.Claims;
 using System.Threading.Tasks;
+using Autheris.Application.Audit;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Products;
+using Autheris.Application.Security;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Identity;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 using Autheris.Tests.Common;
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
@@ -18,13 +26,14 @@ public abstract class DataProductContract : GovernanceContractBase
     private static readonly TableIdentifier Orders = new("crm", "public", "orders");
     private static readonly Sid Alice = new("S-1-5-21-1001");
     private static readonly Sid Bob = new("S-1-5-21-1002");
+    private static readonly Sid GroupA = new("S-1-5-21-512");
 
     private IDataProductRepository Products => Store.Services.GetRequiredService<IDataProductRepository>();
 
     private static DataProduct NewProduct(TenantId tenant, string name, string definition = "SELECT id FROM crm.public.orders") => new(
         Guid.NewGuid(), tenant, "sales", name, DataProductKind.View, definition, ProductDefinitions.Hash(definition), [Orders],
         [new DataProductColumn("id", "bigint", ProductColumnClass.NonPii, [new ColumnLineage(Orders, "id")], null, null)],
-        Alice, ProductCreatorAuthority.BaseOwner, DataProductStatus.Active, null, LoadSettings.Default, ProductLimits.Default, "desc", Alice, 1, T0, T0);
+        Alice, ProductCreatorAuthority.BaseOwner, DataProductStatus.Active, null, LoadSettings.Default, ProductLimits.Default, "desc", GroupA, ProtectionClass.Confidential, CatalogVisibilityMode.OnRequest, 1, T0, T0);
 
     private static DataProductVersion Revision(DataProduct p) =>
         new(p.Id, p.Version, p.DefinitionHash, p.Definition, p.CreatedBy, p.Authority, T0);
@@ -41,16 +50,18 @@ public abstract class DataProductContract : GovernanceContractBase
     public override async Task Reads_never_return_other_tenant_rows()
     {
         if (!Store.IsAvailable) return;
-        await CreateAsync(Store.TenantA, "tenant_a_view");
-        await CreateAsync(Store.TenantB, "tenant_b_view");
-        await Products.AddDataSourceOwnerAsync(new DataSourceOwner(Store.TenantA, "crm", Alice, Bob, T0));
+        var prodA = await CreateAsync(Store.TenantA, "tenant_a_view");
+        var prodB = await CreateAsync(Store.TenantB, "tenant_b_view");
 
-        (await Products.GetProductAsync(Store.TenantA, "sales", "tenant_a_view")).Should().NotBeNull();
+        var loadedA = await Products.GetProductAsync(Store.TenantA, "sales", "tenant_a_view");
+        loadedA.Should().NotBeNull();
+        loadedA!.OwnerGroupSid.Should().Be(GroupA);
+        loadedA.DefaultClass.Should().Be(ProtectionClass.Confidential);
+        loadedA.Visibility.Should().Be(CatalogVisibilityMode.OnRequest);
+        (await Products.GetProductByIdAsync(Store.TenantA, prodA.Id)).Should().NotBeNull();
+        (await Products.GetProductByIdAsync(Store.TenantA, prodB.Id)).Should().BeNull();
         (await Products.GetProductAsync(Store.TenantA, "sales", "tenant_b_view")).Should().BeNull();
         (await Products.ListProductsAsync(Store.TenantB, null, 50)).Select(p => p.Name).Should().Equal("tenant_b_view");
-        (await Products.IsDataSourceOwnerAsync(Store.TenantA, "crm", Alice)).Should().BeTrue();
-        (await Products.IsDataSourceOwnerAsync(Store.TenantB, "crm", Alice)).Should().BeFalse();
-        (await Products.GetDataSourceOwnersAsync(Store.TenantB, "crm")).Should().BeEmpty();
     }
 
     [RequiresContainerRuntimeFact]
@@ -66,7 +77,6 @@ public abstract class DataProductContract : GovernanceContractBase
 
         (await Products.GetProductAsync(Store.TenantA, "sales", "same_name"))!.Description.Should().Be("desc");
         (await Products.GetProductAsync(Store.TenantA, "sales", "same_name"))!.Id.Should().Be(a.Id);
-        (await Products.RemoveDataSourceOwnerAsync(Store.TenantB, "crm", Alice)).Should().BeFalse();
     }
 
     [RequiresContainerRuntimeFact]
@@ -78,8 +88,8 @@ public abstract class DataProductContract : GovernanceContractBase
         await get.Should().ThrowAsync<ArgumentException>();
         var list = () => Products.ListProductsAsync(default, null, 10);
         await list.Should().ThrowAsync<ArgumentException>();
-        var owner = () => Products.IsDataSourceOwnerAsync(default, "crm", Alice);
-        await owner.Should().ThrowAsync<ArgumentException>();
+        var getById = () => Products.GetProductByIdAsync(default, Guid.NewGuid());
+        await getById.Should().ThrowAsync<ArgumentException>();
     }
 
     [RequiresContainerRuntimeFact]
@@ -87,16 +97,19 @@ public abstract class DataProductContract : GovernanceContractBase
     public override async Task Upsert_is_idempotent()
     {
         if (!Store.IsAvailable) return;
-        var owner = new DataSourceOwner(Store.TenantA, "crm", Alice, Bob, T0);
-        (await Products.AddDataSourceOwnerAsync(owner)).Should().BeTrue();
-        (await Products.AddDataSourceOwnerAsync(owner with { OwnerSid = new Sid("S-1-5-21-1001") })).Should().BeFalse();
-        (await Products.GetDataSourceOwnersAsync(Store.TenantA, "CRM")).Should().HaveCount(1);
-
         var product = await CreateAsync(Store.TenantA, "versioned");
-        var v2 = product with { Definition = "SELECT id, total FROM crm.public.orders", DefinitionHash = ProductDefinitions.Hash("SELECT id, total FROM crm.public.orders") };
+        var v2 = product with
+        {
+            Definition = "SELECT id, total FROM crm.public.orders",
+            DefinitionHash = ProductDefinitions.Hash("SELECT id, total FROM crm.public.orders"),
+            DefaultClass = ProtectionClass.Secret,
+            Visibility = CatalogVisibilityMode.Open
+        };
         var replaced = await Products.ReplaceProductAsync(v2, 1, Revision(v2) with { Version = 2 });
         replaced.Status.Should().Be(ProductWriteStatus.Replaced);
         replaced.Product!.Version.Should().Be(2);
+        replaced.Product.DefaultClass.Should().Be(ProtectionClass.Secret);
+        replaced.Product.Visibility.Should().Be(CatalogVisibilityMode.Open);
         (await Products.ReplaceProductAsync(v2, 1, null)).Status.Should().Be(ProductWriteStatus.VersionMismatch);
         (await Products.GetProductVersionsAsync(Store.TenantA, product.Id)).Select(v => v.Version).Should().Equal(1, 2);
         (await Products.ReplaceProductAsync(NewProduct(Store.TenantA, "ghost"), 1, null)).Status.Should().Be(ProductWriteStatus.NotFound);
@@ -184,11 +197,6 @@ public abstract class DataProductContract : GovernanceContractBase
     public override async Task Soft_deleted_rows_are_invisible_to_reads()
     {
         if (!Store.IsAvailable) return;
-        await Products.AddDataSourceOwnerAsync(new DataSourceOwner(Store.TenantA, "crm", Alice, Bob, T0));
-        (await Products.RemoveDataSourceOwnerAsync(Store.TenantA, "crm", Alice)).Should().BeTrue();
-        (await Products.IsDataSourceOwnerAsync(Store.TenantA, "crm", Alice)).Should().BeFalse();
-        (await Products.GetDataSourceOwnersAsync(Store.TenantA, "crm")).Should().BeEmpty();
-
         // a retired product stays as a tombstone that blocks the name; it is not deleted
         var product = await CreateAsync(Store.TenantA, "retiring");
         (await Products.ReplaceProductAsync(product with { Status = DataProductStatus.Retired }, 1, null)).Status.Should().Be(ProductWriteStatus.Replaced);
@@ -222,6 +230,45 @@ public abstract class DataProductContract : GovernanceContractBase
         // another tenant's identity, or a table that is no product object, is refused before any write
         var act = () => owners.SetOwnerAsync(Store.TenantB, projected.Identifier, Alice);
         await act.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task Downgrade_audit_row()
+    {
+        if (!Store.IsAvailable) return;
+        var product = await CreateAsync(Store.TenantA, "downgrade_audit_view");
+        var column = new DataProductColumn(
+            "email",
+            "varchar",
+            ProductColumnClass.PiiMasked,
+            [new ColumnLineage(Orders, "email")],
+            null,
+            null);
+        var principal = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.PrimarySid, Alice.Value),
+            new Claim("tenant_id", Store.TenantA.Value),
+            new Claim(ClaimTypes.Role, "GovernanceAdmin")
+        ], "Bearer"));
+        var caller = SecurityPrincipalContext.FromPrincipal(principal, overrideTenant: Store.TenantA);
+        var guard = new ViewDowngradeGuard(
+            Store.Services.GetRequiredService<IGovernanceCapabilities>(),
+            Store.Services.GetRequiredService<IAuditWriter>());
+
+        var updated = await guard.GuardAndAuditAsync(
+            caller,
+            product,
+            column,
+            ProductColumnClass.NonPii,
+            "Aggregated email digest is non-identifying");
+
+        updated.Class.Should().Be(ProductColumnClass.NonPii);
+        var entries = await Store.AuditLogs.QueryAuditLogsAsync(
+            targetTable: $"products.{product.Schema}.{product.Name}",
+            actorSid: Alice,
+            tenantId: Store.TenantA);
+        entries.Should().Contain(e => e.EventType == AuditEventTypes.ViewDowngraded && e.TargetColumn == "email" && e.Decision == "ALLOW");
     }
 }
 

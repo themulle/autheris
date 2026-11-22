@@ -36,8 +36,6 @@ public abstract class CatalogContract : GovernanceContractBase
                 SchemaName = id.Schema,
                 TableName = id.TableName,
                 Description = "Catalog contract table",
-                Sensitivity = "NORMAL",
-                RequiresFourEyes = false,
                 IsActive = true
             },
             Columns =
@@ -414,7 +412,7 @@ public abstract class CatalogContract : GovernanceContractBase
         return new TableMetadata
         {
             Identifier = new TableIdentifier("MaskDomain", "dbo", tableName),
-            Table = new Table { Id = id, SourceName = "MaskDomain", SchemaName = "dbo", TableName = tableName, Sensitivity = "LOW", IsActive = true },
+            Table = new Table { Id = id, SourceName = "MaskDomain", SchemaName = "dbo", TableName = tableName, IsActive = true },
             Columns = columns,
             ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(maskedColumns),
             ColumnMaskingRules = maskedColumns.ToDictionary(c => c, c => new MaskingRule { Id = ruleId, RuleType = "REDACT" })

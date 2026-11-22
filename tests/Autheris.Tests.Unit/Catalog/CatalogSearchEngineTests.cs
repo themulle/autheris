@@ -84,7 +84,7 @@ public sealed class CatalogSearchEngineTests
         var custTable = new TableMetadata
         {
             Identifier = custId,
-            Table = new Table { Description = "Kundenstamm", Sensitivity = "NORMAL" },
+            Table = new Table { Description = "Kundenstamm" },
             Columns = [new TableColumn { ColumnName = "customer_id", DataType = "int" }],
             PrimaryKeyColumns = ["customer_id"]
         };
@@ -92,7 +92,7 @@ public sealed class CatalogSearchEngineTests
         var orderTable = new TableMetadata
         {
             Identifier = orderId,
-            Table = new Table { Description = "Bestellungen", Sensitivity = "NORMAL" },
+            Table = new Table { Description = "Bestellungen" },
             Columns =
             [
                 new TableColumn { ColumnName = "order_id", DataType = "int" },
@@ -170,7 +170,7 @@ public sealed class CatalogSearchEngineTests
         new()
         {
             Identifier = new TableIdentifier(domain, "public", tableName),
-            Table = new Table { Description = description, Sensitivity = "NORMAL" },
+            Table = new Table { Description = description },
             Columns = [new TableColumn { ColumnName = "id", DataType = "int" }],
             PrimaryKeyColumns = ["id"]
         };

@@ -46,7 +46,7 @@ public abstract class CatalogSettingsRepositoryContractTestsBase : IAsyncLifetim
         var table = new Table
         {
             Id = Guid.NewGuid(), SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName,
-            DisplayName = id.TableName, Sensitivity = "LOW", RequiresFourEyes = false, IsActive = active
+            DisplayName = id.TableName, IsActive = active
         };
         await repo.UpsertTableMetadataAsync(new TableMetadata
         {

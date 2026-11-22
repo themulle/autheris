@@ -13,6 +13,9 @@ namespace Autheris.Tests.Architecture;
 public sealed class ColumnSensitivityDropArchitectureTests
 {
     private static readonly Regex Legacy = new("is_sensitive|IsSensitive|COLUMN_MASKING_RULES", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant);
+    private static readonly Regex TableSensitivityLegacy = new(
+        @"\bTableSensitivity\b|\b(?:Table|table|Meta|Metadata|BaseTable|existing|stored|candidate|row|item|entry|t|x)\s*\.\s*(?:Sensitivity|RequiresFourEyes|IsHighlySensitive|SensitivityRank|IsSensitivityHigh)\b|(?:FROM|JOIN|UPDATE|ALTER\s+TABLE)\s+(?:dbo\.)?TABLES\b[^\n;]*\b(?:sensitivity|requires_four_eyes)\b",
+        RegexOptions.CultureInvariant);
 
     /// <summary>Derived, read-only external contract fields (JSON <c>isSensitive</c>, documented for API consumers); computed from classifications, never stored.</summary>
     private static readonly string[] DerivedContractFiles =
@@ -54,6 +57,44 @@ public sealed class ColumnSensitivityDropArchitectureTests
             .ToList();
 
         offenders.ShouldBeEmpty("the legacy column sensitivity flag and masking-rule table are dropped; derive from classifications");
+    }
+
+    [Fact]
+    public void No_table_sensitivity_or_four_eyes_properties_outside_migrations()
+    {
+        var tableModels = File.ReadAllText(Path.Combine(Root(), "src", "Autheris.Domain", "Model", "TableModels.cs"));
+        tableModels.ShouldNotContain("public TableSensitivity", Case.Sensitive);
+        tableModels.ShouldNotContain("RequiresFourEyes", Case.Sensitive);
+        tableModels.ShouldNotContain("IsHighlySensitive", Case.Sensitive);
+        tableModels.ShouldNotContain("SensitivityRank", Case.Sensitive);
+        tableModels.ShouldNotContain("IsSensitivityHigh", Case.Sensitive);
+
+        var tableType = typeof(Autheris.Domain.Model.Table);
+        var retiredMembers = new[] { "Sensitivity", "RequiresFourEyes", "IsHighlySensitive", "SensitivityRank", "IsSensitivityHigh" };
+        foreach (var member in retiredMembers)
+        {
+            tableType.GetMember(member).ShouldBeEmpty($"Table must not declare retired member '{member}'.");
+        }
+
+        var src = Path.Combine(Root(), "src");
+        var offenders = Directory.EnumerateFiles(src, "*.cs", SearchOption.AllDirectories)
+            .Select(f => Path.GetRelativePath(Root(), f).Replace('\\', '/'))
+            .Where(f => !f.Contains("/obj/", StringComparison.Ordinal) && !f.Contains("/bin/", StringComparison.Ordinal))
+            .Where(f => !f.Contains("/Persistence/Migrations/", StringComparison.Ordinal))
+            .Where(f => TableSensitivityLegacy.IsMatch(File.ReadAllText(Path.Combine(Root(), f))))
+            .ToList();
+
+        offenders.ShouldBeEmpty("table sensitivity and four-eyes flags are retired in favor of object protection classes");
+    }
+
+    [Theory]
+    [InlineData("postgresql")]
+    [InlineData("sqlserver")]
+    public void Table_sensitivity_columns_dropped(string engine)
+    {
+        var tables = FoldShape(engine);
+        tables["tables"].ShouldNotContain("sensitivity");
+        tables["tables"].ShouldNotContain("requires_four_eyes");
     }
 
     [Fact]

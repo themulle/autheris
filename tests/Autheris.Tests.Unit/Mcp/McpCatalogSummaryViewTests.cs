@@ -37,7 +37,7 @@ public sealed class McpCatalogSummaryViewTests
         var t = Wp0.Table("sales", name, "Short text", ["id", "secret_col", "pii_col"]);
         return t with
         {
-            Table = t.Table with { LongDescription = "mentions secret_col and pii_col", Sensitivity = "CONFIDENTIAL", RequiresFourEyes = true },
+            Table = t.Table with { LongDescription = "mentions secret_col and pii_col" },
             CatalogTags = tags
         };
     }

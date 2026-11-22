@@ -36,7 +36,7 @@ public sealed class AuthzMigrationTests
         var table = new TableMetadata
         {
             Identifier = new TableIdentifier("sales", "public", "orders"),
-            Table = new Table { Id = tableId, SchemaName = "public", TableName = "orders", Sensitivity = "INTERNAL", IsActive = true },
+            Table = new Table { Id = tableId, SchemaName = "public", TableName = "orders", IsActive = true },
             Columns = [new TableColumn { TableId = tableId, ColumnName = "id", DataType = "int" }],
             PrimaryKeyColumns = ["id"]
         };

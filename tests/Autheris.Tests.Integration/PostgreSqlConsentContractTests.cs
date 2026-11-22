@@ -94,8 +94,6 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
             SourceName = tableId.Domain,
             SchemaName = tableId.Schema,
             TableName = tableId.TableName,
-            Sensitivity = "HIGH",
-            RequiresFourEyes = false,
             IsActive = true
         };
 
@@ -103,7 +101,8 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
         {
             Identifier = tableId,
             Table = table,
-            Columns = [new TableColumn { TableId = table.Id, ColumnName = "email", DataType = "VARCHAR" }]
+            Columns = [new TableColumn { TableId = table.Id, ColumnName = "email", DataType = "VARCHAR" }],
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("email")
         });
 
         var request = await repo.CreateConsentRequestAsync(new ConsentRequest
@@ -145,13 +144,13 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
             await roleCmd.ExecuteNonQueryAsync();
         }
 
-        var step1 = await repo.ApproveConsentRequestStepAsync(request.Id, approver1);
+        var step1 = await repo.ApproveConsentRequestStepAsync(request.Id, approver1, requireSecondApprover: true);
         step1.Status.ShouldBe("PENDING_SECOND_APPROVAL");
 
         await Should.ThrowAsync<InvalidOperationException>(() =>
-            repo.ApproveConsentRequestStepAsync(request.Id, approver1));
+            repo.ApproveConsentRequestStepAsync(request.Id, approver1, requireSecondApprover: true));
 
-        var step2 = await repo.ApproveConsentRequestStepAsync(request.Id, approver2);
+        var step2 = await repo.ApproveConsentRequestStepAsync(request.Id, approver2, requireSecondApprover: true);
         step2.Status.ShouldBe("APPROVED");
     }
 
@@ -164,8 +163,6 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
             SourceName = tableId.Domain,
             SchemaName = tableId.Schema,
             TableName = tableId.TableName,
-            Sensitivity = "LOW",
-            RequiresFourEyes = false,
             IsActive = true
         };
         var meta = await repo.UpsertTableMetadataAsync(new TableMetadata

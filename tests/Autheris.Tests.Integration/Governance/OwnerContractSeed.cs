@@ -17,8 +17,6 @@ internal static class OwnerContractSeed
             SourceName = id.Domain,
             SchemaName = id.Schema,
             TableName = id.TableName,
-            Sensitivity = "LOW",
-            RequiresFourEyes = false,
             IsActive = true
         };
         await store.TableMetadata.UpsertTableMetadataAsync(new TableMetadata

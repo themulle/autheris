@@ -429,7 +429,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
 
         var decision = _resolutionService.ResolveAccess(userSid, groupSids, roles, table, tenantConsents, metadata.Dialect, allUserSids: null, callerScopes: resolverScopes);
 
-        var ttl = ConsentResolutionService.ComputeDecisionCacheTtl(metadata.Table.IsHighlySensitive, tenantConsents, now);
+        var ttl = ConsentResolutionService.ComputeDecisionCacheTtl(ClassificationMetadata.IsTableSensitive(metadata), tenantConsents, now);
         await _cacheService.SetCachedDecisionAsync(tenantId, userSid, table, decision, ttl, contextHash, epochAtLoad, ct).ConfigureAwait(false);
 
         return decision;

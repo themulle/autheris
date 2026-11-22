@@ -142,17 +142,9 @@ public sealed class GdprDisclosureReportService : IGdprDisclosureReportService
             if (meta != null)
             {
                 maskingRules = meta.ColumnMaskingRules;
-                var sens = meta.Table.Sensitivity?.ToUpperInvariant() ?? "NORMAL";
-                if (sens.Contains("ART9", StringComparison.Ordinal) || sens.Contains("ARTICLE_9", StringComparison.Ordinal) || meta.Table.RequiresFourEyes)
-                {
-                    sensitivityCategories.Add("GDPR_ARTICLE_9 (Special Category: Health, Biometric, Genetic, Political or Religious Data)");
-                }
-                if (sens.Contains("PII", StringComparison.Ordinal))
+                if (ClassificationMetadata.IsTableSensitive(meta))
                 {
                     sensitivityCategories.Add("PII (Personally Identifiable Information)");
-                }
-                if (sens.Contains("HIGH", StringComparison.Ordinal) || sens.Contains("CONFIDENTIAL", StringComparison.Ordinal))
-                {
                     sensitivityCategories.Add("CONFIDENTIAL_BUSINESS_DATA");
                 }
             }

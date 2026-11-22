@@ -54,6 +54,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
     private readonly AnalyticsOptions _analyticsOptions;
     private readonly bool _hasExplicitAnalyticsOptions;
     private readonly ICallerAttributeRegistry? _callerAttributeRegistry;
+    private readonly IProtectionSnapshotProvider? _protectionProvider;
     private readonly ILogger<GovernedAggregationService>? _logger;
 
     [ActivatorUtilitiesConstructor]
@@ -69,7 +70,8 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         IGovernedTableReadPlanner? planner = null,
         ICallerAttributeRegistry? callerAttributeRegistry = null,
         ILogger<GovernedAggregationService>? logger = null,
-        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
+        IProtectionSnapshotProvider? protectionProvider = null)
     {
         // Issue #447 no gate means deny, never pass-through.
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
@@ -84,6 +86,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         _hasExplicitAnalyticsOptions = analyticsOptions?.Value != null;
         _analyticsOptions = analyticsOptions?.Value ?? new AnalyticsOptions();
         _callerAttributeRegistry = callerAttributeRegistry;
+        _protectionProvider = protectionProvider;
         _logger = logger;
     }
 
@@ -98,7 +101,8 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         IGovernedTableReadPlanner? planner = null,
         ICallerAttributeRegistry? callerAttributeRegistry = null,
         ILogger<GovernedAggregationService>? logger = null,
-        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null)
+        Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
+        IProtectionSnapshotProvider? protectionProvider = null)
     {
         // Issue #447 no gate means deny, never pass-through.
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
@@ -112,6 +116,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         _hasExplicitAnalyticsOptions = analyticsOptions?.Value != null;
         _analyticsOptions = analyticsOptions?.Value ?? new AnalyticsOptions();
         _callerAttributeRegistry = callerAttributeRegistry;
+        _protectionProvider = protectionProvider;
         _logger = logger;
     }
 
@@ -155,7 +160,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             throw new GatewayForbiddenException(DeniedMessage);
         }
 
-        var effectiveMinGroup = ResolveEffectiveMinGroupSize(query, metadata);
+        var effectiveMinGroup = await ResolveEffectiveMinGroupSizeAsync(tenantId, query, metadata, ct).ConfigureAwait(false);
         int effectiveMinGroupSize = effectiveMinGroup.Value;
         SmallGroupStrategy effectiveStrategy = ResolveEffectiveSmallGroupStrategy(query, metadata);
 

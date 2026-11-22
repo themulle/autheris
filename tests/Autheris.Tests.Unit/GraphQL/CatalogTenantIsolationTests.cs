@@ -39,7 +39,6 @@ public sealed class CatalogTenantIsolationTests
             SchemaName = id.Schema,
             TableName = id.TableName,
             DisplayName = id.ToString(),
-            Sensitivity = "NORMAL",
         },
         Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
     };

@@ -22,6 +22,22 @@ internal static class DataProductStoreOperations
         return await ReadOneAsync(repo, conn, null, scoped, DataProductStoreSql.Normalize(schema), DataProductStoreSql.Normalize(name), ct).ConfigureAwait(false);
     }
 
+    public static async Task<DataProduct?> GetByIdAsync(GovernanceRepository repo, TenantId tenant, Guid productId, CancellationToken ct)
+    {
+        if (productId == Guid.Empty)
+        {
+            return null;
+        }
+
+        var scoped = Tenant(tenant, GovernanceTable.DataProducts);
+        await using var conn = await repo.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = repo.CreateProductCommand(conn, null, DataProductStoreSql.GetByIdSql);
+        cmd.AddBound("@tenant_id", scoped.Value);
+        cmd.AddBound("@id", productId.ToString("D"));
+        await using var r = await repo.ExecuteReaderAsync(cmd, "Governance.Products.GetById", ct).ConfigureAwait(false);
+        return await r.ReadAsync(ct).ConfigureAwait(false) ? DataProductStoreSql.ReadProduct(r, scoped) : null;
+    }
+
     private static async Task<DataProduct?> ReadOneAsync(GovernanceRepository repo, DbConnection conn, DbTransaction? tx, TenantId tenant, string schema, string name, CancellationToken ct)
     {
         await using var cmd = repo.CreateProductCommand(conn, tx, DataProductStoreSql.GetSql);
@@ -155,66 +171,6 @@ internal static class DataProductStoreOperations
         }
 
         return items;
-    }
-
-    public static async Task<bool> IsOwnerAsync(GovernanceRepository repo, TenantId tenant, string dataSource, Sid owner, CancellationToken ct)
-    {
-        var scoped = Tenant(tenant, GovernanceTable.DataSourceOwners);
-        await using var conn = await repo.OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var cmd = repo.CreateProductCommand(conn, null, DataProductStoreSql.IsOwnerSql);
-        BindOwner(cmd, scoped, dataSource, owner);
-        return await repo.ExecuteScalarAsync(cmd, "Governance.Products.IsOwner", ct).ConfigureAwait(false) is not null;
-    }
-
-    public static async Task<IReadOnlyList<DataSourceOwner>> GetOwnersAsync(GovernanceRepository repo, TenantId tenant, string dataSource, CancellationToken ct)
-    {
-        var scoped = Tenant(tenant, GovernanceTable.DataSourceOwners);
-        await using var conn = await repo.OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var cmd = repo.CreateProductCommand(conn, null, DataProductStoreSql.SelectOwnersSql);
-        cmd.AddBound("@tenant_id", scoped.Value);
-        cmd.AddBound("@data_source", DataProductStoreSql.Normalize(dataSource));
-        await using var r = await repo.ExecuteReaderAsync(cmd, "Governance.Products.GetOwners", ct).ConfigureAwait(false);
-        var items = new List<DataSourceOwner>();
-        while (await r.ReadAsync(ct).ConfigureAwait(false))
-        {
-            items.Add(new DataSourceOwner(scoped, r.GetString(0), new Sid(r.GetString(1)), new Sid(r.GetString(2)), r.GetFieldValue<DateTimeOffset>(3)));
-        }
-
-        return items;
-    }
-
-    public static async Task<bool> AddOwnerAsync(GovernanceRepository repo, DataSourceOwner owner, CancellationToken ct)
-    {
-        var scoped = Tenant(owner.Tenant, GovernanceTable.DataSourceOwners);
-        await using var conn = await repo.OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var cmd = repo.CreateProductCommand(conn, null, DataProductStoreSql.InsertOwnerSql);
-        BindOwner(cmd, scoped, owner.DataSource, owner.OwnerSid);
-        cmd.AddBound("@assigned_by", owner.AssignedBy.Value);
-        cmd.AddBound("@assigned_at", owner.AssignedAt.ToUniversalTime(), DbType.DateTimeOffset);
-        try
-        {
-            return await repo.ExecuteNonQueryAsync(cmd, "Governance.Products.AddOwner", ct).ConfigureAwait(false) > 0;
-        }
-        catch (DbException ex) when (repo.Dialect.IsUniqueViolation(ex))
-        {
-            return false;
-        }
-    }
-
-    public static async Task<bool> RemoveOwnerAsync(GovernanceRepository repo, TenantId tenant, string dataSource, Sid owner, CancellationToken ct)
-    {
-        var scoped = Tenant(tenant, GovernanceTable.DataSourceOwners);
-        await using var conn = await repo.OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var cmd = repo.CreateProductCommand(conn, null, DataProductStoreSql.DeleteOwnerSql);
-        BindOwner(cmd, scoped, dataSource, owner);
-        return await repo.ExecuteNonQueryAsync(cmd, "Governance.Products.RemoveOwner", ct).ConfigureAwait(false) > 0;
-    }
-
-    private static void BindOwner(DbCommand cmd, TenantId tenant, string dataSource, Sid owner)
-    {
-        cmd.AddBound("@tenant_id", tenant.Value);
-        cmd.AddBound("@data_source", DataProductStoreSql.Normalize(dataSource));
-        cmd.AddBound("@owner_sid", DataProductStoreSql.Normalize(owner.Value));
     }
 
     private static async Task<T> RunInTxAsync<T>(GovernanceRepository repo, Func<DbConnection, DbTransaction, Task<(bool Commit, T Result)>> work, CancellationToken ct)

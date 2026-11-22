@@ -69,7 +69,6 @@ public sealed class CatalogOwnershipAndTierVisibilityTests
                 TableName = id.TableName,
                 DisplayName = $"{id.Schema}.{id.TableName}",
                 Description = description,
-                Sensitivity = "NORMAL",
                 Tags = tags, // Backstage export (Table.Tags) and MCP/GraphQL (CatalogTags) read different sources; the fixture feeds both
             },
             CatalogTags = tags,

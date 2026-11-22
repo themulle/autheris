@@ -54,7 +54,6 @@ public sealed class AdminMcpTwoPhaseTests
                 Id = tableId,
                 SchemaName = "public",
                 TableName = "orders",
-                Sensitivity = "CONFIDENTIAL",
                 IsActive = true
             },
             Columns = new List<TableColumn>
@@ -78,7 +77,7 @@ public sealed class AdminMcpTwoPhaseTests
         var regular = new TableMetadata
         {
             Identifier = new TableIdentifier("sales", "public", "orders"),
-            Table = new Table { Id = Guid.NewGuid(), SchemaName = "public", TableName = "orders", Sensitivity = "INTERNAL", IsActive = true },
+            Table = new Table { Id = Guid.NewGuid(), SchemaName = "public", TableName = "orders", IsActive = true },
             Columns = new List<TableColumn>
             {
                 new() { TableId = Guid.NewGuid(), ColumnName = "id", DataType = "int" },
@@ -505,7 +504,6 @@ public sealed class AdminMcpTwoPhaseTests
                 SourceName = "api_gateway",
                 SchemaName = "public",
                 TableName = "http_orders",
-                Sensitivity = "CONFIDENTIAL",
                 IsActive = false,
                 DataSourceType = DataSourceType.HttpDeclarative,
                 HttpEndpoint = new HttpEndpointDescriptor { BaseUrl = "https://orders.internal.org/api/v1", Method = "GET" },

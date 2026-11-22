@@ -54,7 +54,7 @@ public sealed class ConsentAuditAnchorAckTests : IDisposable
             await cmd.ExecuteNonQueryAsync();
         }
 
-        var table = new Table { Id = Guid.NewGuid(), SourceName = _table.Domain, SchemaName = _table.Schema, TableName = _table.TableName, Sensitivity = "LOW", IsActive = true };
+        var table = new Table { Id = Guid.NewGuid(), SourceName = _table.Domain, SchemaName = _table.Schema, TableName = _table.TableName, IsActive = true };
         _tableId = (await _repo.UpsertTableMetadataAsync(new TableMetadata
         {
             Identifier = _table, Table = table, Columns = [new TableColumn { TableId = table.Id, ColumnName = "id", DataType = "INT" }]

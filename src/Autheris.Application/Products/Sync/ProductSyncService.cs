@@ -237,7 +237,7 @@ public sealed partial class ProductSyncService(
             return "KIND_DIFFERS";
         }
 
-        if (!string.Equals(existing.ProductOwner.Value, entry.Owner.Value, StringComparison.OrdinalIgnoreCase))
+        if (!string.Equals(existing.OwnerGroupSid?.Value, entry.Owner.Value, StringComparison.OrdinalIgnoreCase))
         {
             return "OWNER_DIFFERS";
         }

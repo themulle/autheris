@@ -5,10 +5,15 @@ using System.Collections.Generic;
 using System.Security;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Governance.Domains;
 using Autheris.Application.Governance.Interfaces;
+using Autheris.Application.Security;
+using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
@@ -16,7 +21,7 @@ using Autheris.Application.Security.Totp.Interfaces;
 
 /// <summary>
 /// Implements the classification workflow state machine with SoD enforcement, Step-Up MFA validation,
-/// conditional four-eyes rules, and zero-touch auto-approvals.
+/// protection-class / mask-category persistence, and zero-touch auto-approvals.
 /// </summary>
 public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflowStateMachine
 {
@@ -25,6 +30,10 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
     private readonly IEnumerable<IGovernanceWorkflowHook>? _hooks;
     private readonly ITotpVerificationService? _totpService;
     private readonly ITotpSecretStore? _totpSecretStore;
+    private readonly GovernanceDomainService? _governanceDomainService;
+    private readonly IGovernanceCapabilities? _capabilities;
+    private readonly IGovernanceDomainRepository? _domainRepository;
+    private readonly ITableMetadataRepository? _tableMetadataRepository;
     private readonly ILogger<ClassificationWorkflowStateMachine> _logger;
 
     public ClassificationWorkflowStateMachine(
@@ -33,7 +42,11 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
         IClassificationProposalStore? proposalStore = null,
         IEnumerable<IGovernanceWorkflowHook>? hooks = null,
         ITotpVerificationService? totpService = null,
-        ITotpSecretStore? totpSecretStore = null)
+        ITotpSecretStore? totpSecretStore = null,
+        GovernanceDomainService? governanceDomainService = null,
+        IGovernanceCapabilities? capabilities = null,
+        IGovernanceDomainRepository? domainRepository = null,
+        ITableMetadataRepository? tableMetadataRepository = null)
     {
         _gatewayOptions = gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
@@ -41,6 +54,10 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
         _hooks = hooks;
         _totpService = totpService;
         _totpSecretStore = totpSecretStore;
+        _governanceDomainService = governanceDomainService;
+        _capabilities = capabilities;
+        _domainRepository = domainRepository;
+        _tableMetadataRepository = tableMetadataRepository;
     }
 
     public bool CanZeroTouchAutoApprove(TableClassificationProposal proposal)
@@ -178,8 +195,26 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
             Diagnostics.ClassificationDiagnostics.RecordSodViolation(proposal.TableIdentifier.ToQualifiedName());
             Diagnostics.ClassificationDiagnostics.RecordTransition(request.Action, request.ReviewerRole, "BLOCKED_SOD");
         }
+        else if (IsRequesterDecidingOwnDowngrade(proposal, request, reviewerSid, options))
+        {
+            _logger.LogWarning("SoD Violation: Requester {Sid} attempted to decide their own classification downgrade on proposal {ProposalId}.",
+                LogSanitizer.Sanitize(reviewerSid), proposal.ProposalId);
+            Diagnostics.ClassificationDiagnostics.RecordSodViolation(proposal.TableIdentifier.ToQualifiedName());
+            Diagnostics.ClassificationDiagnostics.RecordTransition(request.Action, request.ReviewerRole, "BLOCKED_SOD");
+            return Fail(proposal, request, "SOD_REQUESTER_DOWNGRADE_FORBIDDEN", "SoD Violation: Requester cannot decide their own classification downgrade.", recordTransition: false);
+        }
         else
         {
+            if (_capabilities is not null && request.Caller is not null && request.TenantId is { } tenant)
+            {
+                var containerRef = await ResolveContainerRefAsync(tenant, proposal.TableIdentifier, ct).ConfigureAwait(false);
+                var callerCtx = SecurityPrincipalContext.FromPrincipal(request.Caller, tenant);
+                if (!await _capabilities.CanClassifyAsync(callerCtx, containerRef, tenant, ct).ConfigureAwait(false))
+                {
+                    return Fail(proposal, request, "CLASSIFY_FORBIDDEN", "Caller is not authorized to approve classification for this dataset.");
+                }
+            }
+
             // Effective maximum rank across ALL proposal columns. Caller-supplied decisions may only raise a rank,
             // never lower it, so they cannot slip below the step-up / four-eyes thresholds.
             var maxEffectiveRank = 0;
@@ -283,6 +318,17 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
             else
             {
                 result = EvaluateApprovalProgression(proposal, request, pipeline, maxEffectiveRank);
+            }
+        }
+
+        if (result.Success &&
+            string.Equals(result.NewStatus, "CLASSIFIED", StringComparison.OrdinalIgnoreCase) &&
+            _governanceDomainService is not null)
+        {
+            var writeFailure = await WriteEffectiveProtectionAsync(proposal, request, options, ct).ConfigureAwait(false);
+            if (writeFailure is not null)
+            {
+                result = writeFailure;
             }
         }
 
@@ -422,6 +468,220 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
                 return true;
             }
         }
+
         return false;
+    }
+
+    private static bool IsRequesterDecidingOwnDowngrade(
+        TableClassificationProposal proposal,
+        TableClassificationApprovalRequest request,
+        string reviewerSid,
+        ClassificationOptions options)
+    {
+        if (string.IsNullOrWhiteSpace(proposal.ProposedBySid) ||
+            !string.Equals(proposal.ProposedBySid, reviewerSid, StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        var proposedByCol = new Dictionary<string, ColumnClassificationProposal>(StringComparer.OrdinalIgnoreCase);
+        foreach (var col in proposal.Columns)
+        {
+            proposedByCol[col.ColumnName] = col;
+        }
+
+        var maxEffective = request.ColumnsCountOrPublicFallback(options, proposal);
+        if (request.ExistingTableClass is { } existingClass && maxEffective < existingClass.NormalizeOrConfidential())
+        {
+            return true;
+        }
+
+        if (request.ColumnDecisions is null)
+        {
+            return false;
+        }
+
+        foreach (var dec in request.ColumnDecisions)
+        {
+            if (!proposedByCol.TryGetValue(dec.ColumnName, out var proposed))
+            {
+                continue;
+            }
+
+            var proposedClass = options.ResolveProtectionClass(proposed.ProposedSensitivityKey, proposed.ProposedSensitivityRank);
+            var effectiveClass = dec.EffectiveProtectionClass
+                ?? options.ResolveProtectionClass(dec.EffectiveSensitivityKey, dec.EffectiveSensitivityRank);
+            if (effectiveClass < proposedClass || dec.EffectiveSensitivityRank < proposed.ProposedSensitivityRank)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private async Task<ContainerRef> ResolveContainerRefAsync(TenantId tenant, TableIdentifier tableId, CancellationToken ct)
+    {
+        if (_tableMetadataRepository is not null && _domainRepository is not null)
+        {
+            var meta = await _tableMetadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
+            if (meta is not null)
+            {
+                var defaults = await _domainRepository.GetContainerForTableAsync(tenant, meta.Table.Id, ct).ConfigureAwait(false);
+                if (defaults.IsValid)
+                {
+                    return defaults.Container;
+                }
+            }
+        }
+
+        return ContainerDefaults.Unassigned.Container;
+    }
+
+    private async Task<TableClassificationApprovalResult?> WriteEffectiveProtectionAsync(
+        TableClassificationProposal proposal,
+        TableClassificationApprovalRequest request,
+        ClassificationOptions options,
+        CancellationToken ct)
+    {
+        if (_governanceDomainService is null || request.TenantId is not { } tenant)
+        {
+            return null;
+        }
+        var callerCtx = request.Caller is not null
+            ? SecurityPrincipalContext.FromPrincipal(request.Caller, tenant)
+            : new SecurityPrincipalContext
+            {
+                UserSid = request.ReviewerSid,
+                ResolvedTenant = tenant,
+                GroupSids = new HashSet<Sid>(),
+                GroupResolutionStatus = Autheris.Domain.Identity.GroupResolutionStatus.Degraded,
+                TenantRoles = new HashSet<string>(),
+                ClusterRoles = new HashSet<string>(),
+                AuthenticationScheme = "Workflow",
+                IsAuthenticated = true
+            };
+
+        var decisionByCol = new Dictionary<string, ColumnClassificationDecision>(StringComparer.OrdinalIgnoreCase);
+        if (request.ColumnDecisions is not null)
+        {
+            foreach (var dec in request.ColumnDecisions)
+            {
+                decisionByCol[dec.ColumnName] = dec;
+            }
+        }
+
+        var resolvedColumns = new List<(string ColumnName, ProtectionClass Class, string? MaskCategory)>(proposal.Columns.Count);
+        foreach (var col in proposal.Columns)
+        {
+            decisionByCol.TryGetValue(col.ColumnName, out var dec);
+            var colClass = dec?.EffectiveProtectionClass
+                ?? (dec is not null && !string.IsNullOrWhiteSpace(dec.EffectiveSensitivityKey)
+                    ? options.ResolveProtectionClass(dec.EffectiveSensitivityKey, dec.EffectiveSensitivityRank)
+                    : options.ResolveProtectionClass(col.ProposedSensitivityKey, col.ProposedSensitivityRank));
+            var maskCategory = NormalizeMaskCategory(dec?.EffectiveMaskCategory)
+                ?? NormalizeMaskCategory(col.ProposedMaskCategory)
+                ?? ResolveMaskCategoryFromPiiKey(col.DetectedPiiCategoryKey);
+            resolvedColumns.Add((col.ColumnName, colClass, maskCategory));
+        }
+
+        var baselineClass = resolvedColumns.Count > 0
+            ? resolvedColumns[0].Class
+            : options.ResolveProtectionClass(options.DefaultSensitivityKey);
+        foreach (var item in resolvedColumns)
+        {
+            if (item.Class < baselineClass)
+            {
+                baselineClass = item.Class;
+            }
+        }
+
+        var datasetId = proposal.TableIdentifier.ToString();
+        var tableOutcome = await _governanceDomainService.SetTableProtectionAsync(
+            callerCtx, tenant, datasetId, baselineClass, requestedMaskCategory: null, ct).ConfigureAwait(false);
+        if (tableOutcome.Status == DomainServiceStatus.NotFound)
+        {
+            return null;
+        }
+
+        if (tableOutcome.Status != DomainServiceStatus.Ok)
+        {
+            return Fail(proposal, request, tableOutcome.ErrorCode ?? "PROTECTION_WRITE_FAILED", tableOutcome.ErrorMessage ?? "Failed to write table protection.");
+        }
+
+        foreach (var (colName, colClass, colMask) in resolvedColumns)
+        {
+            if (colClass == baselineClass && colMask is null)
+            {
+                continue;
+            }
+
+            var colOutcome = await _governanceDomainService.SetColumnProtectionAsync(
+                callerCtx, tenant, datasetId, colName, colClass, colMask, ct).ConfigureAwait(false);
+            if (colOutcome.Status != DomainServiceStatus.Ok && colOutcome.Status != DomainServiceStatus.NotFound)
+            {
+                return Fail(proposal, request, colOutcome.ErrorCode ?? "PROTECTION_WRITE_FAILED", colOutcome.ErrorMessage ?? $"Failed to write column protection for '{colName}'.");
+            }
+        }
+
+        return null;
+    }
+
+    private static string? NormalizeMaskCategory(string? maskCategory)
+    {
+        if (string.IsNullOrWhiteSpace(maskCategory) ||
+            string.Equals(maskCategory.Trim(), "NONE", StringComparison.OrdinalIgnoreCase))
+        {
+            return null;
+        }
+
+        return maskCategory.Trim();
+    }
+
+    private static string? ResolveMaskCategoryFromPiiKey(string? piiKey)
+    {
+        if (string.IsNullOrWhiteSpace(piiKey))
+        {
+            return null;
+        }
+
+        return piiKey.Trim().ToUpperInvariant() switch
+        {
+            "IBAN" or "CREDIT_CARD" => ClassificationScopes.FinancialCode,
+            "HEALTH_DATA" => ClassificationScopes.PiiSpecialCode,
+            _ => ClassificationScopes.PiiCode
+        };
+    }
+}
+
+internal static class ClassificationApprovalRequestExtensions
+{
+    public static ProtectionClass ColumnsCountOrPublicFallback(
+        this TableClassificationApprovalRequest request,
+        ClassificationOptions options,
+        TableClassificationProposal proposal)
+    {
+        var max = ProtectionClass.Public;
+        var decMap = new Dictionary<string, ColumnClassificationDecision>(StringComparer.OrdinalIgnoreCase);
+        if (request.ColumnDecisions is not null)
+        {
+            foreach (var dec in request.ColumnDecisions)
+            {
+                decMap[dec.ColumnName] = dec;
+            }
+        }
+
+        foreach (var col in proposal.Columns)
+        {
+            var cls = decMap.TryGetValue(col.ColumnName, out var dec)
+                ? (dec.EffectiveProtectionClass ?? options.ResolveProtectionClass(dec.EffectiveSensitivityKey, dec.EffectiveSensitivityRank))
+                : options.ResolveProtectionClass(col.ProposedSensitivityKey, col.ProposedSensitivityRank);
+            if (cls > max)
+            {
+                max = cls;
+            }
+        }
+
+        return max;
     }
 }

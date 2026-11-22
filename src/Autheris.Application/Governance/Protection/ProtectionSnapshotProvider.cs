@@ -2,6 +2,7 @@ using System.Collections.Concurrent;
 using Autheris.Application.Catalog;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Governance.Caching;
+using Autheris.Application.Products;
 using Autheris.Application.State.Caching;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -30,6 +31,7 @@ public sealed class ProtectionSnapshotProvider : IProtectionSnapshotProvider, IG
     private readonly IGovernanceDomainRepository _domainRepository;
     private readonly GovernanceEpochProvider _epochProvider;
     private readonly ICatalogVersionProvider _catalogVersionProvider;
+    private readonly IDataProductRepository? _productRepository;
     private readonly TimeSpan _maxTtl;
     private readonly TimeSpan _negativeTtl;
     private readonly TimeProvider _time;
@@ -47,12 +49,14 @@ public sealed class ProtectionSnapshotProvider : IProtectionSnapshotProvider, IG
         ICatalogVersionProvider catalogVersionProvider,
         IOptions<GovernanceCacheSettings>? cacheSettings = null,
         IGovernanceChangeNotifier? changeNotifier = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IDataProductRepository? productRepository = null)
     {
         _tableMetadataRepository = tableMetadataRepository ?? throw new ArgumentNullException(nameof(tableMetadataRepository));
         _domainRepository = domainRepository ?? throw new ArgumentNullException(nameof(domainRepository));
         _epochProvider = epochProvider ?? throw new ArgumentNullException(nameof(epochProvider));
         _catalogVersionProvider = catalogVersionProvider ?? throw new ArgumentNullException(nameof(catalogVersionProvider));
+        _productRepository = productRepository;
 
         var settings = cacheSettings?.Value ?? new GovernanceCacheSettings();
         ArgumentOutOfRangeException.ThrowIfLessThan(settings.MaxTtlSeconds, 1);
@@ -157,7 +161,24 @@ public sealed class ProtectionSnapshotProvider : IProtectionSnapshotProvider, IG
         }
 
         var tableId = tableMetadata.Table.Id;
-        var container = await _domainRepository.GetContainerForTableAsync(tenant, tableId, ct).ConfigureAwait(false);
+        ContainerDefaults container;
+        if (_productRepository is not null &&
+            string.Equals(tableMetadata.Table.SourceName, ProductSource.Name, StringComparison.OrdinalIgnoreCase))
+        {
+            var product = await _productRepository.GetProductByIdAsync(tenant, tableId, ct).ConfigureAwait(false);
+            container = product is not null
+                ? new ContainerDefaults(
+                    new ContainerRef(ContainerKind.DataProduct, product.Id),
+                    product.OwnerGroupSid,
+                    product.DefaultClass,
+                    product.Visibility,
+                    IsValid: true)
+                : await _domainRepository.GetContainerForTableAsync(tenant, tableId, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            container = await _domainRepository.GetContainerForTableAsync(tenant, tableId, ct).ConfigureAwait(false);
+        }
         var (tableProtection, columnProtections) = await _domainRepository.GetProtectionAsync(tenant, tableId, ct).ConfigureAwait(false);
         var columnNames = tableMetadata.Columns.Select(static c => c.ColumnName).ToList();
 

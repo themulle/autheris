@@ -9,6 +9,7 @@ using Autheris.Application.Governance.Contracts;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -64,7 +65,7 @@ public sealed class DynamicSchemaContractTests
         // Arrange
         var contract = new SchemaContractDefinition(
             name: "partner",
-            includedTags: new[] { "partner" },
+            includedClasses: [ProtectionClass.Public],
             excludeInaccessible: true);
 
         // Act
@@ -83,7 +84,7 @@ public sealed class DynamicSchemaContractTests
         // Arrange
         var contract = new SchemaContractDefinition(
             name: "external",
-            excludedTags: new[] { "internal" },
+            excludedClasses: [ProtectionClass.Internal],
             excludeInaccessible: true);
 
         // Act
@@ -119,8 +120,8 @@ public sealed class DynamicSchemaContractTests
                 DefaultContract = "default",
                 Contracts = new Dictionary<string, SchemaContractDefinitionOptions>
                 {
-                    ["partner"] = new() { IncludedTags = ["partner"], ExcludeInaccessible = true },
-                    ["mobile"] = new() { IncludedTags = ["mobile"], ExcludeInaccessible = true }
+                    ["partner"] = new() { IncludedClasses = [ProtectionClass.Public], ExcludeInaccessible = true },
+                    ["mobile"] = new() { IncludedClasses = [ProtectionClass.Internal], ExcludeInaccessible = true }
                 }
             }
         };
@@ -136,7 +137,7 @@ public sealed class DynamicSchemaContractTests
 
         var partnerDef = manager.GetContract("partner");
         partnerDef.ShouldNotBeNull();
-        partnerDef.IncludedTags.ShouldContain("partner");
+        partnerDef.IncludedClasses.ShouldContain(ProtectionClass.Public);
     }
 
     [Fact]
@@ -179,7 +180,7 @@ public sealed class DynamicSchemaContractTests
                 Enabled = true,
                 Contracts = new Dictionary<string, SchemaContractDefinitionOptions>
                 {
-                    ["partner"] = new() { IncludedTags = ["partner"] }
+                    ["partner"] = new() { IncludedClasses = [ProtectionClass.Public] }
                 }
             }
         };
@@ -215,8 +216,8 @@ public sealed class DynamicSchemaContractTests
                 Enabled = true,
                 Contracts = new Dictionary<string, SchemaContractDefinitionOptions>
                 {
-                    ["partner"] = new() { IncludedTags = ["partner"] },
-                    ["internal"] = new() { IncludedTags = ["internal"] }
+                    ["partner"] = new() { IncludedClasses = [ProtectionClass.Public] },
+                    ["internal"] = new() { IncludedClasses = [ProtectionClass.Internal] }
                 }
             }
         };
@@ -263,22 +264,27 @@ public sealed class DynamicSchemaContractTests
     }
 
     [Fact]
-    public void CatalogVisibility_FilterByContract_ExcludedTags_ExcludesSensitiveTables()
+    public void CatalogVisibility_FilterByContract_ExcludedClasses_ExcludesConfidentialTables()
     {
         var t1 = new TableMetadata
         {
             Identifier = new TableIdentifier("hr", "public", "public_info"),
-            Table = new Table { TableName = "public_info", Sensitivity = "PUBLIC" }
+            Table = new Table { TableName = "public_info" }
         };
         var t2 = new TableMetadata
         {
             Identifier = new TableIdentifier("hr", "public", "salaries"),
-            Table = new Table { TableName = "salaries", Sensitivity = "HIGH" }
+            Table = new Table { TableName = "salaries" }
         };
 
-        var contract = new SchemaContractDefinition("external", excludedTags: ["HIGH"]);
+        var tableClasses = new Dictionary<TableIdentifier, Autheris.Domain.Security.ProtectionClass>
+        {
+            [t1.Identifier] = Autheris.Domain.Security.ProtectionClass.Public,
+            [t2.Identifier] = Autheris.Domain.Security.ProtectionClass.Secret
+        };
+        var contract = new SchemaContractDefinition("external", excludedClasses: [Autheris.Domain.Security.ProtectionClass.Secret]);
 
-        var filtered = Autheris.Application.Services.CatalogVisibility.FilterByContract(new[] { t1, t2 }, contract);
+        var filtered = Autheris.Application.Services.CatalogVisibility.FilterByContract([t1, t2], contract, tableClasses);
 
         filtered.Count.ShouldBe(1);
         filtered[0].Identifier.TableName.ShouldBe("public_info");
@@ -339,10 +345,10 @@ public sealed class DynamicSchemaContractTests
     }
 
     [Fact]
-    public async Task TableAccessPolicy_WithExcludedTagsContract_DeniesSensitiveTableExecution()
+    public async Task TableAccessPolicy_WithExcludedClassesContract_DeniesSecretTableExecution()
     {
         var sensitiveTable = new TableIdentifier("hr", "public", "salaries");
-        var contract = new SchemaContractDefinition("external", excludedTags: ["HIGH"]);
+        var contract = new SchemaContractDefinition("external", excludedClasses: [Autheris.Domain.Security.ProtectionClass.Secret]);
 
         var consentRepo = NSubstitute.Substitute.For<Autheris.Application.Common.Interfaces.IConsentRepository>();
         var policy = new Autheris.Application.Policy.TableAccessPolicy(
@@ -355,8 +361,17 @@ public sealed class DynamicSchemaContractTests
         var tableMeta = new TableMetadata
         {
             Identifier = sensitiveTable,
-            Table = new Table { TableName = "salaries", SchemaName = "public", Sensitivity = "HIGH" }
+            Table = new Table { TableName = "salaries", SchemaName = "public" }
         };
+
+        var protection = new Autheris.Domain.Model.EffectiveProtection(
+            new Autheris.Domain.Model.ContainerRef(Autheris.Domain.Model.ContainerKind.Domain, Guid.NewGuid()),
+            null,
+            Autheris.Domain.Security.ProtectionClass.Secret,
+            Autheris.Domain.Security.ProtectionClass.Secret,
+            null,
+            new Dictionary<string, Autheris.Domain.Model.ColumnProtection>(),
+            Autheris.Domain.Model.CatalogVisibilityMode.OnRequest);
 
         var query = new Autheris.Application.Policy.TableAccessQuery(
             new Sid("user-1"),
@@ -364,12 +379,13 @@ public sealed class DynamicSchemaContractTests
             new HashSet<Sid>(),
             new HashSet<string>(),
             tableMeta,
-            Contract: contract);
+            Contract: contract,
+            Protection: protection);
 
         var decision = await policy.DecideAsync(query, default);
 
         decision.IsAllowed.ShouldBeFalse();
-        decision.DeniedReasons.ShouldContain(r => r.Contains("Schema Contract Denial") && r.Contains("HIGH"));
+        decision.DeniedReasons.ShouldContain(r => r.Contains("Schema Contract Denial") && r.Contains("SECRET"));
     }
 
     [Fact]

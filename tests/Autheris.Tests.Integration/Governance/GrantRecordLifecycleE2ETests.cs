@@ -252,7 +252,6 @@ public sealed class GrantRecordLifecycleE2ETests(GovernancePostgresFixture fixtu
                 SchemaName = tableId.Schema,
                 TableName = tableId.TableName,
                 Description = "E2E grant lifecycle test table",
-                Sensitivity = "NORMAL",
                 IsActive = true
             },
             Columns =

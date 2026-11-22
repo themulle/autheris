@@ -7,6 +7,7 @@ using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Shouldly;
 using Xunit;
 
@@ -14,6 +15,16 @@ using Xunit;
 public sealed class CatalogMinGroupSizeResolutionTests
 {
     private static readonly TableIdentifier TestTableId = new("sales", "public", "test_table");
+
+    private static EffectiveProtection Protection(ProtectionClass tableClass, string? maskCategory = null) =>
+        new(
+            new ContainerRef(ContainerKind.Domain, Guid.NewGuid()),
+            null,
+            tableClass,
+            tableClass,
+            maskCategory,
+            new Dictionary<string, ColumnProtection>(),
+            CatalogVisibilityMode.OnRequest);
 
     private static TableMetadata CreateTableMetadata(
         int? minGroupSize = null,
@@ -59,7 +70,6 @@ public sealed class CatalogMinGroupSizeResolutionTests
                 IsActive = true,
                 MinGroupSize = minGroupSize,
                 NonPersonal = tableNonPersonal,
-                Sensitivity = sensitivity,
                 Tags = tags ?? Array.Empty<string>()
             },
             Columns = columns
@@ -179,7 +189,7 @@ public sealed class CatalogMinGroupSizeResolutionTests
     [Fact]
     public void Resolve_HighlySensitiveTable_KeepsDefault()
     {
-        var meta = CreateTableMetadata(minGroupSize: 1, nonPersonal: true, sensitivity: "HIGH");
+        var meta = CreateTableMetadata(minGroupSize: 1, nonPersonal: true);
         var privacy = new AnalyticsPrivacyOptions
         {
             DefaultMinGroupSize = 5,
@@ -190,7 +200,8 @@ public sealed class CatalogMinGroupSizeResolutionTests
             meta,
             CreateQuery(),
             new OperatorFloor(5, false),
-            privacy);
+            privacy,
+            protection: Protection(ProtectionClass.Confidential));
 
         result.Value.ShouldBe(5);
         result.Source.ShouldBe(MinGroupSizeSource.Default);
@@ -287,7 +298,7 @@ public sealed class CatalogMinGroupSizeResolutionTests
             Identifier = new TableIdentifier("sales", "public", "users"),
             MinGroupSize = null,
             NonPersonal = false,
-            Table = new Table { Id = Guid.NewGuid(), Sensitivity = "NORMAL", IsActive = true, TableName = "users", SchemaName = "public", SourceName = "default", SourceType = "PostgreSQL" },
+            Table = new Table { Id = Guid.NewGuid(), IsActive = true, TableName = "users", SchemaName = "public", SourceName = "default", SourceType = "PostgreSQL" },
             Columns = [new TableColumn { ColumnName = "user_id" }]
         };
 
@@ -341,7 +352,8 @@ public sealed class CatalogMinGroupSizeResolutionTests
             meta,
             CreateQuery(),
             new OperatorFloor(5, false),
-            privacy);
+            privacy,
+            protection: Protection(ProtectionClass.Internal, maskCategory: ClassificationScopes.PiiCode));
 
         result.Value.ShouldBe(5);
         result.Source.ShouldBe(MinGroupSizeSource.Default);

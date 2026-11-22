@@ -403,7 +403,7 @@ public sealed class SemanticMcpCompiler(
                            (!string.IsNullOrWhiteSpace(t.Table.Description) ? $"**Description**: {t.Table.Description}\n\n" : "") +
                            $"* **Domain**: {domain}\n" +
                            $"* **Table**: {table}\n" +
-                           $"* **Sensitivity**: {t.Table.Sensitivity}\n" +
+                           $"* **Sensitivity**: {(ClassificationMetadata.IsTableSensitive(t) ? "Sensitive" : "Standard")}\n" +
                            $"* **Columns**:\n" +
                            string.Join("\n", visibleColumns.Select(c =>
                            {

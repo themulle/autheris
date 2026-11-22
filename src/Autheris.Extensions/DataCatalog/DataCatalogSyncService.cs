@@ -195,18 +195,6 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
                 }
             }
 
-            // Ratchet: Sensitivity must not be downgraded from HIGH/RESTRICTED to NORMAL
-            string finalSensitivity = isArt9 ? "HIGH" : (existing?.Table?.Sensitivity ?? "NORMAL");
-            if (existing?.Table != null &&
-                (string.Equals(existing.Table.Sensitivity, "HIGH", StringComparison.OrdinalIgnoreCase) ||
-                 string.Equals(existing.Table.Sensitivity, "RESTRICTED", StringComparison.OrdinalIgnoreCase)) &&
-                !isArt9)
-            {
-                finalSensitivity = existing.Table.Sensitivity;
-                warnings.Add($"Table '{tableAsset.Identifier}': Retained existing high sensitivity '{existing.Table.Sensitivity}'.");
-            }
-
-            bool finalRequiresFourEyes = isArt9 || (existing?.Table?.RequiresFourEyes == true);
             var finalDataSourceType = existing?.Table?.DataSourceType ?? DataSourceType.Sql;
 
             // D-1: external catalogs may report themselves as source type. A supported dialect on
@@ -230,8 +218,6 @@ public sealed class DataCatalogSyncService : IDataCatalogSyncService
                     DocumentationSource = "DataCatalog",
                     DataSourceType = finalDataSourceType,
                     SourceType = finalSourceType,
-                    Sensitivity = finalSensitivity,
-                    RequiresFourEyes = finalRequiresFourEyes,
                     IsActive = existing != null ? existing.Table.IsActive : activateNewTables
                 },
                 Columns = tableColumns,

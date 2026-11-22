@@ -436,6 +436,7 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.IdentityStore", "governance store: SCIM and local identity provider storage (WP-SC-07, REQ-SCALE-5000-WAVE2), fixed statements with bound parameters, no client text"),
         ("Autheris.Infrastructure.Persistence.RightsAndPoliciesStore", "governance store: functional rights mappings and scoped access policies (WP-SC-06, WP-SC-14), fixed statements with bound parameters, no client text"),
         ("Autheris.Infrastructure.Persistence.GovernanceDomainStore", "governance store: governance domains, table assignments, and object protection (Issue #1009), fixed constant SQL statements with bound parameters, no client text"),
+        ("Autheris.Infrastructure.Persistence.AccessPolicySettingsStore", "governance store: tenant access policy settings (Issue #1009), fixed constant SQL statements with bound parameters, no client text"),
     ];
 
     private static bool IsAllowedCommandTextSite(string top) =>

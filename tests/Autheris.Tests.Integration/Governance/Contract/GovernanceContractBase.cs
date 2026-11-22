@@ -118,6 +118,7 @@ public sealed class GovernanceTestStore : IAsyncDisposable
     public IConsentEventOutbox ConsentEventOutbox => Services.GetRequiredService<IConsentEventOutbox>();
     public IGrantExpiryStore GrantExpiry => Services.GetRequiredService<IGrantExpiryStore>();
     public IGovernanceDomainRepository GovernanceDomains => Services.GetRequiredService<IGovernanceDomainRepository>();
+    public IAccessPolicySettingsRepository AccessPolicySettings => Services.GetRequiredService<IAccessPolicySettingsRepository>();
 
     public void SetCaller(CallerContext? caller) => _callerProvider.Current = caller;
 

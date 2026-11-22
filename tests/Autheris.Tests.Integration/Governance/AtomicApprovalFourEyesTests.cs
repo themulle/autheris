@@ -27,7 +27,7 @@ public sealed class AtomicApprovalFourEyesTests
     private static readonly Sid Approver2 = new("S-1-5-21-APPROVER-2");
     private static readonly TenantId Tenant = new("tenant-a");
 
-    private static async Task<(PostgreSqlGovernanceRepository Repo, ConsentRequest Request)> CreateRequestAsync(string sensitivity, bool requiresFourEyes)
+    private static async Task<(PostgreSqlGovernanceRepository Repo, ConsentRequest Request)> CreateRequestAsync(bool sensitiveColumn)
     {
         var repo = GovernanceTestDatabase.CreateRepository(new FakeEpochValidationService());
         var tableId = new TableIdentifier("sales", "crm", "atomic_" + Guid.NewGuid().ToString("N")[..8]);
@@ -37,8 +37,6 @@ public sealed class AtomicApprovalFourEyesTests
             SourceName = tableId.Domain,
             SchemaName = tableId.Schema,
             TableName = tableId.TableName,
-            Sensitivity = sensitivity,
-            RequiresFourEyes = requiresFourEyes,
             IsActive = true
         };
 
@@ -46,7 +44,8 @@ public sealed class AtomicApprovalFourEyesTests
         {
             Identifier = tableId,
             Table = table,
-            Columns = [new TableColumn { TableId = table.Id, ColumnName = "email", DataType = "VARCHAR" }]
+            Columns = [new TableColumn { TableId = table.Id, ColumnName = "email", DataType = "VARCHAR" }],
+            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor(sensitiveColumn ? new[] { "email" } : Array.Empty<string>())
         });
 
         var created = await repo.CreateConsentRequestAsync(new ConsentRequest
@@ -130,21 +129,17 @@ public sealed class AtomicApprovalFourEyesTests
     private static Task<int> CountConsentsAsync(PostgreSqlGovernanceRepository repo, Guid requestId) =>
         CountRowsAsync(repo, "SELECT COUNT(*) FROM CONSENTS WHERE consent_request_id = @id", requestId);
 
-    [Theory]
-    [InlineData("LOW", true)]
-    [InlineData("HIGH", false)]
-    [InlineData("RESTRICTED", false)]
-    [InlineData("SECRET", false)]
-    public async Task SameApprover_AfterFirstStep_CannotFinishFourEyesAloneViaAtomicPath(string sensitivity, bool requiresFourEyes)
+    [Fact]
+    public async Task SameApprover_AfterFirstStep_CannotFinishFourEyesAloneViaAtomicPath()
     {
-        var (repo, request) = await CreateRequestAsync(sensitivity, requiresFourEyes);
+        var (repo, request) = await CreateRequestAsync(sensitiveColumn: true);
         using (repo)
         {
-            (await repo.ApproveConsentRequestStepAsync(request.Id, Approver1)).Status.ShouldBe("PENDING_SECOND_APPROVAL");
+            (await repo.ApproveConsentRequestStepAsync(request.Id, Approver1, requireSecondApprover: true)).Status.ShouldBe("PENDING_SECOND_APPROVAL");
 
             var (step, consent) = BuildFinalApproval(request, Approver1);
             var ex = await Should.ThrowAsync<InvalidOperationException>(() =>
-                repo.ExecuteAtomicApprovalWithConsentAsync(request.Id, step, consent, [], [], CancellationToken.None));
+                repo.ExecuteAtomicApprovalWithConsentAsync(request.Id, step, consent, [], [], requireSecondApprover: true, CancellationToken.None));
             ex.ShouldNotBeOfType<ConsentRequestStatusConflictException>();
             ex.Message.ShouldContain("FOUR_EYES_SAME_APPROVER");
 
@@ -154,18 +149,15 @@ public sealed class AtomicApprovalFourEyesTests
         }
     }
 
-    [Theory]
-    [InlineData("LOW", true)]
-    [InlineData("CONFIDENTIAL", false)]
-    [InlineData("HIGH", false)]
-    public async Task FirstStep_OfFourEyesRequest_IsRefusedOnAtomicPath_AndWritesNothing(string sensitivity, bool requiresFourEyes)
+    [Fact]
+    public async Task FirstStep_OfFourEyesRequest_IsRefusedOnAtomicPath_AndWritesNothing()
     {
-        var (repo, request) = await CreateRequestAsync(sensitivity, requiresFourEyes);
+        var (repo, request) = await CreateRequestAsync(sensitiveColumn: true);
         using (repo)
         {
             var (step, consent) = BuildFinalApproval(request, Approver1);
             var ex = await Should.ThrowAsync<InvalidOperationException>(() =>
-                repo.ExecuteAtomicApprovalWithConsentAsync(request.Id, step, consent, [], [], CancellationToken.None));
+                repo.ExecuteAtomicApprovalWithConsentAsync(request.Id, step, consent, [], [], requireSecondApprover: true, CancellationToken.None));
             ex.ShouldNotBeOfType<ConsentRequestStatusConflictException>();
 
             (await repo.GetConsentRequestAsync(request.Id))!.Status.ShouldBe("PENDING");
@@ -177,7 +169,7 @@ public sealed class AtomicApprovalFourEyesTests
     [Fact]
     public async Task Requester_CannotApproveOwnRequestViaAtomicPath()
     {
-        var (repo, request) = await CreateRequestAsync("LOW", requiresFourEyes: false);
+        var (repo, request) = await CreateRequestAsync(sensitiveColumn: false);
         using (repo)
         {
             var (step, consent) = BuildFinalApproval(request, Requester);
@@ -193,13 +185,13 @@ public sealed class AtomicApprovalFourEyesTests
     [Fact]
     public async Task SecondApprover_CompletesFourEyesViaAtomicPath_WithDescriptionAndRepositoryStepNumber()
     {
-        var (repo, request) = await CreateRequestAsync("HIGH", requiresFourEyes: false);
+        var (repo, request) = await CreateRequestAsync(sensitiveColumn: true);
         using (repo)
         {
-            (await repo.ApproveConsentRequestStepAsync(request.Id, Approver1)).Status.ShouldBe("PENDING_SECOND_APPROVAL");
+            (await repo.ApproveConsentRequestStepAsync(request.Id, Approver1, requireSecondApprover: true)).Status.ShouldBe("PENDING_SECOND_APPROVAL");
 
             var (step, consent) = BuildFinalApproval(request, Approver2, description: "Support case 4711");
-            await repo.ExecuteAtomicApprovalWithConsentAsync(request.Id, step, consent, [], [], CancellationToken.None);
+            await repo.ExecuteAtomicApprovalWithConsentAsync(request.Id, step, consent, [], [], requireSecondApprover: true, CancellationToken.None);
 
             (await repo.GetConsentRequestAsync(request.Id))!.Status.ShouldBe("APPROVED");
             (await CountStepsAsync(repo, request.Id)).ShouldBe(2);
@@ -215,7 +207,7 @@ public sealed class AtomicApprovalFourEyesTests
     [Fact]
     public async Task SingleApproval_OnNonFourEyesTable_StillCompletesViaAtomicPath()
     {
-        var (repo, request) = await CreateRequestAsync("LOW", requiresFourEyes: false);
+        var (repo, request) = await CreateRequestAsync(sensitiveColumn: false);
         using (repo)
         {
             var (step, consent) = BuildFinalApproval(request, Approver1);

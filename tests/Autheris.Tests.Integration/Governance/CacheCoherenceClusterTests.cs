@@ -54,7 +54,6 @@ public abstract class CacheCoherenceClusterTests : IAsyncLifetime
                 SchemaName = tableIdent.Schema,
                 TableName = tableIdent.TableName,
                 Description = "Cluster cache coherence test table",
-                Sensitivity = "NORMAL",
                 IsActive = true
             },
             Columns =

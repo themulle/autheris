@@ -50,7 +50,7 @@ public sealed class CatalogTablePersistedProjection
     public static IReadOnlySet<string> CoveredProperties { get; } = new HashSet<string>(StringComparer.Ordinal)
     {
         "Table.SourceType", "Table.SourceName", "Table.SchemaName", "Table.TableName", "Table.DisplayName", "Table.Description",
-        "Table.LongDescription", "Table.Texts", "Table.DocumentationSource", "Table.Sensitivity", "Table.RequiresFourEyes", "Table.IsActive",
+        "Table.LongDescription", "Table.Texts", "Table.DocumentationSource", "Table.IsActive",
         "Table.DataSourceType", "Table.HttpEndpoint", "Table.PluginName", "Table.MinGroupSize", "Table.NonPersonal", "Table.RequiredFilterColumns",
         "Table.DbtUniqueId", "Table.ObjectKind", "Table.MetricViewCountMeasure",
         "TableColumn.ColumnName", "TableColumn.DisplayName", "TableColumn.DataType", "TableColumn.Collation", "TableColumn.LengthSemantics",
@@ -72,8 +72,7 @@ public sealed class CatalogTablePersistedProjection
     {
         ["TABLES.id"] = "(surrogate id)",
         ["TABLES.source_type"] = "table.source_type", ["TABLES.source_name"] = "table.source_name", ["TABLES.schema_name"] = "table.schema_name",
-        ["TABLES.table_name"] = "table.table_name", ["TABLES.display_name"] = "table.display_name", ["TABLES.sensitivity"] = "table.sensitivity",
-        ["TABLES.requires_four_eyes"] = "table.requires_four_eyes", ["TABLES.is_active"] = "table.is_active",
+        ["TABLES.table_name"] = "table.table_name", ["TABLES.display_name"] = "table.display_name", ["TABLES.is_active"] = "table.is_active",
         ["TABLES.data_source_type"] = "table.data_source_type", ["TABLES.http_endpoint_json"] = "table.http_endpoint",
         ["TABLES.plugin_name"] = "table.plugin_name", ["TABLES.description"] = "table.description", ["TABLES.long_description"] = "table.long_description",
         ["TABLES.doc_source"] = "table.doc_source", ["TABLES.required_filter_columns_json"] = "table.required_filter_columns",
@@ -122,8 +121,6 @@ public sealed class CatalogTablePersistedProjection
         values["table.description"] = table.Description;
         values["table.long_description"] = table.LongDescription;
         values["table.doc_source"] = table.DocumentationSource;
-        values["table.sensitivity"] = table.Sensitivity;
-        values["table.requires_four_eyes"] = Flag(table.RequiresFourEyes);
         values["table.is_active"] = Flag(table.IsActive);
         values["table.data_source_type"] = ((int)table.DataSourceType).ToString(CultureInfo.InvariantCulture);
         values["table.http_endpoint"] = table.HttpEndpoint is null ? null : JsonSerializer.Serialize(table.HttpEndpoint);
@@ -433,7 +430,7 @@ public sealed class CatalogTablePersistedProjection
             ["Table.RlsExpression"] = notWritten, ["Table.SmallGroupStrategy"] = notWritten, ["Table.RequiredFilterColumnGroups"] = notWritten,
             ["Table.ExpectedRows"] = notWritten, ["Table.Tags"] = overlay,
             ["Table.DiscoveryHidden"] = overlay, ["Table.SamplesDisabled"] = overlay,
-            ["Table.IsDelegatedSource"] = derived, ["Table.IsHighlySensitive"] = derived, ["Table.Dialect"] = derived,
+            ["Table.IsDelegatedSource"] = derived, ["Table.Dialect"] = derived,
             ["TableColumn.Name"] = derived, ["TableColumn.Semantics"] = derived, ["TableColumn.WriteProtected"] = notWritten,
             ["TableColumn.DiscoveryHidden"] = overlay,
             ["MaskingRule.IsHmac"] = derived, ["MaskingRule.Mode"] = notWritten, ["MaskingRule.Decimals"] = notWritten,

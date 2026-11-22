@@ -188,7 +188,8 @@ public static class CatalogVisibility
 
     public static IReadOnlyList<TableMetadata> FilterByContract(
         IEnumerable<TableMetadata> tables,
-        Autheris.Application.Governance.Contracts.SchemaContractDefinition? contract)
+        Autheris.Application.Governance.Contracts.SchemaContractDefinition? contract,
+        IReadOnlyDictionary<TableIdentifier, Autheris.Domain.Security.ProtectionClass>? tableClasses = null)
     {
         if (contract == null)
         {
@@ -204,19 +205,18 @@ public static class CatalogVisibility
                 return false;
             }
 
-            var allTableTags = (t.Table.Tags ?? Array.Empty<string>())
-                .Concat(string.IsNullOrWhiteSpace(t.Table.Sensitivity) ? Array.Empty<string>() : [t.Table.Sensitivity])
-                .Where(s => !string.IsNullOrWhiteSpace(s))
-                .ToList();
+            var tableClass = tableClasses is not null && tableClasses.TryGetValue(t.Identifier, out var cls)
+                ? Autheris.Domain.Security.ProtectionClassExtensions.NormalizeOrConfidential(cls)
+                : Autheris.Domain.Security.ProtectionClass.Confidential;
 
-            if (contract.ExcludedTags.Count > 0 &&
-                allTableTags.Any(tag => contract.ExcludedTags.Contains(tag)))
+            if (contract.ExcludedClasses.Count > 0 &&
+                contract.ExcludedClasses.Contains(tableClass))
             {
                 return false;
             }
 
-            if (contract.IncludedTags.Count > 0 &&
-                (allTableTags.Count == 0 || !allTableTags.Any(tag => contract.IncludedTags.Contains(tag))))
+            if (contract.IncludedClasses.Count > 0 &&
+                !contract.IncludedClasses.Contains(tableClass))
             {
                 return false;
             }
@@ -252,6 +252,18 @@ public static class CatalogVisibility
         => VisibleTablesAsync(allTables, principal, tenantId, consentRepository, contract, catalogOwner: null, sharedTables: null, ct);
 
     /// <summary>The data-access visibility: admins and consented tables only (fail closed).</summary>
+    public static Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(
+        IReadOnlyList<TableMetadata> allTables,
+        ClaimsPrincipal principal,
+        TenantId tenantId,
+        IConsentRepository? consentRepository,
+        Autheris.Application.Governance.Contracts.SchemaContractDefinition? contract,
+        TenantId? catalogOwner,
+        IEnumerable<string>? sharedTables,
+        CancellationToken ct = default)
+        => VisibleTablesAsync(allTables, principal, tenantId, consentRepository, contract, catalogOwner, sharedTables, tableClasses: null, ct);
+
+    /// <summary>The data-access visibility: admins and consented tables only (fail closed).</summary>
     public static async Task<IReadOnlyList<TableMetadata>> VisibleTablesAsync(
         IReadOnlyList<TableMetadata> allTables,
         ClaimsPrincipal principal,
@@ -260,6 +272,7 @@ public static class CatalogVisibility
         Autheris.Application.Governance.Contracts.SchemaContractDefinition? contract,
         TenantId? catalogOwner,
         IEnumerable<string>? sharedTables,
+        IReadOnlyDictionary<TableIdentifier, Autheris.Domain.Security.ProtectionClass>? tableClasses,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(allTables);
@@ -272,10 +285,10 @@ public static class CatalogVisibility
             case CallerScope.None:
                 return Array.Empty<TableMetadata>();
             case CallerScope.Global:
-                return FilterByContract(allTables, contract);
+                return FilterByContract(allTables, contract, tableClasses);
             case CallerScope.CatalogOwner:
                 // DT-A-7 / DT-SC-08: the whole physical catalog; the tenant's own virtual tables only (foreign ones dropped, also for the owner).
-                return FilterByContract(DropForeignVirtualTables(allTables, resolution.RequireTenant()), contract);
+                return FilterByContract(DropForeignVirtualTables(allTables, resolution.RequireTenant()), contract, tableClasses);
             case CallerScope.Tenant:
             {
                 if (consentRepository == null)
@@ -289,7 +302,7 @@ public static class CatalogVisibility
                 var ownVirtual = DropForeignVirtualTables(allTables, claimTenant);
                 var tenantConsentTables = await consentRepository.GetTablesWithConsentsForTenantAsync(claimTenant, ct).ConfigureAwait(false);
                 var confined = FilterToTenant(ownVirtual, claimTenant, tenantConsentTables, sharedTables, catalogOwner);
-                return FilterByContract(confined, contract);
+                return FilterByContract(confined, contract, tableClasses);
             }
         }
 
@@ -310,6 +323,6 @@ public static class CatalogVisibility
         // Scopes from the claims overload, as the data path (TableAccessPolicy) reads them.
         var visible = FilterForSubject(
             allTables, activeConsents, tenantId, Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims));
-        return FilterByContract(visible, contract);
+        return FilterByContract(visible, contract, tableClasses);
     }
 }

@@ -219,8 +219,6 @@ public static partial class CatalogApiEndpoints
                     TableName = tableId.TableName,
                     SourceType = request.DataSource,
                     DisplayName = tableId.TableName,
-                    Sensitivity = "Confidential",
-                    RequiresFourEyes = false,
                     IsActive = true,
                     DataSourceType = DataSourceType.Sql
                 },

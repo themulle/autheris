@@ -31,7 +31,6 @@ public abstract class GoldenQueryContract : GovernanceContractBase
                 SourceName = id.Domain,
                 SchemaName = id.Schema,
                 TableName = id.TableName,
-                Sensitivity = "NORMAL",
                 IsActive = active
             },
             Columns = [new TableColumn { Id = Guid.NewGuid(), ColumnName = "id", DataType = "bigint" }],

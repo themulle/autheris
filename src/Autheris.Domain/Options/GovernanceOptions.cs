@@ -13,6 +13,11 @@ public sealed class GovernanceOptions
     /// Configuration for the external consent REST API (<c>Gateway:Governance:ExternalApi</c>).
     /// </summary>
     public ExternalApiSettings ExternalApi { get; init; } = new();
+
+    /// <summary>
+    /// Deployment defaults and upper ceilings for tenant access policies (<c>Gateway:Governance:AccessPolicy</c>).
+    /// </summary>
+    public AccessPolicyOptions AccessPolicy { get; init; } = new();
 }
 
 /// <summary>

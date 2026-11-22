@@ -58,11 +58,11 @@ public sealed class SchemaContractsOptions
 /// <summary>Definition of a single schema contract projection.</summary>
 public sealed class SchemaContractDefinitionOptions
 {
-    /// <summary>Schema tags explicitly included in this contract view.</summary>
-    public List<string> IncludedTags { get; init; } = [];
+    /// <summary>Protection classes explicitly included in this contract view.</summary>
+    public List<Autheris.Domain.Security.ProtectionClass> IncludedClasses { get; init; } = [];
 
-    /// <summary>Schema tags excluded from this contract view.</summary>
-    public List<string> ExcludedTags { get; init; } = [];
+    /// <summary>Protection classes excluded from this contract view.</summary>
+    public List<Autheris.Domain.Security.ProtectionClass> ExcludedClasses { get; init; } = [];
 
     /// <summary>When true, excludes fields marked <c>@inaccessible</c> from this contract view.</summary>
     public bool ExcludeInaccessible { get; init; } = true;
