@@ -82,8 +82,12 @@ public sealed partial class Query
                 .Build());
         }
 
-        var groupSids = principal.GetGroupSids().ToList();
-        var roles = principal.GetUserRoles().ToList();
+        if (resolverContext is not null &&
+            resolverContext.ContextData.TryGetValue(nameof(CallerSecurityContext), out var cscObj) &&
+            cscObj is CallerSecurityContext sessionSecurityContext)
+        {
+            return sessionSecurityContext;
+        }
 
         TenantId tenantId;
         if (!Autheris.GraphQL.Security.GraphQlCallerPrincipal.HasSessionPrincipalOverride(resolverContext) &&
@@ -107,15 +111,9 @@ public sealed partial class Query
             }
         }
 
-        bool isGovAdmin = roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
-        bool isClusterAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
-
-        return new CallerSecurityContext(
-            userSid,
-            groupSids,
-            roles,
-            tenantId,
-            isGovAdmin,
-            isClusterAdmin);
+        return Autheris.GraphQL.Security.GraphQlCallerPrincipal.ResolveCallerSecurityContext(
+            principal,
+            fallbackTenant: tenantId,
+            fallbackUserSid: userSid);
     }
 }

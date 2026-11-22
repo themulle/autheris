@@ -17,6 +17,7 @@ using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
+using Autheris.GraphQL.Security;
 using HotChocolate.Execution;
 using HotChocolate.Language;
 using Microsoft.Extensions.Logging;
@@ -101,7 +102,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         _logger.LogInformation("Executing MCP Tool '{ToolName}' for Principal '{PrincipalId}' on Tenant '{TenantId}'.",
             tool.Name, sessionContext.ServicePrincipalId, sessionContext.TenantId);
 
-        var principal = BuildPrincipal(sessionContext);
+        var principal = GraphQlCallerPrincipal.BuildMcpSessionPrincipal(sessionContext);
 
         // Arguments are validated for every call (empty ones included) against the closed tool schema.
         // Property names are compared ordinally; the validator already rejected duplicates and case variants.
@@ -228,28 +229,11 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
 
             try
             {
-                var effectiveCallerSid = !string.IsNullOrWhiteSpace(sessionContext.UserSid)
-                    ? new Sid(sessionContext.UserSid)
-                    : new Sid(sessionContext.ServicePrincipalId);
-
-                // SR-M-08: an app-only session (no user SID) carries no group SIDs, exactly like its principal.
-                var groupSids = !string.IsNullOrWhiteSpace(sessionContext.UserSid) && sessionContext.GroupSids != null && sessionContext.GroupSids.Count > 0
-                    ? sessionContext.GroupSids.Select(s => new Sid(s)).ToArray()
-                    : Array.Empty<Sid>();
-
                 var executor = await _executorProvider.GetExecutorAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
                 var requestBuilder = OperationRequestBuilder.New()
                     .SetDocument(tool.TargetGraphQLOperation)
-                    .SetServices(_services)
-                    .AddGlobalState("ClaimsPrincipal", principal)
-                    .AddGlobalState("CallerSecurityContext", new CallerSecurityContext(
-                        effectiveCallerSid,
-                        groupSids,
-                        sessionContext.Roles?.ToArray() ?? Array.Empty<string>(),
-                        new TenantId(sessionContext.TenantId),
-                        IsGovernanceAdmin: false,
-                        IsClusterAdmin: false
-                    ));
+                    .SetServices(_services);
+                GraphQlCallerPrincipal.SetMcpSessionState(requestBuilder, principal, sessionContext);
 
                 if (variables.Count > 0)
                 {
@@ -554,8 +538,8 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         var executor = await _executorProvider.GetExecutorAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         var requestBuilder = OperationRequestBuilder.New()
             .SetDocument(document)
-            .SetServices(_services)
-            .AddGlobalState("ClaimsPrincipal", principal);
+            .SetServices(_services);
+        GraphQlCallerPrincipal.SetMcpSessionState(requestBuilder, principal, sessionContext);
         if (variableValues != null)
         {
             requestBuilder.SetVariableValues(variableValues);
@@ -745,46 +729,8 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         return System.Text.Encoding.UTF8.GetString(writer.WrittenSpan);
     }
 
-    /// <summary>
-    /// SG-09: Build authenticated ClaimsPrincipal from active MCP session preserving actual caller identity.
-    /// Sets sub and NameIdentifier to the user identity (UserSid) while maintaining service principal in client_id and azp.
-    /// SR-M-08: the claims are those of <see cref="McpProtocolHandler.BuildPrincipalFromSession"/> (the principal of every other MCP
-    /// path): an app-only session (no user SID) keeps the application identity, carries the identity-kind marker and no group SIDs.
-    /// Only <c>sub</c>, <c>client_id</c>/<c>azp</c> and the <c>McpAuth</c> scheme are added here.
-    /// </summary>
-    internal static ClaimsPrincipal BuildPrincipal(McpSessionContext sessionContext)
-    {
-        ArgumentNullException.ThrowIfNull(sessionContext);
-
-        var effectiveUserId = !string.IsNullOrWhiteSpace(sessionContext.UserSid)
-            ? sessionContext.UserSid
-            : sessionContext.ServicePrincipalId;
-
-        var sessionPrincipal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext)!;
-        var claims = new List<Claim>(sessionPrincipal.Claims);
-        // SG-09: sub is always the session subject, never a token claim carried in the additional claims.
-        claims.RemoveAll(c => c.Type == "sub");
-        if (!string.IsNullOrWhiteSpace(effectiveUserId))
-        {
-            claims.Add(new Claim("sub", effectiveUserId));
-        }
-
-        if (!string.IsNullOrWhiteSpace(sessionContext.ServicePrincipalId) &&
-            !string.Equals(sessionContext.ServicePrincipalId, effectiveUserId, StringComparison.Ordinal))
-        {
-            claims.RemoveAll(c => c.Type is "client_id" or "azp");
-            claims.Add(new Claim("client_id", sessionContext.ServicePrincipalId));
-            claims.Add(new Claim("azp", sessionContext.ServicePrincipalId));
-        }
-
-        // The claims are re-issued on a new identity (ClaimsIdentity clones them, issuers included, so the read-only marker survives).
-        var identity = new ClaimsIdentity(claims, Autheris.Application.Identity.Attributes.CallerAttributeSchemeGate.McpAuthScheme);
-        if (sessionContext.IsReadOnly)
-        {
-            Autheris.Domain.Security.TokenAccessScope.MarkReadOnly(identity);
-        }
-        return new ClaimsPrincipal(identity);
-    }
+    internal static ClaimsPrincipal BuildPrincipal(McpSessionContext sessionContext) =>
+        GraphQlCallerPrincipal.BuildMcpSessionPrincipal(sessionContext);
 
     private async Task<string> ExecuteRequestAccessAsync(
         McpToolDefinition tool,

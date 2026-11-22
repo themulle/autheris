@@ -14,6 +14,9 @@ using Microsoft.Extensions.DependencyInjection;
 using ModelContextProtocol.Client;
 using Shouldly;
 using Xunit;
+using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
+using Autheris.Domain.Model;
 using Autheris.Tests.Integration.Governance;
 
 /// <summary>
@@ -369,6 +372,113 @@ public sealed class McpSdkTransportTests : IClassFixture<McpSdkTransportTests.Fi
 
         var olapResponse = await client.SendAsync(olapRequest);
         olapResponse.Headers.Contains("Access-Control-Allow-Origin").ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Mcp_graphql_uses_request_principal()
+    {
+        var table = new Autheris.Domain.Common.TableIdentifier("default", "main", "mcp_principal_items");
+        var dsConn = PostgresDataSource.Create("mcpprincipal", """
+            CREATE TABLE mcp_principal_items (id INTEGER PRIMARY KEY, label TEXT NOT NULL, secret_note TEXT NOT NULL);
+            INSERT INTO mcp_principal_items VALUES (1, 'item-one', 'classified-alpha');
+            """);
+
+        await using var principalFactory = _factory.WithWebHostBuilder(b =>
+        {
+            b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
+            b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
+            b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("McpSdkPrincipal"));
+            b.UseSetting("Gateway:DataSources:Connections:default:Provider", "PostgreSql");
+            b.UseSetting("Gateway:DataSources:Connections:default:DefaultSchema", "main");
+            b.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", dsConn);
+            b.UseSetting("Gateway:Mcp:Enabled", "true");
+            b.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
+        });
+
+        try
+        {
+            using (var scope = principalFactory.Services.CreateScope())
+            {
+                var repo = scope.ServiceProvider.GetRequiredService<Autheris.Application.Common.Interfaces.IGovernanceRepository>();
+                var tableId = Guid.NewGuid();
+                await repo.UpsertTableMetadataAsync(new Autheris.Domain.Model.TableMetadata
+                {
+                    Table = new Autheris.Domain.Model.Table
+                    {
+                        Id = tableId,
+                        DisplayName = "mcp_principal_items",
+                        TableName = "mcp_principal_items",
+                        SchemaName = "main",
+                        SourceType = "PostgreSql",
+                        SourceName = "default",
+                        Description = "Principal check items"
+                    },
+                    Identifier = table,
+                    Columns =
+                    [
+                        new Autheris.Domain.Model.TableColumn { ColumnName = "id", DataType = "integer" },
+                        new Autheris.Domain.Model.TableColumn { ColumnName = "label", DataType = "varchar" },
+                        new Autheris.Domain.Model.TableColumn { ColumnName = "secret_note", DataType = "varchar" }
+                    ]
+                }.WithPii("secret_note"));
+
+                var meta = await repo.GetTableMetadataAsync(table);
+                await repo.CreateConsentAsync(new Autheris.Domain.Model.Consent
+                {
+                    TableId = meta!.Table.Id,
+                    TableIdentifier = table,
+                    TenantId = new Autheris.Domain.Common.TenantId("tenant_sdk"),
+                    Effect = Autheris.Domain.Model.ConsentEffect.Allow,
+                    GranteeType = Autheris.Domain.Model.GranteeType.User,
+                    GranteeSid = new Autheris.Domain.Common.Sid("S-1-5-MCP-ALICE"),
+                    ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+                    ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+                    ColumnRules =
+                    [
+                        new Autheris.Domain.Model.ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear },
+                        new Autheris.Domain.Model.ConsentColumnRule { ColumnName = "label", AccessLevel = ColumnAccessLevel.Clear }
+                    ]
+                });
+            }
+
+            await TestSupport.GraphQlSchemaReadiness.AwaitCatalogSchemaAsync(
+                principalFactory.Services,
+                ["default_main_mcp_principal_items"],
+                TestSupport.GraphQlSchemaReadiness.DefaultTimeout);
+
+            HttpClient ClientFor(string sid)
+            {
+                var c = principalFactory.CreateClient();
+                c.DefaultRequestHeaders.Add("X-Test-User-Sid", sid);
+                c.DefaultRequestHeaders.Add("X-Test-Roles", "Reader");
+                c.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant_sdk");
+                return c;
+            }
+
+            const string query = "{ default_main_mcp_principal_items(first: 10) { id label } }";
+
+            using (var aliceHttp = ClientFor("S-1-5-MCP-ALICE"))
+            await using (var aliceMcp = await McpTestClient.ConnectAsync(aliceHttp))
+            {
+                var (aliceErr, alicePayload) = await McpTestClient.CallJsonAsync(aliceMcp, "query_graphql", new { query });
+                aliceErr.ShouldBeFalse(alicePayload.ToString());
+                alicePayload.GetProperty("data").GetProperty("default_main_mcp_principal_items").GetArrayLength().ShouldBe(1);
+                alicePayload.ToString().ShouldNotContain("classified-alpha");
+            }
+
+            using (var bobHttp = ClientFor("S-1-5-MCP-BOB"))
+            await using (var bobMcp = await McpTestClient.ConnectAsync(bobHttp))
+            {
+                var (bobErr, _) = await McpTestClient.CallAsync(bobMcp, "query_graphql", new { query });
+                bobErr.ShouldBeTrue();
+            }
+        }
+        finally
+        {
+            Npgsql.NpgsqlConnection.ClearAllPools();
+        }
     }
 
     private sealed class ConnectionItemsStartupFilter : Microsoft.AspNetCore.Hosting.IStartupFilter
