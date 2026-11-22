@@ -70,21 +70,40 @@ public sealed class IdentityRealmRegistry : IIdentityRealmRegistry
             return realm;
         }
 
-        // Check if any registered realm matches with prefix / authority or prefix trailing slash
+        IdentityRealm? bestRealm = null;
+        int bestPrefixLength = -1;
+
+        // Check if any registered realm matches by normalized issuer prefix; select the longest matching prefix deterministically.
         foreach (var r in _realmsById.Values)
         {
             foreach (var iss in r.Issuers)
             {
-                var normIss = NormalizeIssuer(iss);
-                if (string.Equals(normalized, normIss, StringComparison.OrdinalIgnoreCase) ||
-                    normalized.StartsWith(normIss.TrimEnd('/') + "/", StringComparison.OrdinalIgnoreCase))
+                if (string.IsNullOrWhiteSpace(iss))
                 {
-                    return r;
+                    continue;
+                }
+
+                var normIss = NormalizeIssuer(iss);
+                if (string.IsNullOrEmpty(normIss))
+                {
+                    continue;
+                }
+
+                if (string.Equals(normalized, normIss, StringComparison.OrdinalIgnoreCase) ||
+                    normalized.StartsWith(normIss + "/", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (normIss.Length > bestPrefixLength ||
+                        (normIss.Length == bestPrefixLength &&
+                         (bestRealm is null || string.Compare(r.Id, bestRealm.Id, StringComparison.OrdinalIgnoreCase) < 0)))
+                    {
+                        bestRealm = r;
+                        bestPrefixLength = normIss.Length;
+                    }
                 }
             }
         }
 
-        return null;
+        return bestRealm;
     }
 
     public IdentityRealm? GetRealm(string realmId)

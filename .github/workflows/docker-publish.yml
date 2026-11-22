@@ -13,7 +13,7 @@ on:
   workflow_dispatch:
     inputs:
       tag:
-        description: 'Image Tag (z. B. getting-started, v1.0.0, latest)'
+        description: 'Image Tag (e.g. getting-started, v1.0.0, latest)'
         required: true
         default: 'getting-started'
 

@@ -485,6 +485,230 @@ public sealed class WebSqlStatementManagerTests : IDisposable
         status.Truncated.ShouldBeTrue();
     }
 
+    [Fact]
+    public async Task SubmitOrWaitAsync_ConcurrentSubmits_EnforcesMaxSessionsPerUserAtomicallyAcrossAdmission()
+    {
+        var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var enteredAdmission = 0;
+        var allSlotsEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var quota = new StubQueryCostQuota(async (_, ct) =>
+        {
+            if (Interlocked.Increment(ref enteredAdmission) == 2)
+            {
+                allSlotsEntered.TrySetResult(true);
+            }
+
+            await gate.Task.WaitAsync(ct);
+            return new Autheris.Application.Common.Quota.QueryCostAdmission(
+                Autheris.Application.Common.Quota.QueryCostOutcome.Admitted,
+                "user",
+                Autheris.Domain.Model.ClientQuotaPolicy.ForTier(Autheris.Domain.Model.ClientTier.Standard),
+                1, 100, 99, 0, null);
+        });
+
+        var scopeFactory = new StubScopeFactory(quota, TrinoSqlEngine.FastSqlEngine.Default, new StubSqlExecutor());
+        using var smallManager = new WebSqlStatementManager(
+            scopeFactory,
+            NullLogger<WebSqlStatementManager>.Instance,
+            options: null,
+            retentionPeriod: TimeSpan.FromMinutes(1),
+            maxSessionsPerUser: 2,
+            maxTotalSessions: 10);
+
+        using var testCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        Task<StatementExecutionStatus>? t1 = null;
+        Task<StatementExecutionStatus>? t2 = null;
+        try
+        {
+            t1 = Task.Run(() => smallManager.SubmitOrWaitAsync(new GovernedSqlQueryRequest("SELECT 1"), TestUser, TestOwner, TestTenant, TimeSpan.FromSeconds(5), ct: testCts.Token));
+            t2 = Task.Run(() => smallManager.SubmitOrWaitAsync(new GovernedSqlQueryRequest("SELECT 2"), TestUser, TestOwner, TestTenant, TimeSpan.FromSeconds(5), ct: testCts.Token));
+
+            await allSlotsEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            var concurrentTasks = Enumerable.Range(3, 6)
+                .Select(i => Task.Run(async () =>
+                {
+                    try
+                    {
+                        await smallManager.SubmitOrWaitAsync(new GovernedSqlQueryRequest($"SELECT {i}"), TestUser, TestOwner, TestTenant, TimeSpan.FromSeconds(5), ct: testCts.Token);
+                        return true;
+                    }
+                    catch (Autheris.Domain.Exceptions.GatewayThrottledException)
+                    {
+                        return false;
+                    }
+                }))
+                .ToArray();
+
+            var overflowResults = await Task.WhenAll(concurrentTasks).WaitAsync(TimeSpan.FromSeconds(5));
+            overflowResults.ShouldAllBe(admitted => !admitted);
+            Volatile.Read(ref enteredAdmission).ShouldBe(2);
+        }
+        finally
+        {
+            gate.TrySetResult(true);
+        }
+
+        var completed = await Task.WhenAll(t1!, t2!).WaitAsync(TimeSpan.FromSeconds(5));
+        completed.ShouldAllBe(s => s.State == "FINISHED");
+    }
+
+    [Fact]
+    public async Task SubmitOrWaitAsync_ConcurrentSubmitsAcrossUsers_EnforcesMaxTotalSessionsAtomicallyAcrossAdmission()
+    {
+        var gate = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var enteredAdmission = 0;
+        var allSlotsEntered = new TaskCompletionSource<bool>(TaskCreationOptions.RunContinuationsAsynchronously);
+        var quota = new StubQueryCostQuota(async (_, ct) =>
+        {
+            if (Interlocked.Increment(ref enteredAdmission) == 3)
+            {
+                allSlotsEntered.TrySetResult(true);
+            }
+
+            await gate.Task.WaitAsync(ct);
+            return new Autheris.Application.Common.Quota.QueryCostAdmission(
+                Autheris.Application.Common.Quota.QueryCostOutcome.Admitted,
+                "user",
+                Autheris.Domain.Model.ClientQuotaPolicy.ForTier(Autheris.Domain.Model.ClientTier.Standard),
+                1, 100, 99, 0, null);
+        });
+
+        var scopeFactory = new StubScopeFactory(quota, TrinoSqlEngine.FastSqlEngine.Default, new StubSqlExecutor());
+        using var smallManager = new WebSqlStatementManager(
+            scopeFactory,
+            NullLogger<WebSqlStatementManager>.Instance,
+            options: null,
+            retentionPeriod: TimeSpan.FromMinutes(1),
+            maxSessionsPerUser: 2,
+            maxTotalSessions: 3);
+
+        using var testCts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        Task<StatementExecutionStatus>[] initial = [];
+        try
+        {
+            initial = Enumerable.Range(1, 3)
+                .Select(i =>
+                {
+                    var u = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, $"user-{i}")], "TestAuth"));
+                    var sid = new Sid($"user-{i}");
+                    return Task.Run(() => smallManager.SubmitOrWaitAsync(new GovernedSqlQueryRequest($"SELECT {i}"), u, sid, TestTenant, TimeSpan.FromSeconds(5), ct: testCts.Token));
+                })
+                .ToArray();
+
+            await allSlotsEntered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+            var extraUser = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.PrimarySid, "user-extra")], "TestAuth"));
+            await Should.ThrowAsync<Autheris.Domain.Exceptions.GatewayThrottledException>(() =>
+                smallManager.SubmitOrWaitAsync(new GovernedSqlQueryRequest("SELECT 99"), extraUser, new Sid("user-extra"), TestTenant, TimeSpan.FromSeconds(5), ct: testCts.Token)
+                    .WaitAsync(TimeSpan.FromSeconds(5)));
+
+            Volatile.Read(ref enteredAdmission).ShouldBe(3);
+        }
+        finally
+        {
+            gate.TrySetResult(true);
+        }
+
+        var completed = await Task.WhenAll(initial).WaitAsync(TimeSpan.FromSeconds(5));
+        completed.ShouldAllBe(s => s.State == "FINISHED");
+    }
+
+    [Fact]
+    public async Task SubmitOrWaitAsync_AdmissionDenialExceptionAndCancellation_ReleaseReservedSlots()
+    {
+        int call = 0;
+        var std = Autheris.Domain.Model.ClientQuotaPolicy.ForTier(Autheris.Domain.Model.ClientTier.Standard);
+        var quota = new StubQueryCostQuota((_, ct) =>
+        {
+            ct.ThrowIfCancellationRequested();
+            int current = Interlocked.Increment(ref call);
+            return current switch
+            {
+                1 => Task.FromResult(new Autheris.Application.Common.Quota.QueryCostAdmission(
+                    Autheris.Application.Common.Quota.QueryCostOutcome.OverCost, "user", std, 0, 10, 0, 0, null)),
+                2 => Task.FromResult(new Autheris.Application.Common.Quota.QueryCostAdmission(
+                    Autheris.Application.Common.Quota.QueryCostOutcome.QuotaExhausted, "user", std, 0, 100, 0, 7, null)),
+                3 => Task.FromException<Autheris.Application.Common.Quota.QueryCostAdmission>(new InvalidOperationException("quota backend down")),
+                _ => Task.FromResult(new Autheris.Application.Common.Quota.QueryCostAdmission(
+                    Autheris.Application.Common.Quota.QueryCostOutcome.Admitted, "user", std, 1, 100, 99, 0, null))
+            };
+        });
+
+        var scopeFactory = new StubScopeFactory(quota, TrinoSqlEngine.FastSqlEngine.Default, new StubSqlExecutor());
+        using var smallManager = new WebSqlStatementManager(
+            scopeFactory,
+            NullLogger<WebSqlStatementManager>.Instance,
+            options: null,
+            retentionPeriod: TimeSpan.FromMinutes(1),
+            maxSessionsPerUser: 1,
+            maxTotalSessions: 1);
+
+        await Should.ThrowAsync<TrinoSqlEngine.Ast.Emit.SqlCostExceededException>(() =>
+            smallManager.SubmitOrWaitAsync(new GovernedSqlQueryRequest("SELECT 1"), TestUser, TestOwner, TestTenant, TimeSpan.FromSeconds(1)));
+
+        await Should.ThrowAsync<TrinoSqlEngine.Ast.Emit.SqlQuotaExhaustedException>(() =>
+            smallManager.SubmitOrWaitAsync(new GovernedSqlQueryRequest("SELECT 1"), TestUser, TestOwner, TestTenant, TimeSpan.FromSeconds(1)));
+
+        await Should.ThrowAsync<InvalidOperationException>(() =>
+            smallManager.SubmitOrWaitAsync(new GovernedSqlQueryRequest("SELECT 1"), TestUser, TestOwner, TestTenant, TimeSpan.FromSeconds(1)));
+
+        using var cts = new CancellationTokenSource();
+        cts.Cancel();
+        await Should.ThrowAsync<OperationCanceledException>(() =>
+            smallManager.SubmitOrWaitAsync(new GovernedSqlQueryRequest("SELECT 1"), TestUser, TestOwner, TestTenant, TimeSpan.FromSeconds(1), ct: cts.Token));
+
+        var ok = await smallManager.SubmitOrWaitAsync(new GovernedSqlQueryRequest("SELECT 1"), TestUser, TestOwner, TestTenant, TimeSpan.FromSeconds(2));
+        ok.State.ShouldBe("FINISHED");
+    }
+
+    private sealed class StubQueryCostQuota(
+        Func<Autheris.Application.Common.Quota.QueryCostRequest, CancellationToken, Task<Autheris.Application.Common.Quota.QueryCostAdmission>> admit)
+        : Autheris.Application.Common.Quota.IQueryCostQuota
+    {
+        public Task<Autheris.Application.Common.Quota.QueryCostAdmission> AdmitAsync(Autheris.Application.Common.Quota.QueryCostRequest request, CancellationToken ct) =>
+            admit(request, ct);
+
+        public Task<Autheris.Domain.Model.CostQuotaResult?> SettleAsync(Autheris.Application.Common.Quota.QueryCostAdmission admission, int actualCost, CancellationToken ct) =>
+            Task.FromResult<Autheris.Domain.Model.CostQuotaResult?>(null);
+
+        public Task ChargeFailureFeeAsync(ClaimsPrincipal principal, CancellationToken ct) => Task.CompletedTask;
+    }
+
+    private sealed class StubSqlExecutor : IGovernedSqlExecutionService
+    {
+        public Task<GovernedSqlResult> ExecuteQueryBufferedAsync(GovernedSqlQueryRequest request, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default) =>
+            Task.FromResult(new GovernedSqlResult(request.Sql, ["col"], [new Dictionary<string, object?> { ["col"] = 1 }], 1, 1));
+
+        public Task ValidateAsync(string rawSql, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default) =>
+            Task.CompletedTask;
+    }
+
+    private sealed class StubScopeFactory(
+        Autheris.Application.Common.Quota.IQueryCostQuota quota,
+        TrinoSqlEngine.ISqlEngine engine,
+        IGovernedSqlExecutionService executor) : IServiceScopeFactory
+    {
+        public IServiceScope CreateScope() => new Scope(new Provider(quota, engine, executor));
+
+        private sealed class Scope(IServiceProvider provider) : IServiceScope
+        {
+            public IServiceProvider ServiceProvider => provider;
+            public void Dispose() { }
+        }
+
+        private sealed class Provider(
+            Autheris.Application.Common.Quota.IQueryCostQuota quota,
+            TrinoSqlEngine.ISqlEngine engine,
+            IGovernedSqlExecutionService executor) : IServiceProvider
+        {
+            public object? GetService(Type serviceType) =>
+                serviceType == typeof(Autheris.Application.Common.Quota.IQueryCostQuota) ? quota :
+                serviceType == typeof(TrinoSqlEngine.ISqlEngine) ? engine :
+                serviceType == typeof(IGovernedSqlExecutionService) ? executor : null;
+        }
+    }
+
     private sealed class FakeTableMetadataRepository : Autheris.Application.Common.Interfaces.ITableMetadataRepository
     {
         public Task<Autheris.Domain.Model.TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult<Autheris.Domain.Model.TableMetadata?>(null);

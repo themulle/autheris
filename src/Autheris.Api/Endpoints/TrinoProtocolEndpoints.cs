@@ -1,10 +1,8 @@
 namespace Autheris.Api.Endpoints;
 
 using System;
-using System.IO;
 using System.Security;
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Autheris.Api.Errors;
@@ -78,21 +76,15 @@ public static partial class TrinoProtocolEndpoints
         if (caller == null) return;
         var (owner, tenantId) = caller.Value;
 
-        var maxBodySizeFeature = httpContext.Features.Get<Microsoft.AspNetCore.Http.Features.IHttpMaxRequestBodySizeFeature>();
-        if (maxBodySizeFeature != null && !maxBodySizeFeature.IsReadOnly)
+        var (body, bodyError) = await EndpointSecurity.TryReadBodyAsync(
+            httpContext.Request, MaxBodyBytes, "Request body exceeds maximum size limit (2 MB).", ct).ConfigureAwait(false);
+        if (bodyError != null)
         {
-            maxBodySizeFeature.MaxRequestBodySize = MaxBodyBytes;
-        }
-
-        if (httpContext.Request.ContentLength > MaxBodyBytes)
-        {
-            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest,
-                "Request body exceeds maximum size limit (2 MB).", ct);
+            await bodyError.ExecuteAsync(httpContext).ConfigureAwait(false);
             return;
         }
 
-        using var reader = new StreamReader(httpContext.Request.Body, Encoding.UTF8);
-        var sql = await reader.ReadToEndAsync(ct);
+        var sql = body!;
 
         string? dataSource = httpContext.Request.Headers.TryGetValue("X-Trino-Catalog", out var catalogVal) && !string.IsNullOrWhiteSpace(catalogVal.ToString())
             ? catalogVal.ToString().Trim()

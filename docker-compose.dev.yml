@@ -1,19 +1,19 @@
 # ==============================================================================
 # Autheris - Getting-Started / Development Override
 #
-# !!! NUR FÜR LOKALE ENTWICKLUNG / DEMOS – NIEMALS PRODUKTIV EINSETZEN !!!
-# Development deaktiviert zentrale Schutzmechanismen (Test-Auth, Demo-Daten,
-# Entwickler-Secrets, ausführliche Fehler, kein HSTS/HTTPS-Redirect).
+# !!! FOR LOCAL DEVELOPMENT / DEMOS ONLY - NEVER USE IN PRODUCTION !!!
+# Development disables core security controls (test auth, demo data,
+# developer secrets, verbose error details, no HSTS/HTTPS redirect).
 #
-# Verwendung:
+# Usage:
 #   docker compose -f docker-compose.yml -f docker-compose.dev.yml up
 #
-# Ports sind in docker-compose.yml auf 127.0.0.1 gebunden. NICHT auf 0.0.0.0 / ein
-# oeffentliches Interface umbiegen: Development stellt Dev-Benutzer (z.B. dev-admin mit
-# ClusterAdmin) ohne echte Authentifizierung bereit.
+# Ports in docker-compose.yml are bound to 127.0.0.1. DO NOT rebind to 0.0.0.0
+# or a public interface: Development provisions dev users (e.g. dev-admin with
+# ClusterAdmin) without real authentication.
 #
-# SEC C-04: Development im Container erfordert das explizite Opt-in
-# AUTHERIS_ALLOW_DEV_IN_CONTAINER=true, sonst bricht der Gateway den Start ab.
+# SEC C-04: Running Development inside a container requires explicit opt-in via
+# AUTHERIS_ALLOW_DEV_IN_CONTAINER=true, otherwise the gateway aborts startup.
 # ==============================================================================
 services:
   gql-gateway:

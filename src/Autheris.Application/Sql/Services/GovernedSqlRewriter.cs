@@ -205,13 +205,13 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
                 var analysisKey = Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(rawSql)));
                 if (!_stage1Analyses.TryGet(analysisKey, out metadata!))
                 {
-                    metadata = _sqlEngine.Analyze(rawSql.AsMemory(), AnalysisTokenOptions, ct);
+                    metadata = await _sqlEngine.AnalyzeAsync(rawSql.AsMemory(), AnalysisTokenOptions, ct).ConfigureAwait(false);
                     _stage1Analyses.Set(analysisKey, metadata);
                 }
             }
             else
             {
-                metadata = _sqlEngine.Analyze(rawSql.AsMemory(), AnalysisTokenOptions, ct);
+                metadata = await _sqlEngine.AnalyzeAsync(rawSql.AsMemory(), AnalysisTokenOptions, ct).ConfigureAwait(false);
             }
         }
         catch (WebSqlPolicyException)

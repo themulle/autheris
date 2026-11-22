@@ -39,10 +39,7 @@ public sealed partial class Query
 
         if (!TableIdentifier.TryParse(table, out var tableId))
         {
-            throw new GraphQLException(ErrorBuilder.New()
-                .SetCode("BAD_REQUEST")
-                .SetMessage($"Invalid table identifier format: '{table}'. Expected 'domain.schema.table' or 'domain.table'.")
-                .Build());
+            throw InvalidTableArgument();
         }
 
         return await explanationService.ExplainMyAccessAsync(principal, tableId, ct).ConfigureAwait(false);
@@ -190,8 +187,13 @@ public sealed partial class Query
         var now = DateTimeOffset.UtcNow;
 
         IReadOnlyList<Consent> consents;
-        if (!string.IsNullOrWhiteSpace(table) && TableIdentifier.TryParse(table, out var tableId))
+        if (!string.IsNullOrWhiteSpace(table))
         {
+            if (!TableIdentifier.TryParse(table, out var tableId))
+            {
+                throw InvalidTableArgument();
+            }
+
             consents = await consentRepository.GetActiveConsentsForSubjectsAsync(allSubjects, tableId, now, tenantId, ct).ConfigureAwait(false);
         }
         else

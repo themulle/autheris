@@ -332,17 +332,30 @@ internal sealed class FakeDiscoveryRateLimiter : IRateLimiterService
 {
     private readonly Dictionary<string, int> _counts = new(StringComparer.Ordinal);
 
+    private int Increment(string key)
+    {
+        var count = _counts.TryGetValue(key, out var current) ? current + 1 : 1;
+        _counts[key] = count;
+        return count;
+    }
+
     public Task<RateLimitResult> CheckPostAuthSidAsync(string sid, PostAuthSidRateLimitOptions options, CancellationToken ct = default)
     {
-        var count = _counts.TryGetValue(sid, out var current) ? current + 1 : 1;
-        _counts[sid] = count;
+        var count = Increment(sid);
         return Task.FromResult(count > options.TokenBucketCapacity
             ? new RateLimitResult(false, 60)
             : new RateLimitResult(true, 0));
     }
 
     public Task<RateLimitResult> CheckPreAuthIpAsync(string ip, PreAuthIpRateLimitOptions options, CancellationToken ct = default) => Task.FromResult(new RateLimitResult(true, 0));
-    public Task<CostQuotaResult> CheckCostQuotaAsync(string key, int requestedCost, ClientQuotaPolicy policy, CancellationToken ct = default) => throw new NotSupportedException();
+
+    public Task<CostQuotaResult> CheckCostQuotaAsync(string key, int requestedCost, ClientQuotaPolicy policy, CancellationToken ct = default)
+    {
+        var count = Increment(key);
+        return Task.FromResult(count > policy.MaxTokensCapacity
+            ? new CostQuotaResult(false, 0, 60)
+            : new CostQuotaResult(true, Math.Max(0, policy.MaxTokensCapacity - count), 0));
+    }
     public Task<CostQuotaResult> ReserveCostQuotaAsync(string key, int reservedCost, ClientQuotaPolicy policy, CancellationToken ct = default) => throw new NotSupportedException();
     public Task<CostQuotaResult> SettleCostQuotaAsync(string key, int reservedCost, int actualCost, ClientQuotaPolicy policy, CancellationToken ct = default) => throw new NotSupportedException();
     public Task<CallerBucketState?> GetBucketStateAsync(string key, ClientQuotaPolicy policy, CancellationToken ct = default) => throw new NotSupportedException();

@@ -336,4 +336,38 @@ public sealed class CatalogPagingScaleTests
         consents.AllActiveReads.ShouldBe(0);
         singleTableConsentReads.ShouldBe(40);
     }
+
+    [Fact]
+    public async Task CatalogDiscoveryService_ListDatasets_Above200_ReturnsAllPages_AndFeedsMcpSummaryAndApiDispatcher()
+    {
+        var tables = MakeTables(250, domainBuckets: 5);
+        var repo = new CountingTableRepository(tables);
+        var snapshot = CatalogSnapshot.Create(new CatalogVersion(1, 1), tables, []);
+        var snapshots = new StubSnapshotProvider(snapshot);
+        var discovery = CreateDiscoveryService(repo, snapshotProvider: snapshots);
+
+        var catalogService = new CatalogDiscoveryService(
+            repo,
+            new FakeAuditWriter(),
+            Options.Create(new GatewayOptions { Tenancy = TenancyShape.Multi.Options() }),
+            logger: NullLogger<CatalogDiscoveryService>.Instance,
+            discoveryService: discovery);
+
+        var user = DiscoveryTestBuilder.User("S-USER", "tenant-a");
+        var ctx = new RequestContext(new TenantId("tenant-a"), new Sid("S-USER"), [], null, user);
+
+        var allDatasets = await catalogService.ListDatasetsAsync(ctx);
+        allDatasets.Count.ShouldBe(250);
+
+        var dispatcher = new ApiDispatcherService(catalogDiscoveryService: catalogService);
+        var apiJson = await dispatcher.InvokeApiAsync("/api/v1/catalog/datasets", "GET", context: ctx);
+        using var doc = System.Text.Json.JsonDocument.Parse(apiJson);
+        doc.RootElement.GetProperty("count").GetInt32().ShouldBe(250);
+        doc.RootElement.GetProperty("datasets").GetArrayLength().ShouldBe(250);
+
+        var provider = new McpResourceProvider(catalogService, dispatcher);
+        var session = new McpSessionContext("s-1", "sp-1", "tenant-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-USER");
+        var summary = await provider.ReadAsync("autheris://catalog/summary", session);
+        summary.Text.ShouldContain("Total Datasets: 250 across 5 business domains.");
+    }
 }

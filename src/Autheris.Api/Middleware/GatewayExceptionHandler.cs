@@ -12,7 +12,7 @@ using Microsoft.Extensions.Logging;
 namespace Autheris.Api.Middleware;
 
 /// <summary>
-/// O9 (docs/plans/rls-subquery-in-strategy.md, OData-Härtung): last line of defence for exceptions no endpoint handled.
+/// O9 (docs/plans/rls-subquery-in-strategy.md, OData hardening): last line of defence for exceptions no endpoint handled.
 /// Registered with <c>UseExceptionHandler()</c> inside the pipeline, so the developer exception page that ASP.NET Core
 /// adds in Development never sees an exception. Answers with application/problem+json: status, generic title and a
 /// trace id; never exception text, stack trace, source paths or database error messages.

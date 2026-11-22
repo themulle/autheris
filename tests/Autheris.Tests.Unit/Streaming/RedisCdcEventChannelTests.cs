@@ -294,6 +294,9 @@ public sealed class RedisCdcEventChannelTests
 
         capturedHandler.ShouldNotBeNull();
 
+        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
+        await using var enumerator = channel.SubscribeAsync("cdc_orders", cts.Token).GetAsyncEnumerator(cts.Token);
+
         // Simulate Redis echoing back an event with the same instanceId ("node-a") but a new EventId
         // that was not yet seen by the local subscriber; if instanceId filtering works, it will never be enqueued.
         capturedHandler!(RedisChannel.Literal(RedisCdcEventChannel.PubSubChannelName), SealFrom("node-a", CreateEvent("evt-echoed"), kek));
@@ -304,9 +307,6 @@ public sealed class RedisCdcEventChannelTests
 
         // Follow with a valid remote event from node-b so MoveNextAsync completes deterministically.
         capturedHandler!(RedisChannel.Literal(RedisCdcEventChannel.PubSubChannelName), SealFrom("node-b", CreateEvent("evt-from-b"), kek));
-
-        using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
-        await using var enumerator = channel.SubscribeAsync("cdc_orders", cts.Token).GetAsyncEnumerator(cts.Token);
 
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
         enumerator.Current.EventId.ShouldBe("evt-from-b");
@@ -322,10 +322,11 @@ public sealed class RedisCdcEventChannelTests
 
         await using var channel = CreateChannel(CreateKeys().Keys, "node-a", multiplexer: multiplexer);
 
-        await channel.PublishAsync(CreateEvent("evt-disconnected"));
-
         using var cts = new CancellationTokenSource(TimeSpan.FromSeconds(5));
         await using var enumerator = channel.SubscribeAsync("cdc_orders", cts.Token).GetAsyncEnumerator(cts.Token);
+
+        await channel.PublishAsync(CreateEvent("evt-disconnected"));
+
         (await enumerator.MoveNextAsync()).ShouldBeTrue();
         enumerator.Current.EventId.ShouldBe("evt-disconnected");
 

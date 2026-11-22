@@ -33,22 +33,19 @@ public static class FusionGatewayExtensions
             }
 
             var subgraphName = subgraph.Name;
-            services.AddTransient(sp => new SubgraphSecurityDelegatingHandler(
-                subgraphName,
-                sp.GetRequiredService<ISubgraphContextPropagationService>(),
-                sp.GetRequiredService<IHttpContextAccessor>(),
-                sp.GetRequiredService<ILogger<SubgraphSecurityDelegatingHandler>>(),
-                sp.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>(),
-                sp.GetService<Autheris.Application.Federation.Interfaces.ISubgraphCanaryRouter>()
-            ));
-
             services.AddHttpClient(subgraphName, client =>
             {
                 client.BaseAddress = new Uri(subgraph.Url);
                 client.Timeout = TimeSpan.FromSeconds(subgraph.TimeoutSeconds > 0 ? subgraph.TimeoutSeconds : 30);
             })
             .ConfigurePrimaryHttpMessageHandler(sp => Autheris.Application.Security.SecureOutboundHttp.CreatePrimaryHandler(sp, subgraphName))
-            .AddHttpMessageHandler(sp => sp.GetRequiredService<SubgraphSecurityDelegatingHandler>());
+            .AddHttpMessageHandler(sp => new SubgraphSecurityDelegatingHandler(
+                subgraphName,
+                sp.GetRequiredService<ISubgraphContextPropagationService>(),
+                sp.GetRequiredService<IHttpContextAccessor>(),
+                sp.GetRequiredService<ILogger<SubgraphSecurityDelegatingHandler>>(),
+                sp.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>>(),
+                sp.GetService<Autheris.Application.Federation.Interfaces.ISubgraphCanaryRouter>()));
         }
 
         return services;

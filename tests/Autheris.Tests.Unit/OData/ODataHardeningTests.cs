@@ -418,6 +418,37 @@ public sealed class ODataHardeningTests
         result.ShouldBeNull();
     }
 
+    [Fact]
+    public async Task ODataHandler_FilterParserException_DoesNotLeakRawExceptionMessageInAnyEnvironment()
+    {
+        var metadataRepo = new InMemoryTableMetadataRepository(CreateSampleMetadata());
+        var execService = new StubGatewayExecutionService();
+        var devEnv = new ProdWebEnv { EnvironmentName = Microsoft.Extensions.Hosting.Environments.Development };
+        var handler = new ODataHandler(metadataRepo, execService, NullLogger<ODataHandler>.Instance, environment: devEnv)
+        {
+            ParseFilter = _ => throw new InvalidOperationException("SECRET_PARSER_INTERNAL_STATE")
+        };
+
+        var result = await handler.ExecuteEntitySetQueryAsync(
+            CreateUser(),
+            "http://localhost/odata/v4",
+            Table,
+            top: 10,
+            skip: 0,
+            select: null,
+            includeCount: false,
+            headers: null,
+            orderBy: null,
+            filter: "amount eq 1");
+
+        result.Success.ShouldBeFalse();
+        result.StatusCode.ShouldBe(400);
+        result.ErrorCode.ShouldBe("InvalidQueryOption");
+        result.ErrorMessage.ShouldBe("Invalid $filter expression.");
+        result.ErrorMessage.ShouldNotBeNull().ShouldNotContain("SECRET_PARSER_INTERNAL_STATE");
+        JsonSerializer.Serialize(result.Payload).ShouldNotContain("SECRET_PARSER_INTERNAL_STATE");
+    }
+
     private sealed class ProdWebEnv : Microsoft.AspNetCore.Hosting.IWebHostEnvironment
     {
         public string EnvironmentName { get; set; } = Microsoft.Extensions.Hosting.Environments.Production;

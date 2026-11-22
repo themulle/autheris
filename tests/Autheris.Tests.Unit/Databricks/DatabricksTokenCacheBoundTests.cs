@@ -1,7 +1,9 @@
 namespace Autheris.Tests.Unit.Databricks;
 
 using System;
+using System.Threading.Tasks;
 using Autheris.Infrastructure.Databricks;
+using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Time.Testing;
 using Shouldly;
 using Xunit;
@@ -112,5 +114,30 @@ public sealed class DatabricksTokenCacheBoundTests
         tokB.ShouldBe("tok-b");
         cache.TryGet("dbx2", "tenant-a", DatabricksAuthMode.Pat, "p1", null, DateTimeOffset.UtcNow, out var tokC).ShouldBeTrue();
         tokC.ShouldBe("tok-c");
+    }
+
+    [Fact]
+    public async Task Set_WhenReplacingExistingKey_PreservesLiveTrackingKeyForEvict()
+    {
+        var fakeTime = new FakeTimeProvider(InitialTime);
+        var evictedTcs = new TaskCompletionSource<EvictionReason>(TaskCreationOptions.RunContinuationsAsynchronously);
+        using var cache = new DatabricksTokenCache(
+            maxEntries: 50,
+            timeProvider: fakeTime,
+            onPostEviction: reason => evictedTcs.TrySetResult(reason));
+
+        cache.Set("adb.corp.net", "tenant-a", DatabricksAuthMode.OAuthM2M, "client-1", "hash-1", "token-v1", InitialTime.AddMinutes(30));
+        cache.Set("adb.corp.net", "tenant-a", DatabricksAuthMode.OAuthM2M, "client-1", "hash-1", "token-v2", InitialTime.AddHours(1));
+
+        var reason = await evictedTcs.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        reason.ShouldBe(EvictionReason.Replaced);
+
+        cache.TryGet("adb.corp.net", "tenant-a", DatabricksAuthMode.OAuthM2M, "client-1", "hash-1", fakeTime.GetUtcNow(), out var liveToken).ShouldBeTrue();
+        liveToken.ShouldBe("token-v2");
+
+        cache.Evict("adb.corp.net", "tenant-a");
+
+        cache.TryGet("adb.corp.net", "tenant-a", DatabricksAuthMode.OAuthM2M, "client-1", "hash-1", fakeTime.GetUtcNow(), out _).ShouldBeFalse();
+        cache.EntryCount.ShouldBe(0);
     }
 }

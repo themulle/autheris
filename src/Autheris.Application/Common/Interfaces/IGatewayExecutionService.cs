@@ -120,7 +120,8 @@ public sealed record TablePageRequest(
     IReadOnlyList<TableOrderBy>? OrderBy = null,
     TableFilterClause? Filter = null,
     bool IncludeTotalCount = false,
-    IReadOnlyDictionary<string, string[]>? RequestHeaders = null);
+    IReadOnlyDictionary<string, string[]>? RequestHeaders = null,
+    bool RequireTotalCount = true);
 
 /// <summary>
 /// Rows of the page, the access decision and (when requested) the total row count. <paramref name="Unordered"/> is true when no

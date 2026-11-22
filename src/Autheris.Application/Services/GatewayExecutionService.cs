@@ -140,7 +140,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IReadOnlyDictionary<string, string[]>? requestHeaders,
         CancellationToken ct = default)
     {
-        var page = await ExecutePageCoreAsync(principal, table, first, after, queryArguments, requestedFields, requestHeaders, orderBy: null, filter: null, countTotal: false, ct)
+        var page = await ExecutePageCoreAsync(principal, table, first, after, queryArguments, requestedFields, requestHeaders, orderBy: null, filter: null, countTotal: false, requireTotalCount: false, ct)
             .ConfigureAwait(false);
         return (page.Rows, page.Decision);
     }
@@ -154,7 +154,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         ArgumentNullException.ThrowIfNull(request);
         return ExecutePageCoreAsync(
             principal, table, request.First, request.After, queryArguments: null, request.RequestedFields, request.RequestHeaders,
-            request.OrderBy, request.Filter, request.IncludeTotalCount, ct);
+            request.OrderBy, request.Filter, request.IncludeTotalCount, request.RequireTotalCount, ct);
     }
 
     private async Task<TableQueryPage> ExecutePageCoreAsync(
@@ -168,6 +168,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         IReadOnlyList<TableOrderBy>? orderBy,
         TableFilterClause? filter,
         bool countTotal,
+        bool requireTotalCount,
         CancellationToken ct)
     {
         // GQL-03: bound the offset for every caller (negative values are invalid SQL, huge ones force deep OFFSET scans).
@@ -245,7 +246,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                 : authorizedColumns;
 
             // 4a.3 / 2.1: ordering, filtering and counting are pushed into the SQL statement; other data sources cannot do it (never ignored).
-            if (orderBy is { Count: > 0 } || countTotal || filter != null)
+            if (orderBy is { Count: > 0 } || (countTotal && requireTotalCount) || filter != null)
             {
                 if (metadata.Table.DataSourceType != DataSourceType.Sql)
                 {
@@ -262,11 +263,11 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
                     ValidateFilter(filter, metadata, decision);
                     pageItems[TableQueryItems.Filter] = filter;
                 }
+            }
 
-                if (countTotal)
-                {
-                    pageItems[TableQueryItems.CountTotal] = true;
-                }
+            if (countTotal && metadata.Table.DataSourceType == DataSourceType.Sql)
+            {
+                pageItems[TableQueryItems.CountTotal] = true;
             }
         }
         catch (Exception ex)
@@ -404,12 +405,14 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         {
             // The count is only exact when the row filter ran in the same statement (not applied afterwards in memory).
             bool rowFilterInSql = rlsPushdownAlreadyOccurred || string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql);
-            if (!rowFilterInSql || !pageItems.TryGetValue(TableQueryItems.TotalCount, out var countObj) || countObj is not long count)
+            if (rowFilterInSql && pageItems.TryGetValue(TableQueryItems.TotalCount, out var countObj) && countObj is long count)
+            {
+                totalCount = count;
+            }
+            else if (requireTotalCount)
             {
                 throw new GatewayNotImplementedException("The total row count cannot be determined for this data source.");
             }
-
-            totalCount = count;
         }
 
         return new TableQueryPage(processedRows, decision, totalCount, unordered);

@@ -44,13 +44,8 @@ public sealed partial class Mutation
                 .Build());
         }
 
-        // GQL-09: publish on the channel the catalog snapshot / GraphQL type module actually listen to ("schema:reload" had no subscriber).
-        await eventBus.PublishAsync(
-            Autheris.Application.Catalog.ICatalogVersionProvider.CatalogChangedEventChannel,
-            new Autheris.Application.Catalog.CatalogChangedEvent(0, 0, DateTimeOffset.UtcNow),
-            ct);
-
         // Review E-10: schema reloads change what the gateway exposes and belong in the audit chain.
+        // Write the required audit record before publishing the cluster-wide reload event (fail closed).
         TenantId reloadTenant;
         try
         {
@@ -74,12 +69,22 @@ public sealed partial class Mutation
 
         if (auditWriter != null)
         {
-            await auditWriter.RecordRequiredAsync(entry, ct);
+            await auditWriter.RecordRequiredAsync(entry, ct).ConfigureAwait(false);
+        }
+        else if (auditLog != null)
+        {
+            await auditLog.RecordAuditEventAsync(entry, ct).ConfigureAwait(false);
         }
         else
         {
-            await auditLog.RecordAuditEventAsync(entry, ct);
+            throw new Autheris.Application.Audit.AuditUnavailableException("The audit store is unavailable (fail-closed).");
         }
+
+        // GQL-09: publish on the channel the catalog snapshot / GraphQL type module actually listen to ("schema:reload" had no subscriber).
+        await eventBus.PublishAsync(
+            Autheris.Application.Catalog.ICatalogVersionProvider.CatalogChangedEventChannel,
+            new Autheris.Application.Catalog.CatalogChangedEvent(0, 0, DateTimeOffset.UtcNow),
+            ct).ConfigureAwait(false);
 
         return true;
     }

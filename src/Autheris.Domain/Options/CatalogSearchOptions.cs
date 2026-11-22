@@ -41,21 +41,21 @@ public sealed class CatalogSearchOptions
     /// <summary>Minimum interval in seconds between incremental catalog search index refreshes.</summary>
     public int RefreshSeconds { get; set; } = 15;
 
-    /// <summary>RRF-Glättungskonstante k (Standard: 60 gemäß Cormack et al.).</summary>
+    /// <summary>RRF smoothing constant k (default: 60 per Cormack et al.).</summary>
     [Range(1, 200)]
     public int RrfConstantK { get; set; } = 60;
 
-    /// <summary>Standard-Trefferanzahl für MCP-Suchaufrufe.</summary>
+    /// <summary>Default hit count for MCP search calls.</summary>
     [Range(1, 50)]
     public int DefaultLimit { get; set; } = 5;
 
-    /// <summary>Automatischer asynchroner Index-Warmup beim Anwendungsstart.</summary>
+    /// <summary>Automatic asynchronous index warmup on application startup.</summary>
     public bool WarmupOnStartup { get; set; } = true;
 
-    /// <summary>Schwellenwert für minimale Kosinus-Ähnlichkeit bei reiner Vektorsuche.</summary>
+    /// <summary>Minimum cosine similarity threshold for pure vector search.</summary>
     public float MinVectorSimilarity { get; set; } = 0.25f;
 
-    /// <summary>Maximale Abfragelänge in Zeichen zur Abwehr von DoS-Attacken.</summary>
+    /// <summary>Maximum query length in characters to mitigate DoS attacks.</summary>
     public int MaxQueryLength { get; set; } = 256;
 
     /// <summary>Dimension of the embedding vectors (LocalOnnx, Ollama; default 384 for multilingual-e5-small / MiniLM-L12-v2).</summary>

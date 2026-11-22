@@ -331,7 +331,7 @@ export default function () {
   }
 
   // --------------------------------------------------------------------------
-  // 4. 10% Ungültige / Übergroße Requests (Rate Limit, Complexity, Security)
+  // 4. 10% Invalid / Oversized Requests (Rate Limit, Complexity, Security)
   // --------------------------------------------------------------------------
   else {
     const testCase = Math.random();

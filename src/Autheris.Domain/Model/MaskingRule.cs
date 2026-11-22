@@ -23,7 +23,7 @@ public sealed record MaskingRule
     public string? HmacKeyId { get; init; }
 
     [JsonPropertyName("mode")]
-    public string? Mode { get; init; } // GEO_JITTER: "round" (Standard) oder "noise"
+    public string? Mode { get; init; } // GEO_JITTER: "round" (default) or "noise"
 
     private readonly int? _decimals = 2;
 
@@ -35,22 +35,22 @@ public sealed record MaskingRule
     }
 
     [JsonPropertyName("radius_meters")]
-    public double? RadiusMeters { get; init; } = 500.0; // GEO_JITTER noise: Maximalradius in Metern
+    public double? RadiusMeters { get; init; } = 500.0; // GEO_JITTER noise: max radius in meters
 
     [JsonPropertyName("keep_prefix")]
-    public int? KeepPrefix { get; init; } = 1; // PARTIAL_MASK: Sichtbare Anfangszeichen
+    public int? KeepPrefix { get; init; } = 1; // PARTIAL_MASK: visible prefix characters
 
     [JsonPropertyName("keep_suffix")]
-    public int? KeepSuffix { get; init; } = 0; // PARTIAL_MASK: Sichtbare Endzeichen
+    public int? KeepSuffix { get; init; } = 0; // PARTIAL_MASK: visible suffix characters
 
     [JsonPropertyName("mask_char")]
-    public char? MaskChar { get; init; } = '*'; // PARTIAL_MASK: Maskierungszeichen
+    public char? MaskChar { get; init; } = '*'; // PARTIAL_MASK: masking character
 
     [JsonPropertyName("fixed_length")]
-    public bool? FixedLength { get; init; } = false; // PARTIAL_MASK: Verbirgt Originallänge
+    public bool? FixedLength { get; init; } = false; // PARTIAL_MASK: hides original length
 
     [JsonPropertyName("token_domain")]
-    public string? TokenDomain { get; init; } // TOKENIZE: z. B. "customer_id", "iban"
+    public string? TokenDomain { get; init; } // TOKENIZE: e.g. "customer_id", "iban"
 
     /// <summary>R-POL-12: the one definition of a keyed pseudonymization rule (HMAC, HMAC_SHA256 and the HASH alias).</summary>
     [JsonIgnore]

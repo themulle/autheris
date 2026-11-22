@@ -67,7 +67,7 @@ public sealed partial class QueryAnalysisService
         try
         {
             var normalizedSql = SqlParameterExtractor.NormalizeForAst(trimmed);
-            var (tree, _) = FastSqlEngine.Default.Parse(normalizedSql.AsMemory());
+            var (tree, _) = await FastSqlEngine.Default.ParseAsync(normalizedSql.AsMemory(), null, ct).ConfigureAwait(false);
             parsedStatement = new SqlAstBuilder(new AstBuilderOptions
             {
                 EnforceFunctionPolicy = true,
@@ -76,7 +76,7 @@ public sealed partial class QueryAnalysisService
             var analyzer = new SqlQueryAnalyzer();
             metadata = analyzer.Analyze(tree);
         }
-        catch (Exception ex)
+        catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
             outcome.Diagnostics.Add(new QueryValidationDiagnostic(
                 QueryDiagnosticCodes.SyntaxError,

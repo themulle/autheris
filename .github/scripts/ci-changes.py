@@ -21,7 +21,7 @@ DENY = (
     "global.json", "Directory.*", "nuget.config", "NuGet.Config", "packages.lock.json", ".editorconfig",
 )
 # Positive list of doc-only paths.
-DOC_ONLY = ("docs/*", "*.md", "benchmarks/*", "deploy/*", ".github/ISSUE_TEMPLATE/*", "LICENSE")
+DOC_ONLY = ("docs/*", "*.md", "benchmarks/*", ".github/ISSUE_TEMPLATE/*", "LICENSE")
 # Positive path triggers for PR smoke suites (WP-OI-CI-5, #522). Unrecognized/empty/error states fail closed to True.
 ORACLE_PATTERNS = (
     "**/*Oracle*",

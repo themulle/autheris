@@ -279,7 +279,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         }
 
         var sqlForAnalysis = GovernedSqlExecutionService.NormalizeClientParameters(rawSql, null, out _);
-        var metadata = _sqlEngine.Analyze(sqlForAnalysis.AsMemory(), AnalysisTokenOptions, ct);
+        var metadata = await _sqlEngine.AnalyzeAsync(sqlForAnalysis.AsMemory(), AnalysisTokenOptions, ct).ConfigureAwait(false);
 
         if (metadata.StatementType is SqlStatementType.Insert or SqlStatementType.Update or SqlStatementType.Delete)
         {
@@ -349,7 +349,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         GovernedSqlExecutionService.EnsureClientParameterNames(request.Parameters);
 
         var sqlForAnalysis = GovernedSqlExecutionService.NormalizeClientParameters(request.Sql, request.Parameters, out _);
-        var metadata = _sqlEngine.Analyze(sqlForAnalysis.AsMemory(), AnalysisTokenOptions, ct);
+        var metadata = await _sqlEngine.AnalyzeAsync(sqlForAnalysis.AsMemory(), AnalysisTokenOptions, ct).ConfigureAwait(false);
 
         Autheris.Application.Common.Quota.QueryCostAdmission? admission = null;
         bool isMeteredTransport = SqlTransports.IsCostMetered(request.Transport);
@@ -467,7 +467,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
 
             // F-GOV-14 (WI-6): the planner decides per protected HTTP table how the authorized keys are loaded and enforced
             // (single policy decision point: the decisions). Without a planner a table with applied Virtual Filters is denied.
-            var statement = ParseStatement(sqlForAnalysis);
+            var statement = await ParseStatementAsync(sqlForAnalysis, timeoutCts.Token).ConfigureAwait(false);
             var vfPlans = await PlanVirtualFiltersAsync(statement, routing.Tables, decisions, tenantId, keySourceReads, timeoutCts.Token).ConfigureAwait(false);
             var plan = _planner.Plan(sqlForAnalysis, metadata, routing.Tables, decisions, crossSourceOptions, user, tenantId, vfPlans, statement, parameterContract);
 
@@ -540,9 +540,9 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         }
     }
 
-    private SqlStatement ParseStatement(string sql)
+    private async Task<SqlStatement> ParseStatementAsync(string sql, CancellationToken ct)
     {
-        var (tree, _) = _sqlEngine.Parse(sql.AsMemory());
+        var (tree, _) = await _sqlEngine.ParseAsync(sql.AsMemory(), null, ct).ConfigureAwait(false);
         return new SqlAstBuilder(new AstBuilderOptions
         {
             AllowedFunctions = EffectiveDuckDbFunctions(),

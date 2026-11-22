@@ -282,4 +282,38 @@ public sealed class IdentityRealmRegistryTests
         realm.TenantBinding.Kind.ShouldBe(TenantBindingKind.Unbound);
     }
 
+    [Fact]
+    public void ResolveByIssuer_OverlappingPrefixes_DeterministicallySelectsLongestPrefix()
+    {
+        var registryForward = new IdentityRealmRegistry();
+        var rootRealm = new IdentityRealm("realm-root", IdentityRealmKind.GenericOidc, TenantBindingSpecification.Fixed(new TenantId("t-root")), issuers: ["https://sts.corp.com/auth"]);
+        var subRealm = new IdentityRealm("realm-sub", IdentityRealmKind.GenericOidc, TenantBindingSpecification.Fixed(new TenantId("t-sub")), issuers: ["https://sts.corp.com/auth/tenant-b"]);
+
+        registryForward.RegisterRealm(rootRealm);
+        registryForward.RegisterRealm(subRealm);
+
+        var registryReverse = new IdentityRealmRegistry();
+        registryReverse.RegisterRealm(subRealm);
+        registryReverse.RegisterRealm(rootRealm);
+
+        registryForward.ResolveByIssuer("https://sts.corp.com/auth/tenant-b/v2.0")?.Id.ShouldBe("realm-sub");
+        registryReverse.ResolveByIssuer("https://sts.corp.com/auth/tenant-b/v2.0")?.Id.ShouldBe("realm-sub");
+    }
+
+    [Fact]
+    public void ResolveByIssuer_EqualLengthPrefixes_DeterministicallyTieBreaksByRealmId()
+    {
+        var registryA = new IdentityRealmRegistry();
+        var realmA = new IdentityRealm("alpha-realm", IdentityRealmKind.GenericOidc, TenantBindingSpecification.Fixed(new TenantId("t-a")), issuers: ["https://sts.corp.com/shared"]);
+        var realmZ = new IdentityRealm("zeta-realm", IdentityRealmKind.GenericOidc, TenantBindingSpecification.Fixed(new TenantId("t-z")), issuers: ["https://sts.corp.com/shared"]);
+        registryA.RegisterRealm(realmZ);
+        registryA.RegisterRealm(realmA);
+
+        var registryB = new IdentityRealmRegistry();
+        registryB.RegisterRealm(realmA);
+        registryB.RegisterRealm(realmZ);
+
+        registryA.ResolveByIssuer("https://sts.corp.com/shared/sub")?.Id.ShouldBe("alpha-realm");
+        registryB.ResolveByIssuer("https://sts.corp.com/shared/sub")?.Id.ShouldBe("alpha-realm");
+    }
 }

@@ -36,7 +36,7 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
     private readonly int _maxAggregates;
     private readonly int _maxAggregateFieldsPerOperation;
 
-    // SEC M-13: Default-Seitengröße, die Resolver mit `first`-Argument (z.B. Query.GetTableAsync) ohne explizites Argument verwenden.
+    // M-13: Default page size used by resolvers with a `first` argument (e.g. Query.GetTableAsync) when omitted.
     internal const int DefaultPayloadPageSize = 50;
 
     public QueryCostAnalyzerRule(
@@ -161,7 +161,7 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
 
     public void Validate(DocumentValidatorContext context, DocumentNode document)
     {
-        // SEC M-13: Harte Obergrenze für Root-Felder/Aliase pro Operation (Alias-Amplifikation).
+        // M-13: Hard cap on root fields/aliases per operation (alias amplification defense).
         int maxRootFieldCount = CountMaxRootFields(document, _maxRootFields);
         if (maxRootFieldCount > _maxRootFields)
         {
@@ -204,8 +204,8 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
     }
 
     /// <summary>
-    /// SEC M-13: Liefert die größte Anzahl an Root-Feldern (inkl. Aliase, aufgelöst über Inline-Fragmente und
-    /// Fragment-Spreads) über alle Operationen des Dokuments. Bricht ab, sobald <paramref name="stopAfter"/> überschritten ist.
+    /// M-13: Returns the largest count of root fields (including aliases, resolved across inline fragments and
+    /// fragment spreads) over all operations in the document. Stops once <paramref name="stopAfter"/> is exceeded.
     /// </summary>
     public static int CountMaxRootFields(DocumentNode document, int stopAfter = int.MaxValue)
     {
@@ -464,7 +464,7 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
 
                 bool isPagedList = (isList || isConnection) && !isSyntheticConnectionContainer;
 
-                // SEC M-13: Pagination wird unabhängig vom Rückgabetyp erkannt (auch Objekt-Payloads wie TableRecordPayload).
+                // M-13: Pagination is detected regardless of return type (including object payloads like TableRecordPayload).
                 bool acceptsPagination = !isSyntheticConnectionContainer && (isConnection || (fieldDef != null
                     ? fieldDef.Arguments.Any(a => IsRowLimitArgument(a.Name))
                     : field.Arguments.Any(a => IsRowLimitArgument(a.Name.Value))));
@@ -629,7 +629,7 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
                     }
                     else
                     {
-                        // Variablen oder fehlende Limits an Listen: Worst-Case annehmen.
+                        // Variables or missing limits on lists: assume worst-case page size.
                         effectiveRows = _maxResponseRows;
                     }
 

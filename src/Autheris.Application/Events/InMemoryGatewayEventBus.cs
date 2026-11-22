@@ -30,6 +30,7 @@ public sealed class InMemoryGatewayEventBus : IGatewayEventBus, IGatewayEventBus
     private readonly ConcurrentDictionary<Type, Subscription[]> _matchCache = new();
     private Subscription[] _all = [];
     private long _pending;
+    private bool _disposed;
 
     /// <summary>Default upper bound for a single subscriber invocation (SR-M-13).</summary>
     public static readonly TimeSpan DefaultHandlerTimeout = TimeSpan.FromSeconds(10);
@@ -151,6 +152,13 @@ public sealed class InMemoryGatewayEventBus : IGatewayEventBus, IGatewayEventBus
 
         lock (_lock)
         {
+            if (_disposed)
+            {
+                sub.Queue?.Writer.TryComplete();
+                sub.Cts?.Cancel();
+                return new SubscriptionToken(() => { });
+            }
+
             var next = new Subscription[_all.Length + 1];
             Array.Copy(_all, next, _all.Length);
             next[^1] = sub;
@@ -174,16 +182,18 @@ public sealed class InMemoryGatewayEventBus : IGatewayEventBus, IGatewayEventBus
         Subscription[] snapshot;
         lock (_lock)
         {
+            _disposed = true;
             snapshot = _all;
             _all = [];
             _matchCache.Clear();
         }
 
-        _lifetime.Cancel();
+        // Complete subscriber writers before cancelling tokens so RunReaderAsync cannot exit before late TryWrite fails.
         foreach (var sub in snapshot)
         {
             sub.Queue?.Writer.TryComplete();
         }
+        _lifetime.Cancel();
     }
 
     private Subscription[] GetMatching(Type concreteType)
@@ -228,10 +238,12 @@ public sealed class InMemoryGatewayEventBus : IGatewayEventBus, IGatewayEventBus
             }
 
             _matchCache.Clear();
+
+            // Complete writer under _lock before cancelling token so Dispose() and PublishAsync cannot race between _all removal and writer completion.
+            sub.Queue?.Writer.TryComplete();
         }
 
         sub.Cts?.Cancel();
-        sub.Queue?.Writer.TryComplete();
     }
 
     private void OnItemDropped(IGatewayEvent dropped)
@@ -252,7 +264,7 @@ public sealed class InMemoryGatewayEventBus : IGatewayEventBus, IGatewayEventBus
         {
             while (await reader.WaitToReadAsync(token).ConfigureAwait(false))
             {
-                while (reader.TryRead(out var ev))
+                while (!token.IsCancellationRequested && reader.TryRead(out var ev))
                 {
                     try
                     {
