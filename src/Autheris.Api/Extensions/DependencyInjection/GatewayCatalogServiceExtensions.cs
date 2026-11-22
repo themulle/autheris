@@ -148,7 +148,9 @@ public static class GatewayCatalogServiceExtensions
             sp.GetService<Autheris.Application.Mcp.Interfaces.IGraphQlCatalogMap>(),
             sp.GetService<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>() is null
                 ? null
-                : sp.GetService<Autheris.Application.Catalog.Discovery.IDiscoveryService>()));
+                : sp.GetService<Autheris.Application.Catalog.Discovery.IDiscoveryService>(),
+            sp.GetService<IClassificationRepository>(),
+            sp.GetService<IProtectionSnapshotProvider>()));
         services.TryAddScoped<IPrincipalResolverService, PrincipalResolverService>();
         services.TryAddScoped<IDatasourceTestingService, DatasourceTestingService>();
         services.TryAddScoped<IQueryAnalysisService, QueryAnalysisService>();

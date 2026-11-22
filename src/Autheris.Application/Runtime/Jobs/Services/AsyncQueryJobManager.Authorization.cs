@@ -50,6 +50,16 @@ public sealed partial class AsyncQueryJobManager
         TrinoSqlEngine.ISqlEngine sqlEngine,
         CancellationToken ct)
     {
+        if (_epochProvider is not null)
+        {
+            var currentEpoch = await _epochProvider.GetEpochAsync(tenantId, ct).ConfigureAwait(false);
+            if (job.SubmittedGovernanceEpoch is null || currentEpoch != job.SubmittedGovernanceEpoch.Value)
+            {
+                await DenyResultAsync(job, tenantId, userSid, "Async job result download denied: governance policy epoch changed since submission.", ct).ConfigureAwait(false);
+                throw new Autheris.Domain.Exceptions.GatewayForbiddenException("Access to async job result is denied because governance policy changed since submission.", "JOB_RESULT_FORBIDDEN");
+            }
+        }
+
         IReadOnlyList<TableIdentifier> tables;
         try
         {
@@ -58,6 +68,12 @@ public sealed partial class AsyncQueryJobManager
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             await DenyResultAsync(job, tenantId, userSid, "Async job referenced tables could not be validated at fetch.", ct).ConfigureAwait(false);
+            throw new Autheris.Domain.Exceptions.GatewayForbiddenException("Access to async job result is denied.", "JOB_RESULT_FORBIDDEN");
+        }
+
+        if (tables.Count == 0)
+        {
+            await DenyResultAsync(job, tenantId, userSid, "Async job has no governed target tables for fetch re-authorization.", ct).ConfigureAwait(false);
             throw new Autheris.Domain.Exceptions.GatewayForbiddenException("Access to async job result is denied.", "JOB_RESULT_FORBIDDEN");
         }
 
@@ -114,13 +130,13 @@ public sealed partial class AsyncQueryJobManager
 
         if (string.IsNullOrWhiteSpace(job.Query))
         {
-            return [];
+            throw new InvalidOperationException("Async job metadata has no target tables for cross-node fetch re-authorization.");
         }
 
         var parsed = sqlEngine.Analyze(job.Query.AsMemory());
         if (parsed.ReferencedTables.Count == 0)
         {
-            return [];
+            throw new InvalidOperationException("Async job query does not reference any governed table for fetch re-authorization.");
         }
 
         var result = new List<TableIdentifier>(parsed.ReferencedTables.Count);
@@ -148,7 +164,7 @@ public sealed partial class AsyncQueryJobManager
             }
 
             return parsed.ReferencedTables
-                .Select(t => ParseTargetTable(t.FullName).ToQualifiedName())
+                .Select(t => ParseTargetTable(t.FullName).ToString())
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
         }

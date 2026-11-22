@@ -47,7 +47,14 @@ public sealed class AsyncJobKillSwitchTests
         public Task<AsyncJobDescriptor?> GetJobAsync(string jobId, TenantId tenantId, string callerUserSid, CancellationToken ct = default) =>
             throw new InvalidOperationException("GetJob should not be invoked when disabled.");
 
-        public Task<Stream?> GetJobResultStreamAsync(string jobId, TenantId tenantId, string callerUserSid, CancellationToken ct = default) =>
+        public Task<Stream?> GetJobResultStreamAsync(
+            string jobId,
+            TenantId tenantId,
+            ClaimsPrincipal user,
+            Autheris.Application.Policy.Pdp.IAccessDecisionPoint decisionPoint,
+            Autheris.Application.Common.Interfaces.ITableMetadataRepository metadataRepository,
+            TrinoSqlEngine.ISqlEngine? sqlEngine = null,
+            CancellationToken ct = default) =>
             throw new InvalidOperationException("GetResult should not be invoked when disabled.");
 
         public Task<bool> CancelJobAsync(string jobId, TenantId tenantId, string callerUserSid, CancellationToken ct = default) =>

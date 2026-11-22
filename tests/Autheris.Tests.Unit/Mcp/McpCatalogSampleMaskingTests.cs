@@ -108,7 +108,7 @@ public sealed class McpCatalogSampleMaskingTests
             customers.Table.Id,
             Tenant.Value,
             """[{"id": 1, "email": "alice@corp.test", "ssn": "123-45-6789"}]""",
-            """{"table":{"approxRowCount":100},"columns":{"id":{"approxDistinctCount":10},"email":{"approxDistinctCount":10},"ssn":{"approxDistinctCount":10}}}""",
+            """{"table":{"approxRowCount":100},"columns":{"id":{"approxDistinctCount":10,"minValue":"1","maxValue":"100","topValues":["1"]},"email":{"approxDistinctCount":10,"nullRatio":0.05,"minValue":"alice@corp.test","maxValue":"zoe@corp.test","topValues":["alice@corp.test"]},"ssn":{"approxDistinctCount":10,"minValue":"123-45-6789","topValues":["123-45-6789"]}}}""",
             "sha-up",
             "uploader",
             DateTimeOffset.UtcNow,
@@ -181,6 +181,21 @@ public sealed class McpCatalogSampleMaskingTests
         restSamples.Payload.Samples[0]["email"]?.ToString().ShouldNotBe("alice@corp.test");
         mcpSample.Rows[0].ContainsKey("ssn").ShouldBeFalse();
         mcpSample.Rows[0]["email"]?.ToString().ShouldNotBe("alice@corp.test");
+
+        var restEmailStats = restDescribe.Columns.Single(c => c.Name == "email").Statistics!;
+        restEmailStats.MinValue.ShouldBeNull();
+        restEmailStats.MaxValue.ShouldBeNull();
+        restEmailStats.TopValues.ShouldBeNull();
+
+        var mcpEmailProfile = mcpDescribe.Columns.Single(c => c.Name == "email").ValueProfile!;
+        mcpEmailProfile.MinValue.ShouldBeNull();
+        mcpEmailProfile.MaxValue.ShouldBeNull();
+        mcpEmailProfile.AllowedValues.ShouldBeNull();
+        mcpEmailProfile.ApproximateDistinctCount.ShouldBe(10);
+
+        var mcpIdProfile = mcpDescribe.Columns.Single(c => c.Name == "id").ValueProfile!;
+        mcpIdProfile.MinValue.ShouldBe("1");
+        mcpIdProfile.AllowedValues.ShouldBe(["1"]);
     }
 
     private sealed class StubProtectionProvider(EffectiveProtection protection) : IProtectionSnapshotProvider

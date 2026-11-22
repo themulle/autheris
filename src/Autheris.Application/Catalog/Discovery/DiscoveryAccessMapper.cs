@@ -44,7 +44,7 @@ public static class DiscoveryAccessMapper
         ArgumentNullException.ThrowIfNull(activeOwners);
 
         var (accessState, rowScope) = MapAccessAndRowScope(decision, isPendingRequest, isRecentlyExpired);
-        var (tableStats, colStatsByName) = artifacts is { Provenance: not ArtifactProvenance.Import }
+        var (tableStats, colStatsByName) = decision.IsAllowed && artifacts is { Provenance: not ArtifactProvenance.Import }
             ? ParseStatistics(artifacts)
             : (null, null);
         var visibleCols = table.Columns.Where(static c => !c.DiscoveryHidden).ToList();
@@ -76,14 +76,21 @@ public static class DiscoveryAccessMapper
                 DiscoveryTextSanitizer.MaxDescriptionRunes * 4,
                 allowNewlinesAndTabs: true);
 
+            var effectiveMaskCategory = effectiveProtection is null
+                ? null
+                : effectiveProtection.Columns.TryGetValue(col.ColumnName, out var colProt)
+                    ? colProt.EffectiveMaskCategory
+                    : effectiveProtection.TableMaskCategory;
+            bool hasEffectiveMaskCategory = !string.IsNullOrWhiteSpace(effectiveMaskCategory);
+
             DiscoveryColumnStatistics? stats = null;
             if (!hideText &&
                 colState != DiscoveryColumnState.NoAccess &&
                 colStatsByName != null &&
                 colStatsByName.TryGetValue(col.ColumnName, out var parsedColStats))
             {
-                // Restricted-scope callers only receive value-bearing statistics for columns whose effective state is Clear.
-                stats = decision.ScopeClearance is not null && colState != DiscoveryColumnState.Clear
+                // Callers only receive value-bearing statistics for columns that are Clear and without an active mask category.
+                stats = colState != DiscoveryColumnState.Clear || hasEffectiveMaskCategory
                     ? parsedColStats with { MinValue = null, MaxValue = null, TopValues = null }
                     : parsedColStats;
             }

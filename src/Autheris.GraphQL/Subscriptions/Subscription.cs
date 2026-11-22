@@ -2,6 +2,7 @@ namespace Autheris.GraphQL.Subscriptions;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Runtime.CompilerServices;
 using System.Security.Claims;
 using System.Text.Json;
@@ -66,10 +67,26 @@ public sealed class Subscription
         // enforces token expiry / max session lifetime (M-14) and periodic revocation checks.
         var httpContext = services.GetService<IHttpContextAccessor>()?.HttpContext;
         var timeProvider = services.GetService<TimeProvider>() ?? TimeProvider.System;
+        var now = timeProvider.GetUtcNow();
+        if (Autheris.Domain.Identity.GroupResolutionClaims.IsExpired(principal, now) ||
+            Autheris.Domain.Identity.GroupResolutionClaims.IsMarkedDegraded(principal))
+        {
+            throw new GraphQLException(
+                ErrorBuilder.New()
+                    .SetMessage("Unauthorized: Group resolution expired or degraded.")
+                    .SetCode("AUTH_GROUPS_DEGRADED")
+                    .Build());
+        }
+
         var authExpiresUtc = httpContext?.Features.Get<IAuthenticateResultFeature>()?.AuthenticateResult?.Properties?.ExpiresUtc;
         var expiry = WebSocketAuthInterceptor.ResolveSessionExpiry(
-            principal, authExpiresUtc, timeProvider.GetUtcNow(), WebSocketAuthInterceptor.DefaultMaxSessionLifetime);
-        var remaining = expiry - timeProvider.GetUtcNow();
+            principal, authExpiresUtc, now, WebSocketAuthInterceptor.DefaultMaxSessionLifetime);
+        if (Autheris.Domain.Identity.GroupResolutionClaims.ReadExpiresAt(principal) is { } groupExpiry && groupExpiry < expiry)
+        {
+            expiry = groupExpiry;
+        }
+
+        var remaining = expiry - now;
         if (remaining <= TimeSpan.Zero)
         {
             throw new GraphQLException(
@@ -133,10 +150,16 @@ public sealed class Subscription
             }
         });
 
-        using var revocationTimer = (revocation == null && (epochProvider == null || subTenant is null)) ? null : timeProvider.CreateTimer(static state =>
+        var hasGroupExpiry = Autheris.Domain.Identity.GroupResolutionClaims.ReadExpiresAt(principal) is not null;
+        using var revocationTimer = (revocation == null && (epochProvider == null || subTenant is null) && !hasGroupExpiry) ? null : timeProvider.CreateTimer(static state =>
         {
-            var (cts, svc, epProvider, tenantOpt, p, tableOpt, counter, logger, lastEpochBox, syncLock, sProvider) =
-                ((CancellationTokenSource, ITokenRevocationService?, Autheris.Application.Governance.Caching.GovernanceEpochProvider?, TenantId?, ClaimsPrincipal, TableIdentifier?, RevocationFailureCounter, ILogger?, long[], Lock, IServiceProvider))state!;
+            var (cts, svc, epProvider, tenantOpt, p, tableOpt, counter, logger, lastEpochBox, syncLock, sProvider, tp) =
+                ((CancellationTokenSource, ITokenRevocationService?, Autheris.Application.Governance.Caching.GovernanceEpochProvider?, TenantId?, ClaimsPrincipal, TableIdentifier?, RevocationFailureCounter, ILogger?, long[], Lock, IServiceProvider, TimeProvider))state!;
+            if (!CheckPrincipalExpiry(cts, p, tp))
+            {
+                return;
+            }
+
             if (svc != null)
             {
                 _ = CheckRevocationAsync(cts, svc, p, counter, logger);
@@ -146,7 +169,7 @@ public sealed class Subscription
             {
                 _ = PollEpochChangeAsync(cts, epProvider, t, sProvider, p, tableOpt, lastEpochBox, syncLock, logger);
             }
-        }, (guardCts, revocation, epochProvider, subTenant, principal, tableId, failureCounter, watchLogger, new[] { observedEpoch ?? 0L }, epochLock, services), interval, interval);
+        }, (guardCts, revocation, epochProvider, subTenant, principal, tableId, failureCounter, watchLogger, new[] { observedEpoch ?? 0L }, epochLock, services, timeProvider), interval, interval);
 
         // GQL-3 / GQL-4: topic admission (catalog + access decision, cdc_all for admins), per-subject limit, audit.
         var governor = services.GetService<CdcSubscriptionGovernor>()
@@ -297,6 +320,28 @@ public sealed class Subscription
         }
     }
 
+    internal static bool CheckPrincipalExpiry(
+        CancellationTokenSource cts,
+        ClaimsPrincipal principal,
+        TimeProvider timeProvider)
+    {
+        if (cts.IsCancellationRequested)
+        {
+            return false;
+        }
+
+        var now = timeProvider.GetUtcNow();
+        if (principal.Identity?.IsAuthenticated != true ||
+            Autheris.Domain.Identity.GroupResolutionClaims.IsExpired(principal, now) ||
+            Autheris.Domain.Identity.GroupResolutionClaims.IsMarkedDegraded(principal))
+        {
+            try { cts.Cancel(); } catch (ObjectDisposedException) { }
+            return false;
+        }
+
+        return true;
+    }
+
     internal static async Task PollEpochChangeAsync(
         CancellationTokenSource cts,
         Autheris.Application.Governance.Caching.GovernanceEpochProvider epochProvider,
@@ -311,6 +356,12 @@ public sealed class Subscription
         try
         {
             if (cts.IsCancellationRequested)
+            {
+                return;
+            }
+
+            var timeProvider = services.GetService<TimeProvider>() ?? TimeProvider.System;
+            if (!CheckPrincipalExpiry(cts, principal, timeProvider))
             {
                 return;
             }
@@ -351,32 +402,27 @@ public sealed class Subscription
     {
         try
         {
-            if (cts.IsCancellationRequested || tableId is not { } tid)
+            if (cts.IsCancellationRequested)
             {
                 return;
             }
 
-            bool allowed = false;
-            var pdp = services.GetService<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>();
-            var metadataRepo = services.GetService<Autheris.Application.Common.Interfaces.ITableMetadataRepository>();
-            if (pdp != null && metadataRepo != null && tenant is { } tenantId)
+            var timeProvider = services.GetService<TimeProvider>() ?? TimeProvider.System;
+            if (!CheckPrincipalExpiry(cts, principal, timeProvider))
             {
-                var meta = await metadataRepo.GetTableMetadataAsync(tid, CancellationToken.None).ConfigureAwait(false);
-                if (meta is not null && meta.Table.IsActive)
-                {
-                    var ctx = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(principal, tenantId);
-                    var decision = await pdp.DecideAsync(
-                        new Autheris.Application.Policy.Pdp.AccessRequest(
-                            ctx, meta, Autheris.Application.Policy.Pdp.AccessOperation.Read, Autheris.Application.Policy.Pdp.AccessTransport.Streaming),
-                        CancellationToken.None).ConfigureAwait(false);
-                    allowed = decision.IsAllowed;
-                }
+                return;
             }
-            else if (services.GetService<ITableAccessResolver>() is { } resolver)
+
+            var revocation = services.GetService<ITokenRevocationService>();
+            if (revocation != null && await revocation.IsRevokedAsync(principal, CancellationToken.None).ConfigureAwait(false))
             {
-                var resolved = await resolver.ResolveTableAccessAsync(principal, tid, null, null, CancellationToken.None).ConfigureAwait(false);
-                allowed = resolved.Decision.IsAllowed;
+                cts.Cancel();
+                return;
             }
+
+            bool allowed = tableId is { } tid
+                ? await EvaluateSingleTableAccessAsync(services, principal, tenant, tid).ConfigureAwait(false)
+                : await EvaluateWildcardSubscriptionAccessAsync(services, principal, tenant).ConfigureAwait(false);
 
             if (!allowed)
             {
@@ -391,5 +437,99 @@ public sealed class Subscription
             logger?.LogWarning(ex, "Subscription stream terminated after governance policy revalidation denied or failed.");
             try { cts.Cancel(); } catch (ObjectDisposedException) { }
         }
+    }
+
+    private static async Task<bool> EvaluateSingleTableAccessAsync(
+        IServiceProvider services,
+        ClaimsPrincipal principal,
+        TenantId? tenant,
+        TableIdentifier tid)
+    {
+        var pdp = services.GetService<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>();
+        var metadataRepo = services.GetService<ITableMetadataRepository>();
+        if (pdp != null && metadataRepo != null && tenant is { } tenantId)
+        {
+            var meta = await metadataRepo.GetTableMetadataAsync(tid, CancellationToken.None).ConfigureAwait(false);
+            if (meta is not null && meta.Table.IsActive)
+            {
+                var ctx = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(principal, tenantId);
+                var decision = await pdp.DecideAsync(
+                    new Autheris.Application.Policy.Pdp.AccessRequest(
+                        ctx, meta, Autheris.Application.Policy.Pdp.AccessOperation.Read, Autheris.Application.Policy.Pdp.AccessTransport.Streaming),
+                    CancellationToken.None).ConfigureAwait(false);
+                return decision.IsAllowed;
+            }
+
+            return false;
+        }
+
+        if (services.GetService<ITableAccessResolver>() is { } resolver)
+        {
+            var resolved = await resolver.ResolveTableAccessAsync(principal, tid, null, null, CancellationToken.None).ConfigureAwait(false);
+            return resolved.Decision.IsAllowed;
+        }
+
+        return false;
+    }
+
+    private static async Task<bool> EvaluateWildcardSubscriptionAccessAsync(
+        IServiceProvider services,
+        ClaimsPrincipal principal,
+        TenantId? tenant)
+    {
+        var roles = principal.GetUserRoles();
+        bool isGovAdmin = roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
+        bool isClusterAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        if (!isGovAdmin && !isClusterAdmin)
+        {
+            return false;
+        }
+
+        var targets = new HashSet<TableIdentifier>();
+        var streamStore = services.GetService<ICdcStreamStore>();
+        if (streamStore != null)
+        {
+            var streams = await streamStore.ListStreamsAsync(CancellationToken.None).ConfigureAwait(false);
+            foreach (var s in streams)
+            {
+                if (s.Status == CdcStreamStatus.Active)
+                {
+                    targets.Add(s.Table);
+                }
+            }
+        }
+
+        var metadataRepo = services.GetService<ITableMetadataRepository>();
+        if (targets.Count == 0 && metadataRepo != null)
+        {
+            var activeTables = await Autheris.Application.Catalog.CatalogTablePageReader.ReadAllAsync(
+                metadataRepo,
+                new Autheris.Application.Catalog.CatalogTableQuery(IncludeInactive: false),
+                t => t.Table.IsActive &&
+                     (tenant is not { } validTenant ||
+                      string.IsNullOrWhiteSpace(t.OwnerTenantId) ||
+                      string.Equals(t.OwnerTenantId, validTenant.Value, StringComparison.OrdinalIgnoreCase)),
+                ct: CancellationToken.None).ConfigureAwait(false);
+            foreach (var t in activeTables)
+            {
+                targets.Add(t.Identifier);
+            }
+        }
+
+        if (targets.Count == 0)
+        {
+            return services.GetService<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>() != null ||
+                   services.GetService<ITableAccessResolver>() != null;
+        }
+
+        foreach (var target in targets)
+        {
+            if (!await EvaluateSingleTableAccessAsync(services, principal, tenant, target).ConfigureAwait(false))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 }

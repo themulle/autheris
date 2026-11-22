@@ -547,7 +547,7 @@ public sealed partial class AsyncQueryJobManager : IAsyncQueryJobManager, IAsync
         return descriptor;
     }
 
-    public async Task<Stream?> GetJobResultStreamAsync(
+    internal async Task<Stream?> GetJobResultStreamAsync(
         string jobId,
         TenantId tenantId,
         string userSid,

@@ -19,10 +19,12 @@ using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Governance.Protection;
 using Autheris.Application.Identity;
 using Autheris.Application.Policy;
 using Autheris.Application.Security;
 using Autheris.Application.Security.Totp.Interfaces;
+using Autheris.Application.Sql.Services;
 using Autheris.Application.State;
 using Autheris.Domain.Common;
 using Autheris.Domain.Events;
@@ -62,6 +64,8 @@ public class AccessPlanningService : IAccessPlanningService
     private readonly bool _allowDemoDirectory;
     private readonly IGrantPolicy _grantPolicy;
     private readonly ISeparationOfDutiesService _separationOfDuties;
+    private readonly GatewayOptions? _gatewayOptions;
+    private readonly IProtectionSnapshotProvider? _protectionProvider;
 
     private async Task<IReadOnlyList<DateTimeOffset?>> EnsureGrantsAllowedAsync(
         TenantId tenantId,
@@ -167,10 +171,13 @@ public class AccessPlanningService : IAccessPlanningService
         IGrantPolicy? grantPolicy = null,
         IScimGroupStore? groupStore = null,
         IIdentityRealmRegistry? realmRegistry = null,
-        ISeparationOfDutiesService? separationOfDutiesService = null)
+        ISeparationOfDutiesService? separationOfDutiesService = null,
+        IProtectionSnapshotProvider? protectionProvider = null)
     {
         _grantPolicy = grantPolicy ?? new GrantPolicy();
         _separationOfDuties = separationOfDutiesService ?? new SeparationOfDutiesService(groupStore, realmRegistry);
+        _gatewayOptions = options?.Value;
+        _protectionProvider = protectionProvider;
         _audit = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
         _tableRepo = tableMetadataRepository ?? new NullTableMetadataRepository();
         _consentRepository = consentRepository;
@@ -629,6 +636,27 @@ public class AccessPlanningService : IAccessPlanningService
             }
 
             EgressUrlPolicy.ValidateStatic(baseUri, isDev: _isDev);
+        }
+
+        if (_gatewayOptions is not null)
+        {
+            var resolvedConn = SqlDataSourceResolver.ResolveConnectionOptions(_gatewayOptions, request.Domain)
+                ?? SqlDataSourceResolver.ResolveConnectionOptions(_gatewayOptions, request.Name);
+            if (resolvedConn is { EnforcementMode: EnforcementMode.Delegated })
+            {
+                var probeSchema = string.IsNullOrWhiteSpace(resolvedConn.DefaultSchema) ? "default" : resolvedConn.DefaultSchema;
+                if (_protectionProvider is not null &&
+                    TenantId.TryParse(tenantId, out var resolvedTenant) &&
+                    TableIdentifier.TryCreate(request.Domain, probeSchema, request.Name, out var candidateTable))
+                {
+                    var snap = await _protectionProvider.GetAsync(resolvedTenant, candidateTable, ct).ConfigureAwait(false);
+                    DelegatedProtectionValidator.Validate(resolvedConn.EnforcementMode, request.Name, snap);
+                }
+                else
+                {
+                    DelegatedProtectionValidator.Validate(resolvedConn.EnforcementMode, request.Name, ProtectionClass.Confidential, maskCategory: null);
+                }
+            }
         }
 
         if (!string.IsNullOrWhiteSpace(request.Auth?.Secret))

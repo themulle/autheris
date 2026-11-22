@@ -209,6 +209,109 @@ public sealed class TableAccessPolicyProtectionGateTests
         decision.GetColumnAccess("email").ShouldBe(ColumnAccessLevel.Mask);
     }
 
+    [Theory]
+    [InlineData(ProtectionClass.Public, false)]
+    [InlineData(ProtectionClass.Internal, true)]
+    public async Task Baseline_with_explicit_column_deny_and_no_allow_enforces_column_deny(ProtectionClass tableClass, bool isInternal)
+    {
+        var consents = new FakeConsentRepository();
+        var deny = MakeConsent(ConsentEffect.Deny);
+        deny.ColumnRules = [new ConsentColumnRule { ColumnName = "email", AccessLevel = ColumnAccessLevel.Deny }];
+        await consents.CreateConsentAsync(deny);
+        var policy = CreatePolicy(new StubProtectionSnapshotProvider((_, _) => Protection(tableClass)), consents);
+
+        var decision = await policy.DecideAsync(QueryFor(isInternal), CancellationToken.None);
+
+        decision.IsAllowed.ShouldBeTrue();
+        decision.GetColumnAccess("id").ShouldBe(ColumnAccessLevel.Clear);
+        decision.GetColumnAccess("email").ShouldBe(ColumnAccessLevel.Deny);
+    }
+
+    [Theory]
+    [InlineData(ProtectionClass.Public, false)]
+    [InlineData(ProtectionClass.Internal, true)]
+    public async Task Baseline_with_explicit_row_deny_and_no_allow_enforces_row_deny(ProtectionClass tableClass, bool isInternal)
+    {
+        var consents = new FakeConsentRepository();
+        await consents.CreateConsentAsync(MakeConsent(
+            ConsentEffect.Deny,
+            new ConsentRowFilter
+            {
+                Id = Guid.NewGuid(),
+                ColumnName = "amount",
+                Operator = "GT",
+                ValueType = "int",
+                ValueJson = "100"
+            }));
+        var policy = CreatePolicy(new StubProtectionSnapshotProvider((_, _) => Protection(tableClass)), consents);
+
+        var decision = await policy.DecideAsync(QueryFor(isInternal), CancellationToken.None);
+
+        decision.IsAllowed.ShouldBeTrue();
+        decision.CombinedRowFilterSql.ShouldNotBeNullOrWhiteSpace();
+        decision.CombinedRowFilterSql.ShouldContain("NOT");
+        decision.CombinedRowFilterSql.ShouldContain("amount");
+    }
+
+    [Theory]
+    [InlineData(ProtectionClass.Public, false)]
+    [InlineData(ProtectionClass.Internal, true)]
+    public async Task Baseline_with_explicit_deny_mask_and_no_allow_enforces_mask(ProtectionClass tableClass, bool isInternal)
+    {
+        var consents = new FakeConsentRepository();
+        var denyMask = MakeConsent(ConsentEffect.Deny);
+        denyMask.ColumnRules = [new ConsentColumnRule { ColumnName = "email", AccessLevel = ColumnAccessLevel.Mask }];
+        await consents.CreateConsentAsync(denyMask);
+        var policy = CreatePolicy(new StubProtectionSnapshotProvider((_, _) => Protection(tableClass)), consents);
+
+        var decision = await policy.DecideAsync(QueryFor(isInternal), CancellationToken.None);
+
+        decision.IsAllowed.ShouldBeTrue();
+        decision.GetColumnAccess("id").ShouldBe(ColumnAccessLevel.Clear);
+        decision.GetColumnAccess("email").ShouldBe(ColumnAccessLevel.Mask);
+    }
+
+    [Theory]
+    [InlineData(ProtectionClass.Public, false)]
+    [InlineData(ProtectionClass.Internal, true)]
+    public async Task Baseline_with_allow_and_explicit_row_deny_applies_row_deny_without_allow_filter(ProtectionClass tableClass, bool isInternal)
+    {
+        var consents = new FakeConsentRepository();
+        await consents.CreateConsentAsync(MakeConsent(
+            ConsentEffect.Allow,
+            new ConsentRowFilter
+            {
+                Id = Guid.NewGuid(),
+                ColumnName = "id",
+                Operator = "EQ",
+                ValueType = "int",
+                ValueJson = "1"
+            }));
+        var denyConsent = MakeConsent(
+            ConsentEffect.Deny,
+            new ConsentRowFilter
+            {
+                Id = Guid.NewGuid(),
+                ColumnName = "amount",
+                Operator = "GT",
+                ValueType = "int",
+                ValueJson = "500"
+            });
+        denyConsent.ColumnRules = [new ConsentColumnRule { ColumnName = "email", AccessLevel = ColumnAccessLevel.Mask }];
+        await consents.CreateConsentAsync(denyConsent);
+        var policy = CreatePolicy(new StubProtectionSnapshotProvider((_, _) => Protection(tableClass)), consents);
+
+        var decision = await policy.DecideAsync(QueryFor(isInternal), CancellationToken.None);
+
+        decision.IsAllowed.ShouldBeTrue();
+        decision.CombinedRowFilterSql.ShouldNotBeNullOrWhiteSpace();
+        decision.CombinedRowFilterSql.ShouldContain("NOT");
+        decision.CombinedRowFilterSql.ShouldContain("amount");
+        decision.CombinedRowFilterSql.ShouldNotContain("[id]");
+        decision.GetColumnAccess("email").ShouldBe(ColumnAccessLevel.Mask);
+        decision.GetColumnAccess("id").ShouldBe(ColumnAccessLevel.Clear);
+    }
+
     private sealed class StubProtectionSnapshotProvider(Func<TenantId, TableIdentifier, EffectiveProtection> factory) : IProtectionSnapshotProvider
     {
         public ValueTask<EffectiveProtection> GetAsync(TenantId tenant, TableIdentifier table, CancellationToken ct = default)

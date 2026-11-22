@@ -92,17 +92,24 @@ public sealed partial class TableAccessPolicy
 
         if (baselineSatisfied)
         {
-            var columnAccess = ExtractExplicitColumnDenies(consentDecision);
+            var columnAccess = ExtractExplicitColumnConstraints(consentDecision);
+            var (denyRowFilterSql, denyOnlyRecipe) = BuildBaselineDenyRowFilter(consentDecision, query.Metadata);
             var baselineDecision = TableAccessDecision.Allowed(
                 table,
                 columnAccess,
-                rowFilterSql: null,
+                rowFilterSql: denyRowFilterSql,
                 hasUnconstrainedColumnAllow: true) with
             {
+                ConsentFilterRecipe = denyOnlyRecipe,
                 PolicyEpoch = consentDecision.PolicyEpoch,
                 CatalogEpoch = consentDecision.CatalogEpoch,
                 Reasons = BuildBaselineReasons(effectiveTableClass, consentDecision)
             };
+
+            if (denyOnlyRecipe is not null)
+            {
+                baselineDecision = await WithTypedConsentPolicyAsync(baselineDecision, query, ct).ConfigureAwait(false);
+            }
 
             baselineDecision = await ApplyClassificationAccessAsync(baselineDecision, query, ct).ConfigureAwait(false);
             return ApplyProtectionMasks(baselineDecision, query.Metadata, protection);
@@ -167,20 +174,72 @@ public sealed partial class TableAccessPolicy
             Reasons = [new DecisionReason(DecisionStep.Protection, ProtectionUnavailableCode, "Protection", null)]
         };
 
-    private static Dictionary<string, ColumnAccessLevel> ExtractExplicitColumnDenies(TableAccessDecision consentDecision)
+    private static Dictionary<string, ColumnAccessLevel> ExtractExplicitColumnConstraints(TableAccessDecision consentDecision)
     {
         var result = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
         foreach (var reason in consentDecision.Reasons)
         {
-            if (reason.Step == DecisionStep.ExplicitDeny &&
-                string.Equals(reason.Code, "COLUMN_DENY", StringComparison.Ordinal) &&
-                !string.IsNullOrWhiteSpace(reason.Column))
+            if (reason.Step != DecisionStep.ExplicitDeny || string.IsNullOrWhiteSpace(reason.Column))
+            {
+                continue;
+            }
+
+            if (string.Equals(reason.Code, "COLUMN_DENY", StringComparison.Ordinal))
             {
                 result[reason.Column] = ColumnAccessLevel.Deny;
+            }
+            else if (string.Equals(reason.Code, "COLUMN_MASK", StringComparison.Ordinal) &&
+                     (!result.TryGetValue(reason.Column, out var existing) || existing != ColumnAccessLevel.Deny))
+            {
+                result[reason.Column] = ColumnAccessLevel.Mask;
+            }
+        }
+
+        if (!consentDecision.IsAllowed && consentDecision.Grants.Count == 0)
+        {
+            foreach (var (column, level) in consentDecision.ColumnAccess)
+            {
+                if (level == ColumnAccessLevel.Deny)
+                {
+                    result[column] = ColumnAccessLevel.Deny;
+                }
+                else if (level == ColumnAccessLevel.Mask &&
+                         (!result.TryGetValue(column, out var existing) || existing != ColumnAccessLevel.Deny))
+                {
+                    result[column] = ColumnAccessLevel.Mask;
+                }
             }
         }
 
         return result;
+    }
+
+    private static (string? RowFilterSql, ConsentRowFilterRecipe? Recipe) BuildBaselineDenyRowFilter(
+        TableAccessDecision consentDecision,
+        TableMetadata metadata)
+    {
+        if (metadata.IsDelegatedSource ||
+            consentDecision.ConsentFilterRecipe?.Deny is not { Count: > 0 } denyFilterGroups)
+        {
+            return (null, null);
+        }
+
+        var denyRecipe = new ConsentRowFilterRecipe([], denyFilterGroups);
+        if (consentDecision.Grants.Count == 0 && !string.IsNullOrWhiteSpace(consentDecision.CombinedRowFilterSql))
+        {
+            return (consentDecision.CombinedRowFilterSql, denyRecipe);
+        }
+
+        var syntheticDenies = denyFilterGroups
+            .Select(static rf => new Consent
+            {
+                Effect = ConsentEffect.Deny,
+                RowFilters = rf
+            })
+            .ToList();
+        var sql = new Autheris.Application.Services.RowFilterSqlBuilder()
+            .BuildCombinedRowFilter([], syntheticDenies, metadata.Dialect);
+        return (sql, denyRecipe);
     }
 
     private static IReadOnlyList<DecisionReason> BuildBaselineReasons(ProtectionClass tableClass, TableAccessDecision consentDecision)

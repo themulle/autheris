@@ -241,7 +241,7 @@ public sealed class DiscoveryArtifactProvenanceServingTests
         var caller = DiscoveryTestBuilder.Caller(DiscoveryTestBuilder.User("S-1-5-21-U1", Tenant.Value), Tenant);
         var deniedObj = await discoveryDenied.GetAsync(tableDenied.Identifier, caller);
         deniedObj.ShouldNotBeNull();
-        (deniedObj!.Statistics?.PartitionColumns ?? []).ShouldBeEmpty();
+        deniedObj!.Statistics.ShouldBeNull();
         deniedObj.Columns.ShouldAllBe(c => c.Statistics == null);
 
         var pdpAllow = new FakeAccessDecisionPoint(req => TableAccessDecision.Allowed(
@@ -293,6 +293,47 @@ public sealed class DiscoveryArtifactProvenanceServingTests
 
         res.Payload!.Available.ShouldBeFalse();
         res.Payload.Samples.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Non_import_column_value_statistics_redacted_for_data_grant_without_unmask()
+    {
+        var pdp = new FakeAccessDecisionPoint(req => TableAccessDecision.Allowed(
+            req.Object.Identifier,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["id"] = ColumnAccessLevel.Clear,
+                ["email"] = ColumnAccessLevel.Mask,
+                ["ssn"] = ColumnAccessLevel.Deny
+            }));
+
+        var (_, discovery, _, store, table) = CreateHarness(pdp);
+        await store.UpsertAsync(new DiscoveryArtifacts(
+            table.Table.Id,
+            Tenant.Value,
+            null,
+            StatisticsJson: """{"table":{"approxRowCount":99},"columns":{"id":{"approxDistinctCount":5,"minValue":"1","maxValue":"99","topValues":["1","2"]},"email":{"approxDistinctCount":5,"nullRatio":0.1,"minValue":"alice@corp.test","maxValue":"zoe@corp.test","topValues":["alice@corp.test"]}}}""",
+            "sha-st3",
+            "uploader",
+            DateTimeOffset.UtcNow,
+            1,
+            ArtifactProvenance.Upload), new Sid("S-1-5-21-U2"));
+
+        var caller = DiscoveryTestBuilder.Caller(DiscoveryTestBuilder.User("S-1-5-21-U1", Tenant.Value), Tenant);
+        var obj = await discovery.GetAsync(table.Identifier, caller);
+
+        obj.ShouldNotBeNull();
+        var idStats = obj!.Columns.Single(c => c.Name == "id").Statistics!;
+        idStats.MinValue.ShouldBe("1");
+        idStats.MaxValue.ShouldBe("99");
+        idStats.TopValues.ShouldBe(["1", "2"]);
+
+        var emailStats = obj.Columns.Single(c => c.Name == "email").Statistics!;
+        emailStats.ApproxDistinctCount.ShouldBe(5);
+        emailStats.NullRatio.ShouldBe(0.1);
+        emailStats.MinValue.ShouldBeNull();
+        emailStats.MaxValue.ShouldBeNull();
+        emailStats.TopValues.ShouldBeNull();
     }
 
     private sealed class StubProtectionProvider(Func<TableIdentifier, EffectiveProtection> factory) : IProtectionSnapshotProvider

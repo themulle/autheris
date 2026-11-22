@@ -34,6 +34,7 @@ internal static class GatewayStartupChecks
         new("ProcedureDialectAdmission", ProcedureStartupChecks.DialectAdmission),
         new("DataSourceMappings", GatewayStartupChecks.DataSourceMappings),
         new("DefaultSchemas", GatewayStartupChecks.DefaultSchemas),
+        new("DelegatedProtection", GatewayStartupChecks.DelegatedProtection),
         new("TenantCollisions", GatewayStartupChecks.TenantCollisions),
         new("WebhookSubscriptions", GatewayStartupChecks.WebhookSubscriptions),
         new("QueryCostOptions", GatewayStartupChecks.QueryCostOptions),
@@ -84,6 +85,11 @@ internal static class GatewayStartupChecks
     internal static void DefaultSchemas(StartupCheckContext context)
     {
         GatewayStartupValidator.ValidateDefaultSchemas(context.Options);
+    }
+
+    internal static void DelegatedProtection(StartupCheckContext context)
+    {
+        GatewayStartupValidator.ValidateDelegatedProtection(context.Options);
     }
 
     internal static void TenantCollisions(StartupCheckContext context)

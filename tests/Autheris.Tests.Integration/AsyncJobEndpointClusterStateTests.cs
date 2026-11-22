@@ -59,7 +59,14 @@ public sealed class AsyncJobEndpointClusterStateTests : IClassFixture<AsyncJobEn
         public Task<AsyncJobDescriptor?> GetJobAsync(string jobId, TenantId tenantId, string userSid, CancellationToken ct = default) =>
             throw new ClusterStateUnavailableException();
 
-        public Task<Stream?> GetJobResultStreamAsync(string jobId, TenantId tenantId, string userSid, CancellationToken ct = default) =>
+        public Task<Stream?> GetJobResultStreamAsync(
+            string jobId,
+            TenantId tenantId,
+            ClaimsPrincipal user,
+            Autheris.Application.Policy.Pdp.IAccessDecisionPoint decisionPoint,
+            Autheris.Application.Common.Interfaces.ITableMetadataRepository metadataRepository,
+            TrinoSqlEngine.ISqlEngine? sqlEngine = null,
+            CancellationToken ct = default) =>
             jobId.StartsWith("nodelocal", StringComparison.Ordinal) ? throw new AsyncJobResultUnavailableException() : throw new ClusterStateUnavailableException();
 
         public Task<bool> CancelJobAsync(string jobId, TenantId tenantId, string userSid, CancellationToken ct = default) =>

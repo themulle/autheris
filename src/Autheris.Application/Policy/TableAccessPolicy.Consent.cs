@@ -143,17 +143,24 @@ public sealed partial class TableAccessPolicy
 
         if (hasGrantRowScopes)
         {
-            return await ApplyCompiledConsentRowScopesAsync(decision, query, activeConsents, contributingAllows, _rowScopeCompiler, _callerAttributes, ct).ConfigureAwait(false);
+            var scoped = await ApplyCompiledConsentRowScopesAsync(decision, query, activeConsents, contributingAllows, _rowScopeCompiler, _callerAttributes, ct).ConfigureAwait(false);
+            return PreserveDenyRecipeIfPresent(scoped, decision.ConsentFilterRecipe);
         }
 
         if (hasMultiSignatureLegacy)
         {
             var compiler = _rowScopeCompiler ?? new Autheris.Application.Policy.RowScopes.RowScopeCompiler(rowPolicyFactory: _rowPolicyFactory);
-            return await ApplyCompiledConsentRowScopesAsync(decision, query, activeConsents, contributingAllows, compiler, _callerAttributes, ct).ConfigureAwait(false);
+            var scoped = await ApplyCompiledConsentRowScopesAsync(decision, query, activeConsents, contributingAllows, compiler, _callerAttributes, ct).ConfigureAwait(false);
+            return PreserveDenyRecipeIfPresent(scoped, decision.ConsentFilterRecipe);
         }
 
         return await WithTypedConsentPolicyAsync(decision, query, ct).ConfigureAwait(false);
     }
+
+    private static TableAccessDecision PreserveDenyRecipeIfPresent(TableAccessDecision decision, ConsentRowFilterRecipe? originalRecipe) =>
+        decision.ConsentFilterRecipe is null && originalRecipe?.Deny is { Count: > 0 } denyFilters
+            ? decision with { ConsentFilterRecipe = new ConsentRowFilterRecipe([], denyFilters) }
+            : decision;
 
     /// <summary>
     /// MISC-06: tags a consent-stage denial with its kind from the consents themselves (never from reason text). Only "no ALLOW consent at
@@ -205,12 +212,12 @@ public sealed partial class TableAccessPolicy
 
     private static TableAccessDecision ClassifyConsentDenial(TableAccessDecision decision, IReadOnlyList<Consent> activeConsents)
     {
-        if (decision.IsAllowed)
+        if (decision.IsAllowed || decision.DenialKind is TableAccessDenialKind.ConsentMissing or TableAccessDenialKind.ConsentDeny)
         {
             return decision;
         }
 
-        var kind = activeConsents.Any(c => c.Effect == ConsentEffect.Deny)
+        var kind = activeConsents.Any(c => c.Effect == ConsentEffect.Deny && c.ColumnRules.Count == 0 && c.RowFilters.Count == 0)
             ? TableAccessDenialKind.ConsentDeny
             : activeConsents.Any(c => c.Effect == ConsentEffect.Allow)
                 ? TableAccessDenialKind.Policy

@@ -216,7 +216,8 @@ public sealed class GovernancePolicyFactory(
         var roles = string.Join(',', principal.GetUserRoles().OrderBy(static x => x, StringComparer.Ordinal));
         var scopes = string.Join(',', Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims).OrderBy(static x => x, StringComparer.Ordinal));
         var realmKind = Autheris.Domain.Security.SecurityPrincipalContext.ReadPipelineRealmKind(principal)?.ToString() ?? string.Empty;
-        var payload = $"{sid}\n{groups}\n{roles}\n{scopes}\n{realmKind}";
+        var realmId = principal.FindFirst("autheris:realm")?.Value ?? string.Empty;
+        var payload = $"{sid}\n{groups}\n{roles}\n{scopes}\n{realmKind}\n{realmId}";
         var digest = SHA256.HashData(Encoding.UTF8.GetBytes(payload));
         return Convert.ToHexString(digest).ToLowerInvariant();
     }

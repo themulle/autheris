@@ -60,6 +60,14 @@ public static class DelegatedProtectionValidator
         ArgumentNullException.ThrowIfNull(options);
         if (protections is null)
         {
+            foreach (var (name, connection) in options.DataSources.Connections)
+            {
+                if (connection is { EnforcementMode: EnforcementMode.Delegated })
+                {
+                    Validate(connection.EnforcementMode, name, ProtectionClass.Confidential, maskCategory: null);
+                }
+            }
+
             return;
         }
 

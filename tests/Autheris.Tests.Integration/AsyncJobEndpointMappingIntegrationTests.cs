@@ -47,7 +47,14 @@ public sealed class AsyncJobEndpointMappingIntegrationTests
         public Task<AsyncJobDescriptor?> GetJobAsync(string jobId, TenantId tenantId, string userSid, CancellationToken ct = default) =>
             Task.FromResult<AsyncJobDescriptor?>(null);
 
-        public Task<Stream?> GetJobResultStreamAsync(string jobId, TenantId tenantId, string userSid, CancellationToken ct = default) =>
+        public Task<Stream?> GetJobResultStreamAsync(
+            string jobId,
+            TenantId tenantId,
+            ClaimsPrincipal user,
+            Autheris.Application.Policy.Pdp.IAccessDecisionPoint decisionPoint,
+            Autheris.Application.Common.Interfaces.ITableMetadataRepository metadataRepository,
+            TrinoSqlEngine.ISqlEngine? sqlEngine = null,
+            CancellationToken ct = default) =>
             Task.FromResult<Stream?>(null);
 
         public Task<bool> CancelJobAsync(string jobId, TenantId tenantId, string userSid, CancellationToken ct = default) =>

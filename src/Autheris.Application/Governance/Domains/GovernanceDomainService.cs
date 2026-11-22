@@ -254,6 +254,11 @@ public sealed partial class GovernanceDomainService(
             Visibility = parsedVisibility ?? before.Visibility
         };
 
+        if (await ValidateDelegatedDomainUpdateAsync(tenant, updatedModel, ct).ConfigureAwait(false) is { } delegatedError)
+        {
+            return delegatedError;
+        }
+
         var result = await _domains.UpsertAsync(updatedModel, expectedVersion, caller.UserSid, ct).ConfigureAwait(false);
         if (result.Status == GovernanceDomainWriteStatus.NotFound)
         {
@@ -444,6 +449,11 @@ public sealed partial class GovernanceDomainService(
             if (distinct.Any(id => !visibleIds.Contains(id)))
             {
                 return NotFound<int>("RESOURCE_NOT_FOUND", "One or more requested tables were not found.");
+            }
+
+            if (await ValidateDelegatedTableAssignmentsAsync(tenant, domain, matched, ct).ConfigureAwait(false) is { } delegatedError)
+            {
+                return delegatedError;
             }
         }
 

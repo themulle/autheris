@@ -50,7 +50,7 @@ public sealed partial class GovernanceDomainService
 
         var remainingCols = ApplyClearedColumns(beforeCols, tableChange.ClearedRedundantColumns);
         var candidateEffective = EffectiveProtectionResolver.Resolve(container, tableChange.NormalizedTableProtection, remainingCols, colNames);
-        if (ValidateDelegatedProtection(meta.Identifier.Domain, candidateEffective) is { } delegatedError)
+        if (ValidateDelegatedProtection(meta, candidateEffective) is { } delegatedError)
         {
             return delegatedError;
         }
@@ -129,7 +129,7 @@ public sealed partial class GovernanceDomainService
             [canonicalColumn] = validation.NormalizedProtection
         };
         var afterEffective = EffectiveProtectionResolver.Resolve(container, beforeTable, afterCols, colNames);
-        if (ValidateDelegatedProtection(meta.Identifier.Domain, afterEffective) is { } delegatedError)
+        if (ValidateDelegatedProtection(meta, afterEffective) is { } delegatedError)
         {
             return delegatedError;
         }
@@ -459,23 +459,118 @@ public sealed partial class GovernanceDomainService
         return Ok(true);
     }
 
-    private DomainServiceResult<ProtectionWriteOutcome>? ValidateDelegatedProtection(string dataSourceName, EffectiveProtection protection)
+    private Autheris.Domain.Options.EnforcementMode ResolveEffectiveEnforcementMode(TableMetadata meta)
     {
-        if (_gatewayOptions is null)
+        if (meta.Table.EnforcementMode == Autheris.Domain.Options.EnforcementMode.Delegated)
         {
-            return null;
+            return Autheris.Domain.Options.EnforcementMode.Delegated;
         }
 
-        var mode = Autheris.Application.Sql.Services.SqlDataSourceResolver.ResolveConnectionOptions(_gatewayOptions, dataSourceName)?.EnforcementMode
-            ?? Autheris.Domain.Options.EnforcementMode.AutherisEnforced;
+        if (_gatewayOptions is null)
+        {
+            return meta.Table.EnforcementMode;
+        }
+
+        return Autheris.Application.Sql.Services.SqlDataSourceResolver.ResolveConnectionOptions(_gatewayOptions, meta.Identifier.Domain)?.EnforcementMode
+            ?? Autheris.Application.Sql.Services.SqlDataSourceResolver.ResolveConnectionOptions(_gatewayOptions, meta.Table.SourceName)?.EnforcementMode
+            ?? meta.Table.EnforcementMode;
+    }
+
+    private DomainServiceResult<ProtectionWriteOutcome>? ValidateDelegatedProtection(TableMetadata meta, EffectiveProtection protection)
+    {
+        var mode = ResolveEffectiveEnforcementMode(meta);
         try
         {
-            DelegatedProtectionValidator.Validate(mode, dataSourceName, protection);
+            DelegatedProtectionValidator.Validate(mode, meta.Identifier.Domain, protection);
             return null;
         }
         catch (System.ComponentModel.DataAnnotations.ValidationException ex)
         {
             return Invalid<ProtectionWriteOutcome>(DelegatedProtectionValidator.ErrorCode, ex.Message);
         }
+    }
+
+    private async Task<DomainServiceResult<GovernanceDomain>?> ValidateDelegatedDomainUpdateAsync(
+        TenantId tenant,
+        GovernanceDomain updatedDomain,
+        CancellationToken ct)
+    {
+        var delegatedTables = await CatalogTablePageReader.ReadAllAsync(
+            _tables,
+            new CatalogTableQuery(IncludeInactive: true),
+            t => IsVisibleInTenant(t, tenant) && ResolveEffectiveEnforcementMode(t) == Autheris.Domain.Options.EnforcementMode.Delegated,
+            ct: ct).ConfigureAwait(false);
+        if (delegatedTables.Count == 0)
+        {
+            return null;
+        }
+
+        var containerAfter = new ContainerDefaults(
+            new ContainerRef(ContainerKind.Domain, updatedDomain.Id),
+            updatedDomain.OwnerGroupSid,
+            updatedDomain.DefaultClass,
+            updatedDomain.Visibility,
+            IsValid: true);
+
+        foreach (var meta in delegatedTables)
+        {
+            var currentContainer = await _domains.GetContainerForTableAsync(tenant, meta.Table.Id, ct).ConfigureAwait(false);
+            if (!currentContainer.IsValid ||
+                currentContainer.Container.Kind != ContainerKind.Domain ||
+                currentContainer.Container.Id != updatedDomain.Id)
+            {
+                continue;
+            }
+
+            var (beforeTable, beforeCols) = await _domains.GetProtectionAsync(tenant, meta.Table.Id, ct).ConfigureAwait(false);
+            var colNames = meta.Columns.Select(static c => c.ColumnName).ToList();
+            var effective = EffectiveProtectionResolver.Resolve(containerAfter, beforeTable, beforeCols, colNames);
+            try
+            {
+                DelegatedProtectionValidator.Validate(Autheris.Domain.Options.EnforcementMode.Delegated, meta.Identifier.Domain, effective);
+            }
+            catch (System.ComponentModel.DataAnnotations.ValidationException ex)
+            {
+                return Invalid<GovernanceDomain>(DelegatedProtectionValidator.ErrorCode, ex.Message);
+            }
+        }
+
+        return null;
+    }
+
+    private async Task<DomainServiceResult<int>?> ValidateDelegatedTableAssignmentsAsync(
+        TenantId tenant,
+        GovernanceDomain domain,
+        IReadOnlyList<TableMetadata> matchedTables,
+        CancellationToken ct)
+    {
+        var containerAfter = new ContainerDefaults(
+            new ContainerRef(ContainerKind.Domain, domain.Id),
+            domain.OwnerGroupSid,
+            domain.DefaultClass,
+            domain.Visibility,
+            IsValid: true);
+
+        foreach (var meta in matchedTables)
+        {
+            if (ResolveEffectiveEnforcementMode(meta) != Autheris.Domain.Options.EnforcementMode.Delegated)
+            {
+                continue;
+            }
+
+            var (beforeTable, beforeCols) = await _domains.GetProtectionAsync(tenant, meta.Table.Id, ct).ConfigureAwait(false);
+            var colNames = meta.Columns.Select(static c => c.ColumnName).ToList();
+            var effective = EffectiveProtectionResolver.Resolve(containerAfter, beforeTable, beforeCols, colNames);
+            try
+            {
+                DelegatedProtectionValidator.Validate(Autheris.Domain.Options.EnforcementMode.Delegated, meta.Identifier.Domain, effective);
+            }
+            catch (System.ComponentModel.DataAnnotations.ValidationException ex)
+            {
+                return Invalid<int>(DelegatedProtectionValidator.ErrorCode, ex.Message);
+            }
+        }
+
+        return null;
     }
 }

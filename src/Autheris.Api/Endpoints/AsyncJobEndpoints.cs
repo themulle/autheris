@@ -201,15 +201,16 @@ public static class AsyncJobEndpoints
             var pdp = httpContext.RequestServices?.GetService<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>();
             var metadataRepo = httpContext.RequestServices?.GetService<Autheris.Application.Common.Interfaces.ITableMetadataRepository>();
             var sqlEngine = httpContext.RequestServices?.GetService<TrinoSqlEngine.ISqlEngine>();
-            if (jobManager is AsyncQueryJobManager concreteManager && pdp is not null && metadataRepo is not null)
+            if (pdp is null || metadataRepo is null)
             {
-                stream = await concreteManager.GetJobResultStreamAsync(
-                    jobId, tenantId, httpContext.User, pdp, metadataRepo, sqlEngine, ct).ConfigureAwait(false);
+                return Results.Problem(
+                    statusCode: StatusCodes.Status503ServiceUnavailable,
+                    title: "Authorization services unavailable.",
+                    detail: "Async job result re-authorization services are unavailable.");
             }
-            else
-            {
-                stream = await jobManager.GetJobResultStreamAsync(jobId, tenantId, userSid, ct).ConfigureAwait(false);
-            }
+
+            stream = await jobManager.GetJobResultStreamAsync(
+                jobId, tenantId, httpContext.User, pdp, metadataRepo, sqlEngine, ct).ConfigureAwait(false);
 
             if (stream == null)
             {

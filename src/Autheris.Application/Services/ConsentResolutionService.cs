@@ -81,9 +81,34 @@ public sealed class ConsentResolutionService : IConsentResolutionService
             };
         }
 
-        // Rule 2: Zero Trust - If A is empty, deny access
+        // Rule 2: Zero Trust - If A is empty, deny access (while still evaluating explicit DENY column/row rules for baseline callers)
         if (aConsents.Count == 0)
         {
+            var (denyHardCols, denyMaskedCols) = CollectDenyColumnRules(dConsents, callerScopes);
+            var denyColAccess = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
+            foreach (var col in denyHardCols)
+            {
+                denyColAccess[col] = ColumnAccessLevel.Deny;
+            }
+
+            foreach (var col in denyMaskedCols)
+            {
+                if (!denyHardCols.Contains(col))
+                {
+                    denyColAccess[col] = ColumnAccessLevel.Mask;
+                }
+            }
+
+            var orderedDenies = dConsents.OrderBy(c => c.Id).ToList();
+            string? denyRowFilterSql = orderedDenies.Any(static c => c.RowFilters.Count > 0)
+                ? _sqlBuilder.BuildCombinedRowFilter([], orderedDenies, dialect)
+                : null;
+            var denyRecipe = denyRowFilterSql is null
+                ? null
+                : new ConsentRowFilterRecipe(
+                    [],
+                    orderedDenies.Where(static c => c.RowFilters.Count > 0).Select(static c => c.RowFilters).ToList());
+
             var clampedConsent = activeConsents
                 .Where(c => c.Effect == ConsentEffect.Allow &&
                             (c.WriteRules.Count == 0 || c.ColumnRules.Count > 0) &&
@@ -97,45 +122,37 @@ public sealed class ConsentResolutionService : IConsentResolutionService
                 .OrderByDescending(c => c.EffectiveValidTo)
                 .FirstOrDefault();
 
+            var defaultDenyReason = clampedConsent != null
+                ? new DecisionReason(DecisionStep.DefaultDeny, "GRANT_EXPIRED", MapGrantSourceKind(clampedConsent).ToString(), clampedConsent.Id.ToString("D"))
+                : new DecisionReason(DecisionStep.DefaultDeny, "NO_GRANT", "Consent", null);
+            var missingReasons = new List<DecisionReason> { defaultDenyReason };
+            AppendExplicitDenyReasons(missingReasons, orderedDenies, denyColAccess, denyHardCols, denyMaskedCols, callerScopes);
+
             if (clampedConsent != null)
             {
                 return TableAccessDecision.Denied(table,
                     $"Zero Trust: No active ALLOW consent granted to subject (consent expired on {clampedConsent.EffectiveValidTo:yyyy-MM-dd} due to maximum duration clamp).") with
                 {
                     DenialKind = TableAccessDenialKind.ConsentMissing,
-                    Reasons = [new DecisionReason(DecisionStep.DefaultDeny, "GRANT_EXPIRED", MapGrantSourceKind(clampedConsent).ToString(), clampedConsent.Id.ToString("D"))]
+                    ColumnAccess = denyColAccess,
+                    CombinedRowFilterSql = denyRowFilterSql,
+                    ConsentFilterRecipe = denyRecipe,
+                    Reasons = missingReasons
                 };
             }
 
             return TableAccessDecision.Denied(table, "Zero Trust: No active ALLOW consent granted to subject.") with
             {
                 DenialKind = TableAccessDenialKind.ConsentMissing,
-                Reasons = [new DecisionReason(DecisionStep.DefaultDeny, "NO_GRANT", "Consent", null)]
+                ColumnAccess = denyColAccess,
+                CombinedRowFilterSql = denyRowFilterSql,
+                ConsentFilterRecipe = denyRecipe,
+                Reasons = missingReasons
             };
         }
 
-        // Check for Column Hard-DENYs in D
-        var hardDeniedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var maskedOnlyColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var c in dConsents)
-        {
-            foreach (var colRule in c.ColumnRules)
-            {
-                if (!RuleAppliesToScopes(colRule, callerScopes))
-                {
-                    continue;
-                }
-
-                if (colRule.AccessLevel == ColumnAccessLevel.Deny)
-                {
-                    hardDeniedColumns.Add(colRule.ColumnName);
-                }
-                else if (colRule.AccessLevel == ColumnAccessLevel.Mask)
-                {
-                    maskedOnlyColumns.Add(colRule.ColumnName);
-                }
-            }
-        }
+        // Check for Column Hard-DENYs and Mask rules in D
+        var (hardDeniedColumns, maskedOnlyColumns) = CollectDenyColumnRules(dConsents, callerScopes);
 
         // Rule 3: Column Access Levels (Bounded by row-filter scope to prevent consent-blending privilege escalation)
         // SEC H-11: The effective level of a column is computed over ALL allow consents, not only over the consents that
@@ -248,7 +265,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
 
         var scopeClearance = ComputeScopeClearance(columnAccess, callerScopes, unconstrainedConsents, rowConstrainedGroups);
 
-        var (grants, reasons) = BuildGrantTrace(aConsents, dConsents, columnAccess, hardDeniedColumns, callerScopes);
+        var (grants, reasons) = BuildGrantTrace(aConsents, dConsents, columnAccess, hardDeniedColumns, maskedOnlyColumns, callerScopes);
 
         return TableAccessDecision.Allowed(table, columnAccess, rowFilterSql, hasUnconstrainedColumnAllow)
             with
@@ -270,11 +287,41 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         _ => GrantSourceKind.ConsentRequest
     };
 
+    private static (HashSet<string> HardDeniedColumns, HashSet<string> MaskedOnlyColumns) CollectDenyColumnRules(
+        IReadOnlyList<Consent> dConsents,
+        IReadOnlySet<string>? callerScopes)
+    {
+        var hardDeniedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var maskedOnlyColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var c in dConsents)
+        {
+            foreach (var colRule in c.ColumnRules)
+            {
+                if (!RuleAppliesToScopes(colRule, callerScopes))
+                {
+                    continue;
+                }
+
+                if (colRule.AccessLevel == ColumnAccessLevel.Deny)
+                {
+                    hardDeniedColumns.Add(colRule.ColumnName);
+                }
+                else if (colRule.AccessLevel == ColumnAccessLevel.Mask)
+                {
+                    maskedOnlyColumns.Add(colRule.ColumnName);
+                }
+            }
+        }
+
+        return (hardDeniedColumns, maskedOnlyColumns);
+    }
+
     private static (IReadOnlyList<DecisionGrantRef> Grants, IReadOnlyList<DecisionReason> Reasons) BuildGrantTrace(
         IReadOnlyList<Consent> aConsents,
         IReadOnlyList<Consent> dConsents,
         IReadOnlyDictionary<string, ColumnAccessLevel> columnAccess,
         HashSet<string> hardDeniedColumns,
+        HashSet<string> maskedOnlyColumns,
         IReadOnlySet<string>? callerScopes)
     {
         var orderedAllows = aConsents.OrderBy(c => c.Id).ToList();
@@ -290,13 +337,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
             reasons.Add(new DecisionReason(DecisionStep.Grant, "GRANT_ALLOW", MapGrantSourceKind(c).ToString(), c.Id.ToString("D")));
         }
 
-        foreach (var c in orderedDenies.Where(d => d.ColumnRules.Count == 0 && d.RowFilters.Count > 0))
-        {
-            foreach (var rf in c.RowFilters.OrderBy(f => f.Id))
-            {
-                reasons.Add(new DecisionReason(DecisionStep.ExplicitDeny, "ROW_DENY", "RowFilter", rf.Id.ToString("D"), rf.ColumnName));
-            }
-        }
+        AppendExplicitDenyReasons(reasons, orderedDenies, columnAccess, hardDeniedColumns, maskedOnlyColumns, callerScopes);
 
         foreach (var c in orderedAllows)
         {
@@ -309,28 +350,56 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         foreach (var col in columnAccess.Keys.OrderBy(k => k, StringComparer.Ordinal))
         {
             var level = columnAccess[col];
-            if (level == ColumnAccessLevel.Deny)
+            if (level == ColumnAccessLevel.Deny && !hardDeniedColumns.Contains(col))
             {
-                var denyConsent = hardDeniedColumns.Contains(col)
-                    ? orderedDenies.FirstOrDefault(d => d.ColumnRules.Any(r =>
-                        RuleAppliesToScopes(r, callerScopes)
-                        && string.Equals(r.ColumnName, col, StringComparison.OrdinalIgnoreCase)
-                        && r.AccessLevel == ColumnAccessLevel.Deny))
-                    : null;
-                reasons.Add(new DecisionReason(
-                    denyConsent != null ? DecisionStep.ExplicitDeny : DecisionStep.Narrowing,
-                    "COLUMN_DENY",
-                    "Consent",
-                    denyConsent?.Id.ToString("D"),
-                    col));
+                reasons.Add(new DecisionReason(DecisionStep.Narrowing, "COLUMN_DENY", "Consent", null, col));
             }
-            else if (level == ColumnAccessLevel.Mask)
+            else if (level == ColumnAccessLevel.Mask && !maskedOnlyColumns.Contains(col))
             {
                 reasons.Add(new DecisionReason(DecisionStep.Narrowing, "COLUMN_MASK", "Consent", null, col));
             }
         }
 
         return (grants, reasons);
+    }
+
+    private static void AppendExplicitDenyReasons(
+        List<DecisionReason> reasons,
+        IReadOnlyList<Consent> orderedDenies,
+        IReadOnlyDictionary<string, ColumnAccessLevel> columnAccess,
+        HashSet<string> hardDeniedColumns,
+        HashSet<string> maskedOnlyColumns,
+        IReadOnlySet<string>? callerScopes)
+    {
+        foreach (var c in orderedDenies.Where(d => d.RowFilters.Count > 0))
+        {
+            foreach (var rf in c.RowFilters.OrderBy(f => f.Id))
+            {
+                reasons.Add(new DecisionReason(DecisionStep.ExplicitDeny, "ROW_DENY", "RowFilter", rf.Id.ToString("D"), rf.ColumnName));
+            }
+        }
+
+        foreach (var col in columnAccess.Keys.OrderBy(k => k, StringComparer.Ordinal))
+        {
+            var level = columnAccess[col];
+            if (level == ColumnAccessLevel.Deny && hardDeniedColumns.Contains(col))
+            {
+                var denyConsent = orderedDenies.FirstOrDefault(d => d.ColumnRules.Any(r =>
+                    RuleAppliesToScopes(r, callerScopes)
+                    && string.Equals(r.ColumnName, col, StringComparison.OrdinalIgnoreCase)
+                    && r.AccessLevel == ColumnAccessLevel.Deny));
+                reasons.Add(new DecisionReason(
+                    DecisionStep.ExplicitDeny,
+                    "COLUMN_DENY",
+                    "Consent",
+                    denyConsent?.Id.ToString("D"),
+                    col));
+            }
+            else if (level == ColumnAccessLevel.Mask && maskedOnlyColumns.Contains(col))
+            {
+                reasons.Add(new DecisionReason(DecisionStep.ExplicitDeny, "COLUMN_MASK", "Consent", null, col));
+            }
+        }
     }
 
     /// <summary>

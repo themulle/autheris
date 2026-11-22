@@ -18,15 +18,21 @@ using Autheris.Application.Services;
 using Autheris.Application.Sql.Catalog;
 using Autheris.Application.Sql.Masking;
 using Autheris.Application.Sql.Policy;
+using Autheris.Application.Sql.Services;
+using Autheris.Application.Sql.Tree;
+using Autheris.Application.State;
+using Autheris.Application.Streaming.Interfaces;
 using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
+using Autheris.Domain.Identity;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Autheris.GraphQL.Subscriptions;
+using Autheris.Tests.Common;
 using Autheris.Tests.Common.Fakes;
 using Autheris.Tests.Unit.Governance;
 using Autheris.Tests.Unit.TestDoubles;
@@ -34,15 +40,19 @@ using Autheris.Tests.Unit.TestSupport;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using Microsoft.Extensions.Time.Testing;
+using NSubstitute;
 using Shouldly;
 using TrinoSqlEngine;
+using TrinoSqlEngine.Analysis;
 using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
+using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Governance;
 using Xunit;
 
 [Trait("Category", "Security")]
-public sealed class EgressProtectionTests
+public sealed partial class EgressProtectionTests
 {
     private static readonly TenantId Tenant = new("tenant-egress-iso");
     private static readonly TableIdentifier TableId = new("sales", "dbo", "orders");

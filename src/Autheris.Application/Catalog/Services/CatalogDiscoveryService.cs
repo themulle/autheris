@@ -920,8 +920,9 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
         if (resolvedConn is { EnforcementMode: EnforcementMode.Delegated })
         {
             var effectiveDefault = ProtectionClass.Confidential;
+            var probeSchema = string.IsNullOrWhiteSpace(resolvedConn.DefaultSchema) ? "default" : resolvedConn.DefaultSchema;
             if (_protectionProvider is not null &&
-                TableIdentifier.TryCreate(request.Domain, "default", request.Name, out var candidateTable))
+                TableIdentifier.TryCreate(request.Domain, probeSchema, request.Name, out var candidateTable))
             {
                 var snap = await _protectionProvider.GetAsync(context.TenantId, candidateTable, ct).ConfigureAwait(false);
                 Autheris.Application.Governance.Protection.DelegatedProtectionValidator.Validate(resolvedConn.EnforcementMode, request.Name, snap);

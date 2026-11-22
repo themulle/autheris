@@ -76,7 +76,8 @@ public sealed class TreeSecuredSourceBuilder(
             new HashSet<TableIdentity>(),
             GovernedSubqueryStrategy.Correlated)
         {
-            Metadata = new Dictionary<TableIdentity, TableMetadata> { [identity] = metadata }
+            Metadata = new Dictionary<TableIdentity, TableMetadata> { [identity] = metadata },
+            PrincipalCacheKey = GovernancePolicyFactory.ComputePrincipalCacheKey(access.Principal)
         };
 
         var builtPolicy = await policyFactory.CreateAsync(input, ct).ConfigureAwait(false);
