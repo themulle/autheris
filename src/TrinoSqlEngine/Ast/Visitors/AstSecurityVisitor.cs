@@ -49,6 +49,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     private readonly TypedPolicyContext _typed;
     private readonly Stack<SecurityScope> _securityScopes = new();
     private int _subqueryDepth = 0;
+    private int _sqlServerRecursiveMemberDepth = 0;
     private bool _rootLimitHandled = false;
     private bool _allowMetricViewRootQuery = false;
 

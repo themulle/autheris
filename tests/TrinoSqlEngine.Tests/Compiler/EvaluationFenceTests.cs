@@ -178,8 +178,15 @@ public sealed class EvaluationFenceTests
         Assert.Contains("NULLIF", ex.Hint, StringComparison.Ordinal);
     }
 
-    private static CompileRequest OraclePerCellRequest(bool protectEntitlements = false)
+    private static CompileRequest PerCellRequest(
+        TargetSqlDialect dialect,
+        bool protectEntitlements = false,
+        bool allowRecursiveCte = false)
     {
+        bool isOracle = dialect == TargetSqlDialect.Oracle;
+        var decimalType = isOracle ? "number(18,2)" : "decimal(18,2)";
+        var strPrefix = isOracle ? "varchar2" : "nvarchar";
+
         var existsSubquery = new SelectStatement(null,
             new QuerySpecification(
                 false,
@@ -241,31 +248,32 @@ public sealed class EvaluationFenceTests
             new MaskArguments(Constant: new PolicyParameterExpression("__mask_c", SqlParameterType.String)),
             new Dictionary<string, PolicyValue> { ["__mask_c"] = new("***", SqlParameterType.String) }.ToFrozenDictionary());
 
-        var oracleCatalog = new InMemoryTableCatalog(
+        var catalog = new InMemoryTableCatalog(
         [
             new TableCatalogEntry(Orders, ImmutableArray.Create(
-                new CatalogColumn("Id", "int"), new CatalogColumn("TenantId", "varchar2(64)"), new CatalogColumn("Region", "varchar2(20)"),
-                new CatalogColumn("Status", "varchar2(20)"), new CatalogColumn("Amount", "number(18,2)"), new CatalogColumn("Email", "varchar2(200)")),
+                new CatalogColumn("Id", "int"), new CatalogColumn("TenantId", $"{strPrefix}(64)"), new CatalogColumn("Region", $"{strPrefix}(20)"),
+                new CatalogColumn("Status", $"{strPrefix}(20)"), new CatalogColumn("Amount", decimalType), new CatalogColumn("Email", $"{strPrefix}(200)")),
                 "TenantId", 1),
             new TableCatalogEntry(Entitlements, ImmutableArray.Create(
-                new CatalogColumn("Id", "int"), new CatalogColumn("TenantId", "varchar2(64)"), new CatalogColumn("OrderId", "int")),
+                new CatalogColumn("Id", "int"), new CatalogColumn("TenantId", $"{strPrefix}(64)"), new CatalogColumn("OrderId", "int")),
                 "TenantId", 1),
-            new TableCatalogEntry(Lookup, ImmutableArray.Create(new CatalogColumn("Code", "varchar2(10)")), null, 1)
+            new TableCatalogEntry(Lookup, ImmutableArray.Create(new CatalogColumn("Code", $"{strPrefix}(10)")), null, 1)
         ], "dbo");
 
         return new CompileRequest
         {
-            TargetDialect = TargetSqlDialect.Oracle,
+            TargetDialect = dialect,
             Statements = StatementPermissions.ReadOnly,
             TokenGuards = SqlTokenSecurityOptions.Strict,
-            AllowedFunctions = SqlFunctionAllowlists.Build(TargetSqlDialect.Oracle, null),
+            AllowedFunctions = SqlFunctionAllowlists.Build(dialect, null),
             AllowExperimentalDialect = true,
+            AllowRecursiveCte = allowRecursiveCte,
             Policy = new GovernancePolicy
             {
                 RowFilters = rowFilters,
                 Masks = masks,
                 PerCellColumns = new StaticPerCellProvider(Orders, perCell),
-                Catalog = oracleCatalog,
+                Catalog = catalog,
                 Tenant = new TenantBinding("__autheris_tenant", "acme", SqlParameterType.String)
             }
         };
@@ -276,7 +284,7 @@ public sealed class EvaluationFenceTests
     public void Oracle_PerCellWithUndecomposedExistsInProjection_KeepsRowNumFenceOnOuterSubquery()
     {
         // Raising arithmetic (Amount / 10) succeeds only when evaluationFenced == true.
-        var compiled = _engine.Compile("SELECT Amount / 10, Email FROM Orders".AsMemory(), OraclePerCellRequest(), CancellationToken.None);
+        var compiled = _engine.Compile("SELECT Amount / 10, Email FROM Orders".AsMemory(), PerCellRequest(TargetSqlDialect.Oracle), CancellationToken.None);
 
         Assert.Contains("EXISTS (", compiled.Sql, StringComparison.Ordinal);
         Assert.Contains(") AND ROWNUM >= 1)", compiled.Sql, StringComparison.Ordinal);
@@ -296,7 +304,7 @@ public sealed class EvaluationFenceTests
     public void Oracle_PerCellWithFencedInnerExistsTable_KeepsRowNumFenceOnBothSubqueries()
     {
         const string sql = "SELECT CASE WHEN EXISTS (SELECT 1 FROM Entitlements e WHERE e.OrderId = o.Id) THEN o.Amount / 10 ELSE 0 END, o.Email FROM Orders o";
-        var compiled = _engine.Compile(sql.AsMemory(), OraclePerCellRequest(protectEntitlements: true), CancellationToken.None);
+        var compiled = _engine.Compile(sql.AsMemory(), PerCellRequest(TargetSqlDialect.Oracle, protectEntitlements: true), CancellationToken.None);
 
         int entitlementsIdx = compiled.Sql.IndexOf("\"dbo\".\"Entitlements\"", StringComparison.Ordinal);
         int ordersIdx = compiled.Sql.IndexOf("\"dbo\".\"Orders\"", StringComparison.Ordinal);
@@ -453,6 +461,122 @@ public sealed class EvaluationFenceTests
             var compiled = _engine.Compile(sql.AsMemory(), Request(TargetSqlDialect.PostgreSql), CancellationToken.None);
             Assert.False(string.IsNullOrWhiteSpace(compiled.Sql));
         }
+    }
+
+    private static int CountOccurrences(string text, string pattern)
+    {
+        int count = 0;
+        int index = 0;
+        while ((index = text.IndexOf(pattern, index, StringComparison.Ordinal)) >= 0)
+        {
+            count++;
+            index += pattern.Length;
+        }
+
+        return count;
+    }
+
+    [Fact]
+    public void SqlServer_RecursiveCte_SuppressesFenceInRecursiveMembersOnly_AndKeepsAnchorAndCatalogTablesFenced()
+    {
+        const string fence = "ORDER BY (SELECT NULL) OFFSET 0 ROWS";
+        var sqlServerRecursive = Request(TargetSqlDialect.SqlServer) with { AllowRecursiveCte = true };
+
+        // 1. Single recursive branch: anchor Orders keeps the fence; recursive member after UNION ALL omits it.
+        var single = _engine.Compile(
+            "WITH RECURSIVE w(id) AS (SELECT Id FROM Orders WHERE Id = 1 UNION ALL SELECT o.Id FROM Orders o JOIN w ON o.Id = w.id) SELECT id FROM w".AsMemory(),
+            sqlServerRecursive,
+            CancellationToken.None);
+        int unionIdx = single.Sql.IndexOf("UNION ALL", StringComparison.Ordinal);
+        Assert.True(unionIdx > 0, single.Sql);
+        Assert.Equal(1, CountOccurrences(single.Sql[..unionIdx], fence));
+        Assert.Equal(0, CountOccurrences(single.Sql[unionIdx..], fence));
+
+        // 2. Multi-branch recursive CTE: anchor keeps the fence; all recursive branches suppress it.
+        var multi = _engine.Compile(
+            "WITH RECURSIVE w(id) AS (SELECT Id FROM Orders WHERE Id = 1 UNION ALL SELECT o.Id FROM Orders o JOIN w ON o.Id = w.id UNION ALL SELECT o2.Id FROM Orders o2 JOIN w ON o2.Id = w.id) SELECT id FROM w".AsMemory(),
+            sqlServerRecursive,
+            CancellationToken.None);
+        int firstUnionIdx = multi.Sql.IndexOf("UNION ALL", StringComparison.Ordinal);
+        Assert.True(firstUnionIdx > 0, multi.Sql);
+        Assert.Equal(1, CountOccurrences(multi.Sql[..firstUnionIdx], fence));
+        Assert.Equal(0, CountOccurrences(multi.Sql[firstUnionIdx..], fence));
+
+        // 3. Qualified catalog table whose schema matches the CTE name (dbo.Orders, Parts.Count == 2) is not treated as the recursive CTE.
+        var qualifiedAnchor = _engine.Compile(
+            "WITH RECURSIVE dbo(id) AS (SELECT Id FROM dbo.Orders UNION ALL SELECT o.Id FROM dbo.Orders o JOIN dbo ON o.Id = dbo.id) SELECT id FROM dbo".AsMemory(),
+            sqlServerRecursive,
+            CancellationToken.None);
+        int dboUnionIdx = qualifiedAnchor.Sql.IndexOf("UNION ALL", StringComparison.Ordinal);
+        Assert.True(dboUnionIdx > 0, qualifiedAnchor.Sql);
+        Assert.Equal(1, CountOccurrences(qualifiedAnchor.Sql[..dboUnionIdx], fence));
+        Assert.Equal(0, CountOccurrences(qualifiedAnchor.Sql[dboUnionIdx..], fence));
+
+        // 4. Outer query after recursive CTE restores depth to 0 so outer table scans keep their fence and allow arithmetic.
+        var outerRaising = _engine.Compile(
+            "WITH RECURSIVE w(id) AS (SELECT Id FROM Orders WHERE Id = 1 UNION ALL SELECT id + 1 FROM w WHERE id < 3) SELECT o.Id, o.Amount * 2 FROM Orders o JOIN w ON o.Id = w.id".AsMemory(),
+            sqlServerRecursive,
+            CancellationToken.None);
+        Assert.Equal(2, CountOccurrences(outerRaising.Sql, fence));
+
+        var outerAfterPolicyRec = _engine.Compile(
+            "WITH RECURSIVE w(id) AS (SELECT Id FROM Orders WHERE Id = 1 UNION ALL SELECT o.Id FROM Orders o JOIN w ON o.Id = w.id) SELECT o.Id FROM Orders o JOIN w ON o.Id = w.id".AsMemory(),
+            sqlServerRecursive,
+            CancellationToken.None);
+        Assert.Equal(2, CountOccurrences(outerAfterPolicyRec.Sql, fence));
+
+        // 5. Non-recursive nested CTE shadowing an outer CTE name retains evaluation fences and is not misclassified as recursive.
+        var shadowedNonRecursive = _engine.Compile(
+            "WITH w AS (SELECT Id, Amount FROM Orders) SELECT * FROM (WITH w AS (SELECT o.Id, o.Amount * 2 AS x FROM Orders o JOIN w ON o.Id = w.Id) SELECT id, x FROM w) s".AsMemory(),
+            sqlServerRecursive,
+            CancellationToken.None);
+        Assert.Equal(2, CountOccurrences(shadowedNonRecursive.Sql, fence));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void SqlServer_RecursiveCte_PerCellPolicyInRecursiveMember_SuppressesFenceAndEnforcesStrictAllowlist()
+    {
+        const string fence = "ORDER BY (SELECT NULL) OFFSET 0 ROWS";
+        var request = PerCellRequest(TargetSqlDialect.SqlServer, allowRecursiveCte: true);
+
+        var safe = _engine.Compile(
+            "WITH RECURSIVE w(id, email) AS (SELECT Id, Email FROM Orders WHERE Id = 1 UNION ALL SELECT o.Id, o.Email FROM Orders o JOIN w ON o.Id = w.id) SELECT id, email FROM w".AsMemory(),
+            request,
+            CancellationToken.None);
+        int unionIdx = safe.Sql.IndexOf("UNION ALL", StringComparison.Ordinal);
+        Assert.True(unionIdx > 0, safe.Sql);
+        Assert.Equal(1, CountOccurrences(safe.Sql[..unionIdx], fence));
+        Assert.Equal(0, CountOccurrences(safe.Sql[unionIdx..], fence));
+
+        Assert.Throws<RowPolicyExpressionRejectedException>(() =>
+            _engine.Compile(
+                "WITH RECURSIVE w(id, v) AS (SELECT Id, Amount FROM Orders WHERE Id = 1 UNION ALL SELECT o.Id, o.Amount * 2 FROM Orders o JOIN w ON o.Id = w.id) SELECT id, v FROM w".AsMemory(),
+                request,
+                CancellationToken.None));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void RecursiveCte_RaisingExpressionInRecursiveMember_RejectedOnSqlServer_FencedOnPostgresAndOracle()
+    {
+        const string sql = "WITH RECURSIVE w(id, v) AS (SELECT Id, Amount FROM Orders WHERE Id = 1 UNION ALL SELECT o.Id, o.Amount * 2 FROM Orders o JOIN w ON o.Id = w.id) SELECT id, v FROM w";
+
+        var sqlServerEx = Assert.Throws<RowPolicyExpressionRejectedException>(() =>
+            _engine.Compile(sql.AsMemory(), Request(TargetSqlDialect.SqlServer) with { AllowRecursiveCte = true }, CancellationToken.None));
+        Assert.Equal(GovernedSqlErrorCodes.RowPolicyExpressionNotAllowed, sqlServerEx.Code);
+
+        var pgCompiled = _engine.Compile(sql.AsMemory(), Request(TargetSqlDialect.PostgreSql) with { AllowRecursiveCte = true }, CancellationToken.None);
+        int pgUnion = pgCompiled.Sql.IndexOf("UNION ALL", StringComparison.Ordinal);
+        Assert.True(pgUnion > 0, pgCompiled.Sql);
+        Assert.Equal(1, CountOccurrences(pgCompiled.Sql[..pgUnion], "OFFSET 0"));
+        Assert.Equal(1, CountOccurrences(pgCompiled.Sql[pgUnion..], "OFFSET 0"));
+
+        var oraCompiled = _engine.Compile(sql.AsMemory(), Request(TargetSqlDialect.Oracle) with { AllowRecursiveCte = true }, CancellationToken.None);
+        int oraUnion = oraCompiled.Sql.IndexOf("UNION ALL", StringComparison.Ordinal);
+        Assert.True(oraUnion > 0, oraCompiled.Sql);
+        Assert.Equal(1, CountOccurrences(oraCompiled.Sql[..oraUnion], "AND ROWNUM >= 1"));
+        Assert.Equal(1, CountOccurrences(oraCompiled.Sql[oraUnion..], "AND ROWNUM >= 1"));
     }
 
     // Helper types placed after all [Fact]/[Theory] methods so SecurityTestInventoryTests records outer class FQN cleanly.

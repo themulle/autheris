@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Globalization;
 using System.Security;
+using TrinoSqlEngine;
 using TrinoSqlEngine.Ast.Nodes;
 
 public sealed partial class AstSecurityVisitor : SqlAstRewriter
@@ -22,7 +23,10 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     public override SqlNode VisitSubqueryTableSource(SubqueryTableSource node) =>
         WithScope(SecurityScope.Subquery, () => base.VisitSubqueryTableSource(node));
 
-    public override SqlNode VisitSelectStatement(SelectStatement node)
+    public override SqlNode VisitSelectStatement(SelectStatement node) =>
+        VisitSelectStatementCore(node, sqlServerRecursiveCteKey: null);
+
+    private SelectStatement VisitSelectStatementCore(SelectStatement node, string? sqlServerRecursiveCteKey)
     {
         bool isRootRead = _subqueryDepth == 0;
         _subqueryDepth++;
@@ -66,7 +70,9 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
                 SelectStatement cteQuery;
                 try
                 {
-                    cteQuery = (SelectStatement)WithScope(SecurityScope.CteBody, () => Visit(cte.Query));
+                    cteQuery = node.With.IsRecursive && _typed.Capabilities.Dialect == TargetSqlDialect.SqlServer
+                        ? VisitSqlServerRecursiveCteQuery(cte.Query, cteKey)
+                        : (SelectStatement)WithScope(SecurityScope.CteBody, () => Visit(cte.Query));
                 }
                 finally
                 {
@@ -112,7 +118,9 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         QueryBody body;
         try
         {
-            body = (QueryBody)Visit(node.Body);
+            body = sqlServerRecursiveCteKey is not null
+                ? VisitSqlServerRecursiveBody(node.Body, sqlServerRecursiveCteKey)
+                : (QueryBody)Visit(node.Body);
         }
         finally
         {
