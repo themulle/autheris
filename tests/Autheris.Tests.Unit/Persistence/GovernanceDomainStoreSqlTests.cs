@@ -1,6 +1,7 @@
 using System.Data;
 using System.Data.Common;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Governance.Caching;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
@@ -39,10 +40,13 @@ public sealed class GovernanceDomainStoreSqlTests
             }
 
             sql.ShouldNotContain("'");
-            sql.ShouldNotContain("+");
+            sql.Replace("epoch + 1", string.Empty, StringComparison.Ordinal).ShouldNotContain("+");
             sql.ShouldNotContain("$");
             sql.ShouldNotContain("{0}");
         }
+
+        GovernanceDomainStore.ClearColumnClassSql.ShouldContain("LOWER(column_name) = LOWER(@columnName)");
+        GovernanceDomainStore.DeleteEmptyColumnProtectionSql.ShouldContain("LOWER(column_name) = LOWER(@columnName)");
     }
 
     [Theory]
@@ -103,13 +107,13 @@ public sealed class GovernanceDomainStoreSqlTests
         created.Domain.Name.ShouldBe("Human Resources");
         created.Domain.Version.ShouldBe(1);
 
-        var insertCmd = conn.Commands.Last();
-        insertCmd.CommandText.ShouldBe(GovernanceDomainStore.InsertDomainSql);
+        var insertCmd = conn.Commands.First(c => c.CommandText == GovernanceDomainStore.InsertDomainSql);
         insertCmd.Parameters.ShouldContain(p => p.Name == "@tenantId" && Equals(p.Value, TenantA.Value));
         insertCmd.Parameters.ShouldContain(p => p.Name == "@id" && Equals(p.Value, domainId.ToString("D")));
         insertCmd.Parameters.ShouldContain(p => p.Name == "@name" && Equals(p.Value, "Human Resources"));
         insertCmd.Parameters.ShouldContain(p => p.Name == "@defaultClass" && Equals(p.Value, "CONFIDENTIAL"));
         insertCmd.Parameters.ShouldContain(p => p.Name == "@visibility" && Equals(p.Value, "ON_REQUEST"));
+        conn.Commands.ShouldContain(c => c.TransactionSet && c.CommandText == BumpSql(dialectName));
 
         conn.EnqueueReader(DomainTable(domainId, "Human Resources", "CONFIDENTIAL", "ON_REQUEST", false, 2));
         var updated = await store.UpsertAsync(created.Domain with { Name = "HR Core" }, expectedVersion: 1, Actor);
@@ -176,10 +180,46 @@ public sealed class GovernanceDomainStoreSqlTests
         await Should.ThrowAsync<InvalidOperationException>(() => store.UpsertAsync(unassigned with { Name = "Renamed" }, 1, Actor));
         await Should.ThrowAsync<InvalidOperationException>(() => store.UpsertAsync(unassigned with { Visibility = CatalogVisibilityMode.Open }, 1, Actor));
         await Should.ThrowAsync<InvalidOperationException>(() => store.UpsertAsync(unassigned with { DefaultClass = ProtectionClass.Public }, 1, Actor));
+        await Should.ThrowAsync<InvalidOperationException>(() => store.UpsertAsync(unassigned with { OwnerGroupSid = new Sid("S-1-5-21-512") }, 1, Actor));
         await Should.ThrowAsync<InvalidOperationException>(() => store.UpsertAsync(unassigned with { Id = Guid.NewGuid() }, 0, Actor));
         await Should.ThrowAsync<InvalidOperationException>(() => store.UpsertAsync(unassigned with { Id = Guid.NewGuid(), IsSystemUnassigned = false }, 0, Actor));
         await Should.ThrowAsync<InvalidOperationException>(() => store.DeleteAsync(TenantA, Guid.Empty, 1));
         conn.Commands.Count(c => !c.CommandText.StartsWith("SET QUOTED_IDENTIFIER", StringComparison.Ordinal)).ShouldBe(0);
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task UpsertAsync_RejectsDangerousContactUriSchemes_AndAllowsSafeContacts(string dialectName)
+    {
+        var (store, conn) = CreateStore(dialectName);
+        var baseDomain = new GovernanceDomain(
+            Guid.NewGuid(), TenantA, "Finance", null, null, null,
+            ProtectionClass.Confidential, CatalogVisibilityMode.OnRequest, false, 0, FixedNow, FixedNow);
+
+        foreach (var badContact in new[]
+                 {
+                     "javascript:alert(1)",
+                     "JAVASCRIPT:alert(1)",
+                     "vbscript:msgbox(1)",
+                     "data:text/html,<script>",
+                     "file:///etc/passwd"
+                 })
+        {
+            await Should.ThrowAsync<ArgumentException>(() =>
+                store.UpsertAsync(baseDomain with { Contact = badContact }, 0, Actor));
+        }
+
+        conn.Commands.Count(c => !c.CommandText.StartsWith("SET QUOTED_IDENTIFIER", StringComparison.Ordinal)).ShouldBe(0);
+
+        foreach (var safeContact in new[] { "hr@example.com", "mailto:hr@example.com", "https://wiki.internal/hr" })
+        {
+            var res = await store.UpsertAsync(
+                baseDomain with { Id = Guid.NewGuid(), Name = $"Domain-{Guid.NewGuid():N}", Contact = safeContact },
+                0,
+                Actor);
+            res.Status.ShouldBe(GovernanceDomainWriteStatus.Created);
+            res.Domain!.Contact.ShouldBe(safeContact);
+        }
     }
 
     [Theory]
@@ -193,7 +233,12 @@ public sealed class GovernanceDomainStoreSqlTests
 
         deleted.ShouldBeTrue();
         var txCmds = conn.Commands.Where(c => c.TransactionSet).ToList();
-        txCmds.Select(c => c.CommandText).ShouldBe([GovernanceDomainStore.DeleteDomainTablesByDomainSql, GovernanceDomainStore.DeleteDomainSql]);
+        txCmds.Select(c => c.CommandText).ShouldBe(
+        [
+            GovernanceDomainStore.DeleteDomainTablesByDomainSql,
+            GovernanceDomainStore.DeleteDomainSql,
+            BumpSql(dialectName)
+        ]);
         txCmds[1].Parameters.ShouldContain(p => p.Name == "@expectedVersion" && Equals(p.Value, 2));
         txCmds[1].Parameters.ShouldContain(p => p.Name == "@isSystemFalse" && Equals(p.Value, false));
     }
@@ -276,9 +321,10 @@ public sealed class GovernanceDomainStoreSqlTests
         await store.SetTableProtectionAsync(TenantA, tableId, new ObjectProtection(ProtectionClass.Confidential, "PII"), ["email", "EMAIL", "ssn"], Actor);
 
         var txCmds = conn.Commands.Where(c => c.TransactionSet).ToList();
-        txCmds.Count.ShouldBe(5);
+        txCmds.Count.ShouldBe(6);
         txCmds[1].CommandText.ShouldBe(GovernanceDomainStore.ClearColumnClassSql);
         txCmds[2].CommandText.ShouldBe(GovernanceDomainStore.DeleteEmptyColumnProtectionSql);
+        txCmds[5].CommandText.ShouldBe(BumpSql(dialectName));
     }
 
     [Theory]
@@ -339,12 +385,72 @@ public sealed class GovernanceDomainStoreSqlTests
         var tableId = Guid.NewGuid();
 
         await store.SetProtectionAsync(TenantA, tableId, "", new ObjectProtection((ProtectionClass)99, "  PII_HR  "), Actor);
-        var upsertCmd = conn.Commands.Last();
+        var expectedUpsertSql = dialectName == "SqlServer"
+            ? GovernanceDomainStore.UpsertProtectionSsSql
+            : GovernanceDomainStore.UpsertProtectionPgSql;
+        var upsertCmd = conn.Commands.First(c => c.CommandText == expectedUpsertSql);
         upsertCmd.Parameters.ShouldContain(p => p.Name == "@protectionClass" && Equals(p.Value, "CONFIDENTIAL"));
         upsertCmd.Parameters.ShouldContain(p => p.Name == "@maskCategory" && Equals(p.Value, "PII_HR"));
+        conn.Commands.ShouldContain(c => c.CommandText == BumpSql(dialectName));
 
         await store.SetProtectionAsync(TenantA, tableId, "", new ObjectProtection(null, null), Actor);
-        conn.Commands.Last().CommandText.ShouldBe(GovernanceDomainStore.DeleteProtectionSql);
+        conn.Commands.ShouldContain(c => c.CommandText == GovernanceDomainStore.DeleteProtectionSql);
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task EpochMethods_AndChangeNotifier_RunPostCommitOnlyOnSuccessfulWrites(string dialectName)
+    {
+        var notifier = new RecordingChangeNotifier();
+        var (store, conn) = CreateStore(dialectName, notifier);
+
+        conn.ScalarResult = 1;
+        (await store.GetEpochAsync(TenantA)).ShouldBe(1L);
+        notifier.Events.ShouldBeEmpty();
+
+        var bumped = await store.BumpEpochAsync(TenantA);
+        bumped.ShouldBe(1L);
+        conn.Commands.ShouldContain(c => c.TransactionSet && c.CommandText == BumpSql(dialectName));
+        notifier.Events.Count.ShouldBe(1);
+        notifier.Events[0].TenantId.ShouldBe(TenantA.Value);
+        notifier.Events[0].Epoch.ShouldBe(1L);
+        notifier.Events[0].TableId.ShouldBeNull();
+
+        conn.NonQueryResult = 0;
+        var conflictDomain = new GovernanceDomain(
+            Guid.NewGuid(), TenantA, "ConflictDomain", null, null, null,
+            ProtectionClass.Confidential, CatalogVisibilityMode.OnRequest, false, 1, FixedNow, FixedNow);
+        var conflict = await store.UpsertAsync(conflictDomain, expectedVersion: 1, Actor);
+        conflict.Status.ShouldBe(GovernanceDomainWriteStatus.Conflict);
+        (await store.DeleteAsync(TenantA, Guid.NewGuid(), 1)).ShouldBeFalse();
+        notifier.Events.Count.ShouldBe(1);
+
+        var tableId = Guid.NewGuid();
+        conn.NonQueryResult = 1;
+        await store.SetProtectionAsync(TenantA, tableId, "", new ObjectProtection(ProtectionClass.Secret), Actor);
+        notifier.Events.Count.ShouldBe(2);
+        notifier.Events[1].TenantId.ShouldBe(TenantA.Value);
+        notifier.Events[1].Epoch.ShouldBe(1L);
+        notifier.Events[1].TableId.ShouldBe(tableId);
+    }
+
+    [Fact]
+    public async Task EpochMethods_DecodeNullAndArbitraryEpochScalars()
+    {
+        var notifier = new RecordingChangeNotifier();
+        var (store, conn, _) = CreateStubDialectStore(notifier);
+
+        conn.ScalarResult = null;
+        (await store.GetEpochAsync(TenantA)).ShouldBe(0L);
+
+        conn.ScalarResult = 42L;
+        (await store.GetEpochAsync(TenantA)).ShouldBe(42L);
+
+        conn.ScalarResult = 7L;
+        var bumped = await store.BumpEpochAsync(TenantA);
+        bumped.ShouldBe(7L);
+        notifier.Events.Count.ShouldBe(1);
+        notifier.Events[0].Epoch.ShouldBe(7L);
     }
 
     [Fact]
@@ -361,7 +467,13 @@ public sealed class GovernanceDomainStoreSqlTests
         resolved.Visibility.ShouldBe(CatalogVisibilityMode.OnRequest);
     }
 
-    private static (GovernanceDomainStore Store, RecordingDbConnection Conn) CreateStore(string dialectName)
+    private static string BumpSql(string dialectName) => dialectName == "SqlServer"
+        ? GovernanceDomainStore.BumpEpochSsSql
+        : GovernanceDomainStore.BumpEpochPgSql;
+
+    private static (GovernanceDomainStore Store, RecordingDbConnection Conn) CreateStore(
+        string dialectName,
+        IGovernanceChangeNotifier? notifier = null)
     {
         var kit = DialectKit.Of(dialectName);
         var conn = kit.NewConnection();
@@ -369,14 +481,31 @@ public sealed class GovernanceDomainStoreSqlTests
         IGovernanceSqlDialect dialect = dialectName == "SqlServer"
             ? new SqlServerGovernanceDialect(() => conn)
             : new PostgreSqlGovernanceDialect(() => conn);
-        return (new GovernanceDomainStore(dialect, new FakeTimeProvider(FixedNow)), conn);
+        return (new GovernanceDomainStore(dialect, new FakeTimeProvider(FixedNow), notifier), conn);
     }
 
-    private static (GovernanceDomainStore Store, ThrowingRecordingConnection Conn, StubGovernanceDialect Dialect) CreateStubDialectStore()
+    private sealed class RecordingChangeNotifier : IGovernanceChangeNotifier
+    {
+        public List<GovernanceChangeEvent> Events { get; } = [];
+        public Task NotifyAsync(GovernanceChangeEvent change, CancellationToken ct = default)
+        {
+            Events.Add(change);
+            return Task.CompletedTask;
+        }
+        public IDisposable Subscribe(Action<GovernanceChangeEvent> handler) => DummyDisposable.Instance;
+        private sealed class DummyDisposable : IDisposable
+        {
+            public static readonly DummyDisposable Instance = new();
+            public void Dispose() { }
+        }
+    }
+
+    private static (GovernanceDomainStore Store, ThrowingRecordingConnection Conn, StubGovernanceDialect Dialect) CreateStubDialectStore(
+        IGovernanceChangeNotifier? notifier = null)
     {
         var conn = new ThrowingRecordingConnection();
         var dialect = new StubGovernanceDialect(conn);
-        return (new GovernanceDomainStore(dialect, new FakeTimeProvider(FixedNow)), conn, dialect);
+        return (new GovernanceDomainStore(dialect, new FakeTimeProvider(FixedNow), notifier), conn, dialect);
     }
 
     private static DataTable DomainTable(Guid id, string name, string? defaultClass, string visibility, bool isSystem, int version)

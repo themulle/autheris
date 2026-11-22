@@ -3,16 +3,18 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Governance.Caching;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 using Autheris.Tests.Common;
+using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
 
 namespace Autheris.Tests.Integration.Governance.Contract;
 
-/// <summary>Contract suite for <c>IGovernanceDomainRepository</c> across PostgreSQL and SQL Server engines.</summary>
+/// <summary>Contract suite for <c>IGovernanceDomainRepository</c> and <c>IGovernanceEpochStore</c> across PostgreSQL and SQL Server engines.</summary>
 public abstract class GovernanceDomainContract : GovernanceContractBase
 {
     private static readonly DateTimeOffset T0 = new(2026, 11, 22, 10, 0, 0, TimeSpan.Zero);
@@ -20,6 +22,7 @@ public abstract class GovernanceDomainContract : GovernanceContractBase
     private static readonly Sid Bob = new("S-1-5-21-1002");
 
     private IGovernanceDomainRepository Repo => Store.GovernanceDomains;
+    private IGovernanceEpochStore EpochStore => Store.Services.GetRequiredService<IGovernanceEpochStore>();
 
     private static GovernanceDomain NewDomain(
         TenantId tenant,
@@ -98,7 +101,11 @@ public abstract class GovernanceDomainContract : GovernanceContractBase
         await Should.ThrowAsync<ArgumentException>(() => Repo.AssignTablesAsync(default, Guid.NewGuid(), [Guid.NewGuid()], Alice));
         await Should.ThrowAsync<ArgumentException>(() => Repo.GetProtectionAsync(default, Guid.NewGuid()));
         await Should.ThrowAsync<ArgumentException>(() => Repo.SetProtectionAsync(default, Guid.NewGuid(), "", new ObjectProtection(ProtectionClass.Confidential), Alice));
+        await Should.ThrowAsync<ArgumentException>(() => Repo.SetTableProtectionAsync(default, Guid.NewGuid(), new ObjectProtection(ProtectionClass.Confidential), null, Alice));
+        await Should.ThrowAsync<ArgumentException>(() => Repo.DeleteAsync(default, Guid.NewGuid(), 1));
         await Should.ThrowAsync<ArgumentException>(() => Repo.GetContainerForTableAsync(default, Guid.NewGuid()));
+        await Should.ThrowAsync<ArgumentException>(() => EpochStore.GetEpochAsync(default));
+        await Should.ThrowAsync<ArgumentException>(() => EpochStore.BumpEpochAsync(default));
     }
 
     [RequiresContainerRuntimeFact]
@@ -235,7 +242,17 @@ public abstract class GovernanceDomainContract : GovernanceContractBase
         withRow.DefaultClass.ShouldBe(ProtectionClass.Confidential);
         withRow.Visibility.ShouldBe(CatalogVisibilityMode.OnRequest);
 
+        var unassigned = await Repo.GetAsync(Store.TenantA, Guid.Empty);
+        unassigned.ShouldNotBeNull();
+        await Should.ThrowAsync<InvalidOperationException>(() => Repo.UpsertAsync(unassigned with { OwnerGroupSid = Alice }, 1, Alice));
         await Should.ThrowAsync<InvalidOperationException>(() => Repo.DeleteAsync(Store.TenantA, Guid.Empty, 1));
+        await Should.ThrowAsync<ArgumentException>(() => Repo.UpsertAsync(NewDomain(Store.TenantA, "bad-contact") with { Contact = "javascript:alert(1)" }, 0, Alice));
+
+        var epochAfterEnsure = await EpochStore.GetEpochAsync(Store.TenantA);
+        epochAfterEnsure.ShouldBeGreaterThan(0);
+        var bumpedEpoch = await EpochStore.BumpEpochAsync(Store.TenantA);
+        bumpedEpoch.ShouldBeGreaterThan(epochAfterEnsure);
+        (await EpochStore.GetEpochAsync(Store.TenantA)).ShouldBe(bumpedEpoch);
     }
 }
 

@@ -1,3 +1,5 @@
+using System.ComponentModel.DataAnnotations;
+
 namespace Autheris.Domain.Options;
 
 /// <summary>
@@ -11,6 +13,32 @@ public sealed class GovernanceOptions
     /// Configuration for the external consent REST API (<c>Gateway:Governance:ExternalApi</c>).
     /// </summary>
     public ExternalApiSettings ExternalApi { get; init; } = new();
+}
+
+/// <summary>
+/// Configuration settings for governance protection caching and cross-node epoch coherence (<c>Gateway:Governance:Cache</c>).
+/// </summary>
+public sealed class GovernanceCacheSettings
+{
+    public const string SectionName = "Gateway:Governance:Cache";
+
+    /// <summary>
+    /// Maximum time-to-live in seconds for positive cached protection snapshots (1 to 300).
+    /// </summary>
+    [Range(1, 300)]
+    public int MaxTtlSeconds { get; init; } = 300;
+
+    /// <summary>
+    /// Maximum time-to-live in seconds for negative or unassigned cached protection lookups (1 to 60).
+    /// </summary>
+    [Range(1, 60)]
+    public int NegativeTtlSeconds { get; init; } = 60;
+
+    /// <summary>
+    /// Interval in seconds between database governance epoch polls per tenant (1 to 60).
+    /// </summary>
+    [Range(1, 60)]
+    public int EpochPollSeconds { get; init; } = 2;
 }
 
 /// <summary>
