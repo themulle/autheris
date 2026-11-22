@@ -18,7 +18,9 @@ public interface IMcpSessionStore
         System.Collections.Generic.IReadOnlyList<string>? groupSids = null,
         string? clientIp = null,
         bool isReadOnly = false,
-        System.Collections.Generic.IReadOnlyDictionary<string, string>? additionalClaims = null);
+        System.Collections.Generic.IReadOnlyDictionary<string, string>? additionalClaims = null,
+        System.DateTimeOffset? groupsExpireAt = null,
+        bool groupsDegraded = false);
 
     /// <summary>
     /// Retrieves an active session of this node by ID (no remote lookup).
@@ -54,7 +56,9 @@ public interface IMcpSessionStore
         string sessionId,
         System.Collections.Generic.IReadOnlyList<string> roles,
         System.Collections.Generic.IReadOnlyList<string> groupSids,
-        string? clientIp = null);
+        string? clientIp = null,
+        System.DateTimeOffset? groupsExpireAt = null,
+        bool? groupsDegraded = null);
 }
 
 /// <summary>

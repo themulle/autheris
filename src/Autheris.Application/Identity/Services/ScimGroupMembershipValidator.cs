@@ -5,6 +5,8 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Governance.Caching;
 using Autheris.Domain.Common;
 using Autheris.Domain.Governance;
 using Autheris.Domain.Interfaces;
@@ -25,18 +27,32 @@ public sealed class MassMembershipChangeQuarantineException : Exception
 
 public sealed class ScimGroupMembershipValidator
 {
+    private const int MaxDomainPages = 200;
+
     private readonly IFunctionalRightRepository? _functionalRightRepository;
     private readonly IAuditWriter? _auditWriter;
     private readonly double _thresholdPercentage;
+    private readonly IGovernanceDomainRepository? _domainRepository;
+    private readonly IEmployeeGroupLookup _employeeGroupLookup;
+    private readonly IGovernanceChangeNotifier? _changeNotifier;
+    private readonly TimeProvider _timeProvider;
 
     public ScimGroupMembershipValidator(
         IFunctionalRightRepository? functionalRightRepository = null,
         IAuditWriter? auditWriter = null,
-        double thresholdPercentage = 10.0)
+        double thresholdPercentage = 10.0,
+        IGovernanceDomainRepository? domainRepository = null,
+        IEmployeeGroupLookup? employeeGroupLookup = null,
+        IGovernanceChangeNotifier? changeNotifier = null,
+        TimeProvider? timeProvider = null)
     {
         _functionalRightRepository = functionalRightRepository;
         _auditWriter = auditWriter;
         _thresholdPercentage = thresholdPercentage;
+        _domainRepository = domainRepository;
+        _employeeGroupLookup = employeeGroupLookup ?? EmptyEmployeeGroupLookup.Instance;
+        _changeNotifier = changeNotifier;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public Task ValidateMembershipChangeAsync(
@@ -58,18 +74,18 @@ public sealed class ScimGroupMembershipValidator
             return;
         }
 
-        // Check if group is mapped to any privileged right
+        // Check if group is privileged (role-mapped right, tenant owner group, or employee group)
+        var groupKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { groupId };
+        if (SidFormat.TryFormatRealmGroupKey(realmId, groupId, out var realmKey)) groupKeys.Add(realmKey);
+        if (!string.IsNullOrWhiteSpace(groupObjectSid)) groupKeys.Add(groupObjectSid.Trim());
+        if (!string.IsNullOrWhiteSpace(previousGroupObjectSid)) groupKeys.Add(previousGroupObjectSid.Trim());
+
+        bool isPrivileged = false;
         if (_functionalRightRepository != null)
         {
-            var groupKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { groupId };
-            if (SidFormat.TryFormatRealmGroupKey(realmId, groupId, out var realmKey)) groupKeys.Add(realmKey);
-            if (!string.IsNullOrWhiteSpace(groupObjectSid)) groupKeys.Add(groupObjectSid.Trim());
-            if (!string.IsNullOrWhiteSpace(previousGroupObjectSid)) groupKeys.Add(previousGroupObjectSid.Trim());
-
             var mappings = await _functionalRightRepository.GetApprovedMappingsForGroupsAndRolesAsync(
                 tenantId, realmId, groupKeys.ToArray(), ct).ConfigureAwait(false);
 
-            bool isPrivileged = false;
             foreach (var m in mappings)
             {
                 if (m.FunctionalRight.IsPrivileged)
@@ -78,36 +94,85 @@ public sealed class ScimGroupMembershipValidator
                     break;
                 }
             }
+        }
 
-            if (isPrivileged)
+        if (!isPrivileged && _domainRepository != null)
+        {
+            var offset = 0;
+            for (var pageIndex = 0; pageIndex < MaxDomainPages; pageIndex++)
             {
-                // Emit Tier-A audit event
-                if (_auditWriter != null)
+                var domains = await _domainRepository.ListAsync(
+                    tenantId, IGovernanceDomainRepository.MaxPageSize, offset, ct).ConfigureAwait(false);
+                if (domains.Count == 0)
                 {
-                    var entry = new AuditLogEntry
-                    {
-                        TenantId = tenantId,
-                        EventType = "SECURITY_MASS_MEMBERSHIP_REVOCATION_BLOCKED",
-                        ActorSid = new Sid("SCIM_PUSH"),
-                        TargetTable = "IDENTITY_GROUP_MEMBERS",
-                        Decision = "DENY",
-                        DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
-                        {
-                            realm_id = realmId,
-                            group_id = groupId,
-                            current_members = currentMemberCount,
-                            removed_members = membersBeingRemovedCount,
-                            percentage_removed = percentageRemoved,
-                            threshold_percentage = _thresholdPercentage,
-                            reason = "mass_membership_change_quarantined"
-                        })
-                    };
-
-                    await _auditWriter.RecordRequiredAsync(entry, ct).ConfigureAwait(false);
+                    break;
                 }
 
-                throw new MassMembershipChangeQuarantineException(groupId, percentageRemoved);
+                foreach (var d in domains)
+                {
+                    if (d.OwnerGroupSid is { Value: var ownerSid } && groupKeys.Contains(ownerSid))
+                    {
+                        isPrivileged = true;
+                        break;
+                    }
+                }
+
+                if (isPrivileged || domains.Count < IGovernanceDomainRepository.MaxPageSize)
+                {
+                    break;
+                }
+
+                offset += domains.Count;
             }
+        }
+
+        if (!isPrivileged)
+        {
+            foreach (var sid in _employeeGroupLookup.GetEmployeeGroupSids(tenantId))
+            {
+                if (!string.IsNullOrWhiteSpace(sid) && groupKeys.Contains(sid.Trim()))
+                {
+                    isPrivileged = true;
+                    break;
+                }
+            }
+        }
+
+        if (isPrivileged)
+        {
+            // Emit Tier-A audit event
+            if (_auditWriter != null)
+            {
+                var entry = new AuditLogEntry
+                {
+                    TenantId = tenantId,
+                    EventType = "SECURITY_MASS_MEMBERSHIP_REVOCATION_BLOCKED",
+                    ActorSid = new Sid("SCIM_PUSH"),
+                    TargetTable = "IDENTITY_GROUP_MEMBERS",
+                    Decision = "DENY",
+                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+                    {
+                        realm_id = realmId,
+                        group_id = groupId,
+                        current_members = currentMemberCount,
+                        removed_members = membersBeingRemovedCount,
+                        percentage_removed = percentageRemoved,
+                        threshold_percentage = _thresholdPercentage,
+                        reason = "mass_membership_change_quarantined"
+                    })
+                };
+
+                await _auditWriter.RecordRequiredAsync(entry, ct).ConfigureAwait(false);
+            }
+
+            if (_changeNotifier != null)
+            {
+                await _changeNotifier.NotifyAsync(
+                    GovernanceChangeEvent.ForIdentity(tenantId.Value, realmId, _timeProvider.GetUtcNow(), groupId: groupId),
+                    ct).ConfigureAwait(false);
+            }
+
+            throw new MassMembershipChangeQuarantineException(groupId, percentageRemoved);
         }
     }
 }

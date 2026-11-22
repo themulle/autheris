@@ -107,7 +107,6 @@ public sealed class GovernanceTestStore : IAsyncDisposable
     public IAccessProfileRepository AccessProfiles => Services.GetRequiredService<IAccessProfileRepository>();
     public IIdentityStoreRepository IdentityStore => Services.GetRequiredService<IIdentityStoreRepository>();
     public IFunctionalRightRepository FunctionalRights => Services.GetRequiredService<IFunctionalRightRepository>();
-    public IRecertificationRepository Recertification => Services.GetRequiredService<IRecertificationRepository>();
     public ICdcWatermarkRepository CdcWatermarks => Services.GetRequiredService<ICdcWatermarkRepository>();
     public IConsumerAggregationRepository ConsumerAggregation => Services.GetRequiredService<IConsumerAggregationRepository>();
     public ISemanticManifestStore SemanticManifests => Services.GetRequiredService<ISemanticManifestStore>();

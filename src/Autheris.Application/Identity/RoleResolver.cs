@@ -18,6 +18,7 @@ public sealed class RoleResolver : IRoleResolver
     private readonly IRoleResolverCache _cache;
     private readonly IIdentityRealmRegistry? _realmRegistry;
     private readonly IScimProvisioningStore? _scimProvisioningStore;
+    private readonly TimeProvider _timeProvider;
     private readonly int _ttlMinutes;
     private readonly int _maxGroups;
 
@@ -26,12 +27,14 @@ public sealed class RoleResolver : IRoleResolver
         IRoleResolverCache cache,
         IIdentityRealmRegistry? realmRegistry = null,
         IOptions<GatewayOptions>? options = null,
-        IScimProvisioningStore? scimProvisioningStore = null)
+        IScimProvisioningStore? scimProvisioningStore = null,
+        TimeProvider? timeProvider = null)
     {
         _providers = providers ?? throw new ArgumentNullException(nameof(providers));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _realmRegistry = realmRegistry;
         _scimProvisioningStore = scimProvisioningStore;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         var auth = options?.Value.Authentication;
         _ttlMinutes = auth?.GroupCacheTtlMinutes is >= 1 and <= 60 ? auth.GroupCacheTtlMinutes : 5;
         _maxGroups = auth?.MaxGroupSidsPerCaller is >= 1 and <= 4096 ? auth.MaxGroupSidsPerCaller : 1024;
@@ -42,8 +45,9 @@ public sealed class RoleResolver : IRoleResolver
         IEnumerable<IRoleProvider> providers,
         IRoleResolverCache cache,
         IOptions<GatewayOptions>? options = null,
-        IScimProvisioningStore? scimProvisioningStore = null)
-        : this(providers, cache, realmRegistry, options, scimProvisioningStore)
+        IScimProvisioningStore? scimProvisioningStore = null,
+        TimeProvider? timeProvider = null)
+        : this(providers, cache, realmRegistry, options, scimProvisioningStore, timeProvider)
     {
     }
 
@@ -181,7 +185,7 @@ public sealed class RoleResolver : IRoleResolver
         }
 
         var ttlMinutes = _ttlMinutes;
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         var expiresAt = now.AddMinutes(ttlMinutes);
 
         var resolution = new RoleResolution(

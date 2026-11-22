@@ -21,11 +21,21 @@ public sealed class McpSessionStore : IMcpSessionStore
     private readonly ConcurrentDictionary<string, IAsyncDisposable> _sseSubscriptions = new(StringComparer.Ordinal);
     private readonly ILogger<McpSessionStore> _logger;
     private readonly Autheris.Application.State.IDistributedClusterStateProvider? _clusterState;
+    private readonly TimeProvider _timeProvider;
+    private readonly TimeSpan _groupTtl;
 
-    public McpSessionStore(ILogger<McpSessionStore> logger, Autheris.Application.State.IDistributedClusterStateProvider? clusterState = null)
+    public McpSessionStore(
+        ILogger<McpSessionStore> logger,
+        Autheris.Application.State.IDistributedClusterStateProvider? clusterState = null,
+        TimeProvider? timeProvider = null,
+        Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.GatewayOptions>? options = null)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _clusterState = clusterState;
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        var configuredTtl = options?.Value.Authentication.GroupCacheTtlMinutes;
+        var ttlMinutes = configuredTtl is >= 1 and <= 60 ? configuredTtl.Value : 5;
+        _groupTtl = TimeSpan.FromMinutes(ttlMinutes);
     }
 
     internal const int MaxAllowedSessions = 10000;
@@ -43,7 +53,9 @@ public sealed class McpSessionStore : IMcpSessionStore
         IReadOnlyList<string>? groupSids = null,
         string? clientIp = null,
         bool isReadOnly = false,
-        IReadOnlyDictionary<string, string>? additionalClaims = null)
+        IReadOnlyDictionary<string, string>? additionalClaims = null,
+        DateTimeOffset? groupsExpireAt = null,
+        bool groupsDegraded = false)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(servicePrincipalId);
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
@@ -51,7 +63,8 @@ public sealed class McpSessionStore : IMcpSessionStore
         // Strict TenantId domain validation prevents injection into downstream logs/JSON (N-9)
         var validatedTenant = new Autheris.Domain.Common.TenantId(tenantId);
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
+        var boundedGroupsExpireAt = BoundGroupsExpireAt(now, groupSids, groupsExpireAt);
         var ownerKey = GetOwnerKey(servicePrincipalId, userSid);
         McpSessionContext session;
         string sessionId;
@@ -90,7 +103,9 @@ public sealed class McpSessionStore : IMcpSessionStore
                 groupSids,
                 clientIp,
                 isReadOnly,
-                additionalClaims);
+                additionalClaims,
+                boundedGroupsExpireAt,
+                groupsDegraded);
             _sessions[sessionId] = session;
         }
 
@@ -150,7 +165,7 @@ public sealed class McpSessionStore : IMcpSessionStore
 
     internal McpSessionContext? Touch(string sessionId, Action? beforeTryUpdate = null)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         while (_sessions.TryGetValue(sessionId, out var current))
         {
             if (now - current.LastActiveAt > DefaultSessionTtl)
@@ -197,16 +212,31 @@ public sealed class McpSessionStore : IMcpSessionStore
         }
     }
 
-    public McpSessionContext? RefreshPrincipalContext(string sessionId, IReadOnlyList<string> roles, IReadOnlyList<string> groupSids, string? clientIp = null)
+    public McpSessionContext? RefreshPrincipalContext(
+        string sessionId,
+        IReadOnlyList<string> roles,
+        IReadOnlyList<string> groupSids,
+        string? clientIp = null,
+        DateTimeOffset? groupsExpireAt = null,
+        bool? groupsDegraded = null)
     {
         ArgumentNullException.ThrowIfNull(roles);
         ArgumentNullException.ThrowIfNull(groupSids);
 
         if (string.IsNullOrWhiteSpace(sessionId)) return null;
 
+        var now = _timeProvider.GetUtcNow();
+        var boundedGroupsExpireAt = BoundGroupsExpireAt(now, groupSids, groupsExpireAt);
         while (_sessions.TryGetValue(sessionId, out var current))
         {
-            var updated = current with { Roles = roles, GroupSids = groupSids, ClientIp = string.IsNullOrWhiteSpace(clientIp) ? current.ClientIp : clientIp };
+            var updated = current with
+            {
+                Roles = roles,
+                GroupSids = groupSids,
+                ClientIp = string.IsNullOrWhiteSpace(clientIp) ? current.ClientIp : clientIp,
+                GroupsExpireAt = boundedGroupsExpireAt ?? current.GroupsExpireAt,
+                GroupsDegraded = groupsDegraded ?? current.GroupsDegraded
+            };
             if (_sessions.TryUpdate(sessionId, updated, current))
             {
                 PersistInBackground(sessionId, updated);
@@ -215,6 +245,17 @@ public sealed class McpSessionStore : IMcpSessionStore
         }
 
         return null;
+    }
+
+    private DateTimeOffset? BoundGroupsExpireAt(DateTimeOffset now, IReadOnlyList<string>? groupSids, DateTimeOffset? explicitExpiry)
+    {
+        var maxExpiry = now.Add(_groupTtl);
+        if (explicitExpiry is { } expiry)
+        {
+            return expiry > maxExpiry ? maxExpiry : expiry;
+        }
+
+        return groupSids is { Count: > 0 } ? maxExpiry : null;
     }
 
     internal int Count => _sessions.Count;

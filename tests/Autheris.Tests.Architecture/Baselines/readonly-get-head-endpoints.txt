@@ -97,8 +97,6 @@
 /api/v1/queries/|GET|no side effect: lists declarative SQL query endpoints
 /api/v1/sql/openapi.json|GET|no side effect: serves WebSQL OpenAPI spec
 /api/v1/sql/statements/{statementId}|GET|no side effect: reads WebSQL statement status and results
-/api/v1/tenants/{tenantId}/governance/recert/campaigns/{campaignId}/items|GET|no side effect: lists recertification campaign items
-/api/v1/tenants/{tenantId}/governance/recert/campaigns|GET|no side effect: lists recertification campaigns
 /api/v1/tenants/{tenantId}/governance/rights/{realmId}/|GET|no side effect: lists functional rights in realm
 /api/v1/tenants/{tenantId}/lifecycle/locks/{realmId}/{userKey}|GET|no side effect: reads subject lifecycle lock status
 /api/v1/usage/applications|GET|no side effect: reports tenant usage grouped by application or client id

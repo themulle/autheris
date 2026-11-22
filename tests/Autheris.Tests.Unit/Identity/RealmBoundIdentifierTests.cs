@@ -269,7 +269,7 @@ public sealed class RealmBoundIdentifierTests
                 seenValidationKeys.AddRange(groupsAndRoles);
                 var matches = groupsAndRoles.Contains(oldSid, StringComparer.OrdinalIgnoreCase);
                 return Task.FromResult<IReadOnlyList<FunctionalRightMapping>>(matches
-                    ? [new FunctionalRightMapping(tenant, "entra-upd", oldSid, FunctionalRight.SecurityAdmin, "approver-alice", DateTimeOffset.UtcNow, RecertClass.Privileged.ToString(), "creator-bob", DateTimeOffset.UtcNow)]
+                    ? [new FunctionalRightMapping(tenant, "entra-upd", oldSid, FunctionalRight.SecurityAdmin, "approver-alice", DateTimeOffset.UtcNow, "Privileged", "creator-bob", DateTimeOffset.UtcNow)]
                     : []);
             }
 

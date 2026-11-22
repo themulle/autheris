@@ -4,6 +4,7 @@ using System.Security.Cryptography;
 using System.Text;
 using Autheris.Application.State.Caching.Interfaces;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Governance.Caching;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -16,7 +17,7 @@ using StackExchange.Redis;
 
 namespace Autheris.Infrastructure.Cache;
 
-public sealed class ConsentCacheService : IConsentCacheService, IDisposable
+public sealed class ConsentCacheService : IConsentCacheService, IGovernanceCacheInvalidator, IDisposable
 {
     private readonly IMemoryCache _memoryCache;
     private readonly IEpochValidationService _epochValidationService;
@@ -25,10 +26,15 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
     private readonly IDatabase? _redisDb;
     private readonly string _prefix;
     private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, long>> _tableCacheKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, byte>> _tenantCacheKeys = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, ConcurrentDictionary<string, TableIdentifier>> _tenantTables = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, long> _tenantGenerations = new(StringComparer.OrdinalIgnoreCase);
     private static long _keySequence;
+    private long _globalGeneration;
     private readonly TimeProvider _timeProvider;
     private readonly Autheris.Application.Catalog.ICatalogVersionProvider? _catalogVersionProvider;
     private readonly IDisposable? _subscription;
+    private readonly IDisposable? _governanceSubscription;
 
     private readonly object _syncLock = new();
     private readonly byte[] _l2IntegrityKey;
@@ -45,7 +51,12 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
     private static bool IsL2Failure(Exception ex) =>
         ex is RedisException or TimeoutException or CryptographicException or MemoryPack.MemoryPackSerializationException;
 
-    private sealed record CacheEntryEnvelope(TableAccessDecision Decision, long Epoch, DateTimeOffset ValidUntil);
+    private sealed record CacheEntryEnvelope(
+        TableAccessDecision Decision,
+        long Epoch,
+        DateTimeOffset ValidUntil,
+        long TenantGeneration = 0,
+        long GlobalGeneration = 0);
 
     public ConsentCacheService(
         IMemoryCache memoryCache,
@@ -58,7 +69,8 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
         ILogger<ConsentCacheService>? logger = null,
         Autheris.Domain.Security.IRestrictedScopePolicy? restrictedScopes = null,
         TimeProvider? timeProvider = null,
-        Autheris.Application.Catalog.ICatalogVersionProvider? catalogVersionProvider = null)
+        Autheris.Application.Catalog.ICatalogVersionProvider? catalogVersionProvider = null,
+        IGovernanceChangeNotifier? changeNotifier = null)
     {
         _timeProvider = timeProvider ?? TimeProvider.System;
         _catalogVersionProvider = catalogVersionProvider;
@@ -90,6 +102,18 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
                         _memoryCache.Remove(key);
                     }
                 }
+            }
+        });
+
+        _governanceSubscription = changeNotifier?.Subscribe(change =>
+        {
+            if (change.IsFullInvalidation)
+            {
+                InvalidateAll();
+            }
+            else
+            {
+                InvalidateTenant(change.TenantId);
             }
         });
     }
@@ -126,7 +150,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
             var cacheKey = BuildCacheKey(tenant, userSid, table, contextHash);
             if (_memoryCache.TryGetValue(cacheKey, out CacheEntryEnvelope? envelope) && envelope != null)
             {
-                if (envelope.ValidUntil == default || now >= envelope.ValidUntil)
+                if (envelope.ValidUntil == default || now >= envelope.ValidUntil || !IsGenerationCurrent(tenant.Value, envelope))
                 {
                     _memoryCache.Remove(cacheKey);
                     RemoveKeyFromTableIndex(table, cacheKey);
@@ -291,7 +315,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
         var cacheKey = BuildCacheKey(tenant, userSid, table, contextHash);
         if (_memoryCache.TryGetValue(cacheKey, out CacheEntryEnvelope? envelope) && envelope != null)
         {
-            if (envelope.ValidUntil == default || now >= envelope.ValidUntil)
+            if (envelope.ValidUntil == default || now >= envelope.ValidUntil || !IsGenerationCurrent(tenant.Value, envelope))
             {
                 RecordCacheMiss();
                 _memoryCache.Remove(cacheKey);
@@ -440,6 +464,12 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
     private void SetL1Internal(TableIdentifier table, string cacheKey, CacheEntryEnvelope envelope, TimeSpan ttl)
     {
         var decision = envelope.Decision;
+        var tenantKey = ExtractTenantKey(cacheKey);
+        var stampedEnvelope = envelope with
+        {
+            TenantGeneration = _tenantGenerations.GetOrAdd(tenantKey, 0),
+            GlobalGeneration = Volatile.Read(ref _globalGeneration)
+        };
 
         // Approximate byte size for L1 MemoryCache size budgeting (NF-PERF-02)
         var estimatedBytes = 512
@@ -476,6 +506,11 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
                         _tableCacheKeys.TryRemove(new KeyValuePair<string, ConcurrentDictionary<string, long>>(tableKey, currentKeys));
                     }
                 }
+
+                if (!string.IsNullOrEmpty(tenantKey) && _tenantCacheKeys.TryGetValue(tenantKey, out var tenantKeys))
+                {
+                    tenantKeys.TryRemove((string)evictedKey, out _);
+                }
             }
         });
 
@@ -495,13 +530,114 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
             }
 
             keys[cacheKey] = entrySeq;
+
+            if (!string.IsNullOrEmpty(tenantKey))
+            {
+                var tenantKeys = _tenantCacheKeys.GetOrAdd(tenantKey, _ => new ConcurrentDictionary<string, byte>(StringComparer.Ordinal));
+                tenantKeys[cacheKey] = 0;
+                var tenantTables = _tenantTables.GetOrAdd(tenantKey, _ => new ConcurrentDictionary<string, TableIdentifier>(StringComparer.OrdinalIgnoreCase));
+                tenantTables[tableKey] = table;
+            }
         }
 
-        _memoryCache.Set(cacheKey, envelope, cacheEntryOptions);
+        _memoryCache.Set(cacheKey, stampedEnvelope, cacheEntryOptions);
+    }
+
+    private bool IsGenerationCurrent(string tenantId, CacheEntryEnvelope envelope) =>
+        envelope.GlobalGeneration == Volatile.Read(ref _globalGeneration)
+        && envelope.TenantGeneration == _tenantGenerations.GetOrAdd(tenantId, 0);
+
+    private static string ExtractTenantKey(string cacheKey)
+    {
+        var colonIndex = cacheKey.IndexOf(':', StringComparison.Ordinal);
+        return colonIndex > 0 ? cacheKey[..colonIndex] : string.Empty;
+    }
+
+    public void InvalidateTenant(string tenantId)
+    {
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            InvalidateAll();
+            return;
+        }
+
+        var normalizedTenant = tenantId.Trim();
+        _tenantGenerations.AddOrUpdate(normalizedTenant, 1, static (_, gen) => gen + 1);
+
+        IReadOnlyList<TableIdentifier> tables = [];
+        lock (_syncLock)
+        {
+            if (_tenantCacheKeys.TryRemove(normalizedTenant, out var keys))
+            {
+                foreach (var key in keys.Keys)
+                {
+                    _memoryCache.Remove(key);
+                }
+            }
+
+            if (_tenantTables.TryRemove(normalizedTenant, out var trackedTables))
+            {
+                tables = trackedTables.Values.ToArray();
+            }
+        }
+
+        foreach (var table in tables)
+        {
+            _ = InvalidateEpochSafeAsync(table);
+        }
+    }
+
+    public void InvalidateAll()
+    {
+        Interlocked.Increment(ref _globalGeneration);
+        _tenantGenerations.Clear();
+
+        IReadOnlyList<TableIdentifier> allTables;
+        lock (_syncLock)
+        {
+            if (_memoryCache is MemoryCache mc)
+            {
+                mc.Clear();
+            }
+            else
+            {
+                foreach (var keys in _tenantCacheKeys.Values)
+                {
+                    foreach (var key in keys.Keys)
+                    {
+                        _memoryCache.Remove(key);
+                    }
+                }
+            }
+
+            _tableCacheKeys.Clear();
+            _tenantCacheKeys.Clear();
+            allTables = _tenantTables.Values.SelectMany(d => d.Values).Distinct().ToArray();
+            _tenantTables.Clear();
+        }
+
+        foreach (var table in allTables)
+        {
+            _ = InvalidateEpochSafeAsync(table);
+        }
+    }
+
+    private async Task InvalidateEpochSafeAsync(TableIdentifier table)
+    {
+        try
+        {
+            await _epochValidationService.InvalidateEpochAsync(table).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogWarning(ex, "Best-effort epoch invalidation failed for table {Table}.", table.ToString());
+        }
     }
 
     public Task ClearL1CacheAsync(CancellationToken ct = default)
     {
+        Interlocked.Increment(ref _globalGeneration);
+        _tenantGenerations.Clear();
         lock (_syncLock)
         {
             if (_memoryCache is MemoryCache mc)
@@ -509,6 +645,8 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
                 mc.Clear();
             }
             _tableCacheKeys.Clear();
+            _tenantCacheKeys.Clear();
+            _tenantTables.Clear();
         }
         return Task.CompletedTask;
     }
@@ -672,5 +810,6 @@ public sealed class ConsentCacheService : IConsentCacheService, IDisposable
     public void Dispose()
     {
         _subscription?.Dispose();
+        _governanceSubscription?.Dispose();
     }
 }

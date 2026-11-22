@@ -35,7 +35,9 @@ public static partial class GatewayGovernanceServiceExtensions
 {
     private static void AddVirtualFiltersAndCallerAttributes(IServiceCollection services)
     {
-        services.AddSingleton<IAccessProfileCache, AccessProfileCache>();
+        services.AddSingleton<AccessProfileCache>();
+        services.AddSingleton<IAccessProfileCache>(sp => sp.GetRequiredService<AccessProfileCache>());
+        services.AddSingleton<Autheris.Application.Governance.Caching.IGovernanceCacheInvalidator>(sp => sp.GetRequiredService<AccessProfileCache>());
         services.AddSingleton<IDbtProposalRepository, InMemoryDbtProposalRepository>();
         services.TryAddSingleton<IDbtHealthCircuitBreaker, NoDbtHealthData>();
 
@@ -73,7 +75,9 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.VirtualFilters.Federation.IVirtualFilterKeySetProvider, Autheris.Application.VirtualFilters.Federation.SqlVirtualFilterKeySetProvider>();
         // F-GOV-14 (WI-6): without this registration a WebSQL cross-source query over a protected HTTP table is denied.
         services.AddSingleton<Autheris.Application.VirtualFilters.Federation.IVirtualFilterFederationPlanner, Autheris.Application.VirtualFilters.Federation.VirtualFilterFederationPlanner>();
-        services.AddSingleton<IConsentCacheService, ConsentCacheService>();
+        services.AddSingleton<ConsentCacheService>();
+        services.AddSingleton<IConsentCacheService>(sp => sp.GetRequiredService<ConsentCacheService>());
+        services.AddSingleton<Autheris.Application.Governance.Caching.IGovernanceCacheInvalidator>(sp => sp.GetRequiredService<ConsentCacheService>());
     }
 
     private static void AddTypedRowPolicy(IServiceCollection services)

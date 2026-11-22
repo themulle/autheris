@@ -6,6 +6,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Governance.Caching;
 using Autheris.Application.Policy.Exceptions;
 using Autheris.Application.Policy.Interfaces;
 using Autheris.Application.State;
@@ -21,7 +22,7 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// AR-01: Multi-node cluster-consistent access profile cache with epoch-keying and fail-closed security invariants.
 /// </summary>
-public sealed class AccessProfileCache : IAccessProfileCache, IDisposable
+public sealed class AccessProfileCache : IAccessProfileCache, IGovernanceCacheInvalidator, IDisposable
 {
     public const string InvalidationChannel = "autheris:profile:invalidate";
     private const string EpochKeyPrefix = "profile_epoch:";
@@ -35,6 +36,8 @@ public sealed class AccessProfileCache : IAccessProfileCache, IDisposable
     private readonly TimeProvider _timeProvider;
     private readonly ILogger<AccessProfileCache> _logger;
     private readonly IDisposable? _subscription;
+    private readonly IDisposable? _governanceSubscription;
+    private long _globalGeneration;
 
     // Local epoch cache: Tenant -> (Epoch, ExpiryTimestamp)
     private readonly ConcurrentDictionary<string, (long Epoch, DateTimeOffset ExpiresAt)> _epochCache = new(StringComparer.OrdinalIgnoreCase);
@@ -50,7 +53,8 @@ public sealed class AccessProfileCache : IAccessProfileCache, IDisposable
         IOptions<GatewayOptions>? options = null,
         IEventBus? eventBus = null,
         TimeProvider? timeProvider = null,
-        ILogger<AccessProfileCache>? logger = null)
+        ILogger<AccessProfileCache>? logger = null,
+        IGovernanceChangeNotifier? changeNotifier = null)
     {
         _accessProfileRepository = accessProfileRepository ?? throw new ArgumentNullException(nameof(accessProfileRepository));
         _clusterState = clusterState;
@@ -65,6 +69,18 @@ public sealed class AccessProfileCache : IAccessProfileCache, IDisposable
             _eventBus.ConnectionRestored += OnConnectionRestored;
             _subscription = _eventBus.Subscribe<string>(InvalidationChannel, OnPeerInvalidationAsync);
         }
+
+        _governanceSubscription = changeNotifier?.Subscribe(change =>
+        {
+            if (change.IsFullInvalidation)
+            {
+                InvalidateAll();
+            }
+            else
+            {
+                InvalidateTenant(change.TenantId);
+            }
+        });
     }
 
     private void OnConnectionRestored()
@@ -175,9 +191,10 @@ public sealed class AccessProfileCache : IAccessProfileCache, IDisposable
         if (storeAvailable && epoch.HasValue)
         {
             // Epoch is readable: use epoch-keyed L1 cache entry
-            var cacheKey = generation == 0
+            var globalGen = Volatile.Read(ref _globalGeneration);
+            var cacheKey = generation == 0 && globalGen == 0
                 ? $"auth:profile:{tenantId.Value}:{epoch.Value}:{keySuffix}"
-                : $"auth:profile:{tenantId.Value}:g{generation}:{epoch.Value}:{keySuffix}";
+                : $"auth:profile:{tenantId.Value}:g{globalGen}:{generation}:{epoch.Value}:{keySuffix}";
             if (_memoryCache.TryGetValue(cacheKey, out var cachedObj) && cachedObj is IReadOnlyList<AccessProfile> cachedProfiles)
             {
                 return cachedProfiles;
@@ -322,6 +339,26 @@ public sealed class AccessProfileCache : IAccessProfileCache, IDisposable
         return Math.Clamp(configured, 0, 5000);
     }
 
+    public void InvalidateTenant(string tenantId)
+    {
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            InvalidateAll();
+            return;
+        }
+
+        var normalized = tenantId.Trim();
+        _epochCache.TryRemove(normalized, out _);
+        _epochWatermark.AddOrUpdate(normalized, _ => (0, 1), (_, mark) => (mark.Last, mark.Generation + 1));
+    }
+
+    public void InvalidateAll()
+    {
+        Interlocked.Increment(ref _globalGeneration);
+        _epochCache.Clear();
+        _epochWatermark.Clear();
+    }
+
     public void Dispose()
     {
         if (_eventBus != null)
@@ -329,5 +366,6 @@ public sealed class AccessProfileCache : IAccessProfileCache, IDisposable
             _eventBus.ConnectionRestored -= OnConnectionRestored;
         }
         _subscription?.Dispose();
+        _governanceSubscription?.Dispose();
     }
 }

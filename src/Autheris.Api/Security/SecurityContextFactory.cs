@@ -129,9 +129,11 @@ public static class SecurityContextFactory
     {
         var user = context.User;
 
-        // A principal that did not pass the identity pipeline (or whose resolution is degraded) has no known groups: Degraded with an empty
-        // set, never "member of no group".
-        var groupStatus = Autheris.Domain.Identity.GroupResolutionClaims.Read(user);
+        // A principal that did not pass the identity pipeline (or whose resolution is degraded or expired) has no known groups:
+        // Degraded with an empty set, never "member of no group".
+        var timeProvider = context.RequestServices?.GetService(typeof(TimeProvider)) as TimeProvider ?? TimeProvider.System;
+        var groupStatus = Autheris.Domain.Identity.GroupResolutionClaims.Read(user, timeProvider.GetUtcNow());
+        var groupsExpireAt = Autheris.Domain.Identity.GroupResolutionClaims.ReadExpiresAt(user);
         if (groupStatus != Autheris.Domain.Identity.GroupResolutionStatus.Complete)
         {
             groupSids = new HashSet<Sid>();
@@ -150,7 +152,7 @@ public static class SecurityContextFactory
             TenantSource = source,
             GroupSids = groupSids,
             GroupResolutionStatus = groupStatus,
-            GroupsExpireAt = Autheris.Domain.Identity.GroupResolutionClaims.ReadExpiresAt(user),
+            GroupsExpireAt = groupsExpireAt,
             TenantRoles = tenantRoles,
             ClusterRoles = clusterRoles,
             AuthenticationScheme = user.Identity?.AuthenticationType ?? "Unknown",

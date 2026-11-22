@@ -34,7 +34,7 @@ public interface IFunctionalRightMapper
         string realmId,
         string groupOrRole,
         FunctionalRight right,
-        RecertClass recertClass,
+        string recertClass,
         string createdBy,
         CancellationToken ct = default);
 

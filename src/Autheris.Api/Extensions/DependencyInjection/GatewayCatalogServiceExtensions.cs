@@ -54,7 +54,13 @@ public static class GatewayCatalogServiceExtensions
         services.AddHostedService<CatalogSnapshotBackgroundService>();
 
         // Visibility Cache (INC-138-3)
-        services.TryAddSingleton<ICatalogVisibilityCache, CatalogVisibilityLruCache>();
+        services.TryAddSingleton(sp => new CatalogVisibilityLruCache(
+            logger: sp.GetService<ILogger<CatalogVisibilityLruCache>>(),
+            timeProvider: sp.GetService<TimeProvider>(),
+            changeNotifier: sp.GetService<Autheris.Application.Governance.Caching.IGovernanceChangeNotifier>()));
+        services.TryAddSingleton<ICatalogVisibilityCache>(sp => sp.GetRequiredService<CatalogVisibilityLruCache>());
+        services.AddSingleton<Autheris.Application.Governance.Caching.IGovernanceCacheInvalidator>(sp =>
+            sp.GetRequiredService<CatalogVisibilityLruCache>());
 
         // Honest Embeddings & Search Engine (INC-138-5). The embeddings client follows the outbound egress policy (fail closed).
         services.AddHttpClient(EgressIntegrations.CatalogEmbeddings).AddSecureOutboundHandlers(EgressIntegrations.CatalogEmbeddings);

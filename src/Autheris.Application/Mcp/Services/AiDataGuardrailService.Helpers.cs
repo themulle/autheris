@@ -83,10 +83,11 @@ public sealed partial class AiDataGuardrailService
                 return TableAccessDecision.Denied(table, "Table not found in the catalog.");
             }
 
-            var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext)!;
+            var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext, _timeProvider)!;
             var subject = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(
                 principal, new TenantId(sessionContext.TenantId),
-                clientIp: !string.IsNullOrWhiteSpace(sessionContext.ClientIp) && System.Net.IPAddress.TryParse(sessionContext.ClientIp, out var ip) ? ip : System.Net.IPAddress.None);
+                clientIp: !string.IsNullOrWhiteSpace(sessionContext.ClientIp) && System.Net.IPAddress.TryParse(sessionContext.ClientIp, out var ip) ? ip : System.Net.IPAddress.None,
+                timeProvider: _timeProvider);
             return await _decisionPoint.DecideAsync(
                 new Autheris.Application.Policy.Pdp.AccessRequest(
                     subject, metadata, Autheris.Application.Policy.Pdp.AccessOperation.Read, Autheris.Application.Policy.Pdp.AccessTransport.Mcp),

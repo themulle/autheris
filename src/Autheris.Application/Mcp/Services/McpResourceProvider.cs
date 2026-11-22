@@ -32,12 +32,18 @@ public sealed class McpResourceProvider : IMcpResourceProvider
     private readonly IApiDispatcherService _dispatcher;
 
     private readonly IReadPathSwitches? _switches;
+    private readonly TimeProvider _timeProvider;
 
-    public McpResourceProvider(ICatalogDiscoveryService discovery, IApiDispatcherService dispatcher, IReadPathSwitches? switches = null)
+    public McpResourceProvider(
+        ICatalogDiscoveryService discovery,
+        IApiDispatcherService dispatcher,
+        IReadPathSwitches? switches = null,
+        TimeProvider? timeProvider = null)
     {
         _discovery = discovery ?? throw new ArgumentNullException(nameof(discovery));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _switches = switches;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public bool IsResourceEnabled(string uri) => _switches?.IsResourceEnabled(uri) ?? true;
@@ -234,11 +240,20 @@ public sealed class McpResourceProvider : IMcpResourceProvider
 
     private static bool Is(string uri, string expected) => string.Equals(uri, expected, StringComparison.OrdinalIgnoreCase);
 
-    /// <summary>SR-M-08: an app-only session (no user SID) has no group SIDs, exactly like its principal.</summary>
-    private static IReadOnlyList<string> EffectiveGroupSids(McpSessionContext session) =>
-        string.IsNullOrWhiteSpace(session.UserSid) ? [] : session.GroupSids ?? [];
+    /// <summary>SR-M-08: an app-only session (no user SID) has no group SIDs; stale/degraded group snapshots carry none.</summary>
+    private IReadOnlyList<string> EffectiveGroupSids(McpSessionContext session)
+    {
+        if (string.IsNullOrWhiteSpace(session.UserSid)
+            || session.GroupsDegraded
+            || (session.GroupsExpireAt is { } expiresAt && expiresAt <= _timeProvider.GetUtcNow()))
+        {
+            return [];
+        }
 
-    private static RequestContext BuildRequestContext(McpSessionContext session)
+        return session.GroupSids ?? [];
+    }
+
+    private RequestContext BuildRequestContext(McpSessionContext session)
     {
         var roles = session.Roles ?? [];
         var context = RequestContext.FromCaller(
@@ -259,7 +274,7 @@ public sealed class McpResourceProvider : IMcpResourceProvider
             return context;
         }
 
-        return context with { User = McpProtocolHandler.BuildPrincipalFromSession(session)! };
+        return context with { User = McpProtocolHandler.BuildPrincipalFromSession(session, _timeProvider)! };
     }
 
     private const string AnonymousMcpClientSid = "ANONYMOUS_MCP_CLIENT";

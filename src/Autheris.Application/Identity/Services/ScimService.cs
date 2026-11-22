@@ -8,6 +8,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
+using Autheris.Application.Governance.Caching;
 using Autheris.Application.Identity.Caching;
 using Autheris.Application.Identity.Validators;
 using Autheris.Domain.Audit;
@@ -16,7 +17,7 @@ using Autheris.Domain.Identity;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 
-public sealed class ScimService : IScimService
+public sealed partial class ScimService : IScimService
 {
     private readonly IIdentityStoreRepository _repository;
     private readonly IIdentityDeprovisioningService _deprovisioningService;
@@ -27,6 +28,8 @@ public sealed class ScimService : IScimService
     private readonly IAuditWriter? _auditWriter;
     private readonly IIdentityRealmRegistry? _realmRegistry;
     private readonly TimeProvider _timeProvider;
+    private readonly IGovernanceChangeNotifier? _governanceChangeNotifier;
+    private readonly PrivilegedGroupChangeAuditor? _privilegedGroupAuditor;
 
     public ScimService(
         IIdentityStoreRepository repository,
@@ -37,7 +40,9 @@ public sealed class ScimService : IScimService
         TimeProvider? timeProvider = null,
         IScimSyncStateTracker? syncStateTracker = null,
         IAuditWriter? auditWriter = null,
-        IIdentityRealmRegistry? realmRegistry = null)
+        IIdentityRealmRegistry? realmRegistry = null,
+        IGovernanceChangeNotifier? governanceChangeNotifier = null,
+        PrivilegedGroupChangeAuditor? privilegedGroupAuditor = null)
     {
         _massChangeGuard = massChangeGuard;
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
@@ -48,6 +53,8 @@ public sealed class ScimService : IScimService
         _syncStateTracker = syncStateTracker;
         _auditWriter = auditWriter;
         _realmRegistry = realmRegistry;
+        _governanceChangeNotifier = governanceChangeNotifier;
+        _privilegedGroupAuditor = privilegedGroupAuditor;
     }
 
     public async Task<ScimUser?> GetUserAsync(TenantId tenantId, string realmId, string userKey, CancellationToken ct = default)
@@ -136,6 +143,7 @@ public sealed class ScimService : IScimService
                 tenantId, realmId, userKey, "SCIM_DEPROVISION", "SCIM_PUT", ct).ConfigureAwait(false);
             await _repository.IncrementRealmDeprovisionEpochAsync(tenantId, realmId, ct).ConfigureAwait(false);
             _roleCache?.Invalidate(realmId, userKey);
+            await NotifyIdentityGovernanceChangeAsync(tenantId, realmId, userKey, groupId: null, now, ct).ConfigureAwait(false);
         }
         else
         {
@@ -204,6 +212,7 @@ public sealed class ScimService : IScimService
                 tenantId, realmId, userKey, "SCIM_DEPROVISION", "SCIM_PATCH", ct).ConfigureAwait(false);
             await _repository.IncrementRealmDeprovisionEpochAsync(tenantId, realmId, ct).ConfigureAwait(false);
             _roleCache?.Invalidate(realmId, userKey);
+            await NotifyIdentityGovernanceChangeAsync(tenantId, realmId, userKey, groupId: null, now, ct).ConfigureAwait(false);
             await RecordWriteContactAsync(tenantId, realmId, now, ct).ConfigureAwait(false);
 
             return existing with { Active = false, DeactivatedAt = now, UpdatedAt = now };
@@ -258,6 +267,7 @@ public sealed class ScimService : IScimService
         await _repository.DeleteUserAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false);
         await _repository.IncrementRealmDeprovisionEpochAsync(tenantId, realmId, ct).ConfigureAwait(false);
         _roleCache?.Invalidate(realmId, userKey);
+        await NotifyIdentityGovernanceChangeAsync(tenantId, realmId, userKey, groupId: null, now, ct).ConfigureAwait(false);
         await RecordWriteContactAsync(tenantId, realmId, now, ct).ConfigureAwait(false);
         return true;
     }
@@ -331,6 +341,14 @@ public sealed class ScimService : IScimService
             ObjectSid: resolvedObjectSid);
         ScimRequestValidator.ValidateGroupCreate(entity, ScimRequestValidator.UsesRealmBoundGroupKey(realm));
 
+        var initialChanges = (group.Members ?? [])
+            .Select(m => new ScimMembershipAuditItem(m.Value, ScimRequestValidator.NormalizeMemberType(m.Type), "add"))
+            .ToList();
+
+        var privilegedClassification = initialChanges.Count > 0
+            ? await PreparePrivilegedGroupAuditAsync(tenantId, realmId, groupId, entity.ObjectSid, null, initialChanges, "add", now, ct).ConfigureAwait(false)
+            : null;
+
         await RecordRequiredScimAuditAsync(
             tenantId,
             realmId,
@@ -354,11 +372,13 @@ public sealed class ScimService : IScimService
 
         if (group.Members is { Count: > 0 })
         {
+            bool hasNestedGroup = false;
             foreach (var m in group.Members)
             {
                 var memberType = ScimRequestValidator.NormalizeMemberType(m.Type);
                 if (memberType == ScimMemberTypes.Group)
                 {
+                    hasNestedGroup = true;
                     await _repository.AddGroupNestingEdgeAsync(tenantId, realmId, groupId, m.Value, ct).ConfigureAwait(false);
                 }
                 else
@@ -368,7 +388,13 @@ public sealed class ScimService : IScimService
                 }
             }
 
+            if (hasNestedGroup)
+            {
+                _roleCache?.InvalidateAll();
+            }
+
             await _repository.IncrementRealmDeprovisionEpochAsync(tenantId, realmId, ct).ConfigureAwait(false);
+            await CompleteGroupChangeNotificationsAsync(tenantId, realmId, groupId, "add", privilegedClassification, now, ct).ConfigureAwait(false);
         }
 
         await RecordWriteContactAsync(tenantId, realmId, now, ct).ConfigureAwait(false);
@@ -430,7 +456,27 @@ public sealed class ScimService : IScimService
             }
         }
 
-        if (usersToRemove.Count == 0 && addedUsers.Count == 0 && removedChildren.Count == 0 && addedChildren.Count == 0)
+        var auditChanges = new List<ScimMembershipAuditItem>(usersToRemove.Count + removedChildren.Count + addedUsers.Count + addedChildren.Count);
+        auditChanges.AddRange(usersToRemove.Select(u => new ScimMembershipAuditItem(u, ScimMemberTypes.User, "remove")));
+        auditChanges.AddRange(removedChildren.Select(g => new ScimMembershipAuditItem(g, ScimMemberTypes.Group, "remove")));
+        auditChanges.AddRange(addedUsers.Select(u => new ScimMembershipAuditItem(u, ScimMemberTypes.User, "add")));
+        auditChanges.AddRange(addedChildren.Select(g => new ScimMembershipAuditItem(g, ScimMemberTypes.Group, "add")));
+
+        var sidChanged = !string.Equals(existing.ObjectSid, updated.ObjectSid, StringComparison.OrdinalIgnoreCase);
+        var privilegedClassification = (auditChanges.Count > 0 || sidChanged)
+            ? await PreparePrivilegedGroupAuditAsync(
+                tenantId,
+                realmId,
+                groupId,
+                updated.ObjectSid,
+                existing.ObjectSid,
+                auditChanges,
+                auditChanges.Count == 0 ? "update" : "membership_change",
+                now,
+                ct).ConfigureAwait(false)
+            : null;
+
+        if (auditChanges.Count == 0)
         {
             await RecordRequiredScimAuditAsync(
                 tenantId,
@@ -491,10 +537,31 @@ public sealed class ScimService : IScimService
                 await _repository.AddGroupNestingEdgeAsync(tenantId, realmId, groupId, addedChild, ct).ConfigureAwait(false);
             }
 
+            if (removedChildren.Count > 0 || addedChildren.Count > 0 || sidChanged)
+            {
+                _roleCache?.InvalidateAll();
+            }
+
             if (usersToRemove.Count > 0 || removedChildren.Count > 0 || addedUsers.Count > 0 || addedChildren.Count > 0)
             {
                 await _repository.IncrementRealmDeprovisionEpochAsync(tenantId, realmId, ct).ConfigureAwait(false);
             }
+        }
+        else if (sidChanged)
+        {
+            _roleCache?.InvalidateAll();
+        }
+
+        if (auditChanges.Count > 0 || sidChanged)
+        {
+            await CompleteGroupChangeNotificationsAsync(
+                tenantId,
+                realmId,
+                groupId,
+                auditChanges.Count == 0 ? "update" : "membership_change",
+                privilegedClassification,
+                now,
+                ct).ConfigureAwait(false);
         }
 
         await RecordWriteContactAsync(tenantId, realmId, now, ct).ConfigureAwait(false);
@@ -601,6 +668,32 @@ public sealed class ScimService : IScimService
         }
 
         var currentUserSet = currentUserMembers.ToHashSet(StringComparer.Ordinal);
+        var patchAuditChanges = new List<ScimMembershipAuditItem>(membersToRemove.Count + membersToAdd.Count);
+        foreach (var (toRemove, explicitType) in membersToRemove)
+        {
+            var memberType = explicitType ?? (currentUserSet.Contains(toRemove) ? ScimMemberTypes.User : ScimMemberTypes.Group);
+            patchAuditChanges.Add(new ScimMembershipAuditItem(toRemove, memberType, "remove"));
+        }
+
+        foreach (var (toAdd, memberType) in membersToAdd)
+        {
+            patchAuditChanges.Add(new ScimMembershipAuditItem(toAdd, memberType, "add"));
+        }
+
+        var hasChange = patchAuditChanges.Count > 0 || metadataChanged;
+        var privilegedPatchClassification = hasChange
+            ? await PreparePrivilegedGroupAuditAsync(
+                tenantId,
+                realmId,
+                groupId,
+                effectiveGroupSid,
+                existing.ObjectSid,
+                patchAuditChanges,
+                patchAuditChanges.Count == 0 ? "update" : "membership_change",
+                now,
+                ct).ConfigureAwait(false)
+            : null;
+
         if (membersToRemove.Count == 0 && membersToAdd.Count == 0 && metadataChanged)
         {
             await RecordRequiredScimAuditAsync(
@@ -614,17 +707,10 @@ public sealed class ScimService : IScimService
         }
         else
         {
-            foreach (var (toRemove, explicitType) in membersToRemove)
-            {
-                var memberType = explicitType ?? (currentUserSet.Contains(toRemove) ? ScimMemberTypes.User : ScimMemberTypes.Group);
-                await RecordMembershipChangeAuditAsync(
-                    tenantId, realmId, groupId, effectiveGroupSid, toRemove, memberType, "remove", now, ct).ConfigureAwait(false);
-            }
-
-            foreach (var (toAdd, memberType) in membersToAdd)
+            foreach (var change in patchAuditChanges)
             {
                 await RecordMembershipChangeAuditAsync(
-                    tenantId, realmId, groupId, effectiveGroupSid, toAdd, memberType, "add", now, ct).ConfigureAwait(false);
+                    tenantId, realmId, groupId, effectiveGroupSid, change.MemberKey, change.MemberType, change.Operation, now, ct).ConfigureAwait(false);
             }
         }
 
@@ -633,10 +719,12 @@ public sealed class ScimService : IScimService
             await _repository.UpdateGroupAsync(tenantId, realmId, updatedGroup, ct).ConfigureAwait(false);
         }
 
+        var invalidateAllRoles = updatedGroup is not null && !string.Equals(existing.ObjectSid, updatedGroup.ObjectSid, StringComparison.OrdinalIgnoreCase);
         foreach (var (toRemove, explicitType) in membersToRemove)
         {
             if (explicitType == ScimMemberTypes.Group)
             {
+                invalidateAllRoles = true;
                 await _repository.RemoveGroupNestingEdgeAsync(tenantId, realmId, groupId, toRemove, ct).ConfigureAwait(false);
             }
             else if (explicitType == ScimMemberTypes.User)
@@ -646,6 +734,7 @@ public sealed class ScimService : IScimService
             }
             else
             {
+                invalidateAllRoles = true;
                 await _repository.RemoveGroupMemberAsync(tenantId, realmId, groupId, toRemove, ct).ConfigureAwait(false);
                 await _repository.RemoveGroupNestingEdgeAsync(tenantId, realmId, groupId, toRemove, ct).ConfigureAwait(false);
                 _roleCache?.Invalidate(realmId, toRemove);
@@ -656,6 +745,7 @@ public sealed class ScimService : IScimService
         {
             if (memberType == ScimMemberTypes.Group)
             {
+                invalidateAllRoles = true;
                 await _repository.AddGroupNestingEdgeAsync(tenantId, realmId, groupId, toAdd, ct).ConfigureAwait(false);
             }
             else
@@ -665,9 +755,26 @@ public sealed class ScimService : IScimService
             }
         }
 
+        if (invalidateAllRoles)
+        {
+            _roleCache?.InvalidateAll();
+        }
+
         if (membersToRemove.Count > 0 || membersToAdd.Count > 0)
         {
             await _repository.IncrementRealmDeprovisionEpochAsync(tenantId, realmId, ct).ConfigureAwait(false);
+        }
+
+        if (hasChange)
+        {
+            await CompleteGroupChangeNotificationsAsync(
+                tenantId,
+                realmId,
+                groupId,
+                patchAuditChanges.Count == 0 ? "update" : "membership_change",
+                privilegedPatchClassification,
+                now,
+                ct).ConfigureAwait(false);
         }
 
         await RecordWriteContactAsync(tenantId, realmId, now, ct).ConfigureAwait(false);
@@ -683,6 +790,9 @@ public sealed class ScimService : IScimService
         }
 
         var now = _timeProvider.GetUtcNow();
+        var privilegedDeleteClassification = await PreparePrivilegedGroupAuditAsync(
+            tenantId, realmId, groupId, existing.ObjectSid, null, [], "delete", now, ct).ConfigureAwait(false);
+
         await RecordRequiredScimAuditAsync(
             tenantId,
             realmId,
@@ -697,8 +807,10 @@ public sealed class ScimService : IScimService
         {
             _roleCache?.Invalidate(realmId, memberKey);
         }
+        _roleCache?.InvalidateAll();
 
         await _repository.IncrementRealmDeprovisionEpochAsync(tenantId, realmId, ct).ConfigureAwait(false);
+        await CompleteGroupChangeNotificationsAsync(tenantId, realmId, groupId, "delete", privilegedDeleteClassification, now, ct).ConfigureAwait(false);
         await RecordWriteContactAsync(tenantId, realmId, now, ct).ConfigureAwait(false);
         return true;
     }
@@ -787,184 +899,5 @@ public sealed class ScimService : IScimService
                 DetailsJson = JsonSerializer.Serialize(details)
             },
             ct);
-    }
-
-    private static void ValidateNoSelfNesting(string groupId, IReadOnlyList<ScimGroupMember>? members)
-    {
-        if (members is null)
-        {
-            return;
-        }
-
-        foreach (var member in members)
-        {
-            if (ScimRequestValidator.NormalizeMemberType(member.Type) == ScimMemberTypes.Group
-                && string.Equals(member.Value, groupId, StringComparison.Ordinal))
-            {
-                throw new ValidationException("A group cannot be nested as a member of itself.");
-            }
-        }
-    }
-
-    private static void ApplyUserPatchOperation(
-        ScimPatchOperation op,
-        ref bool activeStatus,
-        ref string? displayName,
-        ref string? email,
-        ref string? objectSid,
-        ref string? immutableId,
-        ref string? upn,
-        ref string? entraObjectId)
-    {
-        var isRemove = string.Equals(op.Op, "remove", StringComparison.OrdinalIgnoreCase);
-        var isSet = string.Equals(op.Op, "replace", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(op.Op, "add", StringComparison.OrdinalIgnoreCase);
-
-        var normalizedPath = op.Path?.Trim().ToLowerInvariant();
-        if (isRemove)
-        {
-            switch (normalizedPath)
-            {
-                case "objectsid":
-                case "urn:ietf:params:scim:schemas:extension:autheris:2.0:user:objectsid":
-                    objectSid = null;
-                    break;
-                case "onpremisesimmutableid":
-                case "urn:ietf:params:scim:schemas:extension:autheris:2.0:user:onpremisesimmutableid":
-                    immutableId = null;
-                    break;
-                case "userprincipalname":
-                case "urn:ietf:params:scim:schemas:extension:autheris:2.0:user:userprincipalname":
-                    upn = null;
-                    break;
-                case "entraobjectid":
-                case "urn:ietf:params:scim:schemas:extension:autheris:2.0:user:entraobjectid":
-                    entraObjectId = null;
-                    break;
-            }
-            return;
-        }
-
-        if (!isSet)
-        {
-            return;
-        }
-
-        switch (normalizedPath)
-        {
-            case "active":
-                if (op.Value is bool b) activeStatus = b;
-                else if (op.Value is JsonElement je && (je.ValueKind == JsonValueKind.True || je.ValueKind == JsonValueKind.False))
-                    activeStatus = je.GetBoolean();
-                else if (bool.TryParse(op.Value?.ToString(), out var parsed))
-                    activeStatus = parsed;
-                break;
-            case "displayname":
-                displayName = ExtractStringValue(op.Value);
-                break;
-            case "email":
-                email = ExtractStringValue(op.Value);
-                break;
-            case "objectsid":
-            case "urn:ietf:params:scim:schemas:extension:autheris:2.0:user:objectsid":
-                objectSid = ExtractStringValue(op.Value);
-                break;
-            case "onpremisesimmutableid":
-            case "urn:ietf:params:scim:schemas:extension:autheris:2.0:user:onpremisesimmutableid":
-                immutableId = ExtractStringValue(op.Value);
-                break;
-            case "userprincipalname":
-            case "urn:ietf:params:scim:schemas:extension:autheris:2.0:user:userprincipalname":
-                upn = ExtractStringValue(op.Value);
-                break;
-            case "entraobjectid":
-            case "urn:ietf:params:scim:schemas:extension:autheris:2.0:user:entraobjectid":
-                entraObjectId = ExtractStringValue(op.Value);
-                break;
-            case null or "":
-                if (op.Value is JsonElement valElem && valElem.ValueKind == JsonValueKind.Object)
-                {
-                    if (valElem.TryGetProperty("active", out var actElem)
-                        && (actElem.ValueKind == JsonValueKind.True || actElem.ValueKind == JsonValueKind.False))
-                    {
-                        activeStatus = actElem.GetBoolean();
-                    }
-                    if (valElem.TryGetProperty("displayName", out var dnElem)) displayName = dnElem.GetString();
-                    if (valElem.TryGetProperty("email", out var emElem)) email = emElem.GetString();
-                    if (valElem.TryGetProperty(ScimSchemaUris.AutherisUserExtension, out var extElem)
-                        && extElem.ValueKind == JsonValueKind.Object)
-                    {
-                        if (extElem.TryGetProperty("objectSid", out var sidEl)) objectSid = sidEl.GetString();
-                        if (extElem.TryGetProperty("onPremisesImmutableId", out var immEl)) immutableId = immEl.GetString();
-                        if (extElem.TryGetProperty("userPrincipalName", out var upnEl)) upn = upnEl.GetString();
-                        if (extElem.TryGetProperty("entraObjectId", out var oidEl)) entraObjectId = oidEl.GetString();
-                    }
-                }
-                break;
-        }
-    }
-
-    private static bool IsGroupObjectSidPath(string? path)
-    {
-        if (string.IsNullOrWhiteSpace(path))
-        {
-            return false;
-        }
-
-        var trimmed = path.Trim();
-        return string.Equals(trimmed, "objectSid", StringComparison.OrdinalIgnoreCase)
-            || string.Equals(trimmed, $"{ScimSchemaUris.AutherisGroupExtension}:objectSid", StringComparison.OrdinalIgnoreCase);
-    }
-
-    private static string? ExtractStringValue(object? value) => value switch
-    {
-        null => null,
-        string s => s,
-        JsonElement je when je.ValueKind == JsonValueKind.String => je.GetString(),
-        JsonElement je when je.ValueKind == JsonValueKind.Null => null,
-        _ => value.ToString()
-    };
-
-    private static void ExtractMembers(object? value, string? defaultType, List<(string Value, string? ExplicitType)> target)
-    {
-        if (value is JsonElement arr && arr.ValueKind == JsonValueKind.Array)
-        {
-            foreach (var item in arr.EnumerateArray())
-            {
-                if (item.TryGetProperty("value", out var valProp) && valProp.ValueKind == JsonValueKind.String)
-                {
-                    var val = valProp.GetString();
-                    if (string.IsNullOrWhiteSpace(val)) continue;
-                    string? explicitType = defaultType;
-                    if (item.TryGetProperty("type", out var typeProp) && typeProp.ValueKind == JsonValueKind.String)
-                    {
-                        explicitType = ScimRequestValidator.NormalizeMemberType(typeProp.GetString());
-                    }
-
-                    target.Add((val, explicitType));
-                }
-            }
-        }
-        else if (value is IEnumerable<ScimGroupMember> memberList)
-        {
-            foreach (var m in memberList)
-            {
-                if (!string.IsNullOrWhiteSpace(m.Value))
-                {
-                    var explicitType = m.Type is null ? defaultType : ScimRequestValidator.NormalizeMemberType(m.Type);
-                    target.Add((m.Value, explicitType));
-                }
-            }
-        }
-    }
-
-    private static void ExtractMembersToAdd(object? value, List<(string Value, string Type)> target)
-    {
-        var raw = new List<(string Value, string? ExplicitType)>();
-        ExtractMembers(value, ScimMemberTypes.User, raw);
-        foreach (var (val, explicitType) in raw)
-        {
-            target.Add((val, explicitType ?? ScimMemberTypes.User));
-        }
     }
 }
