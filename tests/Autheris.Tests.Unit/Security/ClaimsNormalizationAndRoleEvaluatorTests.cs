@@ -28,7 +28,7 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
         identity.AddClaim(new Claim("primarysid", "S-1-5-21-123456789-500"));
         identity.AddClaim(new Claim("groupsid", "S-1-5-21-123456789-512"));
         identity.AddClaim(new Claim("http://schemas.microsoft.com/ws/2008/06/identity/claims/groupsid", "S-1-5-21-123456789-513"));
-        identity.AddClaim(new Claim("role", "DataOwner"));
+        identity.AddClaim(new Claim("role", "SchemaPublisher"));
 
         var context = new DefaultHttpContext
         {
@@ -44,7 +44,7 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
         // Group claims are not produced by the normalizer: the group resolver of the identity pipeline owns them.
         user.GetGroupSids().ShouldBeEmpty();
 
-        user.FindAll(ClaimTypes.Role).Select(c => c.Value).ShouldContain("DataOwner");
+        user.FindAll(ClaimTypes.Role).Select(c => c.Value).ShouldContain("SchemaPublisher");
     }
 
     [Fact]
@@ -53,7 +53,7 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
         var identity = new ClaimsIdentity("Bearer");
         identity.AddClaim(new Claim("sub", "oidc-user-999"));
         identity.AddClaim(new Claim("tid", "tenant-eu-west"));
-        identity.AddClaim(new Claim("roles", "tenant-eu-west:DataOwner"));
+        identity.AddClaim(new Claim("roles", "tenant-eu-west:SchemaPublisher"));
         identity.AddClaim(new Claim("roles", "SecurityAuditor"));
 
         var context = new DefaultHttpContext
@@ -68,7 +68,7 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
         user.FindFirst("tenant_id")?.Value.ShouldBe("tenant-eu-west");
 
         var roles = user.FindAll(ClaimTypes.Role).Select(c => c.Value).ToList();
-        roles.ShouldContain("tenant-eu-west:DataOwner");
+        roles.ShouldContain("tenant-eu-west:SchemaPublisher");
         roles.ShouldContain("SecurityAuditor");
 
     }
@@ -120,16 +120,15 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
         var user = new ClaimsPrincipal(identity);
 
         _evaluator.HasRole(user, GatewayRole.ClusterAdmin).ShouldBeTrue();
-        _evaluator.HasRole(user, GatewayRole.GovernanceAdmin).ShouldBeTrue();
+        _evaluator.HasRole(user, GatewayRole.GovernanceAdmin).ShouldBeFalse();
         _evaluator.HasRole(user, GatewayRole.TenantAdmin).ShouldBeTrue();
-        _evaluator.HasRole(user, GatewayRole.DataOwner).ShouldBeTrue();
-        _evaluator.HasRole(user, GatewayRole.DataSteward).ShouldBeTrue();
         _evaluator.HasRole(user, GatewayRole.SchemaPublisher).ShouldBeTrue();
         _evaluator.HasRole(user, GatewayRole.SecurityAuditor).ShouldBeTrue();
         _evaluator.HasRole(user, GatewayRole.Consumer).ShouldBeTrue();
+        _evaluator.HasRole(user, GatewayRole.CatalogArtifactUploader).ShouldBeTrue();
 
-        // Also satisfies any tenant-scoped query
-        _evaluator.HasRole(user, GatewayRole.DataOwner, "any-tenant").ShouldBeTrue();
+        // Also satisfies any tenant-scoped query for implied roles
+        _evaluator.HasRole(user, GatewayRole.SchemaPublisher, "any-tenant").ShouldBeTrue();
     }
 
     [Fact]
@@ -140,8 +139,7 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
 
         // Within tenant-a scope
         _evaluator.HasRole(user, GatewayRole.TenantAdmin, "tenant-a").ShouldBeTrue();
-        _evaluator.HasRole(user, GatewayRole.DataOwner, "tenant-a").ShouldBeTrue();
-        _evaluator.HasRole(user, GatewayRole.DataSteward, "tenant-a").ShouldBeTrue();
+        _evaluator.HasRole(user, GatewayRole.SecurityAuditor, "tenant-a").ShouldBeTrue();
         _evaluator.HasRole(user, GatewayRole.SchemaPublisher, "tenant-a").ShouldBeTrue();
         _evaluator.HasRole(user, GatewayRole.Consumer, "tenant-a").ShouldBeTrue();
 
@@ -173,15 +171,15 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
     [Fact]
     public void Evaluator_ExactRoleChecks_DoNotApplyHierarchy()
     {
-        var identity = new ClaimsIdentity([new Claim(ClaimTypes.Role, "Analyst")], "Test");
+        var identity = new ClaimsIdentity([new Claim(ClaimTypes.Role, "SchemaPublisher")], "Test");
         var user = new ClaimsPrincipal(identity);
 
         // Exact match works
-        _evaluator.HasExactRole(user, "Analyst").ShouldBeTrue();
+        _evaluator.HasExactRole(user, "SchemaPublisher").ShouldBeTrue();
 
-        // Exact match fails when checking a role not literally held, even if Analyst maps to Consumer
+        // Exact match fails when checking a role not literally held, even if SchemaPublisher implies Consumer
         _evaluator.HasExactRole(user, "Consumer").ShouldBeFalse();
-        _evaluator.HasAnyExactRole(user, ["SchemaPublisher", "SchemaAdmin"]).ShouldBeFalse();
+        _evaluator.HasAnyExactRole(user, ["GovernanceAdmin", "TenantAdmin"]).ShouldBeFalse();
 
         // Hierarchical match works
         _evaluator.HasRole(user, GatewayRole.Consumer).ShouldBeTrue();
@@ -195,18 +193,17 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
             UserSid = new Sid("user-1"),
             TenantId = new TenantId("tenant-1"),
             GroupSids = new HashSet<Sid>(),
-            TenantRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "DataOwner" },
+            TenantRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "SchemaPublisher" },
             ClusterRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
             AuthenticationScheme = "Bearer"
         };
 
-        secContext.HasRole(GatewayRole.DataOwner).ShouldBeTrue();
-        secContext.HasRole(GatewayRole.DataSteward).ShouldBeTrue(); // Implied by DataOwner
-        secContext.HasRole(GatewayRole.Consumer).ShouldBeTrue();    // Implied by DataOwner
+        secContext.HasRole(GatewayRole.SchemaPublisher).ShouldBeTrue();
+        secContext.HasRole(GatewayRole.Consumer).ShouldBeTrue();    // Implied by SchemaPublisher
         secContext.HasRole(GatewayRole.ClusterAdmin).ShouldBeFalse();
         secContext.HasRole(GatewayRole.GovernanceAdmin).ShouldBeFalse();
 
-        secContext.HasAnyRole(GatewayRole.GovernanceAdmin, GatewayRole.DataOwner).ShouldBeTrue();
+        secContext.HasAnyRole(GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher).ShouldBeTrue();
     }
 
     [Fact]

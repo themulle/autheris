@@ -39,7 +39,7 @@ public sealed class VirtualFilterApprovalReasonTests
         new(FilterAuthor, IsSync: false, Roles: new HashSet<string>([nameof(GatewayRole.FilterAdmin)], StringComparer.OrdinalIgnoreCase));
 
     private static readonly VirtualFilterActor FullOwnerActor =
-        new(FullOwnerDelegate, IsSync: false, Roles: new HashSet<string>([nameof(GatewayRole.DataOwner)], StringComparer.OrdinalIgnoreCase));
+        new(FullOwnerDelegate, IsSync: false, Roles: new HashSet<string>([nameof(GatewayRole.Consumer)], StringComparer.OrdinalIgnoreCase));
 
     private static readonly VirtualFilterActor ApproverActor =
         new(Approver, IsSync: false, Roles: new HashSet<string>([nameof(GatewayRole.GovernanceAdmin)], StringComparer.OrdinalIgnoreCase));

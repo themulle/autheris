@@ -40,7 +40,7 @@ public sealed class DbtSyncEndpointCreationTests
     public async Task Sync_NonAdmin_Returns403AndServiceNotCalled()
     {
         var service = Substitute.For<IDbtMetadataIngestionService>();
-        var ctx = Context("DataOwner");
+        var ctx = Context("Consumer");
 
         var result = await DbtEndpoints.HandleSyncAsync(ctx, new ModuleRequestContext(), service);
         await result.ExecuteAsync(ctx);

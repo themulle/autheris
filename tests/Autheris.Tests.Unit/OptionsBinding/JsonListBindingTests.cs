@@ -67,7 +67,7 @@ public class JsonListBindingTests
         o.SystemMetrics.AllowedRoles.ShouldBeNull();
         o.WebSql.CrossSource.AllowedHttpAuthModes.ShouldBeNull();
 
-        o.Authentication.ForwardAuth.GetEffectiveAllowedRoles().ToArray().ShouldBe(["GatewayUser", "Consumer", "Analyst", "Developer"]);
+        o.Authentication.ForwardAuth.GetEffectiveAllowedRoles().ToArray().ShouldBe(["GatewayUser", "Consumer"]);
         o.Authentication.EntraId.GetEffectiveReadOnlyScopes().ToArray().ShouldBe(["Agent.Read", "App.Read"]);
         o.ReverseProxy.GetEffectiveKnownNetworks().ToArray().ShouldBe(["127.0.0.1/32", "::1/128"]);
     }

@@ -15,19 +15,15 @@ public enum GatewayRole
     GovernanceAdmin = 3,
     SecurityAuditor = 4,
 
-    // Data Domain & Stewardship (Can be tenant-scoped)
-    DataOwner = 10,
-    DataSteward = 11,
+    // Schema Publishing & Consumption (Can be tenant-scoped)
     SchemaPublisher = 12,
     Consumer = 20,
 
-    // Virtual filters (decision 2): maintenance and the file repository sync are separate; neither is implied by
-    // GovernanceAdmin or TenantAdmin, only by ClusterAdmin.
+    // Virtual filters: maintenance and repository sync are separate and never implied by ClusterAdmin, GovernanceAdmin, or TenantAdmin.
     FilterAdmin = 30,
     FilterSync = 31,
 
-    // Caller attributes (BC-129-03, BC-129-13): approving data-granting changes and revealing attribute values are separate roles;
-    // neither is implied by GovernanceAdmin or TenantAdmin, only by ClusterAdmin.
+    // Caller attributes: approving data-granting changes and revealing attribute values are separate and never implied by ClusterAdmin, GovernanceAdmin, or TenantAdmin.
     CallerAttributeApprover = 32,
     CallerAttributeInspector = 33,
 
@@ -48,9 +44,6 @@ public static class GatewayRoleExtensions
         ["TenantAdmin"] = GatewayRole.TenantAdmin,
         ["GovernanceAdmin"] = GatewayRole.GovernanceAdmin,
         ["SecurityAuditor"] = GatewayRole.SecurityAuditor,
-        ["Auditor"] = GatewayRole.SecurityAuditor,
-        ["DataOwner"] = GatewayRole.DataOwner,
-        ["DataSteward"] = GatewayRole.DataSteward,
         ["SchemaPublisher"] = GatewayRole.SchemaPublisher,
         ["Consumer"] = GatewayRole.Consumer,
         ["FilterAdmin"] = GatewayRole.FilterAdmin,
@@ -59,8 +52,7 @@ public static class GatewayRoleExtensions
         ["CallerAttributeInspector"] = GatewayRole.CallerAttributeInspector,
         ["CatalogArtifactUploader"] = GatewayRole.CatalogArtifactUploader,
         ["DataProductAdmin"] = GatewayRole.DataProductAdmin,
-        ["DataProductSync"] = GatewayRole.DataProductSync,
-        ["Analyst"] = GatewayRole.Consumer
+        ["DataProductSync"] = GatewayRole.DataProductSync
     };
 
     /// <summary>
@@ -75,7 +67,7 @@ public static class GatewayRoleExtensions
             return false;
         }
 
-        // Support tenant-prefixed roles: "tenant-id:DataOwner"
+        // Support tenant-prefixed roles: "tenant-id:Consumer"
         var colonIdx = roleName.LastIndexOf(':', StringComparison.Ordinal);
         var lookupName = colonIdx >= 0 ? roleName[(colonIdx + 1)..] : roleName;
 
@@ -160,39 +152,36 @@ public static class GatewayRoleExtensions
             return false;
         }
 
-        // ClusterAdmin implies all roles
+        // ClusterAdmin implies IT-administration, auditing, publishing, consumption, and catalog artifact upload.
+        // It does NOT imply GovernanceAdmin, Filter*, CallerAttribute*, or DataProduct* roles.
         if (granted == GatewayRole.ClusterAdmin)
         {
-            return true;
+            return required is GatewayRole.TenantAdmin
+                or GatewayRole.SecurityAuditor
+                or GatewayRole.SchemaPublisher
+                or GatewayRole.Consumer
+                or GatewayRole.CatalogArtifactUploader;
         }
 
-        // SEC M-1: TenantAdmin implies stewardship, publishing, auditing, consumer within tenant scope.
-        // It NEVER implies GovernanceAdmin (global governance) or ClusterAdmin.
+        // TenantAdmin implies auditing, publishing, and consumer within tenant scope.
+        // It does NOT imply GovernanceAdmin, ClusterAdmin, or dedicated filter/caller/product roles.
         if (granted == GatewayRole.TenantAdmin)
         {
-            return required is GatewayRole.DataOwner or GatewayRole.DataSteward or GatewayRole.SchemaPublisher or GatewayRole.SecurityAuditor or GatewayRole.Consumer;
+            return required is GatewayRole.SecurityAuditor
+                or GatewayRole.SchemaPublisher
+                or GatewayRole.Consumer;
         }
 
-        // GovernanceAdmin implies stewardship, publishing, auditing, consumer
+        // GovernanceAdmin implies auditing, publishing, and consumer.
         if (granted == GatewayRole.GovernanceAdmin)
         {
-            return required is GatewayRole.DataOwner or GatewayRole.DataSteward or GatewayRole.SchemaPublisher or GatewayRole.SecurityAuditor or GatewayRole.Consumer;
+            return required is GatewayRole.SecurityAuditor
+                or GatewayRole.SchemaPublisher
+                or GatewayRole.Consumer;
         }
 
-        // DataOwner implies DataSteward and Consumer
-        if (granted == GatewayRole.DataOwner)
-        {
-            return required is GatewayRole.DataSteward or GatewayRole.Consumer;
-        }
-
-        // DataSteward implies Consumer
-        if (granted == GatewayRole.DataSteward)
-        {
-            return required is GatewayRole.Consumer;
-        }
-
-        // SchemaPublisher implies Consumer
-        if (granted == GatewayRole.SchemaPublisher)
+        // SchemaPublisher and SecurityAuditor imply Consumer.
+        if (granted is GatewayRole.SchemaPublisher or GatewayRole.SecurityAuditor)
         {
             return required is GatewayRole.Consumer;
         }

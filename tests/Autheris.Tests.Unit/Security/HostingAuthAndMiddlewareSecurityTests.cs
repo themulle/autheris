@@ -312,11 +312,10 @@ public sealed class HostingAuthAndMiddlewareSecurityTests
         authz.FallbackPolicy.ShouldNotBeNull();
         authz.FallbackPolicy!.Requirements.ShouldContain(r => r is DenyAnonymousAuthorizationRequirement);
 
-        authz.GetPolicy(GatewayPolicies.GovernanceAdmin).ShouldNotBeNull();
-        authz.GetPolicy(GatewayPolicies.Approver).ShouldNotBeNull();
-        authz.GetPolicy(GatewayPolicies.ClusterAdmin).ShouldNotBeNull();
-        authz.GetPolicy(GatewayPolicies.PrivacyAdmin).ShouldNotBeNull();
-        authz.GetPolicy(GatewayPolicies.SchemaAdmin).ShouldNotBeNull();
+        foreach (var policy in new[] { GatewayPolicies.GovernanceAdmin, GatewayPolicies.ItAdmin, GatewayPolicies.AuditRead, GatewayPolicies.ClusterAdmin, GatewayPolicies.AdminOnly, GatewayPolicies.SchemaPublisher })
+            authz.GetPolicy(policy).ShouldNotBeNull();
+        foreach (var removed in new[] { "Approver", "PrivacyAdmin", "SchemaAdmin" })
+            authz.GetPolicy(removed).ShouldBeNull();
     }
 
     [Fact]
@@ -328,26 +327,27 @@ public sealed class HostingAuthAndMiddlewareSecurityTests
         using var sp = services.BuildServiceProvider();
         var authz = sp.GetRequiredService<IAuthorizationService>();
 
-        var developer = User("S-1-5-21-DEV", "Developer");
-        var steward = User("S-1-5-21-STEWARD", "DataSteward");
+        var consumer = User("S-1-5-21-DEV", "Consumer");
+        var govAdmin = User("S-1-5-21-GOV", "GovernanceAdmin");
         var clusterAdmin = User("S-1-5-21-ADMIN", "ClusterAdmin");
         var anonymousWithRoleClaim = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim(ClaimTypes.Role, "ClusterAdmin")]));
 
-        (await authz.AuthorizeAsync(developer, GatewayPolicies.ClusterAdmin)).Succeeded.ShouldBeFalse();
-        (await authz.AuthorizeAsync(developer, GatewayPolicies.Approver)).Succeeded.ShouldBeFalse();
+        (await authz.AuthorizeAsync(consumer, GatewayPolicies.ClusterAdmin)).Succeeded.ShouldBeFalse();
+        (await authz.AuthorizeAsync(consumer, GatewayPolicies.GovernanceAdmin)).Succeeded.ShouldBeFalse();
         (await authz.AuthorizeAsync(anonymousWithRoleClaim, GatewayPolicies.ClusterAdmin)).Succeeded.ShouldBeFalse();
 
-        (await authz.AuthorizeAsync(steward, GatewayPolicies.Approver)).Succeeded.ShouldBeTrue();
+        (await authz.AuthorizeAsync(govAdmin, GatewayPolicies.GovernanceAdmin)).Succeeded.ShouldBeTrue();
         (await authz.AuthorizeAsync(clusterAdmin, GatewayPolicies.ClusterAdmin)).Succeeded.ShouldBeTrue();
-        (await authz.AuthorizeAsync(clusterAdmin, GatewayPolicies.GovernanceAdmin)).Succeeded.ShouldBeTrue();
+        (await authz.AuthorizeAsync(clusterAdmin, GatewayPolicies.ItAdmin)).Succeeded.ShouldBeTrue();
+        (await authz.AuthorizeAsync(clusterAdmin, GatewayPolicies.GovernanceAdmin)).Succeeded.ShouldBeFalse();
     }
 
     [Fact]
     public void M03_HasAnyRole_AcceptsRawRolesClaim()
     {
-        var principal = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim("roles", "PrivacyAdmin")], "Bearer"));
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([DefaultTenantCaller.Claim, new Claim("roles", "SecurityAuditor")], "Bearer"));
 
-        GatewayPolicies.HasAnyRole(principal, GatewayPolicies.PrivacyAdminRoles).ShouldBeTrue();
+        GatewayPolicies.HasAnyRole(principal, GatewayPolicies.AuditReadRoles).ShouldBeTrue();
         GatewayPolicies.HasAnyRole(principal, GatewayPolicies.ClusterAdminRoles).ShouldBeFalse();
         GatewayPolicies.HasAnyRole(null, GatewayPolicies.ClusterAdminRoles).ShouldBeFalse();
     }

@@ -77,9 +77,9 @@ internal static class EndpointSecurity
            && !IsCanonicalClusterAdmin(principal)
            && GatewayPolicies.HasRole(principal, GatewayRole.GovernanceAdmin);
 
-    /// <summary>SEC C-05: Approver roles (DataSteward, DataOwner, GovernanceAdmin) or ClusterAdmin.</summary>
+    /// <summary>Approver role check (GovernanceAdmin).</summary>
     public static bool IsApprover(ClaimsPrincipal? principal)
-        => GatewayPolicies.HasAnyRole(principal, [GatewayRole.DataSteward, GatewayRole.DataOwner, GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin]);
+        => GatewayPolicies.HasRole(principal, GatewayRole.GovernanceAdmin);
 
     /// <summary>
     /// Canonical caller identity from HttpContext using SecurityPrincipalContext if authenticated,

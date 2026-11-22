@@ -9,38 +9,35 @@ using System.Security.Claims;
 using Autheris.Api.Endpoints;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
+using Autheris.Domain.Common;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Authorization;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 
 /// <summary>
-/// SEC M-03 & K-K10: Enterprise Named Authorization Policies and RBAC integration.
+/// Enterprise named authorization policies and RBAC integration.
 /// Standardizes declarative policy attachment via <c>.RequireAuthorization(GatewayPolicies.GovernanceAdmin)</c>
-/// and typed role requirements via <c>.RequireGatewayRole(GatewayRole.DataSteward)</c>.
+/// and typed role requirements via <c>.RequireGatewayRole(GatewayRole.GovernanceAdmin)</c>.
 /// </summary>
 public static class GatewayPolicies
 {
     private static readonly IGatewayRoleEvaluator Evaluator = new GatewayRoleEvaluator();
 
     public const string GovernanceAdmin = "GovernanceAdmin";
-    public const string Approver = "Approver";
+    public const string ItAdmin = nameof(ItAdmin);
+    public const string AuditRead = nameof(AuditRead);
     public const string ClusterAdmin = "ClusterAdmin";
-    public const string PrivacyAdmin = "PrivacyAdmin";
-    public const string SchemaAdmin = "SchemaAdmin";
     public const string SchemaPublisher = "SchemaPublisher";
 
-    /// <summary>SEC2-09: Prometheus scrape endpoint; any authenticated user is not enough.</summary>
+    /// <summary>Prometheus scrape endpoint; any authenticated user is not enough.</summary>
     public const string MetricsScrape = "MetricsScrape";
 
     // Declarative endpoint authorization policies
     public const string AdminOnly = "AdminOnly";
-    public const string OperatorOrAbove = "OperatorOrAbove";
-    public const string AuditorOrAbove = "AuditorOrAbove";
-    public const string DataStewardOrAdmin = "DataStewardOrAdmin";
     public const string AuthenticatedCaller = "AuthenticatedCaller";
     public const string MetricsScraper = "MetricsScraper";
-    public const string McpCaller = "McpCaller";
+    public const string McpCaller = nameof(McpCaller);
     public const string UsageAdmin = "UsageAdmin";
     public const string CatalogRead = "CatalogRead";
     public const string CatalogReadAdmin = "CatalogReadAdmin";
@@ -67,7 +64,6 @@ public static class GatewayPolicies
     public const string ProfileAdmin = "ProfileAdmin";
     public const string ProfileRead = "ProfileRead";
     public const string SqlEndpointRegister = "SqlEndpointRegister";
-    public const string GovernanceAuditRead = "GovernanceAuditRead";
     public const string SunsettingRead = "SunsettingRead";
     public const string SunsettingEvaluate = "SunsettingEvaluate";
     public const string ComplianceCertificateRead = "ComplianceCertificateRead";
@@ -79,42 +75,37 @@ public static class GatewayPolicies
     public const string Scim = "Scim";
     public const string ScimProvisionerRole = "SCIM_PROVISIONER";
 
-    public static readonly string[] GovernanceAdminRoles = ["GovernanceAdmin", "ClusterAdmin"];
-    public static readonly string[] ApproverRoles = ["DataSteward", "DataOwner", "GovernanceAdmin", "ClusterAdmin"];
-    public static readonly string[] ClusterAdminRoles = ["ClusterAdmin"];
-    public static readonly string[] PrivacyAdminRoles = ["GovernanceAdmin", "PrivacyAdmin", "DataProtectionOfficer", "ClusterAdmin"];
-    public static readonly string[] SchemaAdminRoles = ["GovernanceAdmin", "SchemaAdmin", "GatewayAdmin", "PlatformAdmin", "ClusterAdmin"];
-    public static readonly string[] SchemaPublisherRoles = ["GovernanceAdmin", "SchemaAdmin", "GatewayAdmin", "PlatformAdmin", "ClusterAdmin", "Developer", "DataOwner"];
-    public static readonly string[] MetricsScrapeRoles = ["MetricsScraper", "ClusterAdmin"];
+    public static readonly string[] GovernanceAdminRoles = ["GovernanceAdmin"];
+    public static readonly string[] ItAdminRoles = ["TenantAdmin"];
+    public static readonly string[] AuditReadRoles = ["GovernanceAdmin", "SecurityAuditor"];
+    public static readonly string[] ClusterAdminRoles = [];
+    public static readonly string[] SchemaPublisherRoles = ["SchemaPublisher", "GovernanceAdmin", "TenantAdmin"];
+    public static readonly string[] MetricsScrapeRoles = ["MetricsScraper"];
 
-    public static readonly string[] AdminOnlyRoles = ["GovernanceAdmin", "TenantAdmin", "SecurityAdmin", "GatewayAdmin", "PlatformAdmin", "ClusterAdmin"];
-    public static readonly string[] OperatorOrAboveRoles = ["Operator", "DataSteward", "DataOwner", "SchemaAdmin", "GovernanceAdmin", "TenantAdmin", "SecurityAdmin", "GatewayAdmin", "PlatformAdmin", "ClusterAdmin"];
-    public static readonly string[] AuditorOrAboveRoles = ["SecurityAuditor", "Auditor", "PrivacyAdmin", "DataProtectionOfficer", "GovernanceAdmin", "TenantAdmin", "SecurityAdmin", "ClusterAdmin"];
-    public static readonly string[] DataStewardOrAdminRoles = ["DataSteward", "DataOwner", "GovernanceAdmin", "TenantAdmin", "ClusterAdmin"];
-    public static readonly string[] McpCallerRoles = ["AiAgent", "McpCaller", "Developer", "Consumer", "DataSteward", "DataOwner", "GovernanceAdmin", "TenantAdmin", "ClusterAdmin"];
-    public static readonly string[] UsageAdminRoles = ["TenantAdmin", "ClusterAdmin"];
+    public static readonly string[] AdminOnlyRoles = ["GovernanceAdmin", "TenantAdmin"];
+    public static readonly string[] McpCallerRoles = ["Consumer", "SchemaPublisher", "SecurityAuditor", "GovernanceAdmin", "TenantAdmin"];
+    public static readonly string[] UsageAdminRoles = ["TenantAdmin"];
     public static readonly string[] ScimProvisionerRoles = [ScimProvisionerRole];
-    public static readonly string[] CatalogArtifactUploaderRoles = ["CatalogArtifactUploader", "GovernanceAdmin", "ClusterAdmin"];
-    public static readonly string[] CallerAttributeReadRoles = ["GovernanceAdmin", "SecurityAuditor", "FilterAdmin", "CallerAttributeApprover", "ClusterAdmin"];
-    public static readonly string[] CallerAttributeApproveRoles = ["GovernanceAdmin", "CallerAttributeApprover", "ClusterAdmin"];
-    public static readonly string[] CallerAttributeSimulateRoles = ["GovernanceAdmin", "FilterAdmin", "ClusterAdmin"];
-    public static readonly string[] VirtualFilterReadRoles = ["FilterAdmin", "FilterSync", "GovernanceAdmin", "SecurityAuditor", "ClusterAdmin"];
-    public static readonly string[] VirtualFilterWriteRoles = ["FilterAdmin", "GovernanceAdmin", "ClusterAdmin"];
-    public static readonly string[] VirtualFilterApproveRoles = ["GovernanceAdmin", "DataOwner", "ClusterAdmin"];
-    public static readonly string[] FilterAdminRoles = ["FilterAdmin", "ClusterAdmin"];
-    public static readonly string[] VirtualFilterSyncPlanRoles = ["FilterSync", "FilterAdmin", "ClusterAdmin"];
-    public static readonly string[] VirtualFilterSyncApplyRoles = ["FilterSync", "ClusterAdmin"];
-    public static readonly string[] EffectiveFilterInspectRoles = ["FilterAdmin", "GovernanceAdmin", "SecurityAuditor", "ClusterAdmin"];
-    public static readonly string[] ProductOwnerReadRoles = ["GovernanceAdmin", "TenantAdmin", "SecurityAuditor", "DataProductAdmin", "ClusterAdmin"];
-    public static readonly string[] ProductOwnerAdminRoles = ["GovernanceAdmin", "TenantAdmin", "ClusterAdmin"];
-    public static readonly string[] ProductSyncRoles = ["DataProductSync", "ClusterAdmin"];
-    public static readonly string[] OpenApiPublishRoles = ["GovernanceAdmin", "SchemaPublisher", "TenantAdmin", "ClusterAdmin"];
-    public static readonly string[] ProfileAdminRoles = ["ClusterAdmin", "TenantAdmin", "GovernanceAdmin", "SecurityAdmin"];
-    public static readonly string[] ProfileReadRoles = ["ClusterAdmin", "TenantAdmin", "GovernanceAdmin", "SecurityAuditor", "SecurityAdmin"];
-    public static readonly string[] GovernanceAuditReadRoles = ["PrivacyAdmin", "GovernanceAdmin", "TenantAdmin", "SecurityAuditor", "DataOwner", "ClusterAdmin"];
-    public static readonly string[] SunsettingReadRoles = ["GovernanceAdmin", "SchemaPublisher", "DataOwner", "TenantAdmin", "ClusterAdmin"];
-    public static readonly string[] SunsettingEvaluateRoles = ["GovernanceAdmin", "SchemaPublisher", "DataOwner", "Consumer", "TenantAdmin", "ClusterAdmin"];
-    public static readonly string[] ComplianceCertificateReadRoles = ["GovernanceAdmin", "TenantAdmin", "SecurityAuditor", "ClusterAdmin"];
+    public static readonly string[] CatalogArtifactUploaderRoles = ["CatalogArtifactUploader"];
+    public static readonly string[] CallerAttributeReadRoles = ["GovernanceAdmin", "SecurityAuditor", "FilterAdmin", "CallerAttributeApprover"];
+    public static readonly string[] CallerAttributeApproveRoles = ["GovernanceAdmin", "CallerAttributeApprover"];
+    public static readonly string[] CallerAttributeSimulateRoles = ["GovernanceAdmin", "FilterAdmin"];
+    public static readonly string[] VirtualFilterReadRoles = ["FilterAdmin", "FilterSync", "GovernanceAdmin", "SecurityAuditor"];
+    public static readonly string[] VirtualFilterWriteRoles = ["FilterAdmin", "GovernanceAdmin"];
+    public static readonly string[] VirtualFilterApproveRoles = ["GovernanceAdmin"];
+    public static readonly string[] FilterAdminRoles = ["FilterAdmin"];
+    public static readonly string[] VirtualFilterSyncPlanRoles = ["FilterSync", "FilterAdmin"];
+    public static readonly string[] VirtualFilterSyncApplyRoles = ["FilterSync"];
+    public static readonly string[] EffectiveFilterInspectRoles = ["FilterAdmin", "GovernanceAdmin", "SecurityAuditor"];
+    public static readonly string[] ProductOwnerReadRoles = ["GovernanceAdmin", "TenantAdmin", "SecurityAuditor", "DataProductAdmin"];
+    public static readonly string[] ProductOwnerAdminRoles = ["GovernanceAdmin", "TenantAdmin"];
+    public static readonly string[] ProductSyncRoles = ["DataProductSync"];
+    public static readonly string[] OpenApiPublishRoles = ["GovernanceAdmin", "SchemaPublisher", "TenantAdmin"];
+    public static readonly string[] ProfileAdminRoles = ["TenantAdmin", "GovernanceAdmin"];
+    public static readonly string[] ProfileReadRoles = ["TenantAdmin", "GovernanceAdmin", "SecurityAuditor"];
+    public static readonly string[] SunsettingReadRoles = ["GovernanceAdmin", "SchemaPublisher", "TenantAdmin"];
+    public static readonly string[] SunsettingEvaluateRoles = ["GovernanceAdmin", "SchemaPublisher", "Consumer", "TenantAdmin"];
+    public static readonly string[] ComplianceCertificateReadRoles = ["GovernanceAdmin", "TenantAdmin", "SecurityAuditor"];
 
     /// <summary>
     /// K-K10: Checks if principal satisfies any of the strongly-typed GatewayRole requirements,
@@ -157,28 +148,39 @@ public static class GatewayPolicies
     {
         ArgumentNullException.ThrowIfNull(options);
 
-        // SEC M-03: Endpoints without explicit metadata require an authenticated user.
+        // Endpoints without explicit metadata require an authenticated user.
         options.FallbackPolicy = new AuthorizationPolicyBuilder()
             .RequireAuthenticatedUser()
             .Build();
 
-        AddRolePolicy(options, GovernanceAdmin, GovernanceAdminRoles);
-        AddRolePolicy(options, Approver, ApproverRoles);
-        AddRolePolicy(options, ClusterAdmin, ClusterAdminRoles);
-        AddRolePolicy(options, PrivacyAdmin, PrivacyAdminRoles);
-        AddRolePolicy(options, SchemaAdmin, SchemaAdminRoles);
-        AddRolePolicy(options, SchemaPublisher, SchemaPublisherRoles);
-        AddRolePolicy(options, MetricsScrape, MetricsScrapeRoles);
+        options.AddPolicy(GovernanceAdmin, policy => policy
+            .RequireAuthenticatedUser()
+            .RequireAssertion(AllowsGovernanceAdmin));
+        options.AddPolicy(ItAdmin, policy => policy
+            .RequireAuthenticatedUser()
+            .RequireAssertion(AllowsItAdmin));
+        options.AddPolicy(AuditRead, policy => policy
+            .RequireAuthenticatedUser()
+            .RequireAssertion(AllowsAuditRead));
+        options.AddPolicy(ClusterAdmin, policy => policy
+            .RequireAuthenticatedUser()
+            .RequireAssertion(ctx => ClusterAdminPolicy.IsCanonicalClusterAdmin(ctx.User)));
+        AddSecurityRolePolicy(options, SchemaPublisher, [GatewayRole.SchemaPublisher], SchemaPublisherRoles);
+        options.AddPolicy(MetricsScrape, policy => policy
+            .RequireAuthenticatedUser()
+            .RequireAssertion(ctx => ClusterAdminPolicy.IsCanonicalClusterAdmin(ctx.User) || HasAnyRole(ctx.User, MetricsScrapeRoles)));
 
-        // 06 policies
-        AddRolePolicy(options, AdminOnly, AdminOnlyRoles);
-        AddRolePolicy(options, OperatorOrAbove, OperatorOrAboveRoles);
-        AddRolePolicy(options, AuditorOrAbove, AuditorOrAboveRoles);
-        AddRolePolicy(options, DataStewardOrAdmin, DataStewardOrAdminRoles);
-        AddRolePolicy(options, MetricsScraper, MetricsScrapeRoles);
-        AddRolePolicy(options, UsageAdmin, UsageAdminRoles);
+        options.AddPolicy(AdminOnly, policy => policy
+            .RequireAuthenticatedUser()
+            .RequireAssertion(ctx => AllowsGovernanceAdmin(ctx) || AllowsItAdmin(ctx)));
+        options.AddPolicy(MetricsScraper, policy => policy
+            .RequireAuthenticatedUser()
+            .RequireAssertion(ctx => ClusterAdminPolicy.IsCanonicalClusterAdmin(ctx.User) || HasAnyRole(ctx.User, MetricsScrapeRoles)));
+        options.AddPolicy(UsageAdmin, policy => policy
+            .RequireAuthenticatedUser()
+            .RequireAssertion(AllowsItAdmin));
         options.AddPolicy(AuthenticatedCaller, policy => policy.RequireAuthenticatedUser());
-        AddRolePolicy(options, McpCaller, McpCallerRoles);
+        AddSecurityRolePolicy(options, McpCaller, [GatewayRole.Consumer], McpCallerRoles);
         options.AddPolicy(CatalogRead, policy => policy
             .RequireAuthenticatedUser()
             .RequireAssertion(ctx => ExternalApiPermissions.AllowsCatalogRead(ctx.User)));
@@ -213,7 +215,7 @@ public static class GatewayPolicies
                 }
 
                 var tenantId = claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid ? claim.Tenant.Value : null;
-                return Evaluator.HasRole(ctx.User, GatewayRole.CatalogArtifactUploader, tenantId);
+                return HasAnyGatewayRolesCanonical(ctx.User, [GatewayRole.CatalogArtifactUploader], tenantId);
             }));
 
         // Security review: previously RequireAuthorization(GatewayAuthSchemes.Scim) referenced a non-existent policy.
@@ -227,70 +229,67 @@ public static class GatewayPolicies
             .RequireAssertion(MatchesRouteRealm));
 
         AddSecurityRolePolicy(options, CallerAttributeRead,
-            [GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor, GatewayRole.FilterAdmin, GatewayRole.CallerAttributeApprover, GatewayRole.ClusterAdmin],
+            [GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor, GatewayRole.FilterAdmin, GatewayRole.CallerAttributeApprover],
             CallerAttributeReadRoles);
         AddSecurityRolePolicy(options, CallerAttributeApprove,
-            [GatewayRole.GovernanceAdmin, GatewayRole.CallerAttributeApprover, GatewayRole.ClusterAdmin],
+            [GatewayRole.GovernanceAdmin, GatewayRole.CallerAttributeApprover],
             CallerAttributeApproveRoles);
         AddSecurityRolePolicy(options, CallerAttributeSimulate,
-            [GatewayRole.GovernanceAdmin, GatewayRole.FilterAdmin, GatewayRole.ClusterAdmin],
+            [GatewayRole.GovernanceAdmin, GatewayRole.FilterAdmin],
             CallerAttributeSimulateRoles);
 
         AddSecurityRolePolicy(options, VirtualFilterRead,
-            [GatewayRole.FilterAdmin, GatewayRole.FilterSync, GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor, GatewayRole.ClusterAdmin],
+            [GatewayRole.FilterAdmin, GatewayRole.FilterSync, GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor],
             VirtualFilterReadRoles);
         AddSecurityRolePolicy(options, VirtualFilterWrite,
-            [GatewayRole.FilterAdmin, GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin],
+            [GatewayRole.FilterAdmin, GatewayRole.GovernanceAdmin],
             VirtualFilterWriteRoles);
         AddSecurityRolePolicy(options, VirtualFilterApprove,
-            [GatewayRole.GovernanceAdmin, GatewayRole.DataOwner, GatewayRole.ClusterAdmin],
+            [GatewayRole.GovernanceAdmin],
             VirtualFilterApproveRoles);
         AddSecurityRolePolicy(options, FilterAdmin,
-            [GatewayRole.FilterAdmin, GatewayRole.ClusterAdmin],
+            [GatewayRole.FilterAdmin],
             FilterAdminRoles);
         AddSecurityRolePolicy(options, VirtualFilterSyncPlan,
-            [GatewayRole.FilterSync, GatewayRole.FilterAdmin, GatewayRole.ClusterAdmin],
+            [GatewayRole.FilterSync, GatewayRole.FilterAdmin],
             VirtualFilterSyncPlanRoles);
         AddSecurityRolePolicy(options, VirtualFilterSyncApply,
-            [GatewayRole.FilterSync, GatewayRole.ClusterAdmin],
+            [GatewayRole.FilterSync],
             VirtualFilterSyncApplyRoles);
         AddSecurityRolePolicy(options, EffectiveFilterInspect,
-            [GatewayRole.FilterAdmin, GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor, GatewayRole.ClusterAdmin],
+            [GatewayRole.FilterAdmin, GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor],
             EffectiveFilterInspectRoles);
 
         options.AddPolicy(ProductAccess, policy => policy
             .RequireAuthenticatedUser()
             .RequireAssertion(AllowsProductAccess));
         AddSecurityRolePolicy(options, ProductOwnerRead,
-            [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor, GatewayRole.DataProductAdmin, GatewayRole.ClusterAdmin],
+            [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor, GatewayRole.DataProductAdmin],
             ProductOwnerReadRoles);
         AddSecurityRolePolicy(options, ProductOwnerAdmin,
-            [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.ClusterAdmin],
+            [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin],
             ProductOwnerAdminRoles);
         AddSecurityRolePolicy(options, ProductSync,
-            [GatewayRole.DataProductSync, GatewayRole.ClusterAdmin],
+            [GatewayRole.DataProductSync],
             ProductSyncRoles);
 
         AddSecurityRolePolicy(options, OpenApiPublish,
-            [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher, GatewayRole.ClusterAdmin],
+            [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher, GatewayRole.TenantAdmin],
             OpenApiPublishRoles);
         AddSecurityRolePolicy(options, ProfileAdmin,
-            [GatewayRole.ClusterAdmin, GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin],
+            [GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin],
             ProfileAdminRoles);
         AddSecurityRolePolicy(options, ProfileRead,
-            [GatewayRole.ClusterAdmin, GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor],
+            [GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor],
             ProfileReadRoles);
-        AddSecurityRolePolicy(options, GovernanceAuditRead,
-            [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor, GatewayRole.DataOwner, GatewayRole.ClusterAdmin],
-            GovernanceAuditReadRoles);
         AddSecurityRolePolicy(options, SunsettingRead,
-            [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher, GatewayRole.DataOwner, GatewayRole.ClusterAdmin],
+            [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher, GatewayRole.TenantAdmin],
             SunsettingReadRoles);
         AddSecurityRolePolicy(options, SunsettingEvaluate,
-            [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher, GatewayRole.DataOwner, GatewayRole.Consumer, GatewayRole.ClusterAdmin],
+            [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher, GatewayRole.Consumer, GatewayRole.TenantAdmin],
             SunsettingEvaluateRoles);
         AddSecurityRolePolicy(options, ComplianceCertificateRead,
-            [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor, GatewayRole.ClusterAdmin],
+            [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor],
             ComplianceCertificateReadRoles);
 
         options.AddPolicy(SqlEndpointRegister, policy => policy
@@ -328,17 +327,13 @@ public static class GatewayPolicies
         roles = policyName switch
         {
             GovernanceAdmin => GovernanceAdminRoles,
-            Approver => ApproverRoles,
+            ItAdmin => ItAdminRoles,
+            AuditRead => AuditReadRoles,
             ClusterAdmin => ClusterAdminRoles,
-            PrivacyAdmin => PrivacyAdminRoles,
-            SchemaAdmin => SchemaAdminRoles,
             SchemaPublisher => SchemaPublisherRoles,
             MetricsScrape => MetricsScrapeRoles,
             MetricsScraper => MetricsScrapeRoles,
             AdminOnly => AdminOnlyRoles,
-            OperatorOrAbove => OperatorOrAboveRoles,
-            AuditorOrAbove => AuditorOrAboveRoles,
-            DataStewardOrAdmin => DataStewardOrAdminRoles,
             McpCaller => McpCallerRoles,
             UsageAdmin => UsageAdminRoles,
             Scim => ScimProvisionerRoles,
@@ -360,7 +355,6 @@ public static class GatewayPolicies
             ProfileAdmin => ProfileAdminRoles,
             ProfileRead => ProfileReadRoles,
             SqlEndpointRegister => ClusterAdminRoles,
-            GovernanceAuditRead => GovernanceAuditReadRoles,
             SunsettingRead => SunsettingReadRoles,
             SunsettingEvaluate => SunsettingEvaluateRoles,
             ComplianceCertificateRead => ComplianceCertificateReadRoles,
@@ -396,22 +390,127 @@ public static class GatewayPolicies
         }
     }
 
+    private static bool AllowsGovernanceAdmin(AuthorizationHandlerContext ctx)
+        => HasTenantBoundRole(ctx, nameof(GatewayRole.GovernanceAdmin));
+
+    private static bool AllowsItAdmin(AuthorizationHandlerContext ctx)
+    {
+        if (ctx.User?.Identity?.IsAuthenticated != true)
+        {
+            return false;
+        }
+
+        if (ctx.Resource is HttpContext httpContext && !TryGetSecurityContext(httpContext, out _))
+        {
+            return false;
+        }
+
+        return ClusterAdminPolicy.IsCanonicalClusterAdmin(ctx.User)
+            || HasTenantBoundRole(ctx, nameof(GatewayRole.TenantAdmin));
+    }
+
+    private static bool AllowsAuditRead(AuthorizationHandlerContext ctx)
+        => AllowsGovernanceAdmin(ctx)
+            || HasSecurityRole(ctx, [GatewayRole.SecurityAuditor], AuditReadRoles);
+
+    private static bool HasTenantBoundRole(AuthorizationHandlerContext ctx, string roleName)
+    {
+        if (ctx.User?.Identity?.IsAuthenticated != true)
+        {
+            return false;
+        }
+
+        var claim = Autheris.Domain.Tenancy.TenantClaimReader.Read(ctx.User);
+        if (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Invalid)
+        {
+            return false;
+        }
+
+        if (ctx.Resource is HttpContext httpContext)
+        {
+            if (!TryGetSecurityContext(httpContext, out var security) || security.TenantClaimInvalid)
+            {
+                return false;
+            }
+
+            var resolvedTenant = security.ResolvedTenant?.Value;
+            if (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid &&
+                !string.IsNullOrEmpty(resolvedTenant) &&
+                !string.Equals(claim.Tenant.Value, resolvedTenant, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+
+            var scopedRole = string.IsNullOrEmpty(resolvedTenant) ? null : $"{resolvedTenant}:{roleName}";
+            return security.TenantRoles.Contains(roleName) ||
+                   (scopedRole != null && security.TenantRoles.Contains(scopedRole));
+        }
+
+        var claimTenant = claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid ? claim.Tenant.Value : null;
+        var claimScopedRole = string.IsNullOrEmpty(claimTenant) ? null : $"{claimTenant}:{roleName}";
+        foreach (var raw in ctx.User.GetUserRoles())
+        {
+            var trimmed = raw.Trim();
+            if (string.Equals(trimmed, roleName, StringComparison.OrdinalIgnoreCase) ||
+                (claimScopedRole != null && string.Equals(trimmed, claimScopedRole, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     internal static bool HasSecurityRole(
         AuthorizationHandlerContext ctx,
         GatewayRole[] gatewayRoles,
         string[] fallbackRoleNames)
     {
+        _ = fallbackRoleNames;
+        if (Array.IndexOf(gatewayRoles, GatewayRole.GovernanceAdmin) >= 0 && AllowsGovernanceAdmin(ctx))
+        {
+            return true;
+        }
+
         if (ctx.Resource is HttpContext httpContext)
         {
-            if (!TryGetSecurityContext(httpContext, out var security))
+            if (!TryGetSecurityContext(httpContext, out var security) || security.TenantClaimInvalid)
             {
                 return false;
             }
 
-            return security.HasAnyRole(gatewayRoles) || HasAnyFallbackRole(ctx.User, fallbackRoleNames);
+            if (security.HasAnyRole(gatewayRoles))
+            {
+                return true;
+            }
+
+            var resolvedTenant = security.ResolvedTenant?.Value;
+            return !string.IsNullOrEmpty(resolvedTenant) &&
+                   HasAnyGatewayRolesCanonical(ctx.User, gatewayRoles, resolvedTenant);
         }
 
-        return HasAnyGatewayRolesCanonical(ctx.User, gatewayRoles) || HasAnyFallbackRole(ctx.User, fallbackRoleNames);
+        var claim = Autheris.Domain.Tenancy.TenantClaimReader.Read(ctx.User);
+        if (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Invalid)
+        {
+            return false;
+        }
+
+        var claimTenant = claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid ? claim.Tenant.Value : null;
+        if (HasAnyGatewayRolesCanonical(ctx.User, gatewayRoles, claimTenant))
+        {
+            return true;
+        }
+
+        // Tenant-scoped-only roles are excluded from Evaluator.GetEffectiveRoles global branch; match unprefixed or claim-tenant-prefixed explicitly (no '*' wildcard).
+        foreach (var role in gatewayRoles)
+        {
+            if (role.IsTenantScopedOnly() && HasTenantBoundRole(ctx, role.ToString()))
+            {
+                return true;
+            }
+        }
+
+        return false;
     }
 
     private static bool AllowsProductAccess(AuthorizationHandlerContext ctx)
@@ -428,20 +527,19 @@ public static class GatewayPolicies
                 return false;
             }
 
-            bool hasSync = security.HasRole(GatewayRole.DataProductSync) || HasAnyFallbackRole(ctx.User, ["DataProductSync"]);
+            bool hasSync = security.HasRole(GatewayRole.DataProductSync) || Evaluator.HasExactRole(ctx.User, nameof(GatewayRole.DataProductSync), security.ResolvedTenant?.Value);
             bool hasAdmin = security.HasRole(GatewayRole.DataProductAdmin)
-                || HasAnyFallbackRole(ctx.User, ["DataProductAdmin"])
-                || security.IsClusterAdmin
+                || Evaluator.HasExactRole(ctx.User, nameof(GatewayRole.DataProductAdmin), security.ResolvedTenant?.Value)
                 || EndpointSecurity.IsCanonicalClusterAdmin(ctx.User);
             return !hasSync || hasAdmin;
         }
 
-        bool sync = HasAnyFallbackRole(ctx.User, ["DataProductSync"]);
-        bool admin = HasAnyFallbackRole(ctx.User, ["DataProductAdmin"]) || EndpointSecurity.IsCanonicalClusterAdmin(ctx.User);
+        bool sync = Evaluator.HasExactRole(ctx.User, nameof(GatewayRole.DataProductSync));
+        bool admin = Evaluator.HasExactRole(ctx.User, nameof(GatewayRole.DataProductAdmin)) || EndpointSecurity.IsCanonicalClusterAdmin(ctx.User);
         return !sync || admin;
     }
 
-    private static bool HasAnyGatewayRolesCanonical(ClaimsPrincipal? principal, GatewayRole[] gatewayRoles)
+    private static bool HasAnyGatewayRolesCanonical(ClaimsPrincipal? principal, GatewayRole[] gatewayRoles, string? tenantId = null)
     {
         if (principal?.Identity?.IsAuthenticated != true || gatewayRoles.Length == 0)
         {
@@ -452,11 +550,11 @@ public static class GatewayPolicies
                 i.IsAuthenticated &&
                 string.Equals(i.AuthenticationType, ClusterAdminPolicy.ForwardAuthScheme, StringComparison.OrdinalIgnoreCase)))
         {
-            return HasAnyRole(principal, gatewayRoles);
+            return HasAnyRole(principal, gatewayRoles, tenantId);
         }
 
         // Non-canonical ForwardAuth identities must never satisfy roles via an implied ClusterAdmin claim.
-        var effective = Evaluator.GetEffectiveRoles(principal);
+        var effective = Evaluator.GetEffectiveRoles(principal, tenantId);
         foreach (var granted in effective)
         {
             if (granted == GatewayRole.ClusterAdmin)
@@ -474,40 +572,6 @@ public static class GatewayPolicies
         }
 
         return false;
-    }
-
-    private static bool HasAnyFallbackRole(ClaimsPrincipal? principal, string[] fallbackRoleNames)
-    {
-        if (fallbackRoleNames.Length == 0 || principal?.Identity?.IsAuthenticated != true)
-        {
-            return false;
-        }
-
-        foreach (var roleName in fallbackRoleNames)
-        {
-            if (string.Equals(roleName, ClusterAdmin, StringComparison.OrdinalIgnoreCase))
-            {
-                if (ClusterAdminPolicy.IsCanonicalClusterAdmin(principal))
-                {
-                    return true;
-                }
-            }
-            else if (Evaluator.HasExactRole(principal, roleName))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
-
-    private static void AddRolePolicy(AuthorizationOptions options, string name, string[] roles)
-    {
-        options.AddPolicy(name, policy => policy
-            .RequireAuthenticatedUser()
-            .RequireAssertion(ctx => string.Equals(name, ClusterAdmin, StringComparison.Ordinal)
-                ? ClusterAdminPolicy.IsCanonicalClusterAdmin(ctx.User)
-                : HasAnyRole(ctx.User, roles)));
     }
 
     /// <summary>

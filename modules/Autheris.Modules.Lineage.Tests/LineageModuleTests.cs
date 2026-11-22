@@ -198,7 +198,7 @@ public sealed class LineageModuleTests
 
         // 2. Authenticated non-GovernanceAdmin rejected (403)
         using var ownerReq = new HttpRequestMessage(HttpMethod.Post, "/modules/lineage/openlineage/sync");
-        ownerReq.Headers.Add(HeaderTestAuthHandler.RoleHeader, "DataOwner");
+        ownerReq.Headers.Add(HeaderTestAuthHandler.RoleHeader, "Consumer");
         var ownerResponse = await client.SendAsync(ownerReq);
         ownerResponse.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
 

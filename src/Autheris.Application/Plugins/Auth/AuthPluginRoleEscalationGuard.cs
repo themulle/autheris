@@ -22,12 +22,12 @@ public sealed partial class AuthPluginRoleEscalationGuard
     internal static readonly IReadOnlyList<string> DefaultProhibitedRoles =
     [
         // GatewayRole
-        "ClusterAdmin", "TenantAdmin", "GovernanceAdmin", "SecurityAuditor", "Auditor", "DataOwner", "DataSteward", "SchemaPublisher",
-        "FilterAdmin", "FilterSync", "CallerAttributeApprover", "CallerAttributeInspector", "DataProductAdmin", "DataProductSync",
+        "ClusterAdmin", "TenantAdmin", "GovernanceAdmin", "SecurityAuditor", "SchemaPublisher",
+        "FilterAdmin", "FilterSync", "CallerAttributeApprover", "CallerAttributeInspector",
+        "CatalogArtifactUploader", "DataProductAdmin", "DataProductSync",
 
-        // GatewayPolicies role sets
-        "Approver", "SecurityAdmin", "PrivacyAdmin", "DataProtectionOfficer", "SchemaAdmin", "GatewayAdmin", "PlatformAdmin",
-        "Developer", "Operator", "MetricsScraper", "SCIM_PROVISIONER",
+        // Privileged operational and service roles
+        "MetricsScraper", "SCIM_PROVISIONER",
 
         // Literal role checks outside the policies
         "DbtAdmin", "DeveloperAdmin", "BillingAdmin", "BreakGlassOperator", "ComplianceOfficer", "ComplianceReviewer",
@@ -35,7 +35,7 @@ public sealed partial class AuthPluginRoleEscalationGuard
         "governance:admin", "governance:simulate"
     ];
 
-    // Lookup by normalized name (case and the separators '_', '-', '.' ignored), so "cluster_admin" or "Data-Owner" is caught too.
+    // Lookup by normalized name (case and the separators '_', '-', '.' ignored), so "cluster_admin" or "tenant_admin" is caught too.
     private static readonly HashSet<string> NormalizedDefaultProhibitedRoles =
         new(DefaultProhibitedRoles.Select(NormalizeRoleName), StringComparer.Ordinal);
 

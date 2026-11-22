@@ -37,15 +37,13 @@ public sealed class GdprDisclosureReportService : IGdprDisclosureReportService
     }
 
     /// <summary>
-    /// M-15: Access and impact analyses are restricted to the table's Data Owner/delegates,
-    /// GovernanceAdmin, and PrivacyAdmin.
+    /// Access and impact analyses are restricted to the table's Data Owner/delegates and GovernanceAdmin.
     /// </summary>
     private async Task<bool> IsAuthorizedForAccessAnalysisAsync(TableIdentifier table, CallerSecurityContext callerContext, CancellationToken ct)
     {
         if (callerContext.IsGovernanceAdmin ||
             callerContext.Roles.Any(r =>
-                string.Equals(r, "GovernanceAdmin", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(r, "PrivacyAdmin", StringComparison.OrdinalIgnoreCase)))
+                string.Equals(r, "GovernanceAdmin", StringComparison.OrdinalIgnoreCase)))
         {
             return true;
         }

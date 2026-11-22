@@ -87,7 +87,7 @@ public sealed class CdcStreamAdminEndpointsTests : IDisposable
 
     [Theory]
     [InlineData("TenantAdmin")]
-    [InlineData("DataSteward")]
+    [InlineData("SecurityAuditor")]
     public async Task NonGlobalAdmin_Gets403_OnEveryStreamEndpoint(string role)
     {
         Status(await CdcStreamAdminEndpoints.ListAsync(Ctx(role), Service(), default)).ShouldBe(403);

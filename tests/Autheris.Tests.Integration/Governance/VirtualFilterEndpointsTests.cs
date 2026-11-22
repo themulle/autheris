@@ -99,7 +99,7 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
 
     [Theory]
     [InlineData("Consumer")]
-    [InlineData("DataOwner")]
+    [InlineData("ClusterAdmin")]
     [InlineData("GovernanceAdmin")]
     [InlineData("FilterSync")]
     public async Task PutFilter_WithoutFilterAdmin_Returns403(string role)
@@ -139,7 +139,10 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
         var foreign = Context(Tenant, DavidFilterBody(tenant: "other"), "FilterAdmin");
         (await StatusAsync(await VirtualFilterEndpoints.PutFilterAsync("nicht_ausgelieferte_krane", foreign, _service), foreign)).ShouldBe(StatusCodes.Status403Forbidden);
 
-        var cluster = Context(Tenant, DavidFilterBody(tenant: "other"), "ClusterAdmin");
+        var bareCluster = Context(Tenant, DavidFilterBody(tenant: "other"), "ClusterAdmin");
+        (await StatusAsync(await VirtualFilterEndpoints.PutFilterAsync("nicht_ausgelieferte_krane", bareCluster, _service), bareCluster)).ShouldBe(StatusCodes.Status403Forbidden);
+
+        var cluster = Context(Tenant, DavidFilterBody(tenant: "other"), "ClusterAdmin", "FilterAdmin");
         (await StatusAsync(await VirtualFilterEndpoints.PutFilterAsync("nicht_ausgelieferte_krane", cluster, _service), cluster)).ShouldBe(StatusCodes.Status200OK);
         (await _repository.LoadSnapshotAsync()).Filters.ShouldHaveSingleItem().TenantId.ShouldBe(new TenantId("other"));
     }
@@ -274,7 +277,8 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
         GatewayRole.GovernanceAdmin.Implies(admin).ShouldBeFalse();
         GatewayRole.GovernanceAdmin.Implies(sync).ShouldBeFalse();
         GatewayRole.TenantAdmin.Implies(admin).ShouldBeFalse();
-        GatewayRole.ClusterAdmin.Implies(admin).ShouldBeTrue();
+        GatewayRole.ClusterAdmin.Implies(admin).ShouldBeFalse();
+        GatewayRole.ClusterAdmin.Implies(sync).ShouldBeFalse();
         admin.Implies(sync).ShouldBeFalse();
     }
 

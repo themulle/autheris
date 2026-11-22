@@ -422,7 +422,7 @@ internal static class DbtEndpoints
             requestContext.GetRequestTenant(context),
             requestContext.IsCanonicalClusterAdmin(context.User),
             requestContext.IsGlobalGovernanceAdmin(context.User),
-            security.HasRole("DataOwner") || (context.User?.IsInRole("DataOwner") == true));
+            RoleEvaluator.HasRole(context.User, GatewayRole.GovernanceAdmin));
 
         DbtSyncResult? syncResult = null;
         try

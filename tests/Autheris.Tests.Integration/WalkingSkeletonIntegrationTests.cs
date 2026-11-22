@@ -216,7 +216,7 @@ public class WalkingSkeletonIntegrationTests : IClassFixture<WalkingSkeletonInte
         // 2. Legitimate Data Owner approves request
         var approverClient = CreateClient();
         approverClient.DefaultRequestHeaders.Add("X-Test-User-Sid", approverSid.Value);
-        approverClient.DefaultRequestHeaders.Add("X-Test-Roles", "DataOwner");
+        approverClient.DefaultRequestHeaders.Add("X-Test-Roles", "Consumer");
 
         var approveMutation = new
         {

@@ -35,16 +35,14 @@ public sealed class GatewayPoliciesMcpCallerTests
     public async Task McpCaller_AuthenticatedWithoutRequiredRole_FailsClosed()
     {
         (await AuthorizeAsync(Authenticated())).ShouldBeFalse();
-        (await AuthorizeAsync(Authenticated("MetricsScraper", "SecurityAuditor", "SCIM_PROVISIONER"))).ShouldBeFalse();
+        (await AuthorizeAsync(Authenticated("MetricsScraper", "FilterSync", "DataProductSync", "SCIM_PROVISIONER"))).ShouldBeFalse();
+        (await AuthorizeAsync(Authenticated("McpCaller", "AiAgent", "Developer", "DataOwner", "DataSteward"))).ShouldBeFalse();
     }
 
     [Theory]
-    [InlineData("AiAgent")]
-    [InlineData("McpCaller")]
-    [InlineData("Developer")]
     [InlineData("Consumer")]
-    [InlineData("DataSteward")]
-    [InlineData("DataOwner")]
+    [InlineData("SchemaPublisher")]
+    [InlineData("SecurityAuditor")]
     [InlineData("GovernanceAdmin")]
     [InlineData("TenantAdmin")]
     [InlineData("ClusterAdmin")]

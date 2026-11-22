@@ -99,7 +99,7 @@ public sealed class CallerAttributeAdminEndpointTests : IDisposable
 
     [Theory]
     [InlineData("Consumer")]
-    [InlineData("DataOwner")]
+    [InlineData("ClusterAdmin")]
     [InlineData("FilterAdmin")]
     [InlineData("CallerAttributeApprover")]
     [InlineData("SecurityAuditor")]
@@ -155,7 +155,9 @@ public sealed class CallerAttributeAdminEndpointTests : IDisposable
     {
         var context = Context("alice", ClaimsBody(tenant: "tenant_b"), roles: "GovernanceAdmin");
         (await Run(await CallerAttributeAdminEndpoints.PutDefinitionAsync("cost_center", context, _service), context)).Status.ShouldBe(StatusCodes.Status403Forbidden);
-        var cluster = Context("alice", ClaimsBody(tenant: "tenant_b"), roles: "ClusterAdmin");
+        var bareCluster = Context("alice", ClaimsBody(tenant: "tenant_b"), roles: "ClusterAdmin");
+        (await Run(await CallerAttributeAdminEndpoints.PutDefinitionAsync("cost_center", bareCluster, _service), bareCluster)).Status.ShouldBe(StatusCodes.Status403Forbidden);
+        var cluster = Context("alice", ClaimsBody(tenant: "tenant_b"), roles: ["ClusterAdmin", "GovernanceAdmin"]);
         (await Run(await CallerAttributeAdminEndpoints.PutDefinitionAsync("cost_center", cluster, _service), cluster)).Status.ShouldBe(StatusCodes.Status202Accepted);
     }
 
@@ -164,7 +166,7 @@ public sealed class CallerAttributeAdminEndpointTests : IDisposable
     {
         var put = Context("alice", ClaimsBody(), roles: "GovernanceAdmin");
         await Run(await CallerAttributeAdminEndpoints.PutDefinitionAsync("cost_center", put, _service), put);
-        var other = Context("alice", ClaimsBody(tenant: "tenant_b"), roles: "ClusterAdmin");
+        var other = Context("alice", ClaimsBody(tenant: "tenant_b"), roles: ["ClusterAdmin", "GovernanceAdmin"]);
         await Run(await CallerAttributeAdminEndpoints.PutDefinitionAsync("cost_center", other, _service), other);
 
         var list = Context("auditor", roles: "SecurityAuditor");

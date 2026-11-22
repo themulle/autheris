@@ -817,7 +817,7 @@ public class GovernanceSecurityTests : IDisposable
                 httpContextAccessor: accessor);
         });
 
-        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN" && e.Message.Contains("GDPR access reports for other identities require PrivacyAdmin or GovernanceAdmin rights."));
+        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN" && e.Message.Contains("GDPR access reports for other identities require GovernanceAdmin rights."));
     }
 
     [Fact]

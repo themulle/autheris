@@ -169,8 +169,8 @@ public sealed class GatewayRoleEvaluator : IGatewayRoleEvaluator
 
             if (raw.Contains(':', StringComparison.Ordinal))
             {
-                // Strict tenant-scoped form "tenant1:DataOwner": exactly one colon, non-empty parts, exact role name.
-                // Anything else containing ':' (":ClusterAdmin", "a:b:DataOwner", "tenant:") is malformed and grants nothing.
+                // Strict tenant-scoped form "tenant1:Consumer": exactly one colon, non-empty parts, exact role name.
+                // Anything else containing ':' (":ClusterAdmin", "a:b:Consumer", "tenant:") is malformed and grants nothing.
                 if (!GatewayRoleExtensions.TryParseTenantScopedRole(raw, out var roleTenant, out var parsedRole))
                 {
                     continue;

@@ -112,7 +112,7 @@ public class FourEyesAndDelegationIntegrationTests : IClassFixture<FourEyesAndDe
             .GetGuid();
 
         // 3. Step 1 Approval: Approver 1 approves
-        var approver1Client = CreateClient(approver1Sid, new[] { "DataOwner" });
+        var approver1Client = CreateClient(approver1Sid, new[] { "Consumer" });
         var step1Mutation = new
         {
             query = $@"mutation {{
@@ -152,7 +152,7 @@ public class FourEyesAndDelegationIntegrationTests : IClassFixture<FourEyesAndDe
         step1RetryBody.ShouldContain("errors");
 
         // 6. Step 2 Approval: Approver 2 (distinct approver) approves
-        var approver2Client = CreateClient(approver2Sid, new[] { "DataOwner" });
+        var approver2Client = CreateClient(approver2Sid, new[] { "Consumer" });
         var step2Mutation = new
         {
             query = $@"mutation {{
@@ -208,7 +208,7 @@ public class FourEyesAndDelegationIntegrationTests : IClassFixture<FourEyesAndDe
         var requestId = doc.RootElement.GetProperty("data").GetProperty("requestTableAccess").GetProperty("requestId").GetGuid();
 
         // 2. Approver 1 approves -> PENDING_SECOND_APPROVAL
-        var approver1Client = CreateClient(approver1Sid, new[] { "DataOwner" });
+        var approver1Client = CreateClient(approver1Sid, new[] { "Consumer" });
         await approver1Client.PostAsJsonAsync("/graphql", new
         {
             query = $@"mutation {{
@@ -219,7 +219,7 @@ public class FourEyesAndDelegationIntegrationTests : IClassFixture<FourEyesAndDe
         });
 
         // 3. Approver 2 rejects with reason
-        var approver2Client = CreateClient(approver2Sid, new[] { "DataOwner" });
+        var approver2Client = CreateClient(approver2Sid, new[] { "Consumer" });
         var rejectResponse = await approver2Client.PostAsJsonAsync("/graphql", new
         {
             query = $@"mutation {{

@@ -28,7 +28,7 @@ public static partial class ClassificationAdminEndpoints
             var result = await service.AssignColumnClassificationAsync(BuildCaller(http), columnId, code, parsedScope, ct).ConfigureAwait(false);
             return ToResult(result, http, static a => new { scope = a.Scope, columnId = a.TableColumnId, code = a.Code, source = a.Source });
         })
-        .RequireAuthorization(GatewayPolicies.Approver)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Full, AuditEventTypes.ColumnClassificationChanged)
         .WithIngressTransport(DataSourceTransportFlags.Rest)
         .WithTags("Governance");
@@ -44,7 +44,7 @@ public static partial class ClassificationAdminEndpoints
             var result = await service.RemoveColumnClassificationAsync(BuildCaller(http), columnId, code, parsedScope, ct).ConfigureAwait(false);
             return result.IsOk ? Results.NoContent() : ToResult(result, http, static _ => new { });
         })
-        .RequireAuthorization(GatewayPolicies.Approver)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Full, AuditEventTypes.ColumnClassificationChanged)
         .WithIngressTransport(DataSourceTransportFlags.Rest)
         .WithTags("Governance");
@@ -75,7 +75,7 @@ public static partial class ClassificationAdminEndpoints
                 catalogText = ClassificationCatalogTextVisibilities.ToCode(o.CatalogText)
             });
         })
-        .RequireAuthorization(GatewayPolicies.Approver)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Full, AuditEventTypes.MaskOverrideChanged)
         .WithIngressTransport(DataSourceTransportFlags.Rest)
         .WithTags("Governance");
@@ -92,7 +92,7 @@ public static partial class ClassificationAdminEndpoints
                 BuildCaller(http), columnId, ClassificationAdminService.ParseOverrideCode(code), parsedScope, ct).ConfigureAwait(false);
             return result.IsOk ? Results.NoContent() : ToResult(result, http, static _ => new { });
         })
-        .RequireAuthorization(GatewayPolicies.Approver)
+        .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
         .WithAudit(AuditLevel.Full, AuditEventTypes.MaskOverrideChanged)
         .WithIngressTransport(DataSourceTransportFlags.Rest)
         .WithTags("Governance");

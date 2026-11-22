@@ -242,7 +242,7 @@ public sealed class CultureInvariantComparisonSecurityTests
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
         [
             new Claim("scp", "Sql.Write Catalog.Read"),
-            new Claim(ClaimTypes.Role, "tenant-i:DataOwner")
+            new Claim(ClaimTypes.Role, "tenant-i:SchemaPublisher")
         ], "Bearer"));
 
         var evaluator = new GatewayRoleEvaluator();
@@ -256,8 +256,8 @@ public sealed class CultureInvariantComparisonSecurityTests
 
         foreach (var tenant in new[] { "tenant-i", "TENANT-I", "TENANT-\u0130" })
         {
-            var trRole = RunWithCulture(TurkishCulture, () => evaluator.HasRole(principal, "DataOwner", tenant));
-            var invRole = RunWithCulture(CultureInfo.InvariantCulture, () => evaluator.HasRole(principal, "DataOwner", tenant));
+            var trRole = RunWithCulture(TurkishCulture, () => evaluator.HasRole(principal, "SchemaPublisher", tenant));
+            var invRole = RunWithCulture(CultureInfo.InvariantCulture, () => evaluator.HasRole(principal, "SchemaPublisher", tenant));
             trRole.ShouldBe(invRole);
         }
     }
@@ -280,11 +280,11 @@ public sealed class CultureInvariantComparisonSecurityTests
         trSecAdmin.ShouldBeFalse();
         invSecAdmin.ShouldBeFalse();
 
-        var (trDataOwner, invDataOwner) = (
-            RunWithCulture(TurkishCulture, () => evaluator.HasRole(obfuscated, GatewayRole.DataOwner)),
-            RunWithCulture(CultureInfo.InvariantCulture, () => evaluator.HasRole(obfuscated, GatewayRole.DataOwner)));
-        trDataOwner.ShouldBeFalse();
-        invDataOwner.ShouldBeFalse();
+        var (trSchemaPub, invSchemaPub) = (
+            RunWithCulture(TurkishCulture, () => evaluator.HasRole(obfuscated, GatewayRole.SchemaPublisher)),
+            RunWithCulture(CultureInfo.InvariantCulture, () => evaluator.HasRole(obfuscated, GatewayRole.SchemaPublisher)));
+        trSchemaPub.ShouldBeFalse();
+        invSchemaPub.ShouldBeFalse();
     }
 
     [Fact]

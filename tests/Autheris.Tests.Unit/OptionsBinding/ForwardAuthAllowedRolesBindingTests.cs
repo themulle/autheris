@@ -26,7 +26,7 @@ public class ForwardAuthAllowedRolesBindingTests
     public void NothingConfigured_UsesDocumentedDefault()
     {
         Bind(new() { ["Enabled"] = "true" })
-            .GetEffectiveAllowedRoles().ToArray().ShouldBe(["GatewayUser", "Consumer", "Analyst", "Developer"]);
+            .GetEffectiveAllowedRoles().ToArray().ShouldBe(["GatewayUser", "Consumer"]);
     }
 
     [Fact]

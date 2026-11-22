@@ -68,7 +68,8 @@ public static partial class ConsentWorkflowAdminEndpoints
             return false;
         }
 
-        if (!GatewayPolicies.HasAnyRole(context.User, GatewayPolicies.AuditorOrAboveRoles))
+        if (!EndpointSecurity.IsCanonicalClusterAdmin(context.User) &&
+            !GatewayPolicies.HasAnyRole(context.User, [Autheris.Domain.Security.GatewayRole.GovernanceAdmin, Autheris.Domain.Security.GatewayRole.SecurityAuditor]))
         {
             errorResult = ApiProblems.Forbidden(
                 ApiErrorCodes.AccessDenied,

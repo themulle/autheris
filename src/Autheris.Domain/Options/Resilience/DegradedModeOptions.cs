@@ -27,7 +27,7 @@ public sealed class SystemMetricsOptions
     /// </summary>
     public List<string>? AllowedRoles { get; init; }
 
-    private static readonly string[] DefaultAllowedRoles = ["GovernanceAdmin", "ClusterAdmin", "SecurityAdmin"];
+    private static readonly string[] DefaultAllowedRoles = ["GovernanceAdmin", "ClusterAdmin"];
 
     /// <summary>Configured <see cref="AllowedRoles"/> or the default list.</summary>
     public IReadOnlyList<string> GetEffectiveAllowedRoles() => AllowedRoles ?? (IReadOnlyList<string>)DefaultAllowedRoles;

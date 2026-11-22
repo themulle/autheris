@@ -34,6 +34,6 @@ public sealed class AuthPluginOptions
     [
         "ClusterAdmin",
         "GovernanceAdmin",
-        "SecurityAdmin"
+        "TenantAdmin"
     ];
 }

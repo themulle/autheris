@@ -55,7 +55,7 @@ public static partial class VirtualFilterEndpoints
     internal static Task<IResult> ApproveFilterAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
         ExecuteAsync(context, requiredRole: null, async (security, actor) =>
         {
-            if (!security.HasRole(GatewayRole.GovernanceAdmin) && !security.HasRole(GatewayRole.DataOwner))
+            if (!security.HasRole(GatewayRole.GovernanceAdmin))
             {
                 return await AuditDeniedAsync(context, security, GatewayRole.GovernanceAdmin).ConfigureAwait(false);
             }

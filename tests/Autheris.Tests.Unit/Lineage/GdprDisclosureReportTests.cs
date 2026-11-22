@@ -26,7 +26,7 @@ public sealed class GdprDisclosureReportTests
     private static readonly CallerSecurityContext PrivacyAdminContext = new(
         new Sid("S-1-5-21-privacy-admin"),
         [],
-        ["PrivacyAdmin"],
+        ["GovernanceAdmin"],
         Autheris.Tests.Common.TestTenants.Default,
         IsGovernanceAdmin: false,
         IsClusterAdmin: false);

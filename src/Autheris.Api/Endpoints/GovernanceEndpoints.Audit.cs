@@ -30,13 +30,12 @@ public static partial class GovernanceEndpoints
     internal static async Task<bool> IsAuthorizedForSimulationAsync(HttpContext context, string? targetTable)
     {
         var user = context.User;
-        if (user.IsInRole("PrivacyAdmin") || GatewayPolicies.HasAnyRole(user, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor]))
+        if (GatewayPolicies.HasAnyRole(user, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor]))
         {
             return true;
         }
 
-        if (!GatewayPolicies.HasRole(user, GatewayRole.DataOwner) ||
-            string.IsNullOrWhiteSpace(targetTable) ||
+        if (string.IsNullOrWhiteSpace(targetTable) ||
             !TableIdentifier.TryParse(targetTable, out var table))
         {
             return false;
@@ -226,16 +225,16 @@ public static partial class GovernanceEndpoints
     private static void MapAuditAndComplianceEndpoints(IEndpointRouteBuilder app)
     {
         app.MapGet("/api/v1/governance/audit", ListAuditPageAsync)
-            .RequireAuthorization(GatewayPolicies.GovernanceAuditRead).WithAudit(AuditLevel.Summarized, AuditEventTypes.AuditRead);
+            .RequireAuthorization(GatewayPolicies.AuditRead).WithAudit(AuditLevel.Summarized, AuditEventTypes.AuditRead);
         app.MapGet("/api/v1/governance/grants", ListGrantsPageAsync)
-            .RequireAuthorization(GatewayPolicies.GovernanceAuditRead).WithAudit(AuditLevel.Summarized, AuditEventTypes.AuditRead);
+            .RequireAuthorization(GatewayPolicies.AuditRead).WithAudit(AuditLevel.Summarized, AuditEventTypes.AuditRead);
 
         // P11: Automated Schema Deprecation & Client-Impact Sunsetting (Smart Sunsetting Engine)
         app.MapGet("/api/governance/sunsetting/rules", async (
             ISchemaSunsettingService sunsettingService,
             HttpContext context) =>
         {
-            var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher, GatewayRole.DataOwner]);
+            var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher]);
             if (!isPrivileged)
             {
                 return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -323,8 +322,6 @@ public static partial class GovernanceEndpoints
 
         bool isGovAdmin = roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
         bool isClusterAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
-        bool isPrivacyAdmin = roles.Contains("PrivacyAdmin", StringComparer.OrdinalIgnoreCase) ||
-                              roles.Contains("DataProtectionOfficer", StringComparer.OrdinalIgnoreCase);
 
         var callerContext = new CallerSecurityContext(
             userSid.Value,
@@ -339,7 +336,7 @@ public static partial class GovernanceEndpoints
             : null;
         Sid? sid = !string.IsNullOrWhiteSpace(subjectSid) ? new Sid(subjectSid) : (Sid?)null;
 
-        bool canAccessForeignReports = isPrivacyAdmin || isGovAdmin || isClusterAdmin;
+        bool canAccessForeignReports = isGovAdmin || isClusterAdmin;
         var effectiveSid = sid ?? (canAccessForeignReports ? (Sid?)null : callerContext.UserSid);
 
         if (effectiveSid.HasValue && !effectiveSid.Value.Equals(callerContext.UserSid) && !canAccessForeignReports)

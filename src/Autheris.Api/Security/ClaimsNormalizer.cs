@@ -121,7 +121,7 @@ public static class ClaimsNormalizer
             var colonIdx = role.IndexOf(':', StringComparison.Ordinal);
             if (colonIdx > 0)
             {
-                // Tenant-scoped role: "tenant-1:DataOwner"
+                // Tenant-scoped role: "tenant-1:Consumer"
                 var roleTenant = role[..colonIdx];
                 var roleName = role[(colonIdx + 1)..];
 

@@ -73,6 +73,11 @@ public sealed class DevAuthorizationResultHandler : IAuthorizationMiddlewareResu
             }
         }
 
+        if (policyNames.Count > 0)
+        {
+            return $"Policy '{string.Join(", ", policyNames)}' requirements were not satisfied. Caller roles: [{haveText}].";
+        }
+
         var requirements = string.Join(", ", policy.Requirements.Select(r => r.GetType().Name));
         return $"Authorization failed for requirements [{requirements}]. Caller roles: [{haveText}].";
     }

@@ -23,10 +23,7 @@ public static class ExternalApiPermissions
 
     private static readonly string[] InteractiveReadConsentRoles =
     [
-        "Consumer", "Developer", "AiAgent", "McpCaller",
-        "Operator", "DataSteward", "DataOwner", "SchemaAdmin",
-        "GovernanceAdmin", "TenantAdmin", "SecurityAdmin", "GatewayAdmin", "PlatformAdmin", "ClusterAdmin",
-        "SecurityAuditor", "Auditor", "PrivacyAdmin", "DataProtectionOfficer"
+        "Consumer", "SchemaPublisher", "SecurityAuditor", "GovernanceAdmin", "TenantAdmin"
     ];
 
     public static bool IsServicePrincipal(ClaimsPrincipal? principal) =>
@@ -117,7 +114,9 @@ public static class ExternalApiPermissions
 
         return HasAppRole(principal, CatalogReadAdmin)
             || HasDelegatedScope(principal, CatalogReadAdmin)
-            || (!HasAnyExternalScope(principal) && GatewayPolicies.HasAnyRole(principal, GatewayPolicies.AdminOnlyRoles));
+            || (!HasAnyExternalScope(principal) &&
+                (Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal) ||
+                 GatewayPolicies.HasAnyRole(principal, GatewayPolicies.AdminOnlyRoles)));
     }
 
     public static bool AllowsConsentRead(ClaimsPrincipal? principal)
@@ -139,11 +138,12 @@ public static class ExternalApiPermissions
 
         if (HasAnyExternalScope(principal))
         {
-            return GatewayPolicies.HasAnyRole(principal, GatewayPolicies.AdminOnlyRoles)
-                || GatewayPolicies.HasAnyRole(principal, GatewayPolicies.ApproverRoles);
+            return Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal)
+                || GatewayPolicies.HasAnyRole(principal, GatewayPolicies.AdminOnlyRoles);
         }
 
-        return GatewayPolicies.HasAnyRole(principal, InteractiveReadConsentRoles)
+        return Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal)
+            || GatewayPolicies.HasAnyRole(principal, InteractiveReadConsentRoles)
             || HasAnyClaim(principal, PersonIdClaimTypes);
     }
 
@@ -162,7 +162,8 @@ public static class ExternalApiPermissions
         return HasAppRole(principal, GrantsVerify)
             || HasDelegatedScope(principal, GrantsVerify)
             || (!HasAnyExternalScope(principal)
-                && (GatewayPolicies.HasAnyRole(principal, GatewayPolicies.AuditorOrAboveRoles)
+                && (Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal)
+                    || GatewayPolicies.HasAnyRole(principal, GatewayPolicies.AuditReadRoles)
                     || GatewayPolicies.HasAnyRole(principal, GatewayPolicies.AdminOnlyRoles)));
     }
 

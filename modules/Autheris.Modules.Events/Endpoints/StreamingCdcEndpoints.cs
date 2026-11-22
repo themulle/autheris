@@ -412,7 +412,6 @@ public static class StreamingCdcEndpoints
     internal static bool IsAuthorizedCdcIngestion(ClaimsPrincipal user)
         => IsCdcClusterAdmin(user) ||
            user.IsInRole("CdcIngestionService") ||
-           user.IsInRole("PlatformAdmin") ||
            RoleEvaluator.HasAnyRole(user, [GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin]);
 }
 

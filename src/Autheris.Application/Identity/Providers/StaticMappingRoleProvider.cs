@@ -1,11 +1,12 @@
-namespace Autheris.Application.Identity.Providers;
-
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Domain.Identity;
+using Autheris.Domain.Security;
+
+namespace Autheris.Application.Identity.Providers;
 
 public sealed class StaticMappingRoleProvider : IRoleProvider
 {
@@ -26,8 +27,23 @@ public sealed class StaticMappingRoleProvider : IRoleProvider
 
         if (roles != null)
         {
+            var validatedRoles = new List<string>();
+            foreach (var r in roles)
+            {
+                var trimmed = r?.Trim();
+                bool isValid = !string.IsNullOrWhiteSpace(trimmed) &&
+                    (GatewayRoleExtensions.TryParseGlobalRole(trimmed, out _) ||
+                     GatewayRoleExtensions.TryParseTenantScopedRole(trimmed, out _, out _));
+                if (!isValid)
+                {
+                    throw new ArgumentException($"Invalid or removed gateway role name '{r}'.", nameof(roles));
+                }
+
+                validatedRoles.Add(trimmed!);
+            }
+
             var set = _userRoles.GetOrAdd(userKey, _ => new HashSet<string>(StringComparer.OrdinalIgnoreCase));
-            foreach (var r in roles) set.Add(r);
+            foreach (var r in validatedRoles) set.Add(r);
         }
 
         if (attributes != null)

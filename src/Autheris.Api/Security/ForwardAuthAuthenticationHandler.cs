@@ -380,8 +380,7 @@ public sealed class ForwardAuthAuthenticationHandler : AuthenticationHandler<Aut
 
     private static readonly HashSet<string> HeaderForbiddenRoles = new(StringComparer.OrdinalIgnoreCase)
     {
-        "ClusterAdmin", "PlatformAdmin", "GatewayAdmin", "GovernanceAdmin", "SecurityAdmin",
-        "PrivacyAdmin", "BreakGlassOperator", "DataProtectionOfficer"
+        "ClusterAdmin", "GovernanceAdmin", "TenantAdmin", "BreakGlassOperator"
     };
 
     /// <summary>RR-L2-02: Administrative roles are never accepted from proxy headers (even if listed in AllowedRoles).</summary>

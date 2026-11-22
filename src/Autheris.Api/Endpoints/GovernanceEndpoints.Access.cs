@@ -98,8 +98,7 @@ public static partial class GovernanceEndpoints
         IAccessProfileRepository accessProfileRepo,
         CancellationToken ct)
     {
-        var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.ClusterAdmin, GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin])
-            || context.User.IsInRole("SecurityAdmin");
+        var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.ClusterAdmin, GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin]);
         if (!isPrivileged)
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -433,8 +432,7 @@ public static partial class GovernanceEndpoints
         IAccessProfileRepository accessProfileRepo,
         CancellationToken ct)
     {
-        var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.ClusterAdmin, GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor])
-            || context.User.IsInRole("SecurityAdmin");
+        var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.ClusterAdmin, GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor]);
         if (!isPrivileged)
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -451,8 +449,7 @@ public static partial class GovernanceEndpoints
         IAccessProfileRepository accessProfileRepo,
         CancellationToken ct)
     {
-        var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.ClusterAdmin, GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor])
-            || context.User.IsInRole("SecurityAdmin");
+        var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.ClusterAdmin, GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor]);
         if (!isPrivileged)
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);
@@ -605,8 +602,7 @@ public static partial class GovernanceEndpoints
         IAccessProfileRepository accessProfileRepo,
         CancellationToken ct)
     {
-        var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.ClusterAdmin, GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin])
-            || context.User.IsInRole("SecurityAdmin");
+        var isPrivileged = GatewayPolicies.HasAnyRole(context.User, [GatewayRole.ClusterAdmin, GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin]);
         if (!isPrivileged)
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);

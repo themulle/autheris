@@ -323,9 +323,8 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
     }
 
     [Theory]
-    [InlineData("PrivacyAdmin", false)]
     [InlineData("GovernanceAdmin", false)]
-    [InlineData("Analyst", true)]
+    [InlineData("Consumer", true)]
     public async Task M15_TableConsumers_OwnerOrPrivilegedRole_SeesRuntimeConsumers(string role, bool isOwner)
     {
         var table = new TableIdentifier("hr", "dbo", "salaries");

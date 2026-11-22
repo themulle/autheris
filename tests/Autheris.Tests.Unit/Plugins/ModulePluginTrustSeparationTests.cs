@@ -180,11 +180,11 @@ public sealed class PluginEnrichmentTests
         };
 
         var raw = new PluginRoleEnrichmentResult(
-            addedRoles: ["DataOwner", "GovernanceAdmin", "ClusterAdmin", "CustomPluginTag"],
+            addedRoles: ["FilterAdmin", "GovernanceAdmin", "ClusterAdmin", "CustomPluginTag"],
             addedGroupSids: []);
 
         var sanitized = guard.Sanitize("role-plugin", raw, context);
-        sanitized.AddedRoles.ShouldNotContain("DataOwner");
+        sanitized.AddedRoles.ShouldNotContain("FilterAdmin");
         sanitized.AddedRoles.ShouldNotContain("GovernanceAdmin");
         sanitized.AddedRoles.ShouldNotContain("ClusterAdmin");
 

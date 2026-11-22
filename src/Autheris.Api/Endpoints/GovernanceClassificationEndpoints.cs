@@ -288,7 +288,7 @@ public static class GovernanceClassificationEndpoints
         }
 
         var isCompliance = user.IsInRole("ComplianceReviewer") || user.IsInRole("ComplianceOfficer");
-        var isOwnerCapable = user.IsInRole("DataOwner") || EndpointSecurity.IsGlobalGovernanceAdmin(user);
+        var isOwnerCapable = GatewayPolicies.HasRole(user, Autheris.Domain.Security.GatewayRole.GovernanceAdmin) || EndpointSecurity.IsGlobalGovernanceAdmin(user);
         var inGovernanceStage = string.Equals(proposal.Status, "PENDING_GOVERNANCE_REVIEW", StringComparison.OrdinalIgnoreCase);
 
         string? role = null;

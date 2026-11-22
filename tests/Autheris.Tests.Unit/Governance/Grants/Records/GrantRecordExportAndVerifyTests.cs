@@ -228,13 +228,9 @@ public sealed class GrantRecordExportAndVerifyTests
     }
 
     [Theory]
-    [InlineData("Auditor")]
     [InlineData("SecurityAuditor")]
-    [InlineData("PrivacyAdmin")]
-    [InlineData("DataProtectionOfficer")]
     [InlineData("GovernanceAdmin")]
     [InlineData("TenantAdmin")]
-    [InlineData("SecurityAdmin")]
     [InlineData("ClusterAdmin")]
     [Trait("Category", "Security")]
     public async Task Endpoints_AllowAuthorizedRoles_AndReturnBundleAndVerification(string role)
@@ -297,7 +293,7 @@ public sealed class GrantRecordExportAndVerifyTests
         }
 
         // Non-ClusterAdmin requesting cross-tenant grantId on own tenant -> 404 GRANT_NOT_FOUND (no existence oracle)
-        var oracleCtx = CreateHttpContext(TenantA, "PrivacyAdmin");
+        var oracleCtx = CreateHttpContext(TenantA, "SecurityAuditor");
         await (await ConsentWorkflowAdminEndpoints.ExportGrantRecordAsync(tenantBGrantId, oracleCtx, service)).ExecuteAsync(oracleCtx);
         oracleCtx.Response.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
         oracleCtx.Response.Body.Position = 0;

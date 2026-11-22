@@ -107,8 +107,7 @@ public static partial class ConsentApiEndpoints
         var userSid = user.GetUserSid();
         var isPrivReader = isClusterAdmin
             || GatewayPolicies.HasAnyRole(user, GatewayPolicies.AdminOnlyRoles)
-            || GatewayPolicies.HasAnyRole(user, GatewayPolicies.AuditorOrAboveRoles)
-            || GatewayPolicies.HasAnyRole(user, GatewayPolicies.ApproverRoles);
+            || GatewayPolicies.HasAnyRole(user, GatewayPolicies.AuditReadRoles);
         return (tenantId, userSid, clientId, isServicePrincipal, isClusterAdmin, isPrivReader);
     }
 

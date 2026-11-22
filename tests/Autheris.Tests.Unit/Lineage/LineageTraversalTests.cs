@@ -61,7 +61,7 @@ public class LineageTraversalTests
         var callerContext = new CallerSecurityContext(
             new Sid("S-1-5-21-USER-1"),
             [],
-            ["PrivacyAdmin"], // SEC M-15: Auswirkungsanalyse nur für Owner/GovernanceAdmin/PrivacyAdmin
+            ["GovernanceAdmin"], // SEC M-15: Auswirkungsanalyse nur für Owner/GovernanceAdmin/PrivacyAdmin
             new TenantId("tenant-a"),
             IsGovernanceAdmin: false,
             IsClusterAdmin: false);
@@ -105,7 +105,7 @@ public class LineageTraversalTests
         var analystContext = new CallerSecurityContext(
             new Sid("S-1-5-21-ANALYST"),
             [],
-            ["PrivacyAdmin"], // SEC M-15: Zugriff erlaubt, E-Mail bleibt maskiert (kein Owner/GovernanceAdmin)
+            ["GovernanceAdmin"], // SEC M-15: Zugriff erlaubt, E-Mail bleibt maskiert (kein Owner/GovernanceAdmin)
             new TenantId("tenant-a"),
             IsGovernanceAdmin: false,
             IsClusterAdmin: false);
@@ -194,7 +194,7 @@ public class LineageTraversalTests
         var report = await _sut.CalculateConsentRevocationImpactAsync(
             new TenantId("tenant-a"),
             consentId,
-            new CallerSecurityContext(new Sid("S-1-5-21-USER"), [], ["PrivacyAdmin"], new TenantId("tenant-a"), false, false));
+            new CallerSecurityContext(new Sid("S-1-5-21-USER"), [], ["GovernanceAdmin"], new TenantId("tenant-a"), false, false));
 
         report.ContainsCycles.ShouldBeFalse("A converging diamond DAG must NOT be flagged as a cycle!");
         report.AffectedDownstreamCount.ShouldBe(3); // model_a, model_b, target_dash
@@ -248,7 +248,7 @@ public class LineageTraversalTests
         var callerContext = new CallerSecurityContext(
             new Sid("S-1-5-21-PERF-USER"),
             [],
-            ["PrivacyAdmin"],
+            ["GovernanceAdmin"],
             new TenantId("perf-tenant"),
             IsGovernanceAdmin: false,
             IsClusterAdmin: false);

@@ -188,8 +188,8 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
         AssertProtectedRoutePolicy(endpoints, "POST", "/api/v1/profiles/{id}/assignments/approve", GatewayPolicies.GovernanceAdmin);
         AssertProtectedRoutePolicy(endpoints, "POST", "/api/v1/governance/consents/apply", GatewayPolicies.GovernanceAdmin);
         AssertProtectedRoutePolicy(endpoints, "POST", "/api/governance/consents/apply", GatewayPolicies.GovernanceAdmin);
-        AssertProtectedRoutePolicy(endpoints, "GET", "/api/v1/governance/audit", GatewayPolicies.GovernanceAuditRead);
-        AssertProtectedRoutePolicy(endpoints, "GET", "/api/v1/governance/grants", GatewayPolicies.GovernanceAuditRead);
+        AssertProtectedRoutePolicy(endpoints, "GET", "/api/v1/governance/audit", GatewayPolicies.AuditRead);
+        AssertProtectedRoutePolicy(endpoints, "GET", "/api/v1/governance/grants", GatewayPolicies.AuditRead);
         AssertProtectedRoutePolicy(endpoints, "GET", "/api/governance/sunsetting/rules", GatewayPolicies.SunsettingRead);
         AssertProtectedRoutePolicy(endpoints, "POST", "/api/governance/sunsetting/rules", GatewayPolicies.ClusterAdmin);
         AssertProtectedRoutePolicy(endpoints, "POST", "/api/governance/sunsetting/evaluate", GatewayPolicies.SunsettingEvaluate);
@@ -243,26 +243,26 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
     }
 
     [Theory]
-    [InlineData(GatewayPolicies.CallerAttributeRead, new[] { "GovernanceAdmin", "SecurityAuditor", "FilterAdmin", "CallerAttributeApprover", "ClusterAdmin" }, "Consumer")]
-    [InlineData(GatewayPolicies.CallerAttributeApprove, new[] { "GovernanceAdmin", "CallerAttributeApprover", "ClusterAdmin" }, "FilterAdmin")]
-    [InlineData(GatewayPolicies.CallerAttributeSimulate, new[] { "GovernanceAdmin", "FilterAdmin", "ClusterAdmin" }, "SecurityAuditor")]
-    [InlineData(GatewayPolicies.VirtualFilterRead, new[] { "FilterAdmin", "FilterSync", "GovernanceAdmin", "SecurityAuditor", "ClusterAdmin" }, "Consumer")]
-    [InlineData(GatewayPolicies.VirtualFilterWrite, new[] { "FilterAdmin", "GovernanceAdmin", "ClusterAdmin" }, "SecurityAuditor")]
-    [InlineData(GatewayPolicies.VirtualFilterApprove, new[] { "GovernanceAdmin", "DataOwner", "ClusterAdmin" }, "FilterAdmin")]
-    [InlineData(GatewayPolicies.FilterAdmin, new[] { "FilterAdmin", "ClusterAdmin" }, "GovernanceAdmin")]
-    [InlineData(GatewayPolicies.VirtualFilterSyncPlan, new[] { "FilterSync", "FilterAdmin", "ClusterAdmin" }, "SecurityAuditor")]
-    [InlineData(GatewayPolicies.VirtualFilterSyncApply, new[] { "FilterSync", "ClusterAdmin" }, "FilterAdmin")]
-    [InlineData(GatewayPolicies.EffectiveFilterInspect, new[] { "FilterAdmin", "GovernanceAdmin", "SecurityAuditor", "ClusterAdmin" }, "Consumer")]
-    [InlineData(GatewayPolicies.ProductOwnerRead, new[] { "GovernanceAdmin", "TenantAdmin", "SecurityAuditor", "DataProductAdmin", "ClusterAdmin" }, "DataOwner")]
-    [InlineData(GatewayPolicies.ProductOwnerAdmin, new[] { "GovernanceAdmin", "TenantAdmin", "ClusterAdmin" }, "DataProductAdmin")]
-    [InlineData(GatewayPolicies.ProductSync, new[] { "DataProductSync", "ClusterAdmin" }, "DataProductAdmin")]
-    [InlineData(GatewayPolicies.OpenApiPublish, new[] { "GovernanceAdmin", "SchemaPublisher", "TenantAdmin", "ClusterAdmin" }, "Consumer")]
-    [InlineData(GatewayPolicies.ProfileAdmin, new[] { "ClusterAdmin", "TenantAdmin", "GovernanceAdmin", "SecurityAdmin" }, "SecurityAuditor")]
-    [InlineData(GatewayPolicies.ProfileRead, new[] { "ClusterAdmin", "TenantAdmin", "GovernanceAdmin", "SecurityAuditor", "SecurityAdmin" }, "Consumer")]
-    [InlineData(GatewayPolicies.GovernanceAuditRead, new[] { "PrivacyAdmin", "GovernanceAdmin", "TenantAdmin", "SecurityAuditor", "DataOwner", "ClusterAdmin" }, "Consumer")]
-    [InlineData(GatewayPolicies.SunsettingRead, new[] { "GovernanceAdmin", "SchemaPublisher", "DataOwner", "TenantAdmin", "ClusterAdmin" }, "SecurityAuditor")]
-    [InlineData(GatewayPolicies.SunsettingEvaluate, new[] { "GovernanceAdmin", "SchemaPublisher", "DataOwner", "Consumer", "TenantAdmin", "ClusterAdmin" }, "SecurityAuditor")]
-    [InlineData(GatewayPolicies.ComplianceCertificateRead, new[] { "GovernanceAdmin", "TenantAdmin", "SecurityAuditor", "ClusterAdmin" }, "Consumer")]
+    [InlineData(GatewayPolicies.CallerAttributeRead, new[] { "GovernanceAdmin", "SecurityAuditor", "FilterAdmin", "CallerAttributeApprover" }, "Consumer")]
+    [InlineData(GatewayPolicies.CallerAttributeApprove, new[] { "GovernanceAdmin", "CallerAttributeApprover" }, "ClusterAdmin")]
+    [InlineData(GatewayPolicies.CallerAttributeSimulate, new[] { "GovernanceAdmin", "FilterAdmin" }, "ClusterAdmin")]
+    [InlineData(GatewayPolicies.VirtualFilterRead, new[] { "FilterAdmin", "FilterSync", "GovernanceAdmin", "SecurityAuditor" }, "Consumer")]
+    [InlineData(GatewayPolicies.VirtualFilterWrite, new[] { "FilterAdmin", "GovernanceAdmin" }, "ClusterAdmin")]
+    [InlineData(GatewayPolicies.VirtualFilterApprove, new[] { "GovernanceAdmin" }, "ClusterAdmin")]
+    [InlineData(GatewayPolicies.FilterAdmin, new[] { "FilterAdmin" }, "ClusterAdmin")]
+    [InlineData(GatewayPolicies.VirtualFilterSyncPlan, new[] { "FilterSync", "FilterAdmin" }, "ClusterAdmin")]
+    [InlineData(GatewayPolicies.VirtualFilterSyncApply, new[] { "FilterSync" }, "ClusterAdmin")]
+    [InlineData(GatewayPolicies.EffectiveFilterInspect, new[] { "FilterAdmin", "GovernanceAdmin", "SecurityAuditor" }, "Consumer")]
+    [InlineData(GatewayPolicies.ProductOwnerRead, new[] { "GovernanceAdmin", "TenantAdmin", "SecurityAuditor", "DataProductAdmin" }, "Consumer")]
+    [InlineData(GatewayPolicies.ProductOwnerAdmin, new[] { "GovernanceAdmin", "TenantAdmin" }, "DataProductAdmin")]
+    [InlineData(GatewayPolicies.ProductSync, new[] { "DataProductSync" }, "ClusterAdmin")]
+    [InlineData(GatewayPolicies.OpenApiPublish, new[] { "GovernanceAdmin", "SchemaPublisher", "TenantAdmin" }, "Consumer")]
+    [InlineData(GatewayPolicies.ProfileAdmin, new[] { "TenantAdmin", "GovernanceAdmin" }, "SecurityAuditor")]
+    [InlineData(GatewayPolicies.ProfileRead, new[] { "TenantAdmin", "GovernanceAdmin", "SecurityAuditor" }, "Consumer")]
+    [InlineData(GatewayPolicies.AuditRead, new[] { "GovernanceAdmin", "SecurityAuditor" }, "Consumer")]
+    [InlineData(GatewayPolicies.SunsettingRead, new[] { "GovernanceAdmin", "SchemaPublisher", "TenantAdmin" }, "SecurityAuditor")]
+    [InlineData(GatewayPolicies.SunsettingEvaluate, new[] { "GovernanceAdmin", "SchemaPublisher", "Consumer", "TenantAdmin" }, "FilterSync")]
+    [InlineData(GatewayPolicies.ComplianceCertificateRead, new[] { "GovernanceAdmin", "TenantAdmin", "SecurityAuditor" }, "Consumer")]
     public async Task RoleBasedPolicies_EvaluateAllowedAndDeniedRoles_WithAndWithoutHttpContext(
         string policyName,
         string[] allowedRoles,
@@ -355,8 +355,8 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
     {
         await using var provider = BuildAuthorizationProvider();
         var authz = provider.GetRequiredService<IAuthorizationService>();
-        GatewayPolicies.TryGetPolicyRoles(GatewayPolicies.SqlEndpointRegister, out var roles).ShouldBeTrue();
-        roles.ShouldBe(GatewayPolicies.ClusterAdminRoles);
+        GatewayPolicies.ClusterAdminRoles.ShouldBeEmpty();
+        GatewayPolicies.TryGetPolicyRoles(GatewayPolicies.SqlEndpointRegister, out _).ShouldBeFalse();
 
         var canonical = Principal(roles: "ClusterAdmin");
         (await authz.AuthorizeAsync(canonical, null, GatewayPolicies.SqlEndpointRegister)).Succeeded.ShouldBeTrue();
