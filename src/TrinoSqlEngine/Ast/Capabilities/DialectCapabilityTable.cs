@@ -62,7 +62,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         LimitSource: "MSSQL-CAP",
         DmlStatements: AllDml,
         SupportsTimeZoneConversion: true,
-        IntersectBindsTighter: true);   // convert_timezone has a generator rule
+        IntersectBindsTighter: true,
+        HasEvaluationFence: true);   // convert_timezone has a generator rule
 
     private static readonly DialectCapabilities DuckDb = new(
         Dialect: TargetSqlDialect.DuckDb,
@@ -93,7 +94,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         LimitSource: "DUCK-PREP",
         DmlStatements: AllDml,
         SupportsTimeZoneConversion: true,
-        IntersectBindsTighter: true);   // convert_timezone has a generator rule
+        IntersectBindsTighter: true,
+        HasEvaluationFence: false);   // empirically proven: DuckDB StatisticsPropagator leaks hidden-row stats across OFFSET 0 and AS MATERIALIZED allows filter pushdown
 
     private static readonly DialectCapabilities PostgreSql = new(
         Dialect: TargetSqlDialect.PostgreSql,
@@ -124,7 +126,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         LimitSource: "PG-PROTO",
         DmlStatements: AllDml,
         SupportsTimeZoneConversion: true,
-        IntersectBindsTighter: true);   // convert_timezone has a generator rule
+        IntersectBindsTighter: true,
+        HasEvaluationFence: true);   // convert_timezone has a generator rule
 
     private static readonly DialectCapabilities Oracle = new(
         Dialect: TargetSqlDialect.Oracle,
@@ -154,7 +157,8 @@ public sealed class DialectCapabilityTable : IDialectCapabilityProvider
         AllowedTableFunctions: FrozenSet<string>.Empty,
         LimitSource: "JOOQ",
         DmlStatements: AllDml,
-        MergeShape: MergeClauseShape.OracleSingleClause);
+        MergeShape: MergeClauseShape.OracleSingleClause,
+        HasEvaluationFence: true);
 
     private static readonly DialectCapabilities Databricks = new(
         Dialect: TargetSqlDialect.Databricks,

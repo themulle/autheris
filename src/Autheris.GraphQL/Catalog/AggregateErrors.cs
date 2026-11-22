@@ -27,9 +27,23 @@ internal static class AggregateErrors
     public const string ThrottledMessage = "Too many requests.";
     public const string NotSupportedMessage = "The requested aggregation is not supported for this dataset.";
     public const string MaskedMessage = "A requested column is masked for the current caller and cannot be used in an aggregation.";
+    public const string RowPolicyExpressionMessage = "The statement uses an expression that is not permitted on a table with a row policy. Use non-raising forms such as TRY_CAST or NULLIF instead.";
 
     public static GraphQLException Create(string code, string message) =>
         new(ErrorBuilder.New().SetMessage(message).SetCode(code).Build());
+
+    public static GraphQLException RowPolicyExpressionNotAllowed(string? hint = null)
+    {
+        var builder = ErrorBuilder.New()
+            .SetMessage(RowPolicyExpressionMessage)
+            .SetCode(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RowPolicyExpressionNotAllowed);
+        if (!string.IsNullOrWhiteSpace(hint))
+        {
+            builder.SetExtension("hint", hint);
+        }
+
+        return new GraphQLException(builder.Build());
+    }
 
     public static GraphQLException AliasInvalid() => Create(AggregationErrorCodes.AliasInvalid, AliasInvalidMessage);
 
@@ -81,6 +95,7 @@ internal static class AggregateFailureMapper
         TrinoSqlEngine.SqlTimeZoneException { Code: TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.TimeZoneInvalid or TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.TimeZoneArgument } => AggregateErrors.ArgumentInvalid(),
         // #389: every other translation limit (dialect or construct) is one indistinguishable code (I389-T-04).
         TrinoSqlEngine.SqlTimeZoneException or TrinoSqlEngine.Ast.Builder.AstBuildException or TrinoSqlEngine.SqlCompileNotSupportedException => AggregateErrors.Create(AggregationErrorCodes.NotSupported, AggregateErrors.NotSupportedMessage),
+        TrinoSqlEngine.Ast.Security.RowPolicyExpressionRejectedException rpe => AggregateErrors.RowPolicyExpressionNotAllowed(rpe.Hint),
         _ => ForDataAccess(ex)
     };
 

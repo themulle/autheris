@@ -54,13 +54,33 @@ public sealed class AdvisoryRegressionGateTests
         var scenario = item == "case_01" ? PolicyScenario.TenantConsentMask : PolicyScenario.Tenant;
         var engine = new FastSqlEngine();
 
-        var refused = Should.Throw<SecurityException>(() => engine.Compile(Probe.AsMemory(), Request(dialect, scenario), CancellationToken.None));
-        refused.Message.ShouldBe(RowPolicyErrorGuard.Message);
+        if (dialect == "databricks")
+        {
+            var refused = Should.Throw<RowPolicyExpressionRejectedException>(() => engine.Compile(Probe.AsMemory(), Request(dialect, scenario), CancellationToken.None));
+            refused.Message.ShouldBe(RowPolicyErrorGuard.Message);
+            refused.Code.ShouldBe(GovernedSqlErrorCodes.RowPolicyExpressionNotAllowed);
+            refused.Hint.ShouldContain("TRY_CAST");
+            refused.Hint.ShouldContain("NULLIF");
 
-        Should.Throw<SecurityException>(() => engine.Compile("SELECT id FROM orders WHERE CAST(status AS INTEGER) = 1".AsMemory(), Request(dialect, scenario), CancellationToken.None))
-            .Message.ShouldBe(RowPolicyErrorGuard.Message);
-        Should.Throw<SecurityException>(() => engine.Compile("SELECT id FROM orders WHERE id % (id - 1) = 0".AsMemory(), Request(dialect, scenario), CancellationToken.None))
-            .Message.ShouldBe(RowPolicyErrorGuard.Message);
+            Should.Throw<RowPolicyExpressionRejectedException>(() => engine.Compile("SELECT id FROM orders WHERE CAST(status AS INTEGER) = 1".AsMemory(), Request(dialect, scenario), CancellationToken.None))
+                .Message.ShouldBe(RowPolicyErrorGuard.Message);
+            Should.Throw<RowPolicyExpressionRejectedException>(() => engine.Compile("SELECT id FROM orders WHERE id % (id - 1) = 0".AsMemory(), Request(dialect, scenario), CancellationToken.None))
+                .Message.ShouldBe(RowPolicyErrorGuard.Message);
+        }
+        else
+        {
+            // Fenced dialects filter first inside a barrier subquery and evaluate caller expressions on its output.
+            string probeSql = engine.Compile(Probe.AsMemory(), Request(dialect, scenario), CancellationToken.None).Sql;
+            string expectedBarrier = dialect switch
+            {
+                "postgresql" => "OFFSET 0",
+                "sqlserver" => "ORDER BY (SELECT NULL) OFFSET 0 ROWS",
+                _ => "ROWNUM >= 1"
+            };
+            probeSql.ShouldContain(expectedBarrier);
+            engine.Compile("SELECT id FROM orders WHERE CAST(status AS INTEGER) = 1".AsMemory(), Request(dialect, scenario), CancellationToken.None).Sql.ShouldContain(expectedBarrier);
+            engine.Compile("SELECT id FROM orders WHERE id % (id - 1) = 0".AsMemory(), Request(dialect, scenario), CancellationToken.None).Sql.ShouldContain(expectedBarrier);
+        }
 
         // control: statements without a data-dependent failure still compile (the Databricks case reuses the PostgreSQL catalog types, so it only proves the refusal)
         if (dialect != "databricks") engine.Compile("SELECT id FROM orders WHERE id > 3 AND id / 2 = 1".AsMemory(), Request(dialect, scenario), CancellationToken.None).Sql.ShouldNotBeNullOrEmpty();
@@ -84,8 +104,17 @@ public sealed class AdvisoryRegressionGateTests
         Assert.NotNull(item);
         var engine = new FastSqlEngine();
 
-        Should.Throw<SecurityException>(() => engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None))
-            .Message.ShouldBe(RowPolicyErrorGuard.Message);
+        if (dialect == "databricks")
+        {
+            var ex = Should.Throw<RowPolicyExpressionRejectedException>(() => engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None));
+            ex.Message.ShouldBe(RowPolicyErrorGuard.Message);
+            ex.Code.ShouldBe(GovernedSqlErrorCodes.RowPolicyExpressionNotAllowed);
+        }
+        else
+        {
+            var compiled = engine.Compile(sql.AsMemory(), Request(dialect, PolicyScenario.Tenant), CancellationToken.None);
+            compiled.Sql.ShouldNotBeNullOrEmpty();
+        }
     }
 
     [Theory]

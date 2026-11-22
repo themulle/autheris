@@ -18,10 +18,15 @@ internal static class SafeErrorResults
     public static IResult TooManyRequests(string code, string generic, HttpContext context) =>
         Problem(StatusCodes.Status429TooManyRequests, code, generic, context);
 
-    public static IResult Problem(int statusCode, string code, string generic, HttpContext context)
+    public static IResult Problem(
+        int statusCode,
+        string code,
+        string generic,
+        HttpContext context,
+        IDictionary<string, object?>? extraExtensions = null)
     {
         ArgumentNullException.ThrowIfNull(context);
-        return ApiProblems.Problem(statusCode, code, generic, context);
+        return ApiProblems.Problem(statusCode, code, generic, context, extraExtensions: extraExtensions);
     }
 
     /// <summary>Logs the original exception server-side (never returned to the client).</summary>

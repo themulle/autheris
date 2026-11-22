@@ -104,7 +104,8 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "CONSENT_REQUEST_NOT_FOUND",
         "PRECONDITION_FAILED",
         "WORKFLOW_MODE_MISMATCH",
-        "FOUR_EYES_SAME_APPROVER"
+        "FOUR_EYES_SAME_APPROVER",
+        "ROW_POLICY_EXPRESSION_NOT_ALLOWED"
     };
 
     /// <summary>
@@ -156,7 +157,8 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         ["INDIVIDUAL_GRANT_REQUIRES_JUSTIFICATION"] = "A justification is required for this grant.",
         ["INDIVIDUAL_GRANT_INDETERMINATE"] = "The grant policy could not be evaluated.",
         ["SYNC_FAILED"] = "The synchronization failed.",
-        ["GDPR_SUBJECT_SCOPE_UNRESOLVED"] = "The report scope cannot be resolved: name the table that holds the data subject's data."
+        ["GDPR_SUBJECT_SCOPE_UNRESOLVED"] = "The report scope cannot be resolved: name the table that holds the data subject's data.",
+        ["ROW_POLICY_EXPRESSION_NOT_ALLOWED"] = "The statement uses an expression that is not permitted on a table with a row policy. Use non-raising forms such as TRY_CAST or NULLIF instead."
     };
 
     internal const string MaskedCode = "MASKED";
@@ -177,7 +179,8 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "DECISION_NOT_PERMITTED",
         "ACCESS_REQUEST_NOT_PENDING",
         "READ_ONLY_TOKEN",
-        "AGGREGATION_TIME_BUCKET_UNSUPPORTED"
+        "AGGREGATION_TIME_BUCKET_UNSUPPORTED",
+        "ROW_POLICY_EXPRESSION_NOT_ALLOWED"
     };
 
     private static readonly string[] SensitivePatterns =
@@ -222,6 +225,15 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
             error = error
                 .WithMessage("Access denied.")
                 .WithCode("ACCESS_DENIED");
+        }
+
+        if (FindRowPolicyRejected(error.Exception) is { } rpe)
+        {
+            var rpeBuilder = ErrorBuilder.FromError(error)
+                .SetMessage(FixedClientMessages[TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RowPolicyExpressionNotAllowed])
+                .SetCode(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.RowPolicyExpressionNotAllowed)
+                .SetExtension("hint", rpe.Hint);
+            error = rpeBuilder.Build();
         }
 
         // A1 (legacy table/finance path): gateway client/capability outcomes map by exception type only. Message, ErrorCode, inner
@@ -457,6 +469,19 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
 
     private static bool IsEngineOrMissingCode(string? code) =>
         code == null || (code.Length == 6 && code.StartsWith("HC", StringComparison.Ordinal) && code.AsSpan(2).IndexOfAnyExceptInRange('0', '9') < 0);
+
+    private static TrinoSqlEngine.Ast.Security.RowPolicyExpressionRejectedException? FindRowPolicyRejected(Exception? ex)
+    {
+        for (int depth = 0; ex is not null && depth < 8; ex = ex.InnerException, depth++)
+        {
+            if (ex is TrinoSqlEngine.Ast.Security.RowPolicyExpressionRejectedException rpe)
+            {
+                return rpe;
+            }
+        }
+
+        return null;
+    }
 
     private static IError EnrichWithDevelopmentFixHints(IError error)
     {

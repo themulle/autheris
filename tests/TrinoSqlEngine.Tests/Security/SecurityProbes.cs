@@ -103,7 +103,19 @@ internal static class SecurityProbes
         PerDialect("RowPolicy_RefusesARaisingExpression", "row-policy-expression", d =>
         {
             var env = new ProbeEnv(d);
-            Assert.Throws<System.Security.SecurityException>(() => env.Compile("SELECT id FROM orders WHERE id + 1 > 3"));
+            // Cross-family coercion and DML raising expressions are refused on every dialect (fenced and unfenced).
+            Assert.Throws<RowPolicyExpressionRejectedException>(() => env.Compile("SELECT id FROM orders WHERE id = '5'"));
+            Assert.Throws<RowPolicyExpressionRejectedException>(() => env.Compile("UPDATE orders SET status = 'x' WHERE id + 1 > 3"));
+
+            // On unfenced dialects, general raising expressions in SELECT remain refused; on fenced dialects, SELECT compiles over the fence.
+            if (d is TargetSqlDialect.DuckDb or TargetSqlDialect.Databricks)
+            {
+                Assert.Throws<RowPolicyExpressionRejectedException>(() => env.Compile("SELECT id FROM orders WHERE id + 1 > 3"));
+            }
+            else
+            {
+                Assert.False(string.IsNullOrEmpty(env.Compile("SELECT id FROM orders WHERE id + 1 > 3").Sql));
+            }
         });
 
         PerDialect("Verifier_RejectsAnUnsecuredStatement", "verifier", d =>

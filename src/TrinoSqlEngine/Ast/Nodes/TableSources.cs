@@ -11,7 +11,11 @@ public sealed record NamedTableSource(
 public sealed record SubqueryTableSource(
     SelectStatement Subquery,
     SqlIdentifier Alias,
-    IReadOnlyList<SqlIdentifier>? ColumnAliases = null) : TableSource;
+    IReadOnlyList<SqlIdentifier>? ColumnAliases = null) : TableSource
+{
+    // Compiler-only evaluation fence flag set exclusively by AstSecurityVisitor on fenced read dialects; never populated by SQL parsing.
+    internal bool EvaluationFence { get; init; }
+}
 
 public sealed record JoinedTableSource(
     TableSource Left,

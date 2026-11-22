@@ -195,7 +195,9 @@ public static class ApiProblems
         // Syntax error position
         "line", "column",
         // Discovery artifact validation code
-        "violation"
+        "violation",
+        // Safe non-raising expression remediation hint
+        "hint"
     };
 
     private static void AddAllowedExtensions(IDictionary<string, object?> target, IEnumerable<KeyValuePair<string, object?>>? source)

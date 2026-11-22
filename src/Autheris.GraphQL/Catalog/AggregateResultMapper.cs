@@ -264,6 +264,7 @@ internal static class AggregateValueConverter
             case ushort us: value = us; return true;
             case uint ui: value = ui; return true;
             case ulong ul when ul <= long.MaxValue: value = (long)ul; return true;
+            case System.Numerics.BigInteger bi when bi >= long.MinValue && bi <= long.MaxValue: value = (long)bi; return true;
             case decimal m when decimal.Truncate(m) == m && m >= long.MinValue && m <= long.MaxValue: value = (long)m; return true;
             case double d when double.IsFinite(d) && Math.Truncate(d) == d && d >= -9.2233720368547758E18 && d < 9.2233720368547758E18:
                 value = (long)d;
@@ -280,6 +281,9 @@ internal static class AggregateValueConverter
         switch (raw)
         {
             case decimal m: value = m; return true;
+            case System.Numerics.BigInteger bi when bi >= (System.Numerics.BigInteger)decimal.MinValue && bi <= (System.Numerics.BigInteger)decimal.MaxValue:
+                value = (decimal)bi;
+                return true;
             case double d when double.IsFinite(d) && Math.Abs(d) < 7.9E28: value = DecimalConversions.FromDouble(d); return true;
             case float f when float.IsFinite(f) && Math.Abs(f) < 7.9E28f: value = DecimalConversions.FromSingle(f); return true;
             default:
@@ -301,6 +305,7 @@ internal static class AggregateValueConverter
             case double d when double.IsFinite(d): value = d; return true;
             case float f when float.IsFinite(f): value = f; return true;
             case decimal m: value = (double)m; return true;
+            case System.Numerics.BigInteger bi when double.IsFinite((double)bi): value = (double)bi; return true;
             default:
                 if (TryLong(raw, out var l))
                 {
