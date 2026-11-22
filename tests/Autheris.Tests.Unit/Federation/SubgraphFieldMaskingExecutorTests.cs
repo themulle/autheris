@@ -32,6 +32,8 @@ public sealed class SubgraphFieldMaskingExecutorTests
         public string Name { get; set; } = "Alice";
         public string Email { get; set; } = "alice@example.com";
         public string Department { get; set; } = "Engineering";
+        public List<string> Tags { get; set; } = ["tag-secret-1", "tag-secret-2"];
+        public string[] Labels { get; set; } = ["lbl-secret-1", "lbl-secret-2"];
     }
 
     public sealed class TestQuery
@@ -267,5 +269,176 @@ public sealed class SubgraphFieldMaskingExecutorTests
 
         result.ContextData.ShouldNotBeNull();
         result.ContextData.ContainsKey("MaskingApplied").ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Executor_CatalogUnavailable_UnknownListOfScalarsMasked()
+    {
+        var maskingProvider = CreateMaskingProvider();
+        var gatewayOptions = new GatewayOptions
+        {
+            Federation = new FederationOptions
+            {
+                Enabled = true,
+                EnableResultMasking = true,
+                DefaultMaskUnknownSensitiveScalars = true
+            }
+        };
+
+        var masker = new SubgraphResultMasker(
+            maskingProvider,
+            Options.Create(gatewayOptions),
+            NullLogger<SubgraphResultMasker>.Instance,
+            catalog: new FailingMaskingCatalog());
+
+        var executor = await CreateExecutorAsync(maskingProvider, masker, gatewayOptions);
+        var request = OperationRequestBuilder.New()
+            .SetDocument("{ user { id tags labels } }")
+            .SetGlobalState(nameof(ClaimsPrincipal), CreateNonAdminUser())
+            .Build();
+
+        var executionResult = await executor.ExecuteAsync(request);
+        var result = executionResult as OperationResult;
+        result.ShouldNotBeNull();
+        (result.Errors == null || result.Errors.Count == 0).ShouldBeTrue();
+
+        using var doc = JsonDocument.Parse(executionResult.ToJson());
+        var user = doc.RootElement.GetProperty("data").GetProperty("user");
+        user.GetProperty("id").GetString().ShouldBe("123");
+        var tags = user.GetProperty("tags");
+        tags.GetArrayLength().ShouldBe(2);
+        tags[0].GetString().ShouldBe("[MASKED:tags]");
+        tags[1].GetString().ShouldBe("[MASKED:tags]");
+
+        var labels = user.GetProperty("labels");
+        labels.GetArrayLength().ShouldBe(2);
+        labels[0].GetString().ShouldBe("[MASKED:labels]");
+        labels[1].GetString().ShouldBe("[MASKED:labels]");
+
+        result.ContextData.ShouldNotBeNull();
+        result.ContextData.ContainsKey("MaskingApplied").ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task MaskResultDataAsync_CatalogUnavailable_MasksScalarListsAndJsonArrays()
+    {
+        var maskingProvider = new Autheris.Tests.Common.Fakes.StubColumnMaskingProvider((_, _, _) => "[REDACTED]");
+        var gatewayOptions = new GatewayOptions
+        {
+            Federation = new FederationOptions
+            {
+                Enabled = true,
+                EnableResultMasking = true,
+                DefaultMaskUnknownSensitiveScalars = true
+            }
+        };
+
+        var masker = new SubgraphResultMasker(
+            maskingProvider,
+            Options.Create(gatewayOptions),
+            NullLogger<SubgraphResultMasker>.Instance,
+            catalog: new FailingMaskingCatalog());
+
+        using var jsonDoc = JsonDocument.Parse("""["j1","j2"]""");
+        var raw = new Dictionary<string, object?>
+        {
+            ["id"] = "1",
+            ["tags"] = new List<string> { "t1", "t2" },
+            ["jsonTags"] = jsonDoc.RootElement.Clone(),
+            ["items"] = new List<Dictionary<string, object?>>
+            {
+                new() { ["id"] = "item-1", ["note"] = "secret-note" }
+            }
+        };
+
+        var masked = await masker.MaskResultDataAsync(raw, CreateNonAdminUser(), null) as IReadOnlyDictionary<string, object?>;
+        masked.ShouldNotBeNull();
+        masked["id"].ShouldBe("1");
+
+        var tags = masked["tags"].ShouldBeAssignableTo<IReadOnlyList<object?>>();
+        tags.ShouldBe(["[REDACTED]", "[REDACTED]"]);
+
+        var jsonTags = masked["jsonTags"].ShouldBeOfType<JsonElement>();
+        jsonTags.ValueKind.ShouldBe(JsonValueKind.Array);
+        jsonTags[0].GetString().ShouldBe("[REDACTED]");
+        jsonTags[1].GetString().ShouldBe("[REDACTED]");
+
+        var items = masked["items"].ShouldBeAssignableTo<IReadOnlyList<object?>>();
+        items.ShouldNotBeNull();
+        var firstItem = items[0].ShouldBeAssignableTo<IReadOnlyDictionary<string, object?>>();
+        firstItem.ShouldNotBeNull();
+        firstItem["id"].ShouldBe("item-1");
+        firstItem["note"].ShouldBe("[REDACTED]");
+    }
+
+    [Fact]
+    public async Task MaskResultDataAsync_CatalogUnavailable_NonIDictionaryReadOnlyDictionaryAndObjectList_ArePreservedAndMasked()
+    {
+        var maskingProvider = new Autheris.Tests.Common.Fakes.StubColumnMaskingProvider((_, _, _) => "[REDACTED]");
+        var gatewayOptions = new GatewayOptions
+        {
+            Federation = new FederationOptions
+            {
+                Enabled = true,
+                EnableResultMasking = true,
+                DefaultMaskUnknownSensitiveScalars = true
+            }
+        };
+
+        var masker = new SubgraphResultMasker(
+            maskingProvider,
+            Options.Create(gatewayOptions),
+            NullLogger<SubgraphResultMasker>.Instance,
+            catalog: new FailingMaskingCatalog());
+
+        var profile = new NonLegacyReadOnlyMap(new Dictionary<string, object?>
+        {
+            ["id"] = "u-1",
+            ["secretNote"] = "classified"
+        });
+        var entry = new NonLegacyReadOnlyMap(new Dictionary<string, object?>
+        {
+            ["id"] = "item-1",
+            ["secretField"] = "classified-item"
+        });
+
+        var raw = new Dictionary<string, object?>
+        {
+            ["profile"] = profile,
+            ["entries"] = new List<object?> { entry }
+        };
+
+        var masked = await masker.MaskResultDataAsync(raw, CreateNonAdminUser(), null) as IReadOnlyDictionary<string, object?>;
+        masked.ShouldNotBeNull();
+
+        var maskedProfile = masked["profile"].ShouldBeAssignableTo<IReadOnlyDictionary<string, object?>>();
+        maskedProfile.ShouldNotBeNull();
+        maskedProfile["id"].ShouldBe("u-1");
+        maskedProfile["secretNote"].ShouldBe("[REDACTED]");
+
+        var maskedEntries = masked["entries"].ShouldBeAssignableTo<IReadOnlyList<object?>>();
+        maskedEntries.ShouldNotBeNull();
+        var maskedEntry = maskedEntries[0].ShouldBeAssignableTo<IReadOnlyDictionary<string, object?>>();
+        maskedEntry.ShouldNotBeNull();
+        maskedEntry["id"].ShouldBe("item-1");
+        maskedEntry["secretField"].ShouldBe("[REDACTED]");
+    }
+
+    private sealed class NonLegacyReadOnlyMap(IReadOnlyDictionary<string, object?> inner) : IReadOnlyDictionary<string, object?>
+    {
+        public object? this[string key] => inner[key];
+        public IEnumerable<string> Keys => inner.Keys;
+        public IEnumerable<object?> Values => inner.Values;
+        public int Count => inner.Count;
+        public bool ContainsKey(string key) => inner.ContainsKey(key);
+        public IEnumerator<KeyValuePair<string, object?>> GetEnumerator() => inner.GetEnumerator();
+        public bool TryGetValue(string key, out object? value) => inner.TryGetValue(key, out value);
+        System.Collections.IEnumerator System.Collections.IEnumerable.GetEnumerator() => ((System.Collections.IEnumerable)inner).GetEnumerator();
+    }
+
+    private sealed class FailingMaskingCatalog : IFederatedMaskingCatalog
+    {
+        public ValueTask<IReadOnlyDictionary<string, MaskingRule>> GetClassificationsAsync(TenantId tenant, CancellationToken ct = default)
+            => ValueTask.FromException<IReadOnlyDictionary<string, MaskingRule>>(new InvalidOperationException("catalog unavailable"));
     }
 }

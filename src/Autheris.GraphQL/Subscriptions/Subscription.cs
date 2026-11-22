@@ -49,7 +49,7 @@ public sealed class Subscription
         {
             throw new GraphQLException(
                 ErrorBuilder.New()
-                    .SetMessage($"Forbidden: Tenant mismatch. Authenticated tenant '{callerTenant.Value}' cannot subscribe to tenant '{tenantId}'.")
+                    .SetMessage("Forbidden: Tenant mismatch.")
                     .SetCode("AUTH_TENANT_MISMATCH")
                     .Build());
         }

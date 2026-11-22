@@ -66,12 +66,22 @@ public static class UsageCsvWriter
     /// <summary>
     /// Neutralizes spreadsheet formula triggers (=, +, -, @, tab, CR) before applying RFC 4180 quoting.
     /// </summary>
-    public static string FormatCell(string? value)
+    public static string FormatCell(string? value) => FormatCell(value, preserveSignedNumbers: false);
+
+    /// <summary>
+    /// Neutralizes spreadsheet formula triggers (=, +, -, @, tab, CR) before applying RFC 4180 quoting.
+    /// When <paramref name="preserveSignedNumbers"/> is true, valid numeric literals keep their leading sign.
+    /// </summary>
+    public static string FormatCell(string? value, bool preserveSignedNumbers)
     {
         string raw = value ?? string.Empty;
         if (raw.Length > 0 && raw[0] is '=' or '+' or '-' or '@' or '\t' or '\r')
         {
-            raw = "'" + raw;
+            if (!preserveSignedNumbers ||
+                !decimal.TryParse(raw, NumberStyles.Number | NumberStyles.AllowLeadingSign | NumberStyles.AllowDecimalPoint | NumberStyles.AllowExponent, CultureInfo.InvariantCulture, out _))
+            {
+                raw = "'" + raw;
+            }
         }
 
         if (raw.IndexOfAny([',', '"', '\n', '\r']) >= 0)

@@ -16,6 +16,8 @@ using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Autheris.GraphQL.Federation;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Http;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -261,6 +263,69 @@ public sealed class FederationTests
         innerHandler.LastRequest.ShouldNotBeNull();
         innerHandler.LastRequest.Headers.Authorization.ShouldNotBeNull();
         innerHandler.LastRequest.Headers.Authorization.Parameter.ShouldBe("test-jwt-token-123");
+    }
+
+    [Fact]
+    public async Task AddFusionFederationServices_BindsSeparateHandlerPerNamedSubgraphClient()
+    {
+        var options = new GatewayOptions
+        {
+            Insecure = new InsecureGettingStartedOptions { danger_allow_insecure_transport = true },
+            Federation = new FederationOptions
+            {
+                Enabled = true,
+                EnableZeroTrustContextForwarding = false,
+                ForwardAuthorizationBearer = false,
+                Subgraphs =
+                [
+                    new SubgraphEndpointOptions
+                    {
+                        Name = "alpha",
+                        Url = "https://alpha.internal/graphql",
+                        ForwardClientBearerToken = true
+                    },
+                    new SubgraphEndpointOptions
+                    {
+                        Name = "beta",
+                        Url = "https://beta.internal/graphql",
+                        ForwardClientBearerToken = false
+                    }
+                ]
+            }
+        };
+
+        var httpContext = new DefaultHttpContext();
+        httpContext.Request.Headers["Authorization"] = "Bearer secret-client-jwt";
+
+        var services = new ServiceCollection();
+        services.AddLogging();
+        services.AddSingleton(Options.Create(options));
+        services.AddSingleton<IHttpContextAccessor>(new HttpContextAccessor { HttpContext = httpContext });
+        services.AddFusionFederationServices(options);
+
+        var captureAlpha = new TestHttpMessageHandler();
+        var captureBeta = new TestHttpMessageHandler();
+        services.Configure<HttpClientFactoryOptions>("alpha", o =>
+            o.HttpMessageHandlerBuilderActions.Add(b => b.PrimaryHandler = captureAlpha));
+        services.Configure<HttpClientFactoryOptions>("beta", o =>
+            o.HttpMessageHandlerBuilderActions.Add(b => b.PrimaryHandler = captureBeta));
+
+        await using var sp = services.BuildServiceProvider();
+        var factory = sp.GetRequiredService<IHttpClientFactory>();
+
+        using var alphaClient = factory.CreateClient("alpha");
+        using var betaClient = factory.CreateClient("beta");
+
+        await alphaClient.PostAsync("/graphql", new StringContent("{}"));
+        await betaClient.PostAsync("/graphql", new StringContent("{}"));
+
+        // Alpha (ForwardClientBearerToken = true) must preserve its own config even though beta was registered last.
+        captureAlpha.LastRequest.ShouldNotBeNull();
+        captureAlpha.LastRequest.Headers.Authorization.ShouldNotBeNull();
+        captureAlpha.LastRequest.Headers.Authorization.Parameter.ShouldBe("secret-client-jwt");
+
+        captureBeta.LastRequest.ShouldNotBeNull();
+        captureBeta.LastRequest.Headers.Authorization.ShouldBeNull();
     }
 
     private sealed class TestHttpMessageHandler : HttpMessageHandler

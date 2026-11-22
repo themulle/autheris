@@ -29,7 +29,8 @@ public interface ITableCacheUpstreamLoader
 /// </summary>
 public sealed class TableCacheManager : ITableCacheManager
 {
-    private readonly ConcurrentDictionary<TableIdentifier, Task<TableCacheEntryMetadata>> _inFlightLoads = new();
+    private readonly ConcurrentDictionary<TableIdentifier, InFlightLoad> _inFlightLoads = new();
+    private readonly ConcurrentDictionary<TableIdentifier, ProactiveRefreshState> _proactiveStates = new();
     private readonly ITableCacheCatalog _catalog;
     private readonly ITableCacheStore _store;
     private readonly ITableCacheUpstreamLoader? _upstreamLoader;
@@ -61,6 +62,7 @@ public sealed class TableCacheManager : ITableCacheManager
 
     public async ValueTask<TableCacheEntryMetadata?> GetOrLoadAsync(TableIdentifier table, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         var now = _timeProvider.GetUtcNow();
 
         if (_catalog.TryGet(table, out var existing) && existing is not null)
@@ -98,82 +100,105 @@ public sealed class TableCacheManager : ITableCacheManager
         Interlocked.Increment(ref _totalMisses);
 
         // 12 Single-Flight Request Coalescing
-        while (true)
-        {
-            if (_inFlightLoads.TryGetValue(table, out var inFlightTask))
-            {
-                return await inFlightTask.WaitAsync(ct).ConfigureAwait(false);
-            }
-
-            var tcs = new TaskCompletionSource<TableCacheEntryMetadata>(TaskCreationOptions.RunContinuationsAsynchronously);
-            if (_inFlightLoads.TryAdd(table, tcs.Task))
-            {
-                try
-                {
-                    var freshMetadata = await ExecuteUpstreamLoadAsync(table, ct).ConfigureAwait(false);
-                    _catalog.Upsert(freshMetadata);
-                    Interlocked.Increment(ref _totalRefreshes);
-                    tcs.SetResult(freshMetadata);
-                    return freshMetadata;
-                }
-                catch (Exception ex)
-                {
-                    // If offline policy permits stale on outage, fallback to stale rather than failing
-                    if (_catalog.TryGet(table, out var stale) && stale is not null &&
-                        stale.OfflinePolicy == TableCacheOfflinePolicy.ServeStaleWithWarning)
-                    {
-                        var staleDuration = now - stale.LastRefreshedAt;
-                        var maxStale = TimeSpan.FromSeconds(_options.MaxStaleSurvivalSeconds);
-                        if (staleDuration <= maxStale)
-                        {
-                            Interlocked.Increment(ref _totalStaleServes);
-                            tcs.SetResult(stale);
-                            return stale;
-                        }
-                    }
-
-                    tcs.SetException(ex);
-                    throw;
-                }
-                finally
-                {
-                    _inFlightLoads.TryRemove(table, out _);
-                }
-            }
-        }
+        return await CoalescedLoadAsync(table, allowStaleFallback: true, now, ct).ConfigureAwait(false);
     }
 
     public async Task ForceRefreshAsync(TableIdentifier table, CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
+        await CoalescedLoadAsync(table, allowStaleFallback: false, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
+    }
+
+    private async Task<TableCacheEntryMetadata> CoalescedLoadAsync(
+        TableIdentifier table,
+        bool allowStaleFallback,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
         while (true)
         {
-            if (_inFlightLoads.TryGetValue(table, out var inFlightTask))
+            if (_inFlightLoads.TryGetValue(table, out var existingFlight))
             {
-                await inFlightTask.WaitAsync(ct).ConfigureAwait(false);
-                return;
+                if (existingFlight.TryAcquireWaiter())
+                {
+                    return await AwaitFlightAsync(table, existingFlight, allowStaleFallback, now, ct).ConfigureAwait(false);
+                }
+
+                await existingFlight.RetiredTask.WaitAsync(ct).ConfigureAwait(false);
+                continue;
             }
 
-            var tcs = new TaskCompletionSource<TableCacheEntryMetadata>(TaskCreationOptions.RunContinuationsAsynchronously);
-            if (_inFlightLoads.TryAdd(table, tcs.Task))
+            var newFlight = new InFlightLoad();
+            if (_inFlightLoads.TryAdd(table, newFlight))
             {
-                try
+                _ = RunSingleFlightLoadAsync(table, newFlight);
+                return await AwaitFlightAsync(table, newFlight, allowStaleFallback, now, ct).ConfigureAwait(false);
+            }
+
+            newFlight.Retire();
+        }
+    }
+
+    private async Task<TableCacheEntryMetadata> AwaitFlightAsync(
+        TableIdentifier table,
+        InFlightLoad flight,
+        bool allowStaleFallback,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        try
+        {
+            return await flight.Tcs.Task.WaitAsync(ct).ConfigureAwait(false);
+        }
+        catch (Exception) when (allowStaleFallback && !ct.IsCancellationRequested)
+        {
+            if (_catalog.TryGet(table, out var stale) &&
+                stale is not null &&
+                stale.OfflinePolicy == TableCacheOfflinePolicy.ServeStaleWithWarning)
+            {
+                var staleDuration = now - stale.LastRefreshedAt;
+                var maxStale = TimeSpan.FromSeconds(_options.MaxStaleSurvivalSeconds);
+                if (staleDuration <= maxStale)
                 {
-                    var freshMetadata = await ExecuteUpstreamLoadAsync(table, ct).ConfigureAwait(false);
-                    _catalog.Upsert(freshMetadata);
-                    Interlocked.Increment(ref _totalRefreshes);
-                    tcs.SetResult(freshMetadata);
-                    return;
-                }
-                catch (Exception ex)
-                {
-                    tcs.SetException(ex);
-                    throw;
-                }
-                finally
-                {
-                    _inFlightLoads.TryRemove(table, out _);
+                    Interlocked.Increment(ref _totalStaleServes);
+                    return stale;
                 }
             }
+
+            throw;
+        }
+        finally
+        {
+            flight.ReleaseWaiter();
+        }
+    }
+
+    private async Task RunSingleFlightLoadAsync(
+        TableIdentifier table,
+        InFlightLoad flight)
+    {
+        try
+        {
+            var freshMetadata = await ExecuteUpstreamLoadAsync(table, flight.Cts.Token).ConfigureAwait(false);
+            _catalog.Upsert(freshMetadata);
+            Interlocked.Increment(ref _totalRefreshes);
+            flight.MarkCompleted();
+            flight.Tcs.TrySetResult(freshMetadata);
+        }
+        catch (OperationCanceledException oce) when (flight.Cts.IsCancellationRequested)
+        {
+            flight.MarkCompleted();
+            flight.Tcs.TrySetCanceled(oce.CancellationToken.IsCancellationRequested ? oce.CancellationToken : flight.Cts.Token);
+        }
+        catch (Exception ex)
+        {
+            flight.MarkCompleted();
+            flight.Tcs.TrySetException(ex);
+        }
+        finally
+        {
+            _inFlightLoads.TryRemove(new KeyValuePair<TableIdentifier, InFlightLoad>(table, flight));
+            flight.Retire();
         }
     }
 
@@ -240,17 +265,25 @@ public sealed class TableCacheManager : ITableCacheManager
             : TimeSpan.FromSeconds(_options.DefaultTtlSeconds);
 
         var remaining = existing.ExpiresAt.Value - now;
-        if (remaining > TimeSpan.Zero && remaining < totalTtl * ratio)
+        if (remaining > TimeSpan.Zero && remaining < totalTtl * ratio && _upstreamLoader != null && !_inFlightLoads.ContainsKey(table))
         {
-            // Trigger proactive background reload
+            var state = _proactiveStates.GetOrAdd(table, static _ => new ProactiveRefreshState());
+            if (!state.TryBegin(now))
+            {
+                return;
+            }
+
+            // Trigger deduplicated proactive background reload with failure backoff
             _ = Task.Run(async () =>
             {
                 try
                 {
                     await ForceRefreshAsync(table, CancellationToken.None).ConfigureAwait(false);
+                    state.RecordSuccess();
                 }
                 catch (Exception ex)
                 {
+                    state.RecordFailure(_timeProvider.GetUtcNow());
                     _logger?.LogWarning(ex, "Proactive early refresh failed for table '{Table}'", table);
                 }
             });
@@ -277,15 +310,120 @@ public sealed class TableCacheManager : ITableCacheManager
         var shadowIdentifier = await _store.StageShadowGenerationAsync(table, epoch, loadResult.Columns, loadResult.Rows, ct).ConfigureAwait(false);
         var meta = await _store.SwapActiveGenerationAsync(table, epoch, shadowIdentifier, loadResult.RowCount, loadResult.SizeInBytes, expiresAt, ct).ConfigureAwait(false);
 
-        // Update metadata with cached columns and policy
+        // Update metadata with cached columns and explicit or default policy
         var enrichedMeta = meta with
         {
             CachedColumns = loadResult.Columns,
             FilterPredicate = targetOpt?.FilterPredicate,
-            OfflinePolicy = targetOpt?.OfflinePolicy ?? _options.Tables.FirstOrDefault()?.OfflinePolicy ?? TableCacheOfflinePolicy.FailClosed,
+            OfflinePolicy = targetOpt?.OfflinePolicy ?? TableCacheOfflinePolicy.FailClosed,
             PrimaryKeyColumns = targetOpt?.PrimaryKeyColumns ?? meta.PrimaryKeyColumns
         };
 
         return enrichedMeta;
+    }
+
+    private sealed class InFlightLoad
+    {
+        private readonly object _sync = new();
+        private readonly TaskCompletionSource _retiredTcs = new(TaskCreationOptions.RunContinuationsAsynchronously);
+        private int _waiters = 1;
+        private bool _completed;
+        private bool _disposed;
+
+        public CancellationTokenSource Cts { get; } = new();
+        public TaskCompletionSource<TableCacheEntryMetadata> Tcs { get; } =
+            new(TaskCreationOptions.RunContinuationsAsynchronously);
+        public Task RetiredTask => _retiredTcs.Task;
+
+        public bool TryAcquireWaiter()
+        {
+            lock (_sync)
+            {
+                if (_completed || _disposed || _waiters <= 0)
+                {
+                    return false;
+                }
+
+                _waiters++;
+                return true;
+            }
+        }
+
+        public void ReleaseWaiter()
+        {
+            lock (_sync)
+            {
+                if (--_waiters <= 0 && !_completed && !_disposed)
+                {
+                    Cts.Cancel();
+                }
+            }
+        }
+
+        public void MarkCompleted()
+        {
+            lock (_sync)
+            {
+                _completed = true;
+            }
+        }
+
+        public void Retire()
+        {
+            lock (_sync)
+            {
+                _completed = true;
+                if (!_disposed)
+                {
+                    _disposed = true;
+                    Cts.Dispose();
+                }
+            }
+
+            _retiredTcs.TrySetResult();
+        }
+    }
+
+    private sealed class ProactiveRefreshState
+    {
+        private readonly object _sync = new();
+        private bool _inFlight;
+        private int _consecutiveFailures;
+        private DateTimeOffset _backoffUntil = DateTimeOffset.MinValue;
+
+        public bool TryBegin(DateTimeOffset now)
+        {
+            lock (_sync)
+            {
+                if (_inFlight || now < _backoffUntil)
+                {
+                    return false;
+                }
+
+                _inFlight = true;
+                return true;
+            }
+        }
+
+        public void RecordSuccess()
+        {
+            lock (_sync)
+            {
+                _inFlight = false;
+                _consecutiveFailures = 0;
+                _backoffUntil = DateTimeOffset.MinValue;
+            }
+        }
+
+        public void RecordFailure(DateTimeOffset now)
+        {
+            lock (_sync)
+            {
+                _inFlight = false;
+                _consecutiveFailures++;
+                var backoffSeconds = Math.Min(60, 5 * (1 << Math.Min(_consecutiveFailures - 1, 4)));
+                _backoffUntil = now.AddSeconds(backoffSeconds);
+            }
+        }
     }
 }
