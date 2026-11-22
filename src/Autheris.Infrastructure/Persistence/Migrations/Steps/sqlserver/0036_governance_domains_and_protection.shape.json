@@ -1,0 +1,106 @@
+{
+  "ops": [
+    {
+      "op": "addTable",
+      "table": "GOVERNANCE_DOMAINS",
+      "newTable": {
+        "name": "GOVERNANCE_DOMAINS",
+        "columns": [
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "name", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "description", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "contact", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "owner_group_sid", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "default_class", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "visibility", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "is_system", "type": "BIT", "family": "boolean", "nullable": false },
+          { "name": "version", "type": "INT", "family": "integer", "nullable": false },
+          { "name": "created_by", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "created_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false },
+          { "name": "updated_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "id"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addIndex",
+      "table": "GOVERNANCE_DOMAINS",
+      "name": "UX_GOVERNANCE_DOMAINS_NAME",
+      "unique": true,
+      "columns": ["tenant_id", "name"]
+    },
+    {
+      "op": "addTable",
+      "table": "GOVERNANCE_DOMAIN_TABLES",
+      "newTable": {
+        "name": "GOVERNANCE_DOMAIN_TABLES",
+        "columns": [
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "table_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "domain_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "assigned_by", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "assigned_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "table_id"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addIndex",
+      "table": "GOVERNANCE_DOMAIN_TABLES",
+      "name": "IX_GOVERNANCE_DOMAIN_TABLES_DOMAIN",
+      "unique": false,
+      "columns": ["tenant_id", "domain_id"]
+    },
+    {
+      "op": "addTable",
+      "table": "OBJECT_PROTECTION",
+      "newTable": {
+        "name": "OBJECT_PROTECTION",
+        "columns": [
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "table_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "column_name", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "protection_class", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "mask_category", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "updated_by", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "updated_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id", "table_id", "column_name"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "ACCESS_POLICY_SETTINGS",
+      "newTable": {
+        "name": "ACCESS_POLICY_SETTINGS",
+        "columns": [
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "settings_json", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "version", "type": "INT", "family": "integer", "nullable": false },
+          { "name": "updated_by", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "updated_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id"],
+        "indexes": []
+      }
+    },
+    {
+      "op": "addTable",
+      "table": "GOVERNANCE_EPOCHS",
+      "newTable": {
+        "name": "GOVERNANCE_EPOCHS",
+        "columns": [
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "epoch", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "updated_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["tenant_id"],
+        "indexes": []
+      }
+    }
+  ]
+}
