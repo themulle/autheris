@@ -22,6 +22,7 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
 
     protected override bool SupportsTryCast => true;
     protected override bool SupportsJoinUsing => false;
+    protected override SubqueryFenceStyle FenceStyle => SubqueryFenceStyle.SqlServerOrderByNullOffsetZero;
 
     protected override bool EmitsTimeZoneConversion => true;
 

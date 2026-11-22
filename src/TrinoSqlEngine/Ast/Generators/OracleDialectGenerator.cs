@@ -19,6 +19,7 @@ public sealed class OracleDialectGenerator : SqlDialectGeneratorBase
     public override TargetSqlDialect TargetDialect => TargetSqlDialect.Oracle;
 
     protected override string SubstringFunctionName => "SUBSTR";
+    protected override SubqueryFenceStyle FenceStyle => SubqueryFenceStyle.OracleWhereRowNum;
 
     // The inline structural positions of this generator are registered with the emitter context.
     protected override bool BindLiterals => true;

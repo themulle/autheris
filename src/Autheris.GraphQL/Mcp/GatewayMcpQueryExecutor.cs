@@ -612,13 +612,13 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
     {
         SqlCompilerErrorMapper.TryMap(exception, out var mapped);
         SqlCompilerErrorMapper.RecordOutcome(mapped);
-        return CreateErrorResult(tenantId, toolName, mapped.Code, mapped.Title);
+        return CreateErrorResult(tenantId, toolName, mapped.Code, mapped.Title, hint: mapped.Hint);
     }
 
     /// <summary>
     /// M-17: Structured error result for MCP tool invocations (deny, execution failure, unavailable).
     /// </summary>
-    internal static string CreateErrorResult(string tenantId, string toolName, string code, string message, string? graphQLResultJson = null, int? retryAfterSeconds = null)
+    internal static string CreateErrorResult(string tenantId, string toolName, string code, string message, string? graphQLResultJson = null, int? retryAfterSeconds = null, string? hint = null)
     {
         JsonElement? graphQL = null;
         if (!string.IsNullOrWhiteSpace(graphQLResultJson))
@@ -638,7 +638,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             tenantId,
             toolName,
             IsError: true,
-            new McpToolError(code, message, retryAfterSeconds),
+            new McpToolError(code, message, retryAfterSeconds, hint),
             graphQL), CamelCaseJsonOptions);
     }
 
@@ -894,7 +894,9 @@ internal sealed record McpToolError(
     string Code,
     string Message,
     [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    int? RetryAfterSeconds = null);
+    int? RetryAfterSeconds = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? Hint = null);
 
 internal sealed record McpToolErrorPayload(
     string TenantId,

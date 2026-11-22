@@ -648,6 +648,7 @@ public sealed partial class GovernedAggregationService
             float f => DecimalConversions.FromSingle(f),
             short s => s,
             byte b => b,
+            System.Numerics.BigInteger bi => (decimal)bi,
             _ => DecimalConversions.ToDecimal(value)
         };
 
@@ -695,7 +696,7 @@ public sealed partial class GovernedAggregationService
         value switch
         {
             null or DBNull => null,
-            int or long or short or byte or decimal or double or float => ToDecimal(value),
+            int or long or short or byte or decimal or double or float or System.Numerics.BigInteger => ToDecimal(value),
             DateTimeOffset dto => dto.UtcTicks,
             DateTime dt => dt.ToUniversalTime().Ticks,
             string s when DateTimeOffset.TryParseExact(s, TimeBucketKeys.TimestampKeyFormat, CultureInfo.InvariantCulture, DateTimeStyles.None, out var dto) => dto.UtcTicks,

@@ -24,6 +24,7 @@ public static class DecimalConversions
     {
         double d => FromDouble(d),
         float f => FromSingle(f),
+        System.Numerics.BigInteger bi => (decimal)bi,
         _ => Convert.ToDecimal(value, CultureInfo.InvariantCulture),
     };
 

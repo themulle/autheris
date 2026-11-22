@@ -129,10 +129,11 @@ public sealed record DialectCapabilities(
     int? MaxExpressionDepth = null,
     bool LikeIsCaseInsensitive = false,
     bool SupportsTimeZoneConversion = false,
-    bool IntersectBindsTighter = false)
+    bool IntersectBindsTighter = false,
+    bool HasEvaluationFence = false)
 {
     /// <summary>Version of the capability data. Part of the compile cache key.</summary>
-    public const string TableVersion = "cap-7";
+    public const string TableVersion = "cap-8";
 }
 
 /// <summary>

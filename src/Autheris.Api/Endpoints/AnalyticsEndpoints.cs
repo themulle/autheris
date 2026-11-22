@@ -164,6 +164,16 @@ public static class AnalyticsEndpoints
             ApiProblems.LogRefusal(httpContext, ex.GetType(), AggregationTimeBucketUnsupportedException.ErrorCodeConst);
             return SafeErrorResults.BadRequest(AggregationTimeBucketUnsupportedException.ErrorCodeConst, AggregationTimeBucketUnsupportedException.FixedMessage, httpContext);
         }
+        catch (TrinoSqlEngine.Ast.Security.RowPolicyExpressionRejectedException ex)
+        {
+            ApiProblems.LogRefusal(httpContext, ex.GetType(), ex.Code);
+            return SafeErrorResults.Problem(
+                StatusCodes.Status422UnprocessableEntity,
+                ex.Code,
+                TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(ex.Code),
+                httpContext,
+                new Dictionary<string, object?> { ["hint"] = ex.Hint });
+        }
         catch (Exception ex) when (IsNotSupportedRefusal(ex))
         {
             ApiProblems.LogRefusal(httpContext, ex.GetType(), AggregationErrorCodes.NotSupported);
@@ -258,6 +268,16 @@ public static class AnalyticsEndpoints
         {
             ApiProblems.LogRefusal(httpContext, ex.GetType(), AggregationTimeBucketUnsupportedException.ErrorCodeConst);
             return SafeErrorResults.BadRequest(AggregationTimeBucketUnsupportedException.ErrorCodeConst, AggregationTimeBucketUnsupportedException.FixedMessage, httpContext);
+        }
+        catch (TrinoSqlEngine.Ast.Security.RowPolicyExpressionRejectedException ex)
+        {
+            ApiProblems.LogRefusal(httpContext, ex.GetType(), ex.Code);
+            return SafeErrorResults.Problem(
+                StatusCodes.Status422UnprocessableEntity,
+                ex.Code,
+                TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage(ex.Code),
+                httpContext,
+                new Dictionary<string, object?> { ["hint"] = ex.Hint });
         }
         catch (Exception ex) when (IsNotSupportedRefusal(ex))
         {

@@ -116,7 +116,17 @@ public class RowPolicyExpressionAllowlistTests
     public void Refused_expression_under_tenant_predicate_is_rejected(string item, string sql)
     {
         Assert.NotNull(item);
-        Assert.Throws<SecurityException>(() => Compile(sql));
+        // Unfenced dialects (Databricks, DuckDb) continue to refuse raising expressions in SELECT
+        // (and disallowlisted functions still fail earlier via SecurityException from SqlAstBuilder).
+        var ex = Assert.ThrowsAny<SecurityException>(() => Compile(sql, TargetSqlDialect.DuckDb));
+        if (ex is RowPolicyExpressionRejectedException rejected)
+        {
+            Assert.Equal(GovernedSqlErrorCodes.RowPolicyExpressionNotAllowed, rejected.Code);
+            Assert.Contains("TRY_CAST", rejected.Hint, StringComparison.Ordinal);
+            Assert.Contains("NULLIF", rejected.Hint, StringComparison.Ordinal);
+        }
+
+        Assert.ThrowsAny<SecurityException>(() => Compile(sql, TargetSqlDialect.Databricks));
     }
 
     [Theory]
@@ -126,8 +136,9 @@ public class RowPolicyExpressionAllowlistTests
     public void Refusal_uses_the_fixed_message(string item, string sql)
     {
         Assert.NotNull(item);
-        var ex = Assert.Throws<SecurityException>(() => Compile(sql));
+        var ex = Assert.Throws<RowPolicyExpressionRejectedException>(() => Compile(sql, TargetSqlDialect.DuckDb));
         Assert.Equal(RowPolicyErrorGuard.Message, ex.Message);
+        Assert.Equal(GovernedSqlErrorCodes.RowPolicyExpressionNotAllowed, ex.Code);
     }
 
     [Theory]
@@ -157,7 +168,7 @@ public class RowPolicyExpressionAllowlistTests
     [Fact]
     public void Correlated_exists_comparison_of_mixed_family_is_refused()
     {
-        Assert.Throws<SecurityException>(() => Compile(
+        Assert.Throws<RowPolicyExpressionRejectedException>(() => Compile(
             "SELECT Id FROM Orders o WHERE EXISTS (SELECT 1 FROM Entitlements e WHERE e.OrderId = o.Status)"));
     }
 

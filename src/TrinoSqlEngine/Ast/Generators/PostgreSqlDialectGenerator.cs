@@ -18,6 +18,7 @@ public sealed class PostgreSqlDialectGenerator : SqlDialectGeneratorBase
     protected override bool SupportsAggregateFilter => true;
     protected override bool SupportsOrderedAggregates => true;
     protected override bool SupportsGroupByDistinct => true;
+    protected override SubqueryFenceStyle FenceStyle => SubqueryFenceStyle.PostgresOffsetZero;
 
     /// <summary>Wunsch 4: PostgreSQL has no double, tinyint or varbinary.</summary>
     protected override string FormatTypeName(TrinoType type) => type.Name switch
