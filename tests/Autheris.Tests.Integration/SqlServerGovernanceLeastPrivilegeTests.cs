@@ -1,8 +1,11 @@
 namespace Autheris.Tests.Integration;
 
 using System;
+using System.IO;
 using System.Linq;
+using System.Text.RegularExpressions;
 using System.Threading.Tasks;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -103,9 +106,11 @@ public sealed class SqlServerGovernanceLeastPrivilegeTests : IClassFixture<SqlSe
         }
     }
 
-    private async Task<SqlException> RuntimeFailsAsync(string sql)
+    private Task<SqlException> RuntimeFailsAsync(string sql) => RuntimeFailsAsync(_runtimeConnectionString, sql);
+
+    private static async Task<SqlException> RuntimeFailsAsync(string connectionString, string sql)
     {
-        await using var conn = new SqlConnection(_runtimeConnectionString);
+        await using var conn = new SqlConnection(connectionString);
         await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
@@ -283,6 +288,150 @@ public sealed class SqlServerGovernanceLeastPrivilegeTests : IClassFixture<SqlSe
         (await repository.ReplaceDatasetTagsAsync(identifier, [], DatasetTagSource.Admin, actor)).ShouldNotBeNull();
         (await repository.ReplaceDatasetTagsAsync(identifier, [], DatasetTagSource.Dbt, actor)).ShouldNotBeNull();
         (await repository.GetTableMetadataAsync(identifier))!.CatalogTags.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task App_role_cannot_update_delete_audit()
+    {
+        var scriptLogin = "autheris_sql_" + Guid.NewGuid().ToString("N")[..12];
+        var master = new SqlConnectionStringBuilder(_db.ConnectionString) { InitialCatalog = "master" }.ConnectionString;
+        await ExecAsync(master, $"CREATE LOGIN [{scriptLogin}] WITH PASSWORD = '{Password}', CHECK_POLICY = OFF;");
+        await ExecAsync(_db.ConnectionString, $"CREATE USER [{scriptLogin}] FOR LOGIN [{scriptLogin}];");
+
+        try
+        {
+            var rawSql = File.ReadAllText(Path.Combine(FindRepositoryRoot(), "deploy", "sql", "governance-app-role.sqlserver.sql"));
+            var substituted = rawSql.Replace("$(AppUser)", scriptLogin, StringComparison.Ordinal);
+            var batches = Regex.Split(substituted, @"^\s*GO\s*$", RegexOptions.Multiline | RegexOptions.IgnoreCase)
+                .Where(b => !string.IsNullOrWhiteSpace(b))
+                .ToArray();
+            batches.Length.ShouldBeGreaterThanOrEqualTo(2);
+
+            // Execute twice to verify idempotency of the shipped SQL Server app-role grant script.
+            for (var run = 0; run < 2; run++)
+            {
+                foreach (var batch in batches)
+                {
+                    await ExecAsync(_db.ConnectionString, batch);
+                }
+            }
+
+            var scriptRuntimeCs = new SqlConnectionStringBuilder(_db.ConnectionString)
+            {
+                UserID = scriptLogin,
+                Password = Password,
+                Pooling = false
+            }.ConnectionString;
+
+            await VerifyLeastPrivilegeRuntimeAsync(scriptRuntimeCs);
+        }
+        finally
+        {
+            SqlConnection.ClearAllPools();
+            await DropLoginAsync(_db.ConnectionString, scriptLogin);
+        }
+    }
+
+    private async Task VerifyLeastPrivilegeRuntimeAsync(string runtimeConnectionString)
+    {
+        var options = GovernanceSchemaTestSupport.SqlServerOptions(runtimeConnectionString, GovernanceMigrationMode.Verify);
+        using var repository = GovernanceSchemaTestSupport.UnmigratedSqlServer(options);
+        await new SqlServerGovernanceMigrationRunner(repository, options).RunAsync();
+        await repository.InitializeAsync();
+
+        await using (var permConn = new SqlConnection(runtimeConnectionString))
+        {
+            await permConn.OpenAsync();
+            await using var permCmd = permConn.CreateCommand();
+            permCmd.CommandText = """
+                SELECT IS_MEMBER(N'db_owner') + IS_MEMBER(N'db_ddladmin')
+                     + CAST(HAS_PERMS_BY_NAME(N'dbo.AUDIT_LOG_TRUNCATE_GUARD', N'OBJECT', N'SELECT') AS int)
+                     + CAST(HAS_PERMS_BY_NAME(N'dbo.AUDIT_LOG_ENTRIES', N'OBJECT', N'ALTER') AS int)
+                     + CAST(HAS_PERMS_BY_NAME(N'dbo.AUDIT_LOG_ENTRIES', N'OBJECT', N'UPDATE') AS int)
+                     + CAST(HAS_PERMS_BY_NAME(N'dbo.AUDIT_LOG_ENTRIES', N'OBJECT', N'DELETE') AS int)
+                     + CAST(HAS_PERMS_BY_NAME(DB_NAME(), N'DATABASE', N'CREATE TABLE') AS int)
+                """;
+            Convert.ToInt32(await permCmd.ExecuteScalarAsync()).ShouldBe(0);
+        }
+
+        var tenant = new TenantId("tenant-lp-audit");
+        var traceId = "lp-audit-" + Guid.NewGuid().ToString("N");
+        await repository.RecordAuditEventAsync(new AuditLogEntry
+        {
+            TenantId = tenant,
+            EventType = AuditEventTypes.AuditConfigChanged,
+            ActorSid = new Sid("S-1-5-21-lp"),
+            TargetTable = "lpsource.dbo.audit_test",
+            Decision = "ALLOW",
+            TraceId = traceId
+        });
+
+        var auditRows = await repository.GetAuditLogEntriesAsync(limit: 20, tenantId: tenant);
+        auditRows.ShouldContain(e => e.TraceId == traceId);
+
+        var domainTenant = "lp-0036-" + Guid.NewGuid().ToString("N")[..12];
+        var domainId = Guid.NewGuid().ToString("D");
+        await using (var conn = new SqlConnection(runtimeConnectionString))
+        {
+            await conn.OpenAsync();
+            await using var cmd = conn.CreateCommand();
+            cmd.Parameters.AddWithValue("@t", domainTenant);
+            cmd.Parameters.AddWithValue("@id", domainId);
+            cmd.CommandText = """
+                INSERT INTO dbo.GOVERNANCE_DOMAINS (tenant_id, id, name, description, contact, owner_group_sid, default_class, visibility, is_system, version, created_by, created_at, updated_at)
+                VALUES (@t, @id, N'LP Domain', NULL, NULL, NULL, N'CONFIDENTIAL', N'ON_REQUEST', CAST(0 AS BIT), 1, N'lp-test', SYSUTCDATETIME(), SYSUTCDATETIME());
+                UPDATE dbo.GOVERNANCE_DOMAINS SET description = N'updated' WHERE tenant_id = @t AND id = @id;
+                INSERT INTO dbo.OBJECT_PROTECTION (tenant_id, table_id, column_name, protection_class, mask_category, updated_by, updated_at)
+                VALUES (@t, N'tbl-lp', N'ssn', N'CONFIDENTIAL', N'PII', N'lp-test', SYSUTCDATETIME());
+                UPDATE dbo.OBJECT_PROTECTION SET protection_class = N'SECRET' WHERE tenant_id = @t AND table_id = N'tbl-lp' AND column_name = N'ssn';
+                """;
+            await cmd.ExecuteNonQueryAsync();
+
+            cmd.CommandText = "SELECT COUNT(*) FROM dbo.OBJECT_PROTECTION WHERE tenant_id = @t AND protection_class = N'SECRET'";
+            Convert.ToInt32(await cmd.ExecuteScalarAsync()).ShouldBe(1);
+
+            cmd.CommandText = """
+                DELETE FROM dbo.OBJECT_PROTECTION WHERE tenant_id = @t;
+                DELETE FROM dbo.GOVERNANCE_DOMAINS WHERE tenant_id = @t AND id = @id;
+                """;
+            await cmd.ExecuteNonQueryAsync();
+        }
+
+        foreach (var sql in new[]
+                 {
+                     "UPDATE dbo.AUDIT_LOG_ENTRIES SET decision = N'DENY'",
+                     "DELETE FROM dbo.AUDIT_LOG_ENTRIES",
+                     "TRUNCATE TABLE dbo.AUDIT_LOG_ENTRIES",
+                     "DISABLE TRIGGER dbo.trg_audit_append_only ON dbo.AUDIT_LOG_ENTRIES",
+                     "DROP TRIGGER dbo.trg_audit_append_only",
+                     "TRUNCATE TABLE dbo.AUDIT_LOG_TRUNCATE_GUARD",
+                     "SELECT COUNT(*) FROM dbo.AUDIT_LOG_TRUNCATE_GUARD"
+                 })
+        {
+            await RuntimeFailsAsync(runtimeConnectionString, sql);
+        }
+
+        await using (var adminConn = new SqlConnection(_db.ConnectionString))
+        {
+            await adminConn.OpenAsync();
+            await using var cmd = adminConn.CreateCommand();
+            cmd.CommandText = SqlServerGovernanceMigrationRunner.AuditTriggerPostConditionSql;
+            Convert.ToInt64(await cmd.ExecuteScalarAsync()).ShouldBe(1L);
+        }
+
+        await GovernanceSchemaTestSupport.RunSqlServerAsync(_db.ConnectionString, GovernanceMigrationMode.Verify);
+    }
+
+    private static string FindRepositoryRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir != null && !File.Exists(Path.Combine(dir.FullName, "Autheris.sln")))
+        {
+            dir = dir.Parent;
+        }
+
+        return dir?.FullName ?? throw new InvalidOperationException("Repository root (Autheris.sln) not found.");
     }
 
 }
