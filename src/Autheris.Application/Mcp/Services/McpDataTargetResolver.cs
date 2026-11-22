@@ -3,9 +3,12 @@ namespace Autheris.Application.Mcp.Services;
 using System;
 using System.Collections.Generic;
 using System.Text.Json;
+using System.Threading;
+using System.Threading.Tasks;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
 using TrinoSqlEngine;
+using TrinoSqlEngine.Analysis;
 
 /// <summary>
 /// SR-H-01: Resolves every table a row-reading MCP tool call (<c>query_sql</c>, <c>invoke_api</c>) really touches, so that
@@ -37,31 +40,7 @@ internal static class McpDataTargetResolver
         try
         {
             var engine = sqlEngine ?? FastSqlEngine.Default;
-            var metadata = engine.Analyze(sql.AsMemory());
-
-            // a keyword-less self-reference would be resolved as a table below (existence-dependent ABAC answer). It is refused
-            // from the analysis alone, with a fixed, catalog-independent marker the guardrail turns into SQL_CONSTRUCT_NOT_SUPPORTED.
-            if (metadata.HasNonRecursiveSelfReference)
-            {
-                return (null, ConstructNotSupportedMarker);
-            }
-
-            if (metadata.ReferencedTables.Count == 0)
-            {
-                return ([SqlNoTable], null);
-            }
-
-            var tables = new List<TableIdentifier>(metadata.ReferencedTables.Count);
-            foreach (var target in metadata.ReferencedTables)
-            {
-                var id = SqlDataSourceResolver.ResolveTableIdentifier(target, defaultDataSourceName);
-                if (!tables.Contains(id))
-                {
-                    tables.Add(id);
-                }
-            }
-
-            return (tables, null);
+            return MapResolvedSqlTables(engine.Analyze(sql.AsMemory()), defaultDataSourceName);
         }
         catch (Exception ex)
         {
@@ -69,9 +48,78 @@ internal static class McpDataTargetResolver
         }
     }
 
+    internal static async Task<(IReadOnlyList<TableIdentifier>? Tables, string? SyntaxError)> TryResolveSqlTablesAsync(
+        string? sql, ISqlEngine? sqlEngine, string? defaultDataSourceName, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(sql))
+        {
+            return (null, "SQL query cannot be empty.");
+        }
+
+        try
+        {
+            var engine = sqlEngine ?? FastSqlEngine.Default;
+            var metadata = await engine.AnalyzeAsync(sql.AsMemory(), null, ct).ConfigureAwait(false);
+            return MapResolvedSqlTables(metadata, defaultDataSourceName);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            return (null, ex.Message);
+        }
+    }
+
+    private static (IReadOnlyList<TableIdentifier>? Tables, string? SyntaxError) MapResolvedSqlTables(
+        SqlQueryMetadata metadata, string? defaultDataSourceName)
+    {
+        // a keyword-less self-reference would be resolved as a table below (existence-dependent ABAC answer). It is refused
+        // from the analysis alone, with a fixed, catalog-independent marker the guardrail turns into SQL_CONSTRUCT_NOT_SUPPORTED.
+        if (metadata.HasNonRecursiveSelfReference)
+        {
+            return (null, ConstructNotSupportedMarker);
+        }
+
+        if (metadata.ReferencedTables.Count == 0)
+        {
+            return ([SqlNoTable], null);
+        }
+
+        var tables = new List<TableIdentifier>(metadata.ReferencedTables.Count);
+        foreach (var target in metadata.ReferencedTables)
+        {
+            var id = SqlDataSourceResolver.ResolveTableIdentifier(target, defaultDataSourceName);
+            if (!tables.Contains(id))
+            {
+                tables.Add(id);
+            }
+        }
+
+        return (tables, null);
+    }
+
     /// <summary>All tables of a SQL statement; null when the statement cannot be parsed and analysed.</summary>
     internal static IReadOnlyList<TableIdentifier>? ResolveSqlTables(string? sql, ISqlEngine? sqlEngine, string? defaultDataSourceName) =>
         TryResolveSqlTables(sql, sqlEngine, defaultDataSourceName).Tables;
+
+    internal static async Task<IReadOnlyList<TableIdentifier>?> ResolveInvokeApiTablesAsync(
+        string? argumentsJson, ISqlEngine? sqlEngine, string? defaultDataSourceName, CancellationToken ct = default)
+    {
+        if (!TryParseInvokeApi(argumentsJson, out var immediate, out var statementSql))
+        {
+            return null;
+        }
+
+        if (statementSql is null)
+        {
+            return immediate;
+        }
+
+        var (tables, _) = await TryResolveSqlTablesAsync(statementSql, sqlEngine, defaultDataSourceName, ct).ConfigureAwait(false);
+        return tables;
+    }
 
     /// <summary>
     /// Tables of an <c>invoke_api</c> call: the dataset of a <c>/api/v1/data</c> call (path and the <c>dataset</c> parameter the
@@ -79,18 +127,32 @@ internal static class McpDataTargetResolver
     /// </summary>
     internal static IReadOnlyList<TableIdentifier>? ResolveInvokeApiTables(string? argumentsJson, ISqlEngine? sqlEngine, string? defaultDataSourceName)
     {
+        if (!TryParseInvokeApi(argumentsJson, out var immediate, out var statementSql))
+        {
+            return null;
+        }
+
+        return statementSql is null
+            ? immediate
+            : ResolveSqlTables(statementSql, sqlEngine, defaultDataSourceName);
+    }
+
+    private static bool TryParseInvokeApi(string? argumentsJson, out IReadOnlyList<TableIdentifier>? immediate, out string? statementSql)
+    {
+        immediate = null;
+        statementSql = null;
         try
         {
             if (string.IsNullOrWhiteSpace(argumentsJson))
             {
-                return null;
+                return false;
             }
 
             using var doc = JsonDocument.Parse(argumentsJson);
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object)
             {
-                return null;
+                return false;
             }
 
             // Same normalisation as ApiDispatcherService.InvokeApiAsync.
@@ -112,7 +174,7 @@ internal static class McpDataTargetResolver
                 var effective = ApiDispatcherService.ExtractTableIdentifier(endpoint, parameters);
                 if (effective == null)
                 {
-                    return null;
+                    return false;
                 }
 
                 var tables = new List<TableIdentifier> { effective.Value };
@@ -122,20 +184,23 @@ internal static class McpDataTargetResolver
                     tables.Add(fromPath.Value);
                 }
 
-                return tables;
+                immediate = tables;
+                return true;
             }
 
             if (endpoint.Equals(StatementEndpoint, StringComparison.Ordinal))
             {
                 object? body = root.TryGetProperty("body", out var bProp) ? bProp : null;
-                return ResolveSqlTables(ApiDispatcherService.ExtractStatementSql(parameters, body), sqlEngine, defaultDataSourceName);
+                statementSql = ApiDispatcherService.ExtractStatementSql(parameters, body) ?? string.Empty;
+                return true;
             }
 
-            return [ApiNoTable];
+            immediate = [ApiNoTable];
+            return true;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            return null;
+            return false;
         }
     }
 }

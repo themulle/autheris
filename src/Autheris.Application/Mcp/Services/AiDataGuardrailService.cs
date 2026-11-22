@@ -317,7 +317,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             }
             else
             {
-                resolvedTables = ParseTablesFromTool(tool, request.ArgumentsJson, _sqlEngine, _options.Value.WebSql?.DefaultDataSourceName);
+                resolvedTables = await ParseTablesFromToolAsync(tool, request.ArgumentsJson, _sqlEngine, _options.Value.WebSql?.DefaultDataSourceName, cancellationToken).ConfigureAwait(false);
             }
         }
         else if (string.Equals(tool.Name, McpDatasetTools.QueryGraphQl, StringComparison.OrdinalIgnoreCase))
@@ -327,13 +327,13 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         else if (string.Equals(tool.Name, McpDatasetTools.QuerySql, StringComparison.OrdinalIgnoreCase))
         {
             var sql = McpDatasetTools.TryGetStringArgument(request.ArgumentsJson, "query", out var s) ? s : null;
-            var (tables, syntaxErr) = McpDataTargetResolver.TryResolveSqlTables(sql, _sqlEngine, _options.Value.WebSql?.DefaultDataSourceName);
+            var (tables, syntaxErr) = await McpDataTargetResolver.TryResolveSqlTablesAsync(sql, _sqlEngine, _options.Value.WebSql?.DefaultDataSourceName, cancellationToken).ConfigureAwait(false);
             resolvedTables = tables;
             sqlSyntaxError = syntaxErr;
         }
         else
         {
-            resolvedTables = ParseTablesFromTool(tool, request.ArgumentsJson, _sqlEngine, _options.Value.WebSql?.DefaultDataSourceName);
+            resolvedTables = await ParseTablesFromToolAsync(tool, request.ArgumentsJson, _sqlEngine, _options.Value.WebSql?.DefaultDataSourceName, cancellationToken).ConfigureAwait(false);
         }
 
         if (string.Equals(sqlSyntaxError, McpDataTargetResolver.ConstructNotSupportedMarker, StringComparison.Ordinal))
