@@ -262,7 +262,7 @@ public sealed class McpServerTests
     }
 
     [Fact]
-    public async Task AiDataGuardrailService_WhenTargetTableRequiresFourEyes_ShouldReturnFourEyesErrorAndRecordDenyAudit()
+    public async Task AiDataGuardrailService_WhenTargetTableIsSensitiveAndActive_ExecutesWithoutFourEyesErrorAndRecordsAllowAudit()
     {
         var registry = new McpToolRegistry();
         var options = Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } });
@@ -292,20 +292,19 @@ public sealed class McpServerTests
 
         var result = await guardrail.ExecuteToolWithGuardrailAsync(request, session);
 
-        result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage.ShouldNotBeNull();
-        result.ErrorMessage.ShouldContain("Four-Eyes justification approval");
+        result.IsSuccess.ShouldBeTrue(result.ErrorMessage);
+        result.IsMasked.ShouldBeTrue();
 
         await auditRepo.Received(1).RecordAuditEventAsync(
             Arg.Is<AuditLogEntry>(e =>
                 e.EventType == "MCP_TOOL_EXECUTION" &&
-                e.Decision == "DENY" &&
-                e.DetailsJson.Contains("Four-Eyes")),
+                e.Decision == "ALLOW" &&
+                !e.DetailsJson.Contains("Four-Eyes")),
             Arg.Any<System.Threading.CancellationToken>());
     }
 
     [Fact]
-    public async Task AiDataGuardrailService_WhenTableRequiresFourEyes_ButCallerHasNoConsent_ShouldDenyWithoutTriggeringStepUpOrLeakingFourEyes()
+    public async Task AiDataGuardrailService_WhenTableIsSensitive_ButCallerDeniedByPdp_ShouldDenyWithoutTriggeringStepUpOrLeakingFourEyes()
     {
         var registry = new McpToolRegistry();
         var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions
@@ -352,7 +351,7 @@ public sealed class McpServerTests
             auditLogRepository: auditRepo,
             tableMetadataRepository: metadataRepo,
             stepUpApprovalService: stepUpService,
-            consentRepository: consentRepo, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll());
+            consentRepository: consentRepo, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.From(static r => TableAccessDecision.Denied(r.Object.Identifier, "no consent")));
 
         var session = new McpSessionContext("sess-1", "sp-analyst", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "user-analyst");
         var request = new McpToolCallRequest("query_customers", "{}");
@@ -362,7 +361,7 @@ public sealed class McpServerTests
         result.IsSuccess.ShouldBeFalse();
         result.ErrorMessage.ShouldNotBeNull();
         result.ErrorMessage.ShouldNotContain("Four-Eyes");
-        result.ErrorMessage.ShouldContain("not accessible");
+        result.ErrorMessage.ShouldContain("denied");
 
         // Step-up approval must NOT be requested!
         await stepUpService.DidNotReceiveWithAnyArgs().RequestStepUpApprovalAsync(

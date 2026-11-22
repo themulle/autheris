@@ -388,11 +388,9 @@ public sealed partial class ConsentDecisionPipeline(
                 string.Equals(grantDecision.ErrorCode, GrantErrorCodes.FourEyesRequired, StringComparison.Ordinal);
         }
 
-        bool tableSensitive = meta is not null && ClassificationMetadata.IsTableSensitive(meta);
         bool stewardGate = clearPlan is { NeedsSteward: true };
-        bool requiresFourEyes = tableSensitive || stewardGate || grantRequiresFourEyes;
-        bool needsSecondApproverOverride = requiresFourEyes;
-        bool requireSecondApprover = needsSecondApproverOverride && command.Channel == ConsentDecisionChannel.Internal;
+        bool requiresFourEyes = stewardGate || grantRequiresFourEyes;
+        bool requireSecondApprover = requiresFourEyes && command.Channel == ConsentDecisionChannel.Internal;
 
         var distinctIndependentApprovers = SeparationOfDutiesService.CountDistinctIndependentApprovers(
             combinedApprovers,
@@ -443,7 +441,7 @@ public sealed partial class ConsentDecisionPipeline(
             {
                 if (command.Channel == ConsentDecisionChannel.External)
                 {
-                    var extStep = needsSecondApproverOverride
+                    var extStep = requiresFourEyes
                         ? await _approvalRepository.ApproveExternalConsentRequestStepAsync(
                             req.Id, command.ExternalAttribution!, externalApproverSids[0], requireSecondApprover: true, ct).ConfigureAwait(false)
                         : await _approvalRepository.ApproveExternalConsentRequestStepAsync(

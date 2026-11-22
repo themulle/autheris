@@ -36,9 +36,7 @@ public sealed class ApproveConsentRequestFourEyesMutationTests
         var guard = Substitute.For<IConsentDecisionGuard>();
         guard.Evaluate(Arg.Any<ClaimsPrincipal>()).Returns(ConsentDecisionVerdict.Allow());
         services.AddSingleton(guard);
-        var grantPolicy = Substitute.For<IGrantPolicy>();
-        grantPolicy.Evaluate(Arg.Any<GrantRequest>()).Returns(new GrantDecision(true, null, false, GrantClass.Standing, "Test grant allowed"));
-        services.AddSingleton(grantPolicy);
+        services.AddSingleton<IGrantPolicy>(new GrantPolicy());
 
         var claims = new List<Claim>
         {

@@ -86,10 +86,7 @@ public sealed class WriteConsentWorkflowTests
         var guard = Substitute.For<IConsentDecisionGuard>();
         guard.Evaluate(Arg.Any<ClaimsPrincipal>()).Returns(ConsentDecisionVerdict.Allow());
         services.AddSingleton(guard);
-        var grantPolicy = Substitute.For<IGrantPolicy>();
-        grantPolicy.Evaluate(Arg.Any<GrantRequest>())
-            .Returns(new GrantDecision(true, null, false, GrantClass.Standing, "Allowed"));
-        services.AddSingleton(grantPolicy);
+        services.AddSingleton<IGrantPolicy>(new GrantPolicy());
 
         var context = new DefaultHttpContext
         {

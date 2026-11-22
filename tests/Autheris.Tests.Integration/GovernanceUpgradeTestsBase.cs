@@ -275,7 +275,8 @@ public abstract class GovernanceUpgradeTestsBase
         await RunAsync(cs, GovernanceMigrationMode.Verify);
     });
 
-    private const string InsertTableSql = "INSERT INTO tables (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active) VALUES ('t', 'sql', 'd', 's', 't', 't', 'NORMAL', 0, 1)";
+    private const string InsertTableStep0004Sql = "INSERT INTO tables (id, source_type, source_name, schema_name, table_name, display_name, sensitivity, requires_four_eyes, is_active) VALUES ('t', 'sql', 'd', 's', 't', 't', 'NORMAL', 0, 1)";
+    private const string InsertTableSql = "INSERT INTO tables (id, source_type, source_name, schema_name, table_name, display_name, is_active) VALUES ('t', 'sql', 'd', 's', 't', 't', 1)";
 
     [Fact]
     [Trait("Category", "Security")]
@@ -285,7 +286,7 @@ public abstract class GovernanceUpgradeTestsBase
         // Ported from the former SQLite upgrade tests (WP-SIMPL-11): re-running step 0004 must not drop or recreate data.
         var cs = db.ConnectionString;
         await RunAsync(cs, GovernanceMigrationMode.Apply, stepVersionCap: 4);
-        await ExecAsync(cs, InsertTableSql);
+        await ExecAsync(cs, InsertTableStep0004Sql);
         await ExecAsync(cs, "INSERT INTO table_physical_indexes (id, table_id, index_ordinal) VALUES ('i1', 't', 1)");
         await ExecAsync(cs, "DELETE FROM autheris_schema_migrations WHERE version = 4");
 

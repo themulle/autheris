@@ -498,4 +498,23 @@ public sealed class ConsentDecisionPipelineTests
             ApprovedValidTo: FixedNow.AddDays(4))));
         ex.StatusCode.ShouldBe(400);
     }
+
+    [Fact]
+    public async Task DecideAsync_GroupGranteeOnSensitiveTable_ApprovesInSingleStep_AndCreatesConsentAtomically()
+    {
+        var (pipeline, approvals, _, _, _, _, _, _) = BuildSut(tableFourEyes: true);
+        var req = Request(granteeType: GranteeType.Group, granteeRef: "S-1-5-21-DATA-READERS");
+        approvals.GetConsentRequestAsync(req.Id, Arg.Any<CancellationToken>()).Returns(req);
+        approvals.ExecuteAtomicApprovalWithConsentAsync(
+                req.Id, Arg.Any<ApprovalStep>(), Arg.Any<Consent>(),
+                Arg.Any<IReadOnlyList<ConsentRowFilter>>(), Arg.Any<IReadOnlyList<ConsentColumnRule>>(), Arg.Any<CancellationToken>())
+            .Returns(ci => ci.ArgAt<Consent>(2));
+
+        var result = await pipeline.DecideAsync(new ConsentDecisionCommand(
+            req.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, Principal(Approver1Sid)));
+
+        result.Request.Status.ShouldBe("APPROVED");
+        result.ActivatedConsent.ShouldNotBeNull();
+        await approvals.DidNotReceiveWithAnyArgs().ApproveConsentRequestStepAsync(default, default!, default);
+    }
 }

@@ -54,7 +54,7 @@ public sealed class SecurityReviewMcpHighTests
                     return new TableMetadata
                     {
                         Identifier = id,
-                        Table = new Table { TableName = "secret", IsActive = true },
+                        Table = new Table { TableName = "secret", IsActive = false },
                         Columns = [new TableColumn { ColumnName = "ssn" }],
                         ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("ssn")
                     };
@@ -104,15 +104,15 @@ public sealed class SecurityReviewMcpHighTests
             new McpToolCallRequest("query_sql", SqlArgs(sql)), Session());
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("Four-Eyes");
+        result.ErrorMessage!.ShouldContain("not accessible");
     }
 
-    // W0-C2: the administrator shortcut before the Four-Eyes gate comes from the canonical caller class, never from session role strings.
+    // W0-C2: the administrator role never bypasses the inactive-table gate.
     [Theory]
     [InlineData("tenant-a", "GovernanceAdmin", "not accessible")]
     [InlineData("default-tenant", "GovernanceAdmin", "not accessible")]
     [InlineData("tenant-a", "tenant:ClusterAdmin", "not accessible")]
-    [InlineData("tenant-a", "ClusterAdmin", "Four-Eyes")]
+    [InlineData("tenant-a", "ClusterAdmin", "not accessible")]
     public async Task QuerySql_CatalogVisibilityShortcut_FollowsTheCanonicalCallerClass(string tenant, string role, string expectedDenial)
     {
         var session = new McpSessionContext("s1", "agent", tenant, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-1-ADM", Roles: [role], GroupSids: []);
@@ -180,7 +180,7 @@ public sealed class SecurityReviewMcpHighTests
             new McpToolCallRequest("invoke_api", args), Session());
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("Four-Eyes");
+        result.ErrorMessage!.ShouldContain("not accessible");
     }
 
     [Theory]
