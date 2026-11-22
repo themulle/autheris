@@ -533,8 +533,6 @@ public sealed partial class AiDataGuardrailService
     private static TableIdentifier? ParseTableIdentifierFromTool(McpToolDefinition tool, string? argumentsJson = null)
     {
         if (tool.TargetTable != null) return tool.TargetTable;
-        if (tool.Name.Equals("query_customers", StringComparison.OrdinalIgnoreCase)) return new TableIdentifier("finance", "dbo", "customers");
-        if (tool.Name.Equals("query_invoices", StringComparison.OrdinalIgnoreCase)) return new TableIdentifier("finance", "dbo", "invoices");
         if (tool.Name.Equals("query_data_catalog", StringComparison.OrdinalIgnoreCase)) return new TableIdentifier("governance", "catalog", "assets");
         if (tool.Name.Equals("get_golden_queries", StringComparison.OrdinalIgnoreCase)) return new TableIdentifier("governance", "mcp", "golden_queries");
         if (McpDatasetTools.IsDatasetTool(tool.Name)) return McpDatasetTools.TargetTable(tool.Name, argumentsJson);

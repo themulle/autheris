@@ -13,7 +13,8 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Application.OData;
-using Autheris.GraphQL.DynamicTypes;
+using Autheris.GraphQL.Catalog;
+using Autheris.Tests.Common.Fakes;
 using HotChocolate;
 using HotChocolate.Execution;
 using HotChocolate.Types;
@@ -40,6 +41,8 @@ public sealed class OmnichannelDocumentationTests
             {
                 SchemaName = "dbo",
                 TableName = "mrr",
+                SourceType = "PostgreSql",
+                IsActive = true,
                 DisplayName = "Monthly Recurring Revenue",
                 Description = "Monthly recurring revenue recognized according to IFRS 15.",
                 LongDescription = "Calculated from active subscriptions at month closing. Excludes one-off setup fees."
@@ -76,36 +79,25 @@ public sealed class OmnichannelDocumentationTests
     }
 
     [Fact]
-    public void Channel1_GraphQL_DynamicTableType_SynthesizesCommonMarkMarkdownDescriptions()
+    public async Task Channel1_GraphQL_CatalogGraphQlTypeModule_ExposesColumnDescriptions()
     {
         var table = CreateDocumentedTable();
-        var masking = Substitute.For<IColumnMaskingProvider>();
+        using var module = new CatalogGraphQlTypeModule(
+            new InMemoryTableMetadataRepository(table),
+            new InMemoryTableRelationRepository());
 
-        var tableType = new DynamicTableType(table, masking);
-
-        var schema = SchemaBuilder.New()
-            .AddType(tableType)
+        var schema = await new ServiceCollection()
+            .AddGraphQLServer()
             .AddQueryType(d => d.Name("Query").Field("dummy").Resolve(_ => "ok"))
-            .Create();
+            .AddTypeModule(_ => module)
+            .BuildSchemaAsync();
 
-        var dynamicType = schema.Types.GetType<IObjectTypeDefinition>("finance_mrr");
-        dynamicType.ShouldNotBeNull();
-        dynamicType.Description.ShouldBe("Monthly recurring revenue recognized according to IFRS 15.");
+        var entityType = schema.Types.GetType<IObjectTypeDefinition>("finance_dbo_mrr");
+        entityType.ShouldNotBeNull();
 
-        var accountIdField = dynamicType.Fields["account_id"];
-        accountIdField.Description.ShouldNotBeNull();
-        accountIdField.Description!.ShouldContain("Unique identifier of the customer account.");
-        accountIdField.Description!.ShouldContain("---");
-        accountIdField.Description!.ShouldContain("**Detailed specification:**");
-        accountIdField.Description!.ShouldContain("Foreign key referencing accounts.id");
-
-        var revenueField = dynamicType.Fields["revenue_amount"];
-        revenueField.Description.ShouldNotBeNull();
-        revenueField.Description!.ShouldContain("Net MRR in EUR.");
-        revenueField.Description!.ShouldContain("Formula: sum(subscription_price)");
-
-        var ibanField = dynamicType.Fields["iban"];
-        ibanField.Description.ShouldBe("Customer billing IBAN.");
+        entityType.Fields["account_id"].Description.ShouldBe("Unique identifier of the customer account.");
+        entityType.Fields["revenue_amount"].Description.ShouldBe("Net MRR in EUR.");
+        entityType.Fields["iban"].Description.ShouldBe("Customer billing IBAN.");
     }
 
     [Fact]

@@ -188,21 +188,20 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             return await ExecuteDatasetToolAsync(tool, principal, sessionContext, variables, argumentsJson, cancellationToken).ConfigureAwait(false);
         }
 
-        // Fast-path / Specialized execution for registered tables if operation is standard table query
-        if (tool.Name.Equals("query_customers", StringComparison.OrdinalIgnoreCase) ||
-            tool.Name.Equals("query_invoices", StringComparison.OrdinalIgnoreCase))
-        {
-            var fastPathResult = await TryExecuteTableFastPathAsync(tool.Name, principal, sessionContext, variables, cancellationToken).ConfigureAwait(false);
-            if (fastPathResult != null)
-            {
-                return await EnrichWithProvenanceAsync(tool, fastPathResult, cancellationToken).ConfigureAwait(false);
-            }
-        }
-
         // 4b.2: Query Data Catalog Metadata using dataset catalog
         if (tool.Name.Equals("query_data_catalog", StringComparison.OrdinalIgnoreCase))
         {
             return await ExecuteQueryDataCatalogAsync(tool, principal, sessionContext, variables, cancellationToken).ConfigureAwait(false);
+        }
+
+        // Fast-path / Specialized execution for registered tables if tool declares TargetTable
+        if (tool.TargetTable is { } targetTable)
+        {
+            var fastPathResult = await TryExecuteTableFastPathAsync(tool.Name, targetTable, principal, sessionContext, variables, cancellationToken).ConfigureAwait(false);
+            if (fastPathResult != null)
+            {
+                return await EnrichWithProvenanceAsync(tool, fastPathResult, cancellationToken).ConfigureAwait(false);
+            }
         }
 
         // Standard GraphQL execution via HotChocolate IRequestExecutor.
@@ -645,16 +644,12 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
 
     private async Task<string?> TryExecuteTableFastPathAsync(
         string toolName,
+        TableIdentifier tableId,
         ClaimsPrincipal principal,
         McpSessionContext sessionContext,
         Dictionary<string, object?> variables,
         CancellationToken cancellationToken)
     {
-        string domain = "finance";
-        string schema = "dbo";
-        string table = toolName.Equals("query_customers", StringComparison.OrdinalIgnoreCase) ? "customers" : "invoices";
-        var tableId = new TableIdentifier(domain, schema, table);
-
         try
         {
             int first = variables.TryGetValue("limit", out var limObj) && limObj is int l ? l : 50;

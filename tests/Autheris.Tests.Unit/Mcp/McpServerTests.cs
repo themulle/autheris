@@ -203,62 +203,6 @@ public sealed class McpServerTests
     }
 
     [Fact]
-    public async Task McpProtocolHandler_LifecycleAndJsonRpcWorkflow_ShouldSucceed()
-    {
-        // Arrange
-        var registry = new McpToolRegistry();
-        var options = Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } });
-        var guardrail = new AiDataGuardrailService(registry, options, NullLogger<AiDataGuardrailService>.Instance, global::Autheris.Tests.Unit.TestDoubles.NullAuditLogRepository.Instance, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
-        var sessionStore = new McpSessionStore(NullLogger<McpSessionStore>.Instance);
-        var handler = new McpProtocolHandler(sessionStore, registry, guardrail, NullLogger<McpProtocolHandler>.Instance);
-
-        // 1. Session creation
-        var session = handler.CreateSession("svc-ai-claude", "tenant-prod-1", userSid: null);
-        session.SessionId.ShouldNotBeNullOrWhiteSpace();
-        session.ServicePrincipalId.ShouldBe("svc-ai-claude");
-        session.TenantId.ShouldBe("tenant-prod-1");
-
-        // 2. JSON-RPC 'initialize'
-        var initPayload = """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}""";
-        var initResponse = await handler.HandleMessageAsync(session.SessionId, initPayload);
-        using var initDoc = JsonDocument.Parse(initResponse);
-        initDoc.RootElement.GetProperty("result").GetProperty("protocolVersion").GetString().ShouldBe("2024-11-05");
-        initDoc.RootElement.GetProperty("result").GetProperty("serverInfo").GetProperty("name").GetString().ShouldBe("Autheris.McpServer");
-
-        // 3. JSON-RPC 'ping'
-        var pingPayload = """{"jsonrpc":"2.0","id":2,"method":"ping"}""";
-        var pingResponse = await handler.HandleMessageAsync(session.SessionId, pingPayload);
-        using var pingDoc = JsonDocument.Parse(pingResponse);
-        pingDoc.RootElement.GetProperty("id").GetInt64().ShouldBe(2);
-
-        // 4. JSON-RPC 'tools/list'
-        var toolsListPayload = """{"jsonrpc":"2.0","id":3,"method":"tools/list"}""";
-        var toolsListResponse = await handler.HandleMessageAsync(session.SessionId, toolsListPayload);
-        using var toolsDoc = JsonDocument.Parse(toolsListResponse);
-        var toolsArray = toolsDoc.RootElement.GetProperty("result").GetProperty("tools");
-        toolsArray.GetArrayLength().ShouldBeGreaterThanOrEqualTo(3);
-
-        // 5. JSON-RPC 'tools/call'
-        var toolCallPayload = """{"jsonrpc":"2.0","id":4,"method":"tools/call","params":{"name":"query_invoices","arguments":{"currency":"EUR"}}}""";
-        var toolCallResponse = await handler.HandleMessageAsync(session.SessionId, toolCallPayload);
-        using var toolDoc = JsonDocument.Parse(toolCallResponse);
-        var content = toolDoc.RootElement.GetProperty("result").GetProperty("content");
-        content.GetArrayLength().ShouldBe(1);
-        var textContent = content[0].GetProperty("text").GetString();
-        textContent.ShouldNotBeNull();
-        textContent.ShouldContain("INV-2026-001");
-
-        // 6. Session termination
-        handler.RemoveSession(session.SessionId).ShouldBeTrue();
-        handler.GetSession(session.SessionId).ShouldBeNull();
-
-        // 7. Call with terminated session fails
-        var expiredResponse = await handler.HandleMessageAsync(session.SessionId, pingPayload);
-        using var expDoc = JsonDocument.Parse(expiredResponse);
-        expDoc.RootElement.GetProperty("error").GetProperty("code").GetInt32().ShouldBe(-32000);
-    }
-
-    [Fact]
     public async Task AiDataGuardrailService_ShouldRecordAuditLogEntry_OnToolExecution()
     {
         var registry = new McpToolRegistry();

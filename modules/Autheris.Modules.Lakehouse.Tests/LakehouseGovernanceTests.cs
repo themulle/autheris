@@ -618,9 +618,6 @@ private sealed class StubDeltaMetadataReader(DeltaSnapshot snapshot) : IDeltaMet
         public Task SetCachedDecisionAsync(TenantId tenant, Sid userSid, TableIdentifier table, TableAccessDecision decision, TimeSpan ttl, string? contextHash = null, CancellationToken ct = default)
             => Task.CompletedTask;
 
-        public Task EvictTableDecisionsAsync(TableIdentifier table, CancellationToken ct = default)
-            => Task.CompletedTask;
-
         public Task ClearL1CacheAsync(CancellationToken ct = default)
             => Task.CompletedTask;
     }

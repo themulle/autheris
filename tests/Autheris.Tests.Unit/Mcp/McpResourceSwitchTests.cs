@@ -229,18 +229,23 @@ public sealed class McpResourceSwitchTests
         (await closed.GetSemanticResourcesAsync()).ShouldBeEmpty();
         repo.ReceivedCalls().ShouldBeEmpty();
 
-        // JSON-RPC handler: list is empty and read equals the answer for an unknown uri.
+        // Live SDK server path: reading a gated semantic resource fails identically to an unknown URI.
         var registry = new McpToolRegistry();
         var guardrail = new AiDataGuardrailService(registry, Microsoft.Extensions.Options.Options.Create(new GatewayOptions()), NullLogger<AiDataGuardrailService>.Instance, new InMemoryAuditLogRepository(), decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
-        var handler = new McpProtocolHandler(new McpSessionStore(NullLogger<McpSessionStore>.Instance), registry, guardrail, NullLogger<McpProtocolHandler>.Instance, closed);
-        var sid = handler.CreateSession("agent", "t", userSid: null).SessionId;
+        var http = new Microsoft.AspNetCore.Http.DefaultHttpContext
+        {
+            User = new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity([new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, "S-1-USER"), new System.Security.Claims.Claim("tenant_id", "t")], "Bearer"))
+        };
+        http.Items[Autheris.Domain.Security.SecurityPrincipalContext.TenantIdItemKey] = new TenantId("t");
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<Microsoft.AspNetCore.Http.IHttpContextAccessor>(services, new Microsoft.AspNetCore.Http.HttpContextAccessor { HttpContext = http });
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton(services, Microsoft.Extensions.Options.Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } }));
+        Microsoft.Extensions.DependencyInjection.ServiceCollectionServiceExtensions.AddSingleton<IAiDataGuardrailService>(services, guardrail);
+        await using var sp = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
 
-        var list = await handler.HandleMessageAsync(sid, """{"jsonrpc":"2.0","id":1,"method":"resources/list"}""");
-        System.Text.Json.JsonDocument.Parse(list).RootElement.GetProperty("result").GetProperty("resources").GetArrayLength().ShouldBe(0);
-
-        string Read(string uri) => $$$"""{"jsonrpc":"2.0","id":2,"method":"resources/read","params":{"uri":"{{{uri}}}"}}""";
-        var a = await handler.HandleMessageAsync(sid, Read("glossary://finance/mrr"));
-        var b = await handler.HandleMessageAsync(sid, Read("glossary://nothing/here"));
-        a.Replace("glossary://finance/mrr", "<URI>", StringComparison.Ordinal).ShouldBe(b.Replace("glossary://nothing/here", "<URI>", StringComparison.Ordinal));
+        var a = await Should.ThrowAsync<McpProtocolException>(() => GatewayMcpServer.ReadGuardedSemanticResourceAsync(sp, "glossary://finance/mrr", closed, CancellationToken.None));
+        var b = await Should.ThrowAsync<McpProtocolException>(() => GatewayMcpServer.ReadGuardedSemanticResourceAsync(sp, "glossary://nothing/here", closed, CancellationToken.None));
+        a.ErrorCode.ShouldBe(b.ErrorCode);
+        a.Message.Replace("glossary://finance/mrr", "<URI>", StringComparison.Ordinal).ShouldBe(b.Message.Replace("glossary://nothing/here", "<URI>", StringComparison.Ordinal));
     }
 }

@@ -157,48 +157,4 @@ public sealed class McpToolAnnotationsTests
         write.Annotations!.ReadOnlyHint.ShouldBe(false);
         write.Annotations.DestructiveHint.ShouldBe(true);
     }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    [Trait("Category", "Security")]
-    public async Task Protocol_handler_tools_list_annotates_every_tool(bool readOnlySession)
-    {
-        var options = new GatewayOptions
-        {
-            Mcp = new McpOptions { AllowedOperations = ["List Orders"] },
-            WebSql = new WebSqlOptions { AllowDml = true },
-        };
-        var registry = new McpToolRegistry(Options.Create(options));
-        var store = Substitute.For<IMcpSessionStore>();
-        store.GetSessionAsync("s1", Arg.Any<CancellationToken>())
-            .Returns(new ValueTask<McpSessionContext?>(Session(readOnlySession, "ClusterAdmin")));
-        var handler = new McpProtocolHandler(store, registry, Substitute.For<IAiDataGuardrailService>(),
-            NullLogger<McpProtocolHandler>.Instance, options: Options.Create(options));
-
-        var json = await handler.HandleMessageAsync("s1", """{"jsonrpc":"2.0","id":1,"method":"tools/list"}""");
-
-        using var doc = JsonDocument.Parse(json!);
-        var tools = doc.RootElement.GetProperty("result").GetProperty("tools").EnumerateArray().ToList();
-        tools.Count.ShouldBeGreaterThan(20);
-        foreach (var tool in tools)
-        {
-            var name = tool.GetProperty("name").GetString()!;
-            var annotations = tool.GetProperty("annotations");
-            var expected = McpToolAnnotations.For(name, readOnlySession, sqlDmlAllowed: true);
-            annotations.GetProperty("readOnlyHint").GetBoolean().ShouldBe(expected.ReadOnly, name);
-            if (expected.ReadOnly)
-            {
-                annotations.TryGetProperty("destructiveHint", out _).ShouldBeFalse(name);
-            }
-            else
-            {
-                annotations.GetProperty("destructiveHint").GetBoolean().ShouldBe(expected.Destructive, name);
-            }
-        }
-
-        // The dynamic tool from Mcp:AllowedOperations is unclassified, so it is never read-only.
-        tools.Single(t => t.GetProperty("name").GetString() == "list_orders")
-            .GetProperty("annotations").GetProperty("readOnlyHint").GetBoolean().ShouldBeFalse();
-    }
 }

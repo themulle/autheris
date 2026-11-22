@@ -27,7 +27,7 @@ using Microsoft.Extensions.Options;
 /// INF-05: Persistent DuckDB table cache store backed by native DuckDB encrypted disk files.
 /// Conforms to 07, and 14.
 /// Generation files are created and accessed via DuckDB native encryption:
-/// ATTACH '<path>' AS g (ENCRYPTION_KEY '<hex(HKDF(KEK, "duckdb-gen-"+epoch))>')
+/// ATTACH '<path>' AS g (ENCRYPTION_KEY '<hex(HKDF(KEK, "duckdb-gen-"+tableToken+"-"+epoch))>')
 /// No plaintext generation copy or .enc file is ever written to disk.
 /// </summary>
 public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposable
@@ -107,7 +107,7 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
         else
         {
             _masterEncryptionKey = customEncryptionKey;
-            _metadataHmacKey = Array.Empty<byte>();
+            _metadataHmacKey = RandomNumberGenerator.GetBytes(32);
         }
 
         if (!Directory.Exists(_options.PersistentDirectory))
@@ -194,12 +194,15 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
         return "st_" + GetSafeTableToken(table) + "_" + Math.Max(0, epoch);
     }
 
-    private string GetAttachSql(string dbPath, long epoch)
+    internal string GetAttachSql(TableIdentifier table, string dbPath, long epoch)
     {
         var escapedPath = dbPath.Replace("'", "''", StringComparison.Ordinal);
         if (_options.Encryption.Enabled && _masterEncryptionKey != null)
         {
-            var dek = TableCacheCryptoHelper.DeriveKey(_masterEncryptionKey, info: Encoding.UTF8.GetBytes("duckdb-gen-" + epoch));
+            var tableToken = GetSafeTableToken(table);
+            var dek = TableCacheCryptoHelper.DeriveKey(
+                _masterEncryptionKey,
+                info: Encoding.UTF8.GetBytes($"duckdb-gen-{tableToken}-{epoch}"));
             var dekHex = Convert.ToHexStringLower(dek);
             return $"ATTACH '{escapedPath}' AS g (ENCRYPTION_KEY '{dekHex}'); USE g;";
         }
@@ -227,7 +230,10 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
             _declaredPrimaryKeys[table] = options.PrimaryKeyColumns.Select(SanitizeIdentifier).ToArray();
         }
 
-        await Task.CompletedTask;
+        if (HasPersistedEpochMetadata(dir))
+        {
+            await RecoverTableMetadataFromDiskAsync(table, dir, ct).ConfigureAwait(false);
+        }
     }
 
     public async Task<string> StageShadowGenerationAsync(
@@ -258,7 +264,7 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
         {
             await conn.OpenAsync(ct).ConfigureAwait(false);
             using var cmd = conn.CreateCommand();
-            cmd.CommandText = GetAttachSql(dbPath, epoch);
+            cmd.CommandText = GetAttachSql(table, dbPath, epoch);
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 
             cmd.CommandText = $"PRAGMA max_memory='{_options.DefaultMemoryLimitMb}MB';";
@@ -298,10 +304,10 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
                 batch.Clear();
             }
 
-            _stagedColumns[(table, epoch)] = sanitizedCols;
+            cmd.CommandText = "CHECKPOINT g; USE memory; DETACH g;";
+            await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 
-            cmd.CommandText = "CHECKPOINT g; DETACH g;";
-            try { await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); } catch { }
+            _stagedColumns[(table, epoch)] = sanitizedCols;
         }
 
         return shadowTable;
@@ -361,7 +367,7 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
                 throw new InvalidOperationException($"Zero-state protection: shadow staging table '{shadow}' returned 0 rows but active generation has {existing.RowCount} rows.");
             }
 
-            var attachSql = GetAttachSql(dbPath, epoch);
+            var attachSql = GetAttachSql(table, dbPath, epoch);
             using (var conn = new DuckDBConnection("DataSource=:memory:"))
             {
                 await conn.OpenAsync(ct).ConfigureAwait(false);
@@ -372,8 +378,8 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
                 cmd.CommandText = $"CREATE OR REPLACE VIEW \"{activeView}\" AS SELECT * FROM \"{shadow}\";";
                 await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 
-                cmd.CommandText = "CHECKPOINT g; DETACH g;";
-                try { await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false); } catch { }
+                cmd.CommandText = "CHECKPOINT g; USE memory; DETACH g;";
+                await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
             var cachedCols = _stagedColumns.TryRemove((table, epoch), out var stagedCols)
@@ -585,12 +591,29 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
         }
 
         var dir = GetTableDirectory(table);
-        if (_metadata.TryGetValue(table, out var meta) && File.Exists(meta.InternalStoragePath))
+        if (!_metadata.TryGetValue(table, out var meta) && HasPersistedEpochMetadata(dir))
         {
-            var attachSql = GetAttachSql(meta.InternalStoragePath, meta.GenerationEpoch);
-            var newPool = new DuckDbConnectionPool("DataSource=:memory:", attachSql);
-            _connectionPools[table] = newPool;
-            return await newPool.LeaseReaderAsync(ct).ConfigureAwait(false);
+            meta = await RecoverTableMetadataFromDiskAsync(table, dir, ct).ConfigureAwait(false);
+        }
+
+        if (meta != null && File.Exists(meta.InternalStoragePath))
+        {
+            await _lock.WaitAsync(ct).ConfigureAwait(false);
+            try
+            {
+                if (!_connectionPools.TryGetValue(table, out pool))
+                {
+                    var attachSql = GetAttachSql(table, meta.InternalStoragePath, meta.GenerationEpoch);
+                    pool = new DuckDbConnectionPool("DataSource=:memory:", attachSql);
+                    _connectionPools[table] = pool;
+                }
+            }
+            finally
+            {
+                _lock.Release();
+            }
+
+            return await pool.LeaseReaderAsync(ct).ConfigureAwait(false);
         }
 
         throw new KeyNotFoundException($"No active storage connection pool available for table '{table}'.");
@@ -640,6 +663,39 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
     }
 
     // 06 Metadata HMAC Verification
+    private static bool HasPersistedEpochMetadata(string dir) =>
+        File.Exists(Path.Combine(dir, "current_epoch.meta")) ||
+        File.Exists(Path.Combine(dir, "current_epoch.meta.hmac"));
+
+    private async Task<TableCacheEntryMetadata> RecoverTableMetadataFromDiskAsync(
+        TableIdentifier table,
+        string dir,
+        CancellationToken ct)
+    {
+        var meta = await ReadEpochMetadataWithHmacAsync(dir, ct).ConfigureAwait(false);
+        if (!meta.Table.Equals(table))
+        {
+            throw new SecurityException($"Persisted epoch metadata in '{dir}' does not belong to table '{table}'.");
+        }
+
+        if (File.Exists(meta.InternalStoragePath))
+        {
+            _metadata[table] = meta;
+            _activeBackingTables[table] = GetShadowTableName(table, meta.GenerationEpoch);
+            if (meta.CachedColumns is { Count: > 0 } && !_declaredColumns.ContainsKey(table))
+            {
+                _declaredColumns[table] = meta.CachedColumns;
+            }
+            if (meta.PrimaryKeyColumns is { Count: > 0 } && !_declaredPrimaryKeys.ContainsKey(table))
+            {
+                _declaredPrimaryKeys[table] = meta.PrimaryKeyColumns;
+            }
+            _catalog?.Upsert(meta);
+        }
+
+        return meta;
+    }
+
     private async Task WriteEpochMetadataWithHmacAsync(string dir, long epoch, TableCacheEntryMetadata meta, CancellationToken ct)
     {
         var metaFile = Path.Combine(dir, "current_epoch.meta");

@@ -10,7 +10,6 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Exceptions;
-using Autheris.GraphQL.DynamicTypes;
 using Autheris.GraphQL.Types;
 using Autheris.Infrastructure.Cache;
 using Autheris.Infrastructure.Persistence;
@@ -289,40 +288,6 @@ public class DataPathSecurityTests : IDisposable
         tableDto.ShouldNotBeNull();
         tableDto.ColumnNames.ShouldNotContain("email");
         tableDto.ColumnNames.ShouldContain("amount");
-    }
-
-    [Fact]
-    public async Task DynamicTableType_WhenContextDataMissing_FailsClosed()
-    {
-        var table = new TableIdentifier("finance", "dbo", "finance_table_1");
-        var meta = new TableMetadata
-        {
-            Table = new Table { Id = Guid.NewGuid(), SourceName = "finance", SchemaName = "dbo", TableName = "finance_table_1", DisplayName = "Finance 1" },
-            Identifier = table,
-            Columns = new List<TableColumn>
-            {
-                new() { Id = Guid.NewGuid(), ColumnName = "secret_col", DataType = "varchar" }
-            }
-        }.WithPii("secret_col");
-
-        var dynamicType = new DynamicTableType(meta, _maskingProvider);
-        var schema = SchemaBuilder.New()
-            .AddType(dynamicType)
-            .AddQueryType(d => d.Name("Query").Field("dummy").Resolve(_ => "ok"))
-            .Create();
-
-        var objType = schema.Types.GetType<IObjectTypeDefinition>("finance_finance_table_1");
-        var field = (ObjectField)objType.Fields["secret_col"];
-
-        // Simulate resolver context WITHOUT "ColumnAccess" in ContextData
-        var resolverContext = Substitute.For<IResolverContext>();
-        resolverContext.Parent<IReadOnlyDictionary<string, object?>>()
-            .Returns(new Dictionary<string, object?> { ["secret_col"] = "CONFIDENTIAL_DATA" });
-        resolverContext.ContextData.Returns(new Dictionary<string, object?>()); // No ColumnAccess
-
-        var resolvedVal = await field.Resolver!.Invoke(resolverContext);
-        // Currently fails-open (returns CONFIDENTIAL_DATA), must fail-closed (secret_col null)
-        resolvedVal.ShouldBeNull();
     }
 
     [Fact]

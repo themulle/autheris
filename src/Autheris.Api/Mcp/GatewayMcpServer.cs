@@ -434,7 +434,7 @@ public static class GatewayMcpServer
         return $"{id.Domain}.{id.Schema}.{id.TableName}";
     }
 
-    private static async ValueTask<CallToolResult> CallGuardedToolAsync(IServiceProvider services, string toolName, string argumentsJson, CancellationToken ct)
+    internal static async ValueTask<CallToolResult> CallGuardedToolAsync(IServiceProvider services, string toolName, string argumentsJson, CancellationToken ct)
     {
         var session = Caller(services);
         var guardrail = services.GetRequiredService<IAiDataGuardrailService>();

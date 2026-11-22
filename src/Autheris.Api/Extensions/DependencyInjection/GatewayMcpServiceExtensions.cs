@@ -39,7 +39,6 @@ public static class GatewayMcpServiceExtensions
         services.AddSingleton<IGraphQlCatalogMap, CatalogGraphQlMap>();
         services.AddTransient<IPreFlightQuerySimulator, PreFlightQuerySimulator>();
         services.AddSingleton<IMcpProvenanceEnricher, McpProvenanceEnricher>();
-        services.AddSingleton<IMcpSessionStore, McpSessionStore>();
         // 115 C-115-8: one startup snapshot drives the registry, the guardrail, the dispatcher, the resources and the route mapping.
         services.AddSingleton<IReadPathSwitches>(sp => ReadPathSwitches.From(sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value));
         services.AddSingleton<IMcpToolRegistry, McpToolRegistry>();
@@ -52,7 +51,6 @@ public static class GatewayMcpServiceExtensions
         services.AddScoped<IMcpQueryExecutor, GatewayMcpQueryExecutor>();
         GatewayMcpServer.AddGatewayMcpServer(services, gatewayOptions);
         services.AddScoped<IAiDataGuardrailService, AiDataGuardrailService>();
-        services.AddScoped<IMcpProtocolHandler, McpProtocolHandler>();
         services.AddHostedService<McpSchemaDiscoveryService>();
         services.AddSingleton<Autheris.Application.Docs.Services.DocIndexRefreshService>();
         services.AddSingleton<Autheris.Application.Docs.Interfaces.IDocIndexReadiness>(sp => sp.GetRequiredService<Autheris.Application.Docs.Services.DocIndexRefreshService>());

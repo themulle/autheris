@@ -34,7 +34,6 @@ public interface IConsentCacheService
     Task SetCachedDecisionAsync(TenantId tenant, Sid userSid, TableIdentifier table, TableAccessDecision decision, TimeSpan ttl, string? contextHash, long? epochAtLoad, CancellationToken ct = default)
         => SetCachedDecisionAsync(tenant, userSid, table, decision, ttl, contextHash, ct);
 
-    Task EvictTableDecisionsAsync(TableIdentifier table, CancellationToken ct = default);
     Task ClearL1CacheAsync(CancellationToken ct = default);
 
     public static string ComputeSubjectContextHash(IReadOnlySet<Sid>? groupSids, IReadOnlySet<string>? roles, IReadOnlySet<string>? scopes = null)
