@@ -2,6 +2,7 @@ using System.Security;
 using Autheris.Tests.SqlCompilerGate.Harness;
 using Shouldly;
 using TrinoSqlEngine;
+using TrinoSqlEngine.Ast.Security;
 
 namespace Autheris.Tests.SqlCompilerGate;
 
@@ -42,6 +43,7 @@ public sealed class DifferentialRulesTests
     public void RejectionReason_MapsMaskedColumnPredicateToSecurityException_AndPreservesOtherSubclasses()
     {
         GateRunner.RejectionReason(new MaskedColumnPredicateException("masked")).ShouldBe(nameof(SecurityException));
+        GateRunner.RejectionReason(new RowPolicyExpressionRejectedException()).ShouldBe(nameof(SecurityException));
         GateRunner.RejectionReason(new SecurityException("plain")).ShouldBe(nameof(SecurityException));
         GateRunner.RejectionReason(new UnfilteredDmlException("unfiltered")).ShouldBe(nameof(UnfilteredDmlException));
         GateRunner.RejectionReason(new MaskedAggregationException()).ShouldBe(nameof(MaskedAggregationException));

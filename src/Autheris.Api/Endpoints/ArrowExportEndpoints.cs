@@ -177,13 +177,19 @@ public static class ArrowExportEndpoints
             if (SqlCompilerErrorMapper.TryMap(ex, out var mapping))
             {
                 SqlCompilerErrorMapper.RecordOutcome(mapping);
+                var ext = new Dictionary<string, object?> { ["errorCode"] = mapping.Code };
+                if (mapping.Hint is not null)
+                {
+                    ext["hint"] = mapping.Hint;
+                }
+
                 return ApiProblems.Problem(
                     mapping.Status,
                     mapping.Code,
                     mapping.Title,
                     httpContext,
                     mapping.Title,
-                    new Dictionary<string, object?> { ["errorCode"] = mapping.Code });
+                    ext);
             }
 
             switch (ex)

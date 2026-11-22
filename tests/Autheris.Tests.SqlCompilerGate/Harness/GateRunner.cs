@@ -9,6 +9,7 @@ using TrinoSqlEngine.Ast.Builder;
 using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Generators;
+using TrinoSqlEngine.Ast.Security;
 
 /// <summary>
 /// Runs one corpus statement through one engine against the fixture and returns the outcome. Queries return their typed rows;
@@ -209,7 +210,7 @@ public sealed class GateRunner(GateDatabase database, PolicyScenario scenario)
     }
 
     internal static string RejectionReason(Exception ex) =>
-        ex is MaskedColumnPredicateException ? nameof(SecurityException) : ex.GetType().Name;
+        ex is MaskedColumnPredicateException or RowPolicyExpressionRejectedException ? nameof(SecurityException) : ex.GetType().Name;
 
     /// <summary>A typed, expected governance refusal (as opposed to an unexpected exception type, which is an AST defect).</summary>
     public static bool IsGoverned(Exception ex) =>

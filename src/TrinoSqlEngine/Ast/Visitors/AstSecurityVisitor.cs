@@ -71,6 +71,9 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     private SecurityScope CurrentScope =>
         _securityScopes.Count > 0 ? _securityScopes.Peek() : (_subqueryDepth <= 1 ? SecurityScope.Root : SecurityScope.Subquery);
 
+    private bool IsDmlCompile =>
+        _options.WritePermit is not null || _securityScopes.Contains(SecurityScope.DmlSource);
+
     private SqlNode WithScope(SecurityScope scope, Func<SqlNode> visit)
     {
         _securityScopes.Push(scope);

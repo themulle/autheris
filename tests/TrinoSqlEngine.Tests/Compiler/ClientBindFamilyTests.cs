@@ -25,7 +25,7 @@ public class ClientBindFamilyTests
     {
         var compiled = new ClientListHarness().Compile(dialect, BranchShape);
 
-        var ex = Assert.Throws<SecurityException>(() => Bind(dialect, compiled, new() { ["p"] = "abc" }));
+        var ex = Assert.Throws<RowPolicyExpressionRejectedException>(() => Bind(dialect, compiled, new() { ["p"] = "abc" }));
         Assert.Equal(RowPolicyErrorGuard.Message, ex.Message);
     }
 
@@ -49,7 +49,7 @@ public class ClientBindFamilyTests
         var bad = ClientListValue.Create(new object[] { "1", "abc" }, SqlParameterType.String);
         var good = ClientListValue.Create(new object[] { 1L, 2L }, SqlParameterType.Int64);
 
-        var ex = Assert.Throws<SecurityException>(() => Bind(dialect, compiled, new() { ["ids"] = bad }));
+        var ex = Assert.Throws<RowPolicyExpressionRejectedException>(() => Bind(dialect, compiled, new() { ["ids"] = bad }));
         Assert.Equal(RowPolicyErrorGuard.Message, ex.Message);
         Bind(dialect, compiled, new() { ["ids"] = good });
     }
@@ -60,8 +60,8 @@ public class ClientBindFamilyTests
     {
         var compiled = new ClientListHarness().Compile(dialect, "SELECT id FROM orders WHERE extract(year FROM __param_d) = 2020 OR id = 1");
 
-        Assert.Throws<SecurityException>(() => Bind(dialect, compiled, new() { ["d"] = "12:30" }));
-        Assert.Throws<SecurityException>(() => Bind(dialect, compiled, new() { ["d"] = "2020-13-45" }));
+        Assert.Throws<RowPolicyExpressionRejectedException>(() => Bind(dialect, compiled, new() { ["d"] = "12:30" }));
+        Assert.Throws<RowPolicyExpressionRejectedException>(() => Bind(dialect, compiled, new() { ["d"] = "2020-13-45" }));
         Bind(dialect, compiled, new() { ["d"] = "2020-01-31" });
         Bind(dialect, compiled, new() { ["d"] = new DateTime(2020, 1, 31) });
     }
@@ -70,7 +70,7 @@ public class ClientBindFamilyTests
     [MemberData(nameof(Dialects))]
     public void A_bind_that_needs_two_families_is_refused_at_compile(TargetSqlDialect dialect)
     {
-        Assert.Throws<SecurityException>(() => new ClientListHarness().Compile(dialect, "SELECT id FROM orders WHERE id = __param_p AND status = __param_p AND extract(year FROM __param_p) = 1"));
+        Assert.Throws<RowPolicyExpressionRejectedException>(() => new ClientListHarness().Compile(dialect, "SELECT id FROM orders WHERE id = __param_p AND status = __param_p AND extract(year FROM __param_p) = 1"));
     }
 
     [Theory]
@@ -80,7 +80,7 @@ public class ClientBindFamilyTests
         var compiled = new ClientListHarness().Compile(dialect, "SELECT id FROM orders WHERE CASE WHEN id = 42 THEN status = __param_p ELSE 1 = 0 END");
 
         Bind(dialect, compiled, new() { ["p"] = "abc" });
-        var ex = Assert.Throws<SecurityException>(() => Bind(dialect, compiled, new() { ["p"] = 5L }));
+        var ex = Assert.Throws<RowPolicyExpressionRejectedException>(() => Bind(dialect, compiled, new() { ["p"] = 5L }));
         Assert.Equal(RowPolicyErrorGuard.Message, ex.Message);
     }
 
@@ -90,7 +90,7 @@ public class ClientBindFamilyTests
     {
         var compiled = new ClientListHarness().Compile(dialect, "SELECT id FROM orders WHERE __param_p = 'x'");
 
-        Assert.Throws<SecurityException>(() => Bind(dialect, compiled, new() { ["p"] = 1L }));
+        Assert.Throws<RowPolicyExpressionRejectedException>(() => Bind(dialect, compiled, new() { ["p"] = 1L }));
         Bind(dialect, compiled, new() { ["p"] = "x" });
     }
 
@@ -98,8 +98,8 @@ public class ClientBindFamilyTests
     [MemberData(nameof(Dialects))]
     public void Comparison_of_binds_only_is_refused_at_compile(TargetSqlDialect dialect)
     {
-        Assert.Throws<SecurityException>(() => new ClientListHarness().Compile(dialect, "SELECT id FROM orders WHERE __param_a = __param_b"));
-        Assert.Throws<SecurityException>(() => new ClientListHarness().Compile(dialect, "SELECT id FROM orders WHERE __param_a = NULL"));
+        Assert.Throws<RowPolicyExpressionRejectedException>(() => new ClientListHarness().Compile(dialect, "SELECT id FROM orders WHERE __param_a = __param_b"));
+        Assert.Throws<RowPolicyExpressionRejectedException>(() => new ClientListHarness().Compile(dialect, "SELECT id FROM orders WHERE __param_a = NULL"));
     }
 
     [Theory]
@@ -114,7 +114,7 @@ public class ClientBindFamilyTests
         })
         {
             var compiled = new ClientListHarness().Compile(dialect, shape);
-            Assert.Throws<SecurityException>(() => Bind(dialect, compiled, new() { ["p"] = "abc" }));
+            Assert.Throws<RowPolicyExpressionRejectedException>(() => Bind(dialect, compiled, new() { ["p"] = "abc" }));
             Bind(dialect, compiled, new() { ["p"] = true });
         }
     }
@@ -125,7 +125,7 @@ public class ClientBindFamilyTests
         const TargetSqlDialect dialect = TargetSqlDialect.Databricks;
         var compiled = new ClientListHarness().Compile(dialect, BranchShape);
 
-        Assert.Throws<SecurityException>(() => Bind(dialect, compiled, new() { ["p"] = "abc" }));
+        Assert.Throws<RowPolicyExpressionRejectedException>(() => Bind(dialect, compiled, new() { ["p"] = "abc" }));
         Bind(dialect, compiled, new() { ["p"] = "42" });
     }
 }

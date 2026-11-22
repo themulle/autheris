@@ -15,9 +15,11 @@ using TrinoSqlEngine.Governance;
 /// temporal, boolean); an operand whose family is unknown is refused. Date part extractors need a temporal source. Column families come
 /// from the catalog, and from the projections of CTEs and derived tables of the statement. Details: private advisory.
 /// </summary>
-internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScopeTracker(catalog)
+internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog, bool evaluationFenced = false) : ColumnScopeTracker(catalog)
 {
     private enum Fam { Unknown, Any, Text, StringLiteral, Bind, Numeric, Temporal, Boolean }
+
+    private int _wideningAggregateCastDepth;
 
     private readonly Dictionary<string, Dictionary<string, Fam>> _derived = new(StringComparer.Ordinal);
     private readonly Dictionary<QuerySpecification, List<(string? Name, Fam Family)>> _outputs = new(ReferenceEqualityComparer.Instance);
@@ -69,7 +71,7 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
         foreach (var operand in operands) Record(operand, family);
     }
 
-    private static SecurityException Refuse() => new(RowPolicyErrorGuard.Message);
+    private static RowPolicyExpressionRejectedException Refuse() => new();
 
     private static readonly string[] IsoFormats = ["yyyy-MM-dd", "yyyy-MM-dd HH:mm:ss", "yyyy-MM-dd HH:mm:ss.FFF"];
 
@@ -133,6 +135,7 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
             case BinaryExpression b:
                 return b.Operator switch
                 {
+                    BinaryOperator.Add or BinaryOperator.Subtract when b.Left is IntervalLiteralExpression || b.Right is IntervalLiteralExpression => Fam.Temporal,
                     BinaryOperator.Add or BinaryOperator.Subtract or BinaryOperator.Multiply or BinaryOperator.Divide or BinaryOperator.Modulo => Fam.Numeric,
                     BinaryOperator.Concat => Fam.Text,
                     _ => Fam.Boolean
@@ -158,9 +161,20 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
         {
             "coalesce" or "nullif" or "greatest" or "least" or "min" or "max" or "measure" => Combine(call.Arguments.Select(Of)),
             "lower" or "upper" or "trim" or "ltrim" or "rtrim" or "concat" or "substring" or "substr" => Fam.Text,
-            "length" or "char_length" or "character_length" or "count" or "year" or "month" or "day" or "hour" or "minute" or "second"
+            "length" or "char_length" or "character_length" or "count" or "sum" or "avg" or "year" or "month" or "day" or "hour" or "minute" or "second"
                 or "quarter" or "week" or "day_of_week" or "day_of_month" or "day_of_year" => Fam.Numeric,
             "convert_timezone" => Fam.Temporal,
+            _ when evaluationFenced => name switch
+            {
+                "nvl" or "isnull" or "ifnull" => Combine(call.Arguments.Select(Of)),
+                "replace" or "to_char" => Fam.Text,
+                "row_number" or "rank" or "dense_rank" or "ntile" or "grouping"
+                    or "abs" or "round" or "ceil" or "ceiling" or "floor" or "sqrt" or "ln" or "log" or "log10"
+                    or "exp" or "power" or "mod" or "sign" or "trunc" or "strpos" or "instr" or "charindex"
+                    or "len" or "date_diff" => Fam.Numeric,
+                "date_add" or "date_trunc" or "to_date" or "to_timestamp" or "date_parse" => Fam.Temporal,
+                _ => Fam.Unknown
+            },
             _ => Fam.Unknown
         };
     }
@@ -387,7 +401,20 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
 
     public override SqlNode VisitFunctionCallExpression(FunctionCallExpression node)
     {
-        var result = (FunctionCallExpression)base.VisitFunctionCallExpression(node);
+        bool wideningAgg = RowPolicyErrorGuard.IsSafeAggregateForm(node)
+            && node.Arguments.Count == 1
+            && Unwrap(node.Arguments[0]) is CastExpression { IsTryCast: false };
+        if (wideningAgg) _wideningAggregateCastDepth++;
+        FunctionCallExpression result;
+        try
+        {
+            result = (FunctionCallExpression)base.VisitFunctionCallExpression(node);
+        }
+        finally
+        {
+            if (wideningAgg) _wideningAggregateCastDepth--;
+        }
+
         if (result.Name.Parts.Count != 1) return result;
         switch (result.Name.Parts[0].Value.ToLowerInvariant())
         {
@@ -412,10 +439,28 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog) : ColumnScop
         var result = (CastExpression)base.VisitCastExpression(node);
         if (result.IsTryCast) return result;
 
-        // A cast raises on a value that does not convert: only to text, between temporal values, or of NULL.
         var target = OfType(result.TargetType);
         var source = Of(result.Operand);
+
+        // Non-raising gateway aggregate widening (CAST(<numeric column> AS decimal|double)) inside SUM/AVG cannot raise on numeric row values.
+        if (_wideningAggregateCastDepth > 0 && RowPolicyErrorGuard.IsWideningAggregateCast(result) && source == Fam.Numeric)
+        {
+            return result;
+        }
+
+        // Under a proven optimizer evaluation fence, explicit CASTs over column expressions run strictly on visible rows.
+        if (evaluationFenced && AstReflection.Collect<ColumnReference>(result.Operand).Count > 0)
+        {
+            return result;
+        }
+
+        // A cast raises on a value that does not convert: only to text, between temporal values, of NULL, or numeric literals to numeric under a fence.
         if (target == Fam.Text || (target == Fam.Temporal && source == Fam.Temporal) || Unwrap(result.Operand) is LiteralExpression { Type: LiteralType.Null }) return result;
+
+        if (evaluationFenced && target == Fam.Numeric && Unwrap(result.Operand) is LiteralExpression { Type: LiteralType.Integer or LiteralType.Decimal })
+        {
+            return result;
+        }
 
         // A date or time literal that parses cannot fail, wherever the cast sits.
         if (target == Fam.Temporal && Unwrap(result.Operand) is LiteralExpression { Type: LiteralType.String, Value: string text }
