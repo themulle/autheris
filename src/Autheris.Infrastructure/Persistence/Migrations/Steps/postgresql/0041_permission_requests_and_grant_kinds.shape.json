@@ -1,0 +1,85 @@
+{
+  "ops": [
+    { "op": "addColumn", "table": "consent_requests", "column": { "name": "grant_kind", "type": "CHARACTER VARYING(24)", "family": "string", "nullable": false } },
+    { "op": "addColumn", "table": "consent_requests", "column": { "name": "target_columns", "type": "TEXT", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "consent_requests", "column": { "name": "container_kind", "type": "CHARACTER VARYING(24)", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "consent_requests", "column": { "name": "container_id", "type": "CHARACTER VARYING(36)", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "consent_requests", "column": { "name": "approver_capacity", "type": "CHARACTER VARYING(32)", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "consent_requests", "column": { "name": "self_grant", "type": "BOOLEAN", "family": "boolean", "nullable": false } },
+    { "op": "addColumn", "table": "consent_requests", "column": { "name": "bundle_id", "type": "CHARACTER VARYING(36)", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "consent_requests", "column": { "name": "decided_by", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "consent_requests", "column": { "name": "decided_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": true } },
+    { "op": "addIndex", "table": "consent_requests", "name": "ix_consent_requests_requester_status", "unique": false, "columns": ["tenant_id", "requester_sid", "status"] },
+    { "op": "addIndex", "table": "consent_requests", "name": "ix_consent_requests_bundle", "unique": false, "columns": ["tenant_id", "bundle_id"] },
+    { "op": "addColumn", "table": "consents", "column": { "name": "grant_kind", "type": "CHARACTER VARYING(24)", "family": "string", "nullable": false } },
+    { "op": "addColumn", "table": "consents", "column": { "name": "approver_capacity", "type": "CHARACTER VARYING(32)", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "consents", "column": { "name": "self_grant", "type": "BOOLEAN", "family": "boolean", "nullable": false } },
+    { "op": "addColumn", "table": "consents", "column": { "name": "target_columns", "type": "TEXT", "family": "string", "nullable": true } },
+    { "op": "addIndex", "table": "consents", "name": "ix_consents_grant_kind", "unique": false, "columns": ["tenant_id", "grant_kind", "is_revoked"] },
+    {
+      "op": "addTable",
+      "table": "catalog_visibility_grants",
+      "newTable": {
+        "name": "catalog_visibility_grants",
+        "columns": [
+          { "name": "id", "type": "CHARACTER VARYING(36)", "family": "string", "nullable": false },
+          { "name": "tenant_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "container_kind", "type": "CHARACTER VARYING(24)", "family": "string", "nullable": false },
+          { "name": "container_id", "type": "CHARACTER VARYING(36)", "family": "string", "nullable": false },
+          { "name": "grantee_type", "type": "CHARACTER VARYING(32)", "family": "string", "nullable": false },
+          { "name": "grantee_sid", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "grantee_sid_norm", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "valid_from", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false },
+          { "name": "valid_to", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": true },
+          { "name": "granted_by_sid", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false },
+          { "name": "approver_capacity", "type": "CHARACTER VARYING(32)", "family": "string", "nullable": false },
+          { "name": "request_id", "type": "CHARACTER VARYING(36)", "family": "string", "nullable": true },
+          { "name": "is_revoked", "type": "BOOLEAN", "family": "boolean", "nullable": false },
+          { "name": "revoked_by_sid", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": true },
+          { "name": "revoked_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": true },
+          { "name": "revoke_reason", "type": "CHARACTER VARYING(512)", "family": "string", "nullable": true },
+          { "name": "created_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["id"],
+        "indexes": []
+      }
+    },
+    { "op": "addIndex", "table": "catalog_visibility_grants", "name": "ix_catalog_visibility_grants_grantee", "unique": false, "columns": ["tenant_id", "grantee_sid_norm", "is_revoked"] },
+    { "op": "addIndex", "table": "catalog_visibility_grants", "name": "ix_catalog_visibility_grants_container", "unique": false, "columns": ["tenant_id", "container_kind", "container_id", "is_revoked"] },
+    {
+      "op": "addTable",
+      "table": "migration_purge_report",
+      "newTable": {
+        "name": "migration_purge_report",
+        "columns": [
+          { "name": "id", "type": "CHARACTER VARYING(36)", "family": "string", "nullable": false },
+          { "name": "step", "type": "CHARACTER VARYING(64)", "family": "string", "nullable": false },
+          { "name": "table_name", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "row_count", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "ledger_head_hash", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": true },
+          { "name": "purged_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false },
+          { "name": "audited_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": true }
+        ],
+        "primaryKey": ["id"],
+        "indexes": []
+      }
+    },
+    { "op": "addIndex", "table": "migration_purge_report", "name": "ix_migration_purge_report_step", "unique": false, "columns": ["step", "audited_at"] },
+    {
+      "op": "addTable",
+      "table": "grant_record_heads_archive",
+      "newTable": {
+        "name": "grant_record_heads_archive",
+        "columns": [
+          { "name": "tenant_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false },
+          { "name": "last_seq", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "last_hash", "type": "CHARACTER(64)", "family": "string", "nullable": false },
+          { "name": "archived_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false },
+          { "name": "step", "type": "CHARACTER VARYING(64)", "family": "string", "nullable": false }
+        ],
+        "primaryKey": ["step", "tenant_id"],
+        "indexes": []
+      }
+    }
+  ]
+}

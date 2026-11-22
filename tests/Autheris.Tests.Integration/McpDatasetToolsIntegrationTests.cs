@@ -79,4 +79,21 @@ public class McpDatasetToolsIntegrationTests : IClassFixture<McpDatasetToolsInte
         missingError.ShouldBeTrue();
         missing.GetProperty("error").GetProperty("code").GetString().ShouldBe("NOT_FOUND");
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Five_to_nine_char_justification_rejected()
+    {
+        var client = _factory.CreateClient();
+        var (_, list) = await CallAsync(client, "list_datasets", new { });
+        var datasets = list.GetProperty("datasets");
+        var id = datasets[0].GetProperty("id").GetString()!;
+
+        foreach (var shortJustif in new[] { "12345", "1234567", "123456789" })
+        {
+            var (isError, payload) = await CallAsync(client, "request_access", new { dataset = id, justification = shortJustif });
+            isError.ShouldBeTrue($"Short justification '{shortJustif}' ({shortJustif.Length} chars) must be rejected.");
+            payload.ToString().ShouldContain("error");
+        }
+    }
 }

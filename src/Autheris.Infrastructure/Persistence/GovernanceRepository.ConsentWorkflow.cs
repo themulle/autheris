@@ -373,7 +373,7 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
                      r.business_justification, r.status, r.requested_at, r.requested_valid_to,
                      t.source_name, t.schema_name, t.table_name, r.tenant_id,
                      r.requester_identifiers_json, r.context_json, r.requested_write_rules_json,
-                     r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id
+                     r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id, r.grant_kind, r.target_columns, r.container_kind, r.container_id, r.approver_capacity, r.self_grant, r.bundle_id, r.decided_by, r.decided_at
               FROM CONSENT_REQUESTS r
               LEFT JOIN TABLES t ON r.table_id = t.id
               WHERE r.tenant_id = @tenantId
@@ -393,7 +393,7 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
                      r.business_justification, r.status, r.requested_at, r.requested_valid_to,
                      t.source_name, t.schema_name, t.table_name, r.tenant_id,
                      r.requester_identifiers_json, r.context_json, r.requested_write_rules_json,
-                     r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id
+                     r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id, r.grant_kind, r.target_columns, r.container_kind, r.container_id, r.approver_capacity, r.self_grant, r.bundle_id, r.decided_by, r.decided_at
               FROM CONSENT_REQUESTS r
               LEFT JOIN TABLES t ON r.table_id = t.id
               WHERE r.tenant_id = @tenantId

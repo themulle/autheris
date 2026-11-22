@@ -48,8 +48,9 @@ internal static class ConsentSqlCore
                                     id, table_id, requester_sid, requested_grantee_type, requested_grantee_ref,
                                     business_justification, status, requested_at, requested_valid_to,
                                     tenant_id, requester_identifiers_json, context_json, requested_write_rules_json,
-                                    version, workflow_mode, external_system_id, external_reference, requested_valid_from, updated_at, request_kind, profile_id
-                                ) VALUES (@id, @tid, @sid, @gType, @gRef, @just, @status, @reqAt, @reqTo, @tenantId, @reqIds, @ctx, @reqWriteRules, @version, @workflowMode, @externalSystemId, @externalReference, @reqValidFrom, @updatedAt, @requestKind, @profileId)";
+                                    version, workflow_mode, external_system_id, external_reference, requested_valid_from, updated_at, request_kind, profile_id,
+                                    grant_kind, target_columns, container_kind, container_id, approver_capacity, self_grant, bundle_id, decided_by, decided_at
+                                ) VALUES (@id, @tid, @sid, @gType, @gRef, @just, @status, @reqAt, @reqTo, @tenantId, @reqIds, @ctx, @reqWriteRules, @version, @workflowMode, @externalSystemId, @externalReference, @reqValidFrom, @updatedAt, @requestKind, @profileId, @grantKind, @targetColumns, @containerKind, @containerId, @approverCapacity, @selfGrant, @bundleId, @decidedBy, @decidedAt)";
 
     public const string SelectApprovalStepsSql = "SELECT step_number, approver_sid, decision, rejection_reason, decided_at FROM APPROVAL_STEPS WHERE consent_request_id = @id ORDER BY step_number ASC";
 
@@ -145,7 +146,8 @@ internal static class ConsentSqlCore
         cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                    c.grantee_sid, c.valid_from, c.valid_to,
                                    c.is_revoked, t.source_name, t.schema_name, t.table_name,
-                                   c.tenant_id, c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at
+                                   c.tenant_id,
+                                   c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns
                             FROM CONSENTS c
                             JOIN TABLES t ON c.table_id = t.id
                             WHERE c.is_revoked = 0 AND c.consent_request_id = @reqId";
@@ -185,7 +187,7 @@ internal static class ConsentSqlCore
                                    c.grantee_sid, c.valid_from, c.valid_to,
                                    c.is_revoked, c.revoked_by_sid, c.revoked_at, c.revoke_reason,
                                    t.source_name, t.schema_name, t.table_name, c.tenant_id, c.renewal_count,
-                                   c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at
+                                   c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns
                             FROM CONSENTS c
                             JOIN TABLES t ON c.table_id = t.id
                             WHERE c.id = @id";
@@ -642,7 +644,9 @@ internal static class ConsentSqlCore
     {
         var (writeRules, includeRead) = ConsentWriteRulesSql.DeserializeRequestedWriteRules(
             reader.FieldCount > 13 && !reader.IsDBNull(13) ? reader.GetString(13) : null);
-        var tenant = reader.FieldCount > 22 && !reader.IsDBNull(22) ? StoredTenant.Parse(reader.GetString(22)) : default;
+        var tenant = reader.FieldCount > 14 + ConsentWorkflowSql.RequestColumnCount && !reader.IsDBNull(14 + ConsentWorkflowSql.RequestColumnCount)
+            ? StoredTenant.Parse(reader.GetString(14 + ConsentWorkflowSql.RequestColumnCount))
+            : default;
         return ConsentWorkflowSql.BuildConsentRequest(
             reader,
             Guid.Parse(reader.GetString(0)),

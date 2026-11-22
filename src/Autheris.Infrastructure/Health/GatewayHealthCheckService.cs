@@ -24,6 +24,7 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
     private readonly IOptions<CatalogSearchOptions>? _catalogSearchOptions;
     private readonly TimeProvider _timeProvider;
     private readonly ICatalogDirtyFlag? _catalogDirtyFlag;
+    private readonly GovernanceSchemaVersionReadinessCheck? _schemaReadinessCheck;
 
     public GatewayHealthCheckService(
         IOptions<GatewayOptions> options,
@@ -36,9 +37,11 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
         ICatalogVersionProvider? catalogVersionProvider = null,
         IOptions<CatalogSearchOptions>? catalogSearchOptions = null,
         TimeProvider? timeProvider = null,
-        ICatalogDirtyFlag? catalogDirtyFlag = null)
+        ICatalogDirtyFlag? catalogDirtyFlag = null,
+        GovernanceSchemaVersionReadinessCheck? schemaReadinessCheck = null)
     {
         _catalogDirtyFlag = catalogDirtyFlag;
+        _schemaReadinessCheck = schemaReadinessCheck;
         _auditChainMonitor = auditChainMonitor;
         _options = options;
         _logger = logger;
@@ -202,6 +205,16 @@ public sealed class GatewayHealthCheckService : IGatewayHealthCheckService
         {
             components.Add(new HealthCheckComponentResult(
                 "CatalogVersionSync", true, "degraded: catalog version bump pending repair (see gateway logs)."));
+        }
+
+        if (_schemaReadinessCheck is not null)
+        {
+            var schemaResult = await _schemaReadinessCheck.EvaluateAsync(ct).ConfigureAwait(false);
+            components.Add(schemaResult);
+            if (!schemaResult.IsHealthy)
+            {
+                overallHealthy = false;
+            }
         }
 
         return new GatewayHealthReport(overallHealthy, components);

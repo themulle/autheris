@@ -214,9 +214,27 @@ public static class AuditEventTypes
     public const string OwnerGroupAssigned = "OWNER_GROUP_ASSIGNED";
     public const string ProtectionClassChanged = "PROTECTION_CLASS_CHANGED";
     public const string MaskCategoryChanged = "MASK_CATEGORY_CHANGED";
+    public const string PiiFlagChanged = "PII_FLAG_CHANGED";
     public const string ViewDowngraded = "VIEW_DOWNGRADED";
     public const string ImportSamplesChanged = "IMPORT_SAMPLES_CHANGED";
     public const string ImportSamplesPiiSuspected = "IMPORT_SAMPLES_PII_SUSPECTED";
     public const string ImportSamplesPurged = "IMPORT_SAMPLES_PURGED";
+
+    // Unified permission requests, grants, notifications & migration purge audit events
+    public const string PermissionRequested = "PERMISSION_REQUESTED";
+    public const string PermissionApproved = "PERMISSION_APPROVED";
+    public const string PermissionRejected = "PERMISSION_REJECTED";
+    public const string PermissionDecisionConflict = "PERMISSION_DECISION_CONFLICT";
+    public const string CatalogGrantCreated = "CATALOG_GRANT_CREATED";
+    public const string CatalogGrantRevoked = "CATALOG_GRANT_REVOKED";
+    public const string UnmaskGrantCreated = "UNMASK_GRANT_CREATED";
+    public const string GrantRenewed = "GRANT_RENEWED";
+    public const string GrantRevoked = "GRANT_REVOKED";
+    public const string GrantRevokedDeprovisioned = "GRANT_REVOKED_DEPROVISIONED";
+    public const string SelfGrant = "SELF_GRANT";
+    public const string SelfGrantDenied = "SELF_GRANT_DENIED";
+    public const string NotificationChannelChanged = "NOTIFICATION_CHANNEL_CHANGED";
+    public const string WebhookDeliveryFailed = "WEBHOOK_DELIVERY_FAILED";
+    public const string MigrationGrantsPurged = "MIGRATION_GRANTS_PURGED";
 }
 

@@ -6,7 +6,9 @@ using System.Net;
 using System.Net.Http;
 using System.Text;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
+using NSubstitute;
 using Autheris.Application.Events;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Domain.Events;
@@ -145,6 +147,45 @@ public sealed class EventAndWebhookIntegrationTests : IClassFixture<EventAndWebh
         {
             receivedEvents.ShouldContain(e => e is AccessPlanCreatedEvent && ((AccessPlanCreatedEvent)e).DatasetId == "crm.customers");
             receivedEvents.ShouldContain(e => e is DatasetStateChangedEvent && ((DatasetStateChangedEvent)e).DatasetId == "crm.customers");
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Retries_bounded()
+    {
+        var audit = new Autheris.Tests.Common.Fakes.InMemoryAuditWriter();
+        var attempts = 0;
+        var handler = new CountingFailHandler(() => Interlocked.Increment(ref attempts));
+        var clientFactory = NSubstitute.Substitute.For<IHttpClientFactory>();
+        clientFactory.CreateClient(Autheris.Application.Security.EgressIntegrations.GovernanceNotifications)
+            .Returns(_ => new HttpClient(handler, disposeHandler: false));
+
+        var dispatcher = new Autheris.Application.Governance.Notifications.GovernanceNotificationDispatcher(
+            Microsoft.Extensions.Options.Options.Create(new Domain.Options.GovernanceNotificationOptions
+            {
+                Webhook = new Domain.Options.GovernanceNotificationWebhookSettings
+                {
+                    Url = "https://hooks.example.com/dg"
+                }
+            }),
+            clientFactory,
+            audit);
+
+        var ok = await dispatcher.TryDispatchAsync(new Autheris.Application.Governance.Notifications.GovernanceNotificationMessage(
+            "SELF_GRANT", "tenant-a", "entra", "user:it", "Bounded retry check.", DateTimeOffset.UtcNow));
+
+        ok.ShouldBeFalse();
+        attempts.ShouldBeInRange(1, 3);
+        audit.Entries.ShouldContain(e => e.EventType == Domain.Audit.AuditEventTypes.WebhookDeliveryFailed);
+    }
+
+    private sealed class CountingFailHandler(Action onSend) : HttpMessageHandler
+    {
+        protected override Task<HttpResponseMessage> SendAsync(HttpRequestMessage request, System.Threading.CancellationToken cancellationToken)
+        {
+            onSend();
+            return Task.FromResult(new HttpResponseMessage(HttpStatusCode.ServiceUnavailable));
         }
     }
 }

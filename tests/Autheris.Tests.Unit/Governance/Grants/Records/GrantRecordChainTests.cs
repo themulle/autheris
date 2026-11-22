@@ -256,6 +256,21 @@ public sealed class GrantRecordChainTests
         (await new GrantChainVerifier(store, configSigner).VerifyTenantChainAsync("tenant-a")).IsValid.ShouldBeTrue();
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Empty_ledger_after_reset_verifies()
+    {
+        using var signer = EcdsaGrantRecordSigner.CreateEphemeral("key-v1");
+        var store = new InMemoryGrantRecordStore();
+        var verifier = new GrantChainVerifier(store, signer);
+
+        var result = await verifier.VerifyTenantChainAsync("tenant-a");
+        result.IsValid.ShouldBeTrue();
+        result.VerifiedCount.ShouldBe(0);
+        result.LastSeq.ShouldBe(0);
+        result.LastHash.ShouldBe(GrantRecordChain.GenesisHash);
+    }
+
     private static Consent CreateSampleConsent() =>
         new()
         {

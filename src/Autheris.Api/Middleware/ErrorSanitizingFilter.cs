@@ -105,7 +105,14 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "PRECONDITION_FAILED",
         "WORKFLOW_MODE_MISMATCH",
         "FOUR_EYES_SAME_APPROVER",
-        "ROW_POLICY_EXPRESSION_NOT_ALLOWED"
+        "ROW_POLICY_EXPRESSION_NOT_ALLOWED",
+        "GRANT_END_DATE_REQUIRED",
+        "GRANT_DURATION_EXCEEDS_APPROVER_LIMIT",
+        "JUSTIFICATION_TOO_SHORT",
+        "JUSTIFICATION_TOO_LONG",
+        "REQUEST_ALREADY_DECIDED",
+        "SELF_GRANT_SECRET_REFUSED",
+        "SELF_GRANT_EXCEEDS_CEILING"
     };
 
     /// <summary>
@@ -120,6 +127,13 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         ["PRECONDITION_FAILED"] = "The consent request was changed in the meantime.",
         ["WORKFLOW_MODE_MISMATCH"] = "The consent request cannot be decided through this channel.",
         ["FOUR_EYES_SAME_APPROVER"] = "A different approver is required for the next approval step.",
+        ["GRANT_END_DATE_REQUIRED"] = "An explicit expiry date (validTo) is required.",
+        ["GRANT_DURATION_EXCEEDS_APPROVER_LIMIT"] = "The requested grant duration exceeds the approver's maximum allowed lifetime.",
+        ["JUSTIFICATION_TOO_SHORT"] = "A business justification of at least 10 characters is required.",
+        ["JUSTIFICATION_TOO_LONG"] = "The business justification exceeds the maximum allowed length.",
+        ["REQUEST_ALREADY_DECIDED"] = "This permission request has already been decided.",
+        ["SELF_GRANT_SECRET_REFUSED"] = "Secret objects cannot be granted through self-grant.",
+        ["SELF_GRANT_EXCEEDS_CEILING"] = "The target object protection class exceeds the self-grant ceiling.",
         ["GRAPHQL_VALIDATION_FAILED"] = ValidationMessage,
         ["GRAPHQL_VARIABLE_INVALID"] = VariableMessage,
         ["GRAPHQL_PARSE_FAILED"] = ParseMessage,

@@ -1,25 +1,26 @@
 namespace Autheris.Application.Governance.Grants;
 
 using System;
-using System.Linq;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// 16 time-bound individual grant policy. Individual grants (<see cref="GranteeType.User"/>, <see cref="GranteeType.ServicePrincipal"/>)
-/// always need an explicit <c>ValidTo</c> within their effective maximum: the minimum of the operator-configured class limit
-/// (<see cref="IndividualGrantOptions"/>, optional) and the required tenant maximum of <see cref="IGrantValidityPolicy"/>. There
-/// are no compiled-in ceilings. Group grants are standing and take no class limit (the validity policy bounds them).
-/// Renewal is a new approval, never by the grantee. Any unexpected state denies.
+/// Capacity-based grant lifetime policy. Maxima derive solely from the decider's <see cref="ApproverCapacity"/>
+/// (clamped below deployment ceilings from <see cref="AccessPolicyOptions"/>), never from object protection class
+/// or service-principal status. Single decision everywhere (no four-eyes step).
 /// </summary>
-public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null, IGrantValidityPolicy? validityPolicy = null) : IGrantPolicy
+public sealed class GrantPolicy(
+    IOptions<IndividualGrantOptions>? options = null,
+    IGrantValidityPolicy? validityPolicy = null,
+    IOptions<AccessPolicyOptions>? accessPolicyOptions = null) : IGrantPolicy
 {
     private readonly IndividualGrantOptions _options = options?.Value ?? new IndividualGrantOptions();
-
-    // Unit-level construction without DI falls back to the test default; production composition always supplies the
-    // configured (required) validity options.
+    private readonly AccessPolicyOptions _accessPolicy = accessPolicyOptions?.Value ?? new AccessPolicyOptions();
+    private readonly bool _hasExplicitAccessPolicy = accessPolicyOptions is not null;
+    private readonly IGrantValidityPolicy? _explicitValidity = validityPolicy;
     private readonly IGrantValidityPolicy _validity = validityPolicy ?? GrantValidityPolicy.CreateDefault();
 
     public GrantDecision Evaluate(GrantRequest request)
@@ -47,157 +48,274 @@ public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null
             return new GrantDecision(true, null, false, GrantClass.Standing, "Deny grants only restrict access and have no maximum.");
         }
 
-        if (r.GranteeType is GranteeType.Group)
+        var nowUtc = r.Now.ToUniversalTime();
+        var isCapacityEvaluated = r.Capacity.HasValue || r.RequestKind.HasValue || r.SelfGrant;
+
+        if (!isCapacityEvaluated && r.GranteeType == GranteeType.Group)
         {
-            // Standing grants take no class limit, but an explicit expiry is bounded by the tenant maximum like everyone else.
-            var tenantMax = GrantTimeMath.AddSaturating(r.Now, TenantMaximum(r.Kind));
-            if (r.ValidTo is { } standingTo && standingTo > tenantMax)
+            var tenantMax = GrantTimeMath.AddSaturating(nowUtc, TenantMaximum(r.Kind));
+            if (r.ValidTo is { } standingTo && standingTo.ToUniversalTime() > tenantMax)
             {
-                return GrantDecision.Deny(GrantErrorCodes.ExceedsMaximum,
-                    $"The requested expiry exceeds the maximum of {FormatSpan(TenantMaximum(r.Kind))}.", GrantClass.Standing, tenantMax);
+                return GrantDecision.Deny(
+                    GrantErrorCodes.ExceedsMaximum,
+                    $"The requested expiry exceeds the maximum of {FormatSpan(TenantMaximum(r.Kind))}.",
+                    GrantClass.Standing,
+                    tenantMax);
             }
 
             return new GrantDecision(true, null, false, GrantClass.Standing, "Standing group grant.");
         }
 
-        var cls = Classify(r);
-        var (maxSpan, fourEyes) = Limits(cls, r.Kind);
+        var effectiveCapacity = r.SelfGrant
+            ? ApproverCapacity.SelfGrant
+            : r.Capacity ?? ApproverCapacity.DataOwner;
+
+        var cls = MapGrantClass(effectiveCapacity);
         var disabled = CustomerDisabled(r, cls);
         if (disabled != null)
         {
             return GrantDecision.Deny(GrantErrorCodes.DisabledForRealm, disabled, cls);
         }
 
-        var maxValidTo = MaxValidTo(r.Now, maxSpan);
+        if (effectiveCapacity == ApproverCapacity.SelfGrant || r.SelfGrant)
+        {
+            if (r.ProtectionClass == ProtectionClass.Secret)
+            {
+                return GrantDecision.Deny(
+                    GrantErrorCodes.SelfGrantSecretRefused,
+                    "Secret objects cannot be accessed via self-grant.",
+                    GrantClass.SelfGrant);
+            }
 
-        // Rule 3: renewal is a new approval by someone else, capped per class and handed to a campaign from the Nth renewal.
+            var ceiling = ResolveSelfGrantCeiling(r.TenantPolicy);
+            if (r.ProtectionClass > ceiling)
+            {
+                return GrantDecision.Deny(
+                    GrantErrorCodes.SelfGrantExceedsCeiling,
+                    $"Protection class '{r.ProtectionClass}' exceeds the self-grant ceiling '{ceiling}'.",
+                    GrantClass.SelfGrant);
+            }
+        }
+
+        var maxSpan = ResolveMaxSpan(r, effectiveCapacity);
+        var maxValidTo = GrantTimeMath.AddSaturating(nowUtc, maxSpan);
+
         var suggest = false;
         if (r.Kind == GrantKind.Renewal)
         {
             if (string.IsNullOrWhiteSpace(r.Renewer) ||
                 SeparationOfDutiesService.IdentifiersOverlap(r.Renewer, r.GranteeRef))
             {
-                return GrantDecision.Deny(GrantErrorCodes.RenewalByGrantee, "A grant must be renewed by an owner or delegate, never by the grantee.", cls, maxValidTo);
+                return GrantDecision.Deny(
+                    GrantErrorCodes.RenewalByGrantee,
+                    "A grant must be renewed by an eligible approver, never by the grantee.",
+                    cls,
+                    maxValidTo);
             }
 
             if (r.RenewalCount >= _options.CampaignRequiredAfterRenewals)
             {
-                return GrantDecision.Deny(GrantErrorCodes.RenewalRequiresCampaign,
-                    "This grant was renewed repeatedly; a campaign decision is required instead of a direct extension.", cls, maxValidTo) with { RequiresCampaignDecision = true };
+                return GrantDecision.Deny(
+                    GrantErrorCodes.RenewalRequiresCampaign,
+                    "This grant was renewed repeatedly; a campaign decision is required instead of a direct extension.",
+                    cls,
+                    maxValidTo) with { RequiresCampaignDecision = true };
             }
 
             suggest = r.RenewalCount >= _options.RoleConversionHintAfterRenewals;
         }
 
-        // Rule 1: mandatory explicit expiry for every individual grant.
+        var isCatalogRequest = r.RequestKind == ConsentRequestKind.Catalog;
         if (r.ValidTo is null)
         {
-            return GrantDecision.Deny(GrantErrorCodes.RequiresExpiry, "An individual grant requires an explicit expiry (validUntil).", cls, maxValidTo);
+            if (isCatalogRequest)
+            {
+                return new GrantDecision(true, null, false, cls, "Allowed (catalog visibility without end date).", null, suggest);
+            }
+
+            var missingCode = isCapacityEvaluated ? GrantErrorCodes.EndDateRequired : GrantErrorCodes.RequiresExpiry;
+            return GrantDecision.Deny(missingCode, "An explicit expiry (validTo) in UTC is required.", cls, maxValidTo);
         }
 
-        if (r.ValidTo.Value <= r.Now)
+        var validToUtc = r.ValidTo.Value.ToUniversalTime();
+        if (validToUtc <= nowUtc)
         {
             return GrantDecision.Deny(GrantErrorCodes.ExpiryInPast, "The expiry of the grant must lie in the future.", cls, maxValidTo);
         }
 
-        // Rule 2: maximum duration = min(configured class limit, tenant maximum).
-        if (r.ValidTo.Value > maxValidTo)
+        if (validToUtc > maxValidTo)
         {
-            return GrantDecision.Deny(GrantErrorCodes.ExceedsMaximum,
-                $"The requested expiry exceeds the maximum of {FormatSpan(maxSpan)} for this grant class.", cls, maxValidTo);
+            var limitCode = isCapacityEvaluated ? GrantErrorCodes.ExceedsApproverLimit : GrantErrorCodes.ExceedsMaximum;
+            return GrantDecision.Deny(
+                limitCode,
+                $"The requested expiry exceeds the maximum of {FormatSpan(maxSpan)} for approver capacity {effectiveCapacity}.",
+                cls,
+                maxValidTo);
         }
 
-        if ((cls is GrantClass.IndividualUnmasked or GrantClass.IndividualPrivileged) &&
+        if (!isCapacityEvaluated &&
+            (r.MaskingMode == MaskingPolicyMode.Unmasked || r.PrivilegedRight) &&
             string.IsNullOrWhiteSpace(r.Justification))
         {
-            return GrantDecision.Deny(GrantErrorCodes.JustificationRequired, "A justification is required for this grant class.", cls, maxValidTo);
+            return GrantDecision.Deny(GrantErrorCodes.JustificationRequired, "A justification is required for this grant.", cls, maxValidTo);
         }
 
-        // Four-eyes is only enforced once approvals are presented (activation time): owner + second approver for sensitive
-        // classes, approver != requester != grantee.
-        if (fourEyes && r.Approvers is not null)
+        // Legacy four-eyes semantics remain scoped strictly to pre-cutover non-capacity callers until Pair 4 deletion.
+        var legacyFourEyes = !isCapacityEvaluated &&
+            r.GranteeType != GranteeType.ServicePrincipal &&
+            (r.Sensitivity == GrantSensitivity.Sensitive || r.MaskingMode == MaskingPolicyMode.Unmasked || r.PrivilegedRight);
+
+        if (legacyFourEyes && r.Kind == GrantKind.ManifestPolicy)
+        {
+            return GrantDecision.Deny(
+                GrantErrorCodes.FourEyesRequired,
+                "This declarative manifest policy requires explicit approval workflow.",
+                cls,
+                maxValidTo);
+        }
+
+        if (legacyFourEyes && r.Approvers is not null)
         {
             var distinct = SeparationOfDutiesService.CountDistinctIndependentApprovers(r.Approvers, r.Requester, r.GranteeRef);
-            var needed = cls is GrantClass.ServicePrincipal ? 1 : 2;
-
-            if (distinct < needed)
+            if (distinct < 2)
             {
-                return GrantDecision.Deny(GrantErrorCodes.FourEyesRequired,
-                    $"This grant class requires {needed} independent approver(s) different from requester and grantee.", cls, maxValidTo);
+                return GrantDecision.Deny(
+                    GrantErrorCodes.FourEyesRequired,
+                    "This grant class requires 2 independent approver(s) different from requester and grantee.",
+                    cls,
+                    maxValidTo);
             }
         }
 
-        return new GrantDecision(true, maxValidTo, fourEyes, cls, "Allowed.", null, suggest);
+        return new GrantDecision(true, maxValidTo, legacyFourEyes, cls, "Allowed.", null, suggest);
     }
 
-    private GrantClass Classify(GrantRequest r)
+    private TimeSpan ResolveMaxSpan(GrantRequest r, ApproverCapacity capacity)
     {
-        if (r.GranteeType == GranteeType.ServicePrincipal)
+        var capacitySpan = ResolveCapacityLimit(capacity, r.TenantPolicy);
+        var isCapacityEvaluated = r.Capacity.HasValue || r.RequestKind.HasValue || r.SelfGrant;
+
+        TimeSpan? optionalLimit = null;
+        if (r.Kind == GrantKind.ManifestPolicy)
         {
-            return GrantClass.ServicePrincipal;
+            optionalLimit = _validity.DeclarativeMaxDuration;
+        }
+        else if (_explicitValidity is not null)
+        {
+            optionalLimit = _explicitValidity.MaxDuration;
+        }
+        else if (!isCapacityEvaluated && !_hasExplicitAccessPolicy)
+        {
+            optionalLimit = _validity.MaxDuration;
         }
 
-        if (r.PrivilegedRight)
+        int? legacyOptionDays = capacity switch
         {
-            return GrantClass.IndividualPrivileged;
-        }
-
-        if (r.MaskingMode == MaskingPolicyMode.Unmasked)
-        {
-            return GrantClass.IndividualUnmasked;
-        }
-
-        if (r.Sensitivity == GrantSensitivity.Sensitive)
-        {
-            return GrantClass.Sensitive;
-        }
-
-        return r.CustomerRealm ? GrantClass.CustomerRegular : GrantClass.Regular;
-    }
-
-    private (TimeSpan Max, bool FourEyes) Limits(GrantClass cls, GrantKind kind)
-    {
-        var (configured, fourEyes) = cls switch
-        {
-            GrantClass.Regular => (_options.RegularMaxDays, false),
-            GrantClass.CustomerRegular => (_options.CustomerRegularMaxDays, false),
-            GrantClass.Sensitive => (_options.SensitiveMaxDays, true),
-            GrantClass.IndividualUnmasked => (_options.UnmaskedMaxDays, true),
-            GrantClass.IndividualPrivileged => (_options.PrivilegedMaxDays, true),
-            GrantClass.ServicePrincipal => (_options.ServicePrincipalMaxDays, false),
-            _ => throw new InvalidOperationException("Unhandled grant class.")
+            ApproverCapacity.DataOwner or ApproverCapacity.Governance => r.PrivilegedRight
+                ? _options.PrivilegedMaxDays
+                : r.MaskingMode == MaskingPolicyMode.Unmasked
+                    ? _options.UnmaskedMaxDays
+                    : (r.Sensitivity == GrantSensitivity.Sensitive ? _options.SensitiveMaxDays : _options.RegularMaxDays),
+            _ => null
         };
 
-        // Effective maximum = min over the configured limits only: the optional class limit (a non-positive value fails closed
-        // to one day) and the required tenant maximum.
-        var classLimit = configured is { } d ? GrantTimeMath.DaysToSpan(d) : (TimeSpan?)null;
-        if (classLimit is { } c && c <= TimeSpan.Zero)
+        if (r.CustomerRealm && capacity is ApproverCapacity.DataOwner or ApproverCapacity.Governance && _options.CustomerRegularMaxDays.HasValue)
         {
-            classLimit = TimeSpan.FromDays(1);
+            legacyOptionDays = GrantTimeMath.MinLimit(
+                legacyOptionDays.HasValue ? GrantTimeMath.DaysToSpan(legacyOptionDays.Value) : null,
+                GrantTimeMath.DaysToSpan(_options.CustomerRegularMaxDays.Value)) is { } m
+                ? (int)Math.Ceiling(m.TotalDays)
+                : legacyOptionDays;
         }
 
-        return (GrantTimeMath.MinLimit(classLimit, TenantMaximum(kind))!.Value, fourEyes);
+        var legacySpan = legacyOptionDays is { } d
+            ? (d <= 0 ? TimeSpan.FromDays(1) : GrantTimeMath.DaysToSpan(d))
+            : (TimeSpan?)null;
+
+        var combined = GrantTimeMath.MinLimit(capacitySpan, optionalLimit);
+        return GrantTimeMath.MinLimit(combined, legacySpan)!.Value;
     }
 
-    // Declarative manifests are bounded by their own configured maximum; every other path by the tenant maximum.
+    private TimeSpan ResolveCapacityLimit(ApproverCapacity capacity, TenantAccessPolicy? tenantPolicy)
+    {
+        var deploymentDays = capacity switch
+        {
+            ApproverCapacity.DataOwner => Math.Clamp(_accessPolicy.MaxDataOwnerDays, 1, 36500),
+            ApproverCapacity.Governance => Math.Clamp(_accessPolicy.MaxGovernanceDays, 1, 36500),
+            ApproverCapacity.ItAdmin => Math.Clamp(_accessPolicy.MaxItAdminDays, 1, 3650),
+            ApproverCapacity.SelfGrant => Math.Clamp(_accessPolicy.MaxSelfGrantDays, 1, 3650),
+            _ => Math.Clamp(_accessPolicy.MaxItAdminDays, 1, 3650)
+        };
+
+        var effectiveDays = deploymentDays;
+        if (tenantPolicy is not null)
+        {
+            var tenantDays = capacity switch
+            {
+                ApproverCapacity.DataOwner => tenantPolicy.MaxDataOwnerDays,
+                ApproverCapacity.Governance => tenantPolicy.MaxGovernanceDays,
+                ApproverCapacity.ItAdmin => tenantPolicy.MaxItAdminDays,
+                ApproverCapacity.SelfGrant => tenantPolicy.MaxSelfGrantDays,
+                _ => tenantPolicy.MaxItAdminDays
+            };
+
+            if (tenantDays > 0)
+            {
+                effectiveDays = Math.Min(tenantDays, deploymentDays);
+            }
+        }
+
+        return GrantTimeMath.DaysToSpan(Math.Max(1, effectiveDays));
+    }
+
+    private ProtectionClass ResolveSelfGrantCeiling(TenantAccessPolicy? tenantPolicy)
+    {
+        var deploymentCeiling = _accessPolicy.SelfGrantCeiling is ProtectionClass.Public or ProtectionClass.Internal or ProtectionClass.Confidential
+            ? _accessPolicy.SelfGrantCeiling
+            : ProtectionClass.Confidential;
+
+        if (tenantPolicy is null)
+        {
+            return deploymentCeiling;
+        }
+
+        var tenantCeiling = tenantPolicy.SelfGrantCeiling is ProtectionClass.Public or ProtectionClass.Internal or ProtectionClass.Confidential
+            ? tenantPolicy.SelfGrantCeiling
+            : ProtectionClass.Confidential;
+
+        return tenantCeiling < deploymentCeiling ? tenantCeiling : deploymentCeiling;
+    }
+
+    private static GrantClass MapGrantClass(ApproverCapacity capacity) => capacity switch
+    {
+        ApproverCapacity.DataOwner => GrantClass.DataOwner,
+        ApproverCapacity.Governance => GrantClass.Governance,
+        ApproverCapacity.ItAdmin => GrantClass.ItAdmin,
+        ApproverCapacity.SelfGrant => GrantClass.SelfGrant,
+        _ => GrantClass.ItAdmin
+    };
+
     private TimeSpan TenantMaximum(GrantKind kind) =>
         kind == GrantKind.ManifestPolicy ? _validity.DeclarativeMaxDuration : _validity.MaxDuration;
 
-    private static DateTimeOffset MaxValidTo(DateTimeOffset now, TimeSpan maxSpan) => GrantTimeMath.AddSaturating(now, maxSpan);
-
-    private string? CustomerDisabled(GrantRequest r, GrantClass cls)
+    private string? CustomerDisabled(GrantRequest r, GrantClass _)
     {
         if (!r.CustomerRealm)
         {
             return null;
         }
 
-        return cls switch
+        if (r.MaskingMode == MaskingPolicyMode.Unmasked && !_options.AllowCustomerUnmasked)
         {
-            GrantClass.IndividualUnmasked when !_options.AllowCustomerUnmasked => "Individual Unmasked access is disabled for customer realms.",
-            GrantClass.IndividualPrivileged when !_options.AllowCustomerPrivileged => "Individual privileged rights are disabled for customer realms.",
-            _ => null
-        };
+            return "Individual Unmasked access is disabled for customer realms.";
+        }
+
+        if (r.PrivilegedRight && !_options.AllowCustomerPrivileged)
+        {
+            return "Individual privileged rights are disabled for customer realms.";
+        }
+
+        return null;
     }
 
     private static string FormatSpan(TimeSpan s) => s.TotalHours < 24 * 2 ? $"{s.TotalHours:0} hours" : $"{s.TotalDays:0} days";

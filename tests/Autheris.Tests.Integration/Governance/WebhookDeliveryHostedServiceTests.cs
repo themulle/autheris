@@ -434,6 +434,38 @@ public sealed class WebhookDeliveryHostedServiceTests : IDisposable
         (await Outbox.CountPendingAsync()).ShouldBe(0);
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Blocked_target_audited()
+    {
+        var webhooks = Config();
+        var options = Options.Create(new GatewayOptions { Webhooks = webhooks });
+        var env = new TestHostEnvironment("Production");
+        var policy = new WebhookRetryPolicy(webhooks, _clock, () => 1.0);
+        var audit = new Autheris.Tests.Common.Fakes.InMemoryAuditWriter();
+        var client = WebhookDeliveryHostedServiceTestExtensions.NewClient(
+            new HttpClient(_handler),
+            options,
+            policy,
+            _clientLogger,
+            env,
+            _clock,
+            (_, _, _) => throw new System.Security.SecurityException("Blocked SSRF target"));
+
+        var services = new ServiceCollection()
+            .AddSingleton<Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore>(_ceStore)
+            .BuildServiceProvider();
+        var service = new WebhookDeliveryHostedService(
+            Outbox, client, new WebhookSubscriptionResolver(options, services), policy, options, _logger, _clock, auditWriter: audit);
+
+        await Outbox.EnqueueAsync(Msg("ssrf-blocked-1"));
+        await service.RunOnceAsync("w-ssrf", CancellationToken.None);
+
+        var dead = (await DeadLettersAsync()).ShouldHaveSingleItem();
+        dead.LastErrorCode.ShouldBe(WebhookDeliveryErrorCodes.EgressDenied);
+        audit.Entries.ShouldContain(e => e.EventType == Domain.Audit.AuditEventTypes.WebhookDeliveryFailed && e.Decision == "FAILED");
+    }
+
     private static async Task WaitUntilAsync(Func<bool> condition)
     {
         await WaitHelper.WaitUntil(condition, TimeSpan.FromSeconds(10), "Condition not reached.");

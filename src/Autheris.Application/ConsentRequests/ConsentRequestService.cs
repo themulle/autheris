@@ -30,8 +30,6 @@ using Microsoft.Extensions.Options;
 public sealed class ConsentRequestService : IConsentRequestService
 {
     private const string Operation = "RequestTableAccess";
-    private const int MinJustificationLength = 5;
-    private const int MaxJustificationLength = 2000;
     private const int MaxIdempotencyKeyLength = 256;
 
     private readonly ITableMetadataRepository _metadataRepository;
@@ -115,8 +113,8 @@ public sealed class ConsentRequestService : IConsentRequestService
 
         var justification = ConsentSubmissionPipeline.ValidateJustification(
             command.Justification,
-            MinJustificationLength,
-            MaxJustificationLength);
+            Autheris.Application.Governance.Requests.JustificationPolicy.MinLength,
+            Autheris.Application.Governance.Requests.JustificationPolicy.MaxLength);
 
         var now = _timeProvider.GetUtcNow();
         var resolvedValidTo = ConsentSubmissionPipeline.ResolveRequestedValidTo(

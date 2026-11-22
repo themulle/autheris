@@ -410,7 +410,7 @@ WHERE event_id IN (SELECT id FROM CONSENT_EVENTS WHERE created_at < @cutoff)";
        c.grantee_sid, c.valid_from, c.valid_to,
        c.is_revoked, t.source_name, t.schema_name, t.table_name,
        c.tenant_id, c.renewal_count,
-       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at,
+       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns,
        r.workflow_mode, r.external_system_id
 FROM CONSENTS c
 JOIN TABLES t ON c.table_id = t.id
@@ -422,7 +422,7 @@ LIMIT 500"
        c.grantee_sid, c.valid_from, c.valid_to,
        c.is_revoked, t.source_name, t.schema_name, t.table_name,
        c.tenant_id, c.renewal_count,
-       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at,
+       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns,
        r.workflow_mode, r.external_system_id
 FROM dbo.CONSENTS c
 JOIN dbo.TABLES t ON c.table_id = t.id
@@ -521,7 +521,7 @@ WHERE id = @id AND tenant_id = @tenant AND is_revoked = 0 AND expiry_notice_sent
        c.grantee_sid, c.valid_from, c.valid_to,
        c.is_revoked, t.source_name, t.schema_name, t.table_name,
        c.tenant_id, c.renewal_count,
-       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at,
+       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns,
        r.workflow_mode, r.external_system_id
 FROM CONSENTS c
 JOIN TABLES t ON c.table_id = t.id
@@ -537,7 +537,7 @@ LIMIT 500"
        c.grantee_sid, c.valid_from, c.valid_to,
        c.is_revoked, t.source_name, t.schema_name, t.table_name,
        c.tenant_id, c.renewal_count,
-       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at,
+       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns,
        r.workflow_mode, r.external_system_id
 FROM dbo.CONSENTS c
 JOIN dbo.TABLES t ON c.table_id = t.id
@@ -658,7 +658,7 @@ WHERE tenant_id = @tenant AND consent_id = @consentId AND record_type = 'EXPIRED
        r.business_justification, r.status, r.requested_at, r.requested_valid_to,
        t.source_name, t.schema_name, t.table_name, r.tenant_id,
        r.requester_identifiers_json, r.context_json, r.requested_write_rules_json,
-       r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id
+       r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id, r.grant_kind, r.target_columns, r.container_kind, r.container_id, r.approver_capacity, r.self_grant, r.bundle_id, r.decided_by, r.decided_at
 FROM CONSENT_REQUESTS r
 LEFT JOIN TABLES t ON r.table_id = t.id
 WHERE r.status IN ('PENDING', 'PENDING_SECOND_APPROVAL', 'PENDING_EXTERNAL_APPROVAL')
@@ -668,7 +668,7 @@ LIMIT 500"
        r.business_justification, r.status, r.requested_at, r.requested_valid_to,
        t.source_name, t.schema_name, t.table_name, r.tenant_id,
        r.requester_identifiers_json, r.context_json, r.requested_write_rules_json,
-       r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id
+       r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id, r.grant_kind, r.target_columns, r.container_kind, r.container_id, r.approver_capacity, r.self_grant, r.bundle_id, r.decided_by, r.decided_at
 FROM dbo.CONSENT_REQUESTS r
 LEFT JOIN dbo.TABLES t ON r.table_id = t.id
 WHERE r.status IN ('PENDING', 'PENDING_SECOND_APPROVAL', 'PENDING_EXTERNAL_APPROVAL')
@@ -789,8 +789,8 @@ WHERE id = @id AND tenant_id = @tenant
                 reader,
                 14,
                 Convert.ToInt32(reader.GetValue(13), CultureInfo.InvariantCulture));
-            var workflowMode = ConsentWorkflowSql.ReadWorkflowMode(reader, 18);
-            var externalSystemId = ConsentWorkflowSql.ReadOptionalGuid(reader, 19);
+            var workflowMode = ConsentWorkflowSql.ReadWorkflowMode(reader, 22);
+            var externalSystemId = ConsentWorkflowSql.ReadOptionalGuid(reader, 23);
             results.Add(new ExpiringGrantCandidate(consent, workflowMode, externalSystemId));
         }
 

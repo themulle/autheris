@@ -91,9 +91,9 @@ public sealed class QueryAnalysisUnconsentedTableTests
         var requester = Wp0.User("S-NOBODY", "tenant-a");
 
         var real = await service.SubmitBundledRequestAsync(requester,
-            new BundledConsentRequest([new RequestableConsentItem("sales.dbo.orders", "salary", "READ_CLEARTEXT", "why")], "purpose"));
+            new BundledConsentRequest([new RequestableConsentItem("sales.dbo.orders", "salary", "READ_CLEARTEXT", "Legitimate analytics")], "Analytical business reporting"));
         var ghost = await service.SubmitBundledRequestAsync(requester,
-            new BundledConsentRequest([new RequestableConsentItem("sales.dbo.orders", "ghost_column", "READ_CLEARTEXT", "why")], "purpose"));
+            new BundledConsentRequest([new RequestableConsentItem("sales.dbo.orders", "ghost_column", "READ_CLEARTEXT", "Legitimate analytics")], "Analytical business reporting"));
 
         real.Tickets.Count.ShouldBe(1);
         ghost.Tickets.Count.ShouldBe(1);

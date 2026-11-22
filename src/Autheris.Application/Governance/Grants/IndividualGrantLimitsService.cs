@@ -7,13 +7,12 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Options-backed implementation of <see cref="IIndividualGrantLimits"/>. Only operator-configured limits clamp; there are no
-/// compiled-in ceilings (a missing value means no class-specific limit).
+/// compiled-in ceilings (a missing value means no limit). Service principals share the user limits.
 /// </summary>
 public sealed class IndividualGrantLimitsService : IIndividualGrantLimits
 {
     public TimeSpan? RegularMax { get; }
     public TimeSpan? UnmaskedMax { get; }
-    public TimeSpan? ServicePrincipalMax { get; }
 
     public IndividualGrantLimitsService(IOptions<IndividualGrantOptions> options)
         : this(options?.Value)
@@ -21,15 +20,14 @@ public sealed class IndividualGrantLimitsService : IIndividualGrantLimits
     }
 
     internal IndividualGrantLimitsService(IndividualGrantOptions? options = null)
-        : this(Days(options?.RegularMaxDays), Days(options?.UnmaskedMaxDays), Days(options?.ServicePrincipalMaxDays))
+        : this(Days(options?.RegularMaxDays), Days(options?.UnmaskedMaxDays))
     {
     }
 
-    public IndividualGrantLimitsService(TimeSpan? regular, TimeSpan? unmasked, TimeSpan? servicePrincipal)
+    public IndividualGrantLimitsService(TimeSpan? regular, TimeSpan? unmasked)
     {
         RegularMax = IndividualGrantLimits.Normalize(regular);
         UnmaskedMax = IndividualGrantLimits.Normalize(unmasked);
-        ServicePrincipalMax = IndividualGrantLimits.Normalize(servicePrincipal);
     }
 
     public DateTimeOffset EffectiveConsentValidTo(
@@ -37,7 +35,7 @@ public sealed class IndividualGrantLimitsService : IIndividualGrantLimits
         DateTimeOffset validFrom,
         DateTimeOffset validTo,
         ConsentEffect effect = ConsentEffect.Allow) =>
-        IndividualGrantLimits.ClampConsent(RegularMax, ServicePrincipalMax, granteeType, validFrom, validTo, effect);
+        IndividualGrantLimits.ClampConsent(RegularMax, granteeType, validFrom, validTo, effect);
 
     public DateTimeOffset? EffectiveProfileValidTo(
         MaskingPolicyMode mode,

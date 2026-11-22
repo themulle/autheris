@@ -4,8 +4,13 @@ using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Diagnostics.Metrics;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Audit;
+using Autheris.Application.Webhooks;
+using Autheris.Domain.Audit;
+using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -41,6 +46,7 @@ public sealed class WebhookDeliveryHostedService : BackgroundService
     private readonly IOptions<CdcWebhooksOptions>? _cdcWebhooks;
     private readonly ILogger<WebhookDeliveryHostedService> _logger;
     private readonly TimeProvider _timeProvider;
+    private readonly IAuditWriter? _auditWriter;
     private readonly ConcurrentDictionary<(WebhookSubscriptionSource Source, string SubscriptionId), int> _consecutiveFailures = new();
     private readonly ConcurrentDictionary<(WebhookSubscriptionSource Source, string SubscriptionId), DateTimeOffset> _openCircuits = new();
     private long _lastPurgeTicks;
@@ -54,9 +60,11 @@ public sealed class WebhookDeliveryHostedService : BackgroundService
         IOptions<GatewayOptions> options,
         ILogger<WebhookDeliveryHostedService> logger,
         TimeProvider? timeProvider = null,
-        IOptions<CdcWebhooksOptions>? cdcWebhooks = null)
+        IOptions<CdcWebhooksOptions>? cdcWebhooks = null,
+        IAuditWriter? auditWriter = null)
     {
         _cdcWebhooks = cdcWebhooks;
+        _auditWriter = auditWriter;
         _outbox = outbox ?? throw new ArgumentNullException(nameof(outbox));
         _client = client ?? throw new ArgumentNullException(nameof(client));
         _resolver = resolver ?? throw new ArgumentNullException(nameof(resolver));
@@ -242,12 +250,42 @@ public sealed class WebhookDeliveryHostedService : BackgroundService
 
     private async Task DeadAsync(WebhookOutboxMessage message, string leaseOwner, int? statusCode, string errorCode, CancellationToken ct)
     {
-        await _outbox.DeadLetterAsync(message.Id, leaseOwner, statusCode, errorCode, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
+        var now = _timeProvider.GetUtcNow();
+        await _outbox.DeadLetterAsync(message.Id, leaseOwner, statusCode, errorCode, now, ct).ConfigureAwait(false);
         DeliveriesCounter.Add(1, new KeyValuePair<string, object?>("outcome", "dead"));
         DeadLettersCounter.Add(1, new KeyValuePair<string, object?>("code", errorCode));
         _logger.LogWarning(
             "Webhook {EventId} for subscription {SubscriptionId} dead-lettered ({ErrorCode}) after {Attempt} attempt(s).",
             message.EventId, message.SubscriptionId, errorCode, message.Attempt);
+
+        if (_auditWriter is not null)
+        {
+            var tenantRaw = message.EventTenantId ?? message.OwnerTenantId;
+            var tenant = TenantId.TryParse(tenantRaw, out var parsedTenant) ? parsedTenant : TenantId.Platform;
+            var detailsJson = JsonSerializer.Serialize(new
+            {
+                channel = "webhook_outbox",
+                messageId = message.Id,
+                subscriptionId = message.SubscriptionId,
+                eventId = message.EventId,
+                eventType = message.EventType,
+                statusCode,
+                errorCode,
+                attempts = message.Attempt
+            });
+            await _auditWriter.RecordRequiredAsync(new AuditLogEntry
+            {
+                Id = Guid.NewGuid(),
+                OccurredAt = now.ToUniversalTime(),
+                EventType = AuditEventTypes.WebhookDeliveryFailed,
+                ActorSid = new Sid("SYSTEM:WEBHOOKS"),
+                TargetTable = "webhook_outbox",
+                Decision = "FAILED",
+                TraceId = Guid.NewGuid().ToString("N"),
+                DetailsJson = detailsJson,
+                TenantId = tenant
+            }, ct).ConfigureAwait(false);
+        }
     }
 
     private async Task RecordFailureAsync(WebhookOutboxMessage message, CancellationToken ct)

@@ -223,7 +223,8 @@ public static class AccessPolicyEndpoints
             MaxBundleItems: req.MaxBundleItems,
             MaxPendingRequestsPerRequester: req.MaxPendingRequestsPerRequester,
             MaxTablesPerAssignment: req.MaxTablesPerAssignment,
-            MaxPageSize: req.MaxPageSize);
+            MaxPageSize: req.MaxPageSize,
+            NotificationWebhookUrl: req.NotificationWebhookUrl);
         error = null;
         return true;
     }
@@ -271,6 +272,8 @@ public static class AccessPolicyEndpoints
         maxPendingRequestsPerRequester = p.MaxPendingRequestsPerRequester,
         maxTablesPerAssignment = p.MaxTablesPerAssignment,
         maxPageSize = p.MaxPageSize,
+        notificationWebhookConfigured = p.NotificationWebhookConfigured,
+        notificationWebhookHost = p.NotificationWebhookHost,
         version = p.Version,
         updatedBy = p.UpdatedBy,
         updatedAt = p.UpdatedAt
@@ -296,5 +299,6 @@ public static class AccessPolicyEndpoints
         int? MaxBundleItems = null,
         int? MaxPendingRequestsPerRequester = null,
         int? MaxTablesPerAssignment = null,
-        int? MaxPageSize = null);
+        int? MaxPageSize = null,
+        string? NotificationWebhookUrl = null);
 }

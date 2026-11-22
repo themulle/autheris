@@ -29,10 +29,6 @@ public sealed class IndividualGrantOptions
     [Range(1, int.MaxValue)]
     public int? PrivilegedMaxDays { get; set; }
 
-    /// <summary>Service principal (direct grantee). <c>null</c> = no class-specific limit.</summary>
-    [Range(1, int.MaxValue)]
-    public int? ServicePrincipalMaxDays { get; set; }
-
     /// <summary>Regular data for customer-realm users. <c>null</c> = no class-specific limit.</summary>
     [Range(1, int.MaxValue)]
     public int? CustomerRegularMaxDays { get; set; }

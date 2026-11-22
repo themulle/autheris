@@ -3,6 +3,7 @@ using System.Globalization;
 using System.Text.Json;
 using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Governance.Notifications;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -17,13 +18,15 @@ public sealed class AccessPolicySettingsProvider(
     IAccessPolicySettingsRepository repository,
     IOptions<AccessPolicyOptions> deploymentOptions,
     IAuditWriter auditWriter,
-    TimeProvider? timeProvider = null) : IAccessPolicySettingsProvider
+    TimeProvider? timeProvider = null,
+    INotificationWebhookUrlProtector? urlProtector = null) : IAccessPolicySettingsProvider
 {
     private readonly IAccessPolicySettingsRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
     private readonly AccessPolicyOptions _deployment = (deploymentOptions ?? throw new ArgumentNullException(nameof(deploymentOptions))).Value
         ?? throw new ArgumentNullException(nameof(deploymentOptions));
     private readonly IAuditWriter _auditWriter = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+    private readonly INotificationWebhookUrlProtector? _urlProtector = urlProtector;
 
     public async Task<TenantAccessPolicy> GetEffectiveAsync(TenantId tenant, CancellationToken ct = default)
     {
@@ -54,6 +57,8 @@ public sealed class AccessPolicySettingsProvider(
             beforeStored?.UpdatedBy,
             beforeStored?.UpdatedAt);
 
+        normalizedUpdate = PrepareProtectedWebhookUpdate(normalizedUpdate, beforeStored?.Settings);
+
         var writeResult = await _repository.UpsertAsync(tenant, normalizedUpdate, expectedVersion, actor, ct).ConfigureAwait(false);
         if (!writeResult.Succeeded || writeResult.Stored is null)
         {
@@ -73,6 +78,11 @@ public sealed class AccessPolicySettingsProvider(
         try
         {
             await WritePolicyAuditAsync(tenant, actor, beforeEffective, afterEffective, ct).ConfigureAwait(false);
+            if (beforeEffective.NotificationWebhookConfigured != afterEffective.NotificationWebhookConfigured
+                || !string.Equals(beforeEffective.NotificationWebhookHost, afterEffective.NotificationWebhookHost, StringComparison.OrdinalIgnoreCase))
+            {
+                await WriteNotificationChannelChangedAuditAsync(tenant, actor, afterEffective, ct).ConfigureAwait(false);
+            }
         }
         catch
         {
@@ -145,7 +155,10 @@ public sealed class AccessPolicySettingsProvider(
             MaxPageSize: ClampDay(stored.MaxPageSize, defaults.MaxPageSize),
             Version: version,
             UpdatedBy: updatedBy,
-            UpdatedAt: updatedAt);
+            UpdatedAt: updatedAt,
+            NotificationWebhookConfigured: !string.IsNullOrWhiteSpace(stored.NotificationWebhookUrlProtected),
+            NotificationWebhookHost: string.IsNullOrWhiteSpace(stored.NotificationWebhookUrlProtected) ? null : stored.NotificationWebhookHost,
+            NotificationWebhookUrlProtected: stored.NotificationWebhookUrlProtected);
     }
 
     private static int ClampDay(int? candidate, int ceiling) =>
@@ -301,6 +314,21 @@ public sealed class AccessPolicySettingsProvider(
             return false;
         }
 
+        if (update.NotificationWebhookUrlProtected is not null)
+        {
+            errorCode = "INVALID_ACCESS_POLICY";
+            errorMessage = "Protected notification webhook URL cannot be supplied directly.";
+            return false;
+        }
+
+        if (update.NotificationWebhookUrl is { Length: > 0 } &&
+            !NotificationWebhookUrlUtility.TryValidateHttpsUrl(update.NotificationWebhookUrl, out _, out var urlError))
+        {
+            errorCode = "INVALID_ACCESS_POLICY";
+            errorMessage = urlError ?? "Invalid notification webhook URL.";
+            return false;
+        }
+
         normalized = update with
         {
             ReminderDays = update.ReminderDays?.Distinct().OrderByDescending(d => d).ToArray(),
@@ -310,7 +338,8 @@ public sealed class AccessPolicySettingsProvider(
                     NormalizeGuids(update.Internal.TrustedIssuerTenantIds),
                     NormalizeSids(update.Internal.EmployeeGroupSids),
                     update.Internal.RequireMemberIndicator,
-                    NormalizeClientIds(update.Internal.TrustedServicePrincipalClientIds))
+                    NormalizeClientIds(update.Internal.TrustedServicePrincipalClientIds)),
+            NotificationWebhookHost = null
         };
 
         errorCode = null;
@@ -387,4 +416,70 @@ public sealed class AccessPolicySettingsProvider(
         maxTablesPerAssignment = policy.MaxTablesPerAssignment,
         maxPageSize = policy.MaxPageSize
     };
+
+    private TenantAccessPolicyUpdate PrepareProtectedWebhookUpdate(
+        TenantAccessPolicyUpdate normalized,
+        TenantAccessPolicyUpdate? existing)
+    {
+        if (normalized.NotificationWebhookUrl is null)
+        {
+            return normalized with
+            {
+                NotificationWebhookUrl = null,
+                NotificationWebhookUrlProtected = existing?.NotificationWebhookUrlProtected,
+                NotificationWebhookHost = existing?.NotificationWebhookHost
+            };
+        }
+
+        if (string.IsNullOrWhiteSpace(normalized.NotificationWebhookUrl))
+        {
+            return normalized with
+            {
+                NotificationWebhookUrl = null,
+                NotificationWebhookUrlProtected = null,
+                NotificationWebhookHost = null
+            };
+        }
+
+        var protector = _urlProtector
+            ?? throw new InvalidOperationException("Notification webhook URL protector is unavailable.");
+        if (!NotificationWebhookUrlUtility.TryValidateHttpsUrl(normalized.NotificationWebhookUrl, out var uri, out var error) || uri is null)
+        {
+            throw new ArgumentException(error ?? "Invalid notification webhook URL.", nameof(normalized));
+        }
+
+        return normalized with
+        {
+            NotificationWebhookUrl = null,
+            NotificationWebhookUrlProtected = protector.Protect(uri.AbsoluteUri),
+            NotificationWebhookHost = NotificationWebhookUrlUtility.ExtractSafeHost(uri)
+        };
+    }
+
+    private Task WriteNotificationChannelChangedAuditAsync(
+        TenantId tenant,
+        Sid actor,
+        TenantAccessPolicy after,
+        CancellationToken ct)
+    {
+        var detailsJson = JsonSerializer.Serialize(new
+        {
+            channel = "governance_notifications",
+            configured = after.NotificationWebhookConfigured,
+            hostHash = NotificationWebhookUrlUtility.ComputeHostHash(after.NotificationWebhookHost),
+            source = "tenant_policy"
+        });
+
+        return _auditWriter.RecordRequiredAsync(new AuditLogEntry
+        {
+            TenantId = tenant,
+            OccurredAt = _time.GetUtcNow().ToUniversalTime(),
+            EventType = AuditEventTypes.NotificationChannelChanged,
+            ActorSid = actor,
+            TargetTable = "access_policy_settings",
+            Decision = after.NotificationWebhookConfigured ? "CONFIGURED" : "UNCONFIGURED",
+            TraceId = Activity.Current?.TraceId.ToString() ?? string.Empty,
+            DetailsJson = detailsJson
+        }, ct);
+    }
 }

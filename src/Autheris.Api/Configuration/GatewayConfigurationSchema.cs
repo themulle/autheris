@@ -40,6 +40,7 @@ public static class GatewayConfigurationSchema
         ("Gateway:Governance:IndividualGrants", typeof(IndividualGrantOptions)),
         (ExternalApiSettings.SectionName, typeof(ExternalApiSettings)),
         (AccessPolicyOptions.SectionName, typeof(AccessPolicyOptions)),
+        (GovernanceNotificationOptions.SectionName, typeof(GovernanceNotificationOptions)),
         (GovernanceCacheSettings.SectionName, typeof(GovernanceCacheSettings)),
         (QueryAnalysisSettings.SectionName, typeof(QueryAnalysisSettings)),
         (GrantValidityOptions.SectionName, typeof(GrantValidityOptions)),

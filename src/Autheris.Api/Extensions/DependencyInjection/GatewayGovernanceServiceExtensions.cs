@@ -71,10 +71,17 @@ public static partial class GatewayGovernanceServiceExtensions
             .BindConfiguration(AccessPolicyOptions.SectionName)
             .ValidateDataAnnotations()
             .ValidateOnStart();
+        services.AddOptions<GovernanceNotificationOptions>()
+            .BindConfiguration(GovernanceNotificationOptions.SectionName)
+            .ValidateDataAnnotations()
+            .ValidateOnStart();
         services.AddSingleton<Microsoft.Extensions.Options.IValidateOptions<AccessPolicyOptions>, Autheris.Application.Governance.Policy.AccessPolicyOptionsValidator>();
+        services.AddSingleton<Autheris.Application.Governance.Notifications.INotificationWebhookUrlProtector, DataProtectionNotificationWebhookUrlProtector>();
+        services.AddSingleton<Autheris.Application.Governance.Notifications.AdaptiveCardPayloadFormatter>();
         services.AddSingleton<Autheris.Application.Governance.Policy.AccessPolicySettingsProvider>();
         services.AddSingleton<Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider>(sp =>
             sp.GetRequiredService<Autheris.Application.Governance.Policy.AccessPolicySettingsProvider>());
+        services.AddHostedService<Autheris.Application.Governance.Notifications.NotificationChannelStartupAuditHostedService>();
         services.AddSingleton<Autheris.Application.Governance.Domains.GovernanceDomainService>(sp =>
             new Autheris.Application.Governance.Domains.GovernanceDomainService(
                 sp.GetRequiredService<IGovernanceDomainRepository>(),
@@ -268,12 +275,23 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<GovernanceDomainStore>();
         services.AddSingleton<IGovernanceDomainRepository>(sp => sp.GetRequiredService<GovernanceDomainStore>());
         services.AddSingleton<Autheris.Application.Governance.Caching.IGovernanceEpochStore>(sp => sp.GetRequiredService<GovernanceDomainStore>());
+        services.AddSingleton<CatalogVisibilityGrantStore>(sp =>
+            new CatalogVisibilityGrantStore(
+                sp.GetRequiredService<IGovernanceSqlDialect>(),
+                sp.GetService<TimeProvider>(),
+                sp.GetService<Autheris.Application.Governance.Caching.IGovernanceChangeNotifier>()));
+        services.AddSingleton<ICatalogVisibilityGrantRepository>(sp => sp.GetRequiredService<CatalogVisibilityGrantStore>());
         services.AddSingleton<AccessPolicySettingsStore>(sp =>
             new AccessPolicySettingsStore(
                 sp.GetRequiredService<IGovernanceSqlDialect>(),
                 sp.GetService<TimeProvider>(),
                 sp.GetService<Autheris.Application.Governance.Caching.IGovernanceChangeNotifier>()));
         services.AddSingleton<IAccessPolicySettingsRepository>(sp => sp.GetRequiredService<AccessPolicySettingsStore>());
+        services.AddSingleton<MigrationPurgeStore>(sp =>
+            new MigrationPurgeStore(
+                sp.GetRequiredService<IGovernanceSqlDialect>(),
+                sp.GetService<TimeProvider>()));
+        services.AddSingleton<Autheris.Infrastructure.Health.GovernanceSchemaVersionReadinessCheck>();
         services.AddSingleton<IAuditChainExportSource>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<ICdcWatermarkRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IConsumerAggregationRepository>(sp => sp.GetRequiredService<TRepository>());

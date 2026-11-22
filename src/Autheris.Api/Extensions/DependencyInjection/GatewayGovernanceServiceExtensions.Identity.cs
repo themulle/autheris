@@ -81,7 +81,9 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddHostedService<Autheris.Application.Identity.Services.LockRoleCacheInvalidationHostedService>();
         services.AddSingleton<Autheris.Application.Identity.Services.IIdentityDeprovisioningService, Autheris.Application.Identity.Services.IdentityDeprovisioningService>();
         services.TryAddSingleton<Autheris.Application.Identity.Services.IEmployeeGroupLookup, Autheris.Application.Identity.Services.EmptyEmployeeGroupLookup>();
-        services.TryAddSingleton<Autheris.Application.Governance.Notifications.IGovernanceNotificationDispatcher, Autheris.Application.Governance.Notifications.NoOpGovernanceNotificationDispatcher>();
+        services.TryAddSingleton<Autheris.Application.Governance.Notifications.GovernanceNotificationDispatcher>();
+        services.TryAddSingleton<Autheris.Application.Governance.Notifications.IGovernanceNotificationDispatcher>(sp =>
+            sp.GetRequiredService<Autheris.Application.Governance.Notifications.GovernanceNotificationDispatcher>());
         services.AddSingleton<Autheris.Application.Identity.Services.PrivilegedGroupChangeAuditor>(sp =>
             new Autheris.Application.Identity.Services.PrivilegedGroupChangeAuditor(
                 sp.GetService<Autheris.Application.Common.Interfaces.IGovernanceDomainRepository>(),

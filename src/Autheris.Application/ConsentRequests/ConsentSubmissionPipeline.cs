@@ -11,6 +11,7 @@ using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests.Routing;
 using Autheris.Application.Governance.ConsentRequests;
+using Autheris.Application.Governance.Requests;
 using Autheris.Application.Governance.Grants;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -24,8 +25,8 @@ using Autheris.Domain.Options;
 /// </summary>
 public static class ConsentSubmissionPipeline
 {
-    public const int DefaultMinJustificationLength = 5;
-    public const int DefaultMaxJustificationLength = 2000;
+    public const int DefaultMinJustificationLength = JustificationPolicy.MinLength;
+    public const int DefaultMaxJustificationLength = JustificationPolicy.MaxLength;
 
     public static void EnsurePersonSubject(ClaimsPrincipal? principal, IIdentitySubjectResolver? subjectResolver = null)
     {
@@ -100,6 +101,19 @@ public static class ConsentSubmissionPipeline
         int minLength = DefaultMinJustificationLength,
         int maxLength = DefaultMaxJustificationLength)
     {
+        if (minLength == JustificationPolicy.MinLength && maxLength == JustificationPolicy.MaxLength)
+        {
+            if (!JustificationPolicy.TryValidate(justification, out var policyNormalized, out var errorCode))
+            {
+                var msg = errorCode == JustificationPolicy.TooLongErrorCode
+                    ? $"The justification must not exceed {maxLength} characters."
+                    : $"A justification of at least {minLength} characters is required.";
+                throw new ConsentRequestException("VALIDATION_ERROR", msg);
+            }
+
+            return policyNormalized;
+        }
+
         if (string.IsNullOrWhiteSpace(justification) || justification.Trim().Length < minLength)
         {
             throw new ConsentRequestException("VALIDATION_ERROR", $"A justification of at least {minLength} characters is required.");

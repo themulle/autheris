@@ -161,14 +161,14 @@ public sealed class CatalogCallerMigrationBatch1Tests
 
         var ok = await service.SubmitBundledRequestAsync(
             UserWithSid(),
-            new BundledConsentRequest([new RequestableConsentItem("crm.dbo.orders", null, "Read", "analytics")], "purpose", "c-1"));
+            new BundledConsentRequest([new RequestableConsentItem("crm.dbo.orders", null, "Read", "analytics")], "Analytics business reporting", "c-1"));
         ok.Tickets.Count.ShouldBe(1);
         repo.GetAllCalls.ShouldBe(0);
         repo.BatchCalls.Count.ShouldBe(1);
 
         await Should.ThrowAsync<KeyNotFoundException>(() => service.SubmitBundledRequestAsync(
             UserWithSid(),
-            new BundledConsentRequest([new RequestableConsentItem("crm.dbo.secrets", null, "Read", "analytics")], "purpose", "c-2")));
+            new BundledConsentRequest([new RequestableConsentItem("crm.dbo.secrets", null, "Read", "analytics")], "Analytics business reporting", "c-2")));
         repo.GetAllCalls.ShouldBe(0);
     }
 
