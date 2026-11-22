@@ -6,6 +6,16 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.10.4] - 2026-11-22
+
+### Fixed
+- Optimizer evaluation fences (`OFFSET 0`, `ORDER BY (SELECT NULL) OFFSET 0 ROWS`, `ROWNUM >= 1`) for PostgreSQL, SQL Server, and Oracle subqueries under row or tenant predicates (keeping DuckDB, Databricks, and ANSI SQL unfenced), together with actionable `ROW_POLICY_EXPRESSION_NOT_ALLOWED` errors and safe `TRY_CAST`/`NULLIF` hints (#1038).
+- Non-raising widened SQL generation (`TRY_CAST`/`CAST` to `decimal`/`double` and `BigInteger` bucket conversion) and typed `ROW_POLICY_EXPRESSION_NOT_ALLOWED` error mapping for typed GraphQL `SUM`/`AVG` aggregates under row predicates (#1035).
+- Suppressed per-table `TENANT_UNRESOLVED` dbt sync warnings when `meta.golden_queries` is not declared (#1036).
+
+### Security
+- Consistent `UNKNOWN_COLUMN` diagnostics and omitted-column handling for denied columns in `POST /api/v1/governance/queries/analyze` (#1037).
+
 ## [1.10.3] - 2026-11-22
 
 ### Added
