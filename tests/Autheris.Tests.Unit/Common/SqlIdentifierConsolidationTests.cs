@@ -3,7 +3,6 @@ namespace Autheris.Tests.Unit.Common;
 using System;
 using System.Collections.Generic;
 using System.Threading.Tasks;
-using Autheris.Application.DataSources.Interfaces;
 using Autheris.Application.DataSources.Services;
 using Autheris.Application.OData;
 using Autheris.Application.Sql.Tree;

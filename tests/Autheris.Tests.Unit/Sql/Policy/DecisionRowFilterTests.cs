@@ -17,7 +17,6 @@ using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
-using Autheris.Domain.Security;
 using Autheris.Tests.Unit.TestDoubles;
 using Shouldly;
 using TrinoSqlEngine;

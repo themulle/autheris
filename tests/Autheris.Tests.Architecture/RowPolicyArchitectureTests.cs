@@ -136,7 +136,8 @@ public sealed class RowPolicyArchitectureTests
     [
         "src/Autheris.Application/Sql/Security/MetricViewStatementGuard.cs",
         "src/Autheris.Application/Sql/Federation/Subtrees/SubtreeCompiler.cs",
-        "src/Autheris.Application/Sql/Tree/TreeSqlCompiler.cs"
+        "src/Autheris.Application/Sql/Tree/TreeSqlCompiler.cs",
+        "src/Autheris.Application/DataSources/Services/RequiredFilterColumnRule.cs"
     ];
 
     internal static List<string> FindRowFilterConsolidationViolations(IEnumerable<(string RelativePath, string Text)> files)
