@@ -4,7 +4,6 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
-using System.Text.RegularExpressions;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Services;
@@ -26,18 +25,6 @@ using TrinoSqlEngine.Ast.Nodes;
 
 public sealed partial class QueryAnalysisService
 {
-    private static readonly Regex SqlJoinOnColumnRegex = new(
-        @"\bJOIN\b[\s\S]*?\bON\b\s+([\s\S]+?)(?=\b(?:WHERE|GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING|JOIN|INNER|LEFT|RIGHT|FULL)\b|;|$)",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    private static readonly Regex SqlWhereClauseRegex = new(
-        @"\bWHERE\b\s+([\s\S]+?)(?=\b(?:GROUP\s+BY|ORDER\s+BY|LIMIT|HAVING)\b|;|$)",
-        RegexOptions.IgnoreCase | RegexOptions.Compiled);
-
-    private static readonly Regex IdentifierTokenRegex = new(
-        @"\b([a-zA-Z_][a-zA-Z0-9_]*)(?:\.([a-zA-Z_][a-zA-Z0-9_]*))?\b",
-        RegexOptions.Compiled);
-
     private async Task<SingleQueryAnalysisOutcome> AnalyzeSqlTextAsync(
         string sql,
         string queryName,
@@ -102,45 +89,73 @@ public sealed partial class QueryAnalysisService
             aliasToTable[key] = key;
             aliasToTable[target.TableName] = key;
             aliasToTable[ExtractUnqualifiedName(key)] = key;
+            if (!string.IsNullOrWhiteSpace(target.Schema))
+            {
+                aliasToTable[$"{target.Schema}.{target.TableName}"] = key;
+            }
+            if (!string.IsNullOrWhiteSpace(target.Catalog) && !string.IsNullOrWhiteSpace(target.Schema))
+            {
+                aliasToTable[$"{target.Catalog}.{target.Schema}.{target.TableName}"] = key;
+            }
             if (!string.IsNullOrWhiteSpace(target.Alias))
             {
                 aliasToTable[target.Alias!] = key;
             }
         }
 
-        var selectAll = metadata.ProjectedColumns.Count == 0 ||
-                        metadata.ProjectedColumns.Any(c => c == "*" || c.EndsWith(".*", StringComparison.Ordinal));
+        var visibleColumnsByTable = new Dictionary<string, HashSet<string>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var target in metadata.ReferencedTables)
+        {
+            var key = !string.IsNullOrWhiteSpace(target.FullName) ? target.FullName : target.TableName;
+            if (!visibleColumnsByTable.ContainsKey(key) && tableLookup.TryGetValue(key, out var catTable))
+            {
+                var visibleCols = await ResolveVisibleColumnSetAsync(
+                    catTable,
+                    effectivePrincipal,
+                    effectiveSid,
+                    isAdmin,
+                    scopeContext,
+                    activeConsents,
+                    ct).ConfigureAwait(false);
+                if (visibleCols != null)
+                {
+                    visibleColumnsByTable[key] = visibleCols;
+                }
+            }
+        }
 
         var columnsByTable = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        var extraColumnsByTable = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
         var filterColumnsByTable = new Dictionary<string, List<string>>(StringComparer.OrdinalIgnoreCase);
+        var wildcardTables = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var target in metadata.ReferencedTables)
         {
             var key = !string.IsNullOrWhiteSpace(target.FullName) ? target.FullName : target.TableName;
             columnsByTable[key] = new List<string>();
+            extraColumnsByTable[key] = new List<string>();
             filterColumnsByTable[key] = new List<string>();
         }
 
-        foreach (var rawProjected in metadata.ProjectedColumns)
-        {
-            var colExpr = StripSqlAlias(rawProjected);
-            if (colExpr == "*" || colExpr.EndsWith(".*", StringComparison.Ordinal))
-            {
-                continue;
-            }
+        var selectAll = ExtractSqlProjections(
+            parsedStatement,
+            metadata,
+            aliasToTable,
+            visibleColumnsByTable,
+            columnsByTable,
+            extraColumnsByTable,
+            wildcardTables);
 
-            AssignColumnReferenceToTable(colExpr, metadata.ReferencedTables, aliasToTable, tableLookup, columnsByTable);
-        }
-
-        // #322: window PARTITION BY / ORDER BY columns are filter-style usages for the column analysis as before.
-        var filterAndWindowRefs = (metadata.FilterColumnReferences ?? []).Concat(metadata.WindowColumnReferences ?? []);
+        var filterAndWindowRefs = (metadata.FilterColumnReferences ?? [])
+            .Concat(metadata.WindowColumnReferences ?? [])
+            .Concat(metadata.GroupByColumnReferences ?? []);
         {
             foreach (var fRef in filterAndWindowRefs)
             {
                 var qualified = !string.IsNullOrWhiteSpace(fRef.TableOrAlias)
                     ? $"{fRef.TableOrAlias}.{fRef.ColumnName}"
                     : fRef.ColumnName;
-                AssignColumnReferenceToTable(qualified, metadata.ReferencedTables, aliasToTable, tableLookup, filterColumnsByTable);
+                AssignColumnReferenceToTable(qualified, metadata.ReferencedTables, aliasToTable, visibleColumnsByTable, filterColumnsByTable);
             }
         }
 
@@ -151,17 +166,18 @@ public sealed partial class QueryAnalysisService
                 var qualified = !string.IsNullOrWhiteSpace(jRef.TableOrAlias)
                     ? $"{jRef.TableOrAlias}.{jRef.ColumnName}"
                     : jRef.ColumnName;
-                AssignColumnReferenceToTable(qualified, metadata.ReferencedTables, aliasToTable, tableLookup, filterColumnsByTable);
+                AssignColumnReferenceToTable(qualified, metadata.ReferencedTables, aliasToTable, visibleColumnsByTable, filterColumnsByTable);
             }
         }
 
-        ExtractAdditionalSqlFilterColumns(trimmed, metadata.ReferencedTables, aliasToTable, tableLookup, filterColumnsByTable);
+        ExtractAdditionalSqlFilterColumns(trimmed, metadata.ReferencedTables, aliasToTable, visibleColumnsByTable, filterColumnsByTable);
         var providedFilterCols = ExtractSqlEqualityFilterColumns(trimmed);
 
         foreach (var target in metadata.ReferencedTables)
         {
             var key = !string.IsNullOrWhiteSpace(target.FullName) ? target.FullName : target.TableName;
             var tableCols = columnsByTable[key];
+            var extraCols = extraColumnsByTable[key];
             var filterCols = filterColumnsByTable[key];
 
             await EvaluateTableAndColumnsAsync(
@@ -177,9 +193,10 @@ public sealed partial class QueryAnalysisService
                 activeConsents,
                 sunsetRules,
                 tableLookup,
-                selectAllColumns: selectAll && tableCols.Count == 0,
+                selectAllColumns: wildcardTables.Contains(key) || (selectAll && tableCols.Count == 0),
                 outcome,
-                ct).ConfigureAwait(false);
+                ct,
+                extraValidationColumns: extraCols).ConfigureAwait(false);
         }
 
         // Issue #122: Populate Federation analysis if query routes cross-source
@@ -189,6 +206,11 @@ public sealed partial class QueryAnalysisService
             var key = !string.IsNullOrWhiteSpace(target.FullName) ? target.FullName : target.TableName;
             if (tableLookup.TryGetValue(key, out var catTable))
             {
+                if (catTable.Table.DiscoveryHidden && !scopeContext.TableDecisions.ContainsKey(catTable.Identifier))
+                {
+                    continue;
+                }
+
                 var ds = string.IsNullOrWhiteSpace(catTable.Table.SourceName)
                     ? catTable.Identifier.Domain
                     : catTable.Table.SourceName;
@@ -198,8 +220,23 @@ public sealed partial class QueryAnalysisService
 
         if (parsedStatement != null && (resolvedTables.Count > 1 || resolvedTables.Any(t => t.Metadata.DataSourceType != DataSourceType.Sql)))
         {
+            var visibleResolvedTables = new List<ResolvedSourceTable>(resolvedTables.Count);
+            var visibleMetadataByTable = new Dictionary<TableIdentifier, TableMetadata>();
+            foreach (var table in resolvedTables)
+            {
+                var decision = scopeContext.TableDecisions.TryGetValue(table.ResolvedIdentifier, out var dec) ? dec : null;
+                var visibleCols = decision is { IsAllowed: true }
+                    ? table.Metadata.Columns
+                        .Where(c => decision.GetEffectiveColumnAccess(c.ColumnName, table.Metadata) != ColumnAccessLevel.Deny)
+                        .ToList()
+                    : Array.Empty<TableColumn>().ToList();
+                var visibleMeta = table.Metadata with { Columns = visibleCols };
+                visibleMetadataByTable[table.ResolvedIdentifier] = visibleMeta;
+                visibleResolvedTables.Add(table with { Metadata = visibleMeta });
+            }
+
             var conjuncts = SqlConjunctSplitter.Split(parsedStatement);
-            var classification = SingleTableConjunctClassifier.Classify(conjuncts, resolvedTables);
+            var classification = SingleTableConjunctClassifier.Classify(conjuncts, visibleResolvedTables);
 
             var singleConjunctsByTable = classification.SingleTableConjuncts
                 .GroupBy(c => c.Table)
@@ -211,6 +248,7 @@ public sealed partial class QueryAnalysisService
             {
                 var pushedPredicates = new List<AnalyzedPushedPredicate>();
                 var residualPredicates = new List<AnalyzedResidualPredicate>();
+                var visibleMeta = visibleMetadataByTable[table.ResolvedIdentifier];
 
                 if (table.Metadata.DataSourceType != DataSourceType.Sql)
                 {
@@ -220,7 +258,10 @@ public sealed partial class QueryAnalysisService
                         {
                             foreach (var col in sc.Columns)
                             {
-                                residualPredicates.Add(new AnalyzedResidualPredicate(col, RejectionReason.NotSqlSource));
+                                if (visibleMeta.HasColumn(col))
+                                {
+                                    residualPredicates.Add(new AnalyzedResidualPredicate(col, RejectionReason.NotSqlSource));
+                                }
                             }
                         }
                     }
@@ -256,7 +297,10 @@ public sealed partial class QueryAnalysisService
                             {
                                 foreach (var col in sc.Columns)
                                 {
-                                    residualPredicates.Add(new AnalyzedResidualPredicate(col, evalResult.RejectionReason ?? RejectionReason.UnsupportedExpression));
+                                    if (visibleMeta.HasColumn(col))
+                                    {
+                                        residualPredicates.Add(new AnalyzedResidualPredicate(col, evalResult.RejectionReason ?? RejectionReason.UnsupportedExpression));
+                                    }
                                 }
                             }
                         }
@@ -272,7 +316,7 @@ public sealed partial class QueryAnalysisService
                         foreach (var colRef in colRefs)
                         {
                             var colName = colRef.Name.Parts[^1].Value;
-                            if (table.Metadata.HasColumn(colName))
+                            if (visibleMeta.HasColumn(colName))
                             {
                                 residualPredicates.Add(new AnalyzedResidualPredicate(colName, RejectionReason.MultiTable));
                             }
@@ -298,7 +342,7 @@ public sealed partial class QueryAnalysisService
 
             var keySetPlans = DynamicKeySetPlanner.Plan(
                 parsedStatement,
-                resolvedTables,
+                visibleResolvedTables,
                 keySetDecisions,
                 new CrossSourceOptions { DynamicKeySet = new DynamicKeySetOptions() },
                 singleConjunctsByTable);
@@ -440,174 +484,6 @@ public sealed partial class QueryAnalysisService
         }
 
         return true;
-    }
-
-    private static string StripSqlAlias(string projected)
-    {
-        var trimmed = projected.Trim();
-        var asIdx = trimmed.LastIndexOf(" AS ", StringComparison.OrdinalIgnoreCase);
-        if (asIdx > 0)
-        {
-            return trimmed[..asIdx].Trim();
-        }
-
-        return trimmed;
-    }
-
-    private static void AssignColumnReferenceToTable(
-        string rawColumnRef,
-        IReadOnlyList<TableAccessTarget> referencedTables,
-        Dictionary<string, string> aliasToTable,
-        Dictionary<string, TableMetadata> tableLookup,
-        Dictionary<string, List<string>> targetMap)
-    {
-        var cleaned = rawColumnRef.Trim().Trim('"', '`', '[', ']');
-        var dotIdx = cleaned.IndexOf('.', StringComparison.Ordinal);
-        if (dotIdx > 0 && dotIdx < cleaned.Length - 1)
-        {
-            var prefix = cleaned[..dotIdx].Trim();
-            var colName = cleaned[(dotIdx + 1)..].Trim();
-            if (aliasToTable.TryGetValue(prefix, out var resolvedTable) &&
-                targetMap.TryGetValue(resolvedTable, out var list))
-            {
-                if (!list.Contains(colName, StringComparer.OrdinalIgnoreCase))
-                {
-                    list.Add(colName);
-                }
-
-                return;
-            }
-        }
-
-        if (referencedTables.Count == 1)
-        {
-            var onlyKey = !string.IsNullOrWhiteSpace(referencedTables[0].FullName)
-                ? referencedTables[0].FullName
-                : referencedTables[0].TableName;
-            if (!targetMap[onlyKey].Contains(cleaned, StringComparer.OrdinalIgnoreCase))
-            {
-                targetMap[onlyKey].Add(cleaned);
-            }
-
-            return;
-        }
-
-        foreach (var target in referencedTables)
-        {
-            var key = !string.IsNullOrWhiteSpace(target.FullName) ? target.FullName : target.TableName;
-            if (tableLookup.TryGetValue(key, out var catTable) &&
-                catTable.Columns.Any(c => string.Equals(c.ColumnName, cleaned, StringComparison.OrdinalIgnoreCase)))
-            {
-                if (!targetMap[key].Contains(cleaned, StringComparer.OrdinalIgnoreCase))
-                {
-                    targetMap[key].Add(cleaned);
-                }
-
-                return;
-            }
-        }
-
-        var firstKey = !string.IsNullOrWhiteSpace(referencedTables[0].FullName)
-            ? referencedTables[0].FullName
-            : referencedTables[0].TableName;
-        if (!targetMap[firstKey].Contains(cleaned, StringComparer.OrdinalIgnoreCase))
-        {
-            targetMap[firstKey].Add(cleaned);
-        }
-    }
-
-    private static void ExtractAdditionalSqlFilterColumns(
-        string sql,
-        IReadOnlyList<TableAccessTarget> referencedTables,
-        Dictionary<string, string> aliasToTable,
-        Dictionary<string, TableMetadata> tableLookup,
-        Dictionary<string, List<string>> filterColumnsByTable)
-    {
-        foreach (Match match in SqlJoinOnColumnRegex.Matches(sql))
-        {
-            ExtractColumnTokensFromClause(match.Groups[1].Value, referencedTables, aliasToTable, tableLookup, filterColumnsByTable);
-        }
-
-        foreach (Match match in SqlWhereClauseRegex.Matches(sql))
-        {
-            ExtractColumnTokensFromClause(match.Groups[1].Value, referencedTables, aliasToTable, tableLookup, filterColumnsByTable);
-        }
-    }
-
-    private static void ExtractColumnTokensFromClause(
-        string clause,
-        IReadOnlyList<TableAccessTarget> referencedTables,
-        Dictionary<string, string> aliasToTable,
-        Dictionary<string, TableMetadata> tableLookup,
-        Dictionary<string, List<string>> filterColumnsByTable)
-    {
-        var withoutStrings = Regex.Replace(clause, @"'[^']*'", " ");
-        foreach (Match token in IdentifierTokenRegex.Matches(withoutStrings))
-        {
-            var full = token.Value;
-            if (IsSqlKeyword(full))
-            {
-                continue;
-            }
-
-            if (token.Groups[2].Success)
-            {
-                AssignColumnReferenceToTable(full, referencedTables, aliasToTable, tableLookup, filterColumnsByTable);
-            }
-            else
-            {
-                var word = token.Groups[1].Value;
-                if (IsSqlKeyword(word))
-                {
-                    continue;
-                }
-
-                foreach (var target in referencedTables)
-                {
-                    var key = !string.IsNullOrWhiteSpace(target.FullName) ? target.FullName : target.TableName;
-                    if (tableLookup.TryGetValue(key, out var catTable) &&
-                        catTable.Columns.Any(c => string.Equals(c.ColumnName, word, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        if (!filterColumnsByTable[key].Contains(word, StringComparer.OrdinalIgnoreCase))
-                        {
-                            filterColumnsByTable[key].Add(word);
-                        }
-                    }
-                }
-            }
-        }
-    }
-
-    private static HashSet<string> ExtractSqlEqualityFilterColumns(string sql)
-    {
-        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var match = SqlWhereClauseRegex.Match(sql);
-        if (!match.Success)
-        {
-            return result;
-        }
-
-        var clause = match.Groups[1].Value;
-        var eqRegex = new Regex(@"([a-zA-Z_][a-zA-Z0-9_.]*)\s*=\s*('[^']*'|:[a-zA-Z_][a-zA-Z0-9_]*|@[a-zA-Z_][a-zA-Z0-9_]*|[0-9]+)", RegexOptions.IgnoreCase);
-        foreach (Match eq in eqRegex.Matches(clause))
-        {
-            var rawCol = eq.Groups[1].Value;
-            var col = ExtractUnqualifiedName(rawCol);
-            result.Add(col);
-        }
-
-        return result;
-    }
-
-    private static bool IsSqlKeyword(string token)
-    {
-        return token.ToUpperInvariant() switch
-        {
-            "SELECT" or "FROM" or "WHERE" or "JOIN" or "INNER" or "LEFT" or "RIGHT" or "FULL" or "OUTER" or
-            "ON" or "AND" or "OR" or "NOT" or "IN" or "IS" or "NULL" or "LIKE" or "BETWEEN" or "GROUP" or
-            "BY" or "ORDER" or "ASC" or "DESC" or "LIMIT" or "OFFSET" or "HAVING" or "AS" or "TRUE" or "FALSE" => true,
-            _ => false
-        };
     }
 
     private static TableAccessDecision ResolveFederationTableDecision(
