@@ -205,6 +205,12 @@ public sealed partial class Query
                 .Build());
         }
 
+        var (effectiveFirst, effectiveAfter) = ResolveBoundedCatalogPaging(first, after, options?.Value?.GraphQL);
+        if (effectiveFirst == 0)
+        {
+            return [];
+        }
+
         if (discoveryService != null)
         {
             var caller = new Autheris.Application.Catalog.Interfaces.CatalogCaller(
@@ -214,7 +220,7 @@ public sealed partial class Query
             try
             {
                 var page = await discoveryService.ListAsync(
-                    new DiscoveryQuery(domain, null, search, tag, targetLang, first ?? 1000, after ?? 0, DiscoverySurface.GraphQl),
+                    new DiscoveryQuery(domain, null, search, tag, targetLang, effectiveFirst, effectiveAfter, DiscoverySurface.GraphQl),
                     caller,
                     ct).ConfigureAwait(false);
                 return page.Items.Select(o => ToTableMetadataDto(o, targetLang)).ToList();
@@ -237,10 +243,23 @@ public sealed partial class Query
             .ConfigureAwait(false);
         var isAdmin = visible.Scope is CallerScope.Global or CallerScope.CatalogOwner or CallerScope.Tenant;
 
-        // consents and pending requests are loaded only to compute AccessStatus; they never add or remove a row.
+        var scopedTables = FilterCatalogMetadataByScope(visible.Tables, visible.IsAdminView, domain, tag);
+        if (scopedTables.Count == 0)
+        {
+            return [];
+        }
+
+        bool hasSearch = !string.IsNullOrWhiteSpace(search);
+        List<TableMetadata> pagedTables = hasSearch ? [] : scopedTables.Skip(effectiveAfter).Take(effectiveFirst).ToList();
+        if (!hasSearch && pagedTables.Count == 0)
+        {
+            return [];
+        }
+
+        // consents and pending requests are loaded only to compute AccessStatus (and visible-column search); they never add a row.
         IReadOnlyList<Consent> activeConsents = Array.Empty<Consent>();
         IReadOnlyList<ConsentRequest> pendingRequests = Array.Empty<ConsentRequest>();
-        if (!isAdmin && visible.Tables.Count > 0)
+        if (!isAdmin)
         {
             var allSubjects = principal.GetGroupSids().Append(userSid).ToList();
             activeConsents = await consentRepository.GetAllActiveConsentsForSubjectsAsync(
@@ -258,10 +277,23 @@ public sealed partial class Query
             }
         }
 
+        if (hasSearch)
+        {
+            pagedTables = scopedTables
+                .Where(t => MatchesSearchForCaller(t, search!, targetLang, isAdmin, activeConsents, pendingRequests, principal, consentResolution))
+                .Skip(effectiveAfter)
+                .Take(effectiveFirst)
+                .ToList();
+            if (pagedTables.Count == 0)
+            {
+                return [];
+            }
+        }
+
         // Second line of defence: ToCatalogDtos re-applies the shaping rule with the set's admin view.
         var hiddenText = new Dictionary<TableIdentifier, IReadOnlySet<string>>();
         var hiddenResolver = new Autheris.Application.Policy.Classification.ClassificationAccessResolver.IndexingHiddenTextResolver(classificationRepository);
-        foreach (var t in visible.Tables)
+        foreach (var t in pagedTables)
         {
             var hidden = await hiddenResolver.ResolveAsync(t, ct).ConfigureAwait(false);
             if (hidden.Count > 0)
@@ -270,9 +302,7 @@ public sealed partial class Query
             }
         }
 
-        var catalogList = ToCatalogDtos(visible.Tables, visible.IsAdminView, activeConsents, pendingRequests, isAdmin, targetLang, hiddenText, principal, consentResolution);
-
-        return FilterAndPaginateCatalog(catalogList, domain, search, tag, first, after);
+        return ToCatalogDtos(pagedTables, visible.IsAdminView, activeConsents, pendingRequests, isAdmin, targetLang, hiddenText, principal, consentResolution);
     }
 
     public async Task<TableMetadataDto?> GetCatalogObjectAsync(
@@ -566,53 +596,50 @@ public sealed partial class Query
             consentResolution!, principal!, t, activeConsents ?? [], isAdmin: isAdminView, isGranted: true, bypass: false, logger: null);
     }
 
-    private static IReadOnlyList<TableMetadataDto> FilterAndPaginateCatalog(
-        IEnumerable<TableMetadataDto> tables,
-        string? domain,
-        string? search,
-        int? first,
-        int? after) => FilterAndPaginateCatalog(tables, domain, search, null, first, after);
+    private static (int First, int After) ResolveBoundedCatalogPaging(int? first, int? after, GraphQLOptions? gqlOptions) =>
+        ResolveBoundedPageArgs(first, after, DiscoveryService.MaxPageSize, DiscoveryService.MaxPageSize, gqlOptions);
 
-    private static IReadOnlyList<TableMetadataDto> FilterAndPaginateCatalog(
-        IEnumerable<TableMetadataDto> tables,
-        string? domain,
-        string? search,
-        string? tag,
-        int? first,
-        int? after)
+    private static IEnumerable<TableMetadata> FilterCatalogMetadataByScopeEnumerable(
+        IReadOnlyList<TableMetadata> tables, bool isAdminView, string? domain, string? tag)
     {
-        var query = tables;
-
+        IEnumerable<TableMetadata> query = tables.Where(t =>
+            Autheris.Application.Services.CatalogViewShaping.Resolve(isAdminView, t.CatalogView) != Autheris.Application.Services.CatalogOutputShape.NotFound);
         if (!string.IsNullOrWhiteSpace(domain))
-        {
-            query = query.Where(t => string.Equals(t.Domain, domain, StringComparison.OrdinalIgnoreCase));
-        }
-
+            query = query.Where(t => string.Equals(t.Identifier.Domain, domain, StringComparison.OrdinalIgnoreCase));
         if (!string.IsNullOrWhiteSpace(tag))
         {
-            query = query.Where(t => t.Tags.Any(tg => string.Equals(tg, tag.Trim(), StringComparison.OrdinalIgnoreCase)));
+            var trimmedTag = tag.Trim();
+            query = query.Where(t => t.CatalogTags.Any(tg => string.Equals(tg, trimmedTag, StringComparison.OrdinalIgnoreCase)));
         }
+        return query;
+    }
 
-        if (!string.IsNullOrWhiteSpace(search))
+    private static List<TableMetadata> FilterCatalogMetadataByScope(
+        IReadOnlyList<TableMetadata> tables, bool isAdminView, string? domain, string? tag) =>
+        FilterCatalogMetadataByScopeEnumerable(tables, isAdminView, domain, tag).ToList();
+
+    private static bool MatchesSearchForCaller(
+        TableMetadata t, string search, string? language, bool isAdmin,
+        IReadOnlyList<Consent> activeConsents, IReadOnlyList<ConsentRequest> pendingRequests,
+        ClaimsPrincipal principal, IConsentResolutionService? consentResolution)
+    {
+        var resolved = !string.IsNullOrWhiteSpace(language) ? t.Table.Texts.Resolve(language) : null;
+        var displayName = resolved?.Title ?? t.Table.DisplayName;
+        var description = resolved?.Description ?? t.Table.Description;
+        if (t.Table.TableName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
+            (displayName != null && displayName.Contains(search, StringComparison.OrdinalIgnoreCase)) ||
+            (description != null && description.Contains(search, StringComparison.OrdinalIgnoreCase)))
         {
-            query = query.Where(t =>
-                t.TableName.Contains(search, StringComparison.OrdinalIgnoreCase) ||
-                (t.DisplayName != null && t.DisplayName.Contains(search, StringComparison.OrdinalIgnoreCase)) ||
-                (t.Description != null && t.Description.Contains(search, StringComparison.OrdinalIgnoreCase)) ||
-                t.ColumnNames.Any(c => c.Contains(search, StringComparison.OrdinalIgnoreCase)));
+            return true;
         }
 
-        if (after.HasValue && after.Value > 0)
-        {
-            query = query.Skip(after.Value);
-        }
-
-        if (first.HasValue && first.Value > 0)
-        {
-            query = query.Take(first.Value);
-        }
-
-        return query.ToList();
+        var status = Autheris.Application.Services.CatalogVisibility.ComputeAccessStatus(t.Identifier, activeConsents, pendingRequests, isAdmin);
+        var levels = ResolveCallerLevels(t, status, isAdmin, principal, consentResolution, activeConsents);
+        return levels is not null && t.Columns.Any(c =>
+            !c.DiscoveryHidden &&
+            levels.TryGetValue(c.ColumnName, out var lvl) &&
+            lvl is ColumnAccessLevel.Clear or ColumnAccessLevel.Mask &&
+            c.ColumnName.Contains(search, StringComparison.OrdinalIgnoreCase));
     }
 
     public async Task<TableConsumersReport> GetTableConsumersAsync(

@@ -54,6 +54,81 @@ public sealed class GrantEffectPreviewService(
         return result;
     }
 
+    public async Task<IReadOnlyDictionary<Guid, GrantEffectPreviewResult?>> PreviewBatchAsync(
+        SecurityPrincipalContext actor,
+        IReadOnlyList<GrantEffectPreviewBatchEntry> entries,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(actor);
+        ArgumentNullException.ThrowIfNull(entries);
+
+        var results = new Dictionary<Guid, GrantEffectPreviewResult?>(entries.Count);
+        if (entries.Count == 0)
+        {
+            return results;
+        }
+
+        IReadOnlyList<TableMetadata> allTables;
+        try
+        {
+            allTables = await CatalogTablePageReader.ReadAllAsync(
+                _tables,
+                new CatalogTableQuery(IncludeInactive: false),
+                static t => t.Table.IsActive,
+                ct: ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            allTables = Array.Empty<TableMetadata>();
+        }
+
+        if (allTables.Count == 0)
+        {
+            foreach (var entry in entries)
+            {
+                bool includesFuture = entry.RequestedItems.Any(static i => !string.IsNullOrWhiteSpace(i.Target) && i.Target.Contains('*', StringComparison.Ordinal));
+                results[entry.RequestId] = new GrantEffectPreviewResult(0, includesFuture, Array.Empty<RedundantGrantFlag>(), false, Array.Empty<string>());
+            }
+            await RecordBatchPreviewAuditAsync(actor, entries.Count, ct).ConfigureAwait(false);
+            return results;
+        }
+
+        VirtualFilterSnapshot? snapshot = await LoadSnapshotAsync(ct).ConfigureAwait(false);
+        var now = _time.GetUtcNow();
+        var consentsByTenant = new Dictionary<TenantId, IReadOnlyList<Consent>>();
+        var tablesByTenant = new Dictionary<TenantId, List<TableMetadata>>();
+
+        foreach (var group in entries.Where(e => e.Subject.ResolvedTenant is { Value: not null }).GroupBy(e => e.Subject.ResolvedTenant!.Value))
+        {
+            var tenant = group.Key;
+            var allSids = new HashSet<Sid>();
+            foreach (var entry in group)
+            {
+                allSids.Add(entry.Subject.UserSid);
+                foreach (var g in entry.Subject.GroupSids) allSids.Add(g);
+            }
+
+            consentsByTenant[tenant] = await LoadConsentsForSubjectsAsync(allSids, now, tenant, ct).ConfigureAwait(false);
+            tablesByTenant[tenant] = FilterTenantTables(allTables, tenant);
+        }
+
+        foreach (var entry in entries)
+        {
+            if (entry.RequestedItems.Count == 0 || entry.Subject.ResolvedTenant is not { Value: not null } tenant ||
+                !tablesByTenant.TryGetValue(tenant, out var tenantTables) || tenantTables.Count == 0)
+            {
+                bool includesFuture = entry.RequestedItems.Any(static i => !string.IsNullOrWhiteSpace(i.Target) && i.Target.Contains('*', StringComparison.Ordinal));
+                results[entry.RequestId] = new GrantEffectPreviewResult(0, includesFuture, Array.Empty<RedundantGrantFlag>(), false, Array.Empty<string>());
+                continue;
+            }
+
+            results[entry.RequestId] = EvaluateForSubject(tenantTables, snapshot, consentsByTenant[tenant], entry.Subject, entry.RequestedItems, tenant, now);
+        }
+
+        await RecordBatchPreviewAuditAsync(actor, entries.Count, ct).ConfigureAwait(false);
+        return results;
+    }
+
     private async Task<GrantEffectPreviewResult> EvaluateNonBlockingAsync(
         SecurityPrincipalContext subject,
         IReadOnlyList<GrantPreviewRequestedItem> requestedItems,
@@ -82,37 +157,52 @@ public sealed class GrantEffectPreviewService(
             return new GrantEffectPreviewResult(0, includesFutureObjects, Array.Empty<RedundantGrantFlag>(), false, Array.Empty<string>());
         }
 
-        var tenantTables = allTables
+        var tenantTables = FilterTenantTables(allTables, tenant);
+        var now = _time.GetUtcNow();
+        var existingConsents = await LoadConsentsForSubjectsAsync(BuildSubjectSids(subject), now, tenant, ct).ConfigureAwait(false);
+        var snapshot = await LoadSnapshotAsync(ct).ConfigureAwait(false);
+        return EvaluateForSubject(tenantTables, snapshot, existingConsents, subject, requestedItems, tenant, now);
+    }
+
+    private static List<TableMetadata> FilterTenantTables(IReadOnlyList<TableMetadata> allTables, TenantId tenant) =>
+        allTables
             .Where(t => !t.Table.DiscoveryHidden &&
                         (t.OwnerTenantId is null || string.Equals(t.OwnerTenantId, tenant.Value, StringComparison.Ordinal)))
             .OrderBy(t => t.Identifier.ToString(), StringComparer.Ordinal)
             .ToList();
 
-        var now = _time.GetUtcNow();
-        var subjectSids = BuildSubjectSids(subject);
-        IReadOnlyList<Consent> existingConsents = [];
+    private async Task<IReadOnlyList<Consent>> LoadConsentsForSubjectsAsync(
+        IReadOnlySet<Sid> subjectSids, DateTimeOffset now, TenantId tenant, CancellationToken ct)
+    {
         try
         {
-            existingConsents = await _consents.GetAllActiveConsentsForSubjectsAsync(subjectSids, roles: null, now, tenant, ct).ConfigureAwait(false);
+            return await _consents.GetAllActiveConsentsForSubjectsAsync(subjectSids, roles: null, now, tenant, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            existingConsents = Array.Empty<Consent>();
+            return Array.Empty<Consent>();
         }
+    }
 
-        VirtualFilterSnapshot? snapshot = null;
-        if (_filterSnapshots is not null)
-        {
-            try
-            {
-                snapshot = await _filterSnapshots.GetAsync(ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                snapshot = null;
-            }
-        }
+    private async Task<VirtualFilterSnapshot?> LoadSnapshotAsync(CancellationToken ct)
+    {
+        if (_filterSnapshots is null) return null;
+        try { return await _filterSnapshots.GetAsync(ct).ConfigureAwait(false); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return null; }
+    }
 
+    private static GrantEffectPreviewResult EvaluateForSubject(
+        IReadOnlyList<TableMetadata> tenantTables,
+        VirtualFilterSnapshot? snapshot,
+        IReadOnlyList<Consent> existingConsents,
+        SecurityPrincipalContext subject,
+        IReadOnlyList<GrantPreviewRequestedItem> requestedItems,
+        TenantId tenant,
+        DateTimeOffset now)
+    {
+        bool includesFutureObjects = requestedItems.Any(static item =>
+            !string.IsNullOrWhiteSpace(item.Target) && item.Target.Contains('*', StringComparison.Ordinal));
+        var subjectSids = BuildSubjectSids(subject);
         var affectedNames = new SortedSet<string>(StringComparer.Ordinal);
         var redundantFlags = new List<RedundantGrantFlag>();
         var seenRedundant = new HashSet<(Guid GrantId, Guid CoveredBy)>();
@@ -123,68 +213,34 @@ public sealed class GrantEffectPreviewService(
             var matchingSynthetics = new List<Consent>();
             foreach (var item in requestedItems)
             {
-                if (!MatchesRequestedTarget(item.Target, table.Identifier, out var isPattern))
-                {
-                    continue;
-                }
-
+                if (!MatchesRequestedTarget(item.Target, table.Identifier, out var isPattern)) continue;
                 matchingSynthetics.Add(ToSyntheticConsent(item, table.Identifier, tenant, subject.UserSid, isPattern, now));
             }
 
-            if (matchingSynthetics.Count == 0)
-            {
-                continue;
-            }
+            if (matchingSynthetics.Count == 0) continue;
 
             affectedNames.Add(table.Identifier.ToString());
-
-            var activeForTable = await LoadTableAllowsAsync(existingConsents, subjectSids, subject.UserSid, table.Identifier, tenant, now, ct).ConfigureAwait(false);
+            var activeForTable = FilterTableAllows(existingConsents, subjectSids, subject.UserSid, table.Identifier, tenant, now);
             foreach (var flag in EffectiveAccessAnalyzer.FindRedundantAgainstExisting(matchingSynthetics, activeForTable, table))
             {
-                if (seenRedundant.Add((flag.GrantId, flag.CoveredBy)))
-                {
-                    redundantFlags.Add(flag);
-                }
+                if (seenRedundant.Add((flag.GrantId, flag.CoveredBy))) redundantFlags.Add(flag);
             }
 
             var (_, tableEmptyIntersection) = EffectiveAccessAnalyzer.AnalyzeHardPoliciesForObject(snapshot, tenant, subject, table);
-            if (tableEmptyIntersection)
-            {
-                emptyHardIntersection = true;
-            }
+            if (tableEmptyIntersection) emptyHardIntersection = true;
         }
 
-        return new GrantEffectPreviewResult(
-            affectedNames.Count,
-            includesFutureObjects,
-            redundantFlags,
-            emptyHardIntersection,
-            affectedNames.ToList());
+        return new GrantEffectPreviewResult(affectedNames.Count, includesFutureObjects, redundantFlags, emptyHardIntersection, affectedNames.ToList());
     }
 
-    private async Task<List<Consent>> LoadTableAllowsAsync(
-        IReadOnlyList<Consent> cachedAll,
+    private static List<Consent> FilterTableAllows(
+        IReadOnlyList<Consent> source,
         IReadOnlySet<Sid> subjectSids,
         Sid userSid,
         TableIdentifier table,
         TenantId tenant,
-        DateTimeOffset now,
-        CancellationToken ct)
-    {
-        var source = cachedAll;
-        if (source.Count == 0)
-        {
-            try
-            {
-                source = await _consents.GetActiveConsentsForSubjectsAsync(subjectSids, table, now, tenant, ct).ConfigureAwait(false);
-            }
-            catch (Exception ex) when (ex is not OperationCanceledException)
-            {
-                source = Array.Empty<Consent>();
-            }
-        }
-
-        return source
+        DateTimeOffset now) =>
+        source
             .Where(c =>
                 c.Effect == ConsentEffect.Allow &&
                 c.TenantId == tenant &&
@@ -192,7 +248,6 @@ public sealed class GrantEffectPreviewService(
                 ConsentResolutionService.IsTableTargetMatch(c, table) &&
                 GranteeMatcher.MatchesGrant(c.GranteeType, c.GranteeSid, userSid, subjectSids, subjectSids))
             .ToList();
-    }
 
     private static bool MatchesRequestedTarget(string? target, TableIdentifier table, out bool isPattern)
     {
@@ -279,4 +334,16 @@ public sealed class GrantEffectPreviewService(
             DetailsJson = details
         }, ct);
     }
+
+    private Task RecordBatchPreviewAuditAsync(SecurityPrincipalContext actor, int entryCount, CancellationToken ct) =>
+        _audit.RecordAsync(new AuditLogEntry
+        {
+            TenantId = actor.ResolvedTenant ?? default,
+            OccurredAt = _time.GetUtcNow(),
+            EventType = AuditEventTypes.AuthzEffectPreview,
+            ActorSid = actor.UserSid,
+            TargetTable = string.Empty,
+            Decision = "ALLOW",
+            DetailsJson = JsonSerializer.Serialize(new { batchEntryCount = entryCount })
+        }, ct);
 }

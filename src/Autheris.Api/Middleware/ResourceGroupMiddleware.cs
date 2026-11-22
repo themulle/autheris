@@ -1,6 +1,7 @@
 namespace Autheris.Api.Middleware;
 
 using Autheris.Api.Errors;
+using Autheris.Api.Security;
 using System;
 using System.Security.Claims;
 using System.Threading.Tasks;
@@ -18,6 +19,7 @@ public sealed class ResourceGroupMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly IResourceGroupManager _resourceGroupManager;
+    private readonly GatewayOptions _options;
     private readonly ILogger<ResourceGroupMiddleware> _logger;
     private readonly PersistentConnectionLimiter _connectionLimiter;
 
@@ -30,8 +32,9 @@ public sealed class ResourceGroupMiddleware
     {
         _next = next;
         _resourceGroupManager = resourceGroupManager;
+        _options = options.Value;
         _logger = logger;
-        _connectionLimiter = connectionLimiter ?? new PersistentConnectionLimiter(options.Value.ResourceGroups);
+        _connectionLimiter = connectionLimiter ?? new PersistentConnectionLimiter(_options.ResourceGroups);
     }
 
     public async Task InvokeAsync(HttpContext context)
@@ -50,9 +53,9 @@ public sealed class ResourceGroupMiddleware
         // Resolve Tenant and sanitize against CRLF log injection
         var tenantId = ResolveTenantKey(context);
 
-        // SEC H-07: Long-lived connections (WebSocket upgrade, SSE) must not hold resource group slots.
+        // Long-lived connections (WebSocket upgrade, SSE) must not hold resource group slots.
         // They are limited per principal (SID) and per tenant instead.
-        if (IsPersistentConnectionRequest(context))
+        if (IsPersistentConnectionRequest(context, _options))
         {
             var principalKey = ResolvePrincipalKey(context);
             var connectionLease = _connectionLimiter.TryAcquire(principalKey, tenantId);
@@ -73,7 +76,7 @@ public sealed class ResourceGroupMiddleware
         }
 
         // Classify workload tier
-        var tier = ClassifyWorkloadTier(context);
+        var tier = ClassifyWorkloadTier(context, _options);
 
         var leaseResult = await _resourceGroupManager.TryAcquireLeaseAsync(tier, tenantId, context.RequestAborted).ConfigureAwait(false);
 
@@ -112,7 +115,7 @@ public sealed class ResourceGroupMiddleware
     /// HTTP/2 extended CONNECT), Server-Sent Events (Accept: text/event-stream) and the MCP SSE handshake.
     /// Detection is header based because UseWebSockets runs later in the pipeline.
     /// </summary>
-    internal static bool IsPersistentConnectionRequest(HttpContext context)
+    internal static bool IsPersistentConnectionRequest(HttpContext context, GatewayOptions? options = null)
     {
         if (context.Features.Get<IHttpUpgradeFeature>()?.IsUpgradableRequest == true ||
             context.Features.Get<IHttpExtendedConnectFeature>()?.IsExtendedConnect == true)
@@ -126,16 +129,18 @@ public sealed class ResourceGroupMiddleware
             return true;
         }
 
+        bool isMcpRequest = McpPathResolver.IsMcpRequest(context.Request.Path, options);
+
         // MCP streamable-HTTP POSTs advertise text/event-stream but are short-lived tool calls: keep them in the slots.
         var accept = context.Request.Headers.Accept.ToString();
         if (accept.Contains("text/event-stream", StringComparison.OrdinalIgnoreCase) &&
-            (HttpMethods.IsGet(context.Request.Method) || !context.Request.Path.StartsWithSegments("/mcp", StringComparison.OrdinalIgnoreCase)))
+            (HttpMethods.IsGet(context.Request.Method) || !isMcpRequest))
         {
             return true;
         }
 
         var path = context.Request.Path.Value ?? string.Empty;
-        return context.Request.Path.StartsWithSegments("/mcp", StringComparison.OrdinalIgnoreCase) &&
+        return isMcpRequest &&
                path.EndsWith("/sse", StringComparison.OrdinalIgnoreCase);
     }
 
@@ -198,9 +203,9 @@ public sealed class ResourceGroupMiddleware
     /// <c>X-Workload-Tier</c> header is only honoured when it does not raise the caller above that resolved tier
     /// (security review: anti-noisy-neighbor); ClusterAdmin / GovernanceAdmin may request any tier.
     /// </summary>
-    internal static ResourceGroupTier ClassifyWorkloadTier(HttpContext context)
+    internal static ResourceGroupTier ClassifyWorkloadTier(HttpContext context, GatewayOptions? options = null)
     {
-        var resolved = ResolvePathTier(context.Request.Path);
+        var resolved = ResolvePathTier(context, options);
 
         if (!context.Request.Headers.TryGetValue("X-Workload-Tier", out var headerVal) ||
             ParseRequestedTier(headerVal.ToString()) is not { } requested)
@@ -223,14 +228,14 @@ public sealed class ResourceGroupMiddleware
         return resolved;
     }
 
-    private static ResourceGroupTier ResolvePathTier(PathString path)
+    private static ResourceGroupTier ResolvePathTier(HttpContext context, GatewayOptions? options)
     {
-        if (path.StartsWithSegments("/mcp", StringComparison.OrdinalIgnoreCase))
+        if (McpPathResolver.IsMcpRequest(context.Request.Path, options))
         {
             return ResourceGroupTier.AutonomousAgents;
         }
 
-        if (path.StartsWithSegments("/odata", StringComparison.OrdinalIgnoreCase))
+        if (context.Request.Path.StartsWithSegments("/odata", StringComparison.OrdinalIgnoreCase))
         {
             return ResourceGroupTier.BulkAnalytics;
         }
