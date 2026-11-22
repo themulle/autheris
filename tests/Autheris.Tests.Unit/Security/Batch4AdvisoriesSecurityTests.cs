@@ -241,7 +241,6 @@ public sealed class Batch4AdvisoriesSecurityTests
             metaRepo,
             StubColumnMaskingProvider.Null,
             new FakeEpochValidationService(),
-            NullLogger<StreamRlsPolicyEnforcer>.Instance,
             new InMemoryConsentRepository(),
             StubConsentResolutionService.Unconfigured,
             new InMemoryConsentCacheService(),

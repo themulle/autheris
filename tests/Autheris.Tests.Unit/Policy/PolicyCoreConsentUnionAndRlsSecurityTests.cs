@@ -184,7 +184,6 @@ public sealed class PolicyCoreConsentUnionAndRlsSecurityTests
             Metadata,
             Masking,
             Substitute.For<IEpochValidationService>(),
-            NullLogger<StreamRlsPolicyEnforcer>.Instance,
             Consents,
             new ConsentResolutionService(),
             Cache);

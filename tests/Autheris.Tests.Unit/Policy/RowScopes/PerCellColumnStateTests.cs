@@ -547,7 +547,6 @@ public sealed class PerCellColumnStateTests
             new FakeTableMetadataRepository([OrdersMetadata(), AclMetadata()]),
             new ColumnMaskingProvider(opts),
             new AlwaysValidEpochService(),
-            NullLogger<StreamRlsPolicyEnforcer>.Instance,
             CreateConsentRepo(consents),
             new ConsentResolutionService(),
             NullConsentCacheService.Instance,

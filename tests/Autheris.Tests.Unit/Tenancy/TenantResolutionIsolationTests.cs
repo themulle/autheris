@@ -162,7 +162,6 @@ public class TenantResolutionIsolationTests
             metadataRepo,
             maskingProvider,
             epochService,
-            NullLogger<StreamRlsPolicyEnforcer>.Instance,
             new InMemoryConsentRepository(),
             Substitute.For<IConsentResolutionService>(),
             Substitute.For<IConsentCacheService>());

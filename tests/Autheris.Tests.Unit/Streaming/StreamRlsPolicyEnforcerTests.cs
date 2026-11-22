@@ -40,7 +40,6 @@ public sealed class StreamRlsPolicyEnforcerTests
             _metadataRepo,
             _maskingProvider,
             _epochService,
-            NullLogger<StreamRlsPolicyEnforcer>.Instance,
             _consentRepo,
             _resolution,
             _cache);
@@ -222,7 +221,7 @@ public sealed class StreamRlsPolicyEnforcerTests
             new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["id"] = ColumnAccessLevel.Clear, ["ssn"] = ColumnAccessLevel.Deny },
             null, Array.Empty<string>()));
         var sut = Autheris.Tests.Unit.TestDoubles.StreamRlsPolicyEnforcerTestFactory.Create(
-            pdp, _metadataRepo, _maskingProvider, _epochService, NullLogger<StreamRlsPolicyEnforcer>.Instance, _consentRepo, _resolution, _cache);
+            pdp, _metadataRepo, _maskingProvider, _epochService, _consentRepo, _resolution, _cache);
 
         var result = await sut.EvaluateAndMaskAsync(cdcEvent, subscriber);
 

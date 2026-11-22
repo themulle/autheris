@@ -16,7 +16,10 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
 using Autheris.Tests.Unit.Identity.Attributes;
+using Autheris.Tests.Unit.TestDoubles;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Time.Testing;
@@ -82,9 +85,9 @@ public sealed class StreamRlsCallerAttributeTests : IDisposable
             .Returns(TableAccessDecision.Allowed(Orders, new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear, ["cost_center"] = ColumnAccessLevel.Clear }, rowFilterSql: legacyText, hasUnconstrainedColumnAllow: true)
                 with { ConsentFilterRecipe = recipe });
         var policy = Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll();
-        return Autheris.Tests.Unit.TestDoubles.StreamRlsPolicyEnforcerTestFactory.Create(
+        return StreamRlsPolicyEnforcerTestFactory.Create(
             policy, metadataRepo, Substitute.For<IColumnMaskingProvider>(), Substitute.For<IEpochValidationService>(),
-            NullLogger<StreamRlsPolicyEnforcer>.Instance, consents, resolution, Substitute.For<IConsentCacheService>(),
+            consents, resolution, Substitute.For<IConsentCacheService>(),
             callerAttributes: resolver, time: _time);
     }
 
@@ -168,19 +171,19 @@ public sealed class StreamRlsCallerAttributeTests : IDisposable
         (await Enforcer(Allow(Attr()), "1 = 0", resolverEnabled: false).EvaluateAndMaskAsync(Event("CC100"), Subscriber(OidA))).IsAllowed.ShouldBeFalse();
         Should.Throw<ArgumentNullException>(() => new StreamRlsPolicyEnforcer(
             Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(),
-            Substitute.For<ITableMetadataRepository>(),
-            Substitute.For<IColumnMaskingProvider>(),
-            Substitute.For<IEpochValidationService>(),
+            new InMemoryTableMetadataRepository(),
+            StubColumnMaskingProvider.Null,
+            new FakeEpochValidationService(),
             NullLogger<StreamRlsPolicyEnforcer>.Instance,
-            Substitute.For<IConsentRepository>(),
-            Substitute.For<IConsentResolutionService>(),
-            Substitute.For<IConsentCacheService>(),
-            Autheris.Tests.Common.Fakes.NullClientIpResolver.Instance,
+            new InMemoryConsentRepository(),
+            new ConsentResolutionService(),
+            new InMemoryConsentCacheService(),
+            NullClientIpResolver.Instance,
             Options.Create(new GatewayOptions()),
             Autheris.Application.VirtualFilters.NullMandatoryRowFilterResolver.Instance,
             callerAttributes: null!,
             _time,
-            Autheris.Tests.Unit.TestDoubles.AllowAllTransportGate.Instance)).ParamName.ShouldBe("callerAttributes");
+            AllowAllTransportGate.Instance)).ParamName.ShouldBe("callerAttributes");
     }
 
     [Fact]

@@ -118,7 +118,6 @@ public sealed class LayerSecurityAuditRemediationTests
             metadataMock,
             maskingMock,
             epochMock,
-            NullLogger<StreamRlsPolicyEnforcer>.Instance,
             consentRepo,
             resolution,
             Substitute.For<IConsentCacheService>());

@@ -61,7 +61,6 @@ public sealed class StreamRlsTenantBindingTests : IDisposable
             _metadataRepo,
             _maskingProvider,
             _epochService,
-            NullLogger<StreamRlsPolicyEnforcer>.Instance,
             _consentRepo,
             _resolution,
             _cache);

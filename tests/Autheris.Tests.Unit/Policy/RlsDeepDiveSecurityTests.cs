@@ -200,7 +200,6 @@ public sealed class RlsDeepDiveSecurityTests
             metadataRepo,
             maskingProvider,
             epochService,
-            NullLogger<StreamRlsPolicyEnforcer>.Instance,
             consentRepo,
             resolution,
             Substitute.For<IConsentCacheService>());
