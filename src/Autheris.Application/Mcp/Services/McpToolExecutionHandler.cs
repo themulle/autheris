@@ -60,6 +60,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
     private readonly IGraphQlCatalogMap? _graphQlMap;
     private readonly ICatalogSearchEngine? _searchEngine;
     private readonly ILogger<McpToolExecutionHandler> _logger;
+    private readonly TimeProvider _timeProvider;
 
     public McpToolExecutionHandler(
         IGovernedSqlExecutionService sqlExecutionService,
@@ -75,7 +76,8 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? procedureExecutionService = null,
         IGraphQlCatalogMap? graphQlMap = null,
         ICatalogSearchEngine? searchEngine = null,
-        ILogger<McpToolExecutionHandler>? logger = null)
+        ILogger<McpToolExecutionHandler>? logger = null,
+        TimeProvider? timeProvider = null)
     {
         _catalogOwner = TenantResolver.EffectiveDefaultOf(gatewayOptions?.Value.Tenancy);
         _gatewayOptions = gatewayOptions?.Value;
@@ -92,6 +94,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         _graphQlMap = graphQlMap;
         _searchEngine = searchEngine;
         _logger = logger ?? NullLogger<McpToolExecutionHandler>.Instance;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public bool CanHandle(string toolName) =>
@@ -179,11 +182,14 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         var roles = sessionContext.Roles ?? [];
         bool isGovAdmin = roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
         bool isClusterAdmin = roles.Any(Autheris.Domain.Security.ClusterAdminPolicy.IsClusterAdminRole);
+        var groupsFresh = !string.IsNullOrWhiteSpace(sessionContext.UserSid)
+            && !sessionContext.GroupsDegraded
+            && (sessionContext.GroupsExpireAt is null || sessionContext.GroupsExpireAt > _timeProvider.GetUtcNow());
         var requestContext = RequestContext.FromCaller(
             new CallerSecurityContext(
                 UserSid: new Sid(!string.IsNullOrWhiteSpace(sessionContext.UserSid) ? sessionContext.UserSid : sessionContext.ServicePrincipalId),
-                // SR-M-08: an app-only session (no user SID) carries no group SIDs, exactly like its principal.
-                GroupSids: string.IsNullOrWhiteSpace(sessionContext.UserSid) ? [] : (sessionContext.GroupSids ?? []).Select(g => new Sid(g)).ToArray(),
+                // SR-M-08: an app-only session (no user SID) carries no group SIDs, and stale/degraded group snapshots carry none.
+                GroupSids: groupsFresh ? (sessionContext.GroupSids ?? []).Select(g => new Sid(g)).ToArray() : [],
                 Roles: roles,
                 Tenant: tenantId,
                 IsGovernanceAdmin: isGovAdmin,
@@ -823,10 +829,10 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         return JsonSerializer.Serialize(envelope([]), JsonOpts);
     }
 
-    private static ClaimsPrincipal BuildUserPrincipal(McpSessionContext session)
+    private ClaimsPrincipal BuildUserPrincipal(McpSessionContext session)
     {
         // SR-M-08: same principal as the other MCP paths (user SID, groups, claims, read-only marker); app-only sessions stay marked as such.
-        var principal = McpProtocolHandler.BuildPrincipalFromSession(session)!;
+        var principal = McpProtocolHandler.BuildPrincipalFromSession(session, _timeProvider)!;
         if (!string.IsNullOrWhiteSpace(session.TenantId) && principal.Identity is ClaimsIdentity identity)
         {
             identity.AddClaim(new Claim("tid", session.TenantId));

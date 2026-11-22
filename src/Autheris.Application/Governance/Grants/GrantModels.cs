@@ -36,14 +36,6 @@ public enum GrantClass
     CustomerRegular
 }
 
-public enum GrantRecertClass
-{
-    None,
-    Campaign365,
-    Campaign90,
-    CustomerAdminAttestation
-}
-
 /// <param name="Approvers">
 /// Null when the grant is only being validated before approval (request time); a list (possibly empty) when approvals are being
 /// enforced at activation time. Four-eyes is enforced only when this is not null.
@@ -72,7 +64,6 @@ public sealed record GrantDecision(
     bool Allowed,
     DateTimeOffset? MaxValidTo,
     bool RequiresFourEyes,
-    GrantRecertClass RecertClass,
     GrantClass Class,
     string Reason,
     string? ErrorCode = null,
@@ -80,7 +71,7 @@ public sealed record GrantDecision(
     bool RequiresCampaignDecision = false)
 {
     public static GrantDecision Deny(string errorCode, string reason, GrantClass cls = GrantClass.Regular, DateTimeOffset? maxValidTo = null) =>
-        new(false, maxValidTo, true, GrantRecertClass.Campaign90, cls, reason, errorCode);
+        new(false, maxValidTo, true, cls, reason, errorCode);
 }
 
 public static class GrantErrorCodes

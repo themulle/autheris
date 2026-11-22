@@ -190,17 +190,16 @@ public sealed class GrantPolicyTests
     }
 
     [Theory]
-    [InlineData(GrantSensitivity.Regular, MaskingPolicyMode.Default, false, false, GrantRecertClass.Campaign365)]
-    [InlineData(GrantSensitivity.Sensitive, MaskingPolicyMode.Default, false, true, GrantRecertClass.Campaign90)]
-    [InlineData(GrantSensitivity.Regular, MaskingPolicyMode.Unmasked, false, true, GrantRecertClass.Campaign90)]
-    [InlineData(GrantSensitivity.Regular, MaskingPolicyMode.Default, true, true, GrantRecertClass.Campaign90)]
-    public void SEC_SC_20_RecertClass_AndFourEyes_FollowTheClass(GrantSensitivity s, MaskingPolicyMode m, bool priv, bool fourEyes, GrantRecertClass recert)
+    [InlineData(GrantSensitivity.Regular, MaskingPolicyMode.Default, false, false)]
+    [InlineData(GrantSensitivity.Sensitive, MaskingPolicyMode.Default, false, true)]
+    [InlineData(GrantSensitivity.Regular, MaskingPolicyMode.Unmasked, false, true)]
+    [InlineData(GrantSensitivity.Regular, MaskingPolicyMode.Default, true, true)]
+    public void SEC_SC_20_FourEyes_FollowsTheClass(GrantSensitivity s, MaskingPolicyMode m, bool priv, bool fourEyes)
     {
         var d = Policy().Evaluate(Req(TimeSpan.FromDays(1), s, m, priv));
 
         d.Allowed.ShouldBeTrue();
         d.RequiresFourEyes.ShouldBe(fourEyes);
-        d.RecertClass.ShouldBe(recert);
     }
 
     [Fact]

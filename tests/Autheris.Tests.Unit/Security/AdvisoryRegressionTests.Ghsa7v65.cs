@@ -542,7 +542,7 @@ public sealed partial class AdvisoryRegressionTests
         return dt;
     }
 
-    private sealed class RecordingRoleCache : IRoleResolverCache
+    private sealed class RecordingRoleCache : IRoleResolverCache, IDisposable
     {
         public List<(string RealmId, string UserKey)> KeysSeen { get; } = [];
         private readonly RoleResolverCache _inner = new();
@@ -561,6 +561,7 @@ public sealed partial class AdvisoryRegressionTests
 
         public void Invalidate(string realmId, string userKey) => _inner.Invalidate(realmId, userKey);
         public void InvalidateAll() => _inner.InvalidateAll();
+        public void Dispose() => _inner.Dispose();
     }
 
     private sealed class StaticRoleProvider(string providerId, params string[] groupSids) : IRoleProvider

@@ -222,4 +222,14 @@ public sealed class DeletedFeaturesArchitectureTests
         typeof(Autheris.Domain.Options.GatewaySections).GetField("FinOps").ShouldBeNull();
         typeof(Autheris.Api.Errors.ApiErrorCodes).GetField("FinOpsBudgetExceeded").ShouldBeNull();
     }
+
+    [Theory]
+    [InlineData("RecertificationEndpoints")]
+    [InlineData("RecertificationService")]
+    [InlineData("IRecertificationService")]
+    [InlineData("RecertificationGovernorHostedService")]
+    [InlineData("RecertificationStore")]
+    [InlineData("IRecertificationRepository")]
+    public void Recertification_types_gone(string typeName) =>
+        Deleted_Types_Do_Not_Exist_In_Production_Assemblies(typeName);
 }

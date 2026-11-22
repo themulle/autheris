@@ -77,6 +77,16 @@ public static class GroupResolutionClaims
             : null;
     }
 
+    /// <summary>True when the pipeline-issued expiry claim is present and at or before <paramref name="now"/>.</summary>
+    public static bool IsExpired(ClaimsPrincipal? principal, DateTimeOffset now) =>
+        ReadExpiresAt(principal) is { } expiresAt && expiresAt <= now;
+
+    /// <summary>
+    /// The effective status at <paramref name="now"/>: Degraded when absent, degraded, or expired past <see cref="ExpiresAtClaimType"/>.
+    /// </summary>
+    public static GroupResolutionStatus Read(ClaimsPrincipal? principal, DateTimeOffset now) =>
+        IsExpired(principal, now) ? GroupResolutionStatus.Degraded : Read(principal);
+
     /// <summary>The role-resolution marker (any issuer: it only ever restricts) or a degraded pipeline status.</summary>
     public static bool IsMarkedDegraded(ClaimsPrincipal? principal) =>
         principal?.HasClaim(c =>

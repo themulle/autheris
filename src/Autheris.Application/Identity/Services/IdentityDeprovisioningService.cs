@@ -5,6 +5,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
+using Autheris.Application.Governance.Caching;
 using Autheris.Application.Identity.Caching;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
@@ -40,6 +41,8 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
     private readonly IRoleResolverCache? _roleResolverCache;
     private readonly IAuditWriter? _auditWriter;
     private readonly Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore? _subscriptionStore;
+    private readonly IGovernanceChangeNotifier? _governanceChangeNotifier;
+    private readonly TimeProvider _timeProvider;
 
     public IdentityDeprovisioningService(
         IIdentityStoreRepository storeRepository,
@@ -47,7 +50,9 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
         IRedisLockPubSubChannel? pubSubChannel = null,
         IRoleResolverCache? roleResolverCache = null,
         IAuditWriter? auditWriter = null,
-        Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore? subscriptionStore = null)
+        Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore? subscriptionStore = null,
+        IGovernanceChangeNotifier? governanceChangeNotifier = null,
+        TimeProvider? timeProvider = null)
     {
         _storeRepository = storeRepository ?? throw new ArgumentNullException(nameof(storeRepository));
         _tokenRevocationService = tokenRevocationService;
@@ -55,6 +60,8 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
         _roleResolverCache = roleResolverCache;
         _auditWriter = auditWriter;
         _subscriptionStore = subscriptionStore;
+        _governanceChangeNotifier = governanceChangeNotifier;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public async Task DeprovisionAndLockSubjectAsync(
@@ -68,7 +75,7 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
         ArgumentException.ThrowIfNullOrWhiteSpace(realmId);
         ArgumentException.ThrowIfNullOrWhiteSpace(userKey);
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
 
         // 1. Add lock entry
         var lockEntry = new ScimLock(tenantId, realmId, userKey, reason, source, now);
@@ -90,8 +97,14 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
             await _pubSubChannel.PublishLockAsync(msg, ct).ConfigureAwait(false);
         }
 
-        // 5. Invalidate role cache
+        // 5. Invalidate role cache and broadcast identity change
         _roleResolverCache?.Invalidate(realmId, userKey);
+        if (_governanceChangeNotifier != null)
+        {
+            await _governanceChangeNotifier.NotifyAsync(
+                GovernanceChangeEvent.ForIdentity(tenantId.Value, realmId, now, subjectKey: userKey),
+                ct).ConfigureAwait(false);
+        }
 
         // 5b. GHSA-wvwx-q6jg-44wv: webhook subscription cleanup
         if (_subscriptionStore != null)

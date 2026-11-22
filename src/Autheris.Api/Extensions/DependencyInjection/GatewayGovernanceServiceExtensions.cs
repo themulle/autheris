@@ -183,7 +183,6 @@ public static partial class GatewayGovernanceServiceExtensions
             Autheris.Application.Governance.Grants.IGrantExpiryStore,
             IIdentityStoreRepository,
             IFunctionalRightRepository,
-            IRecertificationRepository,
             Autheris.Application.Usage.IUsageRepository,
             Autheris.Application.Catalog.External.ICatalogChangeStore,
             IClassificationRepository,
@@ -234,7 +233,6 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Governance.Grants.IOwnerGrantStore>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentStore>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IFunctionalRightRepository>(sp => (IFunctionalRightRepository)sp.GetRequiredService<TRepository>());
-        services.AddSingleton<IRecertificationRepository>(sp => (IRecertificationRepository)sp.GetRequiredService<TRepository>());
         services.AddSingleton<Autheris.Application.Catalog.External.ICatalogChangeStore>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IClassificationRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<Autheris.Application.Docs.Interfaces.IDocumentRepository>(sp => sp.GetRequiredService<TRepository>());

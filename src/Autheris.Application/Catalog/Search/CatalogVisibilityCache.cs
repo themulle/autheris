@@ -2,6 +2,7 @@ using System;
 using System.Collections.Concurrent;
 using System.Linq;
 using System.Security.Claims;
+using Autheris.Application.Governance.Caching;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
@@ -70,25 +71,41 @@ public interface ICatalogVisibilityCache
 /// <summary>
 /// Thread-safe bounded LRU-like cache for caller visibility bitsets.
 /// </summary>
-public sealed class CatalogVisibilityLruCache : ICatalogVisibilityCache
+public sealed class CatalogVisibilityLruCache : ICatalogVisibilityCache, IGovernanceCacheInvalidator, IDisposable
 {
     private const int DefaultMaxEntries = 10_000;
     private readonly int _maxEntries;
     private readonly TimeSpan _ttl;
     private readonly ConcurrentDictionary<CatalogVisibilityCacheKey, CachedVisibleSetEntry> _cache;
     private readonly ILogger<CatalogVisibilityLruCache>? _logger;
+    private readonly TimeProvider _timeProvider;
+    private readonly IDisposable? _governanceSubscription;
 
     public int Count => _cache.Count;
 
     public CatalogVisibilityLruCache(
         TimeSpan? ttl = null,
         int maxEntries = DefaultMaxEntries,
-        ILogger<CatalogVisibilityLruCache>? logger = null)
+        ILogger<CatalogVisibilityLruCache>? logger = null,
+        TimeProvider? timeProvider = null,
+        IGovernanceChangeNotifier? changeNotifier = null)
     {
         _ttl = ttl ?? TimeSpan.FromSeconds(10);
         _maxEntries = maxEntries;
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
         _cache = new ConcurrentDictionary<CatalogVisibilityCacheKey, CachedVisibleSetEntry>();
+        _governanceSubscription = changeNotifier?.Subscribe(change =>
+        {
+            if (change.IsFullInvalidation)
+            {
+                InvalidateAll();
+            }
+            else
+            {
+                InvalidateTenant(change.TenantId);
+            }
+        });
     }
 
     public bool TryGet(CatalogVisibilityCacheKey key, out CatalogVisibleBitSet? bitSet)
@@ -96,7 +113,7 @@ public sealed class CatalogVisibilityLruCache : ICatalogVisibilityCache
         bitSet = null;
         if (_cache.TryGetValue(key, out var entry))
         {
-            if (DateTimeOffset.UtcNow - entry.CachedAt <= _ttl)
+            if (_timeProvider.GetUtcNow() - entry.CachedAt <= _ttl)
             {
                 bitSet = entry.BitSet;
                 return true;
@@ -119,8 +136,25 @@ public sealed class CatalogVisibilityLruCache : ICatalogVisibilityCache
             PruneStaleOrOldest();
         }
 
-        var entry = new CachedVisibleSetEntry(bitSet, DateTimeOffset.UtcNow);
+        var entry = new CachedVisibleSetEntry(bitSet, _timeProvider.GetUtcNow());
         _cache[key] = entry;
+    }
+
+    public void InvalidateTenant(string tenantId)
+    {
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            InvalidateAll();
+            return;
+        }
+
+        foreach (var key in _cache.Keys)
+        {
+            if (key.TenantId is null || string.Equals(key.TenantId, tenantId, StringComparison.OrdinalIgnoreCase))
+            {
+                _cache.TryRemove(key, out _);
+            }
+        }
     }
 
     public void InvalidateAll()
@@ -128,9 +162,11 @@ public sealed class CatalogVisibilityLruCache : ICatalogVisibilityCache
         _cache.Clear();
     }
 
+    public void Dispose() => _governanceSubscription?.Dispose();
+
     private void PruneStaleOrOldest()
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
         var expiredKeys = _cache
             .Where(kvp => now - kvp.Value.CachedAt > _ttl)
             .Select(kvp => kvp.Key)

@@ -49,6 +49,8 @@ public static partial class GatewayGovernanceServiceExtensions
         });
         // The node-local cache plus its broadcasting decorator: invalidations also go out on IEventBus (best effort; the TTL is the backstop).
         services.AddSingleton<Autheris.Application.Identity.Caching.RoleResolverCache>();
+        services.AddSingleton<Autheris.Application.Governance.Caching.IGovernanceCacheInvalidator>(sp =>
+            sp.GetRequiredService<Autheris.Application.Identity.Caching.RoleResolverCache>());
         services.AddSingleton<Autheris.Application.Identity.Caching.IRoleResolverCache, Autheris.Application.Identity.Caching.BroadcastingRoleResolverCache>();
         services.AddHostedService<Autheris.Application.Identity.Caching.IdentityGroupsChangedSubscriber>();
         // The provider chain the group resolution relies on. No production Graph or LDAP adapter ships yet: without one the
@@ -78,13 +80,28 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Identity.Services.IRedisLockPubSubChannel, Autheris.Infrastructure.Identity.Locks.RedisLockPubSubChannel>();
         services.AddHostedService<Autheris.Application.Identity.Services.LockRoleCacheInvalidationHostedService>();
         services.AddSingleton<Autheris.Application.Identity.Services.IIdentityDeprovisioningService, Autheris.Application.Identity.Services.IdentityDeprovisioningService>();
+        services.TryAddSingleton<Autheris.Application.Identity.Services.IEmployeeGroupLookup, Autheris.Application.Identity.Services.EmptyEmployeeGroupLookup>();
+        services.TryAddSingleton<Autheris.Application.Governance.Notifications.IGovernanceNotificationDispatcher, Autheris.Application.Governance.Notifications.NoOpGovernanceNotificationDispatcher>();
+        services.AddSingleton<Autheris.Application.Identity.Services.PrivilegedGroupChangeAuditor>(sp =>
+            new Autheris.Application.Identity.Services.PrivilegedGroupChangeAuditor(
+                sp.GetService<Autheris.Application.Common.Interfaces.IGovernanceDomainRepository>(),
+                sp.GetService<IFunctionalRightRepository>(),
+                sp.GetService<Autheris.Application.Identity.Services.IEmployeeGroupLookup>(),
+                sp.GetService<IAuditWriter>(),
+                sp.GetService<Autheris.Application.Governance.Notifications.IGovernanceNotificationDispatcher>()));
+        services.AddSingleton<Autheris.Application.Identity.Services.ScimGroupMembershipValidator>(sp =>
+            new Autheris.Application.Identity.Services.ScimGroupMembershipValidator(
+                sp.GetService<IFunctionalRightRepository>(),
+                sp.GetService<IAuditWriter>(),
+                domainRepository: sp.GetService<Autheris.Application.Common.Interfaces.IGovernanceDomainRepository>(),
+                employeeGroupLookup: sp.GetService<Autheris.Application.Identity.Services.IEmployeeGroupLookup>(),
+                changeNotifier: sp.GetService<Autheris.Application.Governance.Caching.IGovernanceChangeNotifier>(),
+                timeProvider: sp.GetService<TimeProvider>()));
         services.AddSingleton<Autheris.Application.Identity.Services.ScimMassChangeGuard>();
         services.AddSingleton<Autheris.Application.Identity.Services.IScimService, Autheris.Application.Identity.Services.ScimService>();
         services.AddSingleton<Autheris.Application.Governance.Rights.IFunctionalRightMapper, Autheris.Application.Governance.Rights.FunctionalRightMapper>();
         services.AddHostedService<Autheris.Api.Hosting.GatewayRoleRightAssignmentReport>();
         services.AddSingleton<Autheris.Application.Governance.Policies.IPolicyEpochService, Autheris.Application.Governance.Policies.PolicyEpochService>();
-        services.AddSingleton<Autheris.Application.Governance.Recertification.IRecertificationService, Autheris.Application.Governance.Recertification.RecertificationService>();
-        services.AddHostedService<Autheris.Application.Governance.Recertification.RecertificationGovernorHostedService>();
         services.AddSingleton<IGovernanceCapabilities, GovernanceCapabilities>();
     }
 }

@@ -6,6 +6,7 @@ using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Governance.Caching;
 using Autheris.Domain.Identity;
 using BitFaster.Caching.Lru;
 
@@ -17,17 +18,57 @@ public interface IRoleResolverCache
     void InvalidateAll();
 }
 
-public sealed class RoleResolverCache : IRoleResolverCache
+public sealed class RoleResolverCache : IRoleResolverCache, IGovernanceCacheInvalidator, IDisposable
 {
     private const int MaxCacheKeyLength = IdentityGroupsChangedChannel.MaxKeyLength + 32;
     private readonly ConcurrentLru<(string RealmId, string UserKey), RoleResolution> _l1Cache;
     private readonly byte[] _hmacKey;
+    private readonly TimeProvider _timeProvider;
+    private readonly IDisposable? _governanceSubscription;
 
-    public RoleResolverCache(int capacity = 10000, byte[]? hmacKey = null)
+    public RoleResolverCache(
+        int capacity = 10000,
+        byte[]? hmacKey = null,
+        TimeProvider? timeProvider = null,
+        IGovernanceChangeNotifier? changeNotifier = null)
     {
         _l1Cache = new ConcurrentLru<(string RealmId, string UserKey), RoleResolution>(capacity);
         _hmacKey = hmacKey ?? RandomNumberGenerator.GetBytes(32);
+        _timeProvider = timeProvider ?? TimeProvider.System;
+        _governanceSubscription = changeNotifier?.Subscribe(OnGovernanceChange);
     }
+
+    private void OnGovernanceChange(GovernanceChangeEvent change)
+    {
+        if (change.IsFullInvalidation || !string.IsNullOrEmpty(change.GroupId))
+        {
+            InvalidateAll();
+            return;
+        }
+
+        if (!string.IsNullOrEmpty(change.SubjectKey))
+        {
+            if (!string.IsNullOrEmpty(change.RealmId))
+            {
+                Invalidate(change.RealmId, change.SubjectKey);
+            }
+            else
+            {
+                foreach (var entry in _l1Cache)
+                {
+                    if (string.Equals(entry.Key.UserKey, change.SubjectKey, StringComparison.Ordinal)
+                        || IsEpochCacheKeyForUser(entry.Key.UserKey, change.SubjectKey))
+                    {
+                        _l1Cache.TryRemove(entry.Key);
+                    }
+                }
+            }
+        }
+    }
+
+    public void InvalidateTenant(string tenantId) => InvalidateAll();
+
+    public void Dispose() => _governanceSubscription?.Dispose();
 
     private static bool IsWithinBounds(string realmId, string userKey)
     {
@@ -57,7 +98,7 @@ public sealed class RoleResolverCache : IRoleResolverCache
         var key = (realmId, userKey);
         if (_l1Cache.TryGet(key, out var resolution))
         {
-            if (resolution.ExpiresAt <= DateTimeOffset.UtcNow)
+            if (resolution.ExpiresAt <= _timeProvider.GetUtcNow())
             {
                 // Expired: fail closed, never serve past ExpiresAt
                 _l1Cache.TryRemove(key);

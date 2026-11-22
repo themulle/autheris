@@ -105,8 +105,6 @@ src/Autheris.Api/Endpoints/ProductEndpoints.cs|/
 src/Autheris.Api/Endpoints/ProductEndpoints.cs|sources/{dataSource}/owners
 src/Autheris.Api/Endpoints/ProductEndpoints.cs|{schema}/{name}
 src/Autheris.Api/Endpoints/QueryAnalysisAndProfilingEndpoints.cs|/api/v1/catalog/datasets/{dataset}/sample-rows
-src/Autheris.Api/Endpoints/RecertificationEndpoints.cs|/campaigns
-src/Autheris.Api/Endpoints/RecertificationEndpoints.cs|/campaigns/{campaignId}/items
 src/Autheris.Api/Endpoints/ScimDiscoveryEndpoints.cs|/ResourceTypes
 src/Autheris.Api/Endpoints/ScimDiscoveryEndpoints.cs|/Schemas
 src/Autheris.Api/Endpoints/ScimDiscoveryEndpoints.cs|/ServiceProviderConfig

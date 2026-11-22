@@ -553,7 +553,7 @@ public sealed class GroupOverageFailClosedTests
 
         public Task CreateMappingAsync(FunctionalRightMapping mapping, CancellationToken ct = default) => Task.CompletedTask;
 
-        public Task<FunctionalRightMapping> ProposeMappingAsync(TenantId tenantId, string realmId, string groupOrRole, FunctionalRight right, RecertClass recertClass, string createdBy, CancellationToken ct = default) =>
+        public Task<FunctionalRightMapping> ProposeMappingAsync(TenantId tenantId, string realmId, string groupOrRole, FunctionalRight right, string recertClass, string createdBy, CancellationToken ct = default) =>
             throw new NotSupportedException();
 
         public Task ApproveMappingAsync(TenantId tenantId, string realmId, string groupOrRole, FunctionalRight right, string approverId, CancellationToken ct = default) =>

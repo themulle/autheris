@@ -156,10 +156,13 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
             return PreconditionDenied(table, "TENANT_UNRESOLVED", "Identity", null, "Access denied: tenant could not be resolved.");
         }
 
+        var now = _timeProvider.GetUtcNow();
         if ((subject.IsAuthenticated && subject.GroupResolutionStatus != GroupResolutionStatus.Complete)
             || (!subject.IsAuthenticated && !consentBypassed && subject.GroupResolutionStatus != GroupResolutionStatus.Complete)
             || (subject.Principal != null && GroupResolutionClaims.IsMarkedDegraded(subject.Principal))
-            || GroupResolutionClaims.HasAnyDegradedClaim(subject.Claims))
+            || GroupResolutionClaims.HasAnyDegradedClaim(subject.Claims)
+            || (subject.GroupsExpireAt is { } expiresAt && expiresAt <= now)
+            || (subject.Principal != null && GroupResolutionClaims.IsExpired(subject.Principal, now)))
         {
             return PreconditionDenied(table, "GROUPS_DEGRADED", "Identity", null, "identity.groups_unresolved: Group resolution unavailable (fail-closed).");
         }

@@ -136,6 +136,85 @@ public sealed class ScimDeprovisioningTests
         epochIndex.ShouldBeGreaterThan(deleteIndex);
     }
 
+    [Fact]
+    public async Task Deactivate_invalidates_caches()
+    {
+        var t0 = new DateTimeOffset(2026, 11, 22, 13, 0, 0, TimeSpan.Zero);
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider(t0);
+        var store = new SharedDeprovisionStore { LastContactAt = t0 };
+        store.SeedUser("u-1", OidA, active: true);
+        store.SeedGroup("g-1", SidA);
+        store.Memberships.Add(("g-1", "u-1"));
+
+        using var notifier = new Autheris.Infrastructure.Cache.RedisGovernanceChangeChannel(timeProvider: time);
+        var roleCache = new RoleResolverCache(timeProvider: time, changeNotifier: notifier);
+        using var memoryCache = new Microsoft.Extensions.Caching.Memory.MemoryCache(
+            new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions { SizeLimit = 10_000_000 });
+        var consentCache = new Autheris.Infrastructure.Cache.ConsentCacheService(
+            memoryCache,
+            new Autheris.Tests.Common.FakeEpochValidationService(),
+            Autheris.Tests.Unit.TestDoubles.StubEventBus.Instance,
+            timeProvider: time,
+            changeNotifier: notifier);
+        using var visibilityCache = new Autheris.Application.Catalog.Search.CatalogVisibilityLruCache(
+            ttl: TimeSpan.FromMinutes(5),
+            timeProvider: time,
+            changeNotifier: notifier);
+
+        var table = new TableIdentifier("sales", "dbo", "orders");
+        await consentCache.SetCachedDecisionAsync(
+            Tenant,
+            new Sid("u-1"),
+            table,
+            Autheris.Domain.Interfaces.TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true),
+            TimeSpan.FromMinutes(5));
+        var visKey = new Autheris.Application.Catalog.Search.CatalogVisibilityCacheKey("u-1", null, 1, 1, 1, Tenant.Value);
+        visibilityCache.Set(visKey, new Autheris.Application.Catalog.Search.CatalogVisibleBitSet(4));
+
+        var options = Options.Create(new GatewayOptions { Authentication = new AuthenticationOptions() });
+        var resolver = new GroupSidResolver(
+            new RoleResolver([new ScimStoreRoleProvider(store)], roleCache, null, options, store, time),
+            [],
+            options,
+            timeProvider: time,
+            scimCorrelator: new ScimIdentityCorrelator(store, store),
+            scimGroupStore: store,
+            scimProvisioningStore: store,
+            syncStateTracker: new ScimSyncStateTracker(store, time),
+            roleCache: roleCache);
+
+        var initial = await resolver.ResolveAsync(Principal(), ScimRealm(), Tenant, "Bearer", CancellationToken.None);
+        initial.Status.ShouldBe(GroupResolutionStatus.Complete);
+        initial.GroupSids.ShouldContain(new Sid(SidA));
+        (await consentCache.GetCachedDecisionAsync(Tenant, new Sid("u-1"), table)).ShouldNotBeNull();
+        visibilityCache.TryGet(visKey, out _).ShouldBeTrue();
+
+        var deprov = new IdentityDeprovisioningService(
+            store,
+            roleResolverCache: roleCache,
+            governanceChangeNotifier: notifier,
+            timeProvider: time);
+        var svc = new ScimService(
+            store,
+            deprov,
+            roleCache: roleCache,
+            timeProvider: time,
+            governanceChangeNotifier: notifier);
+
+        var patch = new ScimPatchRequest([ScimSchemaUris.PatchOp], [new ScimPatchOperation("replace", "active", false)]);
+        var result = await svc.PatchUserAsync(Tenant, "realm-1", "u-1", patch);
+        result.ShouldNotBeNull();
+        result!.Active.ShouldBeFalse();
+
+        (await consentCache.GetCachedDecisionAsync(Tenant, new Sid("u-1"), table)).ShouldBeNull();
+        visibilityCache.TryGet(visKey, out _).ShouldBeFalse();
+        (await roleCache.GetAsync("realm-1", $"role:e{store.DeprovisionEpoch}:{OidA}")).ShouldBeNull();
+
+        var after = await resolver.ResolveAsync(Principal(), ScimRealm(), Tenant, "Bearer", CancellationToken.None);
+        after.Status.ShouldBe(GroupResolutionStatus.Degraded);
+        after.GroupSids.ShouldBeEmpty();
+    }
+
     private sealed class FixedTimeProvider(DateTimeOffset utcNow) : TimeProvider
     {
         public override DateTimeOffset GetUtcNow() => utcNow;

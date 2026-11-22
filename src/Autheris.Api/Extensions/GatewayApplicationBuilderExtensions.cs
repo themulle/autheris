@@ -266,7 +266,6 @@ public static class GatewayApplicationBuilderExtensions
         app.MapScimDiscoveryEndpoints();
         app.MapSubjectLifecycleEndpoints();
         app.MapFunctionalRightEndpoints();
-        app.MapRecertificationEndpoints();
         app.MapArrowExportEndpoints();
         if (gatewayOptions.DuckDbOlap.Enabled)
         {

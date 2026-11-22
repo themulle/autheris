@@ -248,6 +248,27 @@ Autheris.Tests.Unit.Security.OkHandler.M31_WormExport_ContinuityGap_FailsInstead
 Autheris.Tests.Unit.Security.OkHandler.M31_WormExport_CountMismatch_FailsInsteadOfReportingSuccess	WP-SIMPL-36	Audit archive export deleted (owner decision OD-8); the code under test no longer exists
 Autheris.Tests.Unit.Governance.ReadPathSwitchesMetricsAndAnalyzeTests.ReadPathSwitches_DisabledQueryAnalysis_HasQueryAnalysisEnabledFalse	WP-SIMPL-32	Removed GovernanceQueryAnalysisOptions.Enabled (always active) in WP-SIMPL-32 PR 1
 Autheris.Tests.Unit.Security.WebSqlDynamicKeySetSecurityTests.T_SEC_DATA124_05_OrdinalDeduplication_CollationSafety	#993	Removed broken key-set batch row fingerprinting deduplication in FederatedStagingService; replaced by T_SEC_DATA124_05_DisjointKeyBatches_PreserveDuplicateRows
+Autheris.Tests.Integration.Governance.Contract.RecertificationContract.Missing_or_unparseable_tenant_id_throws	#1009	Removed recertification subsystem and contract suite (WP-1009-W7-04)
+Autheris.Tests.Integration.Governance.Contract.RecertificationContract.Page_size_above_cap_is_clamped_or_rejected	#1009	Removed recertification subsystem and contract suite (WP-1009-W7-04)
+Autheris.Tests.Integration.Governance.Contract.RecertificationContract.Reads_never_return_other_tenant_rows	#1009	Removed recertification subsystem and contract suite (WP-1009-W7-04)
+Autheris.Tests.Integration.Governance.Contract.RecertificationContract.Soft_deleted_rows_are_invisible_to_reads	#1009	Removed recertification subsystem and contract suite (WP-1009-W7-04)
+Autheris.Tests.Integration.Governance.Contract.RecertificationContract.TryUpdateItemDecision_ExpectedStateMismatch_ReturnsFalse	#1009	Removed recertification subsystem and contract suite (WP-1009-W7-04)
+Autheris.Tests.Integration.Governance.Contract.RecertificationContract.TryUpdateItemDecision_SecondDecision_LosesTheRace	#1009	Removed recertification subsystem and contract suite (WP-1009-W7-04)
+Autheris.Tests.Integration.Governance.Contract.RecertificationContract.Writes_cannot_modify_other_tenant_rows	#1009	Removed recertification subsystem and contract suite (WP-1009-W7-04)
+Autheris.Tests.Unit.Governance.Recertification.RecertificationCertifyGuardTests.AutoRevokeCycle_TenantScoped_OnlyRevokesItemsOfThatTenant_GOV03	#1009	Removed recertification subsystem and unit tests (WP-1009-W7-04)
+Autheris.Tests.Unit.Governance.Recertification.RecertificationCertifyGuardTests.AutoRevoke_ConcurrentCertify_EndsRevokedAndAudited	#1009	Removed recertification subsystem and unit tests (WP-1009-W7-04)
+Autheris.Tests.Unit.Governance.Recertification.RecertificationCertifyGuardTests.Certify_AfterDeadline_Throws	#1009	Removed recertification subsystem and unit tests (WP-1009-W7-04)
+Autheris.Tests.Unit.Governance.Recertification.RecertificationCertifyGuardTests.Certify_ByNonDesignatedReviewer_Throws	#1009	Removed recertification subsystem and unit tests (WP-1009-W7-04)
+Autheris.Tests.Unit.Governance.Recertification.RecertificationCertifyGuardTests.Certify_CompletedCampaign_Throws	#1009	Removed recertification subsystem and unit tests (WP-1009-W7-04)
+Autheris.Tests.Unit.Governance.Recertification.RecertificationCertifyGuardTests.Certify_DesignatedReviewer_Succeeds_WithCompareAndSetFromPending	#1009	Removed recertification subsystem and unit tests (WP-1009-W7-04)
+Autheris.Tests.Unit.Governance.Recertification.RecertificationCertifyGuardTests.Certify_MissingCampaign_Throws	#1009	Removed recertification subsystem and unit tests (WP-1009-W7-04)
+Autheris.Tests.Unit.Governance.Recertification.RecertificationCertifyGuardTests.Certify_RevokedItem_Throws	#1009	Removed recertification subsystem and unit tests (WP-1009-W7-04)
+Autheris.Tests.Unit.Governance.Recertification.RecertificationCertifyGuardTests.Certify_WhenCompareAndSetLoses_ThrowsConflict	#1009	Removed recertification subsystem and unit tests (WP-1009-W7-04)
+Autheris.Tests.Unit.Governance.Recertification.RecertificationCertifyGuardTests.Revoke_ByNonDesignatedReviewer_Throws	#1009	Removed recertification subsystem and unit tests (WP-1009-W7-04)
+Autheris.Tests.Unit.Governance.Recertification.RecertificationEndpointDecisionTests.Certify_AlreadyDecided_Returns409	#1009	Removed recertification endpoints and unit tests (WP-1009-W7-04)
+Autheris.Tests.Unit.Governance.Recertification.RecertificationEndpointDecisionTests.Certify_ServiceRejectsReviewer_Returns403	#1009	Removed recertification endpoints and unit tests (WP-1009-W7-04)
+Autheris.Tests.Unit.Governance.Recertification.RecertificationEndpointDecisionTests.Certify_WithoutSid_Returns403	#1009	Removed recertification endpoints and unit tests (WP-1009-W7-04)
+Autheris.Tests.Unit.Governance.Recertification.RecertificationEndpointDecisionTests.Revoke_WithoutSid_Returns403	#1009	Removed recertification endpoints and unit tests (WP-1009-W7-04)
 Autheris.Tests.Integration.Governance.IsolatedHttpContextAccessor.DynamicTableType_WhenContextDataMissing_FailsClosed	#998	Deleted obsolete DynamicTableType prototype; live schema is served by CatalogGraphQlTypeModule
 Autheris.Tests.Unit.GraphQL.CapturingHandler.ValidateSignature_PrunesExpiredNoncesByMaxDrift_AndBoundsReplayCacheCapacity	#998	Deleted unused SubgraphSecurityValidator (gateway signs outbound only and strips inbound X-Autheris-* headers at the edge)
 Autheris.Tests.Unit.GraphQL.SubgraphFederationSecurityTests.ApplySecurityHeaders_SignsContextHeaders_AndValidatorConfirmsSignature	#998	Renamed to ApplySecurityHeaders_SignsContextHeaders_WithValidCanonicalV2Signature after deleting dead SubgraphSecurityValidator

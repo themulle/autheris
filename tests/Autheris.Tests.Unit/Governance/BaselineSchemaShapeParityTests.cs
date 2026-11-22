@@ -15,9 +15,7 @@ public sealed class BaselineSchemaShapeParityTests
         "IDENTITY_GROUPS",
         "IDENTITY_GROUP_MEMBERS",
         "IDENTITY_LOCKS",
-        "FUNCTIONAL_RIGHT_MAPPINGS",
-        "RECERT_CAMPAIGNS",
-        "RECERT_ITEMS"
+        "FUNCTIONAL_RIGHT_MAPPINGS"
     ];
 
     private static readonly string[] ConsumerAppTables =

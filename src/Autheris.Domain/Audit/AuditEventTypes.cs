@@ -95,7 +95,6 @@ public static class AuditEventTypes
     public const string ConsentApplied = "CONSENT_APPLIED";
     public const string ConsentDescriptionChanged = "CONSENT_DESCRIPTION_CHANGED";
     public const string PatternCoverageChanged = "PATTERN_COVERAGE_CHANGED";
-    public const string ConsentRecertificationRequired = "CONSENT_RECERTIFICATION_REQUIRED";
     public const string ConsentWorkflowConfigChanged = "CONSENT_WORKFLOW_CONFIG_CHANGED";
     public const string ConsentRouteConflict = "CONSENT_ROUTE_CONFLICT";
     public const string ConsentRequestRerouted = "CONSENT_REQUEST_REROUTED";
@@ -201,6 +200,7 @@ public static class AuditEventTypes
     public const string ScimGroupProvisioned = "SCIM_GROUP_PROVISIONED";
     public const string ScimGroupDeleted = "SCIM_GROUP_DELETED";
     public const string ScimGroupMembershipChanged = "SCIM_GROUP_MEMBERSHIP_CHANGED";
+    public const string PrivilegedGroupMembershipChanged = "PRIVILEGED_GROUP_MEMBERSHIP_CHANGED";
     public const string IdentityCorrelationAmbiguous = "IDENTITY_CORRELATION_AMBIGUOUS";
 
     // Workload identity: gateway roles applied to an authentication from the configured subject mapping (Tier A: fail-closed)

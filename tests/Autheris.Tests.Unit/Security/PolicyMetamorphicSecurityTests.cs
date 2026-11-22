@@ -49,7 +49,7 @@ public sealed class PolicyMetamorphicSecurityTests
         var mapping = new FunctionalRightMapping(
             TestTenant.Value, TestRealm, groupName, expectedRight,
             ApprovedBy: "approver", ApprovedAt: DateTimeOffset.UtcNow,
-            RecertClass: RecertClass.Standard.ToString(), CreatedBy: "admin",
+            RecertClass: "Standard", CreatedBy: "admin",
             CreatedAt: DateTimeOffset.UtcNow);
 
         repository.GetApprovedMappingsForGroupsAndRolesAsync(
@@ -116,19 +116,19 @@ public sealed class PolicyMetamorphicSecurityTests
         var adminMapping = new FunctionalRightMapping(
             TestTenant.Value, "ext-customer", "S-1-5-21-1-2-3-1100", FunctionalRight.TenantAdmin,
             ApprovedBy: "rogue-admin", ApprovedAt: DateTimeOffset.UtcNow,
-            RecertClass: RecertClass.Privileged.ToString(), CreatedBy: "rogue-admin",
+            RecertClass: "Privileged", CreatedBy: "rogue-admin",
             CreatedAt: DateTimeOffset.UtcNow);
 
         var clusterMapping = new FunctionalRightMapping(
             TestTenant.Value, "ext-customer", "S-1-5-21-1-2-3-1100", FunctionalRight.ClusterAdmin,
             ApprovedBy: "rogue-admin", ApprovedAt: DateTimeOffset.UtcNow,
-            RecertClass: RecertClass.Privileged.ToString(), CreatedBy: "rogue-admin",
+            RecertClass: "Privileged", CreatedBy: "rogue-admin",
             CreatedAt: DateTimeOffset.UtcNow);
 
         var standardMapping = new FunctionalRightMapping(
             TestTenant.Value, "ext-customer", "S-1-5-21-1-2-3-1100", FunctionalRight.Consumer,
             ApprovedBy: "admin", ApprovedAt: DateTimeOffset.UtcNow,
-            RecertClass: RecertClass.Standard.ToString(), CreatedBy: "admin",
+            RecertClass: "Standard", CreatedBy: "admin",
             CreatedAt: DateTimeOffset.UtcNow);
 
         repository.GetApprovedMappingsForGroupsAndRolesAsync(

@@ -44,7 +44,7 @@ public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null
 
         if (r.Effect == ConsentEffect.Deny)
         {
-            return new GrantDecision(true, null, false, GrantRecertClass.None, GrantClass.Standing, "Deny grants only restrict access and have no maximum.");
+            return new GrantDecision(true, null, false, GrantClass.Standing, "Deny grants only restrict access and have no maximum.");
         }
 
         if (r.GranteeType is GranteeType.Group)
@@ -57,11 +57,11 @@ public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null
                     $"The requested expiry exceeds the maximum of {FormatSpan(TenantMaximum(r.Kind))}.", GrantClass.Standing, tenantMax);
             }
 
-            return new GrantDecision(true, null, false, GrantRecertClass.None, GrantClass.Standing, "Standing group grant.");
+            return new GrantDecision(true, null, false, GrantClass.Standing, "Standing group grant.");
         }
 
         var cls = Classify(r);
-        var (maxSpan, recert, fourEyes) = Limits(cls, r.Kind);
+        var (maxSpan, fourEyes) = Limits(cls, r.Kind);
         var disabled = CustomerDisabled(r, cls);
         if (disabled != null)
         {
@@ -127,7 +127,7 @@ public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null
             }
         }
 
-        return new GrantDecision(true, maxValidTo, fourEyes, recert, cls, "Allowed.", null, suggest);
+        return new GrantDecision(true, maxValidTo, fourEyes, cls, "Allowed.", null, suggest);
     }
 
     private GrantClass Classify(GrantRequest r)
@@ -155,16 +155,16 @@ public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null
         return r.CustomerRealm ? GrantClass.CustomerRegular : GrantClass.Regular;
     }
 
-    private (TimeSpan Max, GrantRecertClass Recert, bool FourEyes) Limits(GrantClass cls, GrantKind kind)
+    private (TimeSpan Max, bool FourEyes) Limits(GrantClass cls, GrantKind kind)
     {
-        var (configured, recert, fourEyes) = cls switch
+        var (configured, fourEyes) = cls switch
         {
-            GrantClass.Regular => (_options.RegularMaxDays, GrantRecertClass.Campaign365, false),
-            GrantClass.CustomerRegular => (_options.CustomerRegularMaxDays, GrantRecertClass.CustomerAdminAttestation, false),
-            GrantClass.Sensitive => (_options.SensitiveMaxDays, GrantRecertClass.Campaign90, true),
-            GrantClass.IndividualUnmasked => (_options.UnmaskedMaxDays, GrantRecertClass.Campaign90, true),
-            GrantClass.IndividualPrivileged => (_options.PrivilegedMaxDays, GrantRecertClass.Campaign90, true),
-            GrantClass.ServicePrincipal => (_options.ServicePrincipalMaxDays, GrantRecertClass.Campaign90, false),
+            GrantClass.Regular => (_options.RegularMaxDays, false),
+            GrantClass.CustomerRegular => (_options.CustomerRegularMaxDays, false),
+            GrantClass.Sensitive => (_options.SensitiveMaxDays, true),
+            GrantClass.IndividualUnmasked => (_options.UnmaskedMaxDays, true),
+            GrantClass.IndividualPrivileged => (_options.PrivilegedMaxDays, true),
+            GrantClass.ServicePrincipal => (_options.ServicePrincipalMaxDays, false),
             _ => throw new InvalidOperationException("Unhandled grant class.")
         };
 
@@ -176,7 +176,7 @@ public sealed class GrantPolicy(IOptions<IndividualGrantOptions>? options = null
             classLimit = TimeSpan.FromDays(1);
         }
 
-        return (GrantTimeMath.MinLimit(classLimit, TenantMaximum(kind))!.Value, recert, fourEyes);
+        return (GrantTimeMath.MinLimit(classLimit, TenantMaximum(kind))!.Value, fourEyes);
     }
 
     // Declarative manifests are bounded by their own configured maximum; every other path by the tenant maximum.

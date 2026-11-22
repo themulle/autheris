@@ -113,11 +113,13 @@ public sealed class IdentityPipeline : IIdentityPipeline
             return raw;
         }
 
-        // Already processed by this pipeline (marker minted with the pipeline issuer): returned unchanged. A marker of any other issuer
-        // is a forgery; it is stripped below and the principal is processed again.
+        // Already processed by this pipeline (marker minted with the pipeline issuer): returned unchanged unless its bounded group snapshot has expired.
+        // A marker of any other issuer is a forgery; it is stripped below and the principal is processed again.
         if (GroupResolutionClaims.HasPipelineMarker(raw))
         {
-            return raw;
+            return GroupResolutionClaims.IsExpired(raw, _time.GetUtcNow())
+                ? ExpirePipelineGroups(raw)
+                : raw;
         }
 
         try
@@ -134,6 +136,32 @@ public sealed class IdentityPipeline : IIdentityPipeline
             _logger.LogWarning("The identity pipeline failed ({ExceptionType}); the principal is not authenticated.", ex.GetType().Name);
             return Unauthenticated();
         }
+    }
+
+    private static ClaimsPrincipal ExpirePipelineGroups(ClaimsPrincipal principal)
+    {
+        var clone = principal.Clone();
+        foreach (var identity in clone.Identities)
+        {
+            var toRemove = identity.Claims
+                .Where(static c =>
+                    GroupResolutionClaims.InboundGroupClaimTypes.Contains(c.Type, StringComparer.OrdinalIgnoreCase)
+                    || c.Type == GroupResolutionClaims.StatusClaimType
+                    || string.Equals(c.Type, RoleResolutionClaims.ClaimType, StringComparison.OrdinalIgnoreCase))
+                .ToList();
+            foreach (var claim in toRemove)
+            {
+                identity.RemoveClaim(claim);
+            }
+        }
+
+        if (clone.Identity is ClaimsIdentity primary)
+        {
+            primary.AddClaim(GroupResolutionClaims.CreateStatus(GroupResolutionStatus.Degraded));
+            primary.AddClaim(new Claim(RoleResolutionClaims.ClaimType, RoleResolutionClaims.Degraded, ClaimValueTypes.String, IdentityClaimIssuers.Pipeline));
+        }
+
+        return clone;
     }
 
     private async ValueTask<ClaimsPrincipal> RunAsync(ClaimsPrincipal raw, string scheme, X509Certificate2? clientCert, CancellationToken ct)

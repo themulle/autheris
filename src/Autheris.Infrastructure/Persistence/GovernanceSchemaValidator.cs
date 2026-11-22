@@ -14,9 +14,7 @@ public sealed class GovernanceSchemaValidator
         "IDENTITY_GROUPS",
         "IDENTITY_GROUP_MEMBERS",
         "IDENTITY_LOCKS",
-        "FUNCTIONAL_RIGHT_MAPPINGS",
-        "RECERT_CAMPAIGNS",
-        "RECERT_ITEMS"
+        "FUNCTIONAL_RIGHT_MAPPINGS"
     };
 
     public static async Task ValidateWave2TablesAsync(DbConnection connection, CancellationToken ct = default)

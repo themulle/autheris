@@ -7,7 +7,6 @@ using Autheris.Api.Hosting;
 using Autheris.Application.Catalog;
 using Autheris.Application.Catalog.Search;
 using Autheris.Application.Governance.Grants;
-using Autheris.Application.Governance.Recertification;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.AspNetCore.TestHost;
@@ -141,7 +140,7 @@ public class IntegrationHost : IntegrationHost<IntegrationHost.DefaultConfig>
     /// Explicit test-side allow-list of background <see cref="IHostedService"/> implementations that may be
     /// removed by <see cref="IntegrationHost{TConfig}"/>:
     /// - search-index warm-up / catalog snapshot (<see cref="CatalogSearchWarmupService"/>, <see cref="CatalogSnapshotBackgroundService"/>)
-    /// - recertification / grant-expiry cycle (<see cref="GrantExpiryHostedService"/>, <see cref="RecertificationGovernorHostedService"/>)
+    /// - grant-expiry cycle (<see cref="GrantExpiryHostedService"/>)
     /// - traffic drain (<see cref="TrafficDrainHostedService"/>)
     /// Startup validators and security checks are strictly forbidden from this allow-list.
     /// </summary>
@@ -150,7 +149,6 @@ public class IntegrationHost : IntegrationHost<IntegrationHost.DefaultConfig>
         typeof(CatalogSearchWarmupService),
         typeof(CatalogSnapshotBackgroundService),
         typeof(GrantExpiryHostedService),
-        typeof(RecertificationGovernorHostedService),
         typeof(TrafficDrainHostedService),
     };
 

@@ -22,15 +22,18 @@ public sealed class FunctionalRightMapper : IFunctionalRightMapper
     private readonly IFunctionalRightRepository _repository;
     private readonly IIdentityRealmRegistry _realmRegistry;
     private readonly IAuditWriter? _auditWriter;
+    private readonly TimeProvider _timeProvider;
 
     public FunctionalRightMapper(
         IFunctionalRightRepository repository,
         IIdentityRealmRegistry realmRegistry,
-        IAuditWriter? auditWriter = null)
+        IAuditWriter? auditWriter = null,
+        TimeProvider? timeProvider = null)
     {
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _realmRegistry = realmRegistry ?? throw new ArgumentNullException(nameof(realmRegistry));
         _auditWriter = auditWriter;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public async Task<IReadOnlySet<FunctionalRight>> GetRightsForCallerAsync(
@@ -215,7 +218,7 @@ public sealed class FunctionalRightMapper : IFunctionalRightMapper
         string realmId,
         string groupOrRole,
         FunctionalRight right,
-        RecertClass recertClass,
+        string recertClass,
         string createdBy,
         CancellationToken ct = default)
     {
@@ -226,9 +229,9 @@ public sealed class FunctionalRightMapper : IFunctionalRightMapper
             right,
             ApprovedBy: null,
             ApprovedAt: null,
-            RecertClass: recertClass.ToString(),
+            RecertClass: string.IsNullOrWhiteSpace(recertClass) ? "Standard" : recertClass,
             CreatedBy: createdBy,
-            CreatedAt: DateTimeOffset.UtcNow);
+            CreatedAt: _timeProvider.GetUtcNow());
 
         await CreateMappingAsync(mapping, ct).ConfigureAwait(false);
         return mapping;

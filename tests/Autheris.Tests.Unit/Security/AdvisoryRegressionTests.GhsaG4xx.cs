@@ -19,7 +19,6 @@ using Autheris.Application.ConsentRequests.Routing;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Grants.Records;
-using Autheris.Application.Governance.Recertification;
 using Autheris.Application.Governance.Services;
 using Autheris.Application.Security.Totp.Interfaces;
 using Autheris.Application.Security.Totp.Services;
@@ -50,7 +49,6 @@ public sealed partial class AdvisoryRegressionTests
     [InlineData("case_02_external_guard_user_sp_grantee_and_alias_sod")]
     [InlineData("case_03_group_grantee_and_degraded_fail_closed_consent_and_external")]
     [InlineData("case_04_access_planning_group_and_degraded_sod")]
-    [InlineData("case_05_recertification_alias_and_group_fail_closed_sod")]
     [InlineData("case_06_grant_policy_normalized_approver_dedup")]
     [InlineData("case_07_four_eyes_required_internal_and_external_consent_pipeline")]
     [InlineData("case_08_profile_assignment_four_eyes_and_admin_sod")]
@@ -62,7 +60,6 @@ public sealed partial class AdvisoryRegressionTests
         "case_02_external_guard_user_sp_grantee_and_alias_sod" => AssertExternalGuardUserSpSodAsync(),
         "case_03_group_grantee_and_degraded_fail_closed_consent_and_external" => AssertGroupAndDegradedFailClosedConsentAndExternalAsync(),
         "case_04_access_planning_group_and_degraded_sod" => AssertAccessPlanningGroupAndDegradedSodAsync(),
-        "case_05_recertification_alias_and_group_fail_closed_sod" => AssertRecertificationSodAsync(),
         "case_06_grant_policy_normalized_approver_dedup" => Task.Run(AssertGrantPolicyNormalizedApproverDedup),
         "case_07_four_eyes_required_internal_and_external_consent_pipeline" => AssertConsentPipelineFourEyesAsync(),
         "case_08_profile_assignment_four_eyes_and_admin_sod" => AssertProfileAssignmentFourEyesAndAdminSodAsync(),
@@ -324,39 +321,6 @@ public sealed partial class AdvisoryRegressionTests
         effectiveResult = new EffectiveScimGroupsResult(new HashSet<string>(), false, HasNonCanonicalSid: true);
         await Should.ThrowAsync<SecurityException>(() => service.ApplyAccessAsync(
             new AdminApplyAccessRequest(plan.PlanId, confirmed.ConfirmationToken), adminSid, "tenant-a"));
-    }
-
-    private static async Task AssertRecertificationSodAsync()
-    {
-        const string reviewer = "alice@corp.local";
-        var campaign = new RecertificationCampaign(TenantA.Value, "c1", "Q4", RecertClass.Standard, RecertCampaignStatus.Active, DateTimeOffset.UtcNow.AddDays(7), DateTimeOffset.UtcNow.AddDays(-1));
-        var itemAlias = new RecertificationItem(TenantA.Value, "c1", "i1", "Grant", "g1", "user:ALICE@corp.local", reviewer, RecertDecision.Pending);
-        var itemOtherDomain = new RecertificationItem(TenantA.Value, "c1", "i3", "Grant", "g3", "alice@other.local", reviewer, RecertDecision.Pending);
-        var itemGroup = new RecertificationItem(TenantA.Value, "c1", "i2", "Grant", "g2", "group:S-1-5-21-REC-GRP", reviewer, RecertDecision.Pending);
-
-        var repo = Wave2Proxy<IRecertificationRepository>.Create((m, args) => m.Name switch
-        {
-            "GetCampaignByIdAsync" => Task.FromResult<RecertificationCampaign?>(campaign),
-            "GetItemByIdAsync" => Task.FromResult<RecertificationItem?>((string)args![2]! switch { "i1" => itemAlias, "i3" => itemOtherDomain, _ => itemGroup }),
-            "TryUpdateItemDecisionAsync" => Task.FromResult(true),
-            _ => throw new NotSupportedException(m.Name)
-        });
-
-        var scimResult = new EffectiveScimGroupsResult(new HashSet<string>(["S-1-5-21-REC-GRP"]), false, false);
-        var groupStore = Wave2ScimGroupProxy((_, _) => Task.FromResult(scimResult));
-        var service = new RecertificationService(repo, groupStore: groupStore);
-
-        await Should.ThrowAsync<SecurityException>(() => service.CertifyItemAsync(TenantA, "c1", "i1", reviewer));
-        await Should.ThrowAsync<SecurityException>(() => service.CertifyItemAsync(TenantA, "c1", "i2", reviewer));
-
-        scimResult = new EffectiveScimGroupsResult(new HashSet<string>(), MaxDepthExceeded: true);
-        await Should.ThrowAsync<SecurityException>(() => service.CertifyItemAsync(TenantA, "c1", "i2", reviewer));
-
-        scimResult = new EffectiveScimGroupsResult(new HashSet<string>(), MaxDepthExceeded: false, HasNonCanonicalSid: true);
-        await Should.ThrowAsync<SecurityException>(() => service.CertifyItemAsync(TenantA, "c1", "i2", reviewer));
-
-        scimResult = new EffectiveScimGroupsResult(new HashSet<string>(), MaxDepthExceeded: false, HasNonCanonicalSid: false);
-        await service.CertifyItemAsync(TenantA, "c1", "i3", reviewer);
     }
 
     private static void AssertGrantPolicyNormalizedApproverDedup()

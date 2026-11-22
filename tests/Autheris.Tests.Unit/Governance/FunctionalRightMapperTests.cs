@@ -47,7 +47,7 @@ public sealed class FunctionalRightMapperTests
             right,
             ApprovedBy: string.Empty,
             ApprovedAt: null,
-            RecertClass: RecertClass.Standard.ToString(),
+            RecertClass: "Standard",
             CreatedBy: "user-alice",
             CreatedAt: DateTimeOffset.UtcNow
         );
@@ -76,7 +76,7 @@ public sealed class FunctionalRightMapperTests
             right,
             ApprovedBy: string.Empty,
             ApprovedAt: null,
-            RecertClass: RecertClass.Standard.ToString(),
+            RecertClass: "Standard",
             CreatedBy: "user-alice",
             CreatedAt: DateTimeOffset.UtcNow
         );
@@ -110,7 +110,7 @@ public sealed class FunctionalRightMapperTests
         _realmRegistry.GetRealm(customerRealmId).Returns(customerRealm);
 
         var act = () => _sut.ProposeMappingAsync(
-            tenantId, customerRealmId, groupOrRole, privilegedRight, RecertClass.Privileged, "user-alice");
+            tenantId, customerRealmId, groupOrRole, privilegedRight, "Privileged", "user-alice");
 
         await act.ShouldThrowAsync<SecurityException>();
     }
@@ -134,7 +134,7 @@ public sealed class FunctionalRightMapperTests
         _realmRegistry.GetRealm(realmId).Returns(workforceRealm);
 
         var proposed = await _sut.ProposeMappingAsync(
-            tenantId, realmId, groupOrRole, right, RecertClass.Standard, "user-alice");
+            tenantId, realmId, groupOrRole, right, "Standard", "user-alice");
 
         proposed.ShouldNotBeNull();
         await _auditWriter.Received(1).RecordRequiredAsync(
@@ -148,7 +148,7 @@ public sealed class FunctionalRightMapperTests
             right,
             ApprovedBy: string.Empty,
             ApprovedAt: null,
-            RecertClass: RecertClass.Standard.ToString(),
+            RecertClass: "Standard",
             CreatedBy: "user-alice",
             CreatedAt: DateTimeOffset.UtcNow
         );
@@ -193,7 +193,7 @@ public sealed class FunctionalRightMapperTests
             nonPrivilegedRight,
             ApprovedBy: "user-alice",
             ApprovedAt: DateTimeOffset.UtcNow,
-            RecertClass: RecertClass.Standard.ToString(),
+            RecertClass: "Standard",
             CreatedBy: "user-alice",
             CreatedAt: DateTimeOffset.UtcNow
         );
@@ -235,7 +235,7 @@ public sealed class FunctionalRightMapperTests
             privilegedRight,
             ApprovedBy: "user-alice",
             ApprovedAt: DateTimeOffset.UtcNow,
-            RecertClass: RecertClass.Privileged.ToString(),
+            RecertClass: "Privileged",
             CreatedBy: "user-alice",
             CreatedAt: DateTimeOffset.UtcNow
         );
@@ -263,7 +263,7 @@ public sealed class FunctionalRightMapperTests
 
         var privilegedMapping = new FunctionalRightMapping(
             "t1", "ext-realm", "external-users", FunctionalRight.SecurityAdmin,
-            ApprovedBy: null, ApprovedAt: null, RecertClass: RecertClass.Privileged.ToString(),
+            ApprovedBy: null, ApprovedAt: null, RecertClass: "Privileged",
             CreatedBy: "admin", CreatedAt: DateTimeOffset.UtcNow);
 
         Should.Throw<SecurityException>(() =>
@@ -271,7 +271,7 @@ public sealed class FunctionalRightMapperTests
 
         var tenantAdminMapping = new FunctionalRightMapping(
             "t1", "ext-realm", "external-users", FunctionalRight.TenantAdmin,
-            ApprovedBy: null, ApprovedAt: null, RecertClass: RecertClass.Privileged.ToString(),
+            ApprovedBy: null, ApprovedAt: null, RecertClass: "Privileged",
             CreatedBy: "admin", CreatedAt: DateTimeOffset.UtcNow);
 
         Should.Throw<SecurityException>(() =>
@@ -279,7 +279,7 @@ public sealed class FunctionalRightMapperTests
 
         var govAdminMapping = new FunctionalRightMapping(
             "t1", "ext-realm", "external-users", FunctionalRight.GovernanceAdmin,
-            ApprovedBy: null, ApprovedAt: null, RecertClass: RecertClass.Privileged.ToString(),
+            ApprovedBy: null, ApprovedAt: null, RecertClass: "Privileged",
             CreatedBy: "admin", CreatedAt: DateTimeOffset.UtcNow);
 
         Should.Throw<SecurityException>(() =>
@@ -304,7 +304,7 @@ public sealed class FunctionalRightMapperTests
         var mapping = new FunctionalRightMapping(
             tenantId.Value, realmId, "eng-group", FunctionalRight.DataExport,
             ApprovedBy: "approver-bob", ApprovedAt: DateTimeOffset.UtcNow,
-            RecertClass: RecertClass.Standard.ToString(), CreatedBy: "creator-alice",
+            RecertClass: "Standard", CreatedBy: "creator-alice",
             CreatedAt: DateTimeOffset.UtcNow);
 
         _repository.GetApprovedMappingsForGroupsAndRolesAsync(
@@ -342,13 +342,13 @@ public sealed class FunctionalRightMapperTests
         var validExportMapping = new FunctionalRightMapping(
             tenantId.Value, customerRealmId, "b2c-users", FunctionalRight.DataExport,
             ApprovedBy: "bob", ApprovedAt: DateTimeOffset.UtcNow,
-            RecertClass: RecertClass.Standard.ToString(), CreatedBy: "alice",
+            RecertClass: "Standard", CreatedBy: "alice",
             CreatedAt: DateTimeOffset.UtcNow);
 
         var escalatedAdminMapping = new FunctionalRightMapping(
             tenantId.Value, customerRealmId, "b2c-users", FunctionalRight.TenantAdmin,
             ApprovedBy: "bob", ApprovedAt: DateTimeOffset.UtcNow,
-            RecertClass: RecertClass.Privileged.ToString(), CreatedBy: "alice",
+            RecertClass: "Privileged", CreatedBy: "alice",
             CreatedAt: DateTimeOffset.UtcNow);
 
         _repository.GetApprovedMappingsForGroupsAndRolesAsync(
@@ -372,13 +372,13 @@ public sealed class FunctionalRightMapperTests
         var selfApprovedPrivileged = new FunctionalRightMapping(
             tenantId.Value, realmId, "devs", FunctionalRight.SecurityAdmin,
             ApprovedBy: "alice", ApprovedAt: DateTimeOffset.UtcNow,
-            RecertClass: RecertClass.Privileged.ToString(), CreatedBy: "alice", // Self-approved!
+            RecertClass: "Privileged", CreatedBy: "alice", // Self-approved!
             CreatedAt: DateTimeOffset.UtcNow);
 
         var unapprovedStandard = new FunctionalRightMapping(
             tenantId.Value, realmId, "devs", FunctionalRight.DataExport,
             ApprovedBy: null, ApprovedAt: null, // Unapproved!
-            RecertClass: RecertClass.Standard.ToString(), CreatedBy: "alice",
+            RecertClass: "Standard", CreatedBy: "alice",
             CreatedAt: DateTimeOffset.UtcNow);
 
         _repository.GetApprovedMappingsForGroupsAndRolesAsync(
@@ -437,7 +437,7 @@ public sealed class FunctionalRightMapperTests
         var mapping = new FunctionalRightMapping(
             tenantId.Value, "workforce-entra", "DataSteward", FunctionalRight.DataExport,
             ApprovedBy: "approver-bob", ApprovedAt: DateTimeOffset.UtcNow,
-            RecertClass: RecertClass.Standard.ToString(), CreatedBy: "creator-alice", CreatedAt: DateTimeOffset.UtcNow);
+            RecertClass: "Standard", CreatedBy: "creator-alice", CreatedAt: DateTimeOffset.UtcNow);
         _repository.GetApprovedMappingsForGroupsAndRolesAsync(
             tenantId, "workforce-entra", Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
             .Returns([mapping]);
@@ -470,7 +470,7 @@ public sealed class FunctionalRightMapperTests
         var mapping1 = new FunctionalRightMapping(
             tenantId.Value, realmId, "role-4", FunctionalRight.Consumer,
             ApprovedBy: "admin", ApprovedAt: DateTimeOffset.UtcNow,
-            RecertClass: RecertClass.Standard.ToString(), CreatedBy: "admin",
+            RecertClass: "Standard", CreatedBy: "admin",
             CreatedAt: DateTimeOffset.UtcNow);
 
         _repository.GetApprovedMappingsForGroupsAndRolesAsync(
@@ -545,7 +545,7 @@ public sealed class FunctionalRightMapperTests
             Arg.Any<CancellationToken>());
 
         var proposed = await _sut.ProposeMappingAsync(
-            tenantId, realmId, groupOrRole, right, RecertClass.Privileged, "user-alice");
+            tenantId, realmId, groupOrRole, right, "Privileged", "user-alice");
 
         captured.ShouldNotBeNull();
         captured.TenantId.ShouldBe(tenantId);
@@ -554,7 +554,7 @@ public sealed class FunctionalRightMapperTests
         captured.FunctionalRight.ShouldBe(right);
         captured.ApprovedBy.ShouldBeNull();
         captured.ApprovedAt.ShouldBeNull();
-        captured.RecertClass.ShouldBe(RecertClass.Privileged.ToString());
+        captured.RecertClass.ShouldBe("Privileged");
         captured.CreatedBy.ShouldBe("user-alice");
 
         proposed.ApprovedBy.ShouldBeNull();

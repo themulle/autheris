@@ -114,11 +114,6 @@ route /api/v1/products/sync/webhook/{tenant} | governance, signed Git push webho
 route /api/v1/profiles | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/profiles/{id} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/profiles/{id}/assignments/approve | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
-route /api/v1/tenants/{tenantId}/governance/recert/campaigns | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
-route /api/v1/tenants/{tenantId}/governance/recert/campaigns/{campaignId}/items | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
-route /api/v1/tenants/{tenantId}/governance/recert/campaigns/{campaignId}/items/{itemId}/certify | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
-route /api/v1/tenants/{tenantId}/governance/recert/campaigns/{campaignId}/items/{itemId}/revoke | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
-route /api/v1/tenants/{tenantId}/governance/recert/cycle | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/tenants/{tenantId}/governance/rights/{realmId}/ | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/tenants/{tenantId}/governance/rights/{realmId}/approve | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/tenants/{tenantId}/lifecycle/deprovision | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point

@@ -1,0 +1,6 @@
+{
+  "ops": [
+    { "op": "dropTable", "table": "recert_items" },
+    { "op": "dropTable", "table": "recert_campaigns" }
+  ]
+}

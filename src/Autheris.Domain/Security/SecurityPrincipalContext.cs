@@ -215,14 +215,18 @@ public sealed record SecurityPrincipalContext
         TenantId? overrideTenant = null,
         string? authenticationScheme = null,
         System.Net.IPAddress? clientIp = null,
-        CallerContext? caller = null)
+        CallerContext? caller = null,
+        TimeProvider? timeProvider = null)
     {
         ArgumentNullException.ThrowIfNull(principal);
 
+        var now = (timeProvider ?? TimeProvider.System).GetUtcNow();
+        var groupStatus = Autheris.Domain.Identity.GroupResolutionClaims.Read(principal, now);
+        var groupsExpireAt = Autheris.Domain.Identity.GroupResolutionClaims.ReadExpiresAt(principal);
         var userSid = principal.GetUserSid() ?? new Sid(principal.Identity?.Name ?? "ANONYMOUS");
-        var groupSids = Autheris.Domain.Identity.GroupResolutionClaims.IsMarkedDegraded(principal)
-            ? new HashSet<Sid>()
-            : principal.GetGroupSids();
+        var groupSids = groupStatus == Autheris.Domain.Identity.GroupResolutionStatus.Complete
+            ? principal.GetGroupSids()
+            : new HashSet<Sid>();
         var rawRoles = principal.GetUserRoles();
         var clusterRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var tenantRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -262,8 +266,8 @@ public sealed record SecurityPrincipalContext
             TenantClaimInvalid = claimInvalid,
             TenantSource = tenantId is null ? null : principal.FindFirst(Autheris.Domain.Tenancy.TenantSourceClaim.ClaimType)?.Value,
             GroupSids = groupSids,
-            GroupResolutionStatus = Autheris.Domain.Identity.GroupResolutionClaims.Read(principal),
-            GroupsExpireAt = Autheris.Domain.Identity.GroupResolutionClaims.ReadExpiresAt(principal),
+            GroupResolutionStatus = groupStatus,
+            GroupsExpireAt = groupsExpireAt,
             TenantRoles = tenantRoles,
             ClusterRoles = clusterRoles,
             AuthenticationScheme = authenticationScheme ?? principal.Identity?.AuthenticationType ?? "Token",

@@ -552,7 +552,7 @@ public sealed class DiscoveryWriteStateTests
     private sealed class AllowGrantPolicy : IGrantPolicy
     {
         public GrantDecision Evaluate(GrantRequest request)
-            => new(true, null, false, GrantRecertClass.None, GrantClass.Standing, "Allowed");
+            => new(true, null, false, GrantClass.Standing, "Allowed");
     }
 
     private sealed class StaticHttpContextAccessor(HttpContext context) : IHttpContextAccessor

@@ -57,6 +57,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
     private readonly Autheris.Application.Docs.Interfaces.IDocIndexReadiness? _docIndexReadiness;
     private readonly Autheris.Application.Docs.Services.IDocLinkCallerView? _docLinkReader;
     private readonly Autheris.Application.Audit.IAuditWriter? _auditWriter;
+    private readonly TimeProvider _timeProvider;
 
     private static readonly TimeSpan DefaultRegexTimeout = TimeSpan.FromMilliseconds(250);
     private static readonly Regex EmailRegex = new(@"\b([A-Za-z0-9._%+-])[A-Za-z0-9._%+-]*@([A-Za-z0-9.-]+\.[A-Za-z]{2,})\b", RegexOptions.IgnoreCase | RegexOptions.NonBacktracking, DefaultRegexTimeout);
@@ -89,7 +90,8 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? catalogVisibility = null,
         Autheris.Application.Docs.Interfaces.IDocIndexReadiness? docIndexReadiness = null,
         Autheris.Application.Audit.IAuditWriter? auditWriter = null,
-        Autheris.Application.Docs.Services.IDocLinkCallerView? docLinkReader = null)
+        Autheris.Application.Docs.Services.IDocLinkCallerView? docLinkReader = null,
+        TimeProvider? timeProvider = null)
     {
         _docLinkReader = docLinkReader;
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
@@ -116,6 +118,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         _catalogVisibility = catalogVisibility;
         _docIndexReadiness = docIndexReadiness;
         _auditWriter = auditWriter;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     /// <summary>Closed tag set for <c>autheris_disabled_path_requests_total</c> (no tool names, no ids).</summary>
@@ -532,7 +535,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                 System.Security.Claims.ClaimsPrincipal? callerPrincipal = null;
                 try
                 {
-                    callerPrincipal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
+                    callerPrincipal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext, _timeProvider);
                     var allTables = _tableMetadataRepository != null
                         ? await CatalogTablePageReader.ReadAllAsync(_tableMetadataRepository, new CatalogTableQuery(IncludeInactive: false), static t => t.Table.IsActive, ct: cancellationToken).ConfigureAwait(false)
                         : Array.Empty<TableMetadata>();
@@ -552,7 +555,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                     try
                     {
                         var decisions = await _decisionPoint.DecideManyAsync(
-                            Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(callerPrincipal, sessionContext.TenantId),
+                            Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(callerPrincipal, sessionContext.TenantId, timeProvider: _timeProvider),
                             visibleTables,
                             Autheris.Application.Policy.Pdp.AccessOperation.Discover,
                             Autheris.Application.Policy.Pdp.AccessTransport.Mcp,

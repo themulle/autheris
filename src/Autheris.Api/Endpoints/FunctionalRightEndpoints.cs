@@ -17,7 +17,7 @@ using Autheris.Domain.Audit;
 
 public static class FunctionalRightEndpoints
 {
-    public sealed record ProposeMappingRequest(string GroupOrRole, string FunctionalRight, RecertClass? RecertClass);
+    public sealed record ProposeMappingRequest(string GroupOrRole, string FunctionalRight, string? RecertClass);
     public sealed record ApproveMappingRequest(string GroupOrRole, string FunctionalRight);
     public sealed record DeleteMappingRequest(string GroupOrRole, string FunctionalRight);
 
@@ -51,7 +51,7 @@ public static class FunctionalRightEndpoints
                 realmId,
                 request.GroupOrRole,
                 new FunctionalRight(request.FunctionalRight),
-                request.RecertClass ?? RecertClass.Standard,
+                string.IsNullOrWhiteSpace(request.RecertClass) ? "Standard" : request.RecertClass,
                 createdBy,
                 ct).ConfigureAwait(false);
 

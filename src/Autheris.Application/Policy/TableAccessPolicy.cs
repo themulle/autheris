@@ -190,7 +190,7 @@ public sealed partial class TableAccessPolicy
         }
     }
 
-    private static bool IsRoleResolutionDegraded(TableAccessQuery query)
+    private bool IsGroupResolutionUnavailable(TableAccessQuery query)
     {
         static bool Marks(Claim c) =>
             (string.Equals(c.Type, Autheris.Domain.Identity.RoleResolutionClaims.ClaimType, StringComparison.OrdinalIgnoreCase) &&
@@ -198,7 +198,10 @@ public sealed partial class TableAccessPolicy
             (c.Type == Autheris.Domain.Identity.GroupResolutionClaims.StatusClaimType &&
              c.Value == Autheris.Domain.Identity.GroupResolutionClaims.DegradedValue);
 
-        return query.Claims?.Any(Marks) == true || query.Principal?.Claims.Any(Marks) == true;
+        var now = _timeProvider.GetUtcNow();
+        return query.Claims?.Any(Marks) == true
+            || query.Principal?.Claims.Any(Marks) == true
+            || (query.Principal is not null && Autheris.Domain.Identity.GroupResolutionClaims.IsExpired(query.Principal, now));
     }
 
     private async Task<TableAccessDecision> DecideCoreAsync(TableAccessQuery query, CancellationToken ct)
@@ -211,9 +214,9 @@ public sealed partial class TableAccessPolicy
             return TableAccessDecision.Denied(table, $"Table '{table.ToQualifiedName()}' is not active.");
         }
 
-        // GOV-08: group and role resolution was unavailable for this request, so group-scoped deny rules and consents cannot be
+        // GOV-08: group and role resolution was unavailable or expired for this request, so group-scoped deny rules and consents cannot be
         // evaluated reliably. Deny the data request instead of treating the caller as a member of no group (fail closed).
-        if (IsRoleResolutionDegraded(query))
+        if (IsGroupResolutionUnavailable(query))
         {
             return TableAccessDecision.Denied(table, "identity.groups_unresolved: Group resolution unavailable (fail-closed).");
         }

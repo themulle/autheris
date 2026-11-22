@@ -120,7 +120,7 @@ public static class GatewayMcpServer
         var compiler = context.Services!.GetService<ISemanticMcpCompiler>();
         if (compiler != null)
         {
-            var principal = McpProtocolHandler.BuildPrincipalFromSession(Caller(context.Services!));
+            var principal = McpProtocolHandler.BuildPrincipalFromSession(Caller(context.Services!), context.Services!.GetService<TimeProvider>());
             var page = await compiler.ListSemanticResourceUrisAsync(principal, cursor, ct: ct).ConfigureAwait(false);
             resources.AddRange(page.Items.Select(r => new Resource { Uri = r.Uri, Name = r.Name, Description = r.Description, MimeType = r.MimeType }));
             nextCursor = page.NextCursor;
@@ -254,7 +254,7 @@ public static class GatewayMcpServer
             [McpSemanticTools.SemanticCatalogTable],
             async token =>
             {
-                var principal = McpProtocolHandler.BuildPrincipalFromSession(session);
+                var principal = McpProtocolHandler.BuildPrincipalFromSession(session, services.GetService<TimeProvider>());
                 resource = await compiler.ReadSemanticResourceAsync(principal, uri, token).ConfigureAwait(false)
                     ?? throw new McpResourceNotFoundException(uri);
                 return resource.Text;
@@ -468,7 +468,7 @@ public static class GatewayMcpServer
             ?? throw new McpProtocolException("No HTTP request context.", McpErrorCode.InternalError);
         var options = services.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value;
         var caller = McpEndpoints.ResolveCaller(httpContext, options.IsMcpAuthBypassed, options.CallerAttributes);
-        var now = DateTimeOffset.UtcNow;
+        var now = (services.GetService<TimeProvider>() ?? TimeProvider.System).GetUtcNow();
         return new McpSessionContext(
             "http-" + httpContext.TraceIdentifier,
             caller.PrincipalId,

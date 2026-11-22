@@ -106,7 +106,8 @@ public sealed class GovernanceDomainsMigrationStep0036Tests
     public async Task Step0036_FreshFullMigration_MatchesShapeWithZeroDeviations(string engine)
     {
         var steps = SqlMigrationStep.LoadEmbedded(engine);
-        var expectedShape = GovernanceSchemaShapeLoader.LoadAt(engine, 36, steps.ToDictionary(s => s.Version, s => s.ShapeDelta));
+        var latestVersion = steps.Max(s => s.Version);
+        var expectedShape = GovernanceSchemaShapeLoader.LoadAt(engine, latestVersion, steps.ToDictionary(s => s.Version, s => s.ShapeDelta));
 
         if (engine == "postgresql")
         {
