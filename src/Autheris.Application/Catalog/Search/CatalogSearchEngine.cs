@@ -21,8 +21,8 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Hochperformante In-Process Hybrid Search Engine für den Datensatz- und Tabellenkatalog.
-/// Kombiniert Okapi BM25 mit SIMD-beschleunigter Vektorsuche über Reciprocal Rank Fusion (RRF).
+/// High-performance in-process hybrid search engine for the dataset and table catalog.
+/// Combines Okapi BM25 with SIMD-accelerated vector search via Reciprocal Rank Fusion (RRF).
 /// </summary>
 public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchStatusRecorder
 {
@@ -145,7 +145,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
     public async Task RebuildIndexAsync(IReadOnlyList<TableMetadata> tables, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(tables);
-        _logger.LogInformation("Starte Index-Neuaufbau für {Count} Katalog-Tabellen...", tables.Count);
+        _logger.LogInformation("Starting index rebuild for {Count} catalog tables...", tables.Count);
 
         var (opId, startVersion) = BeginMergeOperation();
         try
@@ -162,7 +162,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
                 Interlocked.Exchange(ref _currentSnapshot, finalSnapshot);
             }
 
-            _logger.LogInformation("Katalog-Suchindex erfolgreich aktualisiert. {Count} Tabellen aktiv.", activeTables.Count);
+            _logger.LogInformation("Catalog search index updated successfully. {Count} active tables.", activeTables.Count);
         }
         finally
         {
@@ -724,12 +724,12 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
         int rrfK = _options.Value.RrfConstantK;
         int topK = Math.Max(query.Limit * 3, 50);
 
-        // 1. BM25 Ausführung mit Pre-Filtering
+        // 1. BM25 execution with pre-filtering
         var bm25Hits = (effectiveMode == "keyword" || effectiveMode == "hybrid")
             ? snapshot.Bm25Index.Search(query.QueryText, topK, isAllowed: isAllowed, isColumnRestricted: isColumnRestricted)
             : [];
 
-        // 2. Vektor Ausführung mit Pre-Filtering
+        // 2. Vector execution with pre-filtering
         ReadOnlyMemory<float> queryVec = ReadOnlyMemory<float>.Empty;
         if (effectiveMode == "semantic" || effectiveMode == "hybrid")
         {
@@ -788,7 +788,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
             scoreMap[hit.TableId] = (cur.Score + rrf, cur.Bm25, cur.Vec, cur.Terms);
         }
 
-        // 4. Governance-Filterung (bereits vorab angewendet) & Join-Graph-Expansion
+        // 4. Governance filtering (already applied up front) & join-graph expansion
         var finalHits = scoreMap
             .OrderByDescending(kvp => kvp.Value.Score)
             .Take(query.Limit)
@@ -796,7 +796,7 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
             {
                 snapshot.MetadataMap.TryGetValue(kvp.Key, out var meta);
 
-                // Relationen auflösen (Bridge Tables / Joins)
+                // Resolve relations (bridge tables / joins)
                 IReadOnlyList<TableRelationship> relations = [];
                 if (query.ExpandRelations && snapshot.ForeignKeysGraph.TryGetValue(kvp.Key, out var relList))
                 {

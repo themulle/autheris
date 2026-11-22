@@ -46,6 +46,17 @@ public sealed partial class BenchmarkStackHardeningTests
     }
 
     [Fact]
+    public void PodmanCompose_Healthchecks_DoNotMaskFailuresWithExitZero()
+    {
+        string root = FindRepoRoot();
+        foreach (var composeName in new[] { "podman-compose.yaml", "podman-compose.openmetadata.yaml" })
+        {
+            string compose = File.ReadAllText(Path.Combine(root, "deploy", composeName));
+            compose.ShouldNotContain("|| exit 0", customMessage: $"{composeName} must not mask failing healthchecks with '|| exit 0'");
+        }
+    }
+
+    [Fact]
     public void ReverseProxy_RunsReadOnlyWithTmpfsWritablePaths()
     {
         string compose = File.ReadAllText(Path.Combine(FindRepoRoot(), "deploy", "podman-compose.yaml"));

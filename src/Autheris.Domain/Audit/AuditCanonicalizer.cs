@@ -3,8 +3,8 @@ using Autheris.Domain.Model;
 namespace Autheris.Domain.Audit;
 
 /// <summary>
-/// AU-10: Anbieterneutraler Audit-Kern für einheitliches Escaping (\n, \r, \t, |)
-/// und konsistentes HMAC-SHA256 Entry-Hashing über PostgreSQL und SQL Server.
+/// AU-10: Provider-neutral audit core for consistent escaping (\n, \r, \t, |)
+/// and consistent HMAC-SHA256 entry hashing across PostgreSQL and SQL Server.
 /// </summary>
 public static class AuditCanonicalizer
 {

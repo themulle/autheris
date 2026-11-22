@@ -8,8 +8,8 @@ using Autheris.Domain.Model;
 public interface IGdprDisclosureReportService
 {
     /// <summary>
-    /// Erstellt eine DSGVO-Art.-15-Auskunft (Right of Access) über alle Empfänger und Kategorien von Empfängern,
-    /// die im angegebenen Zeitraum Daten einer Tabelle oder eines Betroffenen über das Gateway abgefragt haben.
+    /// Generates a GDPR Art. 15 disclosure report (Right of Access) listing all recipients and recipient categories
+    /// that queried data for a table or data subject through the gateway within the specified time window.
     /// </summary>
     Task<GdprDisclosureReport> GetGdprDataDisclosureReportAsync(
         TableIdentifier? table,

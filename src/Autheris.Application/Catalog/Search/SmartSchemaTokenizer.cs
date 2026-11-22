@@ -6,15 +6,15 @@ using System.Linq;
 using System.Text.RegularExpressions;
 
 /// <summary>
-/// Intelligenter Tokenizer für Datenkatalog- und Datenbankschema-Metadaten.
-/// Behandelt Casing-Konventionen (snake_case, camelCase, PascalCase) sowie
-/// domänenspezifische Abkürzungen und bilinguale Stopwörter.
+/// Smart tokenizer for data catalog and database schema metadata.
+/// Handles casing conventions (snake_case, camelCase, PascalCase) as well as
+/// domain-specific abbreviations and bilingual stop words.
 /// </summary>
 public static class SmartSchemaTokenizer
 {
     private static readonly Regex CasingSplitRegex = new(@"[_\-\.\s/]+|(?<!^)(?=[A-Z][a-z])|(?<=[a-z])(?=[A-Z])", RegexOptions.Compiled);
 
-    // Domänen-spezifisches Wörterbuch für automatische Synonym-Expansion
+    // Domain-specific dictionary for automatic synonym expansion
     private static readonly Dictionary<string, string[]> AbbreviationMap = new(StringComparer.OrdinalIgnoreCase)
     {
         ["cust"] = ["customer", "kunde"],

@@ -159,7 +159,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
                 return JsonSerializer.Serialize(simResult, CamelCaseJsonOptions);
             }
 
-            // SEC M-17: Ohne Simulator keine erfundene Freigabe ("isAllowed":true) zurückgeben.
+            // M-17: Never return a fabricated approval ("isAllowed":true) when the simulator is absent.
             return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotAvailable, "Query simulator is not available.");
         }
 
@@ -617,7 +617,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
     }
 
     /// <summary>
-    /// SEC M-17: Strukturiertes Fehler-Ergebnis für MCP-Tool-Aufrufe (Deny, Ausführungsfehler, nicht verfügbar).
+    /// M-17: Structured error result for MCP tool invocations (deny, execution failure, unavailable).
     /// </summary>
     internal static string CreateErrorResult(string tenantId, string toolName, string code, string message, string? graphQLResultJson = null, int? retryAfterSeconds = null)
     {
@@ -684,7 +684,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         }
         catch (GatewayForbiddenException ex)
         {
-            // SEC M-17: Verweigerungen nicht verschlucken, sondern als strukturiertes Fehler-Ergebnis melden.
+            // M-17: Do not swallow denials; report them as a structured error result.
             _logger.LogWarning(ex, "Access to table '{Table}' for MCP tool '{ToolName}' was denied.", tableId, toolName);
             return CreateErrorResult(sessionContext.TenantId, toolName, McpErrorCodes.Forbidden, "Access denied by data governance policy.");
         }
@@ -884,7 +884,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
 }
 
 /// <summary>
-/// SEC M-17: Fehlercodes für strukturierte MCP-Tool-Fehlerergebnisse.
+/// M-17: Error codes for structured MCP tool error results.
 /// </summary>
 public static class McpErrorCodes
 {

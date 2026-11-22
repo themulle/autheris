@@ -36,7 +36,7 @@ internal static class StorageStartupChecks
             return;
         }
 
-        // AU-01 & AU-03: Startup Fail-Closed & Umgebungsvalidierung für Audit
+        // AU-01 & AU-03: Startup fail-closed and environment validation for Audit
         var envName = getEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? environment.EnvironmentName;
         bool isDevOrTest = string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase) ||
                            string.Equals(envName, "Test", StringComparison.OrdinalIgnoreCase);
@@ -49,7 +49,7 @@ internal static class StorageStartupChecks
                     "CRITICAL SECURITY VIOLATION: Hardcoded or fallback HMAC audit keys are strictly prohibited in production.");
             }
 
-            // Produktion: Leerer Wert gilt zwingend als Produktion! Every provider needs an explicit anchor:
+            // Production: an empty environment value is treated strictly as Production. Every provider needs an explicit anchor:
             // the anchor must not live only next to the database it protects (consistent with AuditChainAnchorStoreFactory).
             if (string.IsNullOrWhiteSpace(options.Audit.ChainAnchorPath) &&
                 string.IsNullOrWhiteSpace(options.Audit.ChainAnchorWormDirectory) &&

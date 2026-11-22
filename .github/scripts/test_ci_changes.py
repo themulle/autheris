@@ -12,8 +12,20 @@ _spec.loader.exec_module(ci)
 class CiChangesTests(unittest.TestCase):
     def test_docs_only_skips_dotnet(self):
         for paths in (["docs/plans/x.md"], ["README.md", "docs/a/b.png"], ["benchmarks/results/a.json"],
-                      ["deploy/podman-compose.yaml"], [".github/ISSUE_TEMPLATE/bug.yml"], ["LICENSE"]):
+                      ["deploy/README.md"], [".github/ISSUE_TEMPLATE/bug.yml"], ["LICENSE"]):
             self.assertFalse(ci.classify(paths), paths)
+
+    def test_deploy_configs_and_policies_run_dotnet(self):
+        for path in (
+            "deploy/podman-compose.yaml",
+            "deploy/podman-compose.openmetadata.yaml",
+            "deploy/policy/kubernetes/kyverno-verify-images.yaml",
+            "deploy/policy/podman/policy.json",
+            "deploy/security/seccomp-default.json",
+            "deploy/scripts/verify-hardening.sh",
+            "deploy/containers/gqlgateway-api/appsettings.Benchmark.json",
+        ):
+            self.assertTrue(ci.classify([path]), path)
 
     def test_helm_chart_change_runs_dotnet(self):
         self.assertTrue(ci.classify(["deploy/helm/autheris/values.yaml"]))

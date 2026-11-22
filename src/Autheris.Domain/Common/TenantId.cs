@@ -5,8 +5,8 @@ using System.Collections.Generic;
 using System.Text.RegularExpressions;
 
 /// <summary>
-/// Streng typisierte, validierte Tenant-Identität.
-/// Verhindert Cache-Key Injections und Cross-Tenant Verwechslungen.
+/// Strongly typed, validated tenant identity.
+/// Prevents cache-key injections and cross-tenant confusion.
 /// </summary>
 public readonly record struct TenantId
 {
@@ -71,8 +71,8 @@ public readonly record struct TenantId
 }
 
 /// <summary>
-/// Framework-unabhängiger Sicherheitskontext des Aufrufers (Clean Architecture).
-/// Entkoppelt Application- und Domain-Services von ASP.NET Core ClaimsPrincipal.
+/// Framework-independent caller security context (Clean Architecture).
+/// Decouples Application and Domain services from ASP.NET Core ClaimsPrincipal.
 /// </summary>
 public sealed record CallerSecurityContext(
     Sid UserSid,

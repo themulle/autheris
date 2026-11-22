@@ -77,6 +77,9 @@ public sealed class ReleaseWorkflowTests
         content.ShouldContain("Nightly gate");
         content.ShouldContain("parity-nightly.yml");
         content.ShouldContain("sql-compiler-gate-nightly.yml");
+        content.ShouldContain("--commit");
+        content.ShouldContain("GITHUB_SHA");
+        content.ShouldContain("headSha");
         content.ShouldContain("conclusion");
         content.ShouldContain("success");
 

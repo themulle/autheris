@@ -6,8 +6,8 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// Unveränderlicher, atomar austauschbarer Schnappschuss des gesamten Katalog-Suchindex.
-/// Ermöglicht sperrenfreie gleichzeitige Lesezugriffe (Volatile.Read) bei maximalem Durchsatz.
+/// Immutable, atomically swappable snapshot of the entire catalog search index.
+/// Enables lock-free concurrent reads (Volatile.Read) at maximum throughput.
 /// </summary>
 public sealed record CatalogSearchSnapshot(
     Bm25SearchIndex Bm25Index,

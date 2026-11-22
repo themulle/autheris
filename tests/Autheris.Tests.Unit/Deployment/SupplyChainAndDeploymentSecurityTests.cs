@@ -289,28 +289,17 @@ public class SupplyChainAndDeploymentSecurityTests
         var root = FindRepoRoot();
         root.ShouldNotBeNull("Repo root not found");
 
-        var dockerfiles = new[]
-        {
-            Path.Combine(root!, "Dockerfile"),
-            Path.Combine(root!, "Dockerfile.production"),
-            Path.Combine(root!, "Dockerfile.staging")
-        };
+        var dockerfilePath = Path.Combine(root!, "Dockerfile");
+        File.Exists(dockerfilePath).ShouldBeTrue("Expected Dockerfile to exist.");
+        var content = File.ReadAllText(dockerfilePath);
 
-        foreach (var file in dockerfiles)
-        {
-            File.Exists(file).ShouldBeTrue($"Expected dockerfile {Path.GetFileName(file)} to exist.");
-            var content = File.ReadAllText(file);
+        content.Contains("USER 10001:10001").ShouldBeTrue("Dockerfile must specify 'USER 10001:10001'");
+        content.Contains("HEALTHCHECK").ShouldBeTrue("Dockerfile must define a HEALTHCHECK");
+        content.Contains("@sha256:").ShouldBeTrue("Dockerfile must use digest-pinned base images");
+        content.ShouldContain("ASPNETCORE_ENVIRONMENT=Production");
 
-            content.Contains("USER 10001:10001").ShouldBeTrue($"File {Path.GetFileName(file)} must specify 'USER 10001:10001'");
-            content.Contains("HEALTHCHECK").ShouldBeTrue($"File {Path.GetFileName(file)} must define a HEALTHCHECK");
-            content.Contains("@sha256:").ShouldBeTrue($"File {Path.GetFileName(file)} must use digest-pinned base images");
-        }
-
-        var prodContent = File.ReadAllText(Path.Combine(root!, "Dockerfile.production"));
-        prodContent.ShouldContain("ASPNETCORE_ENVIRONMENT=Production");
-
-        var stagingContent = File.ReadAllText(Path.Combine(root!, "Dockerfile.staging"));
-        stagingContent.ShouldContain("ASPNETCORE_ENVIRONMENT=Staging");
+        File.Exists(Path.Combine(root!, "Dockerfile.production")).ShouldBeFalse("Unbuilt drifted Dockerfile.production must stay removed.");
+        File.Exists(Path.Combine(root!, "Dockerfile.staging")).ShouldBeFalse("Unbuilt drifted Dockerfile.staging must stay removed.");
     }
 
     [Fact]
@@ -325,6 +314,9 @@ public class SupplyChainAndDeploymentSecurityTests
         compose.ShouldContain("cap_drop:");
         compose.ShouldContain("ALL");
         compose.ShouldContain("healthcheck:");
+        compose.ShouldContain("@sha256:");
+        compose.ShouldNotContain(":getting-started");
+        compose.ShouldNotContain(":latest");
     }
 
     [Fact]

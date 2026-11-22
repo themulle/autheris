@@ -29,7 +29,7 @@ public sealed record AffectedEntity(
     string Name,
     LineageNodeType Type,
     string? OwnerTeam,
-    string? OwnerEmail, // Null, sofern Aufrufer nicht autorisiert (Zero-Trust Spaltenautorisierung)
+    string? OwnerEmail, // Null when caller is not authorized (zero-trust column authorization)
     bool CyclicReferenceDetected = false
 );
 
