@@ -194,7 +194,7 @@ public sealed class DuckDbPersistentTableCacheStore : ITableCacheStore, IDisposa
         return "st_" + GetSafeTableToken(table) + "_" + Math.Max(0, epoch);
     }
 
-    private string GetAttachSql(TableIdentifier table, string dbPath, long epoch)
+    internal string GetAttachSql(TableIdentifier table, string dbPath, long epoch)
     {
         var escapedPath = dbPath.Replace("'", "''", StringComparison.Ordinal);
         if (_options.Encryption.Enabled && _masterEncryptionKey != null)

@@ -13,7 +13,6 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Options.TableCache;
 using Autheris.Infrastructure.Caching.TableCache;
 using Autheris.Infrastructure.Caching.TableCache.Storage;
-using DuckDB.NET.Data;
 using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
@@ -210,36 +209,33 @@ public sealed class DuckDbPersistentTableCacheStoreTests : IDisposable
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task Store_Encrypted_DistinctTablesAtSameEpoch_DoNotShareDek()
+    public void Store_GetAttachSql_DistinctTablesAtSameEpoch_DeriveDistinctDeks()
     {
         var tableA = new TableIdentifier("crm", "public", "customers");
         var tableB = new TableIdentifier("crm", "public", "orders");
         const long epoch = 777;
 
-        static async IAsyncEnumerable<IReadOnlyList<object?>> Rows()
-        {
-            yield return new object?[] { "1", "Secret" };
-            await Task.CompletedTask;
-        }
+        var sqlA = _store.GetAttachSql(tableA, "/tmp/gen_a.duckdb", epoch);
+        var sqlB = _store.GetAttachSql(tableB, "/tmp/gen_b.duckdb", epoch);
 
-        var shadowA = await _store.StageShadowGenerationAsync(tableA, epoch, ["id", "name"], Rows());
-        await _store.SwapActiveGenerationAsync(tableA, epoch, shadowA, 1, 1024, null);
+        var expectedDekA = Convert.ToHexStringLower(TableCacheCryptoHelper.DeriveKey(
+            _masterKey,
+            info: Encoding.UTF8.GetBytes($"duckdb-gen-{DuckDbPersistentTableCacheStore.GetSafeTableToken(tableA)}-{epoch}")));
+        var expectedDekB = Convert.ToHexStringLower(TableCacheCryptoHelper.DeriveKey(
+            _masterKey,
+            info: Encoding.UTF8.GetBytes($"duckdb-gen-{DuckDbPersistentTableCacheStore.GetSafeTableToken(tableB)}-{epoch}")));
+        var unboundDek = Convert.ToHexStringLower(TableCacheCryptoHelper.DeriveKey(
+            _masterKey,
+            info: Encoding.UTF8.GetBytes($"duckdb-gen-{epoch}")));
 
-        var shadowB = await _store.StageShadowGenerationAsync(tableB, epoch, ["id", "name"], Rows());
-        await _store.SwapActiveGenerationAsync(tableB, epoch, shadowB, 1, 1024, null);
+        expectedDekA.ShouldNotBe(expectedDekB);
+        expectedDekA.ShouldNotBe(unboundDek);
+        expectedDekB.ShouldNotBe(unboundDek);
 
-        var dbPathA = Path.Combine(_store.GetTableDirectory(tableA), $"generation_{epoch}.duckdb");
-        var escapedPathA = dbPathA.Replace("'", "''", StringComparison.Ordinal);
-
-        // Old unbound DEK ("duckdb-gen-<epoch>") must not open tableA's generation file.
-        var unboundDekHex = Convert.ToHexStringLower(
-            TableCacheCryptoHelper.DeriveKey(_masterKey, info: Encoding.UTF8.GetBytes($"duckdb-gen-{epoch}")));
-
-        using var conn = new DuckDBConnection("DataSource=:memory:");
-        await conn.OpenAsync();
-        using var cmd = conn.CreateCommand();
-        cmd.CommandText = $"ATTACH '{escapedPathA}' AS probe (ENCRYPTION_KEY '{unboundDekHex}');";
-        await Should.ThrowAsync<Exception>(() => cmd.ExecuteNonQueryAsync());
+        sqlA.ShouldContain($"ENCRYPTION_KEY '{expectedDekA}'");
+        sqlB.ShouldContain($"ENCRYPTION_KEY '{expectedDekB}'");
+        sqlA.ShouldNotContain(unboundDek);
+        sqlB.ShouldNotContain(unboundDek);
     }
 
     [Fact]

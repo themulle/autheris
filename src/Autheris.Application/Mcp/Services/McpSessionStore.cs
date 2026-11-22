@@ -108,7 +108,7 @@ public sealed class McpSessionStore : IMcpSessionStore
     /// <summary>Local lookup only (no blocking remote read); sessions of other nodes are found by <see cref="GetSessionAsync"/>.</summary>
     public McpSessionContext? GetSession(string sessionId)
     {
-        if (string.IsNullOrWhiteSpace(sessionId) || !_sessions.TryGetValue(sessionId, out var session))
+        if (string.IsNullOrWhiteSpace(sessionId) || !_sessions.TryGetValue(sessionId, out _))
         {
             return null;
         }
