@@ -55,6 +55,38 @@ public sealed class GrantRenewalTests
     }
 
     [Fact]
+    public async Task Superseded_consent_ended_by_id_even_without_request_id()
+    {
+        var c = Grant(withRequest: false);
+        var h = Harness(c);
+        await h.Engine.RenewGrantAsync(Cmd(c, H.Actor("user:dg", "GovernanceAdmin")));
+        h.RevokedConsents.ShouldContain(c.Id);
+        h.RevokedForTenants.ShouldAllBe(t => t == H.Tenant);
+    }
+
+    [Fact]
+    public async Task Failed_revoke_of_superseded_consent_leaves_no_extended_grant()
+    {
+        var c = Grant();
+        var h = Harness(c);
+        h.FailRevokeConsent = id => id == c.Id;
+        await Should.ThrowAsync<InvalidOperationException>(() => h.Engine.RenewGrantAsync(Cmd(c, H.Actor("user:dg", "GovernanceAdmin"))));
+        var created = h.CreatedConsents.ShouldHaveSingleItem();
+        h.RevokedConsents.ShouldContain(created.Id);
+        h.Audit.Entries.ShouldNotContain(e => e.EventType == AuditEventTypes.GrantRenewed);
+    }
+
+    [Fact]
+    public async Task Failed_audit_leaves_no_extended_grant()
+    {
+        var c = Grant();
+        var h = new H(ProtectionClass.Internal, auditFailure: new InvalidOperationException("audit down")) { Existing = c };
+        await Should.ThrowAsync<InvalidOperationException>(() => h.Engine.RenewGrantAsync(Cmd(c, H.Actor("user:dg", "GovernanceAdmin"))));
+        var created = h.CreatedConsents.ShouldHaveSingleItem();
+        h.RevokedConsents.ShouldContain(created.Id);
+    }
+
+    [Fact]
     public async Task Renewal_by_grantee_denied()
     {
         var c = Grant(grantee: "user:alice");

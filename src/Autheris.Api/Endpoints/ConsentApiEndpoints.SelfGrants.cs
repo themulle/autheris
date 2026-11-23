@@ -14,6 +14,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Mvc;
 using Microsoft.AspNetCore.Routing;
 
 public static partial class ConsentApiEndpoints
@@ -33,7 +34,7 @@ public static partial class ConsentApiEndpoints
         Guid id,
         RenewGrantRequestBody? body,
         HttpContext context,
-        PermissionRequestEngine engine,
+        [FromServices] PermissionRequestEngine engine,
         CancellationToken ct = default)
     {
         if (body is null)
@@ -74,7 +75,7 @@ public static partial class ConsentApiEndpoints
     internal static async Task<IResult> CreateSelfGrantAsync(
         SelfGrantRequestBody? body,
         HttpContext context,
-        SelfGrantService selfGrantService,
+        [FromServices] SelfGrantService selfGrantService,
         CancellationToken ct = default)
     {
         if (body is null)

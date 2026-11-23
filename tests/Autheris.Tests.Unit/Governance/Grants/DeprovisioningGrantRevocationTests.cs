@@ -43,6 +43,19 @@ public sealed class DeprovisioningGrantRevocationTests
     }
 
     [Fact]
+    public async Task Unmask_grants_revoked_on_deprovisioning()
+    {
+        var f = new Fixture();
+        var unmask = f.AddGrant(PermissionGrantKind.Unmask);
+
+        var result = await f.Build().RevokeAllForSubjectAsync(Tenant, Subject, Reason);
+
+        result.Complete.ShouldBeTrue();
+        f.Revoked.ShouldBe([unmask.Id]);
+        f.WrongTenantCalls.ShouldBe(0);
+    }
+
+    [Fact]
     public async Task Pending_withdrawn()
     {
         var f = new Fixture();
@@ -142,6 +155,7 @@ public sealed class DeprovisioningGrantRevocationTests
         public List<Guid> Withdrawn { get; } = [];
         public InMemoryAuditWriter Audit { get; } = new();
         public int EnumerationCalls { get; private set; }
+        public int WrongTenantCalls { get; private set; }
 
         public GrantRevocationService Build(int maxItemsPerRun = GrantRevocationService.DefaultMaxItemsPerRun)
         {
@@ -151,9 +165,14 @@ public sealed class DeprovisioningGrantRevocationTests
                 {
                     case nameof(IConsentRepository.GetAllActiveConsentsForSubjectsAsync):
                         EnumerationCalls++;
+                        // Like the real store, the data-path enumeration only returns DATA grants.
+                        return Task.FromResult<IReadOnlyList<Consent>>(Active.Where(c => !Revoked.Contains(c.Id) && c.GrantKind == PermissionGrantKind.Data).ToList());
+                    case nameof(IConsentRepository.GetActiveGrantsForSubjectsAsync):
+                        EnumerationCalls++;
                         return Task.FromResult<IReadOnlyList<Consent>>(Active.Where(c => !Revoked.Contains(c.Id)).ToList());
-                    case nameof(IConsentRepository.RevokeSystemConsentAsync):
-                        var id = (Guid)args![0]!;
+                    case nameof(IConsentRepository.RevokeSystemConsentByIdAsync):
+                        var id = (Guid)args![1]!;
+                        WrongTenantCalls += (TenantId)args[0]! == Tenant ? 0 : 1;
                         if (FailRevoke.Contains(id)) throw new InvalidOperationException("db down");
                         Revoked.Add(id);
                         return Task.FromResult(true);

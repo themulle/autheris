@@ -131,7 +131,7 @@ public partial class GovernanceRepository
             : "SELECT status FROM CONSENT_REQUESTS WHERE id = @id FOR UPDATE";
 
     private string SelectSystemRevokeTargetSql =>
-        BuildLockRowsQuery("t.source_name, t.schema_name, t.table_name, c.tenant_id, c.table_id, c.effect, c.grantee_type, c.grantee_sid, c.grant_source, c.profile_assignment_id, c.valid_from, c.valid_to", "CONSENTS c", "JOIN TABLES t ON c.table_id = t.id WHERE c.id = @id AND (c.consent_request_id = @reqId OR (c.consent_request_id IS NULL AND @reqId = '00000000-0000-0000-0000-000000000000')) AND c.is_revoked = 0", null);
+        BuildLockRowsQuery("t.source_name, t.schema_name, t.table_name, c.tenant_id, c.table_id, c.effect, c.grantee_type, c.grantee_sid, c.grant_source, c.profile_assignment_id, c.valid_from, c.valid_to", "CONSENTS c", "JOIN TABLES t ON c.table_id = t.id WHERE c.id = @id AND c.consent_request_id = @reqId AND c.is_revoked = 0", null);
 
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(
         IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default) =>
@@ -187,13 +187,9 @@ public partial class GovernanceRepository
 
     public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(
         IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default) =>
-        AllActiveCoreAsync(subjects, atTime, TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), ct);
+        AllActiveCoreAsync(subjects, atTime, TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), true, ct);
 
-    private async Task<IReadOnlyList<Consent>> AllActiveCoreAsync(
-        IEnumerable<Sid> subjects,
-        DateTimeOffset? atTime,
-        TenantId tenantId,
-        CancellationToken ct)
+    private async Task<IReadOnlyList<Consent>> AllActiveCoreAsync(IEnumerable<Sid> subjects, DateTimeOffset? atTime, TenantId tenantId, bool dataOnly, CancellationToken ct)
     {
         var effectiveAt = atTime ?? TimeProvider.System.GetUtcNow();
         var subjectEnumerated = subjects.ToList();
@@ -214,7 +210,7 @@ public partial class GovernanceRepository
                                        c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_stage, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns
                                 FROM CONSENTS c
                                 JOIN TABLES t ON c.table_id = t.id
-                                WHERE c.is_revoked = 0 AND c.tenant_id = @tenantId AND c.grant_kind = 'DATA'" + ConsentSubjectFilter.InListPredicate(chunk.Count);
+                                WHERE c.is_revoked = 0 AND c.tenant_id = @tenantId" + (dataOnly ? " AND c.grant_kind = 'DATA'" : string.Empty) + ConsentSubjectFilter.InListPredicate(chunk.Count);
             for (var si = 0; si < chunk.Count; si++)
             {
                 cmd.AddBound("@s" + si, chunk[si]);

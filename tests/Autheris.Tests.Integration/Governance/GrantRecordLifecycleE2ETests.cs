@@ -234,6 +234,40 @@ public sealed class GrantRecordLifecycleE2ETests(GovernancePostgresFixture fixtu
             .And.Contain(ConsentEventTypes.GrantExpired);
     }
 
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task Expiry_enforced_without_sweep()
+    {
+        await using var store = await GovernanceTestStore.CreatePostgreSqlAsync(_fixture, "grant_expiry_without_sweep");
+        if (!store.IsAvailable)
+        {
+            return;
+        }
+
+        var now = DateTimeOffset.UtcNow;
+        var grantee = new Sid("S-1-5-21-1000-1000-1000-5001");
+        var owner1Sid = new Sid("S-1-5-21-1000-1000-1000-4001");
+        var owner2Sid = new Sid("S-1-5-21-1000-1000-1000-4002");
+        var table = await SeedTableAndOwnersAsync(store, owner1Sid, owner2Sid);
+
+        // The grant is stored active but its validity ended an hour ago; no expiry sweep ever runs in this test.
+        var expired = await store.Consents.CreateConsentAsync(new Consent
+        {
+            Id = Guid.NewGuid(),
+            TableIdentifier = table,
+            TenantId = store.TenantA,
+            GranteeType = GranteeType.User,
+            GranteeSid = grantee,
+            Effect = ConsentEffect.Allow,
+            ValidFrom = now.AddDays(-2),
+            ValidTo = now.AddHours(-1)
+        });
+
+        (await store.Consents.GetActiveConsentsForSubjectsAsync([grantee], table, now, store.TenantA)).Should().NotContain(c => c.Id == expired.Id);
+        (await store.Consents.GetAllActiveConsentsForSubjectsAsync([grantee], null, now, store.TenantA)).Should().NotContain(c => c.Id == expired.Id);
+        (await store.Consents.GetActiveGrantsForSubjectsAsync(store.TenantA, [grantee], now, 100)).Should().NotContain(c => c.Id == expired.Id);
+    }
+
     private static async Task<TableIdentifier> SeedTableAndOwnersAsync(
         GovernanceTestStore store,
         Sid owner1Sid,

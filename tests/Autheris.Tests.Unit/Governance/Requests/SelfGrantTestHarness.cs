@@ -25,9 +25,15 @@ namespace Autheris.Tests.Unit.Governance.Requests;
 internal sealed class RecordingNotificationDispatcher : IGovernanceNotificationDispatcher
 {
     public List<GovernanceNotificationMessage> Messages { get; } = [];
+    public Exception? Failure { get; set; }
 
     public Task DispatchAsync(GovernanceNotificationMessage message, CancellationToken ct = default)
     {
+        if (Failure is not null)
+        {
+            throw Failure;
+        }
+
         Messages.Add(message);
         return Task.CompletedTask;
     }
@@ -68,6 +74,8 @@ internal sealed class SelfGrantHarness
     public Consent? Existing { get; set; }
     public List<Consent> CreatedConsents { get; } = [];
     public List<Guid> RevokedConsents { get; } = [];
+    public List<TenantId> RevokedForTenants { get; } = [];
+    public Func<Guid, bool>? FailRevokeConsent { get; set; }
     public Func<Guid, Consent?>? ConsentLookup { get; set; }
     public PermissionRequestEngine Engine { get; }
     public SelfGrantService Service { get; }
@@ -140,8 +148,14 @@ internal sealed class SelfGrantHarness
                 case nameof(IConsentRepository.CreateConsentAsync):
                     CreatedConsents.Add((Consent)args![0]!);
                     return Task.FromResult((Consent)args[0]!);
-                case nameof(IConsentRepository.RevokeSystemConsentAsync):
-                    RevokedConsents.Add((Guid)args![0]!);
+                case nameof(IConsentRepository.RevokeSystemConsentByIdAsync):
+                    if (FailRevokeConsent is not null && FailRevokeConsent((Guid)args![1]!))
+                    {
+                        throw new InvalidOperationException("revoke failed");
+                    }
+
+                    RevokedConsents.Add((Guid)args![1]!);
+                    RevokedForTenants.Add((TenantId)args[0]!);
                     return Task.FromResult(true);
                 default:
                     return NullFake.UseDefault;

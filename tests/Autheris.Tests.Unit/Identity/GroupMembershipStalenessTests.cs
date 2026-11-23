@@ -135,7 +135,7 @@ public sealed class GroupMembershipStalenessTests
         // Remove user from g-2 via SCIM PatchGroupAsync without advancing FakeTimeProvider.
         var scim = new ScimService(
             store,
-            new IdentityDeprovisioningService(store, roleResolverCache: roleCache, governanceChangeNotifier: changeNotifier, timeProvider: time),
+            new IdentityDeprovisioningService(store, Autheris.Tests.Unit.TestSupport.NoOpGrantRevocation.Instance, roleResolverCache: roleCache, governanceChangeNotifier: changeNotifier, timeProvider: time),
             roleCache: roleCache,
             timeProvider: time,
             governanceChangeNotifier: changeNotifier);

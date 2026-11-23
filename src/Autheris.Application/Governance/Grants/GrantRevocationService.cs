@@ -111,7 +111,7 @@ public sealed class GrantRevocationService : IGrantRevocationService
 
         try
         {
-            var grants = await _consents.GetAllActiveConsentsForSubjectsAsync(subjects, null, now, tenant, token).ConfigureAwait(false);
+            var grants = await _consents.GetActiveGrantsForSubjectsAsync(tenant, subjects, now, maxItems + 1, token).ConfigureAwait(false);
             foreach (var consent in grants.Where(IsRevocableGrant))
             {
                 if (handled++ >= maxItems)
@@ -202,8 +202,7 @@ public sealed class GrantRevocationService : IGrantRevocationService
     {
         try
         {
-            var done = await _consents.RevokeSystemConsentAsync(
-                consent.Id, consent.ConsentRequestId ?? Guid.Empty, SystemActor, reason, ct).ConfigureAwait(false);
+            var done = await _consents.RevokeSystemConsentByIdAsync(tenant, consent.Id, SystemActor, reason, ct).ConfigureAwait(false);
             if (!done)
             {
                 return false;

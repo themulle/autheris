@@ -97,7 +97,7 @@ public sealed class DeprovisioningLockTests
     public async Task Lock_survives_revoke_failure()
     {
         var revocation = new StubRevocation(new GrantRevocationResult(0, 0, 0, Failed: 1, Truncated: false));
-        var service = new IdentityDeprovisioningService(_identityStore, grantRevocationService: revocation);
+        var service = new IdentityDeprovisioningService(_identityStore, revocation);
 
         var act = () => service.DeprovisionAndLockSubjectAsync(new TenantId("tenant-1"), "workforce-entra", "user-1", "SCIM_DEPROVISION", "SCIM_PUT");
 
@@ -111,11 +111,25 @@ public sealed class DeprovisioningLockTests
     public async Task Deprovisioning_revokes_grants_for_every_subject_form()
     {
         var revocation = new StubRevocation(new GrantRevocationResult(1, 0, 0, 0, false));
-        var service = new IdentityDeprovisioningService(_identityStore, grantRevocationService: revocation);
+        var service = new IdentityDeprovisioningService(_identityStore, revocation);
 
         await service.DeprovisionAndLockSubjectAsync(new TenantId("tenant-1"), "workforce-entra", "user-1", "SCIM_DEPROVISION", "SCIM_PUT");
 
         revocation.Subjects.ShouldBe([new Sid("user-1"), new Sid("workforce-entra|user-1")]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Bare_subject_form_skipped_when_user_key_exists_in_another_realm()
+    {
+        var tenant = new TenantId("tenant-1");
+        _identityStore.UserKeyExistsInOtherRealmAsync(tenant, "workforce-entra", "user-1", Arg.Any<CancellationToken>()).Returns(true);
+        var revocation = new StubRevocation(new GrantRevocationResult(1, 0, 0, 0, false));
+        var service = new IdentityDeprovisioningService(_identityStore, revocation);
+
+        await service.DeprovisionAndLockSubjectAsync(tenant, "workforce-entra", "user-1", "SCIM_DEPROVISION", "SCIM_PUT");
+
+        revocation.Subjects.ShouldBe([new Sid("workforce-entra|user-1")]);
     }
 
     private sealed class StubRevocation(GrantRevocationResult result) : IGrantRevocationService

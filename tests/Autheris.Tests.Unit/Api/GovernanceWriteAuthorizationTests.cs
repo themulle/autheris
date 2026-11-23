@@ -41,6 +41,19 @@ public sealed class GovernanceWriteAuthorizationTests
         yield return ["PUT /api/v1/governance/classifications/{code}/mask-rule", GatewayPolicies.GovernanceAdmin];
         yield return ["POST /api/governance/classification/classify-table", GatewayPolicies.GovernanceAdmin];
         yield return ["POST /api/governance/classification/assign-owner", GatewayPolicies.GovernanceAdmin];
+        // Access-profile assignments and profile deletion are declarative grants: governance capacity only.
+        yield return ["POST /api/v1/consents/bulk", GatewayPolicies.ProfileAdmin];
+        yield return ["DELETE /api/v1/profiles/{id}", GatewayPolicies.ProfileAdmin];
+    }
+
+    /// <summary>
+    /// IT write routes that stay open to IT on purpose: they are operational (rule scheduling, schema ingest) and do not set
+    /// a classification, mask category, owner group, policy or dataset tag, so they are not part of the refused set above.
+    /// </summary>
+    public static IEnumerable<object[]> ExplicitlyItAllowedWriteRoutes()
+    {
+        yield return ["POST /api/governance/sunsetting/rules", GatewayPolicies.ClusterAdmin, "ClusterAdmin"];
+        yield return ["POST /api/governance/catalog/ingest-openapi", GatewayPolicies.OpenApiPublish, "TenantAdmin"];
     }
 
     public static IEnumerable<object[]> CapabilityGuardedWriteRoutes()
@@ -86,6 +99,14 @@ public sealed class GovernanceWriteAuthorizationTests
     public async Task ClusterAdmin_refused_on_each_write_route(string route, string policy)
     {
         (await PolicyAllowsAsync(ClusterAdmin(), policy)).ShouldBeFalse($"{route} must refuse ClusterAdmin.");
+    }
+
+    [Theory]
+    [MemberData(nameof(ExplicitlyItAllowedWriteRoutes))]
+    public async Task Operational_it_routes_stay_open_to_their_it_role(string route, string policy, string role)
+    {
+        var user = role == "ClusterAdmin" ? ClusterAdmin() : TenantAdmin();
+        (await PolicyAllowsAsync(user, policy)).ShouldBeTrue($"{route} is an operational IT route.");
     }
 
     [Theory]

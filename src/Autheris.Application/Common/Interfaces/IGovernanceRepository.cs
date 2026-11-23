@@ -270,10 +270,26 @@ public interface IConsentRepository
     /// <summary>
     /// SEC E-05 / EX-02: System revocation of a consent owned by an automated sync. Only revokes when the consent carries
     /// <paramref name="consentRequestId"/> (the sync marker); there is no data-owner check because the system actor is not
-    /// a table owner and a revocation can only tighten access. <see cref="Guid.Empty"/> as the marker matches consents that carry no request id
-    /// (deprovisioning revokes every live grant of a subject). Returns false when nothing was revoked.
+    /// a table owner and a revocation can only tighten access. Returns false when nothing was revoked.
     /// </summary>
     Task<bool> RevokeSystemConsentAsync(Guid consentId, Guid consentRequestId, Sid revokedBySid, string reason, CancellationToken ct = default);
+
+    /// <summary>
+    /// System revocation of one consent by id, scoped to <paramref name="tenantId"/>: a consent of another tenant is never touched.
+    /// Used by deprovisioning and grant renewal, which revoke grants regardless of kind or request linkage. Returns false when
+    /// nothing was revoked. Implementations must override; the default fails closed.
+    /// </summary>
+    Task<bool> RevokeSystemConsentByIdAsync(TenantId tenantId, Guid consentId, Sid revokedBySid, string reason, CancellationToken ct = default)
+        => throw new NotSupportedException("RevokeSystemConsentByIdAsync is not implemented by this repository.");
+
+    /// <summary>
+    /// All active grants of any kind (data, unmask, catalog-scoped table grants and pattern grants) held by <paramref name="subjects"/> in
+    /// <paramref name="tenantId"/> at <paramref name="atTime"/>, capped at <paramref name="maxResults"/>. Unlike
+    /// <see cref="GetAllActiveConsentsForSubjectsAsync"/> it is not restricted to data grants and is meant for revocation sweeps only.
+    /// Implementations must override; the default fails closed.
+    /// </summary>
+    Task<IReadOnlyList<Consent>> GetActiveGrantsForSubjectsAsync(TenantId tenantId, IReadOnlyCollection<Sid> subjects, DateTimeOffset atTime, int maxResults, CancellationToken ct = default)
+        => throw new NotSupportedException("GetActiveGrantsForSubjectsAsync is not implemented by this repository.");
 
     /// <summary>
     /// SR-L-21: Tables on which <paramref name="tenantId"/> holds at least one non-revoked consent record (Allow or Deny).

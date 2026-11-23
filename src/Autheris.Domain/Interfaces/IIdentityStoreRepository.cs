@@ -10,6 +10,13 @@ using Autheris.Domain.Identity;
 public interface IScimUserStore
 {
     Task<ScimUser?> GetUserAsync(TenantId tenantId, string realmId, string userKey, CancellationToken ct = default);
+
+    /// <summary>
+    /// True when another realm of <paramref name="tenantId"/> holds a user with the same <paramref name="userKey"/>, so a bare
+    /// (realm-less) subject form of that key cannot be attributed to <paramref name="realmId"/> alone. The default is
+    /// fail-closed: a store that cannot tell reports the key as ambiguous.
+    /// </summary>
+    Task<bool> UserKeyExistsInOtherRealmAsync(TenantId tenantId, string realmId, string userKey, CancellationToken ct = default) => Task.FromResult(true);
     Task<ScimUser?> GetUserByExternalIdAsync(TenantId tenantId, string realmId, string externalId, CancellationToken ct = default);
     Task<ScimUser?> GetUserByUserNameAsync(TenantId tenantId, string realmId, string userName, CancellationToken ct = default);
     Task<ScimUser?> GetUserByObjectSidAsync(TenantId tenantId, string realmId, string objectSid, CancellationToken ct = default);

@@ -127,6 +127,18 @@ public sealed class SelfGrantServiceTests
     }
 
     [Fact]
+    public async Task Notification_failure_after_commit_does_not_fail_the_grant()
+    {
+        var h = new H();
+        h.Notifications.Failure = new InvalidOperationException("smtp down");
+
+        var result = await h.Service.SelfGrantAsync(H.Command(H.Actor("user:it")));
+
+        result.Request.ShouldNotBeNull();
+        h.DataApplier.Applied.ShouldBe(1);
+    }
+
+    [Fact]
     public async Task ServicePrincipal_it_admin_follows_same_rules()
     {
         var h = new H(ProtectionClass.Secret);

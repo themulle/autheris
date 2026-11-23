@@ -13,6 +13,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Microsoft.Extensions.Logging;
 
 public interface IIdentityDeprovisioningService
 {
@@ -43,11 +44,13 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
     private readonly IAuditWriter? _auditWriter;
     private readonly Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore? _subscriptionStore;
     private readonly IGovernanceChangeNotifier? _governanceChangeNotifier;
-    private readonly IGrantRevocationService? _grantRevocationService;
+    private readonly IGrantRevocationService _grantRevocationService;
+    private readonly ILogger<IdentityDeprovisioningService>? _logger;
     private readonly TimeProvider _timeProvider;
 
     public IdentityDeprovisioningService(
         IIdentityStoreRepository storeRepository,
+        IGrantRevocationService grantRevocationService,
         ITokenRevocationService? tokenRevocationService = null,
         IRedisLockPubSubChannel? pubSubChannel = null,
         IRoleResolverCache? roleResolverCache = null,
@@ -55,7 +58,7 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
         Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore? subscriptionStore = null,
         IGovernanceChangeNotifier? governanceChangeNotifier = null,
         TimeProvider? timeProvider = null,
-        IGrantRevocationService? grantRevocationService = null)
+        ILogger<IdentityDeprovisioningService>? logger = null)
     {
         _storeRepository = storeRepository ?? throw new ArgumentNullException(nameof(storeRepository));
         _tokenRevocationService = tokenRevocationService;
@@ -65,7 +68,8 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
         _subscriptionStore = subscriptionStore;
         _governanceChangeNotifier = governanceChangeNotifier;
         _timeProvider = timeProvider ?? TimeProvider.System;
-        _grantRevocationService = grantRevocationService;
+        _grantRevocationService = grantRevocationService ?? throw new ArgumentNullException(nameof(grantRevocationService));
+        _logger = logger;
     }
 
     public async Task DeprovisionAndLockSubjectAsync(
@@ -157,27 +161,39 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
 
         // 7. Revoke every data, unmask and catalog grant and withdraw pending requests. The lock and deactivation above stay
         // in force; an incomplete run fails the call so the deprovisioning is retried idempotently.
-        if (_grantRevocationService != null)
+        var revocation = new GrantRevocationResult(0, 0, 0, 0, false);
+        foreach (var form in await SubjectFormsAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false))
         {
-            var revocation = new GrantRevocationResult(0, 0, 0, 0, false);
-            foreach (var form in SubjectForms(realmId, userKey))
-            {
-                var partial = await _grantRevocationService.RevokeAllForSubjectAsync(tenantId, form, reason, ct).ConfigureAwait(false);
-                revocation = new GrantRevocationResult(
-                    revocation.GrantsRevoked + partial.GrantsRevoked,
-                    revocation.CatalogGrantsRevoked + partial.CatalogGrantsRevoked,
-                    revocation.RequestsWithdrawn + partial.RequestsWithdrawn,
-                    revocation.Failed + partial.Failed,
-                    revocation.Truncated || partial.Truncated);
-            }
+            var partial = await _grantRevocationService.RevokeAllForSubjectAsync(tenantId, form, reason, ct).ConfigureAwait(false);
+            revocation = new GrantRevocationResult(
+                revocation.GrantsRevoked + partial.GrantsRevoked,
+                revocation.CatalogGrantsRevoked + partial.CatalogGrantsRevoked,
+                revocation.RequestsWithdrawn + partial.RequestsWithdrawn,
+                revocation.Failed + partial.Failed,
+                revocation.Truncated || partial.Truncated);
+        }
 
-            if (!revocation.Complete)
-            {
-                throw new GrantRevocationIncompleteException(revocation);
-            }
+        if (!revocation.Complete)
+        {
+            throw new GrantRevocationIncompleteException(revocation);
         }
     }
 
-    private static Sid[] SubjectForms(string realmId, string userKey) =>
-        [new Sid(userKey), new Sid($"{realmId}|{userKey}")];
+    /// <summary>
+    /// The realm-qualified subject form always belongs to this realm. The bare form is revoked only when no other realm of the
+    /// tenant holds the same user key, so a deprovisioning never revokes the grants of an unrelated user of another realm.
+    /// </summary>
+    private async Task<Sid[]> SubjectFormsAsync(TenantId tenantId, string realmId, string userKey, CancellationToken ct)
+    {
+        var qualified = new Sid($"{realmId}|{userKey}");
+        if (await _storeRepository.UserKeyExistsInOtherRealmAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false))
+        {
+            _logger?.LogWarning(
+                "Bare subject form of a deprovisioned user key is ambiguous across realms of tenant {Tenant}; only the realm-qualified grants of realm {Realm} are revoked.",
+                tenantId.Value, realmId);
+            return [qualified];
+        }
+
+        return [new Sid(userKey), qualified];
+    }
 }

@@ -5,6 +5,9 @@
 IF COL_LENGTH(N'dbo.CONSENTS', N'expiry_notice_stage') IS NULL
     ALTER TABLE dbo.CONSENTS ADD expiry_notice_stage INT NOT NULL CONSTRAINT DF_CONSENTS_expiry_notice_stage DEFAULT 0;
 -- batch
+-- A notice that was already sent counts as stage 1 so the first reminder is not sent a second time.
+UPDATE dbo.CONSENTS SET expiry_notice_stage = 1 WHERE expiry_notice_stage = 0 AND expiry_notice_sent_at IS NOT NULL;
+-- batch
 IF COL_LENGTH(N'dbo.CONSENTS', N'expiry_notice_sent_at') IS NOT NULL
     ALTER TABLE dbo.CONSENTS DROP COLUMN expiry_notice_sent_at;
 -- batch
