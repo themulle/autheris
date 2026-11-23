@@ -197,7 +197,7 @@ public sealed class PermissionRequestEngineSubmitTests
     }
 
     private static Autheris.Application.ConsentRequests.Routing.ConsentWorkflowRouteResolution Route(ConsentWorkflowMode mode, Guid? systemId, WorkflowRouteScopeKind? scope) =>
-        new(mode, systemId, 30, 30, 72, false, scope);
+        new(mode, systemId, 30, 30, false, scope);
 
     private static Task<PermissionSubmitResult> SubmitOrdersAsync(PermissionRequestEngine engine) =>
         engine.SubmitAsync(new PermissionRequestSubmission(

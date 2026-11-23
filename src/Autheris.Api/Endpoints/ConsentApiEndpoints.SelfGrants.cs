@@ -106,9 +106,19 @@ public static partial class ConsentApiEndpoints
             return ApiProblems.Problem(StatusCodes.Status422UnprocessableEntity, Autheris.Application.Governance.Grants.GrantErrorCodes.EndDateRequired, "A finite validTo is required.", context);
         }
 
-        var (domain, schema, tableName) = ResolveTableParts(
-            new CreateConsentRequestBody(Domain: body.Domain, Schema: body.Schema, TableName: body.TableName, Table: body.Table));
-        if (string.IsNullOrWhiteSpace(tableName))
+        var domain = body.Domain;
+        var schema = body.Schema;
+        var tableName = body.TableName;
+        if (string.IsNullOrWhiteSpace(domain) && string.IsNullOrWhiteSpace(schema) && string.IsNullOrWhiteSpace(tableName) && !string.IsNullOrWhiteSpace(body.Table))
+        {
+            var parts = body.Table.Trim().Split('.', 3, StringSplitOptions.TrimEntries);
+            if (parts.Length == 3)
+            {
+                (domain, schema, tableName) = (parts[0], parts[1], parts[2]);
+            }
+        }
+
+        if (!TableIdentifier.TryCreate(domain ?? string.Empty, schema ?? string.Empty, tableName ?? string.Empty, out var table))
         {
             return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "A table target is required.", context);
         }
@@ -116,7 +126,7 @@ public static partial class ConsentApiEndpoints
         var command = new SelfGrantCommand(
             actor,
             kind,
-            PermissionTarget.ForTable(new TableIdentifier(domain, schema, tableName), body.Columns),
+            PermissionTarget.ForTable(table, body.Columns),
             granteeType,
             string.IsNullOrWhiteSpace(body.Grantee) ? actor.UserSid.Value : body.Grantee.Trim(),
             body.ValidTo.Value,
