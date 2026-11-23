@@ -27,6 +27,9 @@ public partial class GovernanceRepository
     public Task<IReadOnlyList<Consent>> GetActivePatternConsentsAsync(TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default) =>
         ReadAndHydratePatternConsentsAsync(TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), atTime, c => !c.IsActive(atTime), ct);
 
+    public Task<IReadOnlyList<Consent>> GetPatternConsentsWithPendingDeniesAsync(TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default) =>
+        ReadAndHydratePatternConsentsAsync(TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), atTime, c => !c.IsActive(atTime) && !(c.Effect == ConsentEffect.Deny && c.ValidFrom > atTime), ct);
+
     public Task<IReadOnlyList<Consent>> GetActiveInternalPatternConsentsAsync(DateTimeOffset atTime, CancellationToken ct = default) =>
         ReadAndHydratePatternConsentsAsync(null, atTime, c => !c.IsActive(atTime) || c.Effect != ConsentEffect.Allow || c.WorkflowMode != ConsentWorkflowMode.Internal, ct);
 

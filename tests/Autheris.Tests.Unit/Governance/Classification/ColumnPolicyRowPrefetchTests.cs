@@ -78,6 +78,7 @@ public sealed class ColumnPolicyRowPrefetchTests
 
     private static ColumnPolicyRowPrefetch Empty(string tenant, params Guid[] columns) => new(
         tenant,
+        FixedNow,
         columns.Select(static c => c.ToString()).ToList(),
         new Dictionary<string, IReadOnlyList<ColumnClassification>>(),
         new Dictionary<string, IReadOnlyList<ColumnMaskOverride>>());
@@ -130,7 +131,7 @@ public sealed class ColumnPolicyRowPrefetchTests
 
         // A prefetch of another tenant that has no rows: using it would drop the PII and CONFIDENTIAL classifications.
         var foreign = Empty("tenant-other", IdColumn, SsnColumn, MailColumn);
-        foreign.Covers(Tenant.Value, [IdColumn.ToString()]).ShouldBeFalse();
+        foreign.Covers(Tenant.Value, [IdColumn.ToString()], FixedNow).ShouldBeFalse();
 
         var (_, combined) = await resolver.ResolveForTableAsync(metadata, [Grant()], Tenant, null, columnRowPrefetch: foreign);
         combined.ShouldContainKey("mail");
@@ -145,10 +146,20 @@ public sealed class ColumnPolicyRowPrefetchTests
         var metadata = Metadata();
         // Covers only "id" and has no rows: using it for the table would drop the PII classification of "ssn".
         var prefetch = Empty(Tenant.Value, IdColumn);
-        prefetch.Covers(Tenant.Value, [IdColumn.ToString(), SsnColumn.ToString()]).ShouldBeFalse();
+        prefetch.Covers(Tenant.Value, [IdColumn.ToString(), SsnColumn.ToString()], FixedNow).ShouldBeFalse();
 
         var (_, combined) = await resolver.ResolveForTableAsync(metadata, [Grant()], Tenant, null, columnRowPrefetch: prefetch);
         combined.ShouldContainKey("ssn");
         combined["ssn"].WinningClassificationCode.ShouldBe(ClassificationScopes.PiiCode);
+    }
+
+    [Fact]
+    public void StalePrefetch_IsNotUsed()
+    {
+        var prefetch = Empty(Tenant.Value, IdColumn);
+
+        prefetch.Covers(Tenant.Value, [IdColumn.ToString()], FixedNow.AddSeconds(5)).ShouldBeTrue();
+        prefetch.Covers(Tenant.Value, [IdColumn.ToString()], FixedNow.AddSeconds(6)).ShouldBeFalse();
+        prefetch.Covers(Tenant.Value, [IdColumn.ToString()], FixedNow.AddSeconds(-1)).ShouldBeFalse();
     }
 }

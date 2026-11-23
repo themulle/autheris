@@ -13,7 +13,7 @@ public sealed partial class ClassificationAccessResolver
     /// Issue #1043: the persisted rows of every column of the table (by column id, as the per-column reads), from the batch prefetch when
     /// it covers the table for this tenant, otherwise in one repository read.
     /// </summary>
-    private static async Task<IReadOnlyDictionary<string, IReadOnlyList<T>>> LoadPerTableAsync<T>(
+    private async Task<IReadOnlyDictionary<string, IReadOnlyList<T>>> LoadPerTableAsync<T>(
         TableMetadata metadata,
         string tenantId,
         ColumnPolicyRowPrefetch? prefetch,
@@ -27,7 +27,7 @@ public sealed partial class ClassificationAccessResolver
             return new Dictionary<string, IReadOnlyList<T>>(StringComparer.OrdinalIgnoreCase);
         }
 
-        if (prefetch is not null && prefetch.Covers(tenantId, ids))
+        if (prefetch is not null && prefetch.Covers(tenantId, ids, _timeProvider.GetUtcNow()))
         {
             var fromBatch = new Dictionary<string, IReadOnlyList<T>>(StringComparer.OrdinalIgnoreCase);
             foreach (var id in ids)
@@ -89,8 +89,9 @@ public sealed partial class ClassificationAccessResolver
             return null;
         }
 
+        var readAt = _timeProvider.GetUtcNow();
         var classifications = await _repository.GetColumnClassificationsBatchAsync(ids, tenantId, ct).ConfigureAwait(false);
         var overrides = await _repository.GetColumnMaskOverridesBatchAsync(ids, tenantId, ct).ConfigureAwait(false);
-        return new ColumnPolicyRowPrefetch(tenantId, ids, classifications, overrides);
+        return new ColumnPolicyRowPrefetch(tenantId, readAt, ids, classifications, overrides);
     }
 }

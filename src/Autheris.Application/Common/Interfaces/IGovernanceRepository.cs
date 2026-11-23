@@ -350,6 +350,14 @@ public interface IConsentRepository
         TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<Consent>>([]);
 
+    /// <summary>
+    /// Issue #1043: <see cref="GetActivePatternConsentsAsync"/> plus the not-yet-valid Deny pattern grants, for a batch prefetch that
+    /// re-applies the activity rule at each decision's time (a Deny that starts during the batch must not be lost).
+    /// </summary>
+    Task<IReadOnlyList<Consent>> GetPatternConsentsWithPendingDeniesAsync(
+        TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default)
+        => GetActivePatternConsentsAsync(tenantId, atTime, ct);
+
     /// <summary>Returns all active non-revoked Internal-workflow Allow pattern grants across tenants at <paramref name="atTime"/>.</summary>
     Task<IReadOnlyList<Consent>> GetActiveInternalPatternConsentsAsync(
         DateTimeOffset atTime, CancellationToken ct = default)
