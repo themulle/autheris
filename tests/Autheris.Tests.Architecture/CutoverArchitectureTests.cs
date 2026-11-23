@@ -357,7 +357,7 @@ public sealed partial class CutoverArchitectureTests
             (called.Name == "set_CommandText" || (called.Name is "CreateCommand" or "CreateBatchCommand" && TakesString(called))),
         Code.Newobj => instruction.Operand is MethodReference { Name: ".ctor" } constructor &&
             constructor.DeclaringType.Name.EndsWith("Command", StringComparison.Ordinal) &&
-            !constructor.DeclaringType.Namespace.StartsWith("Autheris.Application.ConsentRequests", StringComparison.Ordinal) && !constructor.DeclaringType.Namespace.StartsWith("Autheris.Application.Governance.Requests", StringComparison.Ordinal) &&
+            !constructor.DeclaringType.Namespace.StartsWith("Autheris.Application.ConsentRequests", StringComparison.Ordinal) && !CommandRecordExemptions.DataCarriers.Contains(constructor.DeclaringType.FullName) &&
             TakesString(constructor),
         _ => false
     };

@@ -12,6 +12,7 @@ using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
+using Microsoft.Extensions.Logging;
 
 namespace Autheris.Application.Governance.Requests;
 
@@ -159,36 +160,45 @@ public sealed partial class PermissionRequestEngine
 
             var created = await _consentRepository.CreateConsentAsync(renewedConsent, ct).ConfigureAwait(false);
 
-            if (consent.ConsentRequestId is { } requestId)
+            try
             {
-                // The superseded consent ends at renewal; a failed end keeps the earlier validity, never widens access.
-                await _consentRepository.RevokeSystemConsentAsync(
-                    consent.Id, requestId, renewer.UserSid, "Renewed by approver.", ct).ConfigureAwait(false);
-            }
+                // The superseded consent always ends at renewal; if it cannot be ended the renewal is rolled back.
+                var ended = await _consentRepository.RevokeSystemConsentByIdAsync(
+                    tenant, consent.Id, renewer.UserSid, "Renewed by approver.", ct).ConfigureAwait(false);
+                if (!ended)
+                {
+                    throw new InvalidOperationException("The superseded grant could not be ended during renewal.");
+                }
 
-            await _auditWriter.RecordRequiredAsync(new AuditLogEntry
+                await _auditWriter.RecordRequiredAsync(new AuditLogEntry
+                {
+                    Id = Guid.NewGuid(),
+                    OccurredAt = now,
+                    EventType = AuditEventTypes.GrantRenewed,
+                    ActorSid = renewer.UserSid,
+                    TargetTable = consent.TableIdentifier.ToString(),
+                    Decision = "RENEWED",
+                    TraceId = GetTraceId(),
+                    TenantId = tenant,
+                    DetailsJson = new PermissionAuditDetails(
+                        Actor: renewer.UserSid.Value,
+                        Subject: consent.GranteeSid.Value.Value,
+                        TargetObject: consent.TableIdentifier.ToString(),
+                        ValidFrom: now,
+                        ValidTo: newValidTo,
+                        Justification: justification,
+                        Capacity: capacity,
+                        SelfGrant: false,
+                        RequestId: consent.ConsentRequestId,
+                        ActorKind: PermissionAuditDetails.ResolveActorKind(renewer),
+                        GrantKind: consent.GrantKind.ToSqlString()).ToDetailsJson()
+                }, ct).ConfigureAwait(false);
+            }
+            catch
             {
-                Id = Guid.NewGuid(),
-                OccurredAt = now,
-                EventType = AuditEventTypes.GrantRenewed,
-                ActorSid = renewer.UserSid,
-                TargetTable = consent.TableIdentifier.ToString(),
-                Decision = "RENEWED",
-                TraceId = GetTraceId(),
-                TenantId = tenant,
-                DetailsJson = new PermissionAuditDetails(
-                    Actor: renewer.UserSid.Value,
-                    Subject: consent.GranteeSid.Value.Value,
-                    TargetObject: consent.TableIdentifier.ToString(),
-                    ValidFrom: now,
-                    ValidTo: newValidTo,
-                    Justification: justification,
-                    Capacity: capacity,
-                    SelfGrant: false,
-                    RequestId: consent.ConsentRequestId,
-                    ActorKind: PermissionAuditDetails.ResolveActorKind(renewer),
-                    GrantKind: consent.GrantKind.ToSqlString()).ToDetailsJson()
-            }, ct).ConfigureAwait(false);
+                await RollbackRenewedConsentAsync(tenant, created, renewer.UserSid).ConfigureAwait(false);
+                throw;
+            }
 
             _cacheInvalidator?.InvalidateTenant(tenant.Value);
             if (_policyEpochRepository is not null)
@@ -202,6 +212,20 @@ public sealed partial class PermissionRequestEngine
         {
             await RecordRenewalDeniedAsync(renewer, tenant, consent.Id, newValidTo, justification, ex.ErrorCode, ct).ConfigureAwait(false);
             throw;
+        }
+    }
+
+    /// <summary>Best-effort compensation: no extended grant may outlive a renewal that did not complete.</summary>
+    private async Task RollbackRenewedConsentAsync(TenantId tenant, Consent created, Sid actor)
+    {
+        try
+        {
+            await _consentRepository!.RevokeSystemConsentByIdAsync(
+                tenant, created.Id, actor, "Renewal rolled back.", CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogError(ex, "Rolling back the renewed grant {GrantId} failed; it must be revoked manually.", created.Id);
         }
     }
 

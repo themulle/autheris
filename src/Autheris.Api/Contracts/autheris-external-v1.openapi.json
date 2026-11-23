@@ -335,6 +335,89 @@
         }
       }
     },
+    "/api/v1/consent/self-grants": {
+      "post": {
+        "operationId": "createSelfGrant",
+        "summary": "IT administrator self-grant on a table without owner group",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/SelfGrantRequestBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Self-grant completed"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Target not found"
+          },
+          "409": {
+            "description": "Conflict"
+          },
+          "422": {
+            "description": "Rejected by grant rules"
+          }
+        }
+      }
+    },
+    "/api/v1/consent/grants/{id}/renew": {
+      "post": {
+        "operationId": "renewConsentGrant",
+        "summary": "Renew a data or unmask grant (eligible approver only)",
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uuid"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "$ref": "#/components/schemas/RenewGrantRequestBody"
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "Grant renewed"
+          },
+          "400": {
+            "description": "Bad Request"
+          },
+          "403": {
+            "description": "Forbidden"
+          },
+          "404": {
+            "description": "Not Found"
+          },
+          "409": {
+            "description": "Grant not active"
+          },
+          "422": {
+            "description": "Rejected by grant rules"
+          }
+        }
+      }
+    },
     "/api/v1/consent/profile-assignments/{id}/revoke": {
       "post": {
         "operationId": "revokeProfileAssignment",
@@ -659,6 +742,73 @@
         "type": "object",
         "properties": {
           "reason": { "type": "string", "nullable": true }
+        }
+      },
+      "SelfGrantRequestBody": {
+        "type": "object",
+        "properties": {
+          "domain": {
+            "type": "string",
+            "nullable": true
+          },
+          "schema": {
+            "type": "string",
+            "nullable": true
+          },
+          "tableName": {
+            "type": "string",
+            "nullable": true
+          },
+          "table": {
+            "type": "string",
+            "nullable": true
+          },
+          "columns": {
+            "type": "array",
+            "items": {
+              "type": "string"
+            },
+            "nullable": true
+          },
+          "kind": {
+            "type": "string",
+            "enum": [
+              "data",
+              "unmask"
+            ],
+            "nullable": true
+          },
+          "grantee": {
+            "type": "string",
+            "nullable": true
+          },
+          "granteeType": {
+            "type": "string",
+            "nullable": true
+          },
+          "validTo": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "justification": {
+            "type": "string",
+            "nullable": true
+          }
+        }
+      },
+      "RenewGrantRequestBody": {
+        "type": "object",
+        "properties": {
+          "validTo": {
+            "type": "string",
+            "format": "date-time",
+            "nullable": true
+          },
+          "justification": {
+            "type": "string",
+            "nullable": true
+          }
         }
       },
       "GrantRecordVerifyRequest": {

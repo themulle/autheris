@@ -84,6 +84,85 @@ public sealed class ExpiryNoticeStagesMigrationStep0042Tests
         }
     }
 
+    [Theory]
+    [InlineData("postgresql")]
+    [InlineData("sqlserver")]
+    public async Task Already_sent_notice_becomes_stage_one_before_the_column_is_dropped(string engine)
+    {
+        var step = SqlMigrationStep.LoadEmbedded(engine).Single(s => s.Name == "expiry_notice_stages");
+
+        if (engine == "postgresql")
+        {
+            // The pre-step shape lives in a dedicated schema of a throwaway clone; the unqualified step SQL resolves there only.
+            await using var conn = new NpgsqlConnection(await GovernanceTestDatabase.CreateAsync("expiry_stage_backfill"));
+            await conn.OpenAsync();
+            await ExecAsync(conn, new NpgsqlCommand(@"
+                CREATE SCHEMA pre_step;
+                SET search_path TO pre_step;
+                CREATE TABLE CONSENTS (id TEXT PRIMARY KEY, expiry_notice_sent_at TIMESTAMPTZ NULL);
+                CREATE TABLE CONSENT_WORKFLOW_ROUTES (tenant_id TEXT PRIMARY KEY, expiry_notice_lead_hours INT NOT NULL DEFAULT 24);
+                INSERT INTO CONSENTS (id, expiry_notice_sent_at) VALUES ('notified', now()), ('fresh', NULL);", conn));
+            for (var run = 0; run < 2; run++)
+            {
+                foreach (var batch in step.Batches)
+                {
+                    await ExecAsync(conn, new NpgsqlCommand(batch, conn));
+                }
+            }
+
+            await using var cmd = new NpgsqlCommand("SELECT id, expiry_notice_stage FROM CONSENTS ORDER BY id", conn);
+            await using var reader = await cmd.ExecuteReaderAsync();
+            var stages = new System.Collections.Generic.Dictionary<string, int>();
+            while (await reader.ReadAsync())
+            {
+                stages[reader.GetString(0)] = reader.GetInt32(1);
+            }
+
+            stages["notified"].ShouldBe(1);
+            stages["fresh"].ShouldBe(0);
+        }
+        else
+        {
+            await using var db = await SqlServerTestDatabase.CreateAsync();
+            if (!db.IsAvailable) return;
+
+            await using var conn = new SqlConnection(db.ConnectionString);
+            await conn.OpenAsync();
+            await ExecAsync(conn, new SqlCommand(@"
+                CREATE TABLE dbo.CONSENTS (id NVARCHAR(64) NOT NULL PRIMARY KEY, expiry_notice_sent_at DATETIMEOFFSET NULL);
+                CREATE TABLE dbo.CONSENT_WORKFLOW_ROUTES (tenant_id NVARCHAR(64) NOT NULL PRIMARY KEY,
+                    expiry_notice_lead_hours INT NOT NULL CONSTRAINT DF_CONSENT_WORKFLOW_ROUTES_expiry_notice_lead_hours DEFAULT 24);
+                INSERT INTO dbo.CONSENTS (id, expiry_notice_sent_at) VALUES (N'notified', SYSDATETIMEOFFSET()), (N'fresh', NULL);", conn));
+            // The SQL Server backfill reads the old column directly (the step lint forbids dynamic SQL), so the step runs once.
+            for (var run = 0; run < 1; run++)
+            {
+                foreach (var batch in step.Batches)
+                {
+                    await ExecAsync(conn, new SqlCommand(batch, conn));
+                }
+            }
+
+            await using var cmd = new SqlCommand("SELECT id, expiry_notice_stage FROM dbo.CONSENTS ORDER BY id", conn);
+            await using var reader = await cmd.ExecuteReaderAsync();
+            var stages = new System.Collections.Generic.Dictionary<string, int>();
+            while (await reader.ReadAsync())
+            {
+                stages[reader.GetString(0)] = reader.GetInt32(1);
+            }
+
+            stages["notified"].ShouldBe(1);
+            stages["fresh"].ShouldBe(0);
+        }
+    }
+
+    private static async Task ExecAsync(System.Data.Common.DbConnection _, System.Data.Common.DbCommand command)
+    {
+        await using (command)
+        {
+            await command.ExecuteNonQueryAsync();
+        }
+    }
+
     private static async Task<bool> ColumnExistsPgAsync(NpgsqlConnection conn, string table, string column)
     {
         await using var cmd = new NpgsqlCommand(

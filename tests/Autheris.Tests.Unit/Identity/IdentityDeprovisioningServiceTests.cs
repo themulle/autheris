@@ -29,7 +29,7 @@ public sealed class IdentityDeprovisioningServiceTests
     [Fact]
     public void Constructor_NullStoreRepository_ThrowsArgumentNullException()
     {
-        Should.Throw<ArgumentNullException>(() => new IdentityDeprovisioningService(null!));
+        Should.Throw<ArgumentNullException>(() => new IdentityDeprovisioningService(null!, Autheris.Tests.Unit.TestSupport.NoOpGrantRevocation.Instance));
     }
 
     [Theory]
@@ -38,7 +38,7 @@ public sealed class IdentityDeprovisioningServiceTests
     [InlineData("   ")]
     public async Task DeprovisionAndLockSubjectAsync_InvalidRealmId_ThrowsArgumentException(string? realmId)
     {
-        var sut = new IdentityDeprovisioningService(_storeRepo);
+        var sut = new IdentityDeprovisioningService(_storeRepo, Autheris.Tests.Unit.TestSupport.NoOpGrantRevocation.Instance);
         await Should.ThrowAsync<ArgumentException>(() =>
             sut.DeprovisionAndLockSubjectAsync(new TenantId("t1"), realmId!, "user-1", "reason", "admin"));
     }
@@ -49,7 +49,7 @@ public sealed class IdentityDeprovisioningServiceTests
     [InlineData("   ")]
     public async Task DeprovisionAndLockSubjectAsync_InvalidUserKey_ThrowsArgumentException(string? userKey)
     {
-        var sut = new IdentityDeprovisioningService(_storeRepo);
+        var sut = new IdentityDeprovisioningService(_storeRepo, Autheris.Tests.Unit.TestSupport.NoOpGrantRevocation.Instance);
         await Should.ThrowAsync<ArgumentException>(() =>
             sut.DeprovisionAndLockSubjectAsync(new TenantId("t1"), "realm-1", userKey!, "reason", "admin"));
     }
@@ -58,7 +58,7 @@ public sealed class IdentityDeprovisioningServiceTests
     public async Task DeprovisionAndLockSubjectAsync_AllDependenciesConfigured_ExecutesFullDeprovisioningPipeline()
     {
         var sut = new IdentityDeprovisioningService(
-            _storeRepo,
+            _storeRepo, Autheris.Tests.Unit.TestSupport.NoOpGrantRevocation.Instance,
             _tokenRevocation,
             _pubSub,
             _roleCache,
@@ -123,7 +123,7 @@ public sealed class IdentityDeprovisioningServiceTests
     [Fact]
     public async Task DeprovisionAndLockSubjectAsync_NullOptionalDependencies_SucceedsWithoutError()
     {
-        var sut = new IdentityDeprovisioningService(_storeRepo);
+        var sut = new IdentityDeprovisioningService(_storeRepo, Autheris.Tests.Unit.TestSupport.NoOpGrantRevocation.Instance);
         var tenantId = new TenantId("tenant-corp");
 
         await sut.DeprovisionAndLockSubjectAsync(tenantId, "realm-1", "user-1", "reason", "admin");
@@ -136,7 +136,7 @@ public sealed class IdentityDeprovisioningServiceTests
     public async Task DeprovisionAndLockSubjectAsync_SubscriptionStoreConfigured_RemovesUserSubscriptions()
     {
         var subStore = Substitute.For<Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore>();
-        var sut = new IdentityDeprovisioningService(_storeRepo, subscriptionStore: subStore);
+        var sut = new IdentityDeprovisioningService(_storeRepo, Autheris.Tests.Unit.TestSupport.NoOpGrantRevocation.Instance, subscriptionStore: subStore);
         var tenantId = new TenantId("tenant-corp");
 
         var sub1 = new CloudEventWebhookSubscription("sub-1", "tenant-corp", "https://example.test", "*", [], "sec", CreatedBySid: "user-1");
@@ -153,7 +153,7 @@ public sealed class IdentityDeprovisioningServiceTests
     [Fact]
     public async Task DeprovisionAsync_DefaultInterfaceMethod_ForwardsToDeprovisionAndLockSubject()
     {
-        var sut = (IIdentityDeprovisioningService)new IdentityDeprovisioningService(_storeRepo);
+        var sut = (IIdentityDeprovisioningService)new IdentityDeprovisioningService(_storeRepo, Autheris.Tests.Unit.TestSupport.NoOpGrantRevocation.Instance);
         var tenantId = new TenantId("tenant-corp");
         var initiatorSid = new Sid("admin@domain.local");
 

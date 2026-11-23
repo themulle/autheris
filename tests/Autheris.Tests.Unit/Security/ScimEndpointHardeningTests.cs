@@ -278,7 +278,7 @@ public sealed class ScimEndpointHardeningTests
     private static ScimService CreateScimService(ScimDeprovisioningTests.SharedDeprovisionStore store, RecordingAuditWriter audit)
     {
         var time = new StaticTimeProvider(FixedNow);
-        var deprov = new IdentityDeprovisioningService(store);
+        var deprov = new IdentityDeprovisioningService(store, Autheris.Tests.Unit.TestSupport.NoOpGrantRevocation.Instance);
         return new ScimService(store, deprov, timeProvider: time, auditWriter: audit);
     }
 

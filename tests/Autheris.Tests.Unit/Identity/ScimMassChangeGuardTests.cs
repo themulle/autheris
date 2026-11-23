@@ -234,7 +234,7 @@ public sealed class ScimMassChangeGuardTests
     [Trait("Category", "Security")]
     public async Task WAVE3_SCIM_T03_AdminDeprovision_NotCountedNorBlocked()
     {
-        IIdentityDeprovisioningService service = new IdentityDeprovisioningService(_repo);
+        IIdentityDeprovisioningService service = new IdentityDeprovisioningService(_repo, Autheris.Tests.Unit.TestSupport.NoOpGrantRevocation.Instance);
         await service.DeprovisionAsync(Tenant, Realm, User, "admin", new Sid("admin-sid"));
         await _repo.Received(1).AddLockAsync(Arg.Is<ScimLock>(l => l.Source == "admin-sid"), Arg.Any<CancellationToken>());
         await _repo.DidNotReceiveWithAnyArgs().CountLocksSinceAsync(default, default!, default!, default, default, default);

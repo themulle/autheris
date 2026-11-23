@@ -75,7 +75,7 @@ public sealed class ScimPrivilegedGroupChangeAuditTests
         var roleCache = new RoleResolverCache(timeProvider: time, changeNotifier: changeNotifier);
         var scim = new ScimService(
             new OperationTrackingStore(store, orderLog),
-            new IdentityDeprovisioningService(store, roleResolverCache: roleCache, governanceChangeNotifier: changeNotifier, timeProvider: time),
+            new IdentityDeprovisioningService(store, Autheris.Tests.Unit.TestSupport.NoOpGrantRevocation.Instance, roleResolverCache: roleCache, governanceChangeNotifier: changeNotifier, timeProvider: time),
             roleCache: roleCache,
             timeProvider: time,
             auditWriter: auditWriter,
@@ -147,7 +147,7 @@ public sealed class ScimPrivilegedGroupChangeAuditTests
 
         var scim = new ScimService(
             store,
-            new IdentityDeprovisioningService(store, timeProvider: time),
+            new IdentityDeprovisioningService(store, Autheris.Tests.Unit.TestSupport.NoOpGrantRevocation.Instance, timeProvider: time),
             timeProvider: time,
             auditWriter: auditWriter,
             privilegedGroupAuditor: auditor);
@@ -193,7 +193,7 @@ public sealed class ScimPrivilegedGroupChangeAuditTests
             notificationDispatcher: dispatcher);
         var scim = new ScimService(
             store,
-            new IdentityDeprovisioningService(store, timeProvider: time),
+            new IdentityDeprovisioningService(store, Autheris.Tests.Unit.TestSupport.NoOpGrantRevocation.Instance, timeProvider: time),
             timeProvider: time,
             auditWriter: failingAudit,
             governanceChangeNotifier: notifier,
@@ -231,7 +231,7 @@ public sealed class ScimPrivilegedGroupChangeAuditTests
             notificationDispatcher: dispatcher);
         var scim = new ScimService(
             store,
-            new IdentityDeprovisioningService(store, timeProvider: time),
+            new IdentityDeprovisioningService(store, Autheris.Tests.Unit.TestSupport.NoOpGrantRevocation.Instance, timeProvider: time),
             timeProvider: time,
             auditWriter: auditWriter,
             governanceChangeNotifier: notifier,

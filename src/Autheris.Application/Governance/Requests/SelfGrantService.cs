@@ -8,6 +8,7 @@ using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
+using Microsoft.Extensions.Logging;
 
 namespace Autheris.Application.Governance.Requests;
 
@@ -37,7 +38,8 @@ public sealed record SelfGrantCommand(
 public sealed class SelfGrantService(
     PermissionRequestEngine engine,
     IAuditWriter auditWriter,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    ILogger<SelfGrantService>? logger = null)
 {
     private readonly PermissionRequestEngine _engine = engine ?? throw new ArgumentNullException(nameof(engine));
     private readonly IAuditWriter _auditWriter = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
@@ -58,7 +60,16 @@ public sealed class SelfGrantService(
             throw;
         }
 
-        await _engine.NotifySelfGrantAsync(result.Request, command.Actor, ct).ConfigureAwait(false);
+        // The grant is committed: a notification failure must neither fail the call nor undo or hide the grant.
+        try
+        {
+            await _engine.NotifySelfGrantAsync(result.Request, command.Actor, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            logger?.LogWarning(ex, "Self-grant notification for request {RequestId} failed after the grant was committed.", result.Request.Id);
+        }
+
         return result;
     }
 

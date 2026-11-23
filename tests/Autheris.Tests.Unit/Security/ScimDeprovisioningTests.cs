@@ -45,7 +45,7 @@ public sealed class ScimDeprovisioningTests
         store.SeedUser("u-1", OidA, active: true);
         store.SeedGroup("g-1", SidA);
         store.Memberships.Add(("g-1", "u-1"));
-        var deprov = new IdentityDeprovisioningService(store);
+        var deprov = new IdentityDeprovisioningService(store, Autheris.Tests.Unit.TestSupport.NoOpGrantRevocation.Instance);
         var svc = new ScimService(store, deprov);
 
         var deleted = await svc.DeleteUserAsync(Tenant, "realm-1", "u-1");
@@ -63,7 +63,7 @@ public sealed class ScimDeprovisioningTests
         store.SeedUser("u-1", OidA, active: true);
         store.SeedGroup("g-1", SidA);
         store.Memberships.Add(("g-1", "u-1"));
-        var deprov = new IdentityDeprovisioningService(store);
+        var deprov = new IdentityDeprovisioningService(store, Autheris.Tests.Unit.TestSupport.NoOpGrantRevocation.Instance);
         var svc = new ScimService(store, deprov);
 
         var patch = new ScimPatchRequest([ScimSchemaUris.PatchOp], [new ScimPatchOperation("replace", "active", false)]);
@@ -110,7 +110,7 @@ public sealed class ScimDeprovisioningTests
         cached.GroupSids.Count.ShouldBe(2);
         store.EffectiveQueryCount.ShouldBe(1);
 
-        var node1Scim = new ScimService(store, new IdentityDeprovisioningService(store, roleResolverCache: node1Cache), roleCache: node1Cache, timeProvider: time);
+        var node1Scim = new ScimService(store, new IdentityDeprovisioningService(store, Autheris.Tests.Unit.TestSupport.NoOpGrantRevocation.Instance, roleResolverCache: node1Cache), roleCache: node1Cache, timeProvider: time);
         var patch = new ScimPatchRequest([ScimSchemaUris.PatchOp], [new ScimPatchOperation("remove", "members[value eq \"u-1\"]", null)]);
         await node1Scim.PatchGroupAsync(Tenant, "realm-1", "g-2", patch);
 
@@ -126,7 +126,7 @@ public sealed class ScimDeprovisioningTests
         store.SeedUser("u-1", OidA, active: true);
         store.SeedGroup("g-1", SidA);
         store.Memberships.Add(("g-1", "u-1"));
-        var svc = new ScimService(store, new IdentityDeprovisioningService(store));
+        var svc = new ScimService(store, new IdentityDeprovisioningService(store, Autheris.Tests.Unit.TestSupport.NoOpGrantRevocation.Instance));
 
         await svc.DeleteUserAsync(Tenant, "realm-1", "u-1");
 
@@ -190,7 +190,7 @@ public sealed class ScimDeprovisioningTests
         visibilityCache.TryGet(visKey, out _).ShouldBeTrue();
 
         var deprov = new IdentityDeprovisioningService(
-            store,
+            store, Autheris.Tests.Unit.TestSupport.NoOpGrantRevocation.Instance,
             roleResolverCache: roleCache,
             governanceChangeNotifier: notifier,
             timeProvider: time);
