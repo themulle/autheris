@@ -108,3 +108,6 @@ public sealed record GrantRenewalCommand(
     SecurityPrincipalContext Renewer,
     DateTimeOffset? NewValidTo,
     string? Justification);
+
+/// <summary>Outcome of a committed renewal: the new consent (signed <c>Renewed</c> ledger entry) and the consent it replaced.</summary>
+public sealed record GrantRenewalResult(Consent Renewed, Guid PreviousConsentId, ApproverCapacity Capacity);

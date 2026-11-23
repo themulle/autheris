@@ -6,6 +6,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy.Classification;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -65,8 +66,13 @@ public static partial class ClassificationAdminEndpoints
 
         app.MapPut(ClassificationRoute, async (
             string code, ClassificationDefinitionRequest? body, string? scope, string? tenant, HttpContext http,
-            [FromServices] IClassificationAdminService service, CancellationToken ct) =>
+            [FromServices] IClassificationAdminService service, [FromServices] IGovernanceCapabilities capabilities, CancellationToken ct) =>
         {
+            if (DenyUnlessGovernance(http, capabilities) is { } denied)
+            {
+                return denied;
+            }
+
             if (!TryParseScope(scope, out var parsedScope))
             {
                 return InvalidScope(http);
@@ -103,8 +109,13 @@ public static partial class ClassificationAdminEndpoints
 
         app.MapPut(ClassificationRoute + "/mask-rule", async (
             string code, MaskRuleRequest? body, string? scope, string? tenant, HttpContext http,
-            [FromServices] IClassificationAdminService service, CancellationToken ct) =>
+            [FromServices] IClassificationAdminService service, [FromServices] IGovernanceCapabilities capabilities, CancellationToken ct) =>
         {
+            if (DenyUnlessGovernance(http, capabilities) is { } denied)
+            {
+                return denied;
+            }
+
             if (!TryParseScope(scope, out var parsedScope))
             {
                 return InvalidScope(http);
@@ -232,4 +243,14 @@ public static partial class ClassificationAdminEndpoints
         catalogText = ClassificationCatalogTextVisibilities.ToCode(r.CatalogText),
         version = r.Version
     };
+
+    /// <summary>Classification and mask-rule definitions are governance-owned; IT capacity alone never writes them.</summary>
+    private static IResult? DenyUnlessGovernance(HttpContext http, IGovernanceCapabilities capabilities)
+    {
+        var security = http.GetSecurityContext();
+        var tenant = security.ResolvedTenant ?? security.TenantId;
+        return capabilities.IsGovernance(security.Principal ?? http.User, tenant)
+            ? null
+            : ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, "Only Data Governance may change classification definitions.", http);
+    }
 }

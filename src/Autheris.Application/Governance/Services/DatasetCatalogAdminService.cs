@@ -40,6 +40,7 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
     private readonly IOptionsMonitor<GatewayOptions> _options;
     private readonly TimeProvider _time;
     private readonly IEventBus? _eventBus;
+    private readonly IGovernanceCapabilities? _capabilities;
     // Probe throttle state: bounded (hard cap, then one shared overflow bucket), swept at most once per window under the lock.
     private readonly Dictionary<string, ProbeWindowState> _probes = new(StringComparer.Ordinal);
     private readonly object _probeLock = new();
@@ -57,7 +58,8 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         IAuditWriter audit,
         IOptionsMonitor<GatewayOptions> options,
         TimeProvider? time = null,
-        IEventBus? eventBus = null)
+        IEventBus? eventBus = null,
+        IGovernanceCapabilities? capabilities = null)
     {
         _tables = tables ?? throw new ArgumentNullException(nameof(tables));
         _owners = owners;
@@ -65,6 +67,7 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _time = time ?? TimeProvider.System;
         _eventBus = eventBus;
+        _capabilities = capabilities;
     }
 
     private sealed class ProbeWindowState(DateTimeOffset start, Caller owner, bool overflow = false)
@@ -115,6 +118,12 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
 
         var actor = gate.Caller!.Value;
         var table = gate.Table;
+
+        // Tags and privacy flags are governance-owned: an IT administrator without governance capacity or ownership never edits them.
+        if (await IsItOnlyWriterAsync(caller, actor, table, ct).ConfigureAwait(false))
+        {
+            return new DatasetCatalogResult(DatasetCatalogOutcome.Forbidden);
+        }
 
         // Validation of the whole body, only after the caller is known to manage the dataset.
         if (edit.Malformed)
@@ -357,6 +366,30 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
         }
 
         return new DatasetCatalogResult(changed ? DatasetCatalogOutcome.Applied : DatasetCatalogOutcome.Unchanged, table, after, warning);
+    }
+
+    private async Task<bool> IsItOnlyWriterAsync(ClaimsPrincipal? principal, Caller actor, TableIdentifier table, CancellationToken ct)
+    {
+        if (_capabilities is null || !actor.IsAdmin || principal is null ||
+            !_capabilities.IsItAdmin(principal, actor.Tenant) ||
+            _capabilities.IsGovernance(principal, actor.Tenant))
+        {
+            return false;
+        }
+
+        if (_owners is null)
+        {
+            return true;
+        }
+
+        try
+        {
+            return !await _owners.IsAuthorizedApproverForTableAsync(table, actor.Sid, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return true;
+        }
     }
 
     private readonly record struct Gate(DatasetCatalogResult? Failure, Caller? Caller, TableIdentifier Table);

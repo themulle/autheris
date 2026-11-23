@@ -1,0 +1,136 @@
+using System;
+using System.Linq;
+using System.Threading.Tasks;
+using Autheris.Application.ConsentRequests;
+using Autheris.Application.Governance.Requests;
+using Autheris.Domain.Audit;
+using Autheris.Domain.Model;
+using Autheris.Domain.Security;
+using Shouldly;
+using Xunit;
+using H = Autheris.Tests.Unit.Governance.Requests.SelfGrantHarness;
+
+namespace Autheris.Tests.Unit.Governance.Requests;
+
+[Trait("Category", "Security")]
+public sealed class GrantRenewalTests
+{
+    private const string Reason = "Quarterly renewal after access review.";
+
+    private static Consent Grant(string grantee = "user:alice", PermissionGrantKind kind = PermissionGrantKind.Data, bool selfGrant = false, int renewals = 0, bool withRequest = true) => new()
+    {
+        Id = Guid.NewGuid(),
+        TableId = Guid.NewGuid(),
+        TableIdentifier = H.Orders,
+        ConsentRequestId = withRequest ? Guid.NewGuid() : null,
+        TenantId = H.Tenant,
+        GranteeType = GranteeType.User,
+        GranteeSid = new Sid(grantee),
+        ValidFrom = H.Now.AddDays(-20),
+        ValidTo = H.Now.AddDays(10),
+        GrantKind = kind,
+        SelfGrant = selfGrant,
+        RenewalCount = renewals,
+        GrantSource = ConsentGrantSource.ConsentRequest
+    };
+
+    private static GrantRenewalCommand Cmd(Consent c, Autheris.Domain.Security.SecurityPrincipalContext renewer, int days = 90, string? justification = Reason) =>
+        new(c.Id, renewer, H.Now.AddDays(days), justification);
+
+    private static H Harness(Consent existing, Sid? owner = null, ProtectionClass cls = ProtectionClass.Internal) => new(cls, ownerGroup: owner) { Existing = existing };
+
+    [Fact]
+    public async Task Eligible_approver_renews_with_signed_ledger_entry()
+    {
+        var c = Grant();
+        var h = Harness(c);
+        var result = await h.Engine.RenewGrantAsync(Cmd(c, H.Actor("user:dg", "GovernanceAdmin")));
+        var created = h.CreatedConsents.ShouldHaveSingleItem();
+        created.RenewalCount.ShouldBe(1);
+        created.ValidFrom.ShouldBe(H.Now);
+        created.ValidTo.ShouldBe(H.Now.AddDays(90));
+        result.Capacity.ShouldBe(ApproverCapacity.Governance);
+        h.RevokedConsents.ShouldContain(c.Id);
+        h.Audit.Entries.ShouldContain(e => e.EventType == AuditEventTypes.GrantRenewed);
+    }
+
+    [Fact]
+    public async Task Renewal_by_grantee_denied()
+    {
+        var c = Grant(grantee: "user:alice");
+        var h = Harness(c);
+        var ex = await Should.ThrowAsync<ConsentDecisionException>(() => h.Engine.RenewGrantAsync(Cmd(c, H.Actor("user:alice", "TenantAdmin"))));
+        ex.ErrorCode.ShouldBe("SOD_VIOLATION");
+        h.CreatedConsents.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Ineligible_approver_refused()
+    {
+        var c = Grant();
+        var h = Harness(c, owner: new Sid("S-1-5-21-5-5-5-1001"));
+        // With an owner group assigned, an IT administrator is not an eligible approver.
+        var ex = await Should.ThrowAsync<ConsentDecisionException>(() => h.Engine.RenewGrantAsync(Cmd(c, H.Actor("user:it", "TenantAdmin"))));
+        ex.ErrorCode.ShouldBe("FORBIDDEN");
+        h.CreatedConsents.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Existing_selfgrant_not_renewable_by_grantee()
+    {
+        var c = Grant(grantee: "user:it", selfGrant: true);
+        var h = Harness(c, owner: new Sid("S-1-5-21-5-5-5-1001"));
+        await Should.ThrowAsync<ConsentDecisionException>(() => h.Engine.RenewGrantAsync(Cmd(c, H.Actor("user:it", "TenantAdmin"))));
+        h.CreatedConsents.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Renewal_needs_justification()
+    {
+        var c = Grant();
+        var h = Harness(c);
+        var ex = await Should.ThrowAsync<ConsentDecisionException>(() => h.Engine.RenewGrantAsync(Cmd(c, H.Actor("user:dg", "GovernanceAdmin"), justification: "short")));
+        ex.ErrorCode.ShouldBe(JustificationPolicy.TooShortErrorCode);
+        h.CreatedConsents.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Renewal_not_chained()
+    {
+        // Validity is measured from the renewal time against the renewer capacity, not from the previous end date.
+        var c = Grant();
+        var h = Harness(c);
+        var itRenewer = H.Actor("user:it", "TenantAdmin");
+        var ex = await Should.ThrowAsync<ConsentDecisionException>(() => h.Engine.RenewGrantAsync(Cmd(c, itRenewer, days: 400)));
+        ex.ErrorCode.ShouldBe(Autheris.Application.Governance.Grants.GrantErrorCodes.ExceedsApproverLimit);
+        h.CreatedConsents.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Catalog_grant_not_renewable()
+    {
+        var c = Grant(kind: PermissionGrantKind.Catalog);
+        var h = Harness(c);
+        var ex = await Should.ThrowAsync<ConsentDecisionException>(() => h.Engine.RenewGrantAsync(Cmd(c, H.Actor("user:dg", "GovernanceAdmin"))));
+        ex.ErrorCode.ShouldBe(PermissionRequestEngine.CatalogGrantNotRenewableCode);
+        h.CreatedConsents.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Missing_end_date_rejected()
+    {
+        var c = Grant();
+        var h = Harness(c);
+        var ex = await Should.ThrowAsync<ConsentDecisionException>(() => h.Engine.RenewGrantAsync(new GrantRenewalCommand(c.Id, H.Actor("user:dg", "GovernanceAdmin"), null, Reason)));
+        ex.ErrorCode.ShouldBe(Autheris.Application.Governance.Grants.GrantErrorCodes.EndDateRequired);
+    }
+
+    [Fact]
+    public async Task Unknown_grant_not_found()
+    {
+        var h = Harness(Grant());
+        var other = Grant();
+        var ex = await Should.ThrowAsync<ConsentDecisionException>(() => h.Engine.RenewGrantAsync(Cmd(other, H.Actor("user:dg", "GovernanceAdmin"))));
+        ex.StatusCode.ShouldBe(404);
+    }
+}

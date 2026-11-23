@@ -45,6 +45,7 @@ public sealed partial class PermissionRequestEngine : IPermissionRequestEngine
     private readonly IIdentitySubjectResolver? _subjectResolver;
     private readonly IRateLimiterService? _rateLimiter;
     private readonly IGovernanceNotificationDispatcher? _notificationDispatcher;
+    private readonly IConsentRepository? _consentRepository;
     private readonly IGovernanceCapabilities? _capabilities;
     private readonly IGovernanceCacheInvalidator? _cacheInvalidator;
     private readonly IPolicyEpochRepository? _policyEpochRepository;
@@ -83,7 +84,8 @@ public sealed partial class PermissionRequestEngine : IPermissionRequestEngine
         TimeProvider? timeProvider = null,
         ILogger<PermissionRequestEngine>? logger = null,
         Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter? workflowRouter = null,
-        Autheris.Application.ConsentRequests.Events.IConsentEventOutbox? eventOutbox = null)
+        Autheris.Application.ConsentRequests.Events.IConsentEventOutbox? eventOutbox = null,
+        IConsentRepository? consentRepository = null)
     {
         _approvalRepository = approvalRepository ?? throw new ArgumentNullException(nameof(approvalRepository));
         _auditWriter = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
@@ -114,6 +116,7 @@ public sealed partial class PermissionRequestEngine : IPermissionRequestEngine
         _logger = logger;
         _eventOutbox = eventOutbox ?? approvalRepository as Autheris.Application.ConsentRequests.Events.IConsentEventOutbox;
         _workflowRouter = workflowRouter;
+        _consentRepository = consentRepository;
     }
 
     private static PermissionGrantKind MapGrantKind(ConsentRequestKind kind) => kind switch
