@@ -179,7 +179,6 @@ public static partial class ConsentApiEndpoints
         CreateConsentRequestBody? body,
         HttpContext context,
         IPermissionRequestEngine engine,
-        IConsentApprovalRepository approvalRepo,
         IRateLimiterService? rateLimiter = null,
         IOptions<GovernanceOptions>? governanceOptions = null,
         CancellationToken ct = default)
@@ -356,6 +355,11 @@ public static partial class ConsentApiEndpoints
             return ApiProblems.NotFound(ConsentDecisionErrorCodes.RequestNotFound, $"Consent request '{id}' was not found.", context);
         }
 
+        if (!isServicePrincipal && (existing is null || existing.TenantId != tenantId))
+        {
+            return ApiProblems.NotFound(ConsentDecisionErrorCodes.RequestNotFound, $"Consent request '{id}' was not found.", context);
+        }
+
         try
         {
             PermissionDecisionResult result;
@@ -430,7 +434,6 @@ public static partial class ConsentApiEndpoints
                 StatusCodes.Status403Forbidden => "Consent decision is not permitted.",
                 StatusCodes.Status404NotFound => "Consent request was not found.",
                 StatusCodes.Status409Conflict => "Consent request cannot be decided in its current state.",
-                StatusCodes.Status412PreconditionFailed => "Consent request version does not match If-Match.",
                 _ => "Consent decision request is invalid."
             };
             return ApiProblems.Problem(ex.StatusCode, mappedCode, detail, context);
@@ -699,8 +702,6 @@ public sealed record CreateConsentRequestBody(
     string? Table = null,
     string? Justification = null,
     int? DurationDays = null,
-    string? IdempotencyKey = null,
-    AccessRequestContextInput? Context = null,
     IReadOnlyList<WriteRule>? RequestedWriteRules = null,
     bool? RequestWriteOnly = null,
     string? RequestedDuration = null,

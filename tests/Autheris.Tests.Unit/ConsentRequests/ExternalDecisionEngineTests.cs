@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
+using Autheris.Application.ConsentRequests.Routing;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Grants.Records;
@@ -52,29 +53,14 @@ public sealed class ExternalDecisionEngineTests
                 .Concat(roles.Select(r => new Claim(ClaimTypes.Role, r))), "ExternalWorkflow"))
     };
 
-    private sealed class MapResolver(Dictionary<string, SecurityPrincipalContext> map) : IExternalApproverResolver
-    {
-        public Task<SecurityPrincipalContext?> ResolveAsync(TenantId tenant, AssertedApprover asserted, CancellationToken ct = default) =>
-            Task.FromResult(map.GetValueOrDefault(asserted.Subject));
-    }
+    private static ConsentWorkflowRouteResolution DomainRoute(Guid systemId) =>
+        new(ConsentWorkflowMode.External, systemId, 60, 30, 72, true, WorkflowRouteScopeKind.Domain);
 
-    private sealed class MemoryReplayStore : IIdempotencyStore
-    {
-        private readonly ConcurrentDictionary<string, object> _items = new();
-        public Task<T?> GetAsync<T>(string key, CancellationToken ct = default) where T : class =>
-            Task.FromResult(_items.TryGetValue(key, out var v) ? v as T : null);
-        public Task<bool> SetIfNotExistsAsync<T>(string key, T value, TimeSpan ttl, CancellationToken ct = default) where T : class =>
-            Task.FromResult(_items.TryAdd(key, value));
-    }
-
-    private sealed record Harness(
-        PermissionRequestEngine Engine,
-        ExternalDecisionService Service,
-        InMemoryCasApprovalRepo Repo,
-        List<Consent> Consents,
-        Func<ExternalDecisionEnvelope, ExternalDecisionEnvelope> Sign);
-
-    private static Harness Create(Dictionary<string, SecurityPrincipalContext> directory)
+    private static Harness Create(
+        Dictionary<string, SecurityPrincipalContext> directory,
+        bool withReplayStore = true,
+        bool withSecret = true,
+        ConsentWorkflowRouteResolution? route = null)
     {
         var req = new ConsentRequest
         {
@@ -125,21 +111,22 @@ public sealed class ExternalDecisionEngineTests
             [new DataGrantApplier(grantWriter)],
             timeProvider: time);
 
-        var system = new ExternalWorkflowSystem(SystemId, TenantA.Value, "ServiceNow", "client-snow", "https://snow.local/cb", Secret, true, "admin", Now, null);
+        var system = new ExternalWorkflowSystem(SystemId, TenantA.Value, "ServiceNow", "client-snow", "https://snow.local/cb", withSecret ? Secret : string.Empty, true, "admin", Now, null);
         var config = NullFake.Create<IConsentWorkflowConfigRepository>((m, _) =>
             m.Name == nameof(IConsentWorkflowConfigRepository.GetExternalWorkflowSystemAsync)
                 ? Task.FromResult<ExternalWorkflowSystem?>(system)
                 : NullFake.UseDefault);
 
-        var guard = new ExternalDecisionGuard(new MapResolver(directory), null, new MemoryReplayStore(), time);
-        var service = new ExternalDecisionService(engine, guard, repo, config);
+        var guard = new ExternalDecisionGuard(new MapResolver(directory), null, withReplayStore ? new MemoryReplayStore() : null, time, allowPlaintextSecret: true);
+        var service = new ExternalDecisionService(engine, guard, repo, config, new StubRouter(route ?? DomainRoute(SystemId)));
 
         ExternalDecisionEnvelope Sign(ExternalDecisionEnvelope e) => e with { Signature = ExternalDecisionGuard.ComputeSignature(Secret, e) };
         return new Harness(engine, service, repo, consents, Sign);
     }
 
     private static ExternalDecisionEnvelope Envelope(Harness h, string approver, bool approve = true, string nonce = "n-1", string? reason = null) =>
-        new(h.Repo.Current.Id, 1, SystemId, "CHG-001", approve, new AssertedApprover(approver), Now, nonce, string.Empty, reason);
+        new(h.Repo.Current.Id, 1, SystemId, "CHG-001", approve, new AssertedApprover(approver), Now, nonce, string.Empty, reason,
+            new ClaimsPrincipal(new ClaimsIdentity([new Claim("azp", "client-snow")], "OAuth")));
 
     private static Task<PermissionDecisionResult> DecideAsync(Harness h, ExternalDecisionEnvelope e) =>
         h.Service.DecideAsync(e, TenantA);
@@ -265,6 +252,38 @@ public sealed class ExternalDecisionEngineTests
         h.Consents.Count.ShouldBe(1);
     }
 
+    [Fact]
+    public async Task Unavailable_transport_no_fallback_approval()
+    {
+        // Replay store or secret unavailable: the evidence cannot be verified, so nothing is decided and no other path approves.
+        var noReplayStore = Create(new() { ["alice"] = Person("user:alice", "GovernanceAdmin") }, withReplayStore: false);
+        var ex1 = await Should.ThrowAsync<ConsentDecisionException>(() => DecideAsync(noReplayStore, noReplayStore.Sign(Envelope(noReplayStore, "alice"))));
+        ex1.StatusCode.ShouldBe(403);
+        noReplayStore.Repo.Current.Status.ShouldBe("PENDING");
+        noReplayStore.Consents.ShouldBeEmpty();
+
+        var noSecret = Create(new() { ["alice"] = Person("user:alice", "GovernanceAdmin") }, withSecret: false);
+        var ex2 = await Should.ThrowAsync<ConsentDecisionException>(() => DecideAsync(noSecret, noSecret.Sign(Envelope(noSecret, "alice"))));
+        ex2.StatusCode.ShouldBe(403);
+        noSecret.Repo.Current.Status.ShouldBe("PENDING");
+        noSecret.Consents.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Domain_routed_request_is_decided_by_its_external_system()
+    {
+        // The effective route is the domain route (not only the tenant route); its system is the request's system.
+        var h = Create(new() { ["alice"] = Person("user:alice", "GovernanceAdmin") }, route: DomainRoute(SystemId));
+
+        (await DecideAsync(h, h.Sign(Envelope(h, "alice")))).Request.Status.ShouldBe("APPROVED");
+
+        // A domain route that now names another system refuses the decision.
+        var other = Create(new() { ["alice"] = Person("user:alice", "GovernanceAdmin") }, route: DomainRoute(Guid.NewGuid()));
+        var ex = await Should.ThrowAsync<ConsentDecisionException>(() => DecideAsync(other, other.Sign(Envelope(other, "alice"))));
+        ex.ErrorCode.ShouldBe(ConsentDecisionErrorCodes.ExternalSystemNotAuthorized);
+        other.Repo.Current.Status.ShouldBe("PENDING");
+    }
+
     private sealed class DummyDbTransaction : DbTransaction
     {
         public override System.Data.IsolationLevel IsolationLevel => System.Data.IsolationLevel.ReadCommitted;
@@ -343,4 +362,35 @@ public sealed class ExternalDecisionEngineTests
             return new DecisionCasResult(DecisionCasOutcome.Applied, updated, grants);
         }
     }
+
+    private sealed class MapResolver(Dictionary<string, SecurityPrincipalContext> map) : IExternalApproverResolver
+    {
+        public Task<SecurityPrincipalContext?> ResolveAsync(TenantId tenant, AssertedApprover asserted, CancellationToken ct = default) =>
+            Task.FromResult(map.GetValueOrDefault(asserted.Subject));
+    }
+
+    private sealed class MemoryReplayStore : IIdempotencyStore
+    {
+        private readonly ConcurrentDictionary<string, object> _items = new();
+        public Task<T?> GetAsync<T>(string key, CancellationToken ct = default) where T : class =>
+            Task.FromResult(_items.TryGetValue(key, out var v) ? v as T : null);
+        public Task<bool> SetIfNotExistsAsync<T>(string key, T value, TimeSpan ttl, CancellationToken ct = default) where T : class =>
+            Task.FromResult(_items.TryAdd(key, value));
+    }
+
+    private sealed class StubRouter(ConsentWorkflowRouteResolution resolution) : IConsentWorkflowRouter
+    {
+        public Task<ConsentWorkflowRouteResolution> ResolveForTableAsync(TenantId tenantId, TableIdentifier table, CancellationToken ct = default) =>
+            Task.FromResult(resolution);
+
+        public Task<ConsentWorkflowRouteResolution> ResolveForTablesAsync(TenantId tenantId, IReadOnlyList<TableIdentifier> tables, CancellationToken ct = default) =>
+            Task.FromResult(resolution);
+    }
+
+    private sealed record Harness(
+        PermissionRequestEngine Engine,
+        ExternalDecisionService Service,
+        InMemoryCasApprovalRepo Repo,
+        List<Consent> Consents,
+        Func<ExternalDecisionEnvelope, ExternalDecisionEnvelope> Sign);
 }

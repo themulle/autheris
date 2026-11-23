@@ -39,7 +39,7 @@ public sealed class ConsentRequestEndpointAdapter(
             throw new ConsentRequestException("VALIDATION_ERROR", "A write-only access request requires at least one write rule.");
         }
 
-        var tenant = ConsentRequestService.ResolveTenantId(
+        var tenant = ConsentTenantResolver.Resolve(
             principal, command.ContextTenant, ClusterAdminPolicy.IsCanonicalClusterAdmin(principal));
 
         var hasClear = command.RequestedClear is { Count: > 0 };

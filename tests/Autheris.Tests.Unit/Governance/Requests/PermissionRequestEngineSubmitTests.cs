@@ -307,6 +307,44 @@ public sealed class PermissionRequestEngineSubmitTests
     }
 
     [Fact]
+    public async Task Pending_cap_per_requester()
+    {
+        // Deployment default (100) applies without a tenant policy: a requester at the cap cannot open another request.
+        var atDefaultCap = NullFake.Create<IConsentApprovalRepository>((m, _) =>
+            m.Name == nameof(IConsentApprovalRepository.CountPendingRequestsForRequesterAsync) ? Task.FromResult(100) : NullFake.UseDefault);
+        var submission = new PermissionRequestSubmission(UserPrincipal(), TenantA, ConsentRequestKind.Data, PermissionTarget.ForTable(OrdersTable),
+            GranteeType.User, "user:alice", "Valid justification text here.", ValidTo: Now.AddDays(10));
+
+        var ex = await Should.ThrowAsync<ConsentRequestException>(() => CreateEngine(atDefaultCap).SubmitAsync(submission));
+        ex.Code.ShouldBe("PENDING_REQUEST_LIMIT_EXCEEDED");
+
+        // A tenant may tighten the cap.
+        var tightened = NullFake.Create<IAccessPolicySettingsProvider>((m, _) =>
+            m.Name == nameof(IAccessPolicySettingsProvider.GetEffectiveAsync)
+                ? Task.FromResult(TenantAccessPolicy.FromDeploymentDefaults(TenantA, new AccessPolicyOptions { MaxPendingRequestsPerRequester = 3 }))
+                : NullFake.UseDefault);
+        var atTenantCap = NullFake.Create<IConsentApprovalRepository>((m, _) =>
+            m.Name == nameof(IConsentApprovalRepository.CountPendingRequestsForRequesterAsync) ? Task.FromResult(3) : NullFake.UseDefault);
+        var tightEx = await Should.ThrowAsync<ConsentRequestException>(() => CreateEngine(atTenantCap, policyProvider: tightened).SubmitAsync(submission));
+        tightEx.Code.ShouldBe("PENDING_REQUEST_LIMIT_EXCEEDED");
+    }
+
+    [Fact]
+    public async Task Caps_enforced()
+    {
+        // Deployment default bundle cap (50) applies without a tenant policy.
+        var engine = CreateEngine(NullFake.Create<IConsentApprovalRepository>());
+        var oversized = Enumerable.Range(0, 51).Select(_ =>
+            new PermissionRequestSubmission(UserPrincipal(), TenantA, ConsentRequestKind.Data, PermissionTarget.ForTable(OrdersTable),
+                GranteeType.User, "user:alice", "Valid bundle justification text.", ValidTo: Now.AddDays(10))).ToArray();
+        (await Should.ThrowAsync<ConsentRequestException>(() => engine.SubmitBundleAsync(UserPrincipal(), TenantA, oversized)))
+            .Code.ShouldBe("BUNDLE_LIMIT_EXCEEDED");
+
+        // Caps are bounded: a tenant cannot raise a cap beyond the hard maximum.
+        TenantAccessPolicy.FromDeploymentDefaults(TenantA, new AccessPolicyOptions { MaxBundleItems = 5000 }).MaxBundleItems.ShouldBeLessThanOrEqualTo(1000);
+    }
+
+    [Fact]
     public async Task Whitespace_or_blank_target_columns_rejected()
     {
         var engine = CreateEngine(NullFake.Create<IConsentApprovalRepository>());

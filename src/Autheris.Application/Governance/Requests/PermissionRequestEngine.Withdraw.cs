@@ -37,19 +37,28 @@ public sealed partial class PermissionRequestEngine
             throw new ConsentRequestException("INVALID_STATE", "The consent request is no longer pending.");
         }
 
+        // The required audit is written before the state change: if the audit cannot be recorded the request stays pending
+        // (fail closed). Should the withdrawal itself then lose a race, the failure is audited as well.
+        await RecordWithdrawAuditAsync(req, callerCtx, "WITHDRAWN", ct).ConfigureAwait(false);
+
         if (!await _approvalRepository.WithdrawConsentRequestAsync(requestId, req.RequesterSid, ct).ConfigureAwait(false))
         {
+            await RecordWithdrawAuditAsync(req, callerCtx, "WITHDRAW_FAILED", ct).ConfigureAwait(false);
             throw new ConsentRequestException("INVALID_STATE", "The consent request could not be withdrawn.");
         }
 
-        await _auditWriter.RecordRequiredAsync(new AuditLogEntry
+        return true;
+    }
+
+    private Task RecordWithdrawAuditAsync(ConsentRequest req, SecurityPrincipalContext callerCtx, string decision, CancellationToken ct) =>
+        _auditWriter.RecordRequiredAsync(new AuditLogEntry
         {
             Id = Guid.NewGuid(),
             OccurredAt = _time.GetUtcNow().ToUniversalTime(),
             EventType = AuditEventTypes.ConsentWithdrawn,
             ActorSid = callerCtx.UserSid,
             TargetTable = FormatTargetObject(req),
-            Decision = "WITHDRAWN",
+            Decision = decision,
             TraceId = GetTraceId(),
             TenantId = req.TenantId,
             DetailsJson = new PermissionAuditDetails(
@@ -64,8 +73,5 @@ public sealed partial class PermissionRequestEngine
                 RequestId: req.Id,
                 ActorKind: PermissionAuditDetails.ResolveActorKind(callerCtx),
                 GrantKind: req.GrantKind.ToSqlString()).ToDetailsJson()
-        }, ct).ConfigureAwait(false);
-
-        return true;
-    }
+        }, ct);
 }

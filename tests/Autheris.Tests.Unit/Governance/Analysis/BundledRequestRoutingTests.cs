@@ -26,7 +26,7 @@ public sealed class BundledRequestRoutingTests
         new($"sales.dbo.t{i}", column, "READ", "Analytics need");
 
     [Fact]
-    public async Task Each_item_is_one_request_with_its_own_kind_and_target()
+    public async Task Each_item_routed_individually()
     {
         var engine = new RecordingPermissionRequestEngine();
         var result = await Service(engine).SubmitBundledRequestAsync(

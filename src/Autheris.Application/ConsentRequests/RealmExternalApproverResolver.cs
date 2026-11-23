@@ -67,22 +67,38 @@ public sealed class RealmExternalApproverResolver(
         return SecurityPrincipalContext.FromPrincipal(principal, overrideTenant: tenant, timeProvider: _time);
     }
 
+    /// <summary>Looks the subject up under every key kind; the result is a user only when all matches are the same user, so an ambiguous subject stays unmapped.</summary>
     private async Task<ScimUser?> FindUserAsync(TenantId tenant, string realmId, AssertedApprover asserted, CancellationToken ct)
     {
+        ScimUser? found = null;
         foreach (var candidate in Candidates(asserted))
         {
-            var user = await userStore!.GetUserByObjectSidAsync(tenant, realmId, candidate, ct).ConfigureAwait(false)
-                ?? await userStore!.GetUserAsync(tenant, realmId, candidate, ct).ConfigureAwait(false)
-                ?? await userStore!.GetUserByExternalIdAsync(tenant, realmId, candidate, ct).ConfigureAwait(false)
-                ?? await userStore!.GetUserByUserNameAsync(tenant, realmId, candidate, ct).ConfigureAwait(false)
-                ?? await userStore!.GetUserByUpnAsync(tenant, realmId, candidate, ct).ConfigureAwait(false);
-            if (user is not null)
+            ScimUser?[] matches =
+            [
+                await userStore!.GetUserByObjectSidAsync(tenant, realmId, candidate, ct).ConfigureAwait(false),
+                await userStore!.GetUserAsync(tenant, realmId, candidate, ct).ConfigureAwait(false),
+                await userStore!.GetUserByExternalIdAsync(tenant, realmId, candidate, ct).ConfigureAwait(false),
+                await userStore!.GetUserByUserNameAsync(tenant, realmId, candidate, ct).ConfigureAwait(false),
+                await userStore!.GetUserByUpnAsync(tenant, realmId, candidate, ct).ConfigureAwait(false)
+            ];
+
+            foreach (var match in matches)
             {
-                return user;
+                if (match is null)
+                {
+                    continue;
+                }
+
+                if (found is not null && !string.Equals(found.UserKey, match.UserKey, StringComparison.Ordinal))
+                {
+                    return null;
+                }
+
+                found = match;
             }
         }
 
-        return null;
+        return found;
     }
 
     // Only the signed subject is looked up. E-mail and the transport's own SID assertion are display data, not identity.

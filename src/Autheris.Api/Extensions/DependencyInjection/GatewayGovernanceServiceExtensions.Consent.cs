@@ -113,14 +113,16 @@ public static partial class GatewayGovernanceServiceExtensions
                 sp.GetService<Autheris.Application.ConsentRequests.IExternalApproverResolver>(),
                 sp.GetService<Autheris.Application.Webhooks.IWebhookSecretProtector>(),
                 sp.GetService<Autheris.Application.Common.Interfaces.IClusterWideIdempotencyStore>(),
-                sp.GetService<TimeProvider>()));
+                sp.GetService<TimeProvider>(),
+                allowPlaintextSecret: sp.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>() is { } hostEnv && string.Equals(hostEnv.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase)));
         services.AddScoped<Autheris.Application.ConsentRequests.IExternalApproverResolver, Autheris.Application.ConsentRequests.RealmExternalApproverResolver>();
         services.AddScoped<Autheris.Application.ConsentRequests.IExternalDecisionService>(sp =>
             new Autheris.Application.ConsentRequests.ExternalDecisionService(
                 sp.GetRequiredService<Autheris.Application.Governance.Requests.IPermissionRequestEngine>(),
                 sp.GetRequiredService<Autheris.Application.ConsentRequests.IExternalDecisionGuard>(),
                 sp.GetRequiredService<Autheris.Application.Common.Interfaces.IConsentApprovalRepository>(),
-                sp.GetRequiredService<Autheris.Application.ConsentRequests.IConsentWorkflowConfigRepository>()));
+                sp.GetRequiredService<Autheris.Application.ConsentRequests.IConsentWorkflowConfigRepository>(),
+                sp.GetRequiredService<Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter>()));
         services.AddScoped<Autheris.Application.Governance.Requests.IPermissionRequestEngine>(sp => sp.GetRequiredService<Autheris.Application.Governance.Requests.PermissionRequestEngine>());
         services.AddHostedService<Autheris.Application.ConsentRequests.Events.ConsentWebhookDispatcherHostedService>();
         services.AddHostedService<Autheris.Application.Governance.Grants.GrantExpiryHostedService>();

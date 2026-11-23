@@ -3,6 +3,7 @@ namespace Autheris.Application.ConsentRequests;
 using System;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.ConsentRequests.Routing;
 using Autheris.Application.Governance.Requests;
 using Autheris.Domain.Tenancy;
 
@@ -15,7 +16,8 @@ public sealed class ExternalDecisionService(
     IPermissionRequestEngine engine,
     IExternalDecisionGuard guard,
     Autheris.Application.Common.Interfaces.IConsentApprovalRepository approvals,
-    IConsentWorkflowConfigRepository workflowConfig) : IExternalDecisionService
+    IConsentWorkflowConfigRepository workflowConfig,
+    IConsentWorkflowRouter router) : IExternalDecisionService
 {
     public async Task<PermissionDecisionResult> DecideAsync(ExternalDecisionEnvelope envelope, TenantId tenant, CancellationToken ct = default)
     {
@@ -28,7 +30,8 @@ public sealed class ExternalDecisionService(
         }
 
         var system = await workflowConfig.GetExternalWorkflowSystemAsync(request.TenantId, envelope.ExternalSystemId, ct).ConfigureAwait(false);
-        var route = await workflowConfig.ResolveWorkflowRouteAsync(request.TenantId, request.TableIdentifier, ct).ConfigureAwait(false);
+        // The same effective route (domain, then tenant; removed or unknown scopes inert) that directed the request at submission.
+        var route = await router.ResolveForTableAsync(request.TenantId, request.TableIdentifier, ct).ConfigureAwait(false);
 
         var validated = await guard.ValidateAsync(envelope, request, route, system, ct).ConfigureAwait(false);
 

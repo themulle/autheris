@@ -169,6 +169,76 @@ public sealed class DataGrantApplierTests
         extrasWritten.ShouldBeTrue();
     }
 
+    private static IGrantWriter CapturingWriter(Action<Consent> capture) =>
+        NullFake.Create<IGrantWriter>((m, args) =>
+        {
+            if (m.Name == nameof(IGrantWriter.InsertAndGrantAsync))
+            {
+                var c = (Consent)args![1]!;
+                capture(c);
+                return Task.FromResult(new GrantRecord(
+                    c.TenantId.Value, 7, Guid.NewGuid(), GrantRecordType.Issued, c.Id, c.ConsentRequestId,
+                    c.GrantSource, null, "User", "user:alice", OrdersTable.ToString(), "{}",
+                    c.ValidFrom, c.ValidTo, "user:alice", "{}", Now, Now, GrantRecordChain.GenesisHash));
+            }
+
+            return NullFake.UseDefault;
+        });
+
+    private static ConsentRequest WriteRequest(IReadOnlyList<WriteRule> rules, bool includeRead) => new()
+    {
+        Id = Guid.NewGuid(),
+        TableId = Guid.NewGuid(),
+        TableIdentifier = OrdersTable,
+        RequesterSid = new Sid("user:alice"),
+        RequestedGranteeType = GranteeType.User,
+        RequestedGranteeRef = "user:alice",
+        BusinessJustification = "Write only ingestion.",
+        TenantId = TenantA,
+        RequestKind = ConsentRequestKind.Data,
+        GrantKind = PermissionGrantKind.Data,
+        RequestedWriteRules = rules,
+        IncludeReadAccess = includeRead
+    };
+
+    [Fact]
+    public async Task Write_only_approval_creates_a_write_grant_with_no_read_columns()
+    {
+        Consent? persisted = null;
+        var rule = new WriteRule(Guid.NewGuid(), WriteOperation.Insert, ["status", "amount"], WriteRowScope.OwnRows, null, 25);
+        var req = WriteRequest([rule], includeRead: false);
+        req.IsWriteOnlyRequest.ShouldBeTrue();
+        using var rawTx = new DummyDbTransaction();
+
+        await new DataGrantApplier(CapturingWriter(c => persisted = c)).ApplyAsync(DummyTx(rawTx), Approve(req));
+
+        persisted.ShouldNotBeNull();
+        persisted.ColumnRules.ShouldBeEmpty();
+        persisted.TargetColumns.ShouldBeNull();
+        persisted.WriteRules.ShouldHaveSingleItem().Columns.ShouldBe(["status", "amount"]);
+    }
+
+    [Fact]
+    public async Task Write_rules_are_granted_exactly_as_requested_and_never_widened()
+    {
+        // The decision carries no write-rule payload: an approver cannot widen (or narrow) the request, only approve or reject it.
+        typeof(PermissionDecisionCommand).GetProperties().ShouldNotContain(p => p.Name.Contains("WriteRule", StringComparison.OrdinalIgnoreCase));
+
+        Consent? persisted = null;
+        var rules = new List<WriteRule>
+        {
+            new(Guid.NewGuid(), WriteOperation.Insert, ["id", "status"], WriteRowScope.AllRows, null, 100),
+            new(Guid.NewGuid(), WriteOperation.Update, ["status"], WriteRowScope.OwnRows, null, 50)
+        };
+        using var rawTx = new DummyDbTransaction();
+
+        await new DataGrantApplier(CapturingWriter(c => persisted = c)).ApplyAsync(DummyTx(rawTx), Approve(WriteRequest(rules, includeRead: true)));
+
+        persisted.ShouldNotBeNull();
+        persisted.WriteRules.Count.ShouldBe(2);
+        persisted.WriteRules.ShouldBe(rules);
+    }
+
     private sealed class DummyDbTransaction : DbTransaction
     {
         public override System.Data.IsolationLevel IsolationLevel => System.Data.IsolationLevel.ReadCommitted;

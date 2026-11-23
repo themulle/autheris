@@ -143,6 +143,48 @@ public sealed class PermissionRequestEngineDecideTests
     }
 
     [Fact]
+    public async Task Withdraw_audit_failure_keeps_the_request_pending()
+    {
+        var req = PendingRequest();
+        var withdrawn = false;
+        var failingAudit = NullFake.Create<IAuditWriter>((m, _) =>
+            m.Name == nameof(IAuditWriter.RecordRequiredAsync)
+                ? Task.FromException(new AuditUnavailableException("Audit DB down"))
+                : NullFake.UseDefault);
+        var approvals = NullFake.Create<IConsentApprovalRepository>((m, _) =>
+        {
+            if (m.Name == nameof(IConsentApprovalRepository.GetConsentRequestAsync))
+            {
+                return Task.FromResult<ConsentRequest?>(req);
+            }
+
+            if (m.Name == nameof(IConsentApprovalRepository.WithdrawConsentRequestAsync))
+            {
+                withdrawn = true;
+                return Task.FromResult(true);
+            }
+
+            return NullFake.UseDefault;
+        });
+        var engine = new PermissionRequestEngine(
+            approvals,
+            failingAudit,
+            new ApproverResolver(),
+            new ApproverEligibility(new GovernanceCapabilities()),
+            new SeparationOfDutiesService(),
+            new GrantPolicy(),
+            GrantValidityPolicy.CreateDefault(),
+            Array.Empty<IGrantEffectApplier>(),
+            timeProvider: new FakeTimeProvider(Now));
+        var owner = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.PrimarySid, "user:alice"), new Claim("tenant_id", TenantA.Value)], "Bearer"));
+
+        await Should.ThrowAsync<AuditUnavailableException>(() => engine.WithdrawAsync(req.Id, owner));
+
+        withdrawn.ShouldBeFalse("The state change must not commit when the required audit cannot be written.");
+    }
+
+    [Fact]
     public async Task Denied_attempt_audited()
     {
         var req = PendingRequest();

@@ -230,7 +230,7 @@ public sealed partial class Mutation
     {
         try
         {
-            return ConsentRequestService.ResolveTenantId(principal, GetContextTenantId(httpContextAccessor, resolverContext), isCrossTenantAdmin);
+            return ConsentTenantResolver.Resolve(principal, GetContextTenantId(httpContextAccessor, resolverContext), isCrossTenantAdmin);
         }
         catch (ConsentRequestException ex)
         {
@@ -285,7 +285,7 @@ public sealed partial class Mutation
         {
             if (discoveryAccessRequests is not null && (writeRules is not { Count: > 0 }) && requestWriteOnly is null)
             {
-                var tenant = ConsentRequestService.ResolveTenantId(
+                var tenant = ConsentTenantResolver.Resolve(
                     principal, GetContextTenantId(httpContextAccessor, resolverContext), ClusterAdminPolicy.IsCanonicalClusterAdmin(principal));
                 var accessResult = await discoveryAccessRequests.RequestAsync(
                     new DiscoveryAccessRequest(domain, schema, tableName, justification, durationDays, null, clearColumns, idempotencyKey, context),

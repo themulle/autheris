@@ -268,7 +268,6 @@ internal sealed class ConsentApiTestHarness : IAsyncDisposable
             body,
             ctx,
             sp.GetRequiredService<IPermissionRequestEngine>(),
-            sp.GetRequiredService<IConsentApprovalRepository>(),
             sp.GetService<IRateLimiterService>(),
             sp.GetService<IOptions<GovernanceOptions>>());
         return await ExecuteResultAsync(ctx, result);

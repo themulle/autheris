@@ -7,6 +7,7 @@ using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.ConsentRequests.Routing;
 using Autheris.Application.Webhooks;
 using Autheris.Domain.Model;
 
@@ -20,13 +21,16 @@ public sealed class ExternalDecisionGuard(
     IExternalApproverResolver? approverResolver = null,
     IWebhookSecretProtector? secretProtector = null,
     IIdempotencyStore? replayStore = null,
-    TimeProvider? timeProvider = null) : IExternalDecisionGuard
+    TimeProvider? timeProvider = null,
+    bool allowPlaintextSecret = false) : IExternalDecisionGuard
 {
     public const string InvalidEvidenceCode = "EXTERNAL_EVIDENCE_INVALID";
     public const string ReplayCode = "EXTERNAL_EVIDENCE_REPLAY";
     public static readonly TimeSpan MaxClockSkew = TimeSpan.FromMinutes(5);
     private static readonly TimeSpan ReplayRetention = TimeSpan.FromHours(24);
     private const int MaxNonceLength = 128;
+    private const int MaxFieldLength = 256;
+    private const int MaxReasonLength = 4000;
     private const string SignatureContext = "autheris-external-decision-v1";
 
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
@@ -36,25 +40,47 @@ public sealed class ExternalDecisionGuard(
     {
         ArgumentException.ThrowIfNullOrEmpty(secret);
         ArgumentNullException.ThrowIfNull(envelope);
-        var canonical = string.Join(
-            '\n',
+        // Every variable field is length-prefixed so no field can bleed into its neighbour; the reason is part of the evidence.
+        var canonical = string.Concat(
             SignatureContext,
-            envelope.RequestId.ToString("D"),
-            envelope.ExpectedVersion.ToString(CultureInfo.InvariantCulture),
-            envelope.ExternalSystemId.ToString("D"),
-            envelope.ExternalReference,
-            envelope.Approve ? "APPROVE" : "REJECT",
-            envelope.Approver.Subject,
-            envelope.Timestamp.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture),
-            envelope.Nonce);
+            Field(envelope.RequestId.ToString("D")),
+            Field(envelope.ExpectedVersion.ToString(CultureInfo.InvariantCulture)),
+            Field(envelope.ExternalSystemId.ToString("D")),
+            Field(envelope.ExternalReference),
+            Field(envelope.Approve ? "APPROVE" : "REJECT"),
+            Field(envelope.Approver.Subject),
+            Field(envelope.Timestamp.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture)),
+            Field(envelope.Nonce),
+            Field(envelope.Reason ?? string.Empty));
         var mac = HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes(canonical));
         return Convert.ToHexStringLower(mac);
+    }
+
+    private static string Field(string? value) =>
+        string.Create(CultureInfo.InvariantCulture, $"\n{value?.Length ?? 0}:{value}");
+
+    private static bool IsCleanText(string? value, int maxLength)
+    {
+        if (value is null || value.Length > maxLength)
+        {
+            return false;
+        }
+
+        foreach (var c in value)
+        {
+            if (char.IsControl(c))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public async Task<ValidatedExternalDecision> ValidateAsync(
         ExternalDecisionEnvelope envelope,
         ConsentRequest request,
-        ConsentWorkflowRoute? route,
+        ConsentWorkflowRouteResolution? route,
         ExternalWorkflowSystem? system,
         CancellationToken ct = default)
     {
@@ -74,7 +100,33 @@ public sealed class ExternalDecisionGuard(
             throw Invalid("External evidence does not match the request.");
         }
 
-        ValidateSystemBinding(envelope, request, route, system);
+        if (string.IsNullOrWhiteSpace(envelope.Nonce) || envelope.Nonce.Length > MaxNonceLength ||
+            string.IsNullOrWhiteSpace(envelope.Signature) || string.IsNullOrWhiteSpace(envelope.Approver?.Subject))
+        {
+            throw Invalid("External evidence is incomplete.");
+        }
+
+        if (!IsCleanText(envelope.ExternalReference, MaxFieldLength) ||
+            !IsCleanText(envelope.Approver.Subject, MaxFieldLength) ||
+            !IsCleanText(envelope.Nonce, MaxNonceLength) ||
+            (envelope.Reason is not null && envelope.Reason.Length > MaxReasonLength))
+        {
+            throw Invalid("External evidence contains invalid characters or exceeds a length limit.");
+        }
+
+        // Only the registered, enabled system of this tenant can be authenticated at all (its secret is needed to verify).
+        if (system is null || !system.Enabled || system.Id != envelope.ExternalSystemId ||
+            !string.Equals(system.TenantId, request.TenantId.Value, StringComparison.OrdinalIgnoreCase))
+        {
+            throw NotAuthorized("The external workflow system is missing, disabled or belongs to another tenant.");
+        }
+
+        var secret = ResolveSecret(system)
+            ?? throw new ConsentDecisionException(ConsentDecisionErrorCodes.ExternalSystemNotAuthorized, "External evidence cannot be verified.", 403);
+        VerifySignature(secret, envelope);
+
+        // Authentic evidence only: the remaining bindings are checked after the signature so an unauthenticated caller learns nothing about them.
+        ValidateRequestBinding(envelope, request, route, system);
 
         var now = _time.GetUtcNow();
         if (envelope.Timestamp > now + MaxClockSkew || envelope.Timestamp < now - MaxClockSkew)
@@ -82,23 +134,13 @@ public sealed class ExternalDecisionGuard(
             throw Invalid("External evidence is outside the accepted time window.");
         }
 
-        if (string.IsNullOrWhiteSpace(envelope.Nonce) || envelope.Nonce.Length > MaxNonceLength ||
-            string.IsNullOrWhiteSpace(envelope.Signature) || string.IsNullOrWhiteSpace(envelope.Approver?.Subject))
-        {
-            throw Invalid("External evidence is incomplete.");
-        }
-
-        var secret = ResolveSecret(system!)
-            ?? throw new ConsentDecisionException(ConsentDecisionErrorCodes.ExternalSystemNotAuthorized, "External evidence cannot be verified.", 403);
-        VerifySignature(secret, envelope);
-
         // The evidence is authentic from here on; consume the nonce before anything else can fail.
         if (replayStore is null)
         {
             throw new ConsentDecisionException(ConsentDecisionErrorCodes.ExternalSystemNotAuthorized, "External evidence cannot be verified.", 403);
         }
 
-        var replayKey = $"external-evidence:{system!.Id:D}:{envelope.Nonce}";
+        var replayKey = $"external-evidence:{system.Id:D}:{envelope.Nonce}";
         if (!await replayStore.SetIfNotExistsAsync(replayKey, new ReplayMarker(request.Id), ReplayRetention, ct).ConfigureAwait(false))
         {
             throw new ConsentDecisionException(ReplayCode, "External evidence was already used.", 409);
@@ -106,7 +148,7 @@ public sealed class ExternalDecisionGuard(
 
         var approver = approverResolver is null
             ? null
-            : await approverResolver.ResolveAsync(request.TenantId, envelope.Approver!, ct).ConfigureAwait(false);
+            : await approverResolver.ResolveAsync(request.TenantId, envelope.Approver, ct).ConfigureAwait(false);
         if (approver is null || !approver.IsAuthenticated)
         {
             // Unmapped identity: nothing is decided and the request stays pending.
@@ -140,18 +182,12 @@ public sealed class ExternalDecisionGuard(
         }
     }
 
-    private static void ValidateSystemBinding(
+    private static void ValidateRequestBinding(
         ExternalDecisionEnvelope envelope,
         ConsentRequest request,
-        ConsentWorkflowRoute? route,
-        ExternalWorkflowSystem? system)
+        ConsentWorkflowRouteResolution? route,
+        ExternalWorkflowSystem system)
     {
-        if (system is null || !system.Enabled || system.Id != envelope.ExternalSystemId ||
-            !string.Equals(system.TenantId, request.TenantId.Value, StringComparison.OrdinalIgnoreCase))
-        {
-            throw NotAuthorized("The external workflow system is missing, disabled or belongs to another tenant.");
-        }
-
         if (request.ExternalSystemId.HasValue && request.ExternalSystemId.Value != envelope.ExternalSystemId)
         {
             throw NotAuthorized("The external workflow system does not match the request.");
@@ -168,12 +204,12 @@ public sealed class ExternalDecisionGuard(
             throw NotAuthorized("The external reference does not match the request.");
         }
 
-        if (envelope.Caller is not null && !string.IsNullOrWhiteSpace(system.ClientId))
+        if (!string.IsNullOrWhiteSpace(system.ClientId))
         {
-            var callerClientId = envelope.Caller.FindFirst("azp")?.Value
-                ?? envelope.Caller.FindFirst("appid")?.Value
-                ?? envelope.Caller.FindFirst("client_id")?.Value;
-            if (!string.IsNullOrWhiteSpace(callerClientId) &&
+            var callerClientId = envelope.Caller?.FindFirst("azp")?.Value
+                ?? envelope.Caller?.FindFirst("appid")?.Value
+                ?? envelope.Caller?.FindFirst("client_id")?.Value;
+            if (string.IsNullOrWhiteSpace(callerClientId) ||
                 !string.Equals(callerClientId, system.ClientId, StringComparison.OrdinalIgnoreCase))
             {
                 throw NotAuthorized("The caller does not match the registered external workflow system.");
@@ -206,7 +242,8 @@ public sealed class ExternalDecisionGuard(
             }
         }
 
-        return secretProtector is null ? stored : null;
+        // A plaintext stored secret is only tolerated where explicitly allowed (Development) and no protector is registered.
+        return secretProtector is null && allowPlaintextSecret ? stored : null;
     }
 
     private static ConsentDecisionException Invalid(string message) => new(InvalidEvidenceCode, message, 403);

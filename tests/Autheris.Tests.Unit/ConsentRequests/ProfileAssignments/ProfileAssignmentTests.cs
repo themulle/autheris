@@ -255,7 +255,7 @@ public sealed class ProfileAssignmentTests
             timeProvider: fx.Clock);
         var badRoleResult = await ConsentApiEndpoints.CreateRequestAsync(
             new CreateConsentRequestBody(Kind: "profileAssignment", ProfileId: fx.ProfileId, Grantee: "AnalystRole", GranteeType: "Role", DurationDays: 14),
-            reqCtx, engine, fx);
+            reqCtx, engine);
         await badRoleResult.ExecuteAsync(reqCtx);
         reqCtx.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
 
@@ -263,7 +263,7 @@ public sealed class ProfileAssignmentTests
         okCtx.Request.Headers["Idempotency-Key"] = "key-create-ok";
         var okResult = await ConsentApiEndpoints.CreateRequestAsync(
             new CreateConsentRequestBody(Kind: "profileAssignment", ProfileId: fx.ProfileId, Justification: "Need access", DurationDays: 14),
-            okCtx, engine, fx);
+            okCtx, engine);
         await okResult.ExecuteAsync(okCtx);
         okCtx.Response.StatusCode.ShouldBe(StatusCodes.Status201Created);
         fx.Requests.Single().RequestKind.ShouldBe(ConsentRequestKind.ProfileAssignment);

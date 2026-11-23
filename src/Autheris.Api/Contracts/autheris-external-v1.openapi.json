@@ -612,8 +612,6 @@
           "table": { "type": "string", "nullable": true },
           "justification": { "type": "string", "nullable": true },
           "durationDays": { "type": "integer", "nullable": true },
-          "idempotencyKey": { "type": "string", "nullable": true },
-          "context": { "type": "object", "nullable": true },
           "requestedWriteRules": { "type": "array", "items": { "type": "object" }, "nullable": true },
           "requestWriteOnly": { "type": "boolean", "nullable": true },
           "requestedDuration": { "type": "string", "nullable": true },

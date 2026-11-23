@@ -73,7 +73,7 @@ public sealed class AccessRequestRateLimitTests
         var body = new CreateConsentRequestBody(Domain: "sales", Schema: "dbo", TableName: "orders", Justification: "Quarterly audit", DurationDays: 7);
 
         var result = await ConsentApiEndpoints.CreateRequestAsync(
-            body, context, Engine(Denying(90)), Substitute.For<IConsentApprovalRepository>());
+            body, context, Engine(Denying(90)));
         await result.ExecuteAsync(context);
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status429TooManyRequests);

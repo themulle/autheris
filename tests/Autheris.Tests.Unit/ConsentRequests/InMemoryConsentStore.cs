@@ -48,6 +48,23 @@ internal sealed class InMemoryConsentStore(
         ]
     };
 
+    private readonly TableMetadata _hiddenTable = new()
+    {
+        Table = new Table
+        {
+            Id = Guid.NewGuid(),
+            SchemaName = "public",
+            TableName = "hidden_payroll",
+            Description = "Hidden",
+            DiscoveryHidden = true
+        },
+        Identifier = new TableIdentifier("pg", "public", "hidden_payroll"),
+        Columns =
+        [
+            new TableColumn { Id = Guid.NewGuid(), ColumnName = "id", DataType = "bigint" }
+        ]
+    };
+
     public List<ConsentRequest> Requests { get; } = new();
     public List<Consent> Consents { get; } = new();
     public List<ExternalWorkflowSystem> Systems { get; } = new();
@@ -137,6 +154,29 @@ internal sealed class InMemoryConsentStore(
         };
         Requests.Add(stored);
         return Task.FromResult(stored);
+    }
+
+    /// <summary>Evaluates the decision like the engine's transaction would; the effect is never applied (this store has no grant writer).</summary>
+    public async Task<Autheris.Application.Governance.Requests.DecisionCasResult> TryDecideAsync(
+        Guid requestId,
+        int expectedVersion,
+        Func<Autheris.Application.Governance.Requests.IGovernanceTransaction, ConsentRequest, Task<Autheris.Application.Governance.Requests.PermissionDecisionRecord>> decideInTransaction,
+        Func<Autheris.Application.Governance.Requests.IGovernanceTransaction, Autheris.Application.Governance.Requests.PermissionDecisionRecord, ConsentRequest, Task<IReadOnlyList<Autheris.Application.Governance.Requests.GrantRef>>> applyEffect,
+        CancellationToken ct = default)
+    {
+        var request = Requests.FirstOrDefault(r => r.Id == requestId);
+        if (request is null)
+        {
+            return new Autheris.Application.Governance.Requests.DecisionCasResult(Autheris.Application.Governance.Requests.DecisionCasOutcome.NotFound);
+        }
+
+        if (request.Version != expectedVersion)
+        {
+            return new Autheris.Application.Governance.Requests.DecisionCasResult(Autheris.Application.Governance.Requests.DecisionCasOutcome.AlreadyDecided, request);
+        }
+
+        await decideInTransaction(Autheris.Tests.Unit.Security.NullFake.Create<Autheris.Application.Governance.Requests.IGovernanceTransaction>(), request);
+        throw new NotSupportedException("InMemoryConsentStore evaluates decisions but never applies their effect.");
     }
 
     public Task<bool> WithdrawConsentRequestAsync(Guid requestId, Sid requesterSid, CancellationToken ct = default)
@@ -264,7 +304,7 @@ internal sealed class InMemoryConsentStore(
         Task.FromResult<IReadOnlyList<GrantRecord>>(GrantRecords.Where(r => r.TenantId == tenantId).OrderBy(r => r.Seq).ToList());
 
     public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default) =>
-        Task.FromResult<TableMetadata?>(table.Equals(_ordersTable.Identifier) ? _ordersTable : null);
+        Task.FromResult<TableMetadata?>(table.Equals(_ordersTable.Identifier) ? _ordersTable : table.Equals(_hiddenTable.Identifier) ? _hiddenTable : null);
 
     public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, TenantId? tenantId, CancellationToken ct = default) =>
         GetTableMetadataAsync(table, ct);

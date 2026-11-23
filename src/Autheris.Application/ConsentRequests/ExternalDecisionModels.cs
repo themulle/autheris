@@ -1,6 +1,7 @@
 namespace Autheris.Application.ConsentRequests;
 
 using System;
+using Autheris.Application.ConsentRequests.Routing;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -35,7 +36,7 @@ public interface IExternalDecisionGuard
     Task<ValidatedExternalDecision> ValidateAsync(
         ExternalDecisionEnvelope envelope,
         ConsentRequest request,
-        ConsentWorkflowRoute? route,
+        ConsentWorkflowRouteResolution? route,
         ExternalWorkflowSystem? system,
         CancellationToken ct = default);
 }

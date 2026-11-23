@@ -157,7 +157,7 @@ public sealed partial class PermissionRequestEngine
     {
         if (!string.IsNullOrWhiteSpace(command.Decider.TenantId.Value) && command.Decider.TenantId != req.TenantId)
         {
-            throw new ConsentDecisionException("FORBIDDEN", "Decider tenant does not match request tenant.", 403);
+            throw new ConsentDecisionException("NOT_FOUND", $"Permission request '{req.Id}' was not found.", 404);
         }
 
         var target = BuildTargetFromRequest(req);

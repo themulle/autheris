@@ -212,10 +212,49 @@ public sealed class ConsentApiEndpointSecurityTests
 
         var missing = await harness.CreateRequestAsync(user, new CreateConsentRequestBody("pg", "public", "does_not_exist", Justification: "Quarterly revenue report", DurationDays: 7));
         var malformed = await harness.CreateRequestAsync(user, new CreateConsentRequestBody("pg", "public", "bad.name", Justification: "Quarterly revenue report", DurationDays: 7));
+        var hidden = await harness.CreateRequestAsync(user, new CreateConsentRequestBody("pg", "public", "hidden_payroll", Justification: "Quarterly revenue report", DurationDays: 7));
 
         missing.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
         malformed.StatusCode.ShouldBe(missing.StatusCode);
         Normalize(malformed.Body).ShouldBe(Normalize(missing.Body));
+        hidden.StatusCode.ShouldBe(missing.StatusCode);
+        Normalize(hidden.Body.Replace("hidden_payroll", "does_not_exist")).ShouldBe(Normalize(missing.Body));
+        harness.Store.Requests.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Foreign_tenant_request_same_as_missing()
+    {
+        await using var harness = ConsentApiTestHarness.Create();
+        var foreign = harness.SeedExternalRequest("tenant-b", harness.RegisteredSystemId, "ext-foreign-1");
+        var decider = ConsentApiTestHarness.BuildUserPrincipal("tenant-a", "S-1-5-21-GOV-1", "GovernanceAdmin");
+
+        var foreignResp = await harness.DecideAsync(decider, foreign.Id, "approve", "idem-foreign-1", ifMatch: null, expectedVersion: 1);
+        var missingResp = await harness.DecideAsync(decider, Guid.NewGuid(), "approve", "idem-foreign-1", ifMatch: null, expectedVersion: 1);
+
+        missingResp.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
+        foreignResp.StatusCode.ShouldBe(missingResp.StatusCode);
+        Normalize(foreignResp.Body.Replace(foreign.Id.ToString("D"), "<id>")).ShouldBe(Normalize(missingResp.Body));
+    }
+
+    [Fact]
+    public async Task Reason_codes_leak_no_third_party_data()
+    {
+        await using var harness = ConsentApiTestHarness.Create();
+        var request = harness.SeedExternalRequest("tenant-a", harness.RegisteredSystemId, "ext-ref-leak-1");
+        // The requester holds the governance role and tries to decide their own request: separation of duties denies.
+        var requester = ConsentApiTestHarness.BuildUserPrincipal("tenant-a", request.RequesterSid.Value, "GovernanceAdmin");
+
+        var denied = await harness.DecideAsync(requester, request.Id, "approve", "idem-leak-1", ifMatch: null, expectedVersion: 1);
+
+        denied.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+        denied.Body.ShouldContain("Consent decision is not permitted.");
+        // Neither the requester, the grantee, the target nor any group or grant of a third party is part of the response.
+        denied.Body.ShouldNotContain(request.RequesterSid.Value);
+        denied.Body.ShouldNotContain(request.RequestedGranteeRef);
+        denied.Body.ShouldNotContain("orders");
+        denied.Body.ShouldNotContain("S-1-5-21", Case.Insensitive);
+        denied.Body.ShouldNotContain("group", Case.Insensitive);
     }
 
     private static string Normalize(string body) =>
