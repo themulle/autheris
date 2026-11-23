@@ -129,7 +129,8 @@ public sealed class GovernanceTestStore : IAsyncDisposable
             Services.GetRequiredService<IOptions<GatewayOptions>>(),
             resolutionService: Services.GetService<IConsentResolutionService>(),
             consentRepository: Consents,
-            cacheService: Services.GetService<IConsentCacheService>(),
+            // No decision cache: the harness has no event bus or memory cache, and every call must see the current grants.
+            cacheService: null,
             protectionProvider: Services.GetRequiredService<IProtectionSnapshotProvider>(),
             accessPolicySettings: Services.GetService<Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider>(),
             realmRegistry: Services.GetService<Autheris.Application.Identity.IIdentityRealmRegistry>());
@@ -262,8 +263,6 @@ public sealed class GovernanceTestStore : IAsyncDisposable
 
         var services = new ServiceCollection();
         services.AddLogging();
-        // The production host registers IMemoryCache; governance services such as ConsentCacheService depend on it.
-        services.AddMemoryCache();
         services.AddSingleton<IConfiguration>(configuration);
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IHostEnvironment>(hostEnv);
