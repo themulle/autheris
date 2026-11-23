@@ -125,89 +125,68 @@ public sealed class ProtectionSnapshotProvider : IProtectionSnapshotProvider, IG
     }
 
     /// <summary>
-    /// Loads the uncached snapshots of <paramref name="tables"/> with one metadata batch read and set-based container and protection reads
-    /// instead of a metadata, a container and a protection read per table. Each snapshot is resolved exactly as <see cref="LoadSnapshotAsync"/>
-    /// resolves it and is cached under the key <see cref="GetAsync"/> uses, only when no invalidation happened during the load; data product
-    /// tables keep the per-table path. Errors propagate (the caller then decides per table, where a failure is fail-closed).
+    /// Snapshots for a batch of decisions over <paramref name="tables"/> (the metadata those decisions use): a valid cache entry is returned
+    /// as <see cref="GetAsync"/> would; every other active table is resolved exactly as <see cref="LoadSnapshotAsync"/> resolves it, but from
+    /// the given metadata and with set-based container and protection reads instead of a metadata, a container and a protection read per
+    /// table. Those snapshots are NOT cached: they were built from caller-supplied metadata, so they serve only this batch (the caller bounds
+    /// their age). Inactive tables, data product tables and tables the batch reads did not answer are left out, so the decision resolves them
+    /// per table. Errors propagate (the caller then resolves per table, where a failure is fail-closed).
     /// </summary>
-    public async ValueTask PrefetchAsync(TenantId tenant, IReadOnlyList<TableIdentifier> tables, CancellationToken ct = default)
+    public async ValueTask<IReadOnlyDictionary<TableIdentifier, EffectiveProtection>> ResolveManyAsync(
+        TenantId tenant, IReadOnlyList<TableMetadata> tables, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(tables);
         var tenantKey = RequireValidTenant(tenant);
+        var result = new Dictionary<TableIdentifier, EffectiveProtection>(tables.Count);
         if (tables.Count == 0)
         {
-            return;
+            return result;
         }
 
-        var startGlobalGen = Volatile.Read(ref _globalGeneration);
-        var startTenantGen = _tenantGenerations.GetValueOrDefault(tenantKey);
         var catalogVersion = await _catalogVersionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
         var governanceEpoch = await _epochProvider.GetEpochAsync(tenant, ct).ConfigureAwait(false);
 
-        var missing = new List<TableIdentifier>();
-        foreach (var table in tables.Distinct())
+        var resolvable = new Dictionary<TableIdentifier, TableMetadata>();
+        foreach (var meta in tables)
         {
-            RequireValidTable(table);
-            if (!_cache.TryGet(new CacheKey(tenantKey, table, catalogVersion, governanceEpoch), out var cached) || IsExpired(cached))
+            RequireValidTable(meta.Identifier);
+            if (result.ContainsKey(meta.Identifier) || resolvable.ContainsKey(meta.Identifier))
             {
-                missing.Add(table);
+                continue;
+            }
+
+            if (_cache.TryGet(new CacheKey(tenantKey, meta.Identifier, catalogVersion, governanceEpoch), out var cached) && !IsExpired(cached))
+            {
+                result[meta.Identifier] = cached.Protection;
+            }
+            else if (meta.Table.IsActive &&
+                     meta.Table.Id != Guid.Empty &&
+                     (_productRepository is null ||
+                      !string.Equals(meta.Table.SourceName, ProductSource.Name, StringComparison.OrdinalIgnoreCase)))
+            {
+                resolvable[meta.Identifier] = meta;
             }
         }
 
-        if (missing.Count == 0)
+        if (resolvable.Count == 0)
         {
-            return;
+            return result;
         }
 
-        var metadata = await _tableMetadataRepository.GetTableMetadataBatchAsync(missing, ct).ConfigureAwait(false);
-        var resolvable = new List<(TableIdentifier Table, TableMetadata Metadata)>(missing.Count);
-        var snapshots = new List<(TableIdentifier Table, CachedSnapshot Snapshot)>(missing.Count);
-        for (var i = 0; i < missing.Count; i++)
+        var ids = resolvable.Values.Select(static m => m.Table.Id).Distinct().ToList();
+        var containers = await _domainRepository.GetContainersForTablesAsync(tenant, ids, ct).ConfigureAwait(false);
+        var protections = await _domainRepository.GetProtectionBatchAsync(tenant, ids, ct).ConfigureAwait(false);
+        foreach (var (table, meta) in resolvable)
         {
-            var meta = i < metadata.Count ? metadata[i] : null;
-            if (meta is null || !meta.Table.IsActive)
+            if (containers.TryGetValue(meta.Table.Id, out var container) &&
+                protections.TryGetValue(meta.Table.Id, out var protection))
             {
-                var negative = EffectiveProtectionResolver.Resolve(ContainerDefaults.Unassigned, null, null, null);
-                snapshots.Add((missing[i], new CachedSnapshot(negative, IsNegative: true, _time.GetTimestamp())));
-            }
-            else if (_productRepository is null ||
-                     !string.Equals(meta.Table.SourceName, ProductSource.Name, StringComparison.OrdinalIgnoreCase))
-            {
-                resolvable.Add((missing[i], meta));
-            }
-        }
-
-        if (resolvable.Count > 0)
-        {
-            var ids = resolvable.Select(static r => r.Metadata.Table.Id).ToList();
-            var containers = await _domainRepository.GetContainersForTablesAsync(tenant, ids, ct).ConfigureAwait(false);
-            var protections = await _domainRepository.GetProtectionBatchAsync(tenant, ids, ct).ConfigureAwait(false);
-            foreach (var (table, meta) in resolvable)
-            {
-                var tableId = meta.Table.Id;
-                if (!containers.TryGetValue(tableId, out var container) || !protections.TryGetValue(tableId, out var protection))
-                {
-                    continue; // Not answered by the batch read: GetAsync loads it per table.
-                }
-
                 var columnNames = meta.Columns.Select(static c => c.ColumnName).ToList();
-                var resolved = EffectiveProtectionResolver.Resolve(container, protection.Table, protection.Columns, columnNames);
-                var isNegative = !container.IsValid
-                    || (container.Container.Id == Guid.Empty && protection.Table is null && protection.Columns.Count == 0);
-                snapshots.Add((table, new CachedSnapshot(resolved, isNegative, _time.GetTimestamp())));
+                result[table] = EffectiveProtectionResolver.Resolve(container, protection.Table, protection.Columns, columnNames);
             }
         }
 
-        // An invalidation during the load may have made the read rows stale: cache nothing, GetAsync reads again.
-        if (!IsSameGeneration(tenantKey, startGlobalGen, startTenantGen))
-        {
-            return;
-        }
-
-        foreach (var (table, snapshot) in snapshots)
-        {
-            _cache.Set(new CacheKey(tenantKey, table, catalogVersion, governanceEpoch), snapshot);
-        }
+        return result;
     }
 
     public void InvalidateTenant(string tenantId)

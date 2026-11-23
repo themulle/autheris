@@ -217,6 +217,12 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
 
             var principal = subject.Principal;
 
+            // A batch-resolved protection snapshot (fresh, same tenant) spares the per-table snapshot load; otherwise the policy loads it.
+            EffectiveProtection? batchProtection = request.ProtectionPrefetch is { } protectionPrefetch &&
+                protectionPrefetch.TryGet(subject.TenantId, metadata.Identifier, _timeProvider.GetUtcNow(), out var prefetchedProtection)
+                    ? prefetchedProtection
+                    : null;
+
             var query = new TableAccessQuery(
                 subject.UserSid,
                 subject.TenantId,
@@ -230,7 +236,8 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
                 ObjectKind: isProcedure ? FilterObjectKinds.ProcedureResult : FilterObjectKinds.Relation,
                 AllUserSids: isProcedure ? null : (principal?.GetAllUserSids() ?? [subject.UserSid]),
                 Principal: principal,
-                SupplementalConsents: request.SupplementalConsents)
+                SupplementalConsents: request.SupplementalConsents,
+                Protection: batchProtection)
             {
                 ColumnRowPrefetch = request.ColumnRowPrefetch,
                 ConsentPrefetch = request.ConsentPrefetch,
@@ -482,14 +489,15 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         for (var offset = 0; offset < objects.Count; offset += PrefetchBlockSize)
         {
             var block = objects.Skip(offset).Take(PrefetchBlockSize).ToList();
-            var (rowPrefetch, consentPrefetch, policyPrefetch) = await PrefetchBlockAsync(subject, block, operation, ct).ConfigureAwait(false);
+            var (rowPrefetch, consentPrefetch, policyPrefetch, protectionPrefetch) = await PrefetchBlockAsync(subject, block, operation, ct).ConfigureAwait(false);
             foreach (var obj in block)
             {
                 var req = new AccessRequest(subject, obj, operation, transport)
                 {
                     ColumnRowPrefetch = rowPrefetch,
                     ConsentPrefetch = consentPrefetch,
-                    TenantPolicyPrefetch = policyPrefetch
+                    TenantPolicyPrefetch = policyPrefetch,
+                    ProtectionPrefetch = protectionPrefetch
                 };
                 results.Add(await DecideAsync(req, ct).ConfigureAwait(false));
             }
@@ -504,7 +512,8 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
     private async ValueTask<(
         Autheris.Application.Policy.Classification.ColumnPolicyRowPrefetch?,
         Autheris.Application.Policy.ConsentBatchPrefetch?,
-        Autheris.Application.Policy.TenantPolicyPrefetch?)> PrefetchBlockAsync(
+        Autheris.Application.Policy.TenantPolicyPrefetch?,
+        Autheris.Application.Policy.ProtectionBatchPrefetch?)> PrefetchBlockAsync(
         SecurityPrincipalContext subject,
         IReadOnlyList<TableMetadata> block,
         AccessOperation operation,
@@ -514,7 +523,7 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         if (_policy == null || block.Count < 2 ||
             operation is AccessOperation.Insert or AccessOperation.Update or AccessOperation.Delete or AccessOperation.ExecuteWrite)
         {
-            return (null, null, null);
+            return (null, null, null, null);
         }
 
         var rowPrefetch = await _policy.PrefetchColumnRowsAsync(block, subject.TenantId, ct).ConfigureAwait(false);
@@ -527,7 +536,7 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
             subject.GroupResolutionStatus != GroupResolutionStatus.Complete ||
             string.IsNullOrWhiteSpace(subject.TenantId.Value))
         {
-            return (rowPrefetch, null, null);
+            return (rowPrefetch, null, null, null);
         }
 
         // Every subject set a decision reads with: the token's user SIDs, the user SID and the group SIDs.
@@ -552,21 +561,23 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
             }
         }
 
-        // The protection gate resolves a protection snapshot per table; load the uncached ones of the block set-based. A failure leaves
-        // them to the per-table read, which fails closed (PROTECTION_UNAVAILABLE).
+        // The protection gate resolves a protection snapshot per table; resolve those of the block set-based from the block's own metadata.
+        // A failure leaves them to the per-table resolution, which fails closed (PROTECTION_UNAVAILABLE).
+        Autheris.Application.Policy.ProtectionBatchPrefetch? protectionPrefetch = null;
         if (_protectionProvider is not null)
         {
             try
             {
-                await _protectionProvider.PrefetchAsync(subject.TenantId, block.Select(static o => o.Identifier).ToList(), ct).ConfigureAwait(false);
+                protectionPrefetch = await Autheris.Application.Policy.ProtectionBatchPrefetch.LoadAsync(
+                    _protectionProvider, subject.TenantId, block, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
             }
             catch (Exception) when (!ct.IsCancellationRequested)
             {
-                // Per-table resolution below.
+                protectionPrefetch = null;
             }
         }
 
-        return (rowPrefetch, consentPrefetch, policyPrefetch);
+        return (rowPrefetch, consentPrefetch, policyPrefetch, protectionPrefetch);
     }
 
     public async ValueTask<AccessExplanation> ExplainAsync(AccessRequest request, CancellationToken ct = default)
