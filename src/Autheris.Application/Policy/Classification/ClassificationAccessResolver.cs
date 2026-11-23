@@ -41,7 +41,7 @@ public sealed record ClassificationPolicyCatalog(
 /// Resolves per-grant and multi-grant column access and winning typed masks from column classifications,
 /// grant classification approvals, hierarchy mask inheritance, and per-column overrides.
 /// </summary>
-public sealed class ClassificationAccessResolver
+public sealed partial class ClassificationAccessResolver
 {
     private const int MaxHierarchyDepth = 16;
 
@@ -168,6 +168,7 @@ public sealed class ClassificationAccessResolver
         TenantId tenant,
         IReadOnlySet<string>? callerScopes,
         ClassificationPolicyCatalog? preloadedCatalog = null,
+        ColumnPolicyRowPrefetch? columnRowPrefetch = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(metadata);
@@ -177,8 +178,8 @@ public sealed class ClassificationAccessResolver
         var now = _timeProvider.GetUtcNow();
         var dialect = PolicyParameterNamer.ToTargetDialect(metadata.Dialect);
 
-        var colClassifications = await LoadEffectiveColumnClassificationsAsync(metadata, tenant.Value, ct).ConfigureAwait(false);
-        var colOverrides = await LoadEffectiveColumnOverridesAsync(metadata, tenant.Value, ct).ConfigureAwait(false);
+        var colClassifications = await LoadEffectiveColumnClassificationsAsync(metadata, tenant.Value, columnRowPrefetch, ct).ConfigureAwait(false);
+        var colOverrides = await LoadEffectiveColumnOverridesAsync(metadata, tenant.Value, columnRowPrefetch, ct).ConfigureAwait(false);
         var grantAccessMap = await LoadEffectiveGrantAccessAsync(allowGrants, tenant.Value, ct).ConfigureAwait(false);
 
         var perGrant = new Dictionary<Guid, IReadOnlyDictionary<string, ColumnClassificationGrantOutcome>>();
@@ -602,9 +603,19 @@ public sealed class ClassificationAccessResolver
     private async ValueTask<Dictionary<string, IReadOnlyList<ColumnClassification>>> LoadEffectiveColumnClassificationsAsync(
         TableMetadata metadata,
         string tenantId,
+        ColumnPolicyRowPrefetch? prefetch,
         CancellationToken ct)
     {
         var result = new Dictionary<string, IReadOnlyList<ColumnClassification>>(StringComparer.OrdinalIgnoreCase);
+        var persistedByColumn = _repository is null
+            ? null
+            : await LoadPerTableAsync(
+                metadata,
+                tenantId,
+                prefetch,
+                static (p, id) => p.ClassificationsOf(id),
+                (ids, token) => _repository.GetColumnClassificationsBatchAsync(ids, tenantId, token),
+                ct).ConfigureAwait(false);
         foreach (var col in metadata.Columns)
         {
             var merged = new List<ColumnClassification>();
@@ -613,13 +624,9 @@ public sealed class ClassificationAccessResolver
                 merged.AddRange(metaList);
             }
 
-            if (_repository is not null && col.Id != Guid.Empty)
+            if (persistedByColumn is not null && col.Id != Guid.Empty && persistedByColumn.TryGetValue(col.Id.ToString(), out var persisted))
             {
-                var persisted = await _repository.GetColumnClassificationsAsync(col.Id.ToString(), tenantId, ct).ConfigureAwait(false);
-                if (persisted.Count > 0)
-                {
-                    merged.AddRange(persisted);
-                }
+                merged.AddRange(persisted);
             }
 
             if (merged.Count > 0)
@@ -634,9 +641,19 @@ public sealed class ClassificationAccessResolver
     private async ValueTask<Dictionary<string, IReadOnlyList<ColumnMaskOverride>>> LoadEffectiveColumnOverridesAsync(
         TableMetadata metadata,
         string tenantId,
+        ColumnPolicyRowPrefetch? prefetch,
         CancellationToken ct)
     {
         var result = new Dictionary<string, IReadOnlyList<ColumnMaskOverride>>(StringComparer.OrdinalIgnoreCase);
+        var persistedByColumn = _repository is null
+            ? null
+            : await LoadPerTableAsync(
+                metadata,
+                tenantId,
+                prefetch,
+                static (p, id) => p.OverridesOf(id),
+                (ids, token) => _repository.GetColumnMaskOverridesBatchAsync(ids, tenantId, token),
+                ct).ConfigureAwait(false);
         foreach (var col in metadata.Columns)
         {
             var merged = new List<ColumnMaskOverride>();
@@ -645,13 +662,9 @@ public sealed class ClassificationAccessResolver
                 merged.AddRange(metaList);
             }
 
-            if (_repository is not null && col.Id != Guid.Empty)
+            if (persistedByColumn is not null && col.Id != Guid.Empty && persistedByColumn.TryGetValue(col.Id.ToString(), out var persisted))
             {
-                var persisted = await _repository.GetColumnMaskOverridesAsync(col.Id.ToString(), tenantId, ct).ConfigureAwait(false);
-                if (persisted.Count > 0)
-                {
-                    merged.AddRange(persisted);
-                }
+                merged.AddRange(persisted);
             }
 
             if (merged.Count > 0)
@@ -812,6 +825,51 @@ public sealed class ClassificationAccessResolver
     public sealed class IndexingHiddenTextResolver(IClassificationRepository? repository)
     {
         private readonly Dictionary<string, ClassificationPolicyCatalog[]> _catalogsByScope = new(StringComparer.Ordinal);
+        private readonly Dictionary<string, PrefetchedRows> _prefetchedByScope = new(StringComparer.Ordinal);
+
+        private sealed record PrefetchedRows(
+            HashSet<string> Covered,
+            IReadOnlyDictionary<string, IReadOnlyList<ColumnMaskOverride>> Overrides,
+            IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>> Classifications);
+
+        /// <summary>
+        /// Issue #1043: reads the mask overrides and classifications of every (not discovery-hidden) column of <paramref name="tables"/> in
+        /// set-based statements per tenant scope, for a rebuild pass over many tables. <see cref="ResolveAsync"/> then answers covered tables
+        /// from memory with the same rows the per-table reads return.
+        /// </summary>
+        public async Task PrefetchAsync(IReadOnlyList<TableMetadata> tables, CancellationToken ct = default)
+        {
+            ArgumentNullException.ThrowIfNull(tables);
+            if (repository is null)
+            {
+                return;
+            }
+
+            var idsByScope = new Dictionary<string, HashSet<string>>(StringComparer.Ordinal);
+            foreach (var table in tables)
+            {
+                var scopeKey = string.IsNullOrWhiteSpace(table.OwnerTenantId) ? string.Empty : table.OwnerTenantId;
+                if (!idsByScope.TryGetValue(scopeKey, out var ids))
+                {
+                    ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    idsByScope[scopeKey] = ids;
+                }
+
+                foreach (var col in table.Columns)
+                {
+                    if (!col.DiscoveryHidden && col.Id != Guid.Empty) ids.Add(col.Id.ToString());
+                }
+            }
+
+            foreach (var (scopeKey, ids) in idsByScope)
+            {
+                if (ids.Count == 0) continue;
+                var tenantScope = scopeKey.Length == 0 ? null : scopeKey;
+                var overrides = await repository.GetColumnMaskOverridesBatchAsync(ids, tenantScope, ct).ConfigureAwait(false);
+                var classes = await repository.GetColumnClassificationsBatchAsync(ids, tenantScope, ct).ConfigureAwait(false);
+                _prefetchedByScope[scopeKey] = new PrefetchedRows(ids, overrides, classes);
+            }
+        }
 
         public async Task<IReadOnlySet<string>> ResolveAsync(TableMetadata metadata, CancellationToken ct = default)
         {
@@ -867,14 +925,40 @@ public sealed class ClassificationAccessResolver
         private async Task<IReadOnlySet<string>> ResolveColumnsAsync(TableMetadata metadata, string? tenantScope, ClassificationPolicyCatalog[] catalogs, CancellationToken ct)
         {
         HashSet<string>? hidden = null;
+
+        // Issue #1043: the persisted rows of all (not discovery-hidden) columns in one read each, instead of two reads per column.
+        IReadOnlyDictionary<string, IReadOnlyList<ColumnMaskOverride>>? persistedOverrides = null;
+        IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>>? persistedClasses = null;
+        if (repository is not null)
+        {
+            var ids = new List<string>(metadata.Columns.Count);
+            foreach (var col in metadata.Columns)
+            {
+                if (!col.DiscoveryHidden && col.Id != Guid.Empty) ids.Add(col.Id.ToString());
+            }
+
+            if (ids.Count > 0)
+            {
+                if (_prefetchedByScope.TryGetValue(tenantScope ?? string.Empty, out var prefetched) && ids.TrueForAll(prefetched.Covered.Contains))
+                {
+                    persistedOverrides = prefetched.Overrides;
+                    persistedClasses = prefetched.Classifications;
+                }
+                else
+                {
+                    persistedOverrides = await repository.GetColumnMaskOverridesBatchAsync(ids, tenantScope, ct).ConfigureAwait(false);
+                    persistedClasses = await repository.GetColumnClassificationsBatchAsync(ids, tenantScope, ct).ConfigureAwait(false);
+                }
+            }
+        }
+
         foreach (var col in metadata.Columns)
         {
             if (col.DiscoveryHidden) continue;
             var overrides = metadata.ColumnMaskOverrides.TryGetValue(col.ColumnName, out var memOv) ? memOv : Array.Empty<ColumnMaskOverride>();
-            if (repository is not null && col.Id != Guid.Empty)
+            if (persistedOverrides is not null && col.Id != Guid.Empty && persistedOverrides.TryGetValue(col.Id.ToString(), out var persistedOv) && persistedOv.Count > 0)
             {
-                var persistedOv = await repository.GetColumnMaskOverridesAsync(col.Id.ToString(), tenantScope, ct).ConfigureAwait(false);
-                if (persistedOv.Count > 0) overrides = overrides.Count == 0 ? persistedOv : [.. overrides, .. persistedOv];
+                overrides = overrides.Count == 0 ? persistedOv : [.. overrides, .. persistedOv];
             }
             if (overrides.Any(static o => o.CatalogText == CatalogTextVisibility.Hidden))
             {
@@ -883,10 +967,9 @@ public sealed class ClassificationAccessResolver
             }
 
             var classes = metadata.ColumnClassifications.TryGetValue(col.ColumnName, out var memCc) ? memCc : Array.Empty<ColumnClassification>();
-            if (repository is not null && col.Id != Guid.Empty)
+            if (persistedClasses is not null && col.Id != Guid.Empty && persistedClasses.TryGetValue(col.Id.ToString(), out var persistedCc) && persistedCc.Count > 0)
             {
-                var persistedCc = await repository.GetColumnClassificationsAsync(col.Id.ToString(), tenantScope, ct).ConfigureAwait(false);
-                if (persistedCc.Count > 0) classes = classes.Count == 0 ? persistedCc : [.. classes, .. persistedCc];
+                classes = classes.Count == 0 ? persistedCc : [.. classes, .. persistedCc];
             }
             if (classes.Any(cc => catalogs.Any(cat => TryResolveRuleFromHierarchy(cc.Code, cat, out var r) && r.CatalogText == CatalogTextVisibility.Hidden)))
             {

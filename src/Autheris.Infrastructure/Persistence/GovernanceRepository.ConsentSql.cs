@@ -62,10 +62,18 @@ internal static class ConsentSqlCore
                                        CASE WHEN EXISTS (SELECT 1 FROM COLUMN_MASK_OVERRIDES m WHERE m.table_column_id = c.id AND m.scope = '*' AND m.code IS NULL) THEN 1 ELSE 0 END AS has_mask
                                        FROM TABLE_COLUMNS c WHERE c.table_id = @tid";
 
-    public static void ReadSubjectConsentRows(DbDataReader reader, TableIdentifier table, DateTimeOffset atTime, HashSet<Sid> subjectSet, HashSet<Guid> seen, List<Consent> consents)
+    public static void ReadSubjectConsentRows(DbDataReader reader, TableIdentifier table, DateTimeOffset atTime, HashSet<Sid> subjectSet, HashSet<Guid> seen, List<Consent> consents) =>
+        ReadSubjectConsentRows(reader, _ => table, atTime, subjectSet, seen, (_, c) => consents.Add(c));
+
+    /// <summary>
+    /// The row filter of the per-table subject read, for rows of any table: <paramref name="tableOf"/> gives the identifier a row is built
+    /// with, or null to skip the row (issue #1043 batch read).
+    /// </summary>
+    public static void ReadSubjectConsentRows(DbDataReader reader, Func<DbDataReader, TableIdentifier?> tableOf, DateTimeOffset atTime, HashSet<Sid> subjectSet, HashSet<Guid> seen, Action<TableIdentifier, Consent> add)
     {
         while (reader.Read())
         {
+            if (tableOf(reader) is not { } table) continue;
             var validFrom = DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture);
             var validTo = DateTimeOffset.Parse(reader.GetString(7), CultureInfo.InvariantCulture);
             if (atTime >= validTo) continue;
@@ -81,7 +89,7 @@ internal static class ConsentSqlCore
             var id = Guid.Parse(reader.GetString(0));
             if (!seen.Add(id)) continue;
 
-            consents.Add(ConsentWorkflowSql.BuildConsent(
+            add(table, ConsentWorkflowSql.BuildConsent(
                 id,
                 Guid.Parse(reader.GetString(1)),
                 table,

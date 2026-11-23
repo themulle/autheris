@@ -150,6 +150,48 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
         }
     }
 
+    /// <summary>
+    /// Issue #1043: the batch read returns, for every requested table (in any spelling), exactly the consents of the per-table read:
+    /// subjects, validity, not-yet-valid denies, revocation, tenant and table matching are unchanged. Unknown tables map to no consents.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(SubjectCases))]
+    public async Task Issue1043_BatchRead_EqualsThePerTableReads(string[] subjects)
+    {
+        if (!Available) return;
+        var seed = await SeedAsync();
+        var sids = subjects.Select(s => new Sid(s)).ToArray();
+        var upper = new TableIdentifier(seed.Table.Domain.ToUpperInvariant(), seed.Table.Schema.ToUpperInvariant(), seed.Table.TableName.ToUpperInvariant());
+        var unknown = new TableIdentifier("Sales", "Crm", "Missing_" + Guid.NewGuid().ToString("N")[..8]);
+
+        foreach (var tenant in new[] { TenantA, TenantB })
+        {
+            var batch = await Repo.GetActiveConsentsForSubjectsBatchAsync(sids, [upper, seed.Other, unknown], seed.Now, tenant);
+
+            foreach (var table in new[] { upper, seed.Other, unknown })
+            {
+                var single = (await Repo.GetActiveConsentsForSubjectsAsync(sids, table, seed.Now, tenant)).ToList();
+                batch.ShouldContainKey(table);
+                var fromBatch = batch[table];
+                fromBatch.Select(static c => c.Id).ShouldBe(single.Select(static c => c.Id), ignoreOrder: true, customMessage: $"table={table} tenant={tenant.Value}");
+                fromBatch.ShouldAllBe(c => c.TableIdentifier.Equals(table));
+
+                // Hydrated like the per-table read.
+                foreach (var consent in fromBatch)
+                {
+                    var twin = single.Single(c => c.Id == consent.Id);
+                    consent.ColumnRules.Count.ShouldBe(twin.ColumnRules.Count);
+                    consent.RowFilters.Count.ShouldBe(twin.RowFilters.Count);
+                    consent.Effect.ShouldBe(twin.Effect);
+                    consent.ValidFrom.ShouldBe(twin.ValidFrom);
+                    consent.ValidTo.ShouldBe(twin.ValidTo);
+                }
+            }
+
+            batch[upper].Select(static c => c.Id).ToHashSet().ShouldBe(Oracle(seed, subjects, tenant), ignoreOrder: true);
+        }
+    }
+
     [Fact]
     public async Task SEC_SC_01_TableNameMatchIsCaseInsensitive_AndFutureDenyIsKept()
     {
