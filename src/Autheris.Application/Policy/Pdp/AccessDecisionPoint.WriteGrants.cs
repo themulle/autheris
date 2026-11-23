@@ -104,7 +104,7 @@ public sealed partial class AccessDecisionPoint
         try
         {
             grantDecision = await _writeGrantEvaluator.EvaluateAsync(
-                new Autheris.Application.Policy.WriteGrants.WriteGrantQuery(principal, subject.TenantId, metadata, writeOp, writtenColumns),
+                new Autheris.Application.Policy.WriteGrants.WriteGrantQuery(principal, subject.TenantId, metadata, writeOp, writtenColumns) { ConsentPrefetch = request.ConsentPrefetch },
                 ct).ConfigureAwait(false);
         }
         catch (Exception)
@@ -132,7 +132,7 @@ public sealed partial class AccessDecisionPoint
         }
 
         var now = _timeProvider.GetUtcNow();
-        var matchingConsents = await LoadMatchingWriteConsentsAsync(principal, subject, table, now, request.SupplementalConsents, ct).ConfigureAwait(false);
+        var matchingConsents = await LoadMatchingWriteConsentsAsync(principal, subject, table, now, request.SupplementalConsents, request.ConsentPrefetch, ct).ConfigureAwait(false);
         if (matchingConsents.HasUnconditionalDeny)
         {
             return TableAccessDecision.Denied(table, $"Access denied: explicit DENY consent on table '{table.ToQualifiedName()}'.") with
@@ -512,6 +512,7 @@ public sealed partial class AccessDecisionPoint
         TableIdentifier table,
         DateTimeOffset now,
         IReadOnlyList<Consent>? supplementalConsents,
+        Autheris.Application.Policy.ConsentBatchPrefetch? prefetch,
         CancellationToken ct)
     {
         if (_consentRepository == null)
@@ -522,7 +523,10 @@ public sealed partial class AccessDecisionPoint
         var allUserSids = principal.GetAllUserSids();
         var groupSids = principal.GetGroupSids();
         var subjects = allUserSids.Concat(groupSids).Distinct().ToList();
-        var loaded = (await _consentRepository.GetActiveConsentsForSubjectsAsync(subjects, table, now, subject.TenantId, ct).ConfigureAwait(false))
+        IReadOnlyList<Consent> read = prefetch is not null && prefetch.TryGetActiveConsents(subjects, table, now, subject.TenantId, out var prefetched)
+            ? prefetched
+            : await _consentRepository.GetActiveConsentsForSubjectsAsync(subjects, table, now, subject.TenantId, ct).ConfigureAwait(false);
+        var loaded = read
             .Where(c => c.TenantId == subject.TenantId && c.TableIdentifier == table && c.IsActive(now))
             .ToList();
 

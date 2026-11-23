@@ -151,9 +151,13 @@ internal sealed class FakeDiscoveryTableRepository : ITableMetadataRepository
         return Task.FromResult(Tables.FirstOrDefault(t => t.Identifier.Equals(table)));
     }
 
+    /// <summary>Number of whole-catalog reads (issue #1050: a single-object read must not need one).</summary>
+    public int AllTablesReads { get; private set; }
+
     public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default)
     {
         if (FailWith != null) throw FailWith;
+        AllTablesReads++;
         return Task.FromResult<IReadOnlyList<TableMetadata>>(Tables.ToList());
     }
 

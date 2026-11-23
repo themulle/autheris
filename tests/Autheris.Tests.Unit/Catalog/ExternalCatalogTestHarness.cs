@@ -100,7 +100,8 @@ internal sealed class ExternalCatalogTestHarness : IAsyncDisposable
         string? cursorSigningKey = null,
         CatalogDiscoveryOptions? discoveryOptions = null,
         IRateLimiterService? rateLimiter = null,
-        long? maxResponseBytes = null)
+        long? maxResponseBytes = null,
+        bool catalogSnapshot = false)
     {
         var clock = new FakeTimeProvider(FixedNow);
         var tables = new FakeDiscoveryTableRepository();
@@ -158,6 +159,11 @@ internal sealed class ExternalCatalogTestHarness : IAsyncDisposable
         services.AddSingleton<IConsentDecisionGuard>(sp =>
             new ConsentDecisionGuard(sp.GetRequiredService<IIdentitySubjectResolver>()));
         services.AddSingleton<IRateLimiterService>(rateLimiter ?? new FakeDiscoveryRateLimiter());
+        if (catalogSnapshot)
+        {
+            services.AddSingleton<Autheris.Application.Catalog.ICatalogSnapshotProvider>(new LiveCatalogSnapshotProvider(tables));
+        }
+
         services.AddSingleton<ExternalCatalogReader>();
         services.AddSingleton<IAuthorizationHandler, ExternalSystemRequirementHandler>();
         services.AddAuthorization(options => options.AddGatewayAuthorizationPolicies());
@@ -378,10 +384,15 @@ internal sealed class ExternalCatalogTestHarness : IAsyncDisposable
         return await ExecuteResultAsync(ctx, result);
     }
 
+    /// <summary>Issue #1050: a reader without the catalog snapshot (the full-read path), sharing every other dependency.</summary>
+    public ExternalCatalogReader CreateFullReadReader() => new(
+        Tables, _services.GetRequiredService<IDiscoveryService>(), Consents, Owners, WorkflowRepo, ChangeStore, Options.Create(GatewayOptions), Artifacts, Clock);
+
     public async Task<ExecutedCatalogResponse> GetObjectByIdAsync(
         ClaimsPrincipal caller,
         string id,
-        string? ifNoneMatch = null)
+        string? ifNoneMatch = null,
+        ExternalCatalogReader? reader = null)
     {
         if (!(await AuthorizeAsync(caller, GatewayPolicies.CatalogRead)).Succeeded)
         {
@@ -389,7 +400,7 @@ internal sealed class ExternalCatalogTestHarness : IAsyncDisposable
         }
 
         var ctx = CreateHttpContext(caller, ifNoneMatch);
-        var reader = _services.GetRequiredService<ExternalCatalogReader>();
+        reader ??= _services.GetRequiredService<ExternalCatalogReader>();
         var result = await ExternalCatalogApiEndpoints.GetObjectByIdAsync(
             id,
             ctx,
@@ -484,6 +495,20 @@ internal sealed class CatalogTestEndpointRouteBuilder(IServiceProvider servicePr
     public IServiceProvider ServiceProvider { get; } = serviceProvider;
     public ICollection<EndpointDataSource> DataSources { get; } = new List<EndpointDataSource>();
     public IApplicationBuilder CreateApplicationBuilder() => new ApplicationBuilder(ServiceProvider);
+}
+
+/// <summary>Issue #1050: a catalog snapshot of the fake repository's current tables (built on every request, like a fresh refresh).</summary>
+internal sealed class LiveCatalogSnapshotProvider(FakeDiscoveryTableRepository tables) : Autheris.Application.Catalog.ICatalogSnapshotProvider
+{
+    public Autheris.Application.Catalog.CatalogSnapshot CurrentSnapshot => Build();
+    public bool IsInitialized => true;
+    public bool IsDegraded => false;
+    public ValueTask<Autheris.Application.Catalog.CatalogSnapshot> GetSnapshotAsync(CancellationToken ct = default) => ValueTask.FromResult(Build());
+    public Task RefreshAsync(CancellationToken ct = default) => Task.CompletedTask;
+    public void SignalChange() { }
+
+    private Autheris.Application.Catalog.CatalogSnapshot Build() =>
+        Autheris.Application.Catalog.CatalogSnapshot.Create(new Autheris.Application.Catalog.CatalogVersion(1, 1), tables.Tables.Where(static t => t.Table.IsActive).ToList(), []);
 }
 
 internal sealed class MutableAccessDecisionPoint : IAccessDecisionPoint

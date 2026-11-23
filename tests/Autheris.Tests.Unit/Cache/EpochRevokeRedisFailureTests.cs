@@ -52,7 +52,8 @@ public sealed class EpochRevokeRedisFailureTests
 
         var bus = Substitute.For<IEventBus>();
         Harness? harness = null;
-        bus.Subscribe(Arg.Any<string>(), Arg.Any<Func<string, Task>>()).Returns(ci =>
+        // Only the epoch invalidation channel (the service also subscribes to the catalog and access-profile channels, issue #1044).
+        bus.Subscribe("consent:invalidations", Arg.Any<Func<string, Task>>()).Returns(ci =>
         {
             harness!.InvalidationHandler = ci.ArgAt<Func<string, Task>>(1);
             return new NoopDisposable();
@@ -121,7 +122,7 @@ public sealed class EpochRevokeRedisFailureTests
         IncrementReturns(h.Db, 6);
         await h.Service.OnConnectionRestoredAsync();
 
-        await h.Db.Received(1).StringIncrementAsync(Arg.Any<RedisKey>(), Arg.Any<long>(), Arg.Any<CommandFlags>());
+        await h.Db.Received(1).StringIncrementAsync(Arg.Is<RedisKey>(static k => !k.ToString().EndsWith("__invalidation_sequence", StringComparison.Ordinal)), Arg.Any<long>(), Arg.Any<CommandFlags>());
         h.Db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>()).Returns(Task.FromResult((RedisValue)"6"));
         time.Advance(TimeSpan.FromSeconds(6));
         (await h.Service.IsEpochValidAsync(A, 6)).ShouldBeTrue();
@@ -187,7 +188,7 @@ public sealed class EpochRevokeRedisFailureTests
         h.Db.StringGetAsync(Arg.Any<RedisKey>(), Arg.Any<CommandFlags>()).Returns(Task.FromResult((RedisValue)"6"));
 
         (await h.Service.IsEpochValidAsync(A, 6)).ShouldBeTrue();
-        await h.Db.Received(1).StringIncrementAsync(Arg.Any<RedisKey>(), Arg.Any<long>(), Arg.Any<CommandFlags>());
+        await h.Db.Received(1).StringIncrementAsync(Arg.Is<RedisKey>(static k => !k.ToString().EndsWith("__invalidation_sequence", StringComparison.Ordinal)), Arg.Any<long>(), Arg.Any<CommandFlags>());
         await h.Db.DidNotReceive().ScriptEvaluateAsync(Arg.Any<string>(), Arg.Any<RedisKey[]>(), Arg.Any<RedisValue[]>(), Arg.Any<CommandFlags>());
     }
 

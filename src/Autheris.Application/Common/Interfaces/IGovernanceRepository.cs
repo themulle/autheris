@@ -190,6 +190,10 @@ public interface ITableMetadataRepository : Autheris.Application.Catalog.ICatalo
     Task<DiscoveryArtifacts?> GetDiscoveryArtifactsAsync(Guid tableId, CancellationToken ct = default)
         => throw new NotSupportedException($"{GetType().Name} does not implement discovery artifacts.");
 
+    /// <summary>Issue #1047: discovery artifacts of several tables; tables without artifacts are absent.</summary>
+    Task<IReadOnlyDictionary<Guid, DiscoveryArtifacts>> GetDiscoveryArtifactsBatchAsync(IReadOnlyCollection<Guid> tableIds, CancellationToken ct = default)
+        => throw new NotSupportedException($"{GetType().Name} does not implement discovery artifacts.");
+
     /// <summary>Upserts discovery artifacts for a table.</summary>
     Task<bool> UpsertDiscoveryArtifactsAsync(DiscoveryArtifacts artifacts, Sid actor, CancellationToken ct = default)
         => throw new NotSupportedException($"{GetType().Name} does not implement discovery artifacts.");

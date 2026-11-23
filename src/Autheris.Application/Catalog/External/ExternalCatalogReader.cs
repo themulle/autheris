@@ -41,7 +41,8 @@ public sealed partial class ExternalCatalogReader(
     TimeProvider? timeProvider = null,
     IOptions<GovernanceTextOptions>? textOptions = null,
     IKeyVaultSecretProvider? secretProvider = null,
-    IConfiguration? configuration = null)
+    IConfiguration? configuration = null,
+    ICatalogSnapshotProvider? snapshotProvider = null)
 {
     public const int DefaultPageSize = 50;
     public const int MaxPageSize = 200;
@@ -212,8 +213,7 @@ public sealed partial class ExternalCatalogReader(
             return ExternalCatalogResult.Fail<ExternalCatalogObjectDto>(404, "OBJECT_NOT_FOUND", "Catalog object was not found.");
         }
 
-        var (allTables, versions, visibility) = await LoadContextAsync(user, tenantId, ct).ConfigureAwait(false);
-        var matchedTable = FindMatchingTable(allTables, rawId);
+        var (matchedTable, versions, visibility) = await LoadSingleContextAsync(user, tenantId, rawId, ct).ConfigureAwait(false);
         if (matchedTable is null)
         {
             return ExternalCatalogResult.Fail<ExternalCatalogObjectDto>(404, "OBJECT_NOT_FOUND", "Catalog object was not found.");
@@ -350,6 +350,43 @@ public sealed partial class ExternalCatalogReader(
         return (allTables, versions, visibility);
     }
 
+    /// <summary>
+    /// Issue #1050: the context of one object. With the catalog snapshot the id is resolved in O(1) (by identifier or table id, active
+    /// tables only, as the full read) and the caller's hidden-object visibility is resolved for that table only; an unknown id returns
+    /// before any further read. Without a snapshot it falls back to the full catalog read.
+    /// </summary>
+    private async Task<(TableMetadata? Table, IReadOnlyDictionary<string, CatalogObjectVersionRow> Versions, CallerVisibility Visibility)>
+        LoadSingleContextAsync(ClaimsPrincipal user, TenantId tenantId, string rawId, CancellationToken ct)
+    {
+        if (snapshotProvider is null)
+        {
+            var (allTables, allVersions, allVisibility) = await LoadContextAsync(user, tenantId, ct).ConfigureAwait(false);
+            return (FindMatchingTable(allTables, rawId), allVersions, allVisibility);
+        }
+
+        var snapshot = await snapshotProvider.GetSnapshotAsync(ct).ConfigureAwait(false);
+        var table = FindInSnapshot(snapshot, rawId);
+        if (table is null)
+        {
+            return (null, new Dictionary<string, CatalogObjectVersionRow>(), new CallerVisibility(false, false, new HashSet<TableIdentifier>()));
+        }
+
+        var versions = await _changeStore.GetObjectVersionsAsync(tenantId, ct).ConfigureAwait(false);
+        var visibility = await ResolveCallerVisibilityAsync(user, tenantId, [table], ct).ConfigureAwait(false);
+        return (table, versions, visibility);
+    }
+
+    private static TableMetadata? FindInSnapshot(CatalogSnapshot snapshot, string rawId)
+    {
+        var trimmed = rawId.Trim();
+        var parts = trimmed.Split('.', 3, StringSplitOptions.TrimEntries);
+        int ordinal;
+        var found = parts.Length == 3 && TableIdentifier.TryCreate(parts[0], parts[1], parts[2], out var parsedId)
+            ? snapshot.OrdinalByIdentifier.TryGetValue(parsedId, out ordinal)
+            : Guid.TryParse(trimmed, out var guidId) & snapshot.OrdinalById.TryGetValue(guidId, out ordinal);
+        return found && snapshot.Tables[ordinal] is { Table.IsActive: true } table ? table : null;
+    }
+
     private async Task<CallerVisibility> ResolveCallerVisibilityAsync(
         ClaimsPrincipal user,
         TenantId tenantId,
@@ -439,11 +476,12 @@ public sealed partial class ExternalCatalogReader(
             var allUserSids = user.GetAllUserSids();
             var subjects = (allUserSids.Count > 0 ? allUserSids : [userSid.Value]).Concat(groupSids).Distinct().ToList();
             var now = _timeProvider.GetUtcNow();
-            var all = (await _consentRepository.GetAllActiveConsentsForSubjectsAsync(subjects, roles, now, tenantId, ct).ConfigureAwait(false))
-                .Where(c => c.TenantId == tenantId)
-                .ToList();
-
             var tableById = tables.ToDictionary(static t => t.Identifier.ToString(), static t => t.Identifier, StringComparer.OrdinalIgnoreCase);
+
+            // Issue #1050: the consents of the listed granted tables only (the per-table row filter, patterns included), not every consent
+            // of the caller with all its rules.
+            var listed = granted.Where(i => tableById.ContainsKey(i.ObjectId)).Select(i => tableById[i.ObjectId]).Distinct().ToList();
+            var byTable = await _consentRepository.GetActiveConsentsForSubjectsBatchAsync(subjects, listed, now, tenantId, ct).ConfigureAwait(false);
             var applicableByObject = new Dictionary<string, List<Consent>>(StringComparer.OrdinalIgnoreCase);
             var distinct = new Dictionary<Guid, Consent>();
             foreach (var item in granted)
@@ -453,7 +491,8 @@ public sealed partial class ExternalCatalogReader(
                     continue;
                 }
 
-                var applicable = EffectiveAccessExplanationService.MatchingAllowConsents(all, id, now, userSid.Value, groupSids, roles, allUserSids);
+                var forTable = byTable.TryGetValue(id, out var rows) ? rows.Where(c => c.TenantId == tenantId).ToList() : [];
+                var applicable = EffectiveAccessExplanationService.MatchingAllowConsents(forTable, id, now, userSid.Value, groupSids, roles, allUserSids);
                 applicableByObject[item.ObjectId] = applicable;
                 foreach (var c in applicable)
                 {
@@ -697,10 +736,18 @@ public sealed partial class ExternalCatalogReader(
             return false;
         }
 
-        var consentTables = await _consentRepository.GetTablesWithConsentsForTenantAsync(tenantId, ct).ConfigureAwait(false);
-        var consentSet = consentTables as IReadOnlySet<TableIdentifier> ?? consentTables.ToHashSet();
         var catalogOwner = TenantResolver.EffectiveDefaultOf(_gatewayOptions.Tenancy);
         var sharedTables = DiscoveryTenantScope.ParseSharedTables(_gatewayOptions.Catalog.SharedTables);
+
+        // Issue #1050: the tenant's consented tables (one read over all of them) are only needed when the table is not in scope otherwise,
+        // as in DiscoveryService.FindSingleScopedTableAsync.
+        if (DiscoveryTenantScope.IsInScope(table, tenantId, catalogOwner, sharedTables, new HashSet<TableIdentifier>()))
+        {
+            return true;
+        }
+
+        var consentTables = await _consentRepository.GetTablesWithConsentsForTenantAsync(tenantId, ct).ConfigureAwait(false);
+        var consentSet = consentTables as IReadOnlySet<TableIdentifier> ?? consentTables.ToHashSet();
         return DiscoveryTenantScope.IsInScope(table, tenantId, catalogOwner, sharedTables, consentSet);
     }
 

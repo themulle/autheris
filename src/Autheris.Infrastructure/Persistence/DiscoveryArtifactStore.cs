@@ -19,6 +19,9 @@ public sealed class DiscoveryArtifactStore : IDiscoveryArtifactStore
     public Task<DiscoveryArtifacts?> GetAsync(Guid tableId, CancellationToken ct = default) =>
         _repository.GetDiscoveryArtifactsAsync(tableId, ct);
 
+    public Task<IReadOnlyDictionary<Guid, DiscoveryArtifacts>> GetManyAsync(IReadOnlyCollection<Guid> tableIds, CancellationToken ct = default) =>
+        _repository.GetDiscoveryArtifactsBatchAsync(tableIds, ct);
+
     public Task<bool> UpsertAsync(DiscoveryArtifacts artifacts, Sid actor, CancellationToken ct = default) =>
         _repository.UpsertDiscoveryArtifactsAsync(artifacts, actor, ct);
 
@@ -32,19 +35,41 @@ public sealed class DiscoveryArtifactStore : IDiscoveryArtifactStore
         cmd.CommandText = $"SELECT table_id, tenant_id, samples_json, statistics_json, content_sha256, uploaded_by, uploaded_at, schema_version FROM {dialect.Prefix}CATALOG_DISCOVERY_ARTIFACTS WHERE table_id = @tid";
         AddParameter(cmd, "@tid", tableId.ToString());
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+        return await reader.ReadAsync(ct).ConfigureAwait(false) ? ReadArtifacts(reader, tableId) : null;
+    }
+
+    /// <summary>Issue #1047: the artifacts of several tables, one statement per 1,000 ids (bound values); tables without artifacts are absent.</summary>
+    internal static async Task<IReadOnlyDictionary<Guid, DiscoveryArtifacts>> GetManyAsync(DbConnection conn, KeyDefinitionDialect dialect, IReadOnlyCollection<Guid> tableIds, CancellationToken ct = default)
+    {
+        var byId = tableIds.Distinct().ToDictionary(static id => id.ToString(), StringComparer.OrdinalIgnoreCase);
+        var result = new Dictionary<Guid, DiscoveryArtifacts>();
+        foreach (var chunk in byId.Keys.Chunk(1000))
         {
-            return null;
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = $"SELECT table_id, tenant_id, samples_json, statistics_json, content_sha256, uploaded_by, uploaded_at, schema_version FROM {dialect.Prefix}CATALOG_DISCOVERY_ARTIFACTS WHERE table_id IN ("
+                + ConsentSqlCore.BindIdInClause(cmd, "tid", chunk) + ")";
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                if (byId.TryGetValue(Convert.ToString(reader.GetValue(0), CultureInfo.InvariantCulture) ?? string.Empty, out var tableId))
+                {
+                    result[tableId] = ReadArtifacts(reader, tableId);
+                }
+            }
         }
 
-        var samples = reader.IsDBNull(2) ? null : reader.GetString(2);
-        var stats = reader.IsDBNull(3) ? null : reader.GetString(3);
-        var sha = reader.GetString(4);
-        var uploadedBy = reader.GetString(5);
-        var uploadedAt = DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture);
-        var schemaVersion = reader.GetInt32(7);
-        return new DiscoveryArtifacts(tableId, reader.GetString(1), samples, stats, sha, uploadedBy, uploadedAt, schemaVersion);
+        return result;
     }
+
+    private static DiscoveryArtifacts ReadArtifacts(DbDataReader reader, Guid tableId) => new(
+        tableId,
+        reader.GetString(1),
+        reader.IsDBNull(2) ? null : reader.GetString(2),
+        reader.IsDBNull(3) ? null : reader.GetString(3),
+        reader.GetString(4),
+        reader.GetString(5),
+        DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture),
+        reader.GetInt32(7));
 
     internal static async Task<bool> UpsertAsync(DbConnection conn, DbTransaction? tx, KeyDefinitionDialect dialect, DiscoveryArtifacts artifacts, Sid actor, CancellationToken ct = default)
     {

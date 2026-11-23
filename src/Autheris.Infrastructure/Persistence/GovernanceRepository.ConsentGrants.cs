@@ -200,13 +200,12 @@ public partial class GovernanceRepository
             throw;
         }
 
+        await (patternVersion is { } version ? PublishCatalogChangedEventAsync(version, ct) : Task.CompletedTask).ConfigureAwait(false);
         foreach (var table in tables.Values)
         {
             _metadataInvalidator?.Invoke(table.ToString().ToLowerInvariant());
             await InvalidateTableEpochAsync(table, ct).ConfigureAwait(false);
         }
-
-        await (patternVersion is { } version ? PublishCatalogChangedEventAsync(version, ct) : Task.CompletedTask).ConfigureAwait(false);
     }
 
     private Task<bool> UpdateConsentDescriptionInTransactionAsync(DbConnection conn, DbTransaction tx, ConsentDescriptionUpdate update, CancellationToken ct) =>

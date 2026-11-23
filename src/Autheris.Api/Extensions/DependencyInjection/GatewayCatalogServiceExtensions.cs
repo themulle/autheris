@@ -111,7 +111,23 @@ public static class GatewayCatalogServiceExtensions
                 sp.GetService<IClassificationRepository>(),
                 sp.GetService<Autheris.Application.Procedures.Interfaces.IProcedureCatalog>(),
                 sp.GetService<Autheris.Application.Docs.Services.IDocLinkDiscoveryReader>(),
-                sp.GetService<IGovernanceRepository>() is null ? null : sp.GetService<ICatalogSnapshotProvider>()));
+                sp.GetService<IGovernanceRepository>() is null ? null : sp.GetService<ICatalogSnapshotProvider>(),
+                sp.GetService<Autheris.Application.Catalog.Discovery.CatalogAccessViewCache>()));
+
+        // Issue #1044: the caller access views of the accessStatus filter, shared across requests (bounded, invalidation-keyed). The
+        // invalidation signal exists only with the governance repository; without it the cache is never used.
+        services.TryAddSingleton(sp =>
+        {
+            var governed = sp.GetService<IGovernanceRepository>() is not null;
+            return new Autheris.Application.Catalog.Discovery.CatalogAccessViewCache(
+                sp.GetService<IOptions<CatalogDiscoveryOptions>>(),
+                governed ? sp.GetService<IEpochValidationService>() : null,
+                governed ? sp.GetService<Autheris.Application.Catalog.ICatalogVersionProvider>() : null,
+                governed ? sp.GetService<Autheris.Application.VirtualFilters.IVirtualFilterSnapshotProvider>() : null,
+                sp.GetService<TimeProvider>(),
+                sp.GetService<IOptions<GatewayOptions>>(),
+                sp.GetService<Autheris.Application.Plugins.Auth.IAuthPluginHost>());
+        });
         services.TryAddScoped<Autheris.Application.Catalog.Discovery.IDiscoveryAccessRequestService>(sp =>
             new Autheris.Application.Catalog.Discovery.DiscoveryAccessRequestService(
                 sp.GetRequiredService<Autheris.Application.Catalog.Discovery.IDiscoveryService>(),
@@ -147,7 +163,21 @@ public static class GatewayCatalogServiceExtensions
         services.TryAddScoped<IGraphQlCostAnalysisEngine, Autheris.GraphQL.Analysis.HotChocolateGraphQlCostAnalysisEngine>();
         services.TryAddScoped<IBundledConsentRequestService, BundledConsentRequestService>();
         services.TryAddSingleton<Autheris.Application.Catalog.External.ICatalogChangedSignal, Autheris.Application.Catalog.External.CatalogChangedSignal>();
-        services.TryAddScoped<Autheris.Application.Catalog.External.ExternalCatalogReader>();
+        // Issue #1050: single objects come from the catalog snapshot, which exists only with the governance repository (as for discovery).
+        services.TryAddScoped(sp => new Autheris.Application.Catalog.External.ExternalCatalogReader(
+            sp.GetRequiredService<ITableMetadataRepository>(),
+            sp.GetRequiredService<Autheris.Application.Catalog.Discovery.IDiscoveryService>(),
+            sp.GetRequiredService<IConsentRepository>(),
+            sp.GetRequiredService<IDataOwnershipRepository>(),
+            sp.GetRequiredService<Autheris.Application.ConsentRequests.IConsentWorkflowConfigRepository>(),
+            sp.GetRequiredService<Autheris.Application.Catalog.External.ICatalogChangeStore>(),
+            sp.GetRequiredService<IOptions<GatewayOptions>>(),
+            sp.GetService<Autheris.Application.Catalog.Discovery.IDiscoveryArtifactStore>(),
+            sp.GetService<TimeProvider>(),
+            sp.GetService<IOptions<GovernanceTextOptions>>(),
+            sp.GetService<IKeyVaultSecretProvider>(),
+            sp.GetService<IConfiguration>(),
+            sp.GetService<IGovernanceRepository>() is null ? null : sp.GetService<ICatalogSnapshotProvider>()));
         services.AddHostedService<Autheris.Application.Catalog.External.CatalogChangeIndexerHostedService>();
         return services;
     }

@@ -43,6 +43,9 @@ public sealed record TableAccessQuery(
     /// <summary>Issue #1043: batch-prefetched consents (see <see cref="AccessRequest.ConsentPrefetch"/>).</summary>
     public ConsentBatchPrefetch? ConsentPrefetch { get; init; }
 
+    /// <summary>Issue #1047: only <see cref="TableAccessDecision.IsAllowed"/> is used (see <see cref="AccessRequest.AllowOnly"/>).</summary>
+    public bool AllowOnly { get; init; }
+
     public static TableAccessQuery ForPrincipal(
         ClaimsPrincipal principal,
         Sid userSid,
@@ -330,18 +333,17 @@ public sealed partial class TableAccessPolicy
         }
 
         // Extension Point 2: Custom Authorization Hooks
-        var authOpt = _options?.Plugins?.Auth;
-        if (decision.IsAllowed &&
-            authOpt?.Enabled == true &&
-            authOpt.AllowAuthorizationHooks &&
-            _authPluginHost != null &&
-            _authPluginHost.HasAuthorizationHooks)
+        if (decision.IsAllowed && AuthorizationHooksActive)
         {
-            decision = await ApplyAuthorizationHooksAsync(decision, query, _authPluginHost, ct).ConfigureAwait(false);
+            decision = await ApplyAuthorizationHooksAsync(decision, query, _authPluginHost!, ct).ConfigureAwait(false);
         }
 
         return decision;
     }
+
+    /// <summary>The authorization plugin hooks run on every allowed decision; they see the column levels.</summary>
+    private bool AuthorizationHooksActive =>
+        _options?.Plugins?.Auth is { Enabled: true, AllowAuthorizationHooks: true } && _authPluginHost is { HasAuthorizationHooks: true };
 
     internal static TableAccessDecision? CheckSchemaContract(TableAccessQuery query, ISchemaContractManager? contractManager)
     {

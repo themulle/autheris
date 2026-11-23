@@ -88,6 +88,10 @@ public static class GatewayDiagnostics
     public static readonly Counter<long> DiscoveryFailuresCounter =
         Meter.CreateCounter<long>("discovery_failures_total", description: "Catalog discovery evaluations that failed closed and returned empty or null");
 
+    /// <summary>Issue #1044: lookups of the cross-request catalog access view cache, tagged result = hit | revalidate | stale.</summary>
+    public static readonly Counter<long> DiscoveryAccessViewCacheCounter =
+        Meter.CreateCounter<long>("discovery_access_view_cache_total", description: "Lookups of the cached catalog access view (accessStatus filter) by result");
+
     public static readonly Counter<long> CallerAttributeResolutions =
         Meter.CreateCounter<long>("autheris.callerattr.resolutions", description: "Caller attribute resolutions, by provider kind and outcome");
 

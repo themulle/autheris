@@ -33,9 +33,11 @@ public sealed class InProcessChannelEventBus : IEventBus, IAsyncDisposable
     private static bool IsInvalidationChannel(string channel)
     {
         if (string.IsNullOrEmpty(channel)) return false;
-        // INF-02: "invalidat" also matches the default "consent:invalidations" channel.
+        // INF-02: "invalidat" also matches the default "consent:invalidations" channel. Issue #1044: a catalog version change is an
+        // invalidation too (cached decisions and access views are keyed on it), so it reaches this process's caches before the write returns.
         return channel.Contains("invalidat", StringComparison.OrdinalIgnoreCase)
-            || channel.Contains("epoch", StringComparison.OrdinalIgnoreCase);
+            || channel.Contains("epoch", StringComparison.OrdinalIgnoreCase)
+            || string.Equals(channel, Autheris.Application.Catalog.ICatalogVersionProvider.CatalogChangedEventChannel, StringComparison.OrdinalIgnoreCase);
     }
 
     public async Task PublishAsync<T>(string channel, T message, CancellationToken ct = default)

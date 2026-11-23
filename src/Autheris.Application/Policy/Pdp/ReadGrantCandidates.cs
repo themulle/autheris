@@ -20,14 +20,25 @@ public sealed class ReadGrantCandidates
     private readonly HashSet<TableIdentifier> _targeted;
     private readonly List<ObjectPatternMatcher> _patterns;
 
-    private ReadGrantCandidates(HashSet<TableIdentifier> targeted, List<ObjectPatternMatcher> patterns)
+    private ReadGrantCandidates(HashSet<TableIdentifier> targeted, List<ObjectPatternMatcher> patterns, DateTimeOffset nextChange)
     {
         _targeted = targeted;
         _patterns = patterns;
+        NextChange = nextChange;
     }
 
+    /// <summary>
+    /// Issue #1044: the earliest time after the read at which one of the subject's consents starts or ends (an expiry, the effective end
+    /// of a clamped grant, or a scheduled deny); <see cref="DateTimeOffset.MaxValue"/> when none does. A view derived from these candidates
+    /// must not be used from then on.
+    /// </summary>
+    public DateTimeOffset NextChange { get; }
+
+    /// <summary>Issue #1044: the number of directly targeted tables and patterns (memory estimate of a cached view).</summary>
+    public int EstimatedCount => _targeted.Count + _patterns.Count;
+
     /// <summary>Every table is a candidate (consent bypass).</summary>
-    public static ReadGrantCandidates All { get; } = new([], []) { IsAll = true };
+    public static ReadGrantCandidates All { get; } = new([], [], DateTimeOffset.MaxValue) { IsAll = true };
 
     private bool IsAll { get; init; }
 
@@ -44,8 +55,15 @@ public sealed class ReadGrantCandidates
 
         var targeted = new HashSet<TableIdentifier>();
         var patterns = new List<ObjectPatternMatcher>();
+        var nextChange = DateTimeOffset.MaxValue;
         foreach (var consent in consents)
         {
+            var boundary = consent.ValidFrom > now ? consent.ValidFrom : consent.EffectiveValidTo;
+            if (boundary > now && boundary < nextChange)
+            {
+                nextChange = boundary;
+            }
+
             // Write-only consents (write rules without column rules) never grant a read.
             if (consent.Effect != ConsentEffect.Allow || (consent.WriteRules.Count > 0 && consent.ColumnRules.Count == 0))
             {
@@ -62,7 +80,7 @@ public sealed class ReadGrantCandidates
             }
         }
 
-        return new ReadGrantCandidates(targeted, patterns);
+        return new ReadGrantCandidates(targeted, patterns, nextChange);
     }
 
     /// <summary>True when <paramref name="table"/> may be allowed and must be decided; false when no Allow read consent targets it.</summary>

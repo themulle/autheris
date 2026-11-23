@@ -87,8 +87,10 @@ public sealed class WriteGrantEvaluator : IWriteGrantEvaluator
 
         var now = _timeProvider.GetUtcNow();
 
-        var loaded = await _consentRepository.GetActiveConsentsForSubjectsAsync(
-            allSubjects, query.Table.Identifier, now, query.Tenant, ct).ConfigureAwait(false);
+        IReadOnlyList<Consent> loaded = query.ConsentPrefetch is { } prefetch &&
+            prefetch.TryGetActiveConsents(allSubjects, query.Table.Identifier, now, query.Tenant, out var prefetched)
+                ? prefetched
+                : await _consentRepository.GetActiveConsentsForSubjectsAsync(allSubjects, query.Table.Identifier, now, query.Tenant, ct).ConfigureAwait(false);
 
         var matchingConsents = new List<Consent>();
         foreach (var consent in loaded)

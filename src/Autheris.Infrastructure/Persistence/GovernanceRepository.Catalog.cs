@@ -412,6 +412,12 @@ public partial class GovernanceRepository
         return await DiscoveryArtifactStore.GetAsync(conn, null, KeyDialect, tableId, ct).ConfigureAwait(false);
     }
 
+    public async Task<IReadOnlyDictionary<Guid, DiscoveryArtifacts>> GetDiscoveryArtifactsBatchAsync(IReadOnlyCollection<Guid> tableIds, CancellationToken ct = default)
+    {
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        return await DiscoveryArtifactStore.GetManyAsync(conn, KeyDialect, tableIds, ct).ConfigureAwait(false);
+    }
+
     public async Task<bool> UpsertDiscoveryArtifactsAsync(DiscoveryArtifacts artifacts, Sid actor, CancellationToken ct = default)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
