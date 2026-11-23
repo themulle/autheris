@@ -58,6 +58,14 @@ public sealed class ContainerOwnership(
         ];
     }
 
+    public async Task<string?> GetContainerKeyForTableAsync(TableIdentifier table, CancellationToken ct = default)
+    {
+        var resolved = await ResolveAsync(table, ct).ConfigureAwait(false);
+        return resolved is { } r
+            ? string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{r.Container.Container.Kind}:{r.Container.Container.Id}:{r.OwnerGroup.Value}")
+            : null;
+    }
+
     public async Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(approverSid.Value))

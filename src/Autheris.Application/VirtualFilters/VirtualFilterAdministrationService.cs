@@ -207,7 +207,8 @@ public sealed partial class VirtualFilterAdministrationService
             UpdatedAt = DateTimeOffset.UtcNow,
             Draft = null,
             PendingDeletion = false,
-            DeletionRequestedBy = null
+            DeletionRequestedBy = null,
+            ReferencedContainers = await RecordReferencedContainersAsync(filter, ct).ConfigureAwait(false)
         };
 
         var evt = existing == null ? "VIRTUAL_FILTER_CREATED" : "VIRTUAL_FILTER_UPDATED";
@@ -216,6 +217,24 @@ public sealed partial class VirtualFilterAdministrationService
             $"virtual_filter:{filter.Name}", new { name = filter.Name, status = direct.Status.ToString(), before = existing?.ComputeDefinitionHash(), after = filter.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
         await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [direct] }, snapshot.Generation, ct).ConfigureAwait(false);
         return direct;
+    }
+
+    /// <summary>The referenced tables of a SQL filter with their current container, recorded so that a later move deactivates the filter.</summary>
+    private async Task<IReadOnlyList<ReferencedTableContainer>> RecordReferencedContainersAsync(VirtualFilter filter, CancellationToken ct)
+    {
+        if (filter.Sql == null || _ownership is null)
+        {
+            return [];
+        }
+
+        var recorded = new List<ReferencedTableContainer>();
+        foreach (var table in SqlFilterCompiler.ReferencedTables(filter).DistinctBy(t => t.ToString(), StringComparer.OrdinalIgnoreCase))
+        {
+            var key = await _ownership.GetContainerKeyForTableAsync(table, ct).ConfigureAwait(false) ?? ReferencedContainerKeys.Unassigned;
+            recorded.Add(new ReferencedTableContainer(table.ToString(), key));
+        }
+
+        return recorded;
     }
 
     /// <summary>

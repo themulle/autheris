@@ -49,6 +49,45 @@ public static partial class SqlFilterCompiler
     [GeneratedRegex(@"^\s*from\s", RegexOptions.IgnoreCase | RegexOptions.CultureInvariant)]
     private static partial Regex StartsWithFrom();
 
+    /// <summary>Maximum number of distinct tables a SQL definition may reference.</summary>
+    public const int MaxReferencedTables = 5;
+
+    /// <summary>Maximum nesting depth of subqueries inside a SQL definition.</summary>
+    public const int MaxSubqueryDepth = 3;
+
+    /// <summary>Deepest nesting of <c>(select ...)</c> subqueries, ignoring string literals.</summary>
+    internal static int SubqueryDepth(string fragment)
+    {
+        var text = StringLiteral().Replace(fragment, "''");
+        var open = new Stack<bool>();
+        int depth = 0, max = 0;
+        for (var i = 0; i < text.Length; i++)
+        {
+            if (text[i] == '(')
+            {
+                var j = i + 1;
+                while (j < text.Length && char.IsWhiteSpace(text[j]))
+                {
+                    j++;
+                }
+
+                var isSubquery = string.Compare(text, j, "select", 0, 6, StringComparison.OrdinalIgnoreCase) == 0 &&
+                                 (j + 6 >= text.Length || !char.IsLetterOrDigit(text[j + 6]));
+                open.Push(isSubquery);
+                if (isSubquery)
+                {
+                    max = Math.Max(max, ++depth);
+                }
+            }
+            else if (text[i] == ')' && open.Count > 0 && open.Pop())
+            {
+                depth--;
+            }
+        }
+
+        return max;
+    }
+
     /// <summary>Validates <paramref name="filter"/>'s SQL against <paramref name="catalog"/> and returns it with the derived target columns.</summary>
     /// <exception cref="ArgumentException">The definition is not acceptable (the message says why).</exception>
     public static VirtualFilter Validate(
@@ -120,6 +159,16 @@ public static partial class SqlFilterCompiler
         if (metadata.StatementType != TrinoSqlEngine.Analysis.SqlStatementType.Select)
         {
             throw Reject(filter, "only a read-only statement fragment is allowed.");
+        }
+
+        if (metadata.ReferencedTables.Select(t => $"{t.Schema}.{t.TableName}").Distinct(StringComparer.OrdinalIgnoreCase).Count() > MaxReferencedTables)
+        {
+            throw Reject(filter, $"at most {MaxReferencedTables} distinct tables may be referenced.");
+        }
+
+        if (SubqueryDepth(fragment) > MaxSubqueryDepth)
+        {
+            throw Reject(filter, $"subqueries may be nested at most {MaxSubqueryDepth} levels deep.");
         }
 
         var sourceTables = new List<TableMetadata>();
@@ -619,6 +668,16 @@ public static partial class SqlFilterCompiler
     {
         ArgumentNullException.ThrowIfNull(filter);
         var fragment = filter.Sql ?? throw new InvalidOperationException($"The virtual filter '{filter.Name}' has no sql definition.");
+        if (RowPolicyParameterBinder.ContainsSqlParameters(fragment) || filter.Parameters.Count > 0)
+        {
+            fragment = RowPolicyParameterBinder.RewriteSqlParameters(filter, out _);
+        }
+
+        if (CallerPlaceholders.Contains(fragment))
+        {
+            fragment = CallerPlaceholders.Rewrite(fragment, out _);
+        }
+
         return FastSqlEngine.Default.Analyze(Statement(fragment).AsMemory()).ReferencedTables
             .Select(t => new TableIdentifier(filter.Source, t.Schema ?? string.Empty, t.TableName))
             .ToList();

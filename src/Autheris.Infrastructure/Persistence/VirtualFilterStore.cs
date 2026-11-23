@@ -25,7 +25,8 @@ internal static class VirtualFilterStore
         FilterApprovalStatus? Status = null, string? CreatedBy = null, string? ApprovedBy = null, DateTimeOffset? ApprovedAt = null,
         FilterDto? Draft = null, bool PendingDeletion = false, string? DeletionRequestedBy = null,
         List<ParameterDto>? Parameters = null, RowPolicyEvaluationMode? EvaluationMode = null, TimeSpan? KeySetMaxAge = null,
-        int? KeySetMaxKeys = null);
+        int? KeySetMaxKeys = null, List<RefContainerDto>? ReferencedContainers = null);
+    private sealed record RefContainerDto(string Table, string Container);
     private sealed record BindingDto(
         string Filter, string? Target, FilterObjectKinds ObjectKinds, string? TimeColumn, Dictionary<string, string>? ColumnMap,
         VirtualFilterExecutionStrategy? Strategy = null, PushdownParameterFormat? PushdownFormat = null,
@@ -256,7 +257,8 @@ internal static class VirtualFilterStore
         filter.Parameters.Count == 0 ? null : filter.Parameters.Select(p => new ParameterDto(p.Name, p.Type, p.IsList, p.MaxValues)).ToList(),
         filter.EvaluationMode == RowPolicyEvaluationMode.Live ? null : filter.EvaluationMode,
         filter.KeySetMaxAge,
-        filter.KeySetMaxKeys);
+        filter.KeySetMaxKeys,
+        filter.ReferencedContainers.Count == 0 ? null : filter.ReferencedContainers.Select(r => new RefContainerDto(r.Table, r.Container)).ToList());
 
     private static ProfileDto ProfileToDto(VirtualFilterAccessProfile profile) => new(
         profile.GranteeType,
@@ -309,7 +311,8 @@ internal static class VirtualFilterStore
         Parameters = (dto.Parameters ?? []).Select(p => new RowPolicyParameter(p.Name, p.Type, p.IsList, p.MaxValues)).ToList(),
         EvaluationMode = dto.EvaluationMode ?? RowPolicyEvaluationMode.Live,
         KeySetMaxAge = dto.KeySetMaxAge,
-        KeySetMaxKeys = dto.KeySetMaxKeys
+        KeySetMaxKeys = dto.KeySetMaxKeys,
+        ReferencedContainers = (dto.ReferencedContainers ?? []).Select(r => new ReferencedTableContainer(r.Table, r.Container)).ToList()
     };
 
     private static VirtualFilterAccessProfile DtoToProfile(ProfileDto dto, Guid id, TenantId tenantId, string name) => new()

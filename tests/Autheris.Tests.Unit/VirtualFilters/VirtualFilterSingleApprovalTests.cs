@@ -78,7 +78,7 @@ public sealed class VirtualFilterSingleApprovalTests
         return new VirtualFilterAdministrationService(repo, audit ?? NullAuditLogRepository.Instance, opts, catalog: catalog, ownership: owners);
     }
 
-    private static MandatoryRowFilterResolver CreateResolver(InMemoryFilterRepo repo)
+    private static MandatoryRowFilterResolver CreateResolver(InMemoryFilterRepo repo, IContainerOwnership? ownership = null)
     {
         var profile = new VirtualFilterAccessProfile
         {
@@ -92,7 +92,8 @@ public sealed class VirtualFilterSingleApprovalTests
         };
         return new MandatoryRowFilterResolver(
             new RepoSnapshotProvider(repo, profile),
-            new StructuredFilterSqlBuilder());
+            new StructuredFilterSqlBuilder(),
+            ownership: ownership);
     }
 
     private static HttpContext HttpCtx(Sid sid, string role, object? body = null)
@@ -226,6 +227,106 @@ public sealed class VirtualFilterSingleApprovalTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public async Task Referenced_table_moved_deactivates()
+    {
+        var owners = new InMemoryOwnershipRepo();
+        var repo = new InMemoryFilterRepo();
+        var service = CreateService(repo, owners);
+
+        var saved = await service.SaveFilterAsync(SqlPolicy(), GovAuthorActor);
+        saved.ReferencedContainers.Select(r => r.Container).ShouldAllBe(c => c == "container-1");
+        saved.ReferencedContainers.Count.ShouldBe(2);
+
+        // Still in the recorded containers: enforced.
+        (await CreateResolver(repo, owners).ResolveAsync(OrdersQuery)).IsDenied.ShouldBeFalse();
+
+        // One referenced table moves to another container: the filter goes inactive, the profile denies until it is saved again.
+        owners.Move(CraneTable, "container-2");
+        (await CreateResolver(repo, owners).ResolveAsync(OrdersQuery)).IsDenied.ShouldBeTrue();
+
+        await service.SaveFilterAsync(SqlPolicy(), GovAuthorActor);
+        (await CreateResolver(repo, owners).ResolveAsync(OrdersQuery)).IsDenied.ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Referenced_tables_own_policies_apply()
+    {
+        // A referenced table keeps its own tenant policy: when it is tenanted the definition must compare it with the reserved tenant value.
+        IReadOnlyList<TableMetadata> catalog =
+        [
+            CatalogTable("conf", "client", "client_id", "tenant_id"),
+            OrdersTable()
+        ];
+        var filter = SqlPolicy("from conf.client client where client.client_id = target.client_id");
+
+        Should.Throw<ArgumentException>(() => SqlFilterCompiler.Validate(filter, catalog));
+        SqlFilterCompiler.Validate(
+            SqlPolicy("from conf.client client where client.tenant_id = '{{tenant}}' and client.client_id = target.client_id"), catalog)
+            .SqlTargetColumns.ShouldContain("client_id");
+    }
+
+    [Theory]
+    [InlineData("pg_sleep(10)")]
+    [InlineData("nextval('conf.seq')")]
+    [InlineData("dblink_exec('x')")]
+    [Trait("Category", "Security")]
+    public async Task Side_effect_function_rejected(string call)
+    {
+        var repo = new InMemoryFilterRepo();
+        var service = CreateService(repo, new InMemoryOwnershipRepo());
+
+        await Should.ThrowAsync<ArgumentException>(() =>
+            service.SaveFilterAsync(SqlPolicy($"from conf.client client where {call} is not null and client.client_id = target.client_id"), GovAuthorActor));
+
+        (await repo.LoadSnapshotAsync()).Filters.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Reference_depth_bounded()
+    {
+        var repo = new InMemoryFilterRepo();
+        var service = CreateService(repo, new InMemoryOwnershipRepo());
+
+        var nested = "from conf.client client where client.client_id = target.client_id and client.crane_serial_number in " +
+                     "(select serial_number from md.crane where serial_number in (select serial_number from md.crane where serial_number in " +
+                     "(select serial_number from md.crane where serial_number in (select serial_number from md.crane))))";
+        (await Should.ThrowAsync<ArgumentException>(() => service.SaveFilterAsync(SqlPolicy(nested), GovAuthorActor)))
+            .Message.ShouldContain("nested");
+
+        // More than five distinct tables is refused as well.
+        var many = string.Join(" ", Enumerable.Range(1, 6).Select(i => $"join md.t{i} t{i} on t{i}.serial_number = client.crane_serial_number"));
+        var catalog = new[] { CatalogTable("conf", "client", "client_id", "crane_serial_number") }
+            .Concat(Enumerable.Range(1, 6).Select(i => CatalogTable("md", $"t{i}", "serial_number"))).ToList();
+        (await Should.ThrowAsync<ArgumentException>(async () =>
+            SqlFilterCompiler.Validate(SqlPolicy($"from conf.client client {many} where target.client_id = client.client_id"), catalog)))
+            .Message.ShouldContain("at most 5");
+
+        (await repo.LoadSnapshotAsync()).Filters.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Writer_without_capacity_refused()
+    {
+        var repo = new InMemoryFilterRepo();
+        var service = CreateService(repo, new InMemoryOwnershipRepo());
+
+        var body = new { source = "lwetem_prod", structured = new { from = new { domain = "lwetem_prod", schema = "sales", table = "orders" } } };
+        foreach (var role in new[] { "Consumer" })
+        {
+            var ctx = HttpCtx(new Sid("S-1-5-21-CALLER"), role, body);
+            var res = await VirtualFilterEndpoints.PutFilterAsync("structured_one", ctx, service);
+            await res.ExecuteAsync(ctx);
+            ctx.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden, role);
+        }
+
+        (await repo.LoadSnapshotAsync()).Filters.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public async Task Definition_change_takes_effect_on_save()
     {
         var repo = new InMemoryFilterRepo();
@@ -328,6 +429,14 @@ public sealed class VirtualFilterSingleApprovalTests
 
         public void Allow(TableIdentifier table, Sid sid) =>
             _allowed.Add((table.Domain.ToLowerInvariant(), table.Schema.ToLowerInvariant(), table.TableName.ToLowerInvariant(), sid.Value));
+
+        private readonly Dictionary<string, string> _containers = new(StringComparer.OrdinalIgnoreCase);
+
+        /// <summary>Moves the table to another container (the container key changes).</summary>
+        public void Move(TableIdentifier table, string container) => _containers[table.ToString()] = container;
+
+        public Task<string?> GetContainerKeyForTableAsync(TableIdentifier table, CancellationToken ct = default) =>
+            Task.FromResult<string?>(_containers.TryGetValue(table.ToString(), out var key) ? key : "container-1");
 
         public Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<DataOwner>>([]);

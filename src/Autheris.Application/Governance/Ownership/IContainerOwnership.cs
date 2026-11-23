@@ -18,6 +18,18 @@ public interface IContainerOwnership
     /// <summary>Owner group (and contact) of the container of <paramref name="table"/> as a single owner entry; empty when none.</summary>
     Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default);
 
+    /// <summary>
+    /// Stable key of the container of <paramref name="table"/> together with its owner group; changes when the table moves to another
+    /// container or the owner group changes. Null when the table has no valid container (unassigned or unresolvable). The default derives
+    /// the key from the owner group alone.
+    /// </summary>
+    async Task<string?> GetContainerKeyForTableAsync(TableIdentifier table, CancellationToken ct = default)
+    {
+        var owners = await GetDataOwnersForTableAsync(table, ct).ConfigureAwait(false);
+        var owner = owners.FirstOrDefault(static o => o.IsActive);
+        return owner is null || string.IsNullOrWhiteSpace(owner.AdSid.Value) ? null : "owner:" + owner.AdSid.Value;
+    }
+
     /// <summary>True when <paramref name="approverSid"/> is the owner group or an effective member of it.</summary>
     Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default);
 
