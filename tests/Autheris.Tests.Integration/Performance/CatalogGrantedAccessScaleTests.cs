@@ -16,8 +16,10 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Tests.Integration.Governance;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.AspNetCore.TestHost;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Hosting;
 using Shouldly;
 using Xunit;
 using Xunit.Abstractions;
@@ -102,10 +104,10 @@ public sealed class CatalogGrantedAccessScaleTests : IClassFixture<CatalogGrante
         var body = await response.Content.ReadAsStringAsync();
         sw.Stop();
 
-        _output.WriteLine($"{path}: {(int)response.StatusCode} in {sw.ElapsedMilliseconds} ms, {counter.Count} statements, {TableCount} granted tables");
-        foreach (var (statement, count) in counter.Top(12))
+        _output.WriteLine($"{path}: {(int)response.StatusCode} in {sw.ElapsedMilliseconds} ms, {counter.Count} statements ({counter.TotalMilliseconds:F0} ms in the database), {TableCount} granted tables");
+        foreach (var (statement, count, ms) in counter.Top(12))
         {
-            _output.WriteLine($"  {count,7} x {statement}");
+            _output.WriteLine($"  {count,7} x {ms,8:F1} ms  {statement}");
         }
 
         return new Measurement(response.StatusCode, body, counter.Count, sw.Elapsed);
@@ -117,7 +119,7 @@ public sealed class CatalogGrantedAccessScaleTests : IClassFixture<CatalogGrante
     private sealed class StatementCounter : IDisposable
     {
         private readonly ActivityListener _listener;
-        private readonly ConcurrentDictionary<string, int> _byStatement = new(StringComparer.Ordinal);
+        private readonly ConcurrentDictionary<string, (int Count, double Milliseconds)> _byStatement = new(StringComparer.Ordinal);
         private int _count;
 
         public StatementCounter()
@@ -137,7 +139,8 @@ public sealed class CatalogGrantedAccessScaleTests : IClassFixture<CatalogGrante
                     Interlocked.Increment(ref _count);
                     var key = string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
                     key = key.Length > 110 ? key[..110] : key;
-                    _byStatement.AddOrUpdate(key, 1, static (_, c) => c + 1);
+                    var ms = activity.Duration.TotalMilliseconds;
+                    _byStatement.AddOrUpdate(key, (1, ms), (_, c) => (c.Count + 1, c.Milliseconds + ms));
                 }
             };
             ActivitySource.AddActivityListener(_listener);
@@ -145,8 +148,10 @@ public sealed class CatalogGrantedAccessScaleTests : IClassFixture<CatalogGrante
 
         public int Count => Volatile.Read(ref _count);
 
-        public IEnumerable<(string Statement, int Count)> Top(int n) =>
-            _byStatement.OrderByDescending(static kv => kv.Value).Take(n).Select(static kv => (kv.Key, kv.Value));
+        public double TotalMilliseconds => _byStatement.Values.Sum(static v => v.Milliseconds);
+
+        public IEnumerable<(string Statement, int Count, double Milliseconds)> Top(int n) =>
+            _byStatement.OrderByDescending(static kv => kv.Value.Milliseconds).Take(n).Select(static kv => (kv.Key, kv.Value.Count, kv.Value.Milliseconds));
 
         public void Dispose() => _listener.Dispose();
     }
@@ -170,6 +175,17 @@ public sealed class CatalogGrantedAccessScaleTests : IClassFixture<CatalogGrante
                 b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
                 b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("CatalogGrantedScale"));
                 b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:Tenancy:DefaultTenantId"] = null }));
+
+                // Issue #1044: the catalog change indexer re-indexes every freshly seeded table in the background (one artifact read
+                // per table), which inflated the time and statement count of the measured requests at 10,000 tables.
+                b.ConfigureTestServices(s =>
+                {
+                    foreach (var indexer in s.Where(static d => d.ServiceType == typeof(IHostedService) &&
+                        d.ImplementationType == typeof(Autheris.Application.Catalog.External.CatalogChangeIndexerHostedService)).ToList())
+                    {
+                        s.Remove(indexer);
+                    }
+                });
             });
         }
 
