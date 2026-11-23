@@ -144,6 +144,25 @@ public sealed class DeprovisioningGrantRevocationTests
         f.Revoked.ShouldBeEmpty();
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Deny_rows_do_not_hide_revocable_grants_beyond_the_cap()
+    {
+        var f = new Fixture();
+        for (var i = 0; i < 3; i++)
+        {
+            f.Active.Add(new Consent { Id = Guid.NewGuid(), TenantId = Tenant, TableIdentifier = new TableIdentifier("s", "dbo", "t"), GranteeSid = Subject, Effect = ConsentEffect.Deny, ValidTo = Now.AddDays(5) });
+        }
+
+        var allow = new[] { f.AddGrant(), f.AddGrant() };
+
+        var result = await f.Build(maxItemsPerRun: 2).RevokeAllForSubjectAsync(Tenant, Subject, Reason);
+
+        f.Revoked.ShouldBe(allow.Select(a => a.Id), ignoreOrder: true);
+        result.GrantsRevoked.ShouldBe(2);
+        result.Complete.ShouldBeTrue();
+    }
+
     private sealed class Fixture
     {
         public List<Consent> Active { get; } = [];
@@ -169,7 +188,11 @@ public sealed class DeprovisioningGrantRevocationTests
                         return Task.FromResult<IReadOnlyList<Consent>>(Active.Where(c => !Revoked.Contains(c.Id) && c.GrantKind == PermissionGrantKind.Data).ToList());
                     case nameof(IConsentRepository.GetActiveGrantsForSubjectsAsync):
                         EnumerationCalls++;
-                        return Task.FromResult<IReadOnlyList<Consent>>(Active.Where(c => !Revoked.Contains(c.Id)).ToList());
+                    {
+                        var rows = Active.Where(c => !Revoked.Contains(c.Id));
+                        var cap = (int)args![3]!;
+                        return Task.FromResult<IReadOnlyList<Consent>>((cap > 0 ? rows.Take(cap) : rows).ToList());
+                    }
                     case nameof(IConsentRepository.RevokeSystemConsentByIdAsync):
                         var id = (Guid)args![1]!;
                         WrongTenantCalls += (TenantId)args[0]! == Tenant ? 0 : 1;

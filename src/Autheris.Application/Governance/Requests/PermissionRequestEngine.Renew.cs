@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
@@ -162,6 +163,8 @@ public sealed partial class PermissionRequestEngine
 
             try
             {
+                // Fail-closed outcome: if the audit write fails after the superseded consent was revoked, the new
+                // consent is rolled back as well, so BOTH grants end up revoked (no silent extension, access lost).
                 // The superseded consent always ends at renewal; if it cannot be ended the renewal is rolled back.
                 var ended = await _consentRepository.RevokeSystemConsentByIdAsync(
                     tenant, consent.Id, renewer.UserSid, "Renewed by approver.", ct).ConfigureAwait(false);
@@ -196,7 +199,7 @@ public sealed partial class PermissionRequestEngine
             }
             catch
             {
-                await RollbackRenewedConsentAsync(tenant, created, renewer.UserSid).ConfigureAwait(false);
+                await RollbackRenewedConsentAsync(tenant, consent, created, renewer.UserSid).ConfigureAwait(false);
                 throw;
             }
 
@@ -215,18 +218,40 @@ public sealed partial class PermissionRequestEngine
         }
     }
 
-    /// <summary>Best-effort compensation: no extended grant may outlive a renewal that did not complete.</summary>
-    private async Task RollbackRenewedConsentAsync(TenantId tenant, Consent created, Sid actor)
+    /// <summary>
+    /// Compensation: no extended grant may outlive a renewal that did not complete. When the compensating revoke
+    /// itself fails, the dangling grant is surfaced through a best-effort audit event besides the error log.
+    /// </summary>
+    private async Task RollbackRenewedConsentAsync(TenantId tenant, Consent original, Consent created, Sid actor)
     {
         try
         {
-            await _consentRepository!.RevokeSystemConsentByIdAsync(
+            var done = await _consentRepository!.RevokeSystemConsentByIdAsync(
                 tenant, created.Id, actor, "Renewal rolled back.", CancellationToken.None).ConfigureAwait(false);
+            if (done)
+            {
+                return;
+            }
+
+            _logger?.LogError("Rolling back the renewed grant {GrantId} reported no change; it must be revoked manually.", created.Id);
         }
         catch (Exception ex)
         {
             _logger?.LogError(ex, "Rolling back the renewed grant {GrantId} failed; it must be revoked manually.", created.Id);
         }
+
+        await _auditWriter.RecordBestEffortAsync(new AuditLogEntry
+        {
+            Id = Guid.NewGuid(),
+            OccurredAt = _time.GetUtcNow(),
+            EventType = AuditEventTypes.GrantRenewalRollbackFailed,
+            ActorSid = actor,
+            TargetTable = original.TableIdentifier.ToString(),
+            Decision = "ROLLBACK_FAILED",
+            TraceId = GetTraceId(),
+            TenantId = tenant,
+            DetailsJson = JsonSerializer.Serialize(new { SupersededConsentId = original.Id, DanglingConsentId = created.Id })
+        }, CancellationToken.None).ConfigureAwait(false);
     }
 
     private async Task<ApproverCapacity> EvaluateRenewalWithGrantPolicyAsync(

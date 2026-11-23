@@ -13,7 +13,8 @@ public sealed class GovernanceRepositoryLocBudgetTests
     // (WP-SIMPL-41/42/45/47/48/52) temporarily raised the total and WP-SIMPL-52 PR 6 will ratchet it back down when legacy tables/repos are dropped.
     // #1009 W3 permission request engine persistence on top of the #1043 consent batch reads (+49 LOC over 15,818).
     // #1009 W8-02 scoped audit read with owner scoping and bound cursors in AuditSqlCore (+18 LOC).
-    public const int MaxAllowedLoc = 15_885;
+    // #1009 W7-03 deprovisioning revokes all grant kinds; kind-complete read + tenant-scoped by-id revoke (+82 LOC).
+    public const int MaxAllowedLoc = 15_967;
 
     [Fact]
     [Trait("Category", "Architecture")]

@@ -184,6 +184,7 @@ public static class AuditPolicyTable
         [AuditEventTypes.CatalogGrantRevoked] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.UnmaskGrantCreated] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.GrantRenewed] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.GrantRenewalRollbackFailed] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.GrantRevoked] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.GrantRevokedDeprovisioned] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.SelfGrant] = AuditFailurePolicy.FailClosed,

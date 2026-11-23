@@ -229,6 +229,7 @@ public static class AuditEventTypes
     public const string CatalogGrantRevoked = "CATALOG_GRANT_REVOKED";
     public const string UnmaskGrantCreated = "UNMASK_GRANT_CREATED";
     public const string GrantRenewed = "GRANT_RENEWED";
+    public const string GrantRenewalRollbackFailed = "GRANT_RENEWAL_ROLLBACK_FAILED";
     public const string GrantRevoked = "GRANT_REVOKED";
     public const string GrantRevokedDeprovisioned = "GRANT_REVOKED_DEPROVISIONED";
     public const string SelfGrant = "SELF_GRANT";

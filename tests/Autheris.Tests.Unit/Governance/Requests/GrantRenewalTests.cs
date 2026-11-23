@@ -84,6 +84,21 @@ public sealed class GrantRenewalTests
         await Should.ThrowAsync<InvalidOperationException>(() => h.Engine.RenewGrantAsync(Cmd(c, H.Actor("user:dg", "GovernanceAdmin"))));
         var created = h.CreatedConsents.ShouldHaveSingleItem();
         h.RevokedConsents.ShouldContain(created.Id);
+        // Known fail-closed outcome: the superseded grant was already revoked, so BOTH grants end up revoked.
+        h.RevokedConsents.ShouldContain(c.Id);
+    }
+
+    [Fact]
+    public async Task Failed_rollback_of_renewed_consent_is_audited()
+    {
+        var c = Grant();
+        var h = Harness(c);
+        h.FailRevokeConsent = _ => true;
+        await Should.ThrowAsync<InvalidOperationException>(() => h.Engine.RenewGrantAsync(Cmd(c, H.Actor("user:dg", "GovernanceAdmin"))));
+        var created = h.CreatedConsents.ShouldHaveSingleItem();
+        var entry = h.Audit.Entries.Single(e => e.EventType == AuditEventTypes.GrantRenewalRollbackFailed);
+        entry.DetailsJson.ShouldContain(created.Id.ToString());
+        entry.DetailsJson.ShouldContain(c.Id.ToString());
     }
 
     [Fact]

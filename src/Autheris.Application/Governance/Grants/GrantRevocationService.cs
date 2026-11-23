@@ -111,7 +111,9 @@ public sealed class GrantRevocationService : IGrantRevocationService
 
         try
         {
-            var grants = await _consents.GetActiveGrantsForSubjectsAsync(tenant, subjects, now, maxItems + 1, token).ConfigureAwait(false);
+            // Uncapped read (0): the cap must apply to revocable rows only, otherwise Deny or non-revocable
+            // rows would consume it and hide revocable Allow grants while the result still reads Complete.
+            var grants = await _consents.GetActiveGrantsForSubjectsAsync(tenant, subjects, now, 0, token).ConfigureAwait(false);
             foreach (var consent in grants.Where(IsRevocableGrant))
             {
                 if (handled++ >= maxItems)
