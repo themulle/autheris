@@ -120,6 +120,20 @@ public sealed class GovernanceTestStore : IAsyncDisposable
     public IGovernanceDomainRepository GovernanceDomains => Services.GetRequiredService<IGovernanceDomainRepository>();
     public IAccessPolicySettingsRepository AccessPolicySettings => Services.GetRequiredService<IAccessPolicySettingsRepository>();
 
+    /// <summary>
+    /// Builds a real PDP over the store's governance services (the API-level PDP registration lives in the gateway
+    /// execution extensions, which this harness does not load).
+    /// </summary>
+    public Autheris.Application.Policy.Pdp.IAccessDecisionPoint CreateAccessDecisionPoint() =>
+        new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
+            Services.GetRequiredService<IOptions<GatewayOptions>>(),
+            resolutionService: Services.GetService<IConsentResolutionService>(),
+            consentRepository: Consents,
+            cacheService: Services.GetService<IConsentCacheService>(),
+            protectionProvider: Services.GetRequiredService<IProtectionSnapshotProvider>(),
+            accessPolicySettings: Services.GetService<Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider>(),
+            realmRegistry: Services.GetService<Autheris.Application.Identity.IIdentityRealmRegistry>());
+
     public void SetCaller(CallerContext? caller) => _callerProvider.Current = caller;
 
     public void InvalidateMetadataCache()

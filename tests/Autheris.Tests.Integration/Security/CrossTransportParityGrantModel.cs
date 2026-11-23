@@ -93,7 +93,7 @@ internal sealed partial class CrossTransportParityGrantModelRows
                 new(true, GrantIds: [GrantId(1), GrantId(2)], RowSet: ParityRowSet.Unfiltered, ColumnState: Cols(ColumnAccessLevel.Mask),
                     PredicateParameterValues: []), plain),
 
-            // S34b: every matching grant has UncoveredPolicy.Deny -> no grant contributes to the object -> denied with ROW_SCOPE_NO_CONTRIBUTING_GRANT and no row set.
+            // S34b: every matching grant has UncoveredPolicy.Deny -> no grant contributes to the object -> denied with ROW_SCOPE_NO_CONTRIBUTING_GRANT and no row set; the table is unclassified (defaults to confidential) and the caller is not internal, so the protection gate also reports PROTECTION_CLASS_GRANT_REQUIRED.
             new(ParityScenarioId.S34b_UncoveredDenyOnly, principal, tenant, table,
                 [
                     GroupGrant(1, GroupA, now, [SegmentEntry("gold", UncoveredPolicy.Deny)]),
@@ -101,7 +101,7 @@ internal sealed partial class CrossTransportParityGrantModelRows
                 ], [], VirtualFilterSnapshot.Empty, false, false,
                 new(false, GrantIds: [], ColumnState: AllCols(ColumnAccessLevel.Deny),
                     PredicateParameterValues: [],
-                    ReasonCodes: [RowScopeCompiler.NoContributingGrantCode]), plain),
+                    ReasonCodes: ["PROTECTION_CLASS_GRANT_REQUIRED", RowScopeCompiler.NoContributingGrantCode]), plain),
 
             // S35: composite-key policy (both key columns are compared pair-wise).
             new(ParityScenarioId.S35_CompositeKeyPolicy, principal, tenant, table,

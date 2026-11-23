@@ -82,26 +82,47 @@ public sealed class SubscriptionRevocationIntegrationTests(GovernancePostgresFix
             new Claim(ClaimTypes.Role, "GovernanceAdmin")
         ], "Bearer"));
 
-        var epochProvider = store.Services.GetRequiredService<GovernanceEpochProvider>();
-        var beforeEpoch = await epochProvider.GetEpochAsync(store.TenantA);
+        // The harness store does not load the gateway execution registrations, so the subscription's services expose
+        // the real PDP and metadata repository explicitly (no fake decision: a missing PDP would deny vacuously).
+        var subscriptionServices = new ServiceCollection()
+            .AddSingleton(store.CreateAccessDecisionPoint())
+            .AddSingleton(store.TableMetadata)
+            .BuildServiceProvider();
 
+        // Control: while the grant is active the revalidation keeps the stream open.
+        using var controlCts = new CancellationTokenSource();
+        await Subscription.RevalidateSubscriptionAccessAsync(
+            controlCts, subscriptionServices, principal, store.TenantA, tableRef, NullLogger.Instance);
+        controlCts.IsCancellationRequested.ShouldBeFalse();
+
+        var epochProvider = store.Services.GetRequiredService<GovernanceEpochProvider>();
         using var streamCts = new CancellationTokenSource();
-        var lastEpoch = new[] { beforeEpoch };
-        var syncLock = new Lock();
+        var revalidations = new List<Task>();
+
+        // Production wiring: a tenant epoch advance (change notification after a grant revocation) triggers revalidation.
+        using var advanceSubscription = epochProvider.OnTenantEpochAdvanced(changedTenant =>
+        {
+            if (string.Equals(changedTenant, store.TenantA.Value, StringComparison.OrdinalIgnoreCase))
+            {
+                lock (revalidations)
+                {
+                    revalidations.Add(Subscription.RevalidateSubscriptionAccessAsync(
+                        streamCts, subscriptionServices, principal, store.TenantA, tableRef, NullLogger.Instance));
+                }
+            }
+        });
 
         await store.Consents.RevokeConsentAsync(grant.Id, new Sid("S-1-5-21-ADM-1"), "Revoked", ConsentRevocationAuthority.FromPrincipal(adminPrincipal));
         epochProvider.InvalidateTenant(store.TenantA.Value);
 
-        await Subscription.PollEpochChangeAsync(
-            streamCts,
-            epochProvider,
-            store.TenantA,
-            store.Services,
-            principal,
-            tableRef,
-            lastEpoch,
-            syncLock,
-            NullLogger.Instance);
+        Task[] pending;
+        lock (revalidations)
+        {
+            pending = [.. revalidations];
+        }
+
+        pending.ShouldNotBeEmpty();
+        await Task.WhenAll(pending);
 
         streamCts.IsCancellationRequested.ShouldBeTrue();
     }

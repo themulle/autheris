@@ -61,7 +61,7 @@ public sealed class ProtectionFailClosedIntegrationTests(GovernancePostgresFixtu
             RealmKind = IdentityRealmKind.EntraWorkforce
         };
 
-        var pdp = store.Services.GetRequiredService<IAccessDecisionPoint>();
+        var pdp = store.CreateAccessDecisionPoint();
         var decision = await pdp.DecideAsync(
             new AccessRequest(subject, metadata, AccessOperation.Read, AccessTransport.Rest),
             CancellationToken.None);

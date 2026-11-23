@@ -83,7 +83,7 @@ public sealed class ProtectionClassEgressMatrixTests(GovernancePostgresFixture f
             IsAuthenticated = true
         };
 
-        var pdp = store.Services.GetRequiredService<IAccessDecisionPoint>();
+        var pdp = store.CreateAccessDecisionPoint();
         var decision = await pdp.DecideAsync(
             new AccessRequest(subject, metadata, AccessOperation.Read, transport),
             CancellationToken.None);
