@@ -101,7 +101,7 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
 
         var route = new ConsentWorkflowRoute(
             Store.TenantA.Value, WorkflowRouteScopeKind.Domain, "sales", ConsentWorkflowMode.Internal,
-            null, 45, 14, 24, true, "admin-a", FixedNow);
+            null, 45, 14, true, "admin-a", FixedNow);
         await Store.ConsentWorkflowAdmin.UpsertWorkflowRouteAsync(route);
         await Store.ConsentWorkflowAdmin.UpsertWorkflowRouteAsync(route with { MaxDurationDays = 30 });
 
@@ -172,7 +172,7 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
 
         var route = new ConsentWorkflowRoute(
             Store.TenantA.Value, WorkflowRouteScopeKind.Domain, "owner-soft-delete", ConsentWorkflowMode.Internal,
-            null, 30, 14, 24, true, "admin-a", FixedNow);
+            null, 30, 14, true, "admin-a", FixedNow);
         await Store.ConsentWorkflowAdmin.UpsertWorkflowRouteAsync(route);
 
         var deleted = await Store.ConsentWorkflowAdmin.DeleteWorkflowRouteAsync(
