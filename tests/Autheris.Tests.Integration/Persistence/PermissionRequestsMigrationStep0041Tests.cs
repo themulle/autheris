@@ -109,12 +109,12 @@ public sealed class PermissionRequestsMigrationStep0041Tests
         await using var cmd = new NpgsqlCommand(@"
             INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active) VALUES ('do-1', 'S-1-5-O1', 'CORP\\o1', 'O1', 'o1@x.test', 1);
             INSERT INTO GRANT_RECORD_HEADS (tenant_id, last_seq, last_hash) VALUES ('tenant-a', 4, 'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
-            INSERT INTO access_profiles (profile_id, name, tenant_id, masking_mode, target_tables_json, created_at) VALUES ('prof-1', 'FinanceAnalyst', 'tenant-a', 'DEFAULT', '[]', '2026-01-01T00:00:00Z');
-            INSERT INTO access_profile_assignments (tenant_id, profile_id, subject_type, subject, assigned_by, assigned_at) VALUES ('tenant-a', 'prof-1', 'USER', 'S-1-5-U1', 'admin', '2026-01-01T00:00:00Z');
+            INSERT INTO access_profiles (profile_id, name, tenant_id, created_by, created_at) VALUES ('prof-1', 'FinanceAnalyst', 'tenant-a', 'admin', '2026-01-01T00:00:00Z');
+            INSERT INTO access_profile_assignments (tenant_id, profile_id, subject_type, subject, subject_norm, created_by, assigned_at, kind, renewal_count) VALUES ('tenant-a', 'prof-1', 'User', 'S-1-5-U1', 's-1-5-u1', 'admin', '2026-01-01T00:00:00Z', 'Standard', 0);
             INSERT INTO CONSENT_WORKFLOW_ROUTES (tenant_id, scope_kind, scope_ref, mode, external_system_id, max_duration_days, request_timeout_days, expiry_notice_lead_hours, require_resolvable_approver, updated_by, updated_at)
             VALUES ('tenant-a', 'DATA_OWNER', 'do-1', 'INTERNAL', NULL, 30, 14, 24, TRUE, 'admin', NOW()),
                    ('tenant-a', 'TENANT', '*', 'INTERNAL', NULL, 90, 14, 24, TRUE, 'admin', NOW());
-            INSERT INTO AUDIT_LOG_ENTRIES (id, occurred_at, event_type, actor_sid, target_table, decision, trace_id, details_json, tenant_id, chain_sequence, prev_hash, entry_hash)
+            INSERT INTO AUDIT_LOG_ENTRIES (id, occurred_at, event_type, actor_sid, target_table, decision, trace_id, details_json, tenant_id, seq, prev_hash, entry_hash)
             VALUES ('audit-pre-1', '2026-01-01T00:00:00Z', 'SERVICE_STARTED', 'SYSTEM', '*', 'ALLOW', 't1', '{}', 'platform', 1, '0000000000000000000000000000000000000000000000000000000000000000', 'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
         ", conn);
         await cmd.ExecuteNonQueryAsync();
@@ -127,12 +127,12 @@ public sealed class PermissionRequestsMigrationStep0041Tests
         await using var cmd = new SqlCommand(@"
             INSERT INTO dbo.DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active) VALUES (N'do-1', N'S-1-5-O1', N'CORP\o1', N'O1', N'o1@x.test', 1);
             INSERT INTO dbo.GRANT_RECORD_HEADS (tenant_id, last_seq, last_hash) VALUES (N'tenant-a', 4, N'aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa');
-            INSERT INTO dbo.ACCESS_PROFILES (profile_id, name, tenant_id, masking_mode, target_tables_json, created_at) VALUES (N'prof-1', N'FinanceAnalyst', N'tenant-a', N'DEFAULT', N'[]', N'2026-01-01T00:00:00Z');
-            INSERT INTO dbo.ACCESS_PROFILE_ASSIGNMENTS (tenant_id, profile_id, subject_type, subject, assigned_by, assigned_at) VALUES (N'tenant-a', N'prof-1', N'USER', N'S-1-5-U1', N'admin', N'2026-01-01T00:00:00Z');
+            INSERT INTO dbo.ACCESS_PROFILES (profile_id, name, tenant_id, created_by, created_at) VALUES (N'prof-1', N'FinanceAnalyst', N'tenant-a', N'admin', N'2026-01-01T00:00:00Z');
+            INSERT INTO dbo.ACCESS_PROFILE_ASSIGNMENTS (tenant_id, profile_id, subject_type, subject, subject_norm, created_by, assigned_at, kind, renewal_count) VALUES (N'tenant-a', N'prof-1', N'User', N'S-1-5-U1', N's-1-5-u1', N'admin', N'2026-01-01T00:00:00Z', N'Standard', 0);
             INSERT INTO dbo.CONSENT_WORKFLOW_ROUTES (tenant_id, scope_kind, scope_ref, mode, external_system_id, max_duration_days, request_timeout_days, expiry_notice_lead_hours, require_resolvable_approver, updated_by, updated_at)
             VALUES (N'tenant-a', N'DATA_OWNER', N'do-1', N'INTERNAL', NULL, 30, 14, 24, 1, N'admin', SYSUTCDATETIME()),
                    (N'tenant-a', N'TENANT', N'*', N'INTERNAL', NULL, 90, 14, 24, 1, N'admin', SYSUTCDATETIME());
-            INSERT INTO dbo.AUDIT_LOG_ENTRIES (id, occurred_at, event_type, actor_sid, target_table, decision, trace_id, details_json, tenant_id, chain_sequence, prev_hash, entry_hash)
+            INSERT INTO dbo.AUDIT_LOG_ENTRIES (id, occurred_at, event_type, actor_sid, target_table, decision, trace_id, details_json, tenant_id, seq, prev_hash, entry_hash)
             VALUES (N'audit-pre-1', N'2026-01-01T00:00:00Z', N'SERVICE_STARTED', N'SYSTEM', N'*', N'ALLOW', N't1', N'{}', N'platform', 1, N'0000000000000000000000000000000000000000000000000000000000000000', N'bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb');
         ", conn);
         await cmd.ExecuteNonQueryAsync();

@@ -317,6 +317,10 @@ public abstract class GovernanceUpgradeTestsBase
         (await CountAsync(cs, "SELECT COUNT(*) FROM table_physical_index_columns")).ShouldBe(0);
     });
 
+    // Step 0041 (D13 start fresh, #1009 SEC-1009-48) purges every consent and request row by design, so data-carrying upgrade
+    // checks of earlier steps run up to the step before it; 0041 itself is covered by PermissionRequestsMigrationStep0041Tests.
+    private const int LastStepBeforeStartFreshPurge = 40;
+
     private static string InsertRequestSql(string id, string tenantLiteral) =>
         "INSERT INTO consent_requests (id, table_id, requester_sid, requested_grantee_type, requested_grantee_ref, business_justification, status, requested_at, requested_valid_to, tenant_id) " +
         $"VALUES ('{id}', 't', 'S-1', 'Role', 'R', 'j', 'Pending', '2026-01-01', '2026-02-01', {tenantLiteral})";
@@ -333,7 +337,7 @@ public abstract class GovernanceUpgradeTestsBase
         var auditHashes = await QueryAsync(cs, AuditHashesSql);
         var triggers = await CountAsync(cs, TriggerCountSql);
 
-        await RunAsync(cs, GovernanceMigrationMode.Apply);
+        await RunAsync(cs, GovernanceMigrationMode.Apply, stepVersionCap: LastStepBeforeStartFreshPurge);
 
         (await CountAsync(cs, "SELECT COUNT(*) FROM autheris_schema_migrations WHERE version = 3")).ShouldBe(1);
         (await CountAsync(cs, TenantDefaultCountSql("consents"))).ShouldBe(0);
@@ -348,7 +352,7 @@ public abstract class GovernanceUpgradeTestsBase
         await Should.ThrowAsync<Exception>(() => ExecAsync(cs, InsertRequestSql("r2", "NULL")));
 
         // A schema past step 0003 without its history row is drift (the nullability is checked strictly), so there is no history-loss rerun here.
-        await RunAsync(cs, GovernanceMigrationMode.Verify);
+        await RunAsync(cs, GovernanceMigrationMode.Verify, stepVersionCap: LastStepBeforeStartFreshPurge);
     });
 
     [Fact]
