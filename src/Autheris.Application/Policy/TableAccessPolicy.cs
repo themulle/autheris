@@ -45,6 +45,9 @@ public sealed record TableAccessQuery(
     /// <summary>Issue #1043: batch-prefetched consents (see <see cref="AccessRequest.ConsentPrefetch"/>).</summary>
     public ConsentBatchPrefetch? ConsentPrefetch { get; init; }
 
+    /// <summary>Batch-prefetched effective tenant access policy (see <see cref="AccessRequest.TenantPolicyPrefetch"/>).</summary>
+    public TenantPolicyPrefetch? TenantPolicyPrefetch { get; init; }
+
     public static TableAccessQuery ForPrincipal(
         ClaimsPrincipal principal,
         Sid userSid,
