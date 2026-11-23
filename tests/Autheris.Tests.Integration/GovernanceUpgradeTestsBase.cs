@@ -318,7 +318,8 @@ public abstract class GovernanceUpgradeTestsBase
     });
 
     // Step 0041 (D13 start fresh, #1009 SEC-1009-48) purges every consent and request row by design, so data-carrying upgrade
-    // checks of earlier steps run up to the step before it; 0041 itself is covered by PermissionRequestsMigrationStep0041Tests.
+    // checks of earlier steps apply up to the step before it before reading the rows; 0041 itself is covered by
+    // PermissionRequestsMigrationStep0041Tests.
     private const int LastStepBeforeStartFreshPurge = 40;
 
     private static string InsertRequestSql(string id, string tenantLiteral) =>
@@ -352,7 +353,8 @@ public abstract class GovernanceUpgradeTestsBase
         await Should.ThrowAsync<Exception>(() => ExecAsync(cs, InsertRequestSql("r2", "NULL")));
 
         // A schema past step 0003 without its history row is drift (the nullability is checked strictly), so there is no history-loss rerun here.
-        await RunAsync(cs, GovernanceMigrationMode.Verify, stepVersionCap: LastStepBeforeStartFreshPurge);
+        // The audit chain check above applies every step (including 0041), so Verify runs against the full catalogue.
+        await RunAsync(cs, GovernanceMigrationMode.Verify);
     });
 
     [Fact]
