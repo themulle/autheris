@@ -183,10 +183,9 @@ public sealed partial class VirtualFilterAdministrationService
     {
         ArgumentNullException.ThrowIfNull(filter);
         ArgumentNullException.ThrowIfNull(actor);
-        if (filter.Sql != null && !actor.IsSync &&
-            actor.Roles?.Contains(nameof(Autheris.Domain.Security.GatewayRole.GovernanceAdmin), StringComparer.OrdinalIgnoreCase) != true)
+        if (filter.Sql != null && !actor.IsSync)
         {
-            throw new UnauthorizedAccessException("Only GovernanceAdmin may author a SQL virtual filter.");
+            await EnsureMaySaveSqlFilterAsync(filter, actor, ct).ConfigureAwait(false);
         }
 
         filter = await ValidateDefinitionAsync(filter, ct).ConfigureAwait(false);
@@ -196,62 +195,7 @@ public sealed partial class VirtualFilterAdministrationService
         EnsureWritable(existing?.ManagedBy, filter.ManagedBy, actor, $"virtual filter '{filter.Name}'");
         ValidateSupersedes(snapshot.Filters.Where(f => f.TenantId == filter.TenantId && f.Name != filter.Name).Append(filter).ToList());
 
-        bool needsApproval = !actor.IsSync && (_options.RequireApproval || filter.Sql != null);
-        var approvalReason = ApprovalReason(filter, _options, actor);
-        if (needsApproval)
-        {
-            if (existing != null && existing.Status == FilterApprovalStatus.Active)
-            {
-                // Last-Known-Good: Active filter stays active, changes go to Draft
-                var draft = filter with
-                {
-                    Id = Guid.NewGuid(),
-                    Status = FilterApprovalStatus.PendingApproval,
-                    CreatedBy = actor.Sid,
-                    ApprovedBy = null,
-                    ApprovedAt = null,
-                    UpdatedBy = CombineUpdatedBy(existing.Draft?.UpdatedBy, actor),
-                    UpdatedAt = DateTimeOffset.UtcNow,
-                    Draft = null,
-                    PendingDeletion = false,
-                    DeletionRequestedBy = null
-                };
-
-                var toStore = existing with
-                {
-                    Draft = draft,
-                    UpdatedBy = CombineUpdatedBy(existing.UpdatedBy, actor),
-                    UpdatedAt = DateTimeOffset.UtcNow
-                };
-
-                await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [toStore] }, snapshot.Generation, ct).ConfigureAwait(false);
-                await AuditAsync(filter.TenantId, actor, "VIRTUAL_FILTER_PENDING_APPROVAL",
-                    $"virtual_filter:{filter.Name}", new { name = filter.Name, status = "DraftPendingApproval", reason = FormatApprovalReason(approvalReason), before = existing.ComputeDefinitionHash(), draft = draft.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
-                return toStore;
-            }
-
-            // Brand new filter (or existing was PendingApproval)
-            var pending = filter with
-            {
-                Id = existing?.Id ?? filter.Id,
-                Status = FilterApprovalStatus.PendingApproval,
-                CreatedBy = existing?.CreatedBy ?? actor.Sid,
-                ApprovedBy = null,
-                ApprovedAt = null,
-                UpdatedBy = CombineUpdatedBy(existing?.UpdatedBy, actor),
-                UpdatedAt = DateTimeOffset.UtcNow,
-                Draft = null,
-                PendingDeletion = false,
-                DeletionRequestedBy = null
-            };
-
-            await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [pending] }, snapshot.Generation, ct).ConfigureAwait(false);
-            var action = existing == null ? "VIRTUAL_FILTER_CREATED" : "VIRTUAL_FILTER_UPDATED";
-            await AuditAsync(filter.TenantId, actor, "VIRTUAL_FILTER_PENDING_APPROVAL",
-                $"virtual_filter:{filter.Name}", new { name = filter.Name, status = pending.Status.ToString(), reason = FormatApprovalReason(approvalReason), before = existing?.ComputeDefinitionHash(), after = filter.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
-            return pending;
-        }
-
+        // Single approval: the save of a writer who holds the capacity activates the filter at once.
         var direct = filter with
         {
             Id = existing?.Id ?? filter.Id,
@@ -266,140 +210,46 @@ public sealed partial class VirtualFilterAdministrationService
             DeletionRequestedBy = null
         };
 
-        await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [direct] }, snapshot.Generation, ct).ConfigureAwait(false);
         var evt = existing == null ? "VIRTUAL_FILTER_CREATED" : "VIRTUAL_FILTER_UPDATED";
+        // Fail closed: the change is audited (hashes only) before it takes effect; a failing audit denies it.
         await AuditAsync(filter.TenantId, actor, evt,
             $"virtual_filter:{filter.Name}", new { name = filter.Name, status = direct.Status.ToString(), before = existing?.ComputeDefinitionHash(), after = filter.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
+        await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [direct] }, snapshot.Generation, ct).ConfigureAwait(false);
         return direct;
     }
 
-    internal static VirtualFilterApprovalReason ApprovalReason(
-        VirtualFilter filter,
-        VirtualFilterOptions options,
-        VirtualFilterActor actor)
-    {
-        ArgumentNullException.ThrowIfNull(filter);
-        ArgumentNullException.ThrowIfNull(options);
-        ArgumentNullException.ThrowIfNull(actor);
-
-        if (actor.IsSync) return VirtualFilterApprovalReason.None;
-        if (filter.Sql != null) return VirtualFilterApprovalReason.SqlDefinitionNeedsOwnerApproval;
-        if (options.RequireApproval) return VirtualFilterApprovalReason.RequireApprovalOption;
-        return VirtualFilterApprovalReason.None;
-    }
-
-    /// <summary>Derives why a stored filter is awaiting approval (drafts take precedence over the active version).</summary>
-    public static VirtualFilterApprovalReason PendingApprovalReason(VirtualFilter filter)
-    {
-        ArgumentNullException.ThrowIfNull(filter);
-
-        var pending = filter.Draft is { Status: FilterApprovalStatus.PendingApproval } draft
-            ? draft
-            : filter.Status == FilterApprovalStatus.PendingApproval
-                ? filter
-                : null;
-
-        return pending is null
-            ? VirtualFilterApprovalReason.None
-            : pending.Sql != null
-                ? VirtualFilterApprovalReason.SqlDefinitionNeedsOwnerApproval
-                : VirtualFilterApprovalReason.RequireApprovalOption;
-    }
-
-    public static string FormatApprovalReason(VirtualFilterApprovalReason reason) => reason switch
-    {
-        VirtualFilterApprovalReason.None => "none",
-        VirtualFilterApprovalReason.RequireApprovalOption => "require_approval_option",
-        VirtualFilterApprovalReason.SqlDefinitionNeedsOwnerApproval => "sql_definition_needs_owner_approval",
-        _ => throw new ArgumentOutOfRangeException(nameof(reason), reason, "Unknown virtual filter approval reason.")
-    };
-
     /// <summary>
-    /// VF-05: the hash an approval compares: the definition hash for a deletion, the draft hash for a pending draft, else the definition hash.
-    /// The read API returns the same value as <c>pending_hash</c>, so the reviewer approves exactly what was reviewed.
+    /// A SQL filter activates on save only when the author is GovernanceAdmin, or an owner-group member of the container of every table it
+    /// references (it references at least one). Anyone else, IT included, is refused and nothing is stored, so the filter never becomes active.
     /// </summary>
-    public static string PendingHash(VirtualFilter filter) =>
-        filter.PendingDeletion
-            ? filter.ComputeDefinitionHash()
-            : (filter.Draft?.ComputeDefinitionHash() ?? filter.ComputeDefinitionHash());
-
-    /// <summary>VF-05: approval is bound to the reviewed definition; there is no hash-less approval.</summary>
-    public async Task<VirtualFilter> ApproveFilterAsync(TenantId tenantId, string name, VirtualFilterActor actor, string expectedHash, CancellationToken ct = default)
+    private async Task EnsureMaySaveSqlFilterAsync(VirtualFilter filter, VirtualFilterActor actor, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(actor);
-        ArgumentException.ThrowIfNullOrWhiteSpace(expectedHash);
-        var snapshot = await _repository.LoadSnapshotAsync(ct).ConfigureAwait(false);
-        var existing = FindFilter(snapshot, tenantId, name) ?? throw new KeyNotFoundException($"The virtual filter '{name}' does not exist.");
-        EnsureWritable(existing.ManagedBy, null, actor, $"virtual filter '{name}'");
-
-        bool hasPending = existing.Status == FilterApprovalStatus.PendingApproval ||
-                          existing.Draft != null ||
-                          existing.PendingDeletion;
-        if (!hasPending)
+        if (actor.Roles?.Contains(nameof(Autheris.Domain.Security.GatewayRole.GovernanceAdmin), StringComparer.OrdinalIgnoreCase) == true)
         {
-            throw new InvalidOperationException($"The virtual filter '{name}' has no pending changes to approve.");
+            return;
         }
 
-        var contributors = GetContributorIdentifiers(existing);
-        if (actor.MatchesAny(contributors))
+        var referenced = SqlFilterCompiler.ReferencedTables(filter).Distinct().ToList();
+        if (referenced.Count > 0 && _ownership is not null)
         {
-            throw new InvalidOperationException("Four-eyes principle violation: Creator or editor cannot approve their own rule.");
-        }
-
-        string pendingHash = PendingHash(existing);
-
-        if (!string.Equals(expectedHash, pendingHash, StringComparison.Ordinal))
-        {
-            throw new VirtualFilterConflictException($"Hash mismatch for virtual filter '{name}': expected '{expectedHash}' but pending definition hash is '{pendingHash}'.");
-        }
-
-        if (!existing.PendingDeletion && (existing.Draft ?? existing) is { Sql: not null } sqlPolicy)
-        {
-            var ownership = _ownership ?? throw new InvalidOperationException("Four-eyes SQL policy approval requires data ownership metadata.");
-            foreach (var table in SqlFilterCompiler.ReferencedTables(sqlPolicy).Distinct())
+            var allOwned = true;
+            foreach (var table in referenced)
             {
-                if (!await ownership.IsAuthorizedApproverForTableAsync(table, actor.Sid, ct).ConfigureAwait(false))
+                if (!await _ownership.IsAuthorizedApproverForTableAsync(table, actor.Sid, ct).ConfigureAwait(false))
                 {
-                    throw new UnauthorizedAccessException($"Approver '{actor.Sid.Value}' is not an authorized data owner or delegate for table '{table}'.");
+                    allOwned = false;
+                    break;
                 }
+            }
+
+            if (allOwned)
+            {
+                return;
             }
         }
 
-        if (existing.PendingDeletion)
-        {
-            await ApplyAsync(new VirtualFilterChangeSet { DeleteFilters = [(tenantId, name)] }, snapshot.Generation, ct).ConfigureAwait(false);
-            await AuditAsync(tenantId, actor, "VIRTUAL_FILTER_DELETED", $"virtual_filter:{name}", new { name, before = existing.ComputeDefinitionHash(), approved_by = actor.Sid.Value }, ct).ConfigureAwait(false);
-            return existing with { Status = FilterApprovalStatus.Rejected, PendingDeletion = false };
-        }
-
-        if (existing.Draft != null)
-        {
-            var promoted = existing.Draft with
-            {
-                Id = existing.Id,
-                Status = FilterApprovalStatus.Active,
-                ApprovedBy = actor.Sid,
-                ApprovedAt = DateTimeOffset.UtcNow,
-                Draft = null,
-                PendingDeletion = false,
-                DeletionRequestedBy = null
-            };
-            await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [promoted] }, snapshot.Generation, ct).ConfigureAwait(false);
-            await AuditAsync(tenantId, actor, "VIRTUAL_FILTER_APPROVED", $"virtual_filter:{name}", new { name, approved_by = actor.Sid.Value }, ct).ConfigureAwait(false);
-            return promoted;
-        }
-
-        var approved = existing with
-        {
-            Status = FilterApprovalStatus.Active,
-            ApprovedBy = actor.Sid,
-            ApprovedAt = DateTimeOffset.UtcNow
-        };
-
-        await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [approved] }, snapshot.Generation, ct).ConfigureAwait(false);
-        await AuditAsync(tenantId, actor, "VIRTUAL_FILTER_APPROVED",
-            $"virtual_filter:{name}", new { name, approved_by = actor.Sid.Value }, ct).ConfigureAwait(false);
-        return approved;
+        throw new UnauthorizedAccessException(
+            "A SQL virtual filter needs GovernanceAdmin or ownership of every table it references.");
     }
 
     public async Task DeleteFilterAsync(TenantId tenantId, string name, VirtualFilterActor actor, CancellationToken ct = default)
@@ -418,20 +268,6 @@ public sealed partial class VirtualFilterAdministrationService
         if (snapshot.Filters.Any(f => f.TenantId == tenantId && f.Supersedes.Contains(name)))
         {
             throw new VirtualFilterConflictException($"The virtual filter '{name}' is superseded by another filter.");
-        }
-
-        if (_options.RequireApproval && existing.Status == FilterApprovalStatus.Active)
-        {
-            var pendingDeletion = existing with
-            {
-                PendingDeletion = true,
-                DeletionRequestedBy = actor.Sid,
-                UpdatedBy = actor.Sid.Value,
-                UpdatedAt = DateTimeOffset.UtcNow
-            };
-            await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [pendingDeletion] }, snapshot.Generation, ct).ConfigureAwait(false);
-            await AuditAsync(tenantId, actor, "VIRTUAL_FILTER_PENDING_DELETION", $"virtual_filter:{name}", new { name }, ct).ConfigureAwait(false);
-            return;
         }
 
         await ApplyAsync(new VirtualFilterChangeSet { DeleteFilters = [(tenantId, name)] }, snapshot.Generation, ct).ConfigureAwait(false);

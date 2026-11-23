@@ -44,17 +44,11 @@ public static partial class VirtualFilterEndpoints
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         group.MapPut("/virtual-filters/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => PutFilterAsync(name, context, service))
             .RequireAuthorization(GatewayPolicies.VirtualFilterWrite);
-        group.MapPost("/virtual-filters/{name}/approve", (string name, HttpContext context, VirtualFilterAdministrationService service) => ApproveFilterAsync(name, context, service))
-            .RequireAuthorization(GatewayPolicies.VirtualFilterApprove)
-            .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
         group.MapDelete("/virtual-filters/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => DeleteFilterAsync(name, context, service))
             .RequireAuthorization(GatewayPolicies.FilterAdmin)
             .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRevoked);
         group.MapPut("/access-profiles/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => PutProfileAsync(name, context, service))
             .RequireAuthorization(GatewayPolicies.FilterAdmin);
-        group.MapPost("/access-profiles/{name}/approve", (string name, HttpContext context, VirtualFilterAdministrationService service) => ApproveProfileAsync(name, context, service))
-            .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
-            .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
         group.MapDelete("/access-profiles/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => DeleteProfileAsync(name, context, service))
             .RequireAuthorization(GatewayPolicies.FilterAdmin)
             .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRevoked);

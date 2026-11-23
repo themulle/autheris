@@ -155,7 +155,7 @@ public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
         var approvalService = new VirtualFilterAdministrationService(
             _repository,
             Substitute.For<IAuditLogRepository>(),
-            Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } }),
+            Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions() }),
             catalog: catalog);
         var dbt = new DbtMetadataIngestionService(
             Substitute.For<IDbtProposalRepository>(),
@@ -176,12 +176,12 @@ public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
         var result = await dbt.IngestGovernanceStreamAsync(stream, ImportCaller);
 
-        // No payload tenant: the caller's request tenant. Not the sync actor: the profile waits for a distinct approver.
+        // No payload tenant: the caller's request tenant. Not the sync actor: the save of the import caller activates the profile.
         result.Success.ShouldBeTrue();
         result.Warnings.ShouldBeEmpty();
         var profile = (await _repository.LoadSnapshotAsync()).Profiles.ShouldHaveSingleItem();
         profile.TenantId.ShouldBe(ImportCaller.Tenant);
-        profile.Status.ShouldBe(FilterApprovalStatus.PendingApproval);
+        profile.Status.ShouldBe(FilterApprovalStatus.Active);
         profile.CreatedBy.ShouldBe(ImportCaller.Actor.Sid);
     }
 }

@@ -69,7 +69,7 @@ public sealed class ServiceAttributeProviderTests
     [Fact]
     public async Task ST_129_02_PendingSet_IsNotApplied()
     {
-        var result = await Provider(Set(AppX, FilterApprovalStatus.PendingApproval, "100")).ResolveAsync(AppSubject(("appid", AppX)), Definition(providerKind: "service-set"), default);
+        var result = await Provider(Set(AppX, FilterApprovalStatus.Rejected, "100")).ResolveAsync(AppSubject(("appid", AppX)), Definition(providerKind: "service-set"), default);
         result.Outcome.ShouldBe(CallerAttributeOutcome.Missing);
     }
 

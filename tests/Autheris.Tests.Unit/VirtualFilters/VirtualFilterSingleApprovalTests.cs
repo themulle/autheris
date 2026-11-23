@@ -1,4 +1,4 @@
-namespace Autheris.Tests.Unit.Policy.RowScopes;
+namespace Autheris.Tests.Unit.VirtualFilters;
 
 using Autheris.Application.Governance.Ownership;
 using System;
@@ -22,8 +22,8 @@ using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
-/// <summary>WP-SIMPL-48 PR 1 (SEC-AZ-15): Four-eyes SQL policy authoring & owner approval per referenced table.</summary>
-public sealed class RowPolicyApprovalTests
+/// <summary>Single approval of virtual filters and access profiles: a save activates, SQL filters follow the owner-group rule, no self-widening.</summary>
+public sealed class VirtualFilterSingleApprovalTests
 {
     private static readonly TenantId Tenant = new("tenant_lwe");
     private static readonly Sid GovAuthor = new("S-1-5-21-GOV-AUTHOR");
@@ -67,15 +67,15 @@ public sealed class RowPolicyApprovalTests
     private static VirtualFilterAdministrationService CreateService(
         InMemoryFilterRepo repo,
         InMemoryOwnershipRepo owners,
-        bool requireApproval = false)
+        IAuditLogRepository? audit = null)
     {
         var catalog = new InMemoryCatalog([
             CatalogTable("conf", "client", "client_id", "crane_serial_number"),
             CatalogTable("md", "crane", "serial_number", "is_delivered"),
             OrdersTable()
         ]);
-        var opts = Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = requireApproval } });
-        return new VirtualFilterAdministrationService(repo, NullAuditLogRepository.Instance, opts, catalog: catalog, ownership: owners);
+        var opts = Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions() });
+        return new VirtualFilterAdministrationService(repo, audit ?? NullAuditLogRepository.Instance, opts, catalog: catalog, ownership: owners);
     }
 
     private static MandatoryRowFilterResolver CreateResolver(InMemoryFilterRepo repo)
@@ -120,71 +120,93 @@ public sealed class RowPolicyApprovalTests
         return ctx;
     }
 
+    private static readonly MandatoryFilterQuery OrdersQuery =
+        new(new Sid("S-1-5-21-USER"), new HashSet<Sid>(), new HashSet<string>(), Tenant, OrdersTable());
+
     [Fact]
-    [Trait("Category", "Security")]
-    public async Task Sql_policy_inactive_until_owner_of_every_read_table_approves()
+    public async Task Save_of_structured_filter_activates_and_writes_one_audit_entry_with_hashes()
     {
         var repo = new InMemoryFilterRepo();
+        var audit = new Autheris.Tests.Common.Fakes.InMemoryAuditLogRepository();
+        var service = CreateService(repo, new InMemoryOwnershipRepo(), audit);
+        var filterAdmin = new VirtualFilterActor(new Sid("S-1-5-21-FILTERADMIN"), IsSync: false, Roles: new HashSet<string>([nameof(GatewayRole.FilterAdmin)]));
+
+        var saved = await service.SaveFilterAsync(VirtualFilterTestData.DavidFilter("structured_one"), filterAdmin);
+
+        saved.Status.ShouldBe(FilterApprovalStatus.Active);
+        saved.Draft.ShouldBeNull();
+        audit.Entries.Count.ShouldBe(1);
+        audit.Entries[0].EventType.ShouldBe("VIRTUAL_FILTER_CREATED");
+        audit.Entries[0].DetailsJson.ShouldContain("after");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task A14_author_dg_or_owner_of_all_referenced_containers_activates()
+    {
         var owners = new InMemoryOwnershipRepo();
-        owners.Allow(ClientTable, PartialOwner);
         owners.Allow(ClientTable, FullOwnerDelegate);
         owners.Allow(CraneTable, FullOwnerDelegate);
-        var service = CreateService(repo, owners, requireApproval: false);
+
+        var repo = new InMemoryFilterRepo();
+        var service = CreateService(repo, owners);
         var resolver = CreateResolver(repo);
 
-        // Even with RequireApproval=false, SQL policies start PendingApproval
-        var saved = await service.SaveFilterAsync(SqlPolicy(), GovAuthorActor);
-        saved.Status.ShouldBe(FilterApprovalStatus.PendingApproval);
+        var byDg = await service.SaveFilterAsync(SqlPolicy(), GovAuthorActor);
+        byDg.Status.ShouldBe(FilterApprovalStatus.Active);
 
-        // Pending SQL policy must NOT apply at runtime (profile Uncovered=Deny denies)
-        var pendingOutcome = await resolver.ResolveAsync(new MandatoryFilterQuery(new Sid("S-1-5-21-USER"), new HashSet<Sid>(), new HashSet<string>(), Tenant, OrdersTable()));
-        pendingOutcome.IsDenied.ShouldBeTrue();
+        var byOwner = await service.SaveFilterAsync(SqlPolicy() with { Name = "owner_authored_sql" }, FullOwnerActor);
+        byOwner.Status.ShouldBe(FilterApprovalStatus.Active);
 
-        // Owner of only ONE of the two referenced tables cannot approve
-        var hash = VirtualFilterAdministrationService.PendingHash(saved);
+        var outcome = await resolver.ResolveAsync(OrdersQuery);
+        outcome.IsDenied.ShouldBeFalse();
+        outcome.AppliedFilters.ShouldBe(["active_cranes_sql"]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task A14_otherwise_inactive()
+    {
+        var owners = new InMemoryOwnershipRepo();
+        owners.Allow(ClientTable, PartialOwner);
+        var repo = new InMemoryFilterRepo();
+        var service = CreateService(repo, owners);
+        var resolver = CreateResolver(repo);
+
+        // Owner of only one of the two referenced tables: refused, nothing stored, the profile denies.
+        await Should.ThrowAsync<UnauthorizedAccessException>(() => service.SaveFilterAsync(SqlPolicy(), PartialOwnerActor));
+
+        (await repo.LoadSnapshotAsync()).Filters.ShouldBeEmpty();
+        (await resolver.ResolveAsync(OrdersQuery)).IsDenied.ShouldBeTrue();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task A14_it_never()
+    {
+        var owners = new InMemoryOwnershipRepo();
+        owners.Allow(ClientTable, new Sid("S-1-5-21-FILTERADMIN"));
+        owners.Allow(CraneTable, new Sid("S-1-5-21-FILTERADMIN"));
+        var repo = new InMemoryFilterRepo();
+        var service = CreateService(repo, owners);
+
+        var itAdmin = new VirtualFilterActor(new Sid("S-1-5-21-ITADMIN"), IsSync: false, Roles: new HashSet<string>([nameof(GatewayRole.ClusterAdmin), nameof(GatewayRole.FilterAdmin)]));
+        await Should.ThrowAsync<UnauthorizedAccessException>(() => service.SaveFilterAsync(SqlPolicy(), itAdmin));
+
+        // A filter admin who owns none of the referenced tables is refused as well.
+        var filterAdmin = new VirtualFilterActor(new Sid("S-1-5-21-NOOWNER"), IsSync: false, Roles: new HashSet<string>([nameof(GatewayRole.FilterAdmin)]));
         await Should.ThrowAsync<UnauthorizedAccessException>(() =>
-            service.ApproveFilterAsync(Tenant, saved.Name, PartialOwnerActor, hash));
+            service.SaveFilterAsync(SqlPolicy("from conf.client client where client.client_id = target.client_id"), filterAdmin));
 
-        // Authorized owner/delegate of EVERY referenced table succeeds
-        var approved = await service.ApproveFilterAsync(Tenant, saved.Name, FullOwnerActor, hash);
-        approved.Status.ShouldBe(FilterApprovalStatus.Active);
-        approved.ApprovedBySid.ShouldBe(FullOwnerDelegate.Value);
-
-        var activeOutcome = await resolver.ResolveAsync(new MandatoryFilterQuery(new Sid("S-1-5-21-USER"), new HashSet<Sid>(), new HashSet<string>(), Tenant, OrdersTable()));
-        activeOutcome.IsDenied.ShouldBeFalse();
-        activeOutcome.AppliedFilters.ShouldBe(["active_cranes_sql"]);
+        (await repo.LoadSnapshotAsync()).Filters.ShouldBeEmpty();
     }
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task Author_cannot_approve_own_sql_policy()
+    public async Task Only_governance_admin_or_owner_reaches_sql_policy_through_the_endpoint()
     {
         var repo = new InMemoryFilterRepo();
-        var owners = new InMemoryOwnershipRepo();
-        owners.Allow(ClientTable, GovAuthor);
-        owners.Allow(CraneTable, GovAuthor);
-        var service = CreateService(repo, owners);
-
-        var saved = await service.SaveFilterAsync(SqlPolicy(), GovAuthorActor);
-        var hash = VirtualFilterAdministrationService.PendingHash(saved);
-
-        // Even though GovAuthor owns every referenced table, four-eyes forbids self-approval
-        await Should.ThrowAsync<InvalidOperationException>(() =>
-            service.ApproveFilterAsync(Tenant, saved.Name, GovAuthorActor, hash));
-
-        (await repo.LoadSnapshotAsync()).Filters.Single().Status.ShouldBe(FilterApprovalStatus.PendingApproval);
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task Only_governance_admin_authors_sql_policy()
-    {
-        var repo = new InMemoryFilterRepo();
-        var owners = new InMemoryOwnershipRepo();
-        var service = CreateService(repo, owners);
-
-        var filterAdmin = new VirtualFilterActor(new Sid("S-1-5-21-FILTERADMIN"), IsSync: false, Roles: new HashSet<string>([nameof(GatewayRole.FilterAdmin)]));
-        await Should.ThrowAsync<UnauthorizedAccessException>(() => service.SaveFilterAsync(SqlPolicy(), filterAdmin));
+        var service = CreateService(repo, new InMemoryOwnershipRepo());
 
         var sqlBody = new { source = "lwetem_prod", sql = SqlPolicy().Sql };
         foreach (var forbiddenRole in new[] { "FilterAdmin", "ClusterAdmin", "Consumer" })
@@ -199,45 +221,67 @@ public sealed class RowPolicyApprovalTests
         var govRes = await VirtualFilterEndpoints.PutFilterAsync("active_cranes_sql", govCtx, service);
         await govRes.ExecuteAsync(govCtx);
         govCtx.Response.StatusCode.ShouldBe(StatusCodes.Status200OK);
-        (await repo.LoadSnapshotAsync()).Filters.Single().Status.ShouldBe(FilterApprovalStatus.PendingApproval);
+        (await repo.LoadSnapshotAsync()).Filters.Single().Status.ShouldBe(FilterApprovalStatus.Active);
     }
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task Definition_change_requires_reapproval_and_old_version_keeps_applying()
+    public async Task Definition_change_takes_effect_on_save()
     {
         var repo = new InMemoryFilterRepo();
-        var owners = new InMemoryOwnershipRepo();
-        owners.Allow(ClientTable, FullOwnerDelegate);
-        owners.Allow(CraneTable, FullOwnerDelegate);
-        var service = CreateService(repo, owners);
+        var service = CreateService(repo, new InMemoryOwnershipRepo());
         var resolver = CreateResolver(repo);
 
-        var v1 = await service.SaveFilterAsync(SqlPolicy("from conf.client client where client.client_id = target.client_id"), GovAuthorActor);
-        await service.ApproveFilterAsync(Tenant, v1.Name, FullOwnerActor, VirtualFilterAdministrationService.PendingHash(v1));
-
-        // Update SQL definition: new change sits in Draft (PendingApproval) while Active v1 continues applying
-        var v2 = await service.SaveFilterAsync(
-            SqlPolicy("from conf.client client join md.crane crane on crane.serial_number = client.crane_serial_number where crane.is_delivered is null and target.client_id = client.client_id"),
-            GovAuthorActor);
+        await service.SaveFilterAsync(SqlPolicy("from conf.client client where client.client_id = target.client_id"), GovAuthorActor);
+        var v2 = await service.SaveFilterAsync(SqlPolicy(), GovAuthorActor);
 
         v2.Status.ShouldBe(FilterApprovalStatus.Active);
-        v2.Draft.ShouldNotBeNull();
-        v2.Draft!.Status.ShouldBe(FilterApprovalStatus.PendingApproval);
+        v2.Draft.ShouldBeNull();
+        var outcome = await resolver.ResolveAsync(OrdersQuery);
+        outcome.PredicateSql.ShouldNotBeNull().ShouldContain("crane");
+    }
 
-        var query = new MandatoryFilterQuery(new Sid("S-1-5-21-USER"), new HashSet<Sid>(), new HashSet<string>(), Tenant, OrdersTable());
-        var whilePending = await resolver.ResolveAsync(query);
-        whilePending.IsDenied.ShouldBeFalse();
-        whilePending.PredicateSql.ShouldNotBeNull().ShouldNotContain("crane");
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Audit_with_hash_fail_closed()
+    {
+        var repo = new InMemoryFilterRepo();
+        var audit = new Autheris.Tests.Common.Fakes.InMemoryAuditLogRepository { FailWith = new InvalidOperationException("audit down") };
+        var service = CreateService(repo, new InMemoryOwnershipRepo(), audit);
 
-        // Approve the Draft -> v2 becomes active
-        var promoted = await service.ApproveFilterAsync(Tenant, v1.Name, FullOwnerActor, VirtualFilterAdministrationService.PendingHash(v2));
-        promoted.Status.ShouldBe(FilterApprovalStatus.Active);
-        promoted.Draft.ShouldBeNull();
+        await Should.ThrowAsync<InvalidOperationException>(() => service.SaveFilterAsync(SqlPolicy(), GovAuthorActor));
 
-        var afterApproval = await resolver.ResolveAsync(query);
-        afterApproval.IsDenied.ShouldBeFalse();
-        afterApproval.PredicateSql.ShouldNotBeNull().ShouldContain("crane");
+        (await repo.LoadSnapshotAsync()).Filters.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Author_cannot_widen_own_access()
+    {
+        var repo = new InMemoryFilterRepo();
+        var service = CreateService(repo, new InMemoryOwnershipRepo());
+        await service.SaveFilterAsync(SqlPolicy("from conf.client client where client.client_id = target.client_id"), GovAuthorActor);
+
+        var profile = new VirtualFilterAccessProfile
+        {
+            TenantId = Tenant,
+            Name = "own_profile",
+            GranteeType = GranteeType.User,
+            GranteeSid = GovAuthor,
+            Scope = "lwetem_prod.*.*",
+            Uncovered = UncoveredPolicy.Skip,
+            Bindings = [new FilterBinding { FilterName = "active_cranes_sql" }]
+        };
+
+        await Should.ThrowAsync<Autheris.Application.Governance.SingleApproval.SingleApprovalRefusedException>(
+            () => service.SaveProfileAsync(profile, GovAuthorActor));
+        (await repo.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+
+        // Narrowing (deny uncovered) or a different grantee is fine.
+        var denied = await service.SaveProfileAsync(profile with { Uncovered = UncoveredPolicy.Deny }, GovAuthorActor);
+        denied.Status.ShouldBe(FilterApprovalStatus.Active);
+        var other = await service.SaveProfileAsync(profile with { Name = "other_profile", GranteeSid = new Sid("S-1-5-21-OTHER") }, GovAuthorActor);
+        other.Status.ShouldBe(FilterApprovalStatus.Active);
     }
 
     private sealed class InMemoryFilterRepo : IVirtualFilterRepository
@@ -284,9 +328,6 @@ public sealed class RowPolicyApprovalTests
 
         public void Allow(TableIdentifier table, Sid sid) =>
             _allowed.Add((table.Domain.ToLowerInvariant(), table.Schema.ToLowerInvariant(), table.TableName.ToLowerInvariant(), sid.Value));
-
-        public Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default) =>
-            throw new NotSupportedException();
 
         public Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<DataOwner>>([]);

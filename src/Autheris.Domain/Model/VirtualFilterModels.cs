@@ -5,20 +5,11 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Autheris.Domain.Common;
 
-/// <summary>Approval status for virtual filters and access profiles when RequireApproval is active.</summary>
+/// <summary>Status of a virtual filter or access profile; a save by a writer with the capacity activates it.</summary>
 public enum FilterApprovalStatus
 {
     Active = 0,
-    PendingApproval = 1,
     Rejected = 2
-}
-
-/// <summary>Why a virtual filter requires four-eyes approval instead of activating immediately.</summary>
-public enum VirtualFilterApprovalReason
-{
-    None = 0,
-    RequireApprovalOption = 1,
-    SqlDefinitionNeedsOwnerApproval = 2
 }
 
 /// <summary>What an object in a profile's scope that no binding covers means for the grantee.</summary>

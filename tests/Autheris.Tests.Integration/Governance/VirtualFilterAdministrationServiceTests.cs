@@ -372,38 +372,15 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task SaveFilter_WithRequireApproval_RequiresDistinctApprover()
+    public async Task SaveFilter_ByWriterWithCapacity_ActivatesOnSave()
     {
-        var serviceWithApproval = new VirtualFilterAdministrationService(_repository, _audit,
-            Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } }));
-
         var creatorActor = new VirtualFilterActor(new Sid("S-1-5-21-CREATOR"), IsSync: false);
-        var approverActor = new VirtualFilterActor(new Sid("S-1-5-21-APPROVER"), IsSync: false);
 
-        var filter = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter();
-        var saved = await serviceWithApproval.SaveFilterAsync(filter, creatorActor);
-        saved.Status.ShouldBe(FilterApprovalStatus.PendingApproval);
-        saved.ApprovedBy.ShouldBeNull();
+        var saved = await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), creatorActor);
 
-        // Self-approval must fail (four-eyes principle)
-        await Should.ThrowAsync<InvalidOperationException>(() =>
-            serviceWithApproval.ApproveFilterAsync(filter.TenantId, filter.Name, creatorActor, VirtualFilterAdministrationService.PendingHash(saved)));
-
-        // Distinct approver succeeds
-        var approved = await serviceWithApproval.ApproveFilterAsync(filter.TenantId, filter.Name, approverActor, VirtualFilterAdministrationService.PendingHash(saved));
-        approved.Status.ShouldBe(FilterApprovalStatus.Active);
-        approved.ApprovedBy.ShouldBe(approverActor.Sid);
-    }
-
-    [Fact]
-    public async Task SaveFilter_WithRequireApproval_SyncActor_BypassesLocalApproval()
-    {
-        var serviceWithApproval = new VirtualFilterAdministrationService(_repository, _audit,
-            Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } }));
-
-        var result = await serviceWithApproval.ApplySyncAsync(Desired("c1", Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter()), Sync);
-        result.ShouldNotBeNull();
-        (await _repository.LoadSnapshotAsync()).Filters.ShouldHaveSingleItem();
+        saved.Status.ShouldBe(FilterApprovalStatus.Active);
+        saved.Draft.ShouldBeNull();
+        saved.ApprovedBy.ShouldBe(creatorActor.Sid);
     }
 
     [Fact]

@@ -87,7 +87,6 @@ route /api/v1/authz/objects/{objectName}/grants | governance, consent, ReBAC, Fi
 route /api/v1/governance/2fa/enroll | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/2fa/verify-enrollment | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/access-profiles/{name} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
-route /api/v1/governance/access-profiles/{name}/approve | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/audit | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/caller-attributes/ | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/caller-attributes/{name} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
@@ -103,7 +102,6 @@ route /api/v1/governance/grants | governance, consent, ReBAC, FinOps or ext-auth
 route /api/v1/governance/queries/analyze | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/virtual-filters | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/virtual-filters/{name} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
-route /api/v1/governance/virtual-filters/{name}/approve | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/virtual-filters/sync/apply | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/virtual-filters/sync/plan | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/virtual-filters/sync/status | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point

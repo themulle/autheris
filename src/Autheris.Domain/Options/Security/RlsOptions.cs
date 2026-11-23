@@ -19,12 +19,6 @@ public sealed class VirtualFilterOptions
     /// </summary>
     public int GenerationCheckSeconds { get; init; } = 5;
 
-    /// <summary>
-    /// When enabled, manual changes to structured virtual filters and access profiles require four-eyes approval by a distinct approver.
-    /// Stage-2 SQL virtual filters (sql) always start PendingApproval and require four-eyes approval by a distinct owner or delegate of every referenced table (or sync-path activation), even when RequireApproval is false.
-    /// </summary>
-    public bool RequireApproval { get; init; } = false;
-
     /// <summary>F-GOV-14: Virtual Filters on Web-API tables in WebSQL cross-source queries.</summary>
     public VirtualFilterFederationOptions Federation { get; init; } = new();
 

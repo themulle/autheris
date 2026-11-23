@@ -90,7 +90,6 @@ public sealed class MandatoryRowFilterResolverTests
 
     [Theory]
     [InlineData(FilterApprovalStatus.Active, true)]
-    [InlineData(FilterApprovalStatus.PendingApproval, false)]
     [InlineData(FilterApprovalStatus.Rejected, false)]
     public async Task HasActiveProfiles_CountsOnlyActiveProfilesOfTheTenant(FilterApprovalStatus status, bool expected)
     {
