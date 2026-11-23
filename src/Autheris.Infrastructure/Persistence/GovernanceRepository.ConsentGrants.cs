@@ -136,6 +136,7 @@ public partial class GovernanceRepository
             : revokeConsentIds.Distinct();
 
         var tables = new Dictionary<string, TableIdentifier>(StringComparer.OrdinalIgnoreCase);
+        Autheris.Application.Catalog.CatalogVersion? patternVersion = null;
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
@@ -165,6 +166,10 @@ public partial class GovernanceRepository
                 tables[c.TableIdentifier.ToString().ToLowerInvariant()] = c.TableIdentifier;
             }
 
+            // A pattern consent has no table (empty identifier): its create or revoke advances the catalog version instead of an epoch.
+            var patternTouched = tables.Values.Any(static t => string.IsNullOrWhiteSpace(t.TableName));
+            tables = tables.Where(static kv => !string.IsNullOrWhiteSpace(kv.Value.TableName)).ToDictionary(StringComparer.OrdinalIgnoreCase);
+
             if (descriptionUpdates != null)
             {
                 foreach (var update in descriptionUpdates)
@@ -186,23 +191,12 @@ public partial class GovernanceRepository
                 await IncrementTableEpochInternalAsync(conn, tx, table, ct).ConfigureAwait(false);
             }
 
+            patternVersion = patternTouched ? await BumpCatalogVersionInternalAsync(conn, tx, 0, 1, ct).ConfigureAwait(false) : null;
             await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
         }
-        catch (ConsentTenantIntegrityException refusal)
+        catch (Exception ex)
         {
-            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
-            await RecordTenantRefusalAuditAsync(conn, actor, refusal, ct).ConfigureAwait(false);
-            throw;
-        }
-        catch (RevocationDenialCaptureException denial)
-        {
-            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
-            await RecordRevocationDenialAuditAsync(conn, actor, denial, ct).ConfigureAwait(false);
-            throw new ConsentRevocationForbiddenException();
-        }
-        catch
-        {
-            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(await FailRevokeTransactionAsync(conn, tx, actor, ex, ct).ConfigureAwait(false));
             throw;
         }
 
@@ -211,6 +205,8 @@ public partial class GovernanceRepository
             _metadataInvalidator?.Invoke(table.ToString().ToLowerInvariant());
             await InvalidateTableEpochAsync(table, ct).ConfigureAwait(false);
         }
+
+        await (patternVersion is { } version ? PublishCatalogChangedEventAsync(version, ct) : Task.CompletedTask).ConfigureAwait(false);
     }
 
     private Task<bool> UpdateConsentDescriptionInTransactionAsync(DbConnection conn, DbTransaction tx, ConsentDescriptionUpdate update, CancellationToken ct) =>
@@ -258,39 +254,48 @@ public partial class GovernanceRepository
         var effectiveAuthority = authority ?? ConsentRevocationAuthority.FromPrincipal(null);
 
         TableIdentifier? revoked;
+        Autheris.Application.Catalog.CatalogVersion? patternVersion = null;
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
             revoked = await RevokeConsentInTransactionAsync(conn, tx, consentId, revokedBySid, reason, effectiveAuthority, requireDeclarativeForPrune: false, ct).ConfigureAwait(false);
-            if (revoked is { } table && !string.IsNullOrWhiteSpace(table.TableName))
+            if (revoked is { } table)
             {
-                await IncrementTableEpochInternalAsync(conn, tx, table, ct).ConfigureAwait(false);
+                // A pattern grant has no table epoch: like its creation, its revoke advances the catalog version (part of every cached decision).
+                patternVersion = string.IsNullOrWhiteSpace(table.TableName) ? await BumpCatalogVersionInternalAsync(conn, tx, 0, 1, ct).ConfigureAwait(false) : null;
+                await (patternVersion is null ? IncrementTableEpochInternalAsync(conn, tx, table, ct) : Task.CompletedTask).ConfigureAwait(false);
             }
 
             await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
         }
-        catch (ConsentTenantIntegrityException refusal)
+        catch (Exception ex)
         {
-            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
-            await RecordTenantRefusalAuditAsync(conn, revokedBySid, refusal, ct).ConfigureAwait(false);
-            throw;
-        }
-        catch (RevocationDenialCaptureException denial)
-        {
-            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
-            await RecordRevocationDenialAuditAsync(conn, revokedBySid, denial, ct).ConfigureAwait(false);
-            throw new ConsentRevocationForbiddenException();
-        }
-        catch
-        {
-            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(await FailRevokeTransactionAsync(conn, tx, revokedBySid, ex, ct).ConfigureAwait(false));
             throw;
         }
 
-        if (revoked is { } committed && !string.IsNullOrWhiteSpace(committed.TableName))
+        await (patternVersion is { } version ? PublishCatalogChangedEventAsync(version, ct)
+            : revoked is { } committed ? InvalidateTableEpochAsync(committed, ct) : Task.CompletedTask).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Rolls a failed revoke transaction back and returns the exception to throw: a tenant refusal and an approver denial leave their
+    /// audit entry (the denial surfaces as <see cref="ConsentRevocationForbiddenException"/>), anything else is rethrown unchanged.
+    /// </summary>
+    private async Task<Exception> FailRevokeTransactionAsync(DbConnection conn, DbTransaction tx, Sid actor, Exception error, CancellationToken ct)
+    {
+        await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
+        switch (error)
         {
-            await InvalidateTableEpochAsync(committed, ct).ConfigureAwait(false);
+            case ConsentTenantIntegrityException refusal:
+                await RecordTenantRefusalAuditAsync(conn, actor, refusal, ct).ConfigureAwait(false);
+                return refusal;
+            case RevocationDenialCaptureException denial:
+                await RecordRevocationDenialAuditAsync(conn, actor, denial, ct).ConfigureAwait(false);
+                return new ConsentRevocationForbiddenException();
+            default:
+                return error;
         }
     }
 
