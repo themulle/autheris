@@ -42,7 +42,12 @@ public sealed class ProtectionClassEgressMatrixTests(GovernancePostgresFixture f
         bool hasInternalEmployeeGroup,
         bool expectedAllowed)
     {
-        await using var store = await GovernanceTestStore.CreatePostgreSqlAsync(fixture, "protection_egress_matrix");
+        const string employeeGroupSid = "S-1-5-21-EMP-1";
+        // Internal access is proven only through a configured employee group (the test subject carries no member claims).
+        await using var store = await GovernanceTestStore.CreatePostgreSqlAsync(
+            fixture,
+            "protection_egress_matrix",
+            configure: o => o.Governance.AccessPolicy.Internal.EmployeeGroupSids.Add(employeeGroupSid));
         if (!store.IsAvailable) return;
 
         var tableId = Guid.NewGuid();
@@ -70,7 +75,7 @@ public sealed class ProtectionClassEgressMatrixTests(GovernancePostgresFixture f
             new Sid("S-1-5-21-ADM-1"),
             CancellationToken.None);
 
-        var empSid = new Sid("S-1-5-21-EMP-1");
+        var empSid = new Sid(employeeGroupSid);
         var subject = new SecurityPrincipalContext
         {
             UserSid = new Sid("S-1-5-21-CALLER-1"),
