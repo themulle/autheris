@@ -166,7 +166,7 @@ public sealed partial class DiscoveryService
         var cache = _accessViewCache!;
 
         // A current entry is used without waiting for anyone; only misses and revalidations are serialized per key.
-        if (await cache.ReadStampAsync(ct).ConfigureAwait(false) is { } early && cache.TryGet(cacheKey, early) is { Stale.Count: 0 } current)
+        if (await cache.ReadStampAsync(caller.Tenant, ct).ConfigureAwait(false) is { } early && cache.TryGet(cacheKey, early) is { Stale.Count: 0 } current)
         {
             return CallerAccessMemo.FromView(current.Entry.Candidates, current.Entry.Allowed, stale: null, cacheKey);
         }
@@ -175,7 +175,7 @@ public sealed partial class DiscoveryService
         await gate.WaitAsync(ct).ConfigureAwait(false);
         try
         {
-            if (await cache.ReadStampAsync(ct).ConfigureAwait(false) is not { } stamp)
+            if (await cache.ReadStampAsync(caller.Tenant, ct).ConfigureAwait(false) is not { } stamp)
             {
                 return new CallerAccessMemo(await LoadGrantCandidatesAsync(caller, subject, ct).ConfigureAwait(false));
             }
@@ -208,7 +208,7 @@ public sealed partial class DiscoveryService
             }
 
             var notAfter = Min(hit?.Entry.NotAfter ?? cache.Time.GetUtcNow() + cache.Ttl, candidates.NextChange);
-            await cache.TrySetAsync(cacheKey, new AccessViewEntry(candidates, memo.ToFrozenDecisions(), stamp, notAfter), ct).ConfigureAwait(false);
+            await cache.TrySetAsync(cacheKey, caller.Tenant, new AccessViewEntry(candidates, memo.ToFrozenDecisions(), stamp, notAfter), ct).ConfigureAwait(false);
             return memo;
         }
         finally
@@ -307,6 +307,164 @@ public sealed partial class DiscoveryService
         }
 
         return kept;
+    }
+
+    private async Task<IReadOnlyList<DiscoveryObject>> ResolveObjectsBatchAsync(
+        CatalogCaller caller,
+        Sid sid,
+        ScopeMemoKey scopeKey,
+        IReadOnlyList<TableMetadata> tables,
+        string? language,
+        CancellationToken ct)
+    {
+        if (tables.Count == 0)
+        {
+            return [];
+        }
+
+        var langKey = string.IsNullOrWhiteSpace(language) ? string.Empty : language.Trim().ToLowerInvariant();
+        var results = new DiscoveryObject?[tables.Count];
+        var uncached = new List<(int Index, TableMetadata Table)>(tables.Count);
+
+        lock (_memoLock)
+        {
+            for (var i = 0; i < tables.Count; i++)
+            {
+                var objKey = new ObjectMemoKey(scopeKey, DiscoveryObjectKind.Table, tables[i].Identifier, langKey);
+                if (_objectMemo.TryGetValue(objKey, out var cached))
+                {
+                    results[i] = cached;
+                }
+                else
+                {
+                    uncached.Add((i, tables[i]));
+                }
+            }
+        }
+
+        if (uncached.Count == 0)
+        {
+            return results.Where(static r => r is not null).Select(static r => r!).ToList();
+        }
+
+        var uncachedTables = uncached.Select(static x => x.Table).ToList();
+        var uncachedIds = uncachedTables.Select(static t => t.Identifier).ToList();
+
+        var ownersTask = _ownershipRepository is null
+            ? Task.FromResult<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<DataOwner>>>(new Dictionary<TableIdentifier, IReadOnlyList<DataOwner>>())
+            : _ownershipRepository.GetDataOwnersForTablesAsync(uncachedIds, ct);
+
+        var subject = SecurityPrincipalContext.FromPrincipal(caller.Principal!, caller.Tenant);
+
+        // Issue #1047: the read and the write capabilities of the page (canonical PDP path, zero data reads) share one batch read.
+        var decisionsTask = _decisionPoint!.DecideOperationsManyAsync(
+            subject, uncachedTables, [AccessOperation.Discover, AccessOperation.Insert, AccessOperation.Update, AccessOperation.Delete], AccessTransport.Discovery, ct).AsTask();
+
+        var pendingTask = LoadPendingRequestTablesAsync(sid, caller.Tenant, ct);
+        var expiredTask = LoadRecentlyExpiredTablesAsync(sid, caller.Tenant, ct);
+
+        await Task.WhenAll(ownersTask, decisionsTask, pendingTask, expiredTask).ConfigureAwait(false);
+
+        var ownersByTable = await ownersTask.ConfigureAwait(false);
+        var byOperation = await decisionsTask.ConfigureAwait(false);
+        var pendingTables = await pendingTask.ConfigureAwait(false);
+        var expiredTables = await expiredTask.ConfigureAwait(false);
+
+        if (byOperation.Count != 4 || byOperation.Any(d => d.Count != uncachedTables.Count))
+        {
+            throw new InvalidOperationException("AccessDecisionPoint returned mismatched decision count.");
+        }
+
+        var (decisions, insertDecisions, updateDecisions, deleteDecisions) = (byOperation[0], byOperation[1], byOperation[2], byOperation[3]);
+
+        var defs = _classificationRepository is null
+            ? ClassificationAccessResolver.BuiltInCatalog(caller.Tenant.Value).Definitions
+            : ClassificationHierarchyValidator.ResolveEffective(await _classificationRepository.GetClassificationsAsync(caller.Tenant.Value, includeInactive: true, ct).ConfigureAwait(false), caller.Tenant.Value);
+
+        var docLinks = await LoadDocumentLinksAsync(caller.Tenant.Value, uncachedTables, ct).ConfigureAwait(false);
+
+        // Issue #1043 / #1047: the column classifications of the page's visible, not yet classified columns in one read.
+        var unclassifiedColumns = _classificationRepository is null
+            ? []
+            : uncachedTables
+                .Where(static t => !t.Table.DiscoveryHidden)
+                .SelectMany(static t => t.Columns.Where(c => !c.DiscoveryHidden && !t.ColumnClassifications.ContainsKey(c.ColumnName)))
+                .Select(static c => c.Id.ToString())
+                .Distinct()
+                .ToList();
+        var classificationsByColumnId = unclassifiedColumns.Count == 0
+            ? new Dictionary<string, IReadOnlyList<ColumnClassification>>()
+            : await _classificationRepository!.GetColumnClassificationsBatchAsync(unclassifiedColumns, caller.Tenant.Value, ct).ConfigureAwait(false);
+
+        TenantAccessPolicy? tenantPolicy = null;
+        if (_accessPolicySettings is not null)
+        {
+            tenantPolicy = await _accessPolicySettings.GetEffectiveAsync(caller.Tenant, ct).ConfigureAwait(false);
+        }
+
+        // Protection snapshots of the page, resolved set-based; a table the batch does not answer is resolved per table below.
+        var batchProtections = _protectionProvider is null
+            ? null
+            : await _protectionProvider.ResolveManyAsync(caller.Tenant, uncachedTables, ct).ConfigureAwait(false);
+
+        var artifactsByTableId = _artifactStore is null
+            ? null
+            : await _artifactStore.GetAllForTablesAsync(uncachedTables.Select(static t => t.Table.Id).ToList(), ct).ConfigureAwait(false);
+
+        for (var i = 0; i < uncached.Count; i++)
+        {
+            var (targetIdx, table) = uncached[i];
+            var decision = decisions[i];
+            var owners = ownersByTable.TryGetValue(table.Identifier, out var list) ? list : Array.Empty<DataOwner>();
+            var isPending = !decision.IsAllowed && pendingTables.Contains(table.Identifier);
+            var isExpired = !decision.IsAllowed && !isPending && expiredTables.Contains(table.Identifier);
+            IReadOnlyList<DiscoveryArtifacts> allArtifacts = artifactsByTableId is not null &&
+                artifactsByTableId.TryGetValue(table.Table.Id, out var loadedArtifacts)
+                ? loadedArtifacts
+                : [];
+            var artifacts = allArtifacts.FirstOrDefault(a => a.Provenance == ArtifactProvenance.Upload)
+                ?? allArtifacts.FirstOrDefault(a => a.Provenance != ArtifactProvenance.Import);
+            var importArtifact = allArtifacts.FirstOrDefault(a => a.Provenance == ArtifactProvenance.Import && !string.IsNullOrWhiteSpace(a.SamplesJson));
+            var importSamplesAvailable = importArtifact is not null
+                && (tenantPolicy?.ServeImportSamples ?? true)
+                && !(tenantPolicy?.QuarantineSuspectedPiiSamples == true && CatalogPiiDetector.JsonHasSuspectedPii(importArtifact.SamplesJson));
+            Dictionary<string, IReadOnlyList<ColumnClassification>>? repoColClasses = null;
+            if (_classificationRepository is not null && !table.Table.DiscoveryHidden)
+            {
+                foreach (var col in table.Columns.Where(c => !c.DiscoveryHidden && !table.ColumnClassifications.ContainsKey(c.ColumnName)))
+                {
+                    if (classificationsByColumnId.TryGetValue(col.Id.ToString(), out var rows) && rows.Count > 0)
+                    {
+                        (repoColClasses ??= new(StringComparer.OrdinalIgnoreCase))[col.ColumnName] = rows;
+                    }
+                }
+            }
+
+            var protection = _protectionProvider is null
+                ? null
+                : batchProtections is not null && batchProtections.TryGetValue(table.Identifier, out var batchProtection)
+                    ? batchProtection
+                    : await _protectionProvider.GetAsync(caller.Tenant, table.Identifier, ct).ConfigureAwait(false);
+            var mapped = DiscoveryAccessMapper.Map(
+                table, decision, owners, isPending, isExpired, artifacts, language,
+                isHidden: table.Table.DiscoveryHidden, insertDecisions[i], updateDecisions[i], deleteDecisions[i], defs, repoColClasses, caller.Tenant.Value,
+                hideMaskedTextForRestrictedScopes: _discoveryOptions.Discovery?.HideMaskedColumnCatalogTextForRestrictedScopes == true,
+                effectiveProtection: protection,
+                importSamplesAvailable: importSamplesAvailable);
+
+            if (docLinks.TryGetValue(table.Identifier, out var linkView))
+            {
+                mapped = linkView.ApplyTo(mapped);
+            }
+
+            results[targetIdx] = mapped;
+            lock (_memoLock)
+            {
+                _objectMemo[new ObjectMemoKey(scopeKey, DiscoveryObjectKind.Table, table.Identifier, langKey)] = mapped;
+            }
+        }
+
+        return results.Where(static r => r is not null).Select(static r => r!).ToList();
     }
 
     /// <summary>The caller's grant sources and the decided tables of one scope (issue #798); mutated only under <c>_memoLock</c>.</summary>

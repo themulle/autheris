@@ -25,6 +25,11 @@ public sealed class DiscoveryArtifactStore : IDiscoveryArtifactStore
     public Task<IReadOnlyList<DiscoveryArtifacts>> GetAllAsync(Guid tableId, CancellationToken ct = default) =>
         _repository.GetAllDiscoveryArtifactsAsync(tableId, ct);
 
+    public Task<IReadOnlyDictionary<Guid, IReadOnlyList<DiscoveryArtifacts>>> GetAllForTablesAsync(
+        IReadOnlyCollection<Guid> tableIds,
+        CancellationToken ct = default) =>
+        _repository.GetAllDiscoveryArtifactsBatchAsync(tableIds, ct);
+
     public Task<bool> UpsertAsync(DiscoveryArtifacts artifacts, Sid actor, CancellationToken ct = default) =>
         _repository.UpsertDiscoveryArtifactsAsync(artifacts, actor, ct);
 
@@ -72,6 +77,43 @@ public sealed class DiscoveryArtifactStore : IDiscoveryArtifactStore
         }
 
         return rows;
+    }
+
+    internal static async Task<IReadOnlyDictionary<Guid, IReadOnlyList<DiscoveryArtifacts>>> GetAllForTablesAsync(
+        DbConnection conn,
+        DbTransaction? tx,
+        KeyDefinitionDialect dialect,
+        IReadOnlyCollection<Guid> tableIds,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(tableIds);
+        var distinctIds = tableIds.Distinct().ToArray();
+        var grouped = new Dictionary<Guid, List<DiscoveryArtifacts>>(distinctIds.Length);
+        if (distinctIds.Length > 0)
+        {
+            foreach (var chunk in ConsentSubjectFilter.Chunks(distinctIds.Select(static id => id.ToString()).ToArray()))
+            {
+                await using var cmd = conn.CreateCommand();
+                if (tx is not null) cmd.Transaction = tx;
+                cmd.CommandText =
+                    $"SELECT table_id, provenance, tenant_id, samples_json, statistics_json, content_sha256, uploaded_by, uploaded_at, schema_version " +
+                    $"FROM {dialect.Prefix}CATALOG_DISCOVERY_ARTIFACTS " +
+                    $"WHERE table_id IN ({ConsentSqlCore.BindIdInClause(cmd, "tid", chunk)}) ORDER BY table_id, provenance";
+                await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    if (!Guid.TryParse(reader.GetString(0), out var rowTableId))
+                    {
+                        continue;
+                    }
+
+                    var item = ReadArtifact(rowTableId, reader);
+                    (grouped.TryGetValue(rowTableId, out var list) ? list : grouped[rowTableId] = []).Add(item);
+                }
+            }
+        }
+
+        return grouped.ToDictionary(static kv => kv.Key, static kv => (IReadOnlyList<DiscoveryArtifacts>)kv.Value);
     }
 
     private static DiscoveryArtifacts ReadArtifact(Guid tableId, DbDataReader reader)

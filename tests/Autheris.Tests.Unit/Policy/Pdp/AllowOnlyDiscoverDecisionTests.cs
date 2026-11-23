@@ -1,6 +1,5 @@
 namespace Autheris.Tests.Unit.Policy.Pdp;
 
-#pragma warning disable CA2012 // NSubstitute configures ValueTask-returning members by calling them
 
 using System.Security.Claims;
 using System.Text.Json;
@@ -26,7 +25,6 @@ using Autheris.Tests.Unit.Governance;
 using Autheris.Tests.Unit.Governance.Classification;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using TrinoSqlEngine;
 using TrinoSqlEngine.Governance;
@@ -71,15 +69,7 @@ public sealed class AllowOnlyDiscoverDecisionTests
     public async Task AllowOnly_EqualsTheFullDecision_WithAuthorizationHooks()
     {
         // Hooks may deny any table; with hooks the classification stage is never skipped (hooks run on the full decision).
-        var hooks = Substitute.For<IAuthPluginHost>();
-        hooks.HasAuthorizationHooks.Returns(true);
-        hooks.EvaluateAuthorizationHooksAsync(Arg.Any<PluginAuthorizationContext>(), Arg.Any<CancellationToken>())
-            .Returns(call => ValueTask.FromResult(new PluginAuthorizationResult
-            {
-                Outcome = call.Arg<PluginAuthorizationContext>().TableIdentifier.TableName == "plain"
-                    ? PluginAuthorizationOutcome.Deny
-                    : PluginAuthorizationOutcome.Allow
-            }));
+        var hooks = new DenyingHookHost(hasHooks: true, "plain");
         var fixture = Fixture.Create();
         var pdp = fixture.CreatePdp(hooks);
 
@@ -107,12 +97,9 @@ public sealed class AllowOnlyDiscoverDecisionTests
     {
         // Decision points without an allow-only path (test doubles, other implementations) answer with their full decisions.
         var table = Fixture.Create().Tables[0];
-        var inner = Substitute.For<IAccessDecisionPoint>();
-        inner.DecideManyAsync(Arg.Any<SecurityPrincipalContext>(), Arg.Any<IReadOnlyList<TableMetadata>>(), AccessOperation.Discover, AccessTransport.Discovery, Arg.Any<CancellationToken>())
-            .Returns(ValueTask.FromResult<IReadOnlyList<TableAccessDecision>>([TableAccessDecision.Denied(table.Identifier, "no")]));
-        var defaultImpl = new DefaultOnly(inner);
+        IAccessDecisionPoint defaultImpl = new DenyingDecisionPoint();
 
-        var allowed = await ((IAccessDecisionPoint)defaultImpl).DecideAllowedManyAsync(Subject(), [table]);
+        var allowed = await defaultImpl.DecideAllowedManyAsync(Subject(), [table]);
 
         allowed.ShouldBe([false]);
     }
@@ -163,14 +150,16 @@ public sealed class AllowOnlyDiscoverDecisionTests
         Claims = [new Claim("scp", "Autheris.Catalog.Read")]
     };
 
-    private sealed class DefaultOnly(IAccessDecisionPoint inner) : IAccessDecisionPoint
+    /// <summary>A decision point without an allow-only path that denies everything.</summary>
+    private sealed class DenyingDecisionPoint : IAccessDecisionPoint
     {
-        public ValueTask<TableAccessDecision> DecideAsync(AccessRequest request, CancellationToken ct = default) => inner.DecideAsync(request, ct);
+        public ValueTask<TableAccessDecision> DecideAsync(AccessRequest request, CancellationToken ct = default) =>
+            ValueTask.FromResult(TableAccessDecision.Denied(request.Object.Identifier, "no"));
 
         public ValueTask<IReadOnlyList<TableAccessDecision>> DecideManyAsync(SecurityPrincipalContext subject, IReadOnlyList<TableMetadata> objects, AccessOperation operation, AccessTransport transport, CancellationToken ct = default) =>
-            inner.DecideManyAsync(subject, objects, operation, transport, ct);
+            ValueTask.FromResult<IReadOnlyList<TableAccessDecision>>(objects.Select(static o => TableAccessDecision.Denied(o.Identifier, "no")).ToList());
 
-        public ValueTask<AccessExplanation> ExplainAsync(AccessRequest request, CancellationToken ct = default) => inner.ExplainAsync(request, ct);
+        public ValueTask<AccessExplanation> ExplainAsync(AccessRequest request, CancellationToken ct = default) => throw new NotSupportedException();
     }
 
     private sealed class Fixture
@@ -360,4 +349,28 @@ public sealed class AllowOnlyDiscoverDecisionTests
         {
         }
     }
+}
+
+/// <summary>An authorization plugin host whose hook denies the tables named in <paramref name="deny"/> (issue #1047 tests).</summary>
+internal sealed class DenyingHookHost(bool hasHooks, params string[] deny) : IAuthPluginHost
+{
+    public bool HasRoleProviders => false;
+    public bool HasCallerAttributeProviders => false;
+    public bool HasAuthorizationHooks => hasHooks;
+
+    public int LoadPluginsFromDirectory(string directoryPath) => 0;
+
+    public ValueTask<PluginRoleEnrichmentExecutionResult> EnrichRolesAsync(PluginSecurityContext context, CancellationToken ct) => throw new NotSupportedException();
+
+    public bool TryGetCallerAttributeProvider(string kind, out IPluginCallerAttributeProvider? provider)
+    {
+        provider = null;
+        return false;
+    }
+
+    public ValueTask<PluginAuthorizationResult> EvaluateAuthorizationHooksAsync(PluginAuthorizationContext context, CancellationToken ct) =>
+        ValueTask.FromResult(new PluginAuthorizationResult
+        {
+            Outcome = deny.Contains(context.TableIdentifier.TableName) ? PluginAuthorizationOutcome.Deny : PluginAuthorizationOutcome.Allow
+        });
 }

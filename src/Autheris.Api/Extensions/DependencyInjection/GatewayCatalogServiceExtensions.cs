@@ -138,7 +138,8 @@ public static class GatewayCatalogServiceExtensions
                 governed ? sp.GetService<Autheris.Application.VirtualFilters.IVirtualFilterSnapshotProvider>() : null,
                 sp.GetService<TimeProvider>(),
                 sp.GetService<IOptions<GatewayOptions>>(),
-                sp.GetService<Autheris.Application.Plugins.Auth.IAuthPluginHost>());
+                sp.GetService<Autheris.Application.Plugins.Auth.IAuthPluginHost>(),
+                governed ? sp.GetService<Autheris.Application.Governance.Caching.GovernanceEpochProvider>() : null);
         });
         services.TryAddScoped<Autheris.Application.Catalog.Discovery.IDiscoveryAccessRequestService>(sp =>
             new Autheris.Application.Catalog.Discovery.DiscoveryAccessRequestService(

@@ -18,7 +18,6 @@ using Autheris.Tests.Common;
 using Autheris.Tests.Unit.Governance.Classification;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -121,6 +120,21 @@ public sealed class CatalogAccessViewCacheTests
         await f.FacetsAsync(Caller);
         f.Pdp.Deny.Add(3);
         f.Catalog.Version = new CatalogVersion(1, 2);
+
+        (await f.FacetsAsync(Caller)).TotalCount.ShouldBe(1);
+        f.LastFilterDiscoverDecisions.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task GovernanceEpochAdvance_RebuildsTheView()
+    {
+        // Protection gates and tenant access-policy settings decide Discover as well; any governance change of the tenant advances its
+        // epoch, which ends every cached view of the tenant.
+        var f = new Fixture(count: 10, granted: [3, 7]);
+        await f.FacetsAsync(Caller);
+        f.Pdp.Deny.Add(7);
+        f.GovernanceStore.Epoch++;
+        f.GovernanceEpochs.InvalidateTenant("tenant-a");
 
         (await f.FacetsAsync(Caller)).TotalCount.ShouldBe(1);
         f.LastFilterDiscoverDecisions.ShouldBe(2);
@@ -293,13 +307,13 @@ public sealed class CatalogAccessViewCacheTests
             Discovery = new CatalogDiscoverySettings { AccessViewCache = new CatalogAccessViewCacheSettings { SizeLimitMegabytes = 1, MaxEntryMegabytes = 1 } }
         });
         using var cache = new CatalogAccessViewCache(options, epochs, catalog, null, time);
-        var stamp = (await cache.ReadStampAsync(CancellationToken.None))!;
+        var stamp = (await cache.ReadStampAsync(new TenantId("tenant-a"), CancellationToken.None))!;
 
         // ~200 KB per entry: ten entries cannot all stay within 1 MB.
         var stored = 0;
         for (var i = 0; i < 10; i++)
         {
-            stored += await cache.TrySetAsync($"k{i}", Entry(stamp, 2_000), CancellationToken.None) ? 1 : 0;
+            stored += await cache.TrySetAsync($"k{i}", new TenantId("tenant-a"), Entry(stamp, 2_000), CancellationToken.None) ? 1 : 0;
         }
 
         stored.ShouldBeGreaterThan(0);
@@ -307,7 +321,7 @@ public sealed class CatalogAccessViewCacheTests
         Enumerable.Range(0, 10).Count(i => cache.TryGet($"k{i}", stamp) is not null).ShouldBeLessThan(10);
 
         // ~1.9 MB: above the per-entry cap.
-        (await cache.TrySetAsync("big", Entry(stamp, 20_000), CancellationToken.None)).ShouldBeFalse();
+        (await cache.TrySetAsync("big", new TenantId("tenant-a"), Entry(stamp, 20_000), CancellationToken.None)).ShouldBeFalse();
         cache.TryGet("big", stamp).ShouldBeNull();
     }
 
@@ -355,9 +369,9 @@ public sealed class CatalogAccessViewCacheTests
 
             Epochs = new FakeEpochs(logCapacity);
             Pdp = new PolicyPdp(this);
-            var hookHost = Substitute.For<Autheris.Application.Plugins.Auth.IAuthPluginHost>();
-            hookHost.HasAuthorizationHooks.Returns(hooks);
-            Cache = new CatalogAccessViewCache(Options.Create(new CatalogDiscoveryOptions()), Epochs, Catalog, null, Time, Options.Create(Gateway()), hookHost);
+            var hookHost = new Autheris.Tests.Unit.Policy.Pdp.DenyingHookHost(hasHooks: hooks);
+            GovernanceEpochs = new Autheris.Application.Governance.Caching.GovernanceEpochProvider(GovernanceStore, timeProvider: Time);
+            Cache = new CatalogAccessViewCache(Options.Create(new CatalogDiscoveryOptions()), Epochs, Catalog, null, Time, Options.Create(Gateway()), hookHost, GovernanceEpochs);
         }
 
         public FakeDiscoveryTableRepository Repo { get; } = new();
@@ -365,6 +379,8 @@ public sealed class CatalogAccessViewCacheTests
         public FakeDiscoveryConsentRepository Consents { get; } = new();
         public FakeEpochs Epochs { get; }
         public FakeCatalogVersion Catalog { get; } = new();
+        public MutableGovernanceEpochStore GovernanceStore { get; } = new();
+        public Autheris.Application.Governance.Caching.GovernanceEpochProvider GovernanceEpochs { get; }
         public AdjustableClassificationTimeProvider Time { get; } = new(Now);
         public PolicyPdp Pdp { get; }
         public CatalogAccessViewCache Cache { get; }
@@ -510,6 +526,13 @@ public sealed class CatalogAccessViewCacheTests
         public Task<long> GetCurrentEpochAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult(1L);
         public Task<IReadOnlyDictionary<TableIdentifier, long>> GetCurrentEpochsAsync(IEnumerable<TableIdentifier> tables, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyDictionary<TableIdentifier, long>>(tables.Distinct().ToDictionary(static t => t, static _ => 1L));
+    }
+
+    private sealed class MutableGovernanceEpochStore : Autheris.Application.Governance.Caching.IGovernanceEpochStore
+    {
+        public long Epoch { get; set; } = 1;
+        public Task<long> GetEpochAsync(TenantId tenant, CancellationToken ct = default) => Task.FromResult(Epoch);
+        public Task<long> BumpEpochAsync(TenantId tenant, CancellationToken ct = default) => Task.FromResult(++Epoch);
     }
 
     private sealed class FakeCatalogVersion : ICatalogVersionProvider

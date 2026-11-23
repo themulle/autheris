@@ -108,6 +108,20 @@ public sealed class ExternalCatalogCursorTests
             return inner.GetAsync(tableId, ct);
         }
 
+        public System.Threading.Tasks.Task<IReadOnlyList<DiscoveryArtifacts>> GetAllAsync(Guid tableId, System.Threading.CancellationToken ct = default)
+        {
+            Reads++;
+            return inner.GetAllAsync(tableId, ct);
+        }
+
+        public System.Threading.Tasks.Task<IReadOnlyDictionary<Guid, IReadOnlyList<DiscoveryArtifacts>>> GetAllForTablesAsync(
+            IReadOnlyCollection<Guid> tableIds,
+            System.Threading.CancellationToken ct = default)
+        {
+            Reads++;
+            return inner.GetAllForTablesAsync(tableIds, ct);
+        }
+
         public System.Threading.Tasks.Task<bool> UpsertAsync(DiscoveryArtifacts artifacts, Sid actor, System.Threading.CancellationToken ct = default) =>
             inner.UpsertAsync(artifacts, actor, ct);
         public System.Threading.Tasks.Task<bool> DeleteAsync(Guid tableId, Sid actor, System.Threading.CancellationToken ct = default) =>

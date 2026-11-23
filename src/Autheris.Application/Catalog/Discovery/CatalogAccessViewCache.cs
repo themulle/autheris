@@ -39,6 +39,7 @@ public sealed class CatalogAccessViewCache : IDisposable
     private readonly ICatalogVersionProvider? _catalogVersion;
     private readonly IVirtualFilterSnapshotProvider? _virtualFilters;
     private readonly Func<bool> _authorizationHooksActive;
+    private readonly Autheris.Application.Governance.Caching.GovernanceEpochProvider? _governanceEpochs;
     private readonly long _maxEntryBytes;
 
     public CatalogAccessViewCache(
@@ -48,8 +49,11 @@ public sealed class CatalogAccessViewCache : IDisposable
         IVirtualFilterSnapshotProvider? virtualFilters,
         TimeProvider? timeProvider = null,
         IOptions<Autheris.Domain.Options.GatewayOptions>? gatewayOptions = null,
-        Autheris.Application.Plugins.Auth.IAuthPluginHost? authPlugins = null)
+        Autheris.Application.Plugins.Auth.IAuthPluginHost? authPlugins = null,
+        Autheris.Application.Governance.Caching.GovernanceEpochProvider? governanceEpochs = null)
     {
+        // Protection gates and tenant access-policy settings decide Discover too; their changes advance the tenant governance epoch.
+        _governanceEpochs = governanceEpochs;
         // Authorization plugin hooks may decide on per-request inputs (client address) and audit every call: no cached view with hooks.
         var auth = gatewayOptions?.Value?.Plugins?.Auth;
         _authorizationHooksActive = () => auth is { Enabled: true, AllowAuthorizationHooks: true } && authPlugins is { HasAuthorizationHooks: true };
@@ -85,7 +89,7 @@ public sealed class CatalogAccessViewCache : IDisposable
     /// The current stamp, read before a view is loaded or used; null when the view must be neither read nor written (no
     /// invalidation signal or a degraded one, no catalog version source, active authorization plugin hooks).
     /// </summary>
-    internal async ValueTask<AccessViewStamp?> ReadStampAsync(CancellationToken ct)
+    internal async ValueTask<AccessViewStamp?> ReadStampAsync(TenantId tenant, CancellationToken ct)
     {
         if (_authorizationHooksActive() || _epochs?.InvalidationGeneration is not { } generation || _catalogVersion is null)
         {
@@ -96,12 +100,13 @@ public sealed class CatalogAccessViewCache : IDisposable
         // older than the state (a rebuild), never newer.
         var catalog = await _catalogVersion.GetCatalogVersionAsync(ct).ConfigureAwait(false);
         var filters = _virtualFilters is null ? 0 : (await _virtualFilters.GetAsync(ct).ConfigureAwait(false)).Generation;
+        var governance = _governanceEpochs is null ? 0 : await _governanceEpochs.GetEpochAsync(tenant, ct).ConfigureAwait(false);
         if (await _epochs.GetClusterInvalidationSequenceAsync(ct).ConfigureAwait(false) is not { } cluster)
         {
             return null;
         }
 
-        return new AccessViewStamp(generation, catalog, filters, cluster);
+        return new AccessViewStamp(generation, catalog, filters, cluster, governance);
     }
 
     /// <summary>
@@ -113,6 +118,7 @@ public sealed class CatalogAccessViewCache : IDisposable
     {
         if (loaded.Catalog != current.Catalog ||
             loaded.VirtualFilterGeneration != current.VirtualFilterGeneration ||
+            loaded.GovernanceEpoch != current.GovernanceEpoch ||
             loaded.Generation > current.Generation ||
             current.Generation - loaded.Generation < current.ClusterSequence - loaded.ClusterSequence)
         {
@@ -151,9 +157,9 @@ public sealed class CatalogAccessViewCache : IDisposable
     /// filters changed during the load or the invalidations since cannot be proven; invalidations the log does prove are re-decided by
     /// the next <see cref="TryGet"/>. Also not above the per-entry cap. Returns whether the cache holds the entry.
     /// </summary>
-    internal async ValueTask<bool> TrySetAsync(string key, AccessViewEntry entry, CancellationToken ct)
+    internal async ValueTask<bool> TrySetAsync(string key, TenantId tenant, AccessViewEntry entry, CancellationToken ct)
     {
-        var current = await ReadStampAsync(ct).ConfigureAwait(false);
+        var current = await ReadStampAsync(tenant, ct).ConfigureAwait(false);
         var size = entry.EstimateBytes();
         if (current is null || StaleSince(entry.Stamp, current) is null || size > _maxEntryBytes || entry.NotAfter <= Time.GetUtcNow())
         {
@@ -189,7 +195,7 @@ public sealed class CatalogAccessViewCache : IDisposable
 }
 
 /// <summary>Issue #1044: what a cached access view was derived from (read before the load).</summary>
-internal sealed record AccessViewStamp(long Generation, CatalogVersion Catalog, long VirtualFilterGeneration, long ClusterSequence);
+internal sealed record AccessViewStamp(long Generation, CatalogVersion Catalog, long VirtualFilterGeneration, long ClusterSequence, long GovernanceEpoch = 0);
 
 /// <summary>Issue #1044: the caller's grant candidates and the allow bit of every decided candidate.</summary>
 internal sealed record AccessViewEntry(

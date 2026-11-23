@@ -415,6 +415,9 @@ public partial class GovernanceRepository
     public Task<IReadOnlyList<DiscoveryArtifacts>> GetAllDiscoveryArtifactsAsync(Guid tableId, CancellationToken ct = default) =>
         WithConnAsync(c => DiscoveryArtifactStore.GetAllAsync(c, null, KeyDialect, tableId, ct), ct);
 
+    public Task<IReadOnlyDictionary<Guid, IReadOnlyList<DiscoveryArtifacts>>> GetAllDiscoveryArtifactsBatchAsync(IReadOnlyCollection<Guid> tableIds, CancellationToken ct = default) =>
+        WithConnAsync(c => DiscoveryArtifactStore.GetAllForTablesAsync(c, null, KeyDialect, tableIds, ct), ct);
+
     public Task<bool> UpsertDiscoveryArtifactsAsync(DiscoveryArtifacts artifacts, Sid actor, CancellationToken ct = default) =>
         WithConnAsync(c => DiscoveryArtifactStore.UpsertAsync(c, null, KeyDialect, artifacts, actor, ct), ct);
 

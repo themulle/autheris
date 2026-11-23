@@ -24,6 +24,23 @@ public interface IDiscoveryArtifactStore
         return item is null ? [] : [item];
     }
 
+    async Task<IReadOnlyDictionary<Guid, IReadOnlyList<DiscoveryArtifacts>>> GetAllForTablesAsync(
+        IReadOnlyCollection<Guid> tableIds,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(tableIds);
+        var byTable = new Dictionary<Guid, IReadOnlyList<DiscoveryArtifacts>>(tableIds.Count);
+        foreach (var tableId in tableIds)
+        {
+            if (!byTable.ContainsKey(tableId))
+            {
+                byTable[tableId] = await GetAllAsync(tableId, ct).ConfigureAwait(false);
+            }
+        }
+
+        return byTable;
+    }
+
     Task<bool> UpsertAsync(DiscoveryArtifacts artifacts, Sid actor, CancellationToken ct = default);
 
     Task<bool> DeleteAsync(Guid tableId, Sid actor, CancellationToken ct = default);
