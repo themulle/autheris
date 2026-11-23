@@ -159,10 +159,9 @@ public sealed class ProfileGrantMaterializer(
                 RecordType: GrantRecordType.Issued);
 
             var record = await _grantWriter.InsertAndGrantAsync(transaction, consent, input, ct).ConfigureAwait(false);
-            if (!consent.IsPatternGrant)
-            {
-                await _store.IncrementTableEpochInTransactionAsync(transaction, consent.TableIdentifier, ct).ConfigureAwait(false);
-            }
+
+            // A pattern consent has no table: the store advances the catalog version instead of a table epoch (issue #1044).
+            await _store.IncrementTableEpochInTransactionAsync(transaction, consent.TableIdentifier, ct).ConfigureAwait(false);
 
             await _store.RecordAuditInTransactionAsync(transaction, new AuditLogEntry
             {
@@ -375,11 +374,9 @@ public sealed class ProfileGrantMaterializer(
                     RecordType: GrantRecordType.Revoked);
 
                 await _grantWriter.RevokeAsync(tx.Transaction, consent, revokeInput, ct).ConfigureAwait(false);
-                if (!consent.IsPatternGrant && !string.IsNullOrWhiteSpace(consent.TableIdentifier.TableName))
-                {
-                    await _store.IncrementTableEpochInTransactionAsync(tx.Transaction, consent.TableIdentifier, ct).ConfigureAwait(false);
-                    invalidatedTables.Add(consent.TableIdentifier);
-                }
+                // Pattern consents included: the store advances the catalog version for them (issue #1044).
+                await _store.IncrementTableEpochInTransactionAsync(tx.Transaction, consent.TableIdentifier, ct).ConfigureAwait(false);
+                invalidatedTables.Add(consent.TableIdentifier);
 
                 await _store.RecordAuditInTransactionAsync(tx.Transaction, new AuditLogEntry
                 {
