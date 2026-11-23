@@ -48,11 +48,15 @@ public static partial class CatalogApiEndpoints
         .RequireAuthorization()
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
-        group.MapGet("/domains", (
-            ICatalogDiscoveryService discoveryService,
-            HttpContext httpContext,
-            CancellationToken ct) =>
-            CatalogDiscoveryApiHelpers.ListDomainsAsync(discoveryService, httpContext, CreateRequestContext, ct))
+        group.MapGet("/domains", ListBusinessDomainsAsync)
+        .RequireAuthorization()
+        .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+
+        group.MapGet("/containers", ListContainersAsync)
+        .RequireAuthorization()
+        .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+
+        group.MapGet("/containers/{kind}/{id:guid}", GetContainerAsync)
         .RequireAuthorization()
         .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 

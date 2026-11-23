@@ -59,6 +59,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
     private readonly Autheris.Application.Procedures.Interfaces.IProcedureExecutionService? _procedureExecutionService;
     private readonly IGraphQlCatalogMap? _graphQlMap;
     private readonly ICatalogSearchEngine? _searchEngine;
+    private readonly Autheris.Application.Catalog.Visibility.IContainerCatalogService? _containerCatalog;
     private readonly ILogger<McpToolExecutionHandler> _logger;
     private readonly TimeProvider _timeProvider;
 
@@ -77,8 +78,10 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         IGraphQlCatalogMap? graphQlMap = null,
         ICatalogSearchEngine? searchEngine = null,
         ILogger<McpToolExecutionHandler>? logger = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        Autheris.Application.Catalog.Visibility.IContainerCatalogService? containerCatalog = null)
     {
+        _containerCatalog = containerCatalog;
         _catalogOwner = TenantResolver.EffectiveDefaultOf(gatewayOptions?.Value.Tenancy);
         _gatewayOptions = gatewayOptions?.Value;
         _sqlExecutionService = sqlExecutionService ?? throw new ArgumentNullException(nameof(sqlExecutionService));
@@ -105,6 +108,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         string.Equals(toolName, McpDatasetTools.GetTableSchema, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, McpDatasetTools.GetMyPermissions, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, McpDatasetTools.ListDatasources, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, McpDatasetTools.ListContainers, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, McpDatasetTools.GetDataLineage, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, McpDatasetTools.DescribeApi, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, McpDatasetTools.InvokeApi, StringComparison.OrdinalIgnoreCase) ||
@@ -504,6 +508,11 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             }
 
             return JsonSerializer.Serialize(datasources, JsonOpts);
+        }
+
+        if (string.Equals(tool.Name, McpDatasetTools.ListContainers, StringComparison.OrdinalIgnoreCase))
+        {
+            return await McpContainerCatalog.ListAsync(_containerCatalog, tenantId, userPrincipal, root, ct).ConfigureAwait(false);
         }
 
         if (string.Equals(tool.Name, McpDatasetTools.GetDataLineage, StringComparison.OrdinalIgnoreCase))

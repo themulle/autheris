@@ -70,7 +70,7 @@ public static class McpToolAnnotations
 
         Add(Effect.Read,
             McpDatasetTools.ListDatasets, McpDatasetTools.DescribeDataset, McpDatasetTools.SearchCatalog,
-            McpDatasetTools.FindRelevantTables, McpDatasetTools.GetTableSchema, McpDatasetTools.ListDatasources,
+            McpDatasetTools.FindRelevantTables, McpDatasetTools.GetTableSchema, McpDatasetTools.ListDatasources, McpDatasetTools.ListContainers,
             McpDatasetTools.GetDataLineage, McpDatasetTools.DescribeApi, McpDatasetTools.GetMyPermissions,
             McpDatasetTools.DescribeMyAccess, McpDatasetTools.QueryGraphQl, McpDatasetTools.QueryDataset,
             McpDatasetTools.SampleRows, McpSemanticTools.ListMetrics, McpSemanticTools.DescribeMetric,

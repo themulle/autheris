@@ -26,6 +26,7 @@ public static class McpDatasetTools
     public const string GetTableSchema = "get_table_schema";
     public const string GetMyPermissions = "get_my_permissions";
     public const string ListDatasources = "list_datasources";
+    public const string ListContainers = "list_containers";
     public const string GetDataLineage = "get_data_lineage";
     public const string DescribeApi = "describe_api";
     public const string InvokeApi = "invoke_api";
@@ -52,6 +53,7 @@ public static class McpDatasetTools
         string.Equals(toolName, GetTableSchema, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, GetMyPermissions, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, ListDatasources, StringComparison.OrdinalIgnoreCase) ||
+        string.Equals(toolName, ListContainers, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, GetDataLineage, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, DescribeApi, StringComparison.OrdinalIgnoreCase) ||
         string.Equals(toolName, InvokeApi, StringComparison.OrdinalIgnoreCase) ||
@@ -88,6 +90,11 @@ public static class McpDatasetTools
         if (string.Equals(toolName, ListDatasources, StringComparison.OrdinalIgnoreCase))
         {
             return new TableIdentifier("governance", "catalog", "datasources");
+        }
+
+        if (string.Equals(toolName, ListContainers, StringComparison.OrdinalIgnoreCase))
+        {
+            return CatalogTable;
         }
 
         if (string.Equals(toolName, DescribeApi, StringComparison.OrdinalIgnoreCase))
@@ -406,6 +413,20 @@ public static class McpDatasetTools
             }
             """,
             TargetGraphQLOperation: ListDatasources);
+
+        yield return new McpToolDefinition(
+            Name: ListContainers,
+            Description: "Lists the business domains and data products of the catalog as tiles (name, description, contact, visibility) with your access state (OPEN, GRANTED, PENDING, NONE). Use request_access to ask for catalog access to a container.",
+            InputJsonSchema: """
+            {
+              "type": "object",
+              "properties": {
+                "kind": { "type": "string", "enum": ["domain", "dataProduct"], "description": "Optional container kind filter." },
+                "limit": { "type": "integer", "minimum": 1, "description": "Maximum number of tiles (bounded by the deployment page size)." }
+              }
+            }
+            """,
+            TargetGraphQLOperation: ListContainers);
 
         yield return new McpToolDefinition(
             Name: GetDataLineage,

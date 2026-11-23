@@ -1,11 +1,8 @@
 namespace Autheris.Tests.Unit.Catalog;
 
 using System;
-using System.IO;
-using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Api.Endpoints;
 using Autheris.Application.Audit;
 using Autheris.Application.Catalog.Discovery;
 using Autheris.Application.Catalog.Interfaces;
@@ -15,64 +12,12 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Tests.Common;
 using Autheris.Tests.Unit.Catalog.Discovery;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
 public sealed class CatalogDomainsEndpointTests
 {
-    [Fact]
-    public async Task ListDomainsAsync_Over200VisibleTables_CountsAllTablesWithout200Cap()
-    {
-        var repo = new FakeDiscoveryTableRepository();
-        for (var i = 0; i < 250; i++)
-        {
-            var domain = $"domain_{i % 5}";
-            var schema = i % 2 == 0 ? "dbo" : "analytics";
-            repo.Tables.Add(DiscoveryTestBuilder.MakeTable(domain, $"table_{i:D3}", schema: schema));
-        }
-
-        var discovery = DiscoveryTestBuilder.CreateService(
-            tables: repo,
-            pdp: FakeAccessDecisionPoint.AllowAll(),
-            audit: new FakeAuditWriter());
-        var options = Options.Create(new GatewayOptions { Tenancy = TenancyShape.Multi.Options() });
-        var catalogService = new CatalogDiscoveryService(
-            repo,
-            new FakeAuditWriter(),
-            options,
-            discoveryService: discovery);
-
-        var sp = new ServiceCollection().AddLogging().BuildServiceProvider();
-        var httpContext = new DefaultHttpContext { RequestServices = sp };
-        httpContext.Response.Body = new MemoryStream();
-        var principal = DiscoveryTestBuilder.User("S-1", "tenant-a");
-        var requestContext = new RequestContext(new TenantId("tenant-a"), new Sid("S-1"), User: principal);
-
-        var result = await CatalogDiscoveryApiHelpers.ListDomainsAsync(
-            catalogService,
-            httpContext,
-            (_, _) => requestContext,
-            CancellationToken.None);
-
-        await result.ExecuteAsync(httpContext);
-        httpContext.Response.StatusCode.ShouldBe(StatusCodes.Status200OK);
-        httpContext.Response.Body.Position = 0;
-        using var doc = await JsonDocument.ParseAsync(httpContext.Response.Body);
-        var root = doc.RootElement;
-
-        root.GetProperty("totalTables").GetInt32().ShouldBe(250);
-        root.GetProperty("totalDomains").GetInt32().ShouldBe(5);
-        var domains = root.GetProperty("domains");
-        domains.GetArrayLength().ShouldBe(5);
-        foreach (var d in domains.EnumerateArray())
-        {
-            d.GetProperty("tableCount").GetInt32().ShouldBe(50);
-        }
-    }
-
     [Fact]
     public async Task ListFacetsAsync_WithoutDiscoveryService_FallsBackToVisibleTables()
     {
