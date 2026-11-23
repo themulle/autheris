@@ -218,5 +218,6 @@ public sealed class ConsentApiEndpointSecurityTests
         Normalize(malformed.Body).ShouldBe(Normalize(missing.Body));
     }
 
-    private static string Normalize(string body) => Regex.Replace(body, "[0-9a-fA-F]{32}|[0-9a-fA-F-]{36}", "<id>");
+    private static string Normalize(string body) =>
+        Regex.Replace(Regex.Replace(body, "\"(correlationId|traceId)\":\"[^\"]*\"", "\"$1\":\"<id>\""), "[0-9a-fA-F]{32}|[0-9a-fA-F-]{36}", "<id>");
 }

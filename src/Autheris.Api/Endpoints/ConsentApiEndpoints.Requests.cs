@@ -14,6 +14,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.ConsentRequests.Events;
 using Autheris.Application.Governance.Requests;
+using Autheris.Application.ConsentRequests.ProfileAssignments;
 using Autheris.Application.ConsentRequests.Routing;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Policy.Pdp;
@@ -210,6 +211,11 @@ public static partial class ConsentApiEndpoints
         if (!TryParseRequestKind(body.Kind, out var kind))
         {
             return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Unsupported request kind.", context);
+        }
+
+        if (string.Equals(body.GranteeType?.Trim(), "Role", StringComparison.OrdinalIgnoreCase))
+        {
+            return ApiProblems.BadRequest(AccessProfileAssignmentRules.RoleSubjectUnsupported, "Access profiles cannot be assigned directly to Role subjects.", context);
         }
 
         var granteeType = GranteeType.User;
@@ -659,7 +665,7 @@ public static partial class ConsentApiEndpoints
         {
             "RATE_LIMIT_EXCEEDED" => ApiProblems.TooManyRequests(ApiErrorCodes.RateLimitExceeded, "Access request rate limit exceeded. Retry later.", context, ex.RetryAfterSeconds ?? 1),
             "FORBIDDEN" => ApiProblems.Forbidden(ConsentDecisionErrorCodes.DecisionNotPermitted, "Consent request operation is not permitted.", context),
-            "TABLE_NOT_FOUND" or "NOT_FOUND" => ApiProblems.NotFound(ApiErrorCodes.TableNotRegistered, "Target table, access profile, or consent request was not found.", context),
+            "TABLE_NOT_FOUND" or "NOT_FOUND" or "TARGET_NOT_FOUND" => ApiProblems.NotFound(ApiErrorCodes.TableNotRegistered, "Target table, access profile, or consent request was not found.", context),
             "CONFLICT" or "IDEMPOTENCY_CONFLICT" => ApiProblems.Conflict(ApiErrorCodes.Conflict, "Consent request conflicts with existing state.", context),
             AccessProfileAssignmentRules.RoleSubjectUnsupported => ApiProblems.BadRequest(AccessProfileAssignmentRules.RoleSubjectUnsupported, "Access profiles cannot be assigned directly to Role subjects.", context),
             _ => ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Consent request payload is invalid.", context)

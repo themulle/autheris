@@ -435,32 +435,7 @@ public sealed partial class AdvisoryRegressionTests
         step2.Request.Status.ShouldBe("APPROVED");
         h.Consents.Count.ShouldBe(1);
 
-        var reqExt = h.SeedPendingRequest("S-1-5-21-REQ", GranteeType.User, "S-1-5-21-GRANTEE2", MaskingPolicyMode.Default, external: true);
-        var extStep1 = await h.Service.DecideAsync(
-            new ConsentDecisionCommand(reqExt.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.External, null,
-                ExternalAttribution: new ExternalDecisionAttribution(Guid.NewGuid(), "EXT-P1", "APPROVED", new AssertedApprover("S-1-5-21-EXT1", ResolvedSid: "S-1-5-21-EXT1"), DateTimeOffset.UtcNow)),
-            reqExt, new Sid("S-1-5-21-EXT1"), [new Sid("S-1-5-21-EXT1")]);
-        extStep1.Request.Status.ShouldBe("PENDING_EXTERNAL_APPROVAL");
-        h.Consents.Count.ShouldBe(1);
-
-        var updatedExt = h.Requests.Single(r => r.Id == reqExt.Id);
-        var extStep2 = await h.Service.DecideAsync(
-            new ConsentDecisionCommand(reqExt.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.External, null,
-                ExternalAttribution: new ExternalDecisionAttribution(Guid.NewGuid(), "EXT-P2", "APPROVED", new AssertedApprover("S-1-5-21-EXT2", ResolvedSid: "S-1-5-21-EXT2"), DateTimeOffset.UtcNow)),
-            updatedExt, new Sid("S-1-5-21-EXT2"), [new Sid("S-1-5-21-EXT2")]);
-        extStep2.Request.Status.ShouldBe("APPROVED");
-        h.Consents.Count.ShouldBe(2);
-
-        var reqExtDual = h.SeedPendingRequest("S-1-5-21-REQ", GranteeType.User, "S-1-5-21-GRANTEE3", MaskingPolicyMode.Default, external: true);
-        var dualResult = await h.Service.DecideAsync(
-            new ConsentDecisionCommand(reqExtDual.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.External, null,
-                ExternalAttribution: new ExternalDecisionAttribution(Guid.NewGuid(), "EXT-DUAL", "APPROVED",
-                    new AssertedApprover("S-1-5-21-EXT1", ResolvedSid: "S-1-5-21-EXT1"), DateTimeOffset.UtcNow,
-                    AdditionalApprovers: [new AssertedApprover("S-1-5-21-EXT2", ResolvedSid: "S-1-5-21-EXT2")])),
-            reqExtDual, new Sid("S-1-5-21-EXT2"), [new Sid("S-1-5-21-EXT1"), new Sid("S-1-5-21-EXT2")]);
-        dualResult.Request.Status.ShouldBe("APPROVED");
-        h.Requests.Single(r => r.Id == reqExtDual.Id).ApprovalSteps.Select(s => s.ApproverSid.Value)
-            .ShouldBe(["S-1-5-21-EXT1", "S-1-5-21-EXT2"]);
+        // External decisions on profile assignments go through the permission request engine (ExternalDecisionEngineTests).
 
         var reqMulti = h.SeedPendingRequest("S-1-5-21-REQ", GranteeType.User, "S-1-5-21-GRANTEE4", MaskingPolicyMode.Default, external: false, multiItem: true);
         await h.Service.DecideAsync(
@@ -473,14 +448,14 @@ public sealed partial class AdvisoryRegressionTests
             new ConsentDecisionCommand(reqMulti.Id, ConsentDecisionKind.Reject, ConsentDecisionChannel.Internal, Wave2Principal("S-1-5-21-PUBOWN"), Reason: "Deny public table"),
             reqMultiAfter1, new Sid("S-1-5-21-PUBOWN"), []);
         afterReject2.Request.Status.ShouldBe("PENDING_SECOND_APPROVAL");
-        h.Consents.Count.ShouldBe(3);
+        h.Consents.Count.ShouldBe(1);
 
         var reqMultiAfter2 = h.Requests.Single(r => r.Id == reqMulti.Id);
         var multiFinal = await h.Service.DecideAsync(
             new ConsentDecisionCommand(reqMulti.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, Wave2Principal("S-1-5-21-OWN3")),
             reqMultiAfter2, new Sid("S-1-5-21-OWN3"), []);
         multiFinal.Request.Status.ShouldBe("APPROVED");
-        h.Consents.Count.ShouldBe(4);
+        h.Consents.Count.ShouldBe(2);
     }
 
     private static async Task AssertTotpReplayLockoutAndLocalPurgeAsync()

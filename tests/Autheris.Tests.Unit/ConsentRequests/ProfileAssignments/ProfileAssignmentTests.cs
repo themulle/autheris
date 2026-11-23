@@ -269,8 +269,9 @@ public sealed class ProfileAssignmentTests
         fx.Requests.Single().RequestKind.ShouldBe(ConsentRequestKind.ProfileAssignment);
 
         // Decisions and revocation of an already materialised assignment: submitted through the profile service so the item snapshot exists.
+        var otherRequester = new Sid("S-1-5-21-OTHER-REQUESTER");
         var reqId = (await fx.Service.SubmitAsync(new ProfileAssignmentSubmission(
-            fx.ProfileId, new Sid("S-1-5-21-OTHER-REQUESTER"), fx.UserPrincipal(new Sid("S-1-5-21-OTHER-REQUESTER")), Tenant, DurationDays: 14))).RequestId;
+            fx.ProfileId, otherRequester, fx.UserPrincipal(otherRequester), Tenant, DurationDays: 14))).RequestId;
 
         await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(reqId, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerA), ContextTenantId: Tenant));
         await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(reqId, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerB), ContextTenantId: Tenant));
@@ -282,7 +283,7 @@ public sealed class ProfileAssignmentTests
         await deniedResult.ExecuteAsync(revokeDeniedCtx);
         revokeDeniedCtx.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
 
-        var revokeOkCtx = new DefaultHttpContext { RequestServices = sp, Response = { Body = new System.IO.MemoryStream() }, User = fx.UserPrincipal(Requester) };
+        var revokeOkCtx = new DefaultHttpContext { RequestServices = sp, Response = { Body = new System.IO.MemoryStream() }, User = fx.UserPrincipal(otherRequester) };
         revokeOkCtx.Request.Headers["Idempotency-Key"] = "key-rev-ok";
         var okRevoke = await ConsentApiEndpoints.RevokeProfileAssignmentAsync(
             reqId, new RevokeConsentGrantBody("No longer needed"), revokeOkCtx, fx, fx, fx, fx.Service, fx, timeProvider: fx.Clock);

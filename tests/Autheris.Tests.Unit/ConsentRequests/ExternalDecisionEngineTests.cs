@@ -20,6 +20,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 using Autheris.Domain.Tenancy;
 using Autheris.Tests.Common.Fakes;
+using Autheris.Tests.Unit.Security;
 using Microsoft.Extensions.Time.Testing;
 using Shouldly;
 using Xunit;
@@ -324,6 +325,9 @@ public sealed class ExternalDecisionEngineTests
                 Version = Current.Version + 1,
                 RequestKind = Current.RequestKind,
                 GrantKind = Current.GrantKind,
+                WorkflowMode = Current.WorkflowMode,
+                ExternalSystemId = Current.ExternalSystemId,
+                ExternalReference = Current.ExternalReference,
                 ApproverCapacity = decision.Capacity,
                 SelfGrant = decision.SelfGrant,
                 DecidedBy = decision.DecidedBy,

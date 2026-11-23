@@ -96,13 +96,6 @@ public sealed partial class PermissionRequestEngine
             throw new ConsentRequestException("VALIDATION_ERROR", "Grantee reference is required.");
         }
 
-        if (submission.RequestKind == ConsentRequestKind.ProfileAssignment && submission.GranteeType == GranteeType.Role)
-        {
-            throw new ConsentRequestException(
-                AccessProfileAssignmentRules.RoleSubjectUnsupported,
-                "Role assignees are not supported; assign the profile to a group or a user.");
-        }
-
         if (submission.RequestKind != ConsentRequestKind.Data && submission.RequestedWriteRules is { Count: > 0 })
         {
             throw new ConsentRequestException("VALIDATION_ERROR", "Write rules are supported for Data requests only.");

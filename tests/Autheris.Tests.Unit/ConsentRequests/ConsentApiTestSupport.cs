@@ -21,7 +21,6 @@ using Autheris.Application.ConsentRequests.Routing;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Requests;
-using Autheris.Application.Security;
 using Autheris.Tests.Common.Fakes;
 using Autheris.Application.Governance.Grants.Records;
 using Autheris.Application.Governance.Paging;
@@ -235,7 +234,7 @@ internal sealed class ConsentApiTestHarness : IAsyncDisposable
             ApproverSid: approverSid,
             ExpectedVersion: expectedVersion,
             DecidedAt: FixedNow,
-            Nonce: Guid.NewGuid().ToString("N"),
+            Nonce: "nonce-" + (idempotencyKey ?? "none"),
             Signature: "00");
         await using var scope = _services.CreateAsyncScope();
         var sp = scope.ServiceProvider;

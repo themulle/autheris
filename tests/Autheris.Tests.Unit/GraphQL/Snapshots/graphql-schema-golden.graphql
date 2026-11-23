@@ -371,44 +371,12 @@ input AccessRequestContextInput {
   expectedDuration: String
 }
 
-input ColumnMaskingInput {
-  rules: [ColumnMaskRuleInput!]
-}
-
-input ColumnMaskRuleInput {
-  columnName: String!
-  maskingType: String
-  maskingLevel: ColumnAccessLevel!
-}
-
 input ConsentWriteRuleInput {
   id: UUID
   operation: WriteOperation!
   columns: [String!]!
   rowScope: WriteRowScope!
   maxRowsPerStatement: Long
-}
-
-input RowFilterInput {
-  rowFilterSql: String
-  filterGroup: String
-  predicates: [RowFilterPredicateInput!]
-}
-
-input RowFilterPredicateInput {
-  columnName: String!
-  operator: String!
-  valueType: String
-  valueJson: String
-  value: String
-  values: [String!]
-}
-
-enum ColumnAccessLevel {
-  DENY
-  MASK
-  CLEAR
-  ROW_DEPENDENT
 }
 
 enum DiscoveryAccessState {
