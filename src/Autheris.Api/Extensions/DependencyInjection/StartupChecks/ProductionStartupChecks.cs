@@ -72,12 +72,21 @@ internal static class ProductionStartupChecks
             throw new ValidationException("Security violation: danger_allow_anonymous_access may be true ONLY in the Development environment.");
         }
 
-        // Only DANGER entries are blocked outside Development; WARN entries are permitted (reported above).
-        if (dangerBypasses.Count > 0)
+        // Only DANGER entries are blocked outside Development (consent bypass is also permitted in Test); WARN entries are permitted (reported above).
+        var envName = context.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT") ?? context.Environment.EnvironmentName;
+        bool isDevOrTest = context.IsDevelopment ||
+                           string.Equals(envName, "Development", StringComparison.OrdinalIgnoreCase) ||
+                           string.Equals(envName, "Test", StringComparison.OrdinalIgnoreCase);
+
+        var blockedBypasses = isDevOrTest
+            ? dangerBypasses.Where(b => !string.Equals(b, "DANGER:danger_bypass_consent_checks", StringComparison.Ordinal)).ToList()
+            : dangerBypasses;
+
+        if (blockedBypasses.Count > 0)
         {
             throw new ValidationException(
                 $"Critical security violation: The following security bypasses may be active ONLY in the Development environment:\n  - " +
-                string.Join("\n  - ", dangerBypasses));
+                string.Join("\n  - ", blockedBypasses));
         }
     }
 

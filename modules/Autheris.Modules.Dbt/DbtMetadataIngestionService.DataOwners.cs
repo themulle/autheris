@@ -53,7 +53,8 @@ public sealed partial class DbtMetadataIngestionService
         IClassificationRepository? classificationRepository = null,
         Microsoft.Extensions.Options.IOptions<Autheris.Application.Catalog.Services.CatalogDiscoveryOptions>? discoveryOptions = null,
         TimeProvider? timeProvider = null,
-        IGoldenQueryRepository? goldenQueryRepository = null)
+        IGoldenQueryRepository? goldenQueryRepository = null,
+        Autheris.Application.Governance.Notifications.IGovernanceNotificationDispatcher? notificationDispatcher = null)
         : this(proposalRepository, metadataRepository, lineageGraphStore, epochRepository, gatewayOptions, sqlEndpointLoader, relationRepository,
             virtualFilterAdmin, tagImport, artifactStore, testTargetMap, auditWriter, logger)
     {
@@ -65,6 +66,7 @@ public sealed partial class DbtMetadataIngestionService
         _catalogWriteScopes = catalogWriteScopeFactory;
         _classificationRepository = classificationRepository;
         _discoveryOptions = discoveryOptions;
+        _notifications = notificationDispatcher;
         if (timeProvider is not null)
         {
             _timeProvider = timeProvider;

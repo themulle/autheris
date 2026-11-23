@@ -118,6 +118,6 @@ public sealed class CatalogDiscoveryProjectionColumnRuleTests
     [Fact]
     public void Statistics_PartitionColumn_Denied_IsNotNamed_Ungranted()
     {
-        Map(granted: false, withStatistics: true).Statistics!.PartitionColumns.ShouldBeEmpty();
+        Map(granted: false, withStatistics: true).Statistics.ShouldBeNull();
     }
 }

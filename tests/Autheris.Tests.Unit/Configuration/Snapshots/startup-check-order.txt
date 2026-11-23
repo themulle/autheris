@@ -5,6 +5,7 @@ Databricks
 ProcedureDialectAdmission
 DataSourceMappings
 DefaultSchemas
+DelegatedProtection
 TenantCollisions
 WebhookSubscriptions
 QueryCostOptions

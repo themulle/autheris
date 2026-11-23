@@ -63,6 +63,7 @@ public sealed partial class DiscoveryService : IDiscoveryService
     private readonly Autheris.Application.Docs.Services.IDocLinkDiscoveryReader? _docLinks;
     private readonly ICatalogSnapshotProvider? _snapshotProvider;
     private readonly IProtectionSnapshotProvider? _protectionProvider;
+    private readonly Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? _accessPolicySettings;
 
     private readonly Lock _memoLock = new();
     private readonly Dictionary<ScopeMemoKey, ScopedCatalog> _scopeMemo = [];
@@ -93,11 +94,13 @@ public sealed partial class DiscoveryService : IDiscoveryService
         Autheris.Application.Procedures.Interfaces.IProcedureCatalog? procedureCatalog = null,
         Autheris.Application.Docs.Services.IDocLinkDiscoveryReader? docLinks = null,
         ICatalogSnapshotProvider? snapshotProvider = null,
-        IProtectionSnapshotProvider? protectionProvider = null)
+        IProtectionSnapshotProvider? protectionProvider = null,
+        Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? accessPolicySettings = null)
     {
         _docLinks = docLinks;
         _snapshotProvider = snapshotProvider;
         _protectionProvider = protectionProvider;
+        _accessPolicySettings = accessPolicySettings;
         ArgumentNullException.ThrowIfNull(gatewayOptions);
         _metadataRepository = metadataRepository;
         _decisionPoint = decisionPoint;
@@ -633,6 +636,12 @@ public sealed partial class DiscoveryService : IDiscoveryService
 
         var docLinks = await LoadDocumentLinksAsync(caller.Tenant.Value, uncachedTables, ct).ConfigureAwait(false);
 
+        TenantAccessPolicy? tenantPolicy = null;
+        if (_accessPolicySettings is not null)
+        {
+            tenantPolicy = await _accessPolicySettings.GetEffectiveAsync(caller.Tenant, ct).ConfigureAwait(false);
+        }
+
         for (var i = 0; i < uncached.Count; i++)
         {
             var (targetIdx, table) = uncached[i];
@@ -640,7 +649,13 @@ public sealed partial class DiscoveryService : IDiscoveryService
             var owners = ownersByTable.TryGetValue(table.Identifier, out var list) ? list : Array.Empty<DataOwner>();
             var isPending = !decision.IsAllowed && pendingTables.Contains(table.Identifier);
             var isExpired = !decision.IsAllowed && !isPending && expiredTables.Contains(table.Identifier);
-            var artifacts = _artifactStore is null ? null : await _artifactStore.GetAsync(table.Table.Id, ct).ConfigureAwait(false);
+            var allArtifacts = _artifactStore is null ? [] : await _artifactStore.GetAllAsync(table.Table.Id, ct).ConfigureAwait(false);
+            var artifacts = allArtifacts.FirstOrDefault(a => a.Provenance == ArtifactProvenance.Upload)
+                ?? allArtifacts.FirstOrDefault(a => a.Provenance != ArtifactProvenance.Import);
+            var importArtifact = allArtifacts.FirstOrDefault(a => a.Provenance == ArtifactProvenance.Import && !string.IsNullOrWhiteSpace(a.SamplesJson));
+            var importSamplesAvailable = importArtifact is not null
+                && (tenantPolicy?.ServeImportSamples ?? true)
+                && !(tenantPolicy?.QuarantineSuspectedPiiSamples == true && CatalogPiiDetector.JsonHasSuspectedPii(importArtifact.SamplesJson));
             Dictionary<string, IReadOnlyList<ColumnClassification>>? repoColClasses = null;
             if (_classificationRepository is not null && !table.Table.DiscoveryHidden)
             {
@@ -667,7 +682,8 @@ public sealed partial class DiscoveryService : IDiscoveryService
                 table, decision, owners, isPending, isExpired, artifacts, language,
                 isHidden: table.Table.DiscoveryHidden, insertDecisions[i], updateDecisions[i], deleteDecisions[i], defs, repoColClasses, caller.Tenant.Value,
                 hideMaskedTextForRestrictedScopes: _discoveryOptions.Discovery?.HideMaskedColumnCatalogTextForRestrictedScopes == true,
-                effectiveProtection: protection);
+                effectiveProtection: protection,
+                importSamplesAvailable: importSamplesAvailable);
 
             if (docLinks.TryGetValue(table.Identifier, out var linkView))
             {

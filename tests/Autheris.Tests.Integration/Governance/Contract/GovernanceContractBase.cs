@@ -120,6 +120,21 @@ public sealed class GovernanceTestStore : IAsyncDisposable
     public IGovernanceDomainRepository GovernanceDomains => Services.GetRequiredService<IGovernanceDomainRepository>();
     public IAccessPolicySettingsRepository AccessPolicySettings => Services.GetRequiredService<IAccessPolicySettingsRepository>();
 
+    /// <summary>
+    /// Builds a real PDP over the store's governance services (the API-level PDP registration lives in the gateway
+    /// execution extensions, which this harness does not load).
+    /// </summary>
+    public Autheris.Application.Policy.Pdp.IAccessDecisionPoint CreateAccessDecisionPoint() =>
+        new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
+            Services.GetRequiredService<IOptions<GatewayOptions>>(),
+            resolutionService: Services.GetService<IConsentResolutionService>(),
+            consentRepository: Consents,
+            // No decision cache: the harness has no event bus or memory cache, and every call must see the current grants.
+            cacheService: null,
+            protectionProvider: Services.GetRequiredService<IProtectionSnapshotProvider>(),
+            accessPolicySettings: Services.GetService<Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider>(),
+            realmRegistry: Services.GetService<Autheris.Application.Identity.IIdentityRealmRegistry>());
+
     public void SetCaller(CallerContext? caller) => _callerProvider.Current = caller;
 
     public void InvalidateMetadataCache()
@@ -237,6 +252,8 @@ public sealed class GovernanceTestStore : IAsyncDisposable
                 ["Gateway:Governance:Grants:MaxDuration"] = "P2M",
                 ["Gateway:Governance:Grants:DeclarativeMaxDuration"] = "P2M"
             })
+            // AccessPolicyOptions binds from configuration (not from the GatewayOptions instance), so forward deployment defaults.
+            .AddInMemoryCollection(BuildAccessPolicyConfiguration(gatewayOptions))
             .Build();
 
         var callerProvider = new MutableCallerContextProvider { Current = caller };
@@ -424,6 +441,15 @@ public sealed class GovernanceTestStore : IAsyncDisposable
             {
                 // Best-effort temp directory cleanup.
             }
+        }
+    }
+
+    private static IEnumerable<KeyValuePair<string, string?>> BuildAccessPolicyConfiguration(GatewayOptions gatewayOptions)
+    {
+        var sids = gatewayOptions.Governance.AccessPolicy.Internal.EmployeeGroupSids;
+        for (var i = 0; i < sids.Count; i++)
+        {
+            yield return new KeyValuePair<string, string?>($"{GatewaySections.AccessPolicy}:Internal:EmployeeGroupSids:{i}", sids[i]);
         }
     }
 

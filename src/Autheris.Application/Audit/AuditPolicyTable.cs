@@ -172,6 +172,9 @@ public static class AuditPolicyTable
         [AuditEventTypes.ProtectionClassChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.MaskCategoryChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.ViewDowngraded] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ImportSamplesChanged] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ImportSamplesPiiSuspected] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ImportSamplesPurged] = AuditFailurePolicy.FailClosed,
     };
 
     public static IReadOnlyDictionary<string, AuditFailurePolicy> All => Table;

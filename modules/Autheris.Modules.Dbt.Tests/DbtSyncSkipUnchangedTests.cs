@@ -166,6 +166,11 @@ public sealed class DbtSyncSkipUnchangedTests
 
             ArtifactStore.GetAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
                 .Returns(call => Task.FromResult(ArtifactStoreData.GetValueOrDefault(call.Arg<Guid>())));
+            ArtifactStore.GetAsync(Arg.Any<Guid>(), Arg.Any<ArtifactProvenance>(), Arg.Any<CancellationToken>())
+                .Returns(call => Task.FromResult(ArtifactStoreData.GetValueOrDefault(call.Arg<Guid>()) is { } found && found.Provenance == call.Arg<ArtifactProvenance>() ? found : null));
+            ArtifactStore.GetAllAsync(Arg.Any<Guid>(), Arg.Any<CancellationToken>())
+                .Returns(call => Task.FromResult<IReadOnlyList<DiscoveryArtifacts>>(
+                    ArtifactStoreData.GetValueOrDefault(call.Arg<Guid>()) is { } found ? [found] : []));
             ArtifactStore.UpsertAsync(Arg.Any<DiscoveryArtifacts>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>())
                 .Returns(call =>
                 {

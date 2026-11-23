@@ -100,7 +100,18 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Policy.TypedPolicySources>();
         services.AddSingleton<Autheris.Application.Policy.RowScopes.RowScopeCompiler>();
         // WP-X0l: assembles the typed GovernancePolicy of a statement (no caller until X1). The catalog provider is registered with the storage.
-        services.AddSingleton<Autheris.Application.Sql.Policy.GovernancePolicyFactory>();
+        services.AddSingleton<Autheris.Application.Sql.Policy.GovernancePolicyFactory>(sp =>
+        {
+            var opts = sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>();
+            var epochProvider = string.IsNullOrWhiteSpace(opts.Value.GovernanceDb?.ConnectionString)
+                ? null
+                : sp.GetService<Autheris.Application.Governance.Caching.GovernanceEpochProvider>();
+            return new Autheris.Application.Sql.Policy.GovernancePolicyFactory(
+                sp.GetRequiredService<Autheris.Application.Sql.Catalog.IGovernedCatalogProvider>(),
+                sp.GetRequiredService<ITableMetadataRepository>(),
+                opts,
+                epochProvider);
+        });
         services.AddSingleton<IRlsFilterGenerator, RlsFilterGenerator>();
         services.AddSingleton<IRowFilterSqlBuilder, RowFilterSqlBuilder>();
     }

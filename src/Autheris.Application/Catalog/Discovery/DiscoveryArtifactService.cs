@@ -40,6 +40,10 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
     private readonly IRateLimiterService? _rateLimiter;
     private readonly TimeProvider _timeProvider;
     private readonly IAccessDecisionPoint? _decisionPoint;
+    private readonly ICatalogVisibilityService? _catalogVisibility;
+    private readonly Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? _accessPolicySettings;
+    private readonly IProtectionSnapshotProvider? _protectionProvider;
+    private readonly IColumnMaskingProvider? _maskingProvider;
 
     public DiscoveryArtifactService(
         ITableMetadataRepository metadata,
@@ -52,7 +56,11 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
         IRateLimiterService? rateLimiter = null,
         TimeProvider? timeProvider = null,
         IAccessDecisionPoint? decisionPoint = null,
-        IRestrictedScopePolicy? restrictedScopes = null)
+        IRestrictedScopePolicy? restrictedScopes = null,
+        ICatalogVisibilityService? catalogVisibility = null,
+        Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? accessPolicySettings = null,
+        IProtectionSnapshotProvider? protectionProvider = null,
+        IColumnMaskingProvider? maskingProvider = null)
     {
         _metadata = metadata ?? throw new ArgumentNullException(nameof(metadata));
         _artifacts = artifacts ?? throw new ArgumentNullException(nameof(artifacts));
@@ -65,6 +73,10 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
         _timeProvider = timeProvider ?? TimeProvider.System;
         _decisionPoint = decisionPoint;
         _ = restrictedScopes;
+        _catalogVisibility = catalogVisibility;
+        _accessPolicySettings = accessPolicySettings;
+        _protectionProvider = protectionProvider;
+        _maskingProvider = maskingProvider;
     }
 
     public async Task<DiscoveryArtifactWriteResult> UpsertAsync(
@@ -92,7 +104,7 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
                 Message: validation.Message);
         }
 
-        var before = await _artifacts.GetAsync(table.Table.Id, ct).ConfigureAwait(false);
+        var before = await _artifacts.GetAsync(table.Table.Id, ArtifactProvenance.Upload, ct).ConfigureAwait(false);
         var updated = new DiscoveryArtifacts(
             TableId: table.Table.Id,
             TenantId: gate.EffectiveTenant,
@@ -101,7 +113,8 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
             ContentSha256: validation.ContentSha256,
             UploadedBy: gate.ActorSid.Value,
             UploadedAt: _timeProvider.GetUtcNow(),
-            SchemaVersion: DiscoveryArtifactValidator.SupportedSchemaVersion);
+            SchemaVersion: DiscoveryArtifactValidator.SupportedSchemaVersion,
+            Provenance: ArtifactProvenance.Upload);
 
         await _artifacts.UpsertAsync(updated, gate.ActorSid, ct).ConfigureAwait(false);
 
@@ -121,7 +134,7 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
         }
         catch (Exception ex)
         {
-            await RestoreBeforeAsync(table.Table.Id, before, gate.ActorSid).ConfigureAwait(false);
+            await RestoreBeforeAsync(table.Table.Id, ArtifactProvenance.Upload, before, gate.ActorSid).ConfigureAwait(false);
             if (ex is OperationCanceledException)
             {
                 throw;
@@ -152,7 +165,7 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
             return failure;
         }
 
-        var before = await _artifacts.GetAsync(gate.Table!.Table.Id, ct).ConfigureAwait(false);
+        var before = await _artifacts.GetAsync(gate.Table!.Table.Id, ArtifactProvenance.Upload, ct).ConfigureAwait(false);
         if (before is null)
         {
             return new DiscoveryArtifactWriteResult(
@@ -160,7 +173,7 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
                 DatasetId: gate.Table.Identifier.ToString());
         }
 
-        await _artifacts.DeleteAsync(gate.Table.Table.Id, gate.ActorSid, ct).ConfigureAwait(false);
+        await _artifacts.DeleteAsync(gate.Table.Table.Id, ArtifactProvenance.Upload, gate.ActorSid, ct).ConfigureAwait(false);
 
         try
         {
@@ -178,7 +191,7 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
         }
         catch (Exception ex)
         {
-            await RestoreBeforeAsync(gate.Table.Table.Id, before, gate.ActorSid).ConfigureAwait(false);
+            await RestoreBeforeAsync(gate.Table.Table.Id, ArtifactProvenance.Upload, before, gate.ActorSid).ConfigureAwait(false);
             if (ex is OperationCanceledException)
             {
                 throw;
@@ -257,13 +270,51 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
             return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
         }
 
-        var stored = await _artifacts.GetAsync(table.Table.Id, ct).ConfigureAwait(false);
-        if (stored is null || string.IsNullOrWhiteSpace(stored.SamplesJson))
+        var allArtifacts = await _artifacts.GetAllAsync(table.Table.Id, ct).ConfigureAwait(false);
+        var importArtifact = allArtifacts.FirstOrDefault(a =>
+            a.Provenance == ArtifactProvenance.Import && !string.IsNullOrWhiteSpace(a.SamplesJson));
+        var dataArtifact = allArtifacts.FirstOrDefault(a =>
+                a.Provenance == ArtifactProvenance.Upload && !string.IsNullOrWhiteSpace(a.SamplesJson))
+            ?? allArtifacts.FirstOrDefault(a =>
+                a.Provenance != ArtifactProvenance.Import && !string.IsNullOrWhiteSpace(a.SamplesJson));
+
+        var maxRows = Math.Clamp(settings.MaxSampleRows, 1, CatalogDiscoverySettings.HardMaxSampleRows);
+        var take = limit is > 0 ? Math.Min(limit.Value, maxRows) : maxRows;
+
+        if (importArtifact is not null)
         {
-            return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
+            var policy = _accessPolicySettings is null
+                ? null
+                : await TryGetPolicyAsync(resolution.Tenant!.Value, ct).ConfigureAwait(false);
+            if (_accessPolicySettings is not null && policy is null)
+            {
+                return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
+            }
+
+            var serveImport = (policy?.ServeImportSamples ?? true) &&
+                !(policy?.QuarantineSuspectedPiiSamples == true && CatalogPiiDetector.JsonHasSuspectedPii(importArtifact.SamplesJson));
+            if (serveImport)
+            {
+                var visible = _catalogVisibility is null
+                    ? table
+                    : (await _catalogVisibility.FindVisibleAsync(caller, id, ct).ConfigureAwait(false))?.Table;
+                if (visible is null)
+                {
+                    return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
+                }
+
+                var importProjected = ProjectUnmaskedSamples(importArtifact.SamplesJson!, visible, take);
+                if (importProjected.Count > 0)
+                {
+                    await RecordSampleReadAuditBestEffortAsync(resolution.Tenant!.Value, actorSid, id.ToString(), importProjected.Count, surface, ct).ConfigureAwait(false);
+                    return new DiscoverySamplesReadResult(
+                        DiscoveryArtifactOutcome.Ok,
+                        new DiscoverySamplesResponse(Available: true, Samples: importProjected));
+                }
+            }
         }
 
-        if (_decisionPoint is null)
+        if (dataArtifact is null || _decisionPoint is null)
         {
             return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
         }
@@ -277,9 +328,20 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
             return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
         }
 
-        var maxRows = Math.Clamp(settings.MaxSampleRows, 1, CatalogDiscoverySettings.HardMaxSampleRows);
-        var take = limit is > 0 ? Math.Min(limit.Value, maxRows) : maxRows;
-        var projected = ProjectVisibleSamples(stored.SamplesJson, table, take, decision);
+        EffectiveProtection? protection = null;
+        if (_protectionProvider is not null)
+        {
+            try
+            {
+                protection = await _protectionProvider.GetAsync(resolution.Tenant!.Value, id, ct).ConfigureAwait(false);
+            }
+            catch (Exception) when (!ct.IsCancellationRequested)
+            {
+                return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
+            }
+        }
+
+        var projected = ProjectVisibleSamples(dataArtifact.SamplesJson!, table, take, decision, protection);
         if (projected.Count == 0)
         {
             return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
@@ -290,6 +352,18 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
         return new DiscoverySamplesReadResult(
             DiscoveryArtifactOutcome.Ok,
             new DiscoverySamplesResponse(Available: true, Samples: projected));
+    }
+
+    private async Task<TenantAccessPolicy?> TryGetPolicyAsync(TenantId tenant, CancellationToken ct)
+    {
+        try
+        {
+            return await _accessPolicySettings!.GetEffectiveAsync(tenant, ct).ConfigureAwait(false);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return null;
+        }
     }
 
     private sealed record MutationGate(
@@ -396,26 +470,18 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
         return CallerScopeResolver.IsOwner(callerTenant, catalogOwner) || sharedTables.Contains(table.Identifier);
     }
 
-    private static IReadOnlyList<IReadOnlyDictionary<string, object?>> ProjectVisibleSamples(
+    private IReadOnlyList<IReadOnlyDictionary<string, object?>> ProjectUnmaskedSamples(
         string samplesJson,
         TableMetadata table,
-        int maxRows,
-        TableAccessDecision decision)
+        int maxRows)
     {
         var visibleColumns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (var col in table.Columns)
         {
-            if (col.DiscoveryHidden)
+            if (!col.DiscoveryHidden)
             {
-                continue;
+                visibleColumns.TryAdd(col.ColumnName, col.ColumnName);
             }
-
-            if (DiscoveryAccessMapper.MapColumnState(table, decision, col.ColumnName).State != DiscoveryColumnState.Clear)
-            {
-                continue;
-            }
-
-            visibleColumns.TryAdd(col.ColumnName, col.ColumnName);
         }
 
         if (visibleColumns.Count == 0)
@@ -423,6 +489,74 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
             return [];
         }
 
+        return ExtractProjectedRows(samplesJson, maxRows, visibleColumns, maskColumns: null, table);
+    }
+
+    private IReadOnlyList<IReadOnlyDictionary<string, object?>> ProjectVisibleSamples(
+        string samplesJson,
+        TableMetadata table,
+        int maxRows,
+        TableAccessDecision decision,
+        EffectiveProtection? protection)
+    {
+        var visibleColumns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var maskColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        foreach (var col in table.Columns)
+        {
+            if (col.DiscoveryHidden)
+            {
+                continue;
+            }
+
+            var access = decision.GetEffectiveColumnAccess(col.ColumnName, table);
+            if (access == ColumnAccessLevel.Deny)
+            {
+                continue;
+            }
+
+            var (mappedState, _) = DiscoveryAccessMapper.MapColumnState(table, decision, col.ColumnName);
+            if (!DiscoveryAccessMapper.IsSampleVisibleState(mappedState))
+            {
+                continue;
+            }
+
+            if (decision.ScopeClearance is not null && mappedState != DiscoveryColumnState.Clear)
+            {
+                continue;
+            }
+
+            var hasMaskCategory = protection is not null && !string.IsNullOrWhiteSpace(
+                protection.Columns.TryGetValue(col.ColumnName, out var cp)
+                    ? cp.EffectiveMaskCategory
+                    : protection.TableMaskCategory);
+
+            if (mappedState == DiscoveryColumnState.Masked && _maskingProvider is null && _protectionProvider is null)
+            {
+                continue;
+            }
+
+            visibleColumns.TryAdd(col.ColumnName, col.ColumnName);
+            if (mappedState == DiscoveryColumnState.Masked || hasMaskCategory)
+            {
+                maskColumns.Add(col.ColumnName);
+            }
+        }
+
+        if (visibleColumns.Count == 0)
+        {
+            return [];
+        }
+
+        return ExtractProjectedRows(samplesJson, maxRows, visibleColumns, maskColumns, table);
+    }
+
+    private IReadOnlyList<IReadOnlyDictionary<string, object?>> ExtractProjectedRows(
+        string samplesJson,
+        int maxRows,
+        IReadOnlyDictionary<string, string> visibleColumns,
+        IReadOnlySet<string>? maskColumns,
+        TableMetadata table)
+    {
         try
         {
             using var doc = JsonDocument.Parse(samplesJson);
@@ -454,7 +588,9 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
 
                     if (TryExtractScalar(prop.Value, out var scalar))
                     {
-                        projected[canonicalName] = scalar;
+                        projected[canonicalName] = maskColumns is not null && maskColumns.Contains(canonicalName)
+                            ? MaskSampleScalar(canonicalName, scalar, table)
+                            : scalar;
                     }
                 }
 
@@ -471,6 +607,27 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
             return [];
         }
     }
+
+    private object? MaskSampleScalar(string columnName, object? scalar, TableMetadata table)
+    {
+        if (scalar is null)
+        {
+            return null;
+        }
+
+        if (table.ColumnMaskingRules.TryGetValue(columnName, out var rule))
+        {
+            return (_maskingProvider ?? DefaultMaskingProvider).MaskValue(columnName, scalar, rule);
+        }
+
+        return (_maskingProvider ?? DefaultMaskingProvider).MaskValue(
+            columnName,
+            scalar,
+            new MaskingRule { RuleType = "REDACT", Replacement = "***" });
+    }
+
+    private static readonly IColumnMaskingProvider DefaultMaskingProvider =
+        new Autheris.Application.Services.ColumnMaskingProvider(Options.Create(new GatewayOptions()));
 
     private static bool TryExtractScalar(JsonElement value, out object? scalar)
     {
@@ -582,13 +739,13 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
         }
     }
 
-    private async Task RestoreBeforeAsync(Guid tableId, DiscoveryArtifacts? before, Sid actorSid)
+    private async Task RestoreBeforeAsync(Guid tableId, ArtifactProvenance provenance, DiscoveryArtifacts? before, Sid actorSid)
     {
         try
         {
             if (before is null)
             {
-                await _artifacts.DeleteAsync(tableId, actorSid, CancellationToken.None).ConfigureAwait(false);
+                await _artifacts.DeleteAsync(tableId, provenance, actorSid, CancellationToken.None).ConfigureAwait(false);
             }
             else
             {

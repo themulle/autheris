@@ -27,7 +27,8 @@ public sealed partial class DbtMetadataIngestionService
         IReadOnlyList<IReadOnlyDictionary<string, object?>>? SyntheticSamples,
         bool UpsertMetadata,
         bool SyncClassifications,
-        bool ImportTags);
+        bool ImportTags,
+        bool SyntheticSamplesSizeExceeded = false);
 
     private async Task FlushPendingModelUpdatesAsync(
         IReadOnlyList<PendingModelUpdate> pendingModelUpdates,
@@ -66,12 +67,22 @@ public sealed partial class DbtMetadataIngestionService
                 await ImportModelTagsAsync(update.Metadata.Identifier, update.Tags, warnings, ct).ConfigureAwait(false);
             }
 
-            if (update.SyntheticSamples is { Count: > 0 })
+            if (update.SyntheticSamplesSizeExceeded)
+            {
+                const string sizeCode = "SYNTHETIC_SAMPLE_SIZE_EXCEEDED";
+                _logger.LogWarning("Table {Table}: dbt synthetic_samples rejected ({Code}).", update.Metadata.Identifier, sizeCode);
+                warnings.Add($"Table '{update.Metadata.Identifier}': dbt synthetic_samples rejected ({sizeCode}): Serialized sample payload exceeds {MaxDbtSyntheticSampleArtifactBytes} bytes.");
+            }
+            else if (update.SyntheticSamples is { Count: > 0 })
             {
                 await IngestDbtSyntheticSamplesAsync(update.Metadata, update.SyntheticSamples, warnings, ct).ConfigureAwait(false);
             }
         }
     }
+
+    private const int MaxDbtSyntheticSampleRows = 50;
+    private const int MaxDbtSyntheticSampleCellChars = 256;
+    private const int MaxDbtSyntheticSampleArtifactBytes = 64 * 1024;
 
     private async Task IngestDbtSyntheticSamplesAsync(
         TableMetadata metadata,
@@ -84,22 +95,38 @@ public sealed partial class DbtMetadataIngestionService
             return;
         }
 
-        var maxRows = _discoveryOptions?.Value.Discovery.MaxSampleRows ?? new CatalogDiscoverySettings().MaxSampleRows;
+        var maxRows = Math.Min(_discoveryOptions?.Value.Discovery.MaxSampleRows ?? MaxDbtSyntheticSampleRows, MaxDbtSyntheticSampleRows);
         var validation = DiscoveryArtifactValidator.ValidateSampleRows(samples, metadata, maxRows);
-        if (!validation.IsValid)
+        if (!validation.IsValid || string.IsNullOrWhiteSpace(validation.SamplesJson))
         {
             _logger.LogWarning("Table {Table}: dbt synthetic_samples rejected ({Code}): {Message}", metadata.Identifier, validation.ViolationCode, validation.Message);
             warnings.Add($"Table '{metadata.Identifier}': dbt synthetic_samples rejected ({validation.ViolationCode}): {validation.Message}");
             return;
         }
 
-        var before = await _artifactStore.GetAsync(metadata.Table.Id, ct).ConfigureAwait(false);
-        var combinedSha = DiscoveryArtifactValidator.ComputeContentSha256(
+        if (samples.Any(r => r.Values.Any(v => v is string s && s.Length > MaxDbtSyntheticSampleCellChars)))
+        {
+            const string cellCode = "SYNTHETIC_SAMPLE_CELL_TOO_LONG";
+            _logger.LogWarning("Table {Table}: dbt synthetic_samples rejected ({Code}).", metadata.Identifier, cellCode);
+            warnings.Add($"Table '{metadata.Identifier}': dbt synthetic_samples rejected ({cellCode}): Cell length exceeds {MaxDbtSyntheticSampleCellChars} characters.");
+            return;
+        }
+
+        if (System.Text.Encoding.UTF8.GetByteCount(validation.SamplesJson) > MaxDbtSyntheticSampleArtifactBytes)
+        {
+            const string sizeCode = "SYNTHETIC_SAMPLE_SIZE_EXCEEDED";
+            _logger.LogWarning("Table {Table}: dbt synthetic_samples rejected ({Code}).", metadata.Identifier, sizeCode);
+            warnings.Add($"Table '{metadata.Identifier}': dbt synthetic_samples rejected ({sizeCode}): Serialized sample payload exceeds {MaxDbtSyntheticSampleArtifactBytes} bytes.");
+            return;
+        }
+
+        var before = await _artifactStore.GetAsync(metadata.Table.Id, ArtifactProvenance.Import, ct).ConfigureAwait(false);
+        var importSha = DiscoveryArtifactValidator.ComputeContentSha256(
             DiscoveryArtifactValidator.SupportedSchemaVersion,
             validation.SamplesJson,
-            before?.StatisticsJson);
+            statisticsJson: null);
 
-        if (before is not null && string.Equals(before.ContentSha256, combinedSha, StringComparison.Ordinal))
+        if (before is not null && string.Equals(before.ContentSha256, importSha, StringComparison.Ordinal))
         {
             return;
         }
@@ -121,13 +148,20 @@ public sealed partial class DbtMetadataIngestionService
             TableId: metadata.Table.Id,
             TenantId: tenantId,
             SamplesJson: validation.SamplesJson,
-            StatisticsJson: before?.StatisticsJson,
-            ContentSha256: combinedSha,
+            StatisticsJson: null,
+            ContentSha256: importSha,
             UploadedBy: DbtIngestionActor,
             UploadedAt: _timeProvider.GetUtcNow(),
-            SchemaVersion: DiscoveryArtifactValidator.SupportedSchemaVersion);
+            SchemaVersion: DiscoveryArtifactValidator.SupportedSchemaVersion,
+            Provenance: ArtifactProvenance.Import);
 
         await _artifactStore.UpsertAsync(updated, actor, ct).ConfigureAwait(false);
+
+        var columns = samples
+            .SelectMany(r => r.Keys)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .OrderBy(static c => c, StringComparer.OrdinalIgnoreCase)
+            .ToList();
 
         try
         {
@@ -136,13 +170,16 @@ public sealed partial class DbtMetadataIngestionService
                 TenantId = parsedTenant,
                 OccurredAt = _timeProvider.GetUtcNow(),
                 ActorSid = actor,
-                EventType = AuditEventTypes.CatalogDiscoveryArtifactsChanged,
+                EventType = AuditEventTypes.ImportSamplesChanged,
                 TargetTable = metadata.Identifier.ToString(),
                 Decision = "ALLOW",
                 DetailsJson = JsonSerializer.Serialize(new
                 {
                     operation = "upsert",
                     source = DbtIngestionActor,
+                    provenance = ArtifactProvenance.Import.ToDbString(),
+                    columns,
+                    contentHash = updated.ContentSha256,
                     beforeSha256 = before?.ContentSha256,
                     afterSha256 = updated.ContentSha256,
                     sampleRowCount = validation.SampleRowCount,
@@ -165,7 +202,7 @@ public sealed partial class DbtMetadataIngestionService
             {
                 if (before is null)
                 {
-                    await _artifactStore.DeleteAsync(metadata.Table.Id, actor, CancellationToken.None).ConfigureAwait(false);
+                    await _artifactStore.DeleteAsync(metadata.Table.Id, ArtifactProvenance.Import, actor, CancellationToken.None).ConfigureAwait(false);
                 }
                 else
                 {
@@ -178,6 +215,55 @@ public sealed partial class DbtMetadataIngestionService
             }
 
             throw;
+        }
+
+        var (suspectedPii, suspectedColumns) = CatalogPiiDetector.HasSuspectedPii(samples);
+        if (suspectedPii)
+        {
+            try
+            {
+                var piiEntry = new AuditLogEntry
+                {
+                    TenantId = parsedTenant,
+                    OccurredAt = _timeProvider.GetUtcNow(),
+                    ActorSid = actor,
+                    EventType = AuditEventTypes.ImportSamplesPiiSuspected,
+                    TargetTable = metadata.Identifier.ToString(),
+                    Decision = "ALLOW",
+                    DetailsJson = JsonSerializer.Serialize(new
+                    {
+                        table = metadata.Identifier.ToString(),
+                        columns = suspectedColumns,
+                        contentHash = updated.ContentSha256
+                    })
+                };
+
+                if (_auditWriter != null)
+                {
+                    await _auditWriter.RecordAsync(piiEntry, ct).ConfigureAwait(false);
+                }
+                else if (_auditLog != null)
+                {
+                    await _auditLog.RecordAuditEventAsync(piiEntry, ct).ConfigureAwait(false);
+                }
+
+                if (_notifications != null)
+                {
+                    await _notifications.DispatchAsync(
+                        new Autheris.Application.Governance.Notifications.GovernanceNotificationMessage(
+                            AuditEventTypes.ImportSamplesPiiSuspected,
+                            parsedTenant.Value,
+                            "dbt-import",
+                            metadata.Identifier.ToString(),
+                            $"Suspected PII patterns detected in dbt import samples for {metadata.Identifier}.",
+                            _timeProvider.GetUtcNow()),
+                        ct).ConfigureAwait(false);
+                }
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                _logger.LogWarning(ex, "Table {Table}: failed to record or dispatch import PII notice.", metadata.Identifier);
+            }
         }
     }
 

@@ -42,7 +42,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
     private readonly IDataOwnerAssignmentRepository? _ownerAssignments;
     private readonly IAuditLogRepository? _auditLog;
     private readonly Autheris.Application.Governance.IDataOwnerIdentityVerifier? _ownerIdentityVerifier;
-    private readonly IAuditWriter? _auditWriter;
+    private readonly Autheris.Application.Audit.IAuditWriter? _auditWriter;
+    private readonly Autheris.Application.Governance.Notifications.IGovernanceNotificationDispatcher? _notifications;
     private readonly IDataOwnershipRepository? _ownershipRepo;
     private readonly ILogger<DbtMetadataIngestionService> _logger;
     private readonly Autheris.Application.Catalog.ICatalogWriteScopeFactory? _catalogWriteScopes;
@@ -680,7 +681,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         var upsertMetadata = !IsTableMetadataUnchanged(existingMeta, updatedMetadata);
                         var syncClassifications = createdInThisRun || upsertMetadata;
                         var importTags = createdInThisRun || model.Tags.Count > 0 || existingMeta.CatalogTags.Count > 0;
-                        var hasSyntheticSamples = model.SyntheticSamples is { Count: > 0 };
+                        var hasSyntheticSamples = model.SyntheticSamples is { Count: > 0 } || model.SyntheticSamplesSizeExceeded;
                         if (upsertMetadata || syncClassifications || importTags || hasSyntheticSamples)
                         {
                             pendingModelUpdates.Add(new PendingModelUpdate(
@@ -689,7 +690,8 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                                 model.SyntheticSamples,
                                 upsertMetadata,
                                 syncClassifications,
-                                importTags));
+                                importTags,
+                                model.SyntheticSamplesSizeExceeded));
                         }
                         pendingGoldenQueries.Add((updatedMetadata, model.GoldenQueries ?? DbtGoldenQueryMeta.None));
                     }

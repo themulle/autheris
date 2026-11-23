@@ -5,6 +5,8 @@ using System.IO;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Policy.Pdp;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 
@@ -26,7 +28,10 @@ public interface IAsyncQueryJobManager
     Task<Stream?> GetJobResultStreamAsync(
         string jobId,
         TenantId tenantId,
-        string userSid,
+        ClaimsPrincipal user,
+        IAccessDecisionPoint decisionPoint,
+        ITableMetadataRepository metadataRepository,
+        TrinoSqlEngine.ISqlEngine? sqlEngine = null,
         CancellationToken ct = default);
 
     Task<bool> CancelJobAsync(

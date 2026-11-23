@@ -67,6 +67,7 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
             Dev("ProcedureDialectAdmission_MissingConnection", ("SqlEndpoints:Procedures:Enabled", "true"), ("SqlEndpoints:Procedures:ConnectionName", "absent")),
             Dev("DataSourceMappings_ChainedMapping", ("DataSources:Connections:a:Provider", "PostgreSql"), ("DataSources:Connections:a:ConnectionString", "Host=a;Database=a"), ("DataSources:Connections:b:Provider", "PostgreSql"), ("DataSources:Connections:b:ConnectionString", "Host=b;Database=b"), ("WebSql:DataSourceMappings:a", "b"), ("WebSql:DataSourceMappings:b", "a")),
             Prod("DefaultSchemas_InvalidSchema", ("DataSources:Connections:pg:Provider", "PostgreSql"), ("DataSources:Connections:pg:ConnectionString", "Host=h;Database=d"), ("DataSources:Connections:pg:DefaultSchema", "bad schema;")),
+            Prod("DelegatedProtection_WithoutDefenceInDepth", ("DataSources:Connections:pg:Provider", "PostgreSql"), ("DataSources:Connections:pg:ConnectionString", "Host=h;Database=d"), ("DataSources:Connections:pg:DefaultSchema", "public"), ("DataSources:Connections:pg:EnforcementMode", "Delegated")),
             Prod("TenantCollisions_StrictMode", ("TenantIsolation:StrictCollisionStartup", "true"), ("Authentication:ForwardAuth:AllowedTenantIds:0", "Acme"), ("Authentication:ForwardAuth:AllowedTenantIds:1", "ACME")),
             Prod("WebhookSubscriptions_MissingId", ("Webhooks:Subscriptions:0:Url", "https://example.org/hook")),
             Prod("QueryCost_FailureFeeRange", ("QueryCost:FailureFee", "0")),

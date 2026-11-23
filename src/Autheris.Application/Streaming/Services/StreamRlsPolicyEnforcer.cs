@@ -203,33 +203,42 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
             return StreamSecurityDecision.Denied("Table not found in catalog");
         }
 
-        if (!decision.IsAllowed)
+        if (decision.DenialKind == TableAccessDenialKind.ConsentDeny)
         {
             _logger.LogDebug(
-                "Streaming event '{EventId}' on table '{Table}' denied for subscriber '{UserSid}' by consent policy",
+                "Streaming event '{EventId}' on table '{Table}' denied for subscriber '{UserSid}' by explicit deny consent policy",
                 cdcEvent.EventId, cdcEvent.Table.ToQualifiedName(), userSid.Value);
             return StreamSecurityDecision.Denied("Access denied by consent policy");
         }
 
-        // Virtual filters: a change event cannot evaluate the filter's subquery, so an applying filter drops the event
-        // (fail closed), like an uncovered object.
-        var mandatory = await _mandatoryFilters.ResolveAsync(
-            new Autheris.Application.VirtualFilters.MandatoryFilterQuery(userSid, groupSids, roles, tenantId, metadata), ct).ConfigureAwait(false);
-        if (mandatory.IsDenied || mandatory.PredicateSql != null)
+        if (decision.IsAllowed)
         {
-            _logger.LogDebug(
-                "Streaming event '{EventId}' on table '{Table}' dropped for subscriber '{UserSid}': virtual filters apply.",
-                cdcEvent.EventId, cdcEvent.Table.ToQualifiedName(), userSid.Value);
-            return StreamSecurityDecision.Denied("Virtual filters cannot be enforced on change events");
+            // Virtual filters: a change event cannot evaluate the filter's subquery, so an applying filter drops the event
+            // (fail closed), like an uncovered object.
+            var mandatory = await _mandatoryFilters.ResolveAsync(
+                new Autheris.Application.VirtualFilters.MandatoryFilterQuery(userSid, groupSids, roles, tenantId, metadata), ct).ConfigureAwait(false);
+            if (mandatory.IsDenied || mandatory.PredicateSql != null)
+            {
+                _logger.LogDebug(
+                    "Streaming event '{EventId}' on table '{Table}' dropped for subscriber '{UserSid}': virtual filters apply.",
+                    cdcEvent.EventId, cdcEvent.Table.ToQualifiedName(), userSid.Value);
+                return StreamSecurityDecision.Denied("Virtual filters cannot be enforced on change events");
+            }
         }
 
-        // 6. The decision point: one Streaming read decision per event table as an additional gate. Its consent
-        // cache is keyed by tenant, subject context and policy epoch and never outlives a grant. A deny, a failure or a mandatory predicate
+        // 6. The decision point: one Streaming read decision per event table as an additional gate and baseline evaluator. Its consent
+        // cache is keyed by tenant, subject context and policy epoch and never outlives a grant. A deny, expired groups, a failure or a mandatory predicate
         // (an event cannot evaluate a subquery) drops the event (fail closed).
+        var subject = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(subscriber, tenantId, clientIp: ResolveClientIp(subscriber));
+        if (subject.GroupsExpireAt is { } groupsExpireAt && groupsExpireAt <= _time.GetUtcNow())
+        {
+            _logger.LogDebug("Streaming event '{EventId}' dropped: subscriber group resolution expired", cdcEvent.EventId);
+            return StreamSecurityDecision.Denied("Principal group claims expired");
+        }
+
         TableAccessDecision pdpDecision;
         try
         {
-            var subject = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(subscriber, tenantId, clientIp: ResolveClientIp(subscriber));
             pdpDecision = await _decisionPoint.DecideAsync(
                 new Autheris.Application.Policy.Pdp.AccessRequest(
                     subject, metadata, Autheris.Application.Policy.Pdp.AccessOperation.Read, Autheris.Application.Policy.Pdp.AccessTransport.Streaming,
@@ -248,6 +257,19 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
                 "Streaming event '{EventId}' on table '{Table}' denied for subscriber '{UserSid}' by the decision point",
                 cdcEvent.EventId, cdcEvent.Table.ToQualifiedName(), userSid.Value);
             return StreamSecurityDecision.Denied("Access denied by access policy");
+        }
+
+        if (!decision.IsAllowed)
+        {
+            if (!pdpDecision.EvaluatedByPdp)
+            {
+                _logger.LogDebug(
+                    "Streaming event '{EventId}' on table '{Table}' denied for subscriber '{UserSid}' by consent policy",
+                    cdcEvent.EventId, cdcEvent.Table.ToQualifiedName(), userSid.Value);
+                return StreamSecurityDecision.Denied("Access denied by consent policy");
+            }
+
+            decision = pdpDecision;
         }
 
         if (!string.IsNullOrWhiteSpace(pdpDecision.MandatoryRowPredicateSql))

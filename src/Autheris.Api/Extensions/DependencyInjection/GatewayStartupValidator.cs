@@ -796,6 +796,13 @@ public static class GatewayStartupValidator
         return names;
     }
 
+    public static void ValidateDelegatedProtection(
+        GatewayOptions options,
+        IEnumerable<(string DataSource, EffectiveProtection Protection)>? protections = null)
+    {
+        Autheris.Application.Governance.Protection.DelegatedProtectionValidator.Validate(options, protections);
+    }
+
     /// <summary>
     /// Decision B-1: tenant ids that collide case-insensitively are reported. By default the start only logs a critical warning:
     /// the colliding tenants are denied per request (<c>SecurityContextResolutionMiddleware</c>, 403 <c>TENANT_ID_COLLISION</c>)

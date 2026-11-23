@@ -444,7 +444,9 @@ public class CompileApiTests
             [nameof(GovernancePolicy.TablesWithMaskedColumns)] = policy with { TablesWithMaskedColumns = new HashSet<string> { "x" } },
             [nameof(GovernancePolicy.SubqueryStrategy)] = policy with { SubqueryStrategy = (GovernedSubqueryStrategy)99 },
             [nameof(GovernancePolicy.Write)] = policy with { Write = new DmlWritePermit(DmlWriteOperation.Insert, new HashSet<string> { "x" }, new HashSet<string>()) },
-            [nameof(GovernancePolicy.Tenant)] = policy with { Tenant = new TenantBinding("other_param", "acme", SqlParameterType.String) }
+            [nameof(GovernancePolicy.Tenant)] = policy with { Tenant = new TenantBinding("other_param", "acme", SqlParameterType.String) },
+            [nameof(GovernancePolicy.PrincipalCacheKey)] = policy with { PrincipalCacheKey = "principal-key-a" },
+            [nameof(GovernancePolicy.GovernanceEpoch)] = policy with { GovernanceEpoch = 42L }
         };
         var validatedPerTable = new HashSet<string> { nameof(GovernancePolicy.RowFilters), nameof(GovernancePolicy.Masks), nameof(GovernancePolicy.Catalog), nameof(GovernancePolicy.PerCellColumns) };
         foreach (var property in typeof(GovernancePolicy).GetProperties(BindingFlags.Public | BindingFlags.Instance))

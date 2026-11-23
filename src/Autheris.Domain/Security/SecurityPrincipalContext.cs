@@ -79,6 +79,7 @@ public sealed record SecurityPrincipalContext
     public required IReadOnlySet<string> ClusterRoles { get; init; }
     public required string AuthenticationScheme { get; init; }
     public bool IsAuthenticated { get; init; } = true;
+    public Autheris.Domain.Identity.IdentityRealmKind? RealmKind { get; init; }
 
     /// <summary>
     /// M-A2: the tenant was selected by a ClusterAdmin through the tenant header (not taken from the token claim). Such a tenant is only
@@ -272,11 +273,32 @@ public sealed record SecurityPrincipalContext
             ClusterRoles = clusterRoles,
             AuthenticationScheme = authenticationScheme ?? principal.Identity?.AuthenticationType ?? "Token",
             IsAuthenticated = principal.Identity?.IsAuthenticated ?? true,
+            RealmKind = ReadPipelineRealmKind(principal),
             ClientIp = clientIp,
             Caller = caller,
             Claims = principal.Claims,
             Principal = principal
         };
+    }
+
+    public static Autheris.Domain.Identity.IdentityRealmKind? ReadPipelineRealmKind(System.Security.Claims.ClaimsPrincipal? principal)
+    {
+        if (principal is null)
+        {
+            return null;
+        }
+
+        foreach (var claim in principal.Claims)
+        {
+            if (string.Equals(claim.Type, "autheris:realm_kind", StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(claim.Issuer, IdentityClaimIssuers.Pipeline, StringComparison.Ordinal) &&
+                Enum.TryParse<Autheris.Domain.Identity.IdentityRealmKind>(claim.Value, ignoreCase: true, out var kind))
+            {
+                return kind;
+            }
+        }
+
+        return null;
     }
 }
 

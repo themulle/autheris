@@ -8,6 +8,7 @@ Databricks_MissingSection [Production]: ValidationException: Databricks data sou
 ProcedureDialectAdmission_MissingConnection [Development]: ValidationException: Stored procedure endpoints support SQL Server and PostgreSQL only (data source 'absent').
 DataSourceMappings_ChainedMapping [Development]: ValidationException: Gateway:WebSql:DataSourceMappings:a ('b') must name an existing key of DataSources:Connections that is not itself a mapping key (one hop only).
 DefaultSchemas_InvalidSchema [Production]: ValidationException: Security violation: DataSources:Connections:pg:DefaultSchema must match ^[A-Za-z_][A-Za-z0-9_$#]{0,127}$.
+DelegatedProtection_WithoutDefenceInDepth [Production]: ValidationException: Security violation (DELEGATED_PROTECTION_VIOLATION): Data source 'pg' uses EnforcementMode = Delegated without defence-in-depth and cannot hold objects with protection class 'CONFIDENTIAL'.
 TenantCollisions_StrictMode [Production]: ValidationException: Security violation (B-1): tenant ids that differ only in case are configured (ACME / Acme). Strict mode refuses the start; rename one of them.
 WebhookSubscriptions_MissingId [Production]: ValidationException: Gateway:Webhooks:Subscriptions:0:Id is required (a stable, unique id of at most 128 characters).
 QueryCost_FailureFeeRange [Production]: ValidationException: The field FailureFee must be between 1 and 1000.

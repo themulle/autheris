@@ -673,7 +673,9 @@ internal sealed partial class CrossTransportParityHarness : IAsyncDisposable
         var explanation = await pdp.ExplainAsync(new AccessRequest(subject, s.Table, AccessOperation.Read, AccessTransport.GraphQl), ct);
         var decision = await pdp.DecideAsync(new AccessRequest(subject, s.Table, AccessOperation.Read, AccessTransport.GraphQl), ct);
         bool ssnMasked = explanation.Columns.Any(c => string.Equals(c.ColumnName, "ssn", StringComparison.OrdinalIgnoreCase) && c.Level == ColumnAccessLevel.Mask);
-        bool ssnDenied = explanation.Columns.Any(c => string.Equals(c.ColumnName, "ssn", StringComparison.OrdinalIgnoreCase) && c.Level == ColumnAccessLevel.Deny);
+        bool ssnOnTable = s.Table.Columns.Any(c => string.Equals(c.ColumnName, "ssn", StringComparison.OrdinalIgnoreCase));
+        // Explain omits denied columns (it must not reveal them): a denied column is on the table but absent from an allowed explanation.
+        bool ssnDenied = explanation.Allowed && ssnOnTable && !explanation.Columns.Any(c => string.Equals(c.ColumnName, "ssn", StringComparison.OrdinalIgnoreCase));
         return new ParityOutcome(
             explanation.Allowed,
             // The combined filter also carries the mandatory predicate; the consent row filter alone is what the baseline compares (as in Normalize).

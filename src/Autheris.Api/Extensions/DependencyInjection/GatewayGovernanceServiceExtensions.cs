@@ -85,7 +85,8 @@ public static partial class GatewayGovernanceServiceExtensions
                 sp.GetRequiredService<Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider>(),
                 sp.GetRequiredService<Autheris.Application.Governance.Protection.ProtectionSnapshotProvider>(),
                 sp.GetService<TimeProvider>(),
-                sp.GetService<Autheris.Application.Products.IDataProductRepository>()));
+                sp.GetService<Autheris.Application.Products.IDataProductRepository>(),
+                sp.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>()));
     }
 
     private static void AddGovernanceProtectionCaching(IServiceCollection services)

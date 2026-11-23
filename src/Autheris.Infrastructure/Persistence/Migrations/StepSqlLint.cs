@@ -49,9 +49,11 @@ internal static class StepSqlLint
     // equivalent static statement before linting, so the audit table rules (phase3 marker, DROP CONSTRAINT df_* only) still apply. Any other EXEC stays forbidden.
     private static readonly Regex DynamicDropConstraint = Re(
         @"\bdeclare\s+(?<sql>@\w+)\s+nvarchar\s*\(\s*max\s*\)\s*=\s*N'alter\s+table\s+(?:dbo\.)?(?<t>[A-Za-z_][A-Za-z0-9_]*)\s+drop\s+constraint\s+'\s*\+\s*quotename\s*\(\s*(?<v>@\w+)\s*\)\s*;\s*(?:if\s+\k<v>\s+is\s+not\s+null\s+)?exec\s*\(\s*\k<sql>\s*\)");
-    // The variable of the dynamic form must be declared from a sys.default_constraints lookup in the same step; any other variable is refused.
+    // The variable of the dynamic form must be declared from a sys.default_constraints or sys.key_constraints lookup in the same step; any other variable is refused.
     private static readonly Regex DeclaredFromDefaultConstraintLookup = Re(
         @"\bdeclare\s+(@\w+)\s+\w+(?:\s*\(\s*\w+\s*\))?\s*=\s*\(\s*select\s+(?:\w+\.)?name\s+from\s+(?:sys\.)?default_constraints\b");
+    private static readonly Regex DeclaredFromKeyConstraintLookup = Re(
+        @"\bdeclare\s+(@\w+)\s+\w+(?:\s*\(\s*\w+\s*\))?\s*=\s*\(\s*select\s+(?:\w+\.)?name\s+from\s+(?:sys\.)?key_constraints\b");
     private static readonly Regex Qualifier = new(@"\b[a-z_][a-z0-9_$]*\.(?=[a-z_])", RegexOptions.CultureInvariant);
     private static readonly Regex Blanks = new(@"\s+", RegexOptions.CultureInvariant);
     private static readonly Regex MarkerId = new(@"^[A-Z0-9][A-Z0-9-]{2,40}$", RegexOptions.CultureInvariant);
@@ -68,16 +70,27 @@ internal static class StepSqlLint
         }
 
         var strippedSql = StripComments(normalizedSql);
-        var lookupVariables = DeclaredFromDefaultConstraintLookup.Matches(string.Join(";", Normalize(strippedSql)))
+        var normalizedJoined = string.Join(";", Normalize(strippedSql));
+        var defaultLookupVariables = DeclaredFromDefaultConstraintLookup.Matches(normalizedJoined)
+            .Select(m => m.Groups[1].Value.ToLowerInvariant())
+            .ToHashSet(StringComparer.Ordinal);
+        var keyLookupVariables = DeclaredFromKeyConstraintLookup.Matches(normalizedJoined)
             .Select(m => m.Groups[1].Value.ToLowerInvariant())
             .ToHashSet(StringComparer.Ordinal);
         var statements = Normalize(DynamicDropConstraint.Replace(strippedSql, m =>
         {
-            if (!lookupVariables.Contains(m.Groups["v"].Value.ToLowerInvariant()))
+            var varName = m.Groups["v"].Value.ToLowerInvariant();
+            if (defaultLookupVariables.Contains(varName))
             {
-                violations.Add("the dynamic DROP CONSTRAINT variable is not declared from a sys.default_constraints lookup in the same step");
+                return "ALTER TABLE " + m.Groups["t"].Value + " DROP CONSTRAINT df_dynamic";
             }
 
+            if (keyLookupVariables.Contains(varName))
+            {
+                return "ALTER TABLE " + m.Groups["t"].Value + " DROP CONSTRAINT pk_dynamic";
+            }
+
+            violations.Add("the dynamic DROP CONSTRAINT variable is not declared from a sys.default_constraints lookup in the same step");
             return "ALTER TABLE " + m.Groups["t"].Value + " DROP CONSTRAINT df_dynamic";
         }));
         if (statements.Count == 0)

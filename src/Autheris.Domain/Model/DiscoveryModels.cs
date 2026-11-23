@@ -148,6 +148,38 @@ public sealed record DiscoveryColumnStatistics(
     string? MaxValue,
     IReadOnlyList<string>? TopValues);
 
+public enum ArtifactProvenance
+{
+    Unknown = 0,
+    Import = 1,
+    Upload = 2
+}
+
+public static class ArtifactProvenanceExtensions
+{
+    public static ArtifactProvenance Parse(string? raw)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            return ArtifactProvenance.Unknown;
+        }
+
+        return raw.Trim().ToUpperInvariant() switch
+        {
+            "IMPORT" => ArtifactProvenance.Import,
+            "UPLOAD" => ArtifactProvenance.Upload,
+            _ => ArtifactProvenance.Unknown
+        };
+    }
+
+    public static string ToDbString(this ArtifactProvenance provenance) => provenance switch
+    {
+        ArtifactProvenance.Import => "IMPORT",
+        ArtifactProvenance.Upload => "UPLOAD",
+        _ => "UNKNOWN"
+    };
+}
+
 public sealed record DiscoveryArtifacts(
     Guid TableId,
     string TenantId,
@@ -156,4 +188,5 @@ public sealed record DiscoveryArtifacts(
     string ContentSha256,
     string UploadedBy,
     DateTimeOffset UploadedAt,
-    int SchemaVersion = 1);
+    int SchemaVersion = 1,
+    ArtifactProvenance Provenance = ArtifactProvenance.Unknown);

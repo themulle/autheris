@@ -135,11 +135,11 @@ public sealed class GovernedPipelineCachePoisoningTests
         const string Sql = "SELECT id FROM orders";
 
         var a1 = await service.CompileAsync(Sql, User("S-A"), new TenantId(Tenant));
-        var b = await service.CompileAsync(Sql, User("S-B"), new TenantId(Tenant));   // same text, same shape, other consent values
-        var a2 = await service.CompileAsync(Sql, User("S-A"), new TenantId(Tenant));  // and back: a hit that must rebind
+        var b = await service.CompileAsync(Sql, User("S-B"), new TenantId(Tenant));   // distinct principal: isolated PrincipalCacheKey misses and compiles cleanly
+        var a2 = await service.CompileAsync(Sql, User("S-A"), new TenantId(Tenant));  // back to S-A: hits S-A's own template and rebinds
 
-        _engine.CompileCache.Stats.Misses.ShouldBe(1);   // only the first compile built a template
-        _engine.CompileCache.Stats.Hits.ShouldBe(2);     // the other principal and the way back were served from it, and rebound their own values
+        _engine.CompileCache.Stats.Misses.ShouldBe(2);   // one miss per distinct PrincipalCacheKey (S-A and S-B never share a key)
+        _engine.CompileCache.Stats.Hits.ShouldBe(1);     // S-A hits its own template and rebinds its values
         a1.ValuesOf(ParameterOrigin.Policy).ShouldBe(["EU"]);
         b.ValuesOf(ParameterOrigin.Policy).ShouldBe(["US"]);
         a2.ValuesOf(ParameterOrigin.Policy).ShouldBe(["EU"]);

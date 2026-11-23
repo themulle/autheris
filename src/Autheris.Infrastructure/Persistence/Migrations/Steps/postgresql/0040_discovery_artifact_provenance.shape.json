@@ -1,0 +1,19 @@
+{
+  "ops": [
+    {
+      "op": "addColumn",
+      "table": "catalog_discovery_artifacts",
+      "column": {
+        "name": "provenance",
+        "type": "CHARACTER VARYING(16)",
+        "family": "string",
+        "nullable": false
+      }
+    },
+    {
+      "op": "setPrimaryKey",
+      "table": "catalog_discovery_artifacts",
+      "columns": ["table_id", "provenance"]
+    }
+  ]
+}

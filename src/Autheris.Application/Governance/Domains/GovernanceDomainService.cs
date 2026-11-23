@@ -13,6 +13,10 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 
+using Microsoft.Extensions.Options;
+using Autheris.Application.Sql.Services;
+using Autheris.Domain.Options;
+
 namespace Autheris.Application.Governance.Domains;
 
 public enum DomainServiceStatus
@@ -69,7 +73,8 @@ public sealed partial class GovernanceDomainService(
     IAccessPolicySettingsProvider? policyProvider = null,
     IGovernanceCacheInvalidator? cacheInvalidator = null,
     TimeProvider? timeProvider = null,
-    IDataProductRepository? products = null)
+    IDataProductRepository? products = null,
+    IOptions<GatewayOptions>? gatewayOptions = null)
 {
     private static readonly string[] SafeContactSchemes = ["https", "http", "mailto"];
     private static readonly string[] DangerousContactPrefixes = ["javascript:", "vbscript:", "data:", "file:"];
@@ -83,6 +88,7 @@ public sealed partial class GovernanceDomainService(
     private readonly IGovernanceCacheInvalidator? _cacheInvalidator = cacheInvalidator;
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private readonly IDataProductRepository? _products = products;
+    private readonly GatewayOptions? _gatewayOptions = gatewayOptions?.Value;
 
     public async Task<DomainServiceResult<IReadOnlyList<GovernanceDomain>>> ListDomainsAsync(
         SecurityPrincipalContext caller,
@@ -247,6 +253,11 @@ public sealed partial class GovernanceDomainService(
             DefaultClass = defaultClass,
             Visibility = parsedVisibility ?? before.Visibility
         };
+
+        if (await ValidateDelegatedDomainUpdateAsync(tenant, updatedModel, ct).ConfigureAwait(false) is { } delegatedError)
+        {
+            return delegatedError;
+        }
 
         var result = await _domains.UpsertAsync(updatedModel, expectedVersion, caller.UserSid, ct).ConfigureAwait(false);
         if (result.Status == GovernanceDomainWriteStatus.NotFound)
@@ -438,6 +449,11 @@ public sealed partial class GovernanceDomainService(
             if (distinct.Any(id => !visibleIds.Contains(id)))
             {
                 return NotFound<int>("RESOURCE_NOT_FOUND", "One or more requested tables were not found.");
+            }
+
+            if (await ValidateDelegatedTableAssignmentsAsync(tenant, domain, matched, ct).ConfigureAwait(false) is { } delegatedError)
+            {
+                return delegatedError;
             }
         }
 

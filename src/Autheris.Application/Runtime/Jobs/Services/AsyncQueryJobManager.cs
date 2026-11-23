@@ -23,7 +23,7 @@ using Microsoft.Extensions.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 
-public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
+public sealed partial class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
 {
     private readonly Channel<AsyncJobExecutionItem> _channel;
     private readonly ConcurrentDictionary<string, AsyncJobDescriptor> _jobs = new();
@@ -38,6 +38,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
     private readonly IDistributedClusterStateProvider? _cluster;
     private readonly AsyncJobNodeIdentity _node;
     private readonly TimeProvider _time;
+    private readonly Autheris.Application.Governance.Caching.GovernanceEpochProvider? _epochProvider;
 
     private static readonly System.Diagnostics.Metrics.Meter Meter = new("Autheris.AsyncJobs");
     private static readonly System.Diagnostics.Metrics.Counter<long> TombstoneCheckFailures =
@@ -57,7 +58,8 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         IDistributedClusterStateProvider? clusterState = null,
         IClusterStateTopology? topology = null,
         AsyncJobNodeIdentity? node = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        Autheris.Application.Governance.Caching.GovernanceEpochProvider? epochProvider = null)
     {
         ArgumentNullException.ThrowIfNull(auditLogRepository);
         _options = options;
@@ -70,6 +72,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         _cluster = topology?.IsClusterWide == true ? clusterState : null;
         _node = node ?? new AsyncJobNodeIdentity();
         _time = timeProvider ?? TimeProvider.System;
+        _epochProvider = epochProvider;
         _auditLogRepository = auditLogRepository;
         _logger = logger ?? NullLogger<AsyncQueryJobManager>.Instance;
 
@@ -202,7 +205,11 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         d.ErrorMessage,
         string.IsNullOrWhiteSpace(d.ResultFilePath) ? null : Path.GetFileName(d.ResultFilePath),
         _node.NodeId,
-        d.SubmittedByGroupSids);
+        d.SubmittedByGroupSids,
+        d.SubmittedByRoles,
+        d.SubmittedByScopes,
+        d.SubmittedGovernanceEpoch,
+        d.TargetTables);
 
     /// <summary>Writes the cluster record of a job (TTL is reset on every write). A failure is fatal only for the submit.</summary>
     private async ValueTask WriteRecordAsync(AsyncJobDescriptor descriptor, bool throwOnFailure, CancellationToken ct)
@@ -298,13 +305,30 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         var userSid = AsyncJobOwner.Resolve(user)
                       ?? throw new Autheris.Domain.Exceptions.GatewaySecurityException("Async jobs require an authenticated principal with a resolvable user identity.", "ASYNC_JOB_OWNER_UNRESOLVABLE");
 
+        var groupStatusClaim = user.FindFirst(Autheris.Domain.Identity.GroupResolutionClaims.StatusClaimType)?.Value;
+        if (string.Equals(groupStatusClaim, Autheris.Domain.Identity.GroupResolutionClaims.DegradedValue, StringComparison.OrdinalIgnoreCase) ||
+            Autheris.Domain.Identity.GroupResolutionClaims.IsExpired(user, _time.GetUtcNow()))
+        {
+            throw new Autheris.Domain.Exceptions.GatewaySecurityException(
+                "Async jobs require complete, non-expired group resolution.",
+                "AUTH_GROUPS_DEGRADED");
+        }
+
         var jobId = Guid.NewGuid().ToString("D");
         if (!AsyncQueryJobFormat.TryNormalize(request.Format, out var format))
         {
             throw new AsyncJobInvalidFormatException();
         }
 
-        var groupSids = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(user, tenantId).GroupSids.Select(s => s.Value).ToArray();
+        var secCtx = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(user, tenantId);
+        var groupSids = secCtx.GroupSids.Select(static s => s.Value).ToArray();
+        var roles = user.GetUserRoles().ToArray();
+        var scopes = Autheris.Domain.Security.TokenAccessScope.GetScopeSet(user.Claims).ToArray();
+        long? submittedEpoch = _epochProvider is not null
+            ? await _epochProvider.GetEpochAsync(tenantId, ct).ConfigureAwait(false)
+            : null;
+        var targetTables = TryExtractQueryTables(request.Query);
+
         var descriptor = new AsyncJobDescriptor(
             JobId: jobId,
             TenantId: tenantId.Value,
@@ -313,7 +337,11 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
             Format: format,
             State: AsyncJobState.Queued,
             CreatedAt: _time.GetUtcNow(),
-            SubmittedByGroupSids: groupSids);
+            SubmittedByGroupSids: groupSids,
+            SubmittedByRoles: roles,
+            SubmittedByScopes: scopes,
+            SubmittedGovernanceEpoch: submittedEpoch,
+            TargetTables: targetTables);
 
         // Per-tenant, per-user and scratch quota backlog caps: counted and reserved under one gate so concurrent submits cannot overshoot them.
         var jobOpts = _jobOptions?.Value ?? _options?.Value?.AsyncJobs ?? new AsyncJobOptions();
@@ -502,7 +530,11 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
             record.RowsProduced,
             record.BytesProduced,
             record.ErrorMessage,
-            SubmittedByGroupSids: record.SubmittedByGroupSids);
+            SubmittedByGroupSids: record.SubmittedByGroupSids,
+            SubmittedByRoles: record.SubmittedByRoles,
+            SubmittedByScopes: record.SubmittedByScopes,
+            SubmittedGovernanceEpoch: record.SubmittedGovernanceEpoch,
+            TargetTables: record.TargetTables);
 
         // The owner node vanished without a terminal write: computed, never persisted.
         var jobs = _jobOptions?.Value ?? _options?.Value?.AsyncJobs ?? new AsyncJobOptions();
@@ -515,7 +547,7 @@ public sealed class AsyncQueryJobManager : IAsyncQueryJobManager, IAsyncJobQueue
         return descriptor;
     }
 
-    public async Task<Stream?> GetJobResultStreamAsync(
+    internal async Task<Stream?> GetJobResultStreamAsync(
         string jobId,
         TenantId tenantId,
         string userSid,

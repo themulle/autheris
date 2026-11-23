@@ -215,5 +215,8 @@ public static class AuditEventTypes
     public const string ProtectionClassChanged = "PROTECTION_CLASS_CHANGED";
     public const string MaskCategoryChanged = "MASK_CATEGORY_CHANGED";
     public const string ViewDowngraded = "VIEW_DOWNGRADED";
+    public const string ImportSamplesChanged = "IMPORT_SAMPLES_CHANGED";
+    public const string ImportSamplesPiiSuspected = "IMPORT_SAMPLES_PII_SUSPECTED";
+    public const string ImportSamplesPurged = "IMPORT_SAMPLES_PURGED";
 }
 

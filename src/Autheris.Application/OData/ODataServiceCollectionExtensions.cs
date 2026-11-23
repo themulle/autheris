@@ -21,7 +21,20 @@ public static class ODataServiceCollectionExtensions
 
         services.AddSingleton(new ODataIntegrationMarker());
         services.TryAddScoped<IODataQueryPolicyEnforcer, ODataQueryPolicyEnforcer>();
-        services.TryAddScoped<IODataHandler, ODataHandler>();
+        services.TryAddScoped<IODataHandler>(sp => new ODataHandler(
+            sp.GetRequiredService<Autheris.Application.Common.Interfaces.ITableMetadataRepository>(),
+            sp.GetRequiredService<Autheris.Application.Common.Interfaces.IGatewayExecutionService>(),
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<ODataHandler>>(),
+            sp.GetRequiredService<Microsoft.Extensions.Hosting.IHostEnvironment>(),
+            sp.GetRequiredService<Microsoft.Extensions.Caching.Memory.IMemoryCache>(),
+            sp.GetRequiredService<Autheris.Application.Catalog.ICatalogVersionProvider>(),
+            sp.GetRequiredService<Autheris.Application.Tenancy.ITenantResolver>(),
+            sp.GetRequiredService<Autheris.Application.DataSources.IDataSourceOptionsResolver>(),
+            sp.GetRequiredService<Autheris.Application.DataSources.IIngressTransportContext>(),
+            sp.GetRequiredService<IODataQueryPolicyEnforcer>())
+        {
+            EpochProvider = sp.GetService<Autheris.Application.Governance.Caching.GovernanceEpochProvider>()
+        });
         return services;
     }
 

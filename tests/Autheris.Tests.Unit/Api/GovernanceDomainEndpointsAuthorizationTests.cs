@@ -165,7 +165,7 @@ public sealed class GovernanceDomainEndpointsAuthorizationTests
             .OfType<RouteEndpoint>()
             .ToList();
 
-        endpoints.Count.ShouldBe(9);
+        endpoints.Count.ShouldBe(10);
         endpoints.ShouldAllBe(e => e.Metadata.GetMetadata<IAuthorizeData>() != null);
         endpoints.ShouldAllBe(e => e.Metadata.GetMetadata<AuditPolicy>() != null);
     }

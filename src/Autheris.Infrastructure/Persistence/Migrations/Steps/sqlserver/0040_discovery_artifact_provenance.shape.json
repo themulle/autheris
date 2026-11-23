@@ -1,0 +1,19 @@
+{
+  "ops": [
+    {
+      "op": "addColumn",
+      "table": "CATALOG_DISCOVERY_ARTIFACTS",
+      "column": {
+        "name": "provenance",
+        "type": "NVARCHAR",
+        "family": "string",
+        "nullable": false
+      }
+    },
+    {
+      "op": "setPrimaryKey",
+      "table": "CATALOG_DISCOVERY_ARTIFACTS",
+      "columns": ["table_id", "provenance"]
+    }
+  ]
+}

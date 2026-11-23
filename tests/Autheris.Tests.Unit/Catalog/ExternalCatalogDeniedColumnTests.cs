@@ -172,7 +172,7 @@ public sealed class ExternalCatalogDeniedColumnTests
         ungrantedResp.Body.ShouldNotContain(DeniedName);
         grantedResp.ReadJson().GetProperty("statistics").GetProperty("partitionColumns").EnumerateArray()
             .Select(p => p.GetString()).ShouldBe(["id"]);
-        ungrantedResp.ReadJson().GetProperty("statistics").GetProperty("partitionColumns").GetArrayLength().ShouldBe(0);
+        ungrantedResp.ReadJson().GetProperty("statistics").ValueKind.ShouldBe(JsonValueKind.Null);
     }
 
     [Fact]

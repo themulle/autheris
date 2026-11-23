@@ -31,7 +31,11 @@ public sealed record AsyncJobDescriptor(
     long? RowsProduced = null,
     long? BytesProduced = null,
     string? ErrorMessage = null,
-    System.Collections.Generic.IReadOnlyList<string>? SubmittedByGroupSids = null);
+    System.Collections.Generic.IReadOnlyList<string>? SubmittedByGroupSids = null,
+    System.Collections.Generic.IReadOnlyList<string>? SubmittedByRoles = null,
+    System.Collections.Generic.IReadOnlyList<string>? SubmittedByScopes = null,
+    long? SubmittedGovernanceEpoch = null,
+    System.Collections.Generic.IReadOnlyList<string>? TargetTables = null);
 
 public sealed record AsyncJobStatusResponse(
     string JobId,

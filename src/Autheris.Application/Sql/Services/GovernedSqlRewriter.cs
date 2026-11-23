@@ -798,7 +798,8 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
             Metadata = decidedTableMetadata,
             ConnectionKey = connectionKey,
             WritePermit = writePermit,
-            MetricViewInternalCountColumn = mvGuard.InternalCountMeasureColumn
+            MetricViewInternalCountColumn = mvGuard.InternalCountMeasureColumn,
+            PrincipalCacheKey = GovernancePolicyFactory.ComputePrincipalCacheKey(user)
         };
 
         var policy = await policyFactory.CreateAsync(input, ct).ConfigureAwait(false);

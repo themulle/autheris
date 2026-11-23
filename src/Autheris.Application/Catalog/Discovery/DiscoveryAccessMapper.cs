@@ -36,14 +36,17 @@ public static class DiscoveryAccessMapper
         IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>>? repoColumnClassifications = null,
         string? tenantId = null,
         bool hideMaskedTextForRestrictedScopes = false,
-        EffectiveProtection? effectiveProtection = null)
+        EffectiveProtection? effectiveProtection = null,
+        bool importSamplesAvailable = false)
     {
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(decision);
         ArgumentNullException.ThrowIfNull(activeOwners);
 
         var (accessState, rowScope) = MapAccessAndRowScope(decision, isPendingRequest, isRecentlyExpired);
-        var (tableStats, colStatsByName) = ParseStatistics(artifacts);
+        var (tableStats, colStatsByName) = decision.IsAllowed && artifacts is { Provenance: not ArtifactProvenance.Import }
+            ? ParseStatistics(artifacts)
+            : (null, null);
         var visibleCols = table.Columns.Where(static c => !c.DiscoveryHidden).ToList();
 
         var defs = classificationDefinitions
@@ -73,14 +76,21 @@ public static class DiscoveryAccessMapper
                 DiscoveryTextSanitizer.MaxDescriptionRunes * 4,
                 allowNewlinesAndTabs: true);
 
+            var effectiveMaskCategory = effectiveProtection is null
+                ? null
+                : effectiveProtection.Columns.TryGetValue(col.ColumnName, out var colProt)
+                    ? colProt.EffectiveMaskCategory
+                    : effectiveProtection.TableMaskCategory;
+            bool hasEffectiveMaskCategory = !string.IsNullOrWhiteSpace(effectiveMaskCategory);
+
             DiscoveryColumnStatistics? stats = null;
             if (!hideText &&
                 colState != DiscoveryColumnState.NoAccess &&
                 colStatsByName != null &&
                 colStatsByName.TryGetValue(col.ColumnName, out var parsedColStats))
             {
-                // Restricted-scope callers only receive value-bearing statistics for columns whose effective state is Clear.
-                stats = decision.ScopeClearance is not null && colState != DiscoveryColumnState.Clear
+                // Callers only receive value-bearing statistics for columns that are Clear and without an active mask category.
+                stats = colState != DiscoveryColumnState.Clear || hasEffectiveMaskCategory
                     ? parsedColStats with { MinValue = null, MaxValue = null, TopValues = null }
                     : parsedColStats;
             }
@@ -124,9 +134,14 @@ public static class DiscoveryAccessMapper
                 Email: string.IsNullOrWhiteSpace(o.Email) ? null : DiscoveryTextSanitizer.SanitizeText(o.Email, DiscoveryTextSanitizer.MaxDisplayNameRunes)))
             .ToList();
 
-        var samplesAvailable = !table.Table.SamplesDisabled
-            && HasSamples(artifacts?.SamplesJson)
-            && mappedCols.Any(static c => c.State == DiscoveryColumnState.Clear);
+        var samplesAvailable = !table.Table.SamplesDisabled && (
+            importSamplesAvailable ||
+            (decision.IsAllowed &&
+             artifacts is { Provenance: not ArtifactProvenance.Import } &&
+             HasSamples(artifacts.SamplesJson) &&
+             mappedCols.Any(c => decision.ScopeClearance is not null
+                 ? c.State == DiscoveryColumnState.Clear
+                 : c.State != DiscoveryColumnState.NoAccess)));
         var writeState = MapWriteState(table, visibleCols, insertDecision, updateDecision, deleteDecision);
 
         return new DiscoveryObject(
@@ -549,4 +564,6 @@ public static class DiscoveryAccessMapper
         }
         return (pii, sep, items, clearReq);
     }
+
+    public static bool IsSampleVisibleState(DiscoveryColumnState state) => state != DiscoveryColumnState.NoAccess;
 }

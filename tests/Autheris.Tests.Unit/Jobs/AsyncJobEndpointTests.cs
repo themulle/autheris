@@ -1,12 +1,15 @@
 namespace Autheris.Tests.Unit.Jobs;
 
 using System;
+using System.Collections.Generic;
 using System.IO;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Policy.Pdp;
 using Autheris.Application.Runtime.Jobs.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -18,6 +21,23 @@ using Xunit;
 [Trait("Category", "Security")]
 public sealed class AsyncJobEndpointTests
 {
+    private sealed class NoopAccessDecisionPoint : IAccessDecisionPoint
+    {
+        public ValueTask<TableAccessDecision> DecideAsync(AccessRequest request, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public ValueTask<IReadOnlyList<TableAccessDecision>> DecideManyAsync(
+            Autheris.Domain.Security.SecurityPrincipalContext subject,
+            IReadOnlyList<TableMetadata> objects,
+            AccessOperation operation,
+            AccessTransport transport,
+            CancellationToken ct = default)
+            => throw new NotSupportedException();
+
+        public ValueTask<AccessExplanation> ExplainAsync(AccessRequest request, CancellationToken ct = default)
+            => throw new NotSupportedException();
+    }
+
     private sealed class FakeAsyncQueryJobManager : IAsyncQueryJobManager
     {
         public bool SubmitCalled { get; private set; }
@@ -45,7 +65,14 @@ public sealed class AsyncJobEndpointTests
         public Task<AsyncJobDescriptor?> GetJobAsync(string jobId, TenantId tenantId, string userSid, CancellationToken ct = default)
             => Task.FromResult(StoredJob);
 
-        public Task<Stream?> GetJobResultStreamAsync(string jobId, TenantId tenantId, string userSid, CancellationToken ct = default)
+        public Task<Stream?> GetJobResultStreamAsync(
+            string jobId,
+            TenantId tenantId,
+            ClaimsPrincipal user,
+            IAccessDecisionPoint decisionPoint,
+            ITableMetadataRepository metadataRepository,
+            TrinoSqlEngine.ISqlEngine? sqlEngine = null,
+            CancellationToken ct = default)
             => Task.FromResult<Stream?>(new MemoryStream(ResultBytes));
 
         public Task<bool> CancelJobAsync(string jobId, TenantId tenantId, string userSid, CancellationToken ct = default)
@@ -55,9 +82,16 @@ public sealed class AsyncJobEndpointTests
             => Task.CompletedTask;
     }
 
-    private static DefaultHttpContext NewContext()
+    private static DefaultHttpContext NewContext(bool includeAuthzServices = true)
     {
-        var services = new ServiceCollection().AddLogging().BuildServiceProvider();
+        var sc = new ServiceCollection().AddLogging();
+        if (includeAuthzServices)
+        {
+            sc.AddSingleton<IAccessDecisionPoint>(new NoopAccessDecisionPoint());
+            sc.AddSingleton<ITableMetadataRepository>(new Autheris.Tests.Common.Fakes.InMemoryTableMetadataRepository());
+        }
+
+        var services = sc.BuildServiceProvider();
         var ctx = new DefaultHttpContext
         {
             RequestServices = services,
@@ -141,5 +175,21 @@ public sealed class AsyncJobEndpointTests
         var json = await ReadJsonAsync(badCtx.Response);
         json.GetProperty("status").GetInt32().ShouldBe(StatusCodes.Status500InternalServerError);
         json.ToString().ShouldNotContain("../evil");
+    }
+
+    [Fact]
+    public async Task Download_fails_closed_when_reauthorization_services_missing()
+    {
+        var manager = new FakeAsyncQueryJobManager
+        {
+            StoredJob = new AsyncJobDescriptor(
+                "job-1", "tenant-a", "S-1-USER", "SELECT id FROM t", "json", AsyncJobState.Completed, DateTimeOffset.UtcNow)
+        };
+        var ctx = NewContext(includeAuthzServices: false);
+
+        var result = await AsyncJobEndpoints.DownloadJobResultHandler("job-1", manager, ctx, CancellationToken.None);
+        await result.ExecuteAsync(ctx);
+
+        ctx.Response.StatusCode.ShouldBe(StatusCodes.Status503ServiceUnavailable);
     }
 }
