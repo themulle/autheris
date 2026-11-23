@@ -392,9 +392,7 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.BindByNameOracleCommand", "DbCommand decorator: forwards the text the binder gave it to the Oracle command (BindByName)"),
         ("Autheris.Infrastructure.Persistence.GoldenQueries.GoldenQueryStoreOperations", "governance-store access with fixed, parameterised SQL constants (golden queries); no caller-supplied text"),
         ("Autheris.Infrastructure.Persistence.MetadataGuardedCommand", "DbCommand decorator: forwards the text to the inner command; the text is checked before every execution"),
-        // -- constructors of the PermissionDecisionCommand record: it carries a decision reason string, never SQL text --
-        ("Autheris.Api.Endpoints.ConsentApiEndpoints", "builds the PermissionDecisionCommand record (reason text, not SQL) for the engine decision"),
-        ("Autheris.Application.ConsentRequests.ExternalDecisionService", "builds the PermissionDecisionCommand record (reason text, not SQL) for the engine decision"),
+        ("Autheris.Api.Endpoints.ConsentApiEndpoints", "builds the PermissionDecisionCommand record (reason text, not SQL) for the engine decision"), ("Autheris.Application.ConsentRequests.ExternalDecisionService", "builds the PermissionDecisionCommand record (reason text, not SQL) for the engine decision"),
         // -- the allowed exceptions of §28.9 (the text comes from the typed IR / the compiler, never from a client string) --
         ("Autheris.Application.Sql.Tree.GovernedTreeQueryService", "§28.9 OQ-GQL: executes compiled.Sql of the GraphQL tree compiler"),
         ("Autheris.Application.Olap.DuckDbOlapEngine", "§28.9 DuckDB staging: runs on the in-process staged copy, after the governed fetch"),
@@ -440,8 +438,7 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.RightsAndPoliciesStore", "governance store: functional rights mappings and scoped access policies (WP-SC-06, WP-SC-14), fixed statements with bound parameters, no client text"),
         ("Autheris.Infrastructure.Persistence.GovernanceDomainStore", "governance store: governance domains, table assignments, and object protection (Issue #1009), fixed constant SQL statements with bound parameters, no client text"),
         ("Autheris.Infrastructure.Persistence.AccessPolicySettingsStore", "governance store: tenant access policy settings (Issue #1009), fixed constant SQL statements with bound parameters, no client text"),
-        ("Autheris.Infrastructure.Persistence.MigrationPurgeStore", "governance store: D13 migration purge report, archived head reader, and schema version check (Issue #1009), fixed constant SQL statements with bound parameters, no client text"),
-        ("Autheris.Infrastructure.Persistence.CatalogVisibilityGrantStore", "governance store: container-scoped catalog visibility grants (Issue #1009), fixed constant SQL statements with bound parameters, no client text"),
+        ("Autheris.Infrastructure.Persistence.MigrationPurgeStore", "governance store: D13 migration purge report, archived head reader, and schema version check (Issue #1009), fixed constant SQL statements with bound parameters, no client text"), ("Autheris.Infrastructure.Persistence.CatalogVisibilityGrantStore", "governance store: container-scoped catalog visibility grants (Issue #1009), fixed constant SQL statements with bound parameters, no client text"),
         ("Autheris.Infrastructure.Persistence.PermissionRequestStore", "governance store: single-transaction permission decision CAS and query store (Issue #1009), fixed constant SQL statements with bound parameters, no client text"),
     ];
 

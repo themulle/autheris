@@ -200,7 +200,10 @@ public sealed class PagingTests : IDisposable
         seen!.Tenant.ShouldBe(new TenantId("t1"));
         seen.PageSize.ShouldBe(2);
         seen.BeforeSequence.ShouldBeNull();
-        (await Body(result)).ShouldContain("\"nextCursor\":\"" + PageCursor.Encode(9) + "\"");
+        var body = await Body(result);
+        var next = System.Text.Json.JsonDocument.Parse(body).RootElement.GetProperty("nextCursor").GetString();
+        PageCursor.TryDecode(next, out var position).ShouldBeTrue();
+        position.ShouldStartWith("9.");
     }
 
     [Fact]
@@ -208,10 +211,16 @@ public sealed class PagingTests : IDisposable
     {
         var repo = Substitute.For<IAuditLogRepository>();
         AuditLogPageQuery? seen = null;
-        repo.QueryAuditLogPageAsync(Arg.Do<AuditLogPageQuery>(q => seen = q), Arg.Any<CancellationToken>()).Returns(new AuditLogPage([], null));
+        repo.QueryAuditLogPageAsync(Arg.Do<AuditLogPageQuery>(q => seen = q), Arg.Any<CancellationToken>())
+            .Returns(new AuditLogPage([Entry(10), Entry(9)], 9), new AuditLogPage([], null));
 
-        await GovernanceEndpoints.ListAuditPageAsync(Ctx("GovernanceAdmin"), repo, PageCursor.Encode(9), null, null, null, null, null);
+        var firstBody = await Body(await GovernanceEndpoints.ListAuditPageAsync(Ctx("GovernanceAdmin"), repo, null, 2, null, null, null, null));
+        var cursor = System.Text.Json.JsonDocument.Parse(firstBody).RootElement.GetProperty("nextCursor").GetString();
+        await GovernanceEndpoints.ListAuditPageAsync(Ctx("GovernanceAdmin"), repo, cursor, 2, null, null, null, null);
         seen!.BeforeSequence.ShouldBe(9);
+
+        // a cursor of another scope (other view) is refused
+        StatusOf(await GovernanceEndpoints.ListAuditPageAsync(Ctx("GovernanceAdmin"), repo, cursor, 2, null, null, null, null, "decisions")).ShouldBe(StatusCodes.Status400BadRequest);
 
         repo.ClearReceivedCalls();
         var bad = await GovernanceEndpoints.ListAuditPageAsync(Ctx("GovernanceAdmin"), repo, "nope", null, null, null, null, null);
@@ -231,9 +240,10 @@ public sealed class PagingTests : IDisposable
         StatusOf(await GovernanceEndpoints.ListAuditPageAsync(Ctx("DataOwner", owners: owners), repo, null, null, "default.sales.orders", null, null, null)).ShouldBe(403);
         await repo.DidNotReceiveWithAnyArgs().QueryAuditLogPageAsync(default!, default);
 
+        // the legacy per-table data-owner path is gone: only an owner-group member of the object's container reads (see AuditReadScopeTests)
         owners.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>()).Returns(true);
-        repo.QueryAuditLogPageAsync(Arg.Any<AuditLogPageQuery>(), Arg.Any<CancellationToken>()).Returns(new AuditLogPage([], null));
-        StatusOf(await GovernanceEndpoints.ListAuditPageAsync(Ctx("DataOwner", owners: owners), repo, null, null, "default.sales.orders", null, null, null)).ShouldBe(200);
+        StatusOf(await GovernanceEndpoints.ListAuditPageAsync(Ctx("DataOwner", owners: owners), repo, null, null, "default.sales.orders", null, null, null)).ShouldBe(403);
+        await repo.DidNotReceiveWithAnyArgs().QueryAuditLogPageAsync(default!, default);
     }
 
     [Fact]

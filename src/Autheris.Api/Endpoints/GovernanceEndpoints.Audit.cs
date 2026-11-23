@@ -10,6 +10,7 @@ using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Api.Middleware;
 using Autheris.Api.Security;
+using Autheris.Application.Audit;
 using Autheris.Application.Governance;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Paging;
@@ -55,8 +56,9 @@ public static partial class GovernanceEndpoints
     private static TenantId ResolveRequestTenant(HttpContext context) => EndpointSecurity.GetRequestTenant(context);
 
     /// <summary>
-    /// keyset-paged audit listing. Tenant administrators and auditors read their tenant; a data owner reads only the
-    /// audit of one table they own. A foreign tenant is honoured for ClusterAdmin only. A malformed cursor is a 400, never a silent restart.
+    /// keyset-paged audit listing. Data Governance, Security Auditor and (for a foreign tenant) canonical ClusterAdmin read the tenant; an
+    /// owner-group member reads only the entries of objects in the containers whose owner group they belong to. <c>view</c> narrows the listing
+    /// (<c>decisions</c>, <c>self-grants</c>, <c>decisions-by-service-principals</c>). A malformed or foreign cursor is a 400, never a silent restart.
     /// </summary>
     internal static async Task<IResult> ListAuditPageAsync(
         HttpContext context,
@@ -66,14 +68,11 @@ public static partial class GovernanceEndpoints
         string? targetTable,
         string? actor,
         DateTimeOffset? since,
-        string? tenant)
+        string? tenant,
+        string? view = null)
     {
-        if (!await IsAuthorizedForSimulationAsync(context, targetTable).ConfigureAwait(false))
-        {
-            return Results.StatusCode(StatusCodes.Status403Forbidden);
-        }
-
         var effectiveTenant = ResolveRequestTenant(context);
+        var tenantWide = GatewayPolicies.HasAnyRequestRole(context, [GatewayRole.GovernanceAdmin, GatewayRole.TenantAdmin, GatewayRole.SecurityAuditor]);
         if (!string.IsNullOrWhiteSpace(tenant) && !string.Equals(tenant, effectiveTenant.Value, StringComparison.Ordinal))
         {
             // DT-A-6: the platform bucket (_platform) is readable by canonical ClusterAdmin only; every other reserved value stays rejected.
@@ -83,45 +82,61 @@ public static partial class GovernanceEndpoints
             }
 
             effectiveTenant = StoredTenant.ParseAudit(tenant);
+            tenantWide = true;
         }
 
-        long? before = null;
-        if (cursor != null)
+        SecurityPrincipalContext caller;
+        try
         {
-            if (!PageCursor.TryDecodeLong(cursor, out var decoded))
-            {
-                return ApiProblems.BadRequest(ApiErrorCodes.InvalidCursor, "The cursor is malformed.", context);
-            }
-
-            before = decoded;
+            caller = EndpointSecurity.GetSecurityContext(context);
+        }
+        catch (UnauthorizedAccessException)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
 
-        var page = await auditRepository.QueryAuditLogPageAsync(
-            new AuditLogPageQuery(
-                effectiveTenant,
-                string.IsNullOrWhiteSpace(targetTable) ? null : targetTable,
-                string.IsNullOrWhiteSpace(actor) ? (Sid?)null : new Sid(actor),
-                since,
-                before,
-                pageSize ?? AuditLogPageQuery.DefaultPageSize),
+        var services = context.RequestServices;
+        var reader = new AuditReadService(
+            auditRepository,
+            services.GetService<ITableMetadataRepository>(),
+            services.GetService<IProtectionSnapshotProvider>(),
+            services.GetService<IGovernanceCapabilities>(),
+            services.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AccessPolicyOptions>>());
+
+        var result = await reader.ReadAsync(
+            new AuditReadRequest(caller, effectiveTenant, tenantWide, targetTable, actor, since, view, cursor, pageSize),
             context.RequestAborted).ConfigureAwait(false);
+
+        switch (result.Outcome)
+        {
+            case AuditReadOutcome.Forbidden:
+                return Results.StatusCode(StatusCodes.Status403Forbidden);
+            case AuditReadOutcome.InvalidCursor:
+                return ApiProblems.BadRequest(ApiErrorCodes.InvalidCursor, "The cursor is malformed.", context);
+            case AuditReadOutcome.InvalidView:
+                return ApiProblems.BadRequest(
+                    ApiErrorCodes.BadRequest,
+                    "Supported views: decisions, self-grants, decisions-by-service-principals.",
+                    context);
+        }
 
         return Results.Ok(new
         {
-            items = page.Items.Select(e => new
+            items = result.Items.Select(e => new
             {
                 sequence = e.ChainSequence,
                 occurredAt = e.OccurredAt,
                 eventType = e.EventType,
                 decision = e.Decision,
                 actorSid = e.ActorSid.Value,
+                actorKind = AuditActorKindReader.Read(e),
                 targetTable = e.TargetTable,
                 targetColumn = e.TargetColumn,
                 traceId = e.TraceId,
                 tenantId = e.TenantId.Value
             }),
-            nextCursor = page.NextBeforeSequence is { } next ? PageCursor.Encode(next) : null,
-            pageSize = Math.Clamp(pageSize ?? AuditLogPageQuery.DefaultPageSize, 1, AuditLogPageQuery.MaxPageSize)
+            nextCursor = result.NextCursor,
+            pageSize = result.PageSize
         });
     }
 
@@ -225,7 +240,7 @@ public static partial class GovernanceEndpoints
     private static void MapAuditAndComplianceEndpoints(IEndpointRouteBuilder app)
     {
         app.MapGet("/api/v1/governance/audit", ListAuditPageAsync)
-            .RequireAuthorization(GatewayPolicies.AuditRead).WithAudit(AuditLevel.Summarized, AuditEventTypes.AuditRead);
+            .RequireAuthorization(GatewayPolicies.AuthenticatedCaller).WithAudit(AuditLevel.Summarized, AuditEventTypes.AuditRead);
         app.MapGet("/api/v1/governance/grants", ListGrantsPageAsync)
             .RequireAuthorization(GatewayPolicies.AuditRead).WithAudit(AuditLevel.Summarized, AuditEventTypes.AuditRead);
 
