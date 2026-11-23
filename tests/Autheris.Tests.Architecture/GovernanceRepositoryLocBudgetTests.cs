@@ -11,7 +11,8 @@ public sealed class GovernanceRepositoryLocBudgetTests
     // Post-consolidation budget ceiling with appropriate headroom (parent guidance WP-SIMPL-20d).
     // Original AD-1 target was 7,000 lines; Wave 4-7 unified governance store extensions
     // (WP-SIMPL-41/42/45/47/48/52) temporarily raised the total and WP-SIMPL-52 PR 6 will ratchet it back down when legacy tables/repos are dropped.
-    public const int MaxAllowedLoc = 15_818;
+    // #1009 W3 permission request engine persistence on top of the #1043 consent batch reads (+49 LOC over 15,818).
+    public const int MaxAllowedLoc = 15_867;
 
     [Fact]
     [Trait("Category", "Architecture")]
