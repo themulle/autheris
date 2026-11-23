@@ -76,7 +76,8 @@ public sealed class Consent
     public IReadOnlyList<string>? TargetColumns { get; init; }
     public long GrantRecordSeq { get; init; }
     public Guid? ProfileAssignmentId { get; init; }
-    public DateTimeOffset? ExpiryNoticeSentAt { get; init; }
+    /// <summary>Highest expiry reminder stage already sent for this grant (0 = none).</summary>
+    public int ExpiryNoticeStage { get; init; }
 
     /// <summary>
     /// owner-authored explanation of why this grant exists (persisted, normalised by<c>UntrustedText</c>). Settable because

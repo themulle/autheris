@@ -31,10 +31,10 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
 
         var routeA = new ConsentWorkflowRoute(
             Store.TenantA.Value, WorkflowRouteScopeKind.Tenant, "*", ConsentWorkflowMode.Internal,
-            null, 30, 14, 48, true, "admin-a", FixedNow);
+            null, 30, 14, true, "admin-a", FixedNow);
         var routeB = new ConsentWorkflowRoute(
             Store.TenantB.Value, WorkflowRouteScopeKind.Tenant, "*", ConsentWorkflowMode.Internal,
-            null, 60, 21, 72, true, "admin-b", FixedNow);
+            null, 60, 21, true, "admin-b", FixedNow);
         await Store.ConsentWorkflowAdmin.UpsertWorkflowRouteAsync(routeA);
         await Store.ConsentWorkflowAdmin.UpsertWorkflowRouteAsync(routeB);
 
@@ -101,7 +101,7 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
 
         var route = new ConsentWorkflowRoute(
             Store.TenantA.Value, WorkflowRouteScopeKind.DataSource, "sales", ConsentWorkflowMode.Internal,
-            null, 45, 14, 24, true, "admin-a", FixedNow);
+            null, 45, 14, true, "admin-a", FixedNow);
         await Store.ConsentWorkflowAdmin.UpsertWorkflowRouteAsync(route);
         await Store.ConsentWorkflowAdmin.UpsertWorkflowRouteAsync(route with { MaxDurationDays = 30 });
 
@@ -126,7 +126,7 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
             original with { TenantId = Store.TenantB.Value, Name = "Conflicting-Tenant" });
         await crossTenant.Should().ThrowAsync<UnauthorizedAccessException>();
 
-        var remaining = await Store.GrantExpiry.GetGrantsWithoutExpiryNoticeAsync(FixedNow);
+        var remaining = await Store.GrantExpiry.GetGrantsWithPendingReminderAsync(FixedNow, FixedNow.AddDays(30), 10);
         remaining.Should().NotBeNull();
     }
 
@@ -172,7 +172,7 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
 
         var route = new ConsentWorkflowRoute(
             Store.TenantA.Value, WorkflowRouteScopeKind.DataOwner, "owner-soft-delete", ConsentWorkflowMode.Internal,
-            null, 30, 14, 24, true, "admin-a", FixedNow);
+            null, 30, 14, true, "admin-a", FixedNow);
         await Store.ConsentWorkflowAdmin.UpsertWorkflowRouteAsync(route);
 
         var deleted = await Store.ConsentWorkflowAdmin.DeleteWorkflowRouteAsync(

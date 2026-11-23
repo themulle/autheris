@@ -105,6 +105,14 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Governance.Requests.IGrantEffectApplier, Autheris.Application.Governance.Requests.CatalogGrantApplier>();
         services.AddSingleton<Autheris.Application.Governance.Requests.IGrantEffectApplier, Autheris.Application.Governance.Requests.ProfileAssignmentApplier>();
         services.AddScoped<Autheris.Application.Governance.Requests.PermissionRequestEngine>();
+        services.AddScoped<Autheris.Application.Governance.Requests.SelfGrantService>();
+        services.AddSingleton<Autheris.Application.Governance.Grants.IGrantRevocationService>(sp => new Autheris.Application.Governance.Grants.GrantRevocationService(
+            sp.GetRequiredService<Autheris.Application.Common.Interfaces.IConsentRepository>(),
+            sp.GetRequiredService<Autheris.Application.Common.Interfaces.IConsentApprovalRepository>(),
+            sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>(),
+            sp.GetService<Autheris.Application.Common.Interfaces.ICatalogVisibilityGrantRepository>(),
+            timeProvider: sp.GetService<TimeProvider>(),
+            logger: sp.GetService<Microsoft.Extensions.Logging.ILogger<Autheris.Application.Governance.Grants.GrantRevocationService>>()));
         services.AddHostedService<Autheris.Application.ConsentRequests.Events.ConsentWebhookDispatcherHostedService>();
         services.AddHostedService<Autheris.Application.Governance.Grants.GrantExpiryHostedService>();
         services.AddHostedService<Autheris.Application.Policy.RowScopes.PatternCoverageMonitor>();

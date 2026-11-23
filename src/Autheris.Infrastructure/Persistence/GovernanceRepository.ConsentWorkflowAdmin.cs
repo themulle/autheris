@@ -62,7 +62,7 @@ public partial class GovernanceRepository : IConsentWorkflowAdminRepository
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = @"SELECT tenant_id, scope_kind, scope_ref, mode, external_system_id, max_duration_days,
-       request_timeout_days, expiry_notice_lead_hours, require_resolvable_approver, updated_by, updated_at
+       request_timeout_days, require_resolvable_approver, updated_by, updated_at
 FROM CONSENT_WORKFLOW_ROUTES
 WHERE tenant_id = @tenant AND scope_kind = @scopeKind AND scope_ref = @scopeRef";
         cmd.AddBound("@tenant", tenantId.Value);
@@ -95,15 +95,14 @@ WHERE tenant_id = @tenant AND scope_kind = @scopeKind AND scope_ref = @scopeRef"
                 cmd.Transaction = tx;
                 cmd.CommandText = @"INSERT INTO CONSENT_WORKFLOW_ROUTES
 (tenant_id, scope_kind, scope_ref, mode, external_system_id, max_duration_days,
- request_timeout_days, expiry_notice_lead_hours, require_resolvable_approver, updated_by, updated_at)
+ request_timeout_days, require_resolvable_approver, updated_by, updated_at)
 VALUES (@tenant, @scopeKind, @scopeRef, @mode, @externalSystemId, @maxDurationDays,
-        @requestTimeoutDays, @expiryNoticeLeadHours, @requireResolvableApprover, @updatedBy, @updatedAt)
+        @requestTimeoutDays, @requireResolvableApprover, @updatedBy, @updatedAt)
 ON CONFLICT (tenant_id, scope_kind, scope_ref) DO UPDATE
 SET mode = EXCLUDED.mode,
     external_system_id = EXCLUDED.external_system_id,
     max_duration_days = EXCLUDED.max_duration_days,
     request_timeout_days = EXCLUDED.request_timeout_days,
-    expiry_notice_lead_hours = EXCLUDED.expiry_notice_lead_hours,
     require_resolvable_approver = EXCLUDED.require_resolvable_approver,
     updated_by = EXCLUDED.updated_by,
     updated_at = EXCLUDED.updated_at";
@@ -119,7 +118,6 @@ SET mode = @mode,
     external_system_id = @externalSystemId,
     max_duration_days = @maxDurationDays,
     request_timeout_days = @requestTimeoutDays,
-    expiry_notice_lead_hours = @expiryNoticeLeadHours,
     require_resolvable_approver = @requireResolvableApprover,
     updated_by = @updatedBy,
     updated_at = @updatedAt
@@ -132,9 +130,9 @@ WHERE tenant_id = @tenant AND scope_kind = @scopeKind AND scope_ref = @scopeRef"
                     insertCmd.Transaction = tx;
                     insertCmd.CommandText = @"INSERT INTO dbo.CONSENT_WORKFLOW_ROUTES
 (tenant_id, scope_kind, scope_ref, mode, external_system_id, max_duration_days,
- request_timeout_days, expiry_notice_lead_hours, require_resolvable_approver, updated_by, updated_at)
+ request_timeout_days, require_resolvable_approver, updated_by, updated_at)
 VALUES (@tenant, @scopeKind, @scopeRef, @mode, @externalSystemId, @maxDurationDays,
-        @requestTimeoutDays, @expiryNoticeLeadHours, @requireResolvableApprover, @updatedBy, @updatedAt)";
+        @requestTimeoutDays, @requireResolvableApprover, @updatedBy, @updatedAt)";
                     BindWorkflowRouteParameters(insertCmd, route);
                     await insertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
                 }
@@ -155,8 +153,7 @@ VALUES (@tenant, @scopeKind, @scopeRef, @mode, @externalSystemId, @maxDurationDa
                     mode = route.Mode.ToSqlString(),
                     externalSystemId = route.ExternalSystemId,
                     maxDurationDays = route.MaxDurationDays,
-                    requestTimeoutDays = route.RequestTimeoutDays,
-                    expiryNoticeLeadHours = route.ExpiryNoticeLeadHours
+                    requestTimeoutDays = route.RequestTimeoutDays
                 })
             }, tx, ct).ConfigureAwait(false);
 
@@ -622,10 +619,9 @@ WHERE id = @id AND tenant_id = @tenant AND status = @expectedStatus";
             ConsentWorkflowSql.ReadOptionalGuid(reader, 4),
             Convert.ToInt32(reader.GetValue(5), CultureInfo.InvariantCulture),
             Convert.ToInt32(reader.GetValue(6), CultureInfo.InvariantCulture),
-            Convert.ToInt32(reader.GetValue(7), CultureInfo.InvariantCulture),
-            Convert.ToInt32(reader.GetValue(8), CultureInfo.InvariantCulture) == 1,
-            reader.GetString(9),
-            ConsentWorkflowSql.ReadOptionalTimestamp(reader, 10) ?? DateTimeOffset.UnixEpoch);
+            Convert.ToInt32(reader.GetValue(7), CultureInfo.InvariantCulture) == 1,
+            reader.GetString(8),
+            ConsentWorkflowSql.ReadOptionalTimestamp(reader, 9) ?? DateTimeOffset.UnixEpoch);
 
     private static ExternalWorkflowSystem ReadExternalWorkflowSystemRow(DbDataReader reader) =>
         new(
@@ -649,7 +645,6 @@ WHERE id = @id AND tenant_id = @tenant AND status = @expectedStatus";
         cmd.AddBound("@externalSystemId", (object?)route.ExternalSystemId?.ToString("D") ?? DBNull.Value);
         cmd.AddBound("@maxDurationDays", route.MaxDurationDays, System.Data.DbType.Int32);
         cmd.AddBound("@requestTimeoutDays", route.RequestTimeoutDays, System.Data.DbType.Int32);
-        cmd.AddBound("@expiryNoticeLeadHours", route.ExpiryNoticeLeadHours, System.Data.DbType.Int32);
         cmd.AddBound("@requireResolvableApprover", route.RequireResolvableApprover, System.Data.DbType.Boolean);
         cmd.AddBound("@updatedBy", route.UpdatedBy);
         cmd.AddBound("@updatedAt", route.UpdatedAt.ToUniversalTime(), System.Data.DbType.DateTimeOffset);

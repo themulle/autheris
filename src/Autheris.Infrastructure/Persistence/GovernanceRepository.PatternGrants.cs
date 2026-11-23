@@ -110,7 +110,7 @@ public partial class GovernanceRepository
             "SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type, " +
             "c.grantee_sid, c.valid_from, c.valid_to, " +
             "c.is_revoked, c.tenant_id, c.grant_source, c.grant_record_seq, " +
-            "c.profile_assignment_id, c.expiry_notice_sent_at, c.object_pattern, " +
+            "c.profile_assignment_id, c.expiry_notice_stage, c.object_pattern, " +
             "c.data_source, c.column_set_mode, c.workflow_mode, c.profile_item_no, " +
             "c.renewal_count, c.revoked_by_sid, c.revoked_at, c.revoke_reason, " +
             "c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns " +
@@ -328,7 +328,7 @@ public partial class GovernanceRepository
                 GrantSource = ConsentWorkflowSql.ReadGrantSource(reader, 10),
                 GrantRecordSeq = ConsentWorkflowSql.ReadInt64OrZero(reader, 11),
                 ProfileAssignmentId = ConsentWorkflowSql.ReadOptionalGuid(reader, 12),
-                ExpiryNoticeSentAt = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 13),
+                ExpiryNoticeStage = (int)ConsentWorkflowSql.ReadInt64OrZero(reader, 13),
                 ObjectPattern = ConsentWorkflowSql.ReadOptionalString(reader, 14),
                 DataSource = dataSource,
                 ColumnSetMode = ColumnSetModeExtensions.ParseColumnSetModeOrDefault(columnSetRaw),

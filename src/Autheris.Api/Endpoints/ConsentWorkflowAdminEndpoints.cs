@@ -86,7 +86,7 @@ public static partial class ConsentWorkflowAdminEndpoints
             return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Unsupported workflow mode.");
         }
 
-        if (body.MaxDurationDays <= 0 || body.RequestTimeoutDays <= 0 || body.ExpiryNoticeLeadHours <= 0)
+        if (body.MaxDurationDays <= 0 || body.RequestTimeoutDays <= 0)
         {
             return SafeErrorResults.Problem(
                 StatusCodes.Status422UnprocessableEntity,
@@ -150,7 +150,6 @@ public static partial class ConsentWorkflowAdminEndpoints
             parsedMode == ConsentWorkflowMode.External ? body.ExternalSystemId : null,
             body.MaxDurationDays,
             body.RequestTimeoutDays,
-            body.ExpiryNoticeLeadHours,
             body.RequireResolvableApprover ?? true,
             actorSid,
             now);
@@ -449,7 +448,6 @@ public static partial class ConsentWorkflowAdminEndpoints
         externalSystemId = route.ExternalSystemId,
         maxDurationDays = route.MaxDurationDays,
         requestTimeoutDays = route.RequestTimeoutDays,
-        expiryNoticeLeadHours = route.ExpiryNoticeLeadHours,
         requireResolvableApprover = route.RequireResolvableApprover,
         updatedBy = route.UpdatedBy,
         updatedAt = route.UpdatedAt
@@ -473,7 +471,6 @@ public static partial class ConsentWorkflowAdminEndpoints
         Guid? ExternalSystemId,
         int MaxDurationDays,
         int RequestTimeoutDays = 30,
-        int ExpiryNoticeLeadHours = 72,
         bool? RequireResolvableApprover = true);
 
     public sealed record UpsertExternalSystemRequest(

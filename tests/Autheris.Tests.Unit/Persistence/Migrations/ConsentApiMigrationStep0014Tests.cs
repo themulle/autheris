@@ -108,7 +108,7 @@ public sealed class ConsentApiMigrationStep0014Tests
         var now = new DateTimeOffset(2026, 11, 14, 12, 0, 0, TimeSpan.Zero);
         var reqValidFrom = now.AddMinutes(-5);
         var updatedAt = now.AddMinutes(5);
-        var expiryNotice = now.AddDays(2);
+        var expiryNoticeStage = 2L;
 
         var reqId = Guid.NewGuid();
         var tableId = Guid.NewGuid();
@@ -167,7 +167,7 @@ public sealed class ConsentApiMigrationStep0014Tests
             "DECLARATIVE",
             42L,
             profileAssignId.ToString(),
-            expiryNotice
+            expiryNoticeStage
         ]);
 
         var list = new List<Consent>();
@@ -182,7 +182,7 @@ public sealed class ConsentApiMigrationStep0014Tests
         hydratedConsent.GrantSource.ShouldBe(ConsentGrantSource.Declarative);
         hydratedConsent.GrantRecordSeq.ShouldBe(42L);
         hydratedConsent.ProfileAssignmentId.ShouldBe(profileAssignId);
-        hydratedConsent.ExpiryNoticeSentAt.ShouldBe(expiryNotice);
+        hydratedConsent.ExpiryNoticeStage.ShouldBe(2);
     }
 
     private static string FindRepoRoot()

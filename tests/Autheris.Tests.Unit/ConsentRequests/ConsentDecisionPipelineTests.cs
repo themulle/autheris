@@ -369,7 +369,7 @@ public sealed class ConsentDecisionPipelineTests
         var req = Request(mode: ConsentWorkflowMode.External, status: "PENDING_EXTERNAL_APPROVAL");
         approvals.GetConsentRequestAsync(req.Id, Arg.Any<CancellationToken>()).Returns(req);
         configRepo.ResolveWorkflowRouteAsync(TenantA, req.TableIdentifier, Arg.Any<CancellationToken>())
-            .Returns(new ConsentWorkflowRoute(TenantA.Value, WorkflowRouteScopeKind.Tenant, TenantA.Value, ConsentWorkflowMode.External, ExternalSystemId, 60, 30, 72, true, "admin", FixedNow));
+            .Returns(new ConsentWorkflowRoute(TenantA.Value, WorkflowRouteScopeKind.Tenant, TenantA.Value, ConsentWorkflowMode.External, ExternalSystemId, 60, 30, true, "admin", FixedNow));
         configRepo.GetExternalWorkflowSystemAsync(TenantA, ExternalSystemId, Arg.Any<CancellationToken>())
             .Returns(new ExternalWorkflowSystem(ExternalSystemId, TenantA.Value, "SNOW", "snow-client", "https://snow.local/hook", "sec", true, "admin", FixedNow, null));
         scimUsers.GetUserByObjectSidAsync(TenantA, Arg.Any<string>(), Approver1Sid.Value, Arg.Any<CancellationToken>())

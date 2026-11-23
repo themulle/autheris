@@ -37,9 +37,9 @@ public sealed class ConsentWorkflowRouterTests
 
         var routes = new List<ConsentWorkflowRoute>
         {
-            new(Tenant.Value, WorkflowRouteScopeKind.Tenant, "*", ConsentWorkflowMode.External, tenantSystemId, 90, 30, 72, true, "admin", FixedNow),
-            new(Tenant.Value, WorkflowRouteScopeKind.DataOwner, "owner-1", ConsentWorkflowMode.External, ownerSystemId, 45, 20, 48, true, "admin", FixedNow),
-            new(Tenant.Value, WorkflowRouteScopeKind.DataSource, "sales_db", ConsentWorkflowMode.External, dsSystemId, 14, 7, 24, true, "admin", FixedNow)
+            new(Tenant.Value, WorkflowRouteScopeKind.Tenant, "*", ConsentWorkflowMode.External, tenantSystemId, 90, 30, true, "admin", FixedNow),
+            new(Tenant.Value, WorkflowRouteScopeKind.DataOwner, "owner-1", ConsentWorkflowMode.External, ownerSystemId, 45, 20, true, "admin", FixedNow),
+            new(Tenant.Value, WorkflowRouteScopeKind.DataSource, "sales_db", ConsentWorkflowMode.External, dsSystemId, 14, 7, true, "admin", FixedNow)
         };
 
         var adminRepo = Substitute.For<IConsentWorkflowAdminRepository>();
@@ -58,7 +58,6 @@ public sealed class ConsentWorkflowRouterTests
         resolution.ExternalSystemId.ShouldBe(dsSystemId);
         resolution.MaxDurationDays.ShouldBe(14);
         resolution.RequestTimeoutDays.ShouldBe(7);
-        resolution.ExpiryNoticeLeadHours.ShouldBe(24);
         resolution.MatchedScopeKind.ShouldBe(WorkflowRouteScopeKind.DataSource);
         resolution.ConflictDetected.ShouldBeFalse();
     }
@@ -71,9 +70,9 @@ public sealed class ConsentWorkflowRouterTests
 
         var routes = new List<ConsentWorkflowRoute>
         {
-            new(Tenant.Value, WorkflowRouteScopeKind.Tenant, "*", ConsentWorkflowMode.External, systemA, 60, 30, 72, true, "admin", FixedNow),
-            new(Tenant.Value, WorkflowRouteScopeKind.DataOwner, "owner-1", ConsentWorkflowMode.External, systemA, 30, 15, 24, true, "admin", FixedNow),
-            new(Tenant.Value, WorkflowRouteScopeKind.DataOwner, "owner-2", ConsentWorkflowMode.External, systemB, 45, 20, 48, true, "admin", FixedNow)
+            new(Tenant.Value, WorkflowRouteScopeKind.Tenant, "*", ConsentWorkflowMode.External, systemA, 60, 30, true, "admin", FixedNow),
+            new(Tenant.Value, WorkflowRouteScopeKind.DataOwner, "owner-1", ConsentWorkflowMode.External, systemA, 30, 15, true, "admin", FixedNow),
+            new(Tenant.Value, WorkflowRouteScopeKind.DataOwner, "owner-2", ConsentWorkflowMode.External, systemB, 45, 20, true, "admin", FixedNow)
         };
 
         var adminRepo = Substitute.For<IConsentWorkflowAdminRepository>();
@@ -120,7 +119,6 @@ public sealed class ConsentWorkflowRouterTests
         resolution.ExternalSystemId.ShouldBeNull();
         resolution.MaxDurationDays.ShouldBe(ConsentWorkflowRouter.FallbackMaxDurationDays);
         resolution.RequestTimeoutDays.ShouldBe(ConsentWorkflowRouter.FallbackRequestTimeoutDays);
-        resolution.ExpiryNoticeLeadHours.ShouldBe(ConsentWorkflowRouter.FallbackExpiryNoticeLeadHours);
         resolution.MatchedScopeKind.ShouldBeNull();
         resolution.ConflictDetected.ShouldBeFalse();
     }
@@ -130,15 +128,14 @@ public sealed class ConsentWorkflowRouterTests
     {
         var adminRepo = Substitute.For<IConsentWorkflowAdminRepository>();
         adminRepo.GetWorkflowRouteAsync(Tenant, WorkflowRouteScopeKind.Tenant, "*", Arg.Any<CancellationToken>())
-            .Returns(new ConsentWorkflowRoute(Tenant.Value, WorkflowRouteScopeKind.Tenant, "*", ConsentWorkflowMode.Internal, null, 30, 14, 48, true, "admin", FixedNow));
+            .Returns(new ConsentWorkflowRoute(Tenant.Value, WorkflowRouteScopeKind.Tenant, "*", ConsentWorkflowMode.Internal, null, 30, 14, true, "admin", FixedNow));
 
         var configRepo = Substitute.For<IConsentWorkflowConfigRepository>();
         var body = new ConsentWorkflowAdminEndpoints.UpsertWorkflowRouteRequest(
             Mode: "INTERNAL",
             ExternalSystemId: null,
             MaxDurationDays: 45,
-            RequestTimeoutDays: 14,
-            ExpiryNoticeLeadHours: 24);
+            RequestTimeoutDays: 14);
 
         var httpContext = new DefaultHttpContext
         {

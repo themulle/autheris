@@ -90,7 +90,7 @@ WHERE request_id = @requestId AND owner_decision = 'PENDING' AND UPPER(owner_sid
 SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
        c.grantee_sid, c.valid_from, c.valid_to,
        c.is_revoked, c.tenant_id, c.renewal_count,
-       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at,
+       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_stage,
        t.source_name, t.schema_name, t.table_name,
        c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns
 FROM CONSENTS c
@@ -109,7 +109,7 @@ WHERE table_id = @tid AND data_owner_id = @oid";
 SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
        c.grantee_sid, c.valid_from, c.valid_to,
        c.is_revoked, c.tenant_id, c.renewal_count,
-       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at,
+       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_stage,
        t.source_name, t.schema_name, t.table_name,
        c.object_pattern, c.data_source, c.column_set_mode, c.workflow_mode, c.profile_item_no,
        c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns
@@ -463,7 +463,7 @@ WHERE c.tenant_id = @tenantId
             GrantSource = ConsentWorkflowSql.ReadGrantSource(reader, 11),
             GrantRecordSeq = ConsentWorkflowSql.ReadInt64OrZero(reader, 12),
             ProfileAssignmentId = ConsentWorkflowSql.ReadOptionalGuid(reader, 13),
-            ExpiryNoticeSentAt = ConsentWorkflowSql.ReadOptionalTimestamp(reader, 14),
+            ExpiryNoticeStage = (int)ConsentWorkflowSql.ReadInt64OrZero(reader, 14),
             ObjectPattern = hasPatternCols ? ConsentWorkflowSql.ReadOptionalString(reader, 18) : null,
             DataSource = hasPatternCols ? ConsentWorkflowSql.ReadOptionalString(reader, 19) : null,
             ColumnSetMode = hasPatternCols

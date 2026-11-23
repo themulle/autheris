@@ -41,7 +41,6 @@ public sealed partial class AdvisoryRegressionTests
             extSystemId,
             MaxDurationDays: 30,
             RequestTimeoutDays: 14,
-            ExpiryNoticeLeadHours: 24,
             RequireResolvableApprover: false,
             WorkflowRouteScopeKind.DataSource));
 

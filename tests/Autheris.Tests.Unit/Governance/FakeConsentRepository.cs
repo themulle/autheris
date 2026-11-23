@@ -96,7 +96,7 @@ internal sealed class FakeConsentRepository : IConsentRepository, IConsentDescri
         Id = c.Id, TableId = c.TableId, TableIdentifier = c.TableIdentifier, TenantId = c.TenantId, Effect = c.Effect,
         GranteeType = c.GranteeType, GranteeSid = c.GranteeSid, ValidFrom = c.ValidFrom, ValidTo = validTo ?? c.ValidTo,
         IsRevoked = revoked, RevokeReason = revokeReason ?? c.RevokeReason, RenewalCount = c.RenewalCount + renewalCountDelta,
-        GrantSource = c.GrantSource, GrantRecordSeq = c.GrantRecordSeq, ProfileAssignmentId = c.ProfileAssignmentId, ExpiryNoticeSentAt = c.ExpiryNoticeSentAt,
+        GrantSource = c.GrantSource, GrantRecordSeq = c.GrantRecordSeq, ProfileAssignmentId = c.ProfileAssignmentId, ExpiryNoticeStage = c.ExpiryNoticeStage,
         ColumnRules = c.ColumnRules, RowFilters = c.RowFilters, Description = c.Description,
         ObjectPattern = c.ObjectPattern, DataSource = c.DataSource, ColumnSetMode = c.ColumnSetMode
     };

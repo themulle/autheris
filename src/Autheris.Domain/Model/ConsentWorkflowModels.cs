@@ -287,7 +287,6 @@ public sealed record ConsentWorkflowRoute(
     Guid? ExternalSystemId,
     int MaxDurationDays,
     int RequestTimeoutDays,
-    int ExpiryNoticeLeadHours,
     bool RequireResolvableApprover,
     string UpdatedBy,
     DateTimeOffset UpdatedAt);

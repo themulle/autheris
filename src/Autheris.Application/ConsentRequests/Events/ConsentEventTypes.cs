@@ -34,7 +34,8 @@ public sealed record ConsentThinEventPayload(
     int Version,
     string WorkflowMode,
     DateTimeOffset OccurredAt,
-    ConsentEventLinks Links);
+    ConsentEventLinks Links,
+    int? ReminderStage = null);
 
 public static class ConsentEventPayloads
 {
@@ -64,7 +65,8 @@ public static class ConsentEventPayloads
         ConsentWorkflowMode workflowMode,
         int version,
         string status,
-        DateTimeOffset occurredAt)
+        DateTimeOffset occurredAt,
+        int? reminderStage = null)
     {
         ArgumentNullException.ThrowIfNull(consent);
         var objectId = !string.IsNullOrWhiteSpace(consent.TableIdentifier.TableName)
@@ -79,7 +81,8 @@ public static class ConsentEventPayloads
             version <= 0 ? 1 : version,
             workflowMode.ToSqlString(),
             occurredAt,
-            new ConsentEventLinks($"/api/v1/consent/grants/{consent.Id}", "/api/v1/consent/events"));
+            new ConsentEventLinks($"/api/v1/consent/grants/{consent.Id}", "/api/v1/consent/events"),
+            reminderStage);
     }
 
     public static string Serialize(ConsentThinEventPayload payload)

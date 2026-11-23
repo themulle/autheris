@@ -177,7 +177,7 @@ public sealed partial class AdvisoryRegressionTests
     {
         var sysId = Guid.NewGuid();
         var system = new ExternalWorkflowSystem(sysId, TenantA.Value, "snow", "svc", "https://sn.local", "sec", true, "admin", DateTimeOffset.UtcNow, null);
-        var route = new ConsentWorkflowRoute(TenantA.Value, WorkflowRouteScopeKind.Tenant, TenantA.Value, ConsentWorkflowMode.External, sysId, 90, 30, 72, false, "admin", DateTimeOffset.UtcNow);
+        var route = new ConsentWorkflowRoute(TenantA.Value, WorkflowRouteScopeKind.Tenant, TenantA.Value, ConsentWorkflowMode.External, sysId, 90, 30, false, "admin", DateTimeOffset.UtcNow);
         var guard = new ExternalDecisionGuard();
 
         foreach (var (gType, gRef, subject) in new[]
@@ -200,7 +200,7 @@ public sealed partial class AdvisoryRegressionTests
         const string targetGroup = "S-1-5-21-1000-2000-3000-5001";
         var sysId = Guid.NewGuid();
         var system = new ExternalWorkflowSystem(sysId, TenantA.Value, "snow", "svc", "https://sn.local", "sec", true, "admin", DateTimeOffset.UtcNow, null);
-        var route = new ConsentWorkflowRoute(TenantA.Value, WorkflowRouteScopeKind.Tenant, TenantA.Value, ConsentWorkflowMode.External, sysId, 90, 30, 72, false, "admin", DateTimeOffset.UtcNow);
+        var route = new ConsentWorkflowRoute(TenantA.Value, WorkflowRouteScopeKind.Tenant, TenantA.Value, ConsentWorkflowMode.External, sysId, 90, 30, false, "admin", DateTimeOffset.UtcNow);
 
         EffectiveScimGroupsResult scimResult = new(new HashSet<string>(), false, false);
         var scimGroups = Wave2ScimGroupProxy((_, _) => Task.FromResult(scimResult));
@@ -632,7 +632,7 @@ public sealed partial class AdvisoryRegressionTests
                 ? Task.FromResult(true) : Task.FromResult<IReadOnlyList<DataOwner>>([]));
             _workflow = Wave2Proxy<IConsentWorkflowConfigRepository>.Create((m, args) => m.Name switch
             {
-                "ResolveWorkflowRouteAsync" => Task.FromResult<ConsentWorkflowRoute?>(new ConsentWorkflowRoute(TenantA.Value, WorkflowRouteScopeKind.Tenant, TenantA.Value, ConsentWorkflowMode.External, ExternalSystemId, 90, 30, 72, false, "admin", DateTimeOffset.UtcNow)),
+                "ResolveWorkflowRouteAsync" => Task.FromResult<ConsentWorkflowRoute?>(new ConsentWorkflowRoute(TenantA.Value, WorkflowRouteScopeKind.Tenant, TenantA.Value, ConsentWorkflowMode.External, ExternalSystemId, 90, 30, false, "admin", DateTimeOffset.UtcNow)),
                 "GetExternalWorkflowSystemAsync" => Task.FromResult<ExternalWorkflowSystem?>(new ExternalWorkflowSystem(ExternalSystemId, TenantA.Value, "snow", "svc", "https://sn.local", "sec", true, "admin", DateTimeOffset.UtcNow, null)),
                 _ => throw new NotSupportedException(m.Name)
             });
