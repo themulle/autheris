@@ -191,14 +191,14 @@ public sealed class WriteConsentWorkflowTests
 
         var unknownCol = await Should.ThrowAsync<ConsentRequestException>(() => service.SubmitAsync(
             new ConsentRequestSubmission(
-                OrdersId.Domain, OrdersId.Schema, OrdersId.TableName, "Unknown column", 7, null,
+                OrdersId.Domain, OrdersId.Schema, OrdersId.TableName, "Unknown column validation", 7, null,
                 Requester, CreatePrincipal(Requester), Tenant,
                 RequestedWriteRules: [new WriteRule(Guid.Empty, WriteOperation.Insert, ["does_not_exist"], WriteRowScope.OwnRows, null, null)])));
         unknownCol.Code.ShouldBe("VALIDATION_ERROR");
 
         var protectedCol = await Should.ThrowAsync<ConsentRequestException>(() => service.SubmitAsync(
             new ConsentRequestSubmission(
-                OrdersId.Domain, OrdersId.Schema, OrdersId.TableName, "Protected column", 7, null,
+                OrdersId.Domain, OrdersId.Schema, OrdersId.TableName, "Protected column validation", 7, null,
                 Requester, CreatePrincipal(Requester), Tenant,
                 RequestedWriteRules: [new WriteRule(Guid.Empty, WriteOperation.Insert, ["created_by"], WriteRowScope.OwnRows, null, null)])));
         protectedCol.Code.ShouldBe("VALIDATION_ERROR");
@@ -206,7 +206,7 @@ public sealed class WriteConsentWorkflowTests
 
         var pkUpdate = await Should.ThrowAsync<ConsentRequestException>(() => service.SubmitAsync(
             new ConsentRequestSubmission(
-                OrdersId.Domain, OrdersId.Schema, OrdersId.TableName, "Update PK", 7, null,
+                OrdersId.Domain, OrdersId.Schema, OrdersId.TableName, "Primary key column update", 7, null,
                 Requester, CreatePrincipal(Requester), Tenant,
                 RequestedWriteRules: [new WriteRule(Guid.Empty, WriteOperation.Update, ["id"], WriteRowScope.OwnRows, null, null)])));
         pkUpdate.Code.ShouldBe("VALIDATION_ERROR");

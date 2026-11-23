@@ -85,7 +85,8 @@ public sealed record ConsentPageQuery(
     string? Grantee = null,
     bool IncludeInactive = false,
     Guid? AfterId = null,
-    int PageSize = ConsentPageQuery.DefaultPageSize)
+    int PageSize = ConsentPageQuery.DefaultPageSize,
+    Autheris.Domain.Model.PermissionGrantKind? GrantKind = Autheris.Domain.Model.PermissionGrantKind.Data)
 {
     public const int DefaultPageSize = 100;
     public const int MaxPageSize = 500;

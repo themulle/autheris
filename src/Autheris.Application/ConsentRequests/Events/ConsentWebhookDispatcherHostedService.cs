@@ -3,9 +3,12 @@ namespace Autheris.Application.ConsentRequests.Events;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics.Metrics;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Audit;
 using Autheris.Application.Webhooks;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
@@ -39,6 +42,7 @@ public sealed class ConsentWebhookDispatcherHostedService : BackgroundService
     private readonly ILogger<ConsentWebhookDispatcherHostedService> _logger;
     private readonly IWebhookSecretProtector? _secretProtector;
     private readonly TimeProvider _timeProvider;
+    private readonly IAuditWriter? _auditWriter;
     private long _lastPurgeTicks;
 
     public ConsentWebhookDispatcherHostedService(
@@ -49,8 +53,10 @@ public sealed class ConsentWebhookDispatcherHostedService : BackgroundService
         IOptions<ConsentEventsOptions> options,
         ILogger<ConsentWebhookDispatcherHostedService> logger,
         IWebhookSecretProtector? secretProtector = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IAuditWriter? auditWriter = null)
     {
+        _auditWriter = auditWriter;
         _outbox = outbox ?? throw new ArgumentNullException(nameof(outbox));
         _workflowConfig = workflowConfig ?? throw new ArgumentNullException(nameof(workflowConfig));
         _client = client ?? throw new ArgumentNullException(nameof(client));
@@ -286,11 +292,12 @@ public sealed class ConsentWebhookDispatcherHostedService : BackgroundService
         string errorCode,
         CancellationToken ct)
     {
+        var now = _timeProvider.GetUtcNow();
         await _outbox.MarkDeadLetteredAsync(
             item.EventId,
             item.ExternalSystemId,
             leaseOwner,
-            _timeProvider.GetUtcNow(),
+            now,
             ct).ConfigureAwait(false);
         DeliveriesCounter.Add(1, new KeyValuePair<string, object?>("outcome", "dead"));
         DeadLettersCounter.Add(1, new KeyValuePair<string, object?>("code", errorCode));
@@ -300,5 +307,30 @@ public sealed class ConsentWebhookDispatcherHostedService : BackgroundService
             item.ExternalSystemId,
             errorCode,
             item.Attempts);
+
+        if (_auditWriter is not null)
+        {
+            var tenant = TenantId.TryParse(item.TenantId, out var parsedTenant) ? parsedTenant : TenantId.Platform;
+            var detailsJson = JsonSerializer.Serialize(new
+            {
+                channel = "consent_event_outbox",
+                eventId = item.EventId,
+                externalSystemId = item.ExternalSystemId,
+                errorCode,
+                attempts = item.Attempts
+            });
+            await _auditWriter.RecordRequiredAsync(new AuditLogEntry
+            {
+                Id = Guid.NewGuid(),
+                OccurredAt = now.ToUniversalTime(),
+                EventType = AuditEventTypes.WebhookDeliveryFailed,
+                ActorSid = new Sid("SYSTEM:WEBHOOKS"),
+                TargetTable = "consent_event_deliveries",
+                Decision = "FAILED",
+                TraceId = Guid.NewGuid().ToString("N"),
+                DetailsJson = detailsJson,
+                TenantId = tenant
+            }, ct).ConfigureAwait(false);
+        }
     }
 }

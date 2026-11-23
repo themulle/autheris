@@ -27,7 +27,10 @@ public static class IndividualGrantServiceCollectionExtensions
             IndividualGrantLimits.Current = service;
         });
 
-        services.TryAddSingleton<IGrantPolicy>(sp => new GrantPolicy(sp.GetRequiredService<IOptions<IndividualGrantOptions>>(), sp.GetService<IGrantValidityPolicy>()));
+        services.TryAddSingleton<IGrantPolicy>(sp => new GrantPolicy(
+            sp.GetRequiredService<IOptions<IndividualGrantOptions>>(),
+            sp.GetService<IGrantValidityPolicy>(),
+            sp.GetService<IOptions<AccessPolicyOptions>>()));
         return services;
     }
 }

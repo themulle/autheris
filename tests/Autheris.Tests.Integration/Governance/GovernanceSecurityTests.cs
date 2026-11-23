@@ -249,10 +249,10 @@ public class GovernanceSecurityTests : IDisposable
         var accessorB = CreateAccessor(userB);
 
         var payloadA = await _mutation.RequestTableAccessAsync(
-            "finance", "dbo", "finance_table_1", "Reason A", 7, sharedIdempotencyKey, new ConsentRequestService(_repository, _repository), accessorA);
+            "finance", "dbo", "finance_table_1", "Quarterly reporting for user A", 7, sharedIdempotencyKey, new ConsentRequestService(_repository, _repository), accessorA);
 
         var payloadB = await _mutation.RequestTableAccessAsync(
-            "finance", "dbo", "finance_table_1", "Reason B", 7, sharedIdempotencyKey, new ConsentRequestService(_repository, _repository), accessorB);
+            "finance", "dbo", "finance_table_1", "Quarterly reporting for user B", 7, sharedIdempotencyKey, new ConsentRequestService(_repository, _repository), accessorB);
 
         // Payloads must not collide!
         payloadA.RequestId.ShouldNotBe(payloadB.RequestId);

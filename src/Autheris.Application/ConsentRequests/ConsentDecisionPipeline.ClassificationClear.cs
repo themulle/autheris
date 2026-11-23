@@ -22,7 +22,7 @@ public sealed partial class ConsentDecisionPipeline
     /// </summary>
     private async Task<ClearApprovalPlan?> ResolveClearPlanAsync(ConsentRequest req, ConsentDecisionCommand command, CancellationToken ct)
     {
-        if (command.Decision != ConsentDecisionKind.Approve || req.RequestKind != ConsentRequestKind.Consent)
+        if (command.Decision != ConsentDecisionKind.Approve || req.RequestKind != ConsentRequestKind.Data)
         {
             return null;
         }

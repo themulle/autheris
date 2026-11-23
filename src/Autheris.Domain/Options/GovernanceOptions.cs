@@ -18,6 +18,11 @@ public sealed class GovernanceOptions
     /// Deployment defaults and upper ceilings for tenant access policies (<c>Gateway:Governance:AccessPolicy</c>).
     /// </summary>
     public AccessPolicyOptions AccessPolicy { get; init; } = new();
+
+    /// <summary>
+    /// Data Governance outbound notification webhook configuration (<c>Gateway:Governance:Notifications</c>).
+    /// </summary>
+    public GovernanceNotificationOptions Notifications { get; init; } = new();
 }
 
 /// <summary>

@@ -52,29 +52,6 @@ public sealed class AccessPolicyEndpointsAuthorizationTests
         return new ClaimsPrincipal(new ClaimsIdentity(claims, "Bearer"));
     }
 
-    private sealed class StubPolicyProvider : IAccessPolicySettingsProvider
-    {
-        public int UpdateCalls { get; private set; }
-        public Task<TenantAccessPolicy> GetEffectiveAsync(TenantId tenant, CancellationToken ct = default) =>
-            throw new NotSupportedException();
-        public Task<AccessPolicyUpdateResult> UpdateAsync(TenantId tenant, TenantAccessPolicyUpdate update, int expectedVersion, Sid actor, CancellationToken ct = default)
-        {
-            UpdateCalls++;
-            return Task.FromResult(new AccessPolicyUpdateResult(AccessPolicyUpdateStatus.Updated));
-        }
-    }
-
-    private sealed class StubPolicyRepo : IAccessPolicySettingsRepository
-    {
-        public Task<StoredTenantAccessPolicy?> GetAsync(TenantId tenant, CancellationToken ct = default) =>
-            Task.FromResult<StoredTenantAccessPolicy?>(null);
-        public Task<AccessPolicyWriteResult> UpsertAsync(TenantId tenant, TenantAccessPolicyUpdate settings, int expectedVersion, Sid actor, CancellationToken ct = default) =>
-            Task.FromResult(new AccessPolicyWriteResult(AccessPolicyWriteStatus.Created,
-                new StoredTenantAccessPolicy(tenant, settings, 1, actor.Value, DateTimeOffset.UtcNow)));
-        public Task<bool> DeleteIfVersionAsync(TenantId tenant, int expectedVersion, CancellationToken ct = default) =>
-            Task.FromResult(false);
-    }
-
     [Fact]
     public async Task It_refused()
     {
@@ -169,5 +146,61 @@ public sealed class AccessPolicyEndpointsAuthorizationTests
         put.Metadata.GetMetadata<IAuthorizeData>()!.Policy.ShouldBe(GatewayPolicies.AuthenticatedCaller);
         put.Metadata.GetMetadata<AuditPolicy>()!.EventType.ShouldBe(AuditEventTypes.PolicyChanged);
         put.Metadata.GetMetadata<AuditPolicy>()!.Level.ShouldBe(AuditLevel.Full);
+    }
+
+    [Fact]
+    public async Task Url_never_returned()
+    {
+        const string secretUrl = "https://hooks.slack.com/services/T111/B222/NEVER_EXPOSED_TOKEN";
+        var protector = new DataProtectionNotificationWebhookUrlProtector(
+            Microsoft.AspNetCore.DataProtection.DataProtectionProvider.Create("Autheris.Tests"));
+        var capabilities = new GovernanceCapabilities();
+        var repo = new StubPolicyRepo();
+        var audit = new InMemoryAuditWriter();
+        var provider = new AccessPolicySettingsProvider(
+            repo,
+            Options.Create(new AccessPolicyOptions()),
+            audit,
+            new FakeTimeProvider(DateTimeOffset.UtcNow),
+            protector);
+
+        var govPrincipal = MakePrincipal("GovernanceAdmin");
+        var putHttp = HttpFor(govPrincipal, "\"0\"");
+        var putResult = await AccessPolicyEndpoints.UpdatePolicyAsync(
+            putHttp,
+            new AccessPolicyEndpoints.TenantAccessPolicyUpdateRequest(NotificationWebhookUrl: secretUrl),
+            capabilities,
+            provider,
+            CancellationToken.None);
+
+        (putResult as IStatusCodeHttpResult)?.StatusCode.ShouldBe(StatusCodes.Status200OK);
+        var json = System.Text.Json.JsonSerializer.Serialize((putResult as Ok<object>)!.Value);
+        json.ShouldNotContain("NEVER_EXPOSED_TOKEN");
+        json.ShouldNotContain("/services/");
+        json.ShouldContain("\"notificationWebhookConfigured\":true");
+        json.ShouldContain("\"notificationWebhookHost\":\"hooks.slack.com\"");
+    }
+
+    private sealed class StubPolicyProvider : IAccessPolicySettingsProvider
+    {
+        public int UpdateCalls { get; private set; }
+        public Task<TenantAccessPolicy> GetEffectiveAsync(TenantId tenant, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task<AccessPolicyUpdateResult> UpdateAsync(TenantId tenant, TenantAccessPolicyUpdate update, int expectedVersion, Sid actor, CancellationToken ct = default)
+        {
+            UpdateCalls++;
+            return Task.FromResult(new AccessPolicyUpdateResult(AccessPolicyUpdateStatus.Updated));
+        }
+    }
+
+    private sealed class StubPolicyRepo : IAccessPolicySettingsRepository
+    {
+        public Task<StoredTenantAccessPolicy?> GetAsync(TenantId tenant, CancellationToken ct = default) =>
+            Task.FromResult<StoredTenantAccessPolicy?>(null);
+        public Task<AccessPolicyWriteResult> UpsertAsync(TenantId tenant, TenantAccessPolicyUpdate settings, int expectedVersion, Sid actor, CancellationToken ct = default) =>
+            Task.FromResult(new AccessPolicyWriteResult(AccessPolicyWriteStatus.Created,
+                new StoredTenantAccessPolicy(tenant, settings, 1, actor.Value, DateTimeOffset.UtcNow)));
+        public Task<bool> DeleteIfVersionAsync(TenantId tenant, int expectedVersion, CancellationToken ct = default) =>
+            Task.FromResult(false);
     }
 }

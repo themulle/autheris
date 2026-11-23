@@ -93,9 +93,16 @@ public sealed class StartupWarmupExecutorIntegrationTests
 
         await WaitForStartupAsync(factory);
 
-        // The only startup audit entries come from pre-existing hosted services (catalog governance ingestion);
-        // the warm-up adds none (the chain length is that baseline).
-        string[] startupBaseline = [AuditEventTypes.CatalogVisibilityChanged, AuditEventTypes.TenancyDefaultTenantConfigured];
+        // The only startup audit entries come from pre-existing hosted services (catalog governance ingestion, the default tenant,
+        // the one-time D13 purge audit of step 0041 (#1009 SEC-1009-48) and the notification channel state written on every start
+        // (#1009 SEC-1009-46)); the warm-up adds none (the chain length is that baseline).
+        string[] startupBaseline =
+        [
+            AuditEventTypes.CatalogVisibilityChanged,
+            AuditEventTypes.TenancyDefaultTenantConfigured,
+            AuditEventTypes.MigrationGrantsPurged,
+            AuditEventTypes.NotificationChannelChanged
+        ];
         audit.ReceivedCalls().SelectMany(c => c.GetArguments().OfType<Autheris.Domain.Model.AuditLogEntry>())
             .Select(e => e.EventType).ShouldAllBe(t => startupBaseline.Contains(t));
         dataSource.ReceivedCalls().ShouldBeEmpty();

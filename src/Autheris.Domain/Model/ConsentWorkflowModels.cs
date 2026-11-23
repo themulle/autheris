@@ -8,8 +8,26 @@ public enum ConsentWorkflowMode
 
 public enum ConsentRequestKind
 {
-    Consent = 0,
-    ProfileAssignment = 1
+    Data = 0,
+    ProfileAssignment = 1,
+    Unmask = 2,
+    Catalog = 3
+}
+
+public enum PermissionGrantKind
+{
+    Unknown = 0,
+    Data = 1,
+    Unmask = 2,
+    Catalog = 3
+}
+
+public enum ApproverCapacity
+{
+    DataOwner = 0,
+    Governance = 1,
+    ItAdmin = 2,
+    SelfGrant = 3
 }
 
 public enum ConsentGrantSource
@@ -19,7 +37,8 @@ public enum ConsentGrantSource
     Owner = 2,
     Bulk = 3,
     Declarative = 4,
-    AccessPlan = 5
+    AccessPlan = 5,
+    SelfGrant = 6
 }
 
 public enum WorkflowRouteScopeKind
@@ -39,6 +58,7 @@ public static class ConsentWorkflowSqlMapping
         ConsentGrantSource.Bulk => "BULK",
         ConsentGrantSource.Declarative => "DECLARATIVE",
         ConsentGrantSource.AccessPlan => "ACCESS_PLAN",
+        ConsentGrantSource.SelfGrant => "SELF_GRANT",
         _ => throw new ArgumentOutOfRangeException(nameof(source), source, "Unsupported consent grant source.")
     };
 
@@ -63,6 +83,9 @@ public static class ConsentWorkflowSqlMapping
                 return true;
             case "ACCESS_PLAN":
                 source = ConsentGrantSource.AccessPlan;
+                return true;
+            case "SELF_GRANT":
+                source = ConsentGrantSource.SelfGrant;
                 return true;
             default:
                 source = ConsentGrantSource.ConsentRequest;
@@ -105,8 +128,10 @@ public static class ConsentWorkflowSqlMapping
 
     public static string ToSqlString(this ConsentRequestKind kind) => kind switch
     {
-        ConsentRequestKind.Consent => "CONSENT",
+        ConsentRequestKind.Data => "DATA",
         ConsentRequestKind.ProfileAssignment => "PROFILE_ASSIGNMENT",
+        ConsentRequestKind.Unmask => "UNMASK",
+        ConsentRequestKind.Catalog => "CATALOG",
         _ => throw new ArgumentOutOfRangeException(nameof(kind), kind, "Unsupported consent request kind.")
     };
 
@@ -114,22 +139,117 @@ public static class ConsentWorkflowSqlMapping
     {
         switch (value?.Trim().ToUpperInvariant())
         {
+            case "DATA":
             case "CONSENT":
-                kind = ConsentRequestKind.Consent;
+                kind = ConsentRequestKind.Data;
                 return true;
             case "PROFILE_ASSIGNMENT":
                 kind = ConsentRequestKind.ProfileAssignment;
                 return true;
+            case "UNMASK":
+                kind = ConsentRequestKind.Unmask;
+                return true;
+            case "CATALOG":
+                kind = ConsentRequestKind.Catalog;
+                return true;
             default:
-                kind = ConsentRequestKind.Consent;
+                kind = ConsentRequestKind.Data;
                 return false;
         }
     }
 
     public static ConsentRequestKind ParseRequestKindOrDefault(
         string? value,
-        ConsentRequestKind fallback = ConsentRequestKind.Consent) =>
+        ConsentRequestKind fallback = ConsentRequestKind.Data) =>
         TryParseRequestKind(value, out var parsed) ? parsed : fallback;
+
+    public static string ToSqlString(this PermissionGrantKind grantKind) => grantKind switch
+    {
+        PermissionGrantKind.Data => "DATA",
+        PermissionGrantKind.Unmask => "UNMASK",
+        PermissionGrantKind.Catalog => "CATALOG",
+        PermissionGrantKind.Unknown => "UNKNOWN",
+        _ => throw new ArgumentOutOfRangeException(nameof(grantKind), grantKind, "Unsupported permission grant kind.")
+    };
+
+    /// <summary>
+    /// Strict parser for persisted grant kinds: unknown or NULL values never fall back to <see cref="PermissionGrantKind.Data"/>.
+    /// </summary>
+    public static bool TryParseGrantKind(string? value, out PermissionGrantKind grantKind)
+    {
+        switch (value?.Trim().ToUpperInvariant())
+        {
+            case "DATA":
+                grantKind = PermissionGrantKind.Data;
+                return true;
+            case "UNMASK":
+                grantKind = PermissionGrantKind.Unmask;
+                return true;
+            case "CATALOG":
+                grantKind = PermissionGrantKind.Catalog;
+                return true;
+            default:
+                grantKind = PermissionGrantKind.Unknown;
+                return false;
+        }
+    }
+
+    public static PermissionGrantKind ParseGrantKindOrUnknown(string? value) =>
+        TryParseGrantKind(value, out var parsed) ? parsed : PermissionGrantKind.Unknown;
+
+    public static string ToSqlString(this ApproverCapacity capacity) => capacity switch
+    {
+        ApproverCapacity.DataOwner => "DATA_OWNER",
+        ApproverCapacity.Governance => "GOVERNANCE",
+        ApproverCapacity.ItAdmin => "IT_ADMIN",
+        ApproverCapacity.SelfGrant => "SELF_GRANT",
+        _ => throw new ArgumentOutOfRangeException(nameof(capacity), capacity, "Unsupported approver capacity.")
+    };
+
+    public static bool TryParseApproverCapacity(string? value, out ApproverCapacity capacity)
+    {
+        switch (value?.Trim().ToUpperInvariant())
+        {
+            case "DATA_OWNER":
+                capacity = ApproverCapacity.DataOwner;
+                return true;
+            case "GOVERNANCE":
+                capacity = ApproverCapacity.Governance;
+                return true;
+            case "IT_ADMIN":
+                capacity = ApproverCapacity.ItAdmin;
+                return true;
+            case "SELF_GRANT":
+                capacity = ApproverCapacity.SelfGrant;
+                return true;
+            default:
+                capacity = default;
+                return false;
+        }
+    }
+
+    public static string ToSqlString(this ContainerKind containerKind) => containerKind switch
+    {
+        ContainerKind.Domain => "DOMAIN",
+        ContainerKind.DataProduct => "DATA_PRODUCT",
+        _ => throw new ArgumentOutOfRangeException(nameof(containerKind), containerKind, "Unsupported container kind.")
+    };
+
+    public static bool TryParseContainerKind(string? value, out ContainerKind containerKind)
+    {
+        switch (value?.Trim().ToUpperInvariant())
+        {
+            case "DOMAIN":
+                containerKind = ContainerKind.Domain;
+                return true;
+            case "DATA_PRODUCT":
+                containerKind = ContainerKind.DataProduct;
+                return true;
+            default:
+                containerKind = default;
+                return false;
+        }
+    }
 
     public static string ToSqlString(this WorkflowRouteScopeKind scopeKind) => scopeKind switch
     {

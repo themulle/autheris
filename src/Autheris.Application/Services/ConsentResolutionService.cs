@@ -110,7 +110,8 @@ public sealed class ConsentResolutionService : IConsentResolutionService
                     orderedDenies.Where(static c => c.RowFilters.Count > 0).Select(static c => c.RowFilters).ToList());
 
             var clampedConsent = activeConsents
-                .Where(c => c.Effect == ConsentEffect.Allow &&
+                .Where(c => c.GrantKind == PermissionGrantKind.Data &&
+                            c.Effect == ConsentEffect.Allow &&
                             (c.WriteRules.Count == 0 || c.ColumnRules.Count > 0) &&
                             IsTableTargetMatch(c, table) &&
                             !(isHiddenTable && c.IsPatternGrant) &&
@@ -764,7 +765,10 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         IReadOnlySet<Sid> subjectGroupSids,
         IReadOnlySet<string> userRoles,
         IReadOnlySet<Sid>? allUserSids = null) =>
-        consent.IsActive(now) && IsTableTargetMatch(consent, table) && IsSubjectMatch(consent, userSid, subjectGroupSids, allUserSids);
+        consent.GrantKind == PermissionGrantKind.Data &&
+        consent.IsActive(now) &&
+        IsTableTargetMatch(consent, table) &&
+        IsSubjectMatch(consent, userSid, subjectGroupSids, allUserSids);
 
     internal static bool IsTableTargetMatch(Consent consent, TableIdentifier table)
     {

@@ -134,10 +134,12 @@ public static partial class GovernanceEndpoints
             return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Segregation of Duties (SoD) violation: Self-grant of access profiles is strictly prohibited.", context);
         }
 
-        // Justification validation (minimum 15 characters)
-        if (string.IsNullOrWhiteSpace(req.Justification) || req.Justification.Trim().Length < 15)
+        if (!Autheris.Application.Governance.Requests.JustificationPolicy.TryValidate(req.Justification, out var normalizedJustification, out _))
         {
-            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Justification is required and must be at least 15 characters long.", context);
+            return ApiProblems.BadRequest(
+                ApiErrorCodes.BadRequest,
+                $"Justification is required and must be between {Autheris.Application.Governance.Requests.JustificationPolicy.MinLength} and {Autheris.Application.Governance.Requests.JustificationPolicy.MaxLength} characters long.",
+                context);
         }
 
         // ValidDays validation bounded by GrantValidityPolicy
@@ -287,7 +289,7 @@ public static partial class GovernanceEndpoints
             GrantClassifier.Classify(matchedTables),
             mode,
             Requester: callerSid,
-            Justification: req.Justification.Trim()));
+            Justification: normalizedJustification));
         if (!grantDecision.Allowed)
         {
             return ApiProblems.BadRequest(
@@ -307,7 +309,7 @@ public static partial class GovernanceEndpoints
             RowScope = rowScope,
             CreatedAt = now,
             ValidTo = validTo,
-            Justification = req.Justification.Trim(),
+            Justification = normalizedJustification,
             CreatedBy = callerSid
         };
 

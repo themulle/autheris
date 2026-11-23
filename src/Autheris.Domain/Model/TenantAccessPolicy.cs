@@ -37,7 +37,10 @@ public sealed record TenantAccessPolicyUpdate(
     int? MaxBundleItems = null,
     int? MaxPendingRequestsPerRequester = null,
     int? MaxTablesPerAssignment = null,
-    int? MaxPageSize = null);
+    int? MaxPageSize = null,
+    string? NotificationWebhookUrl = null,
+    string? NotificationWebhookUrlProtected = null,
+    string? NotificationWebhookHost = null);
 
 /// <summary>Stored tenant-level access policy row with optimistic concurrency version.</summary>
 public sealed record StoredTenantAccessPolicy(
@@ -66,7 +69,10 @@ public sealed record TenantAccessPolicy(
     int MaxPageSize,
     int Version = 0,
     string? UpdatedBy = null,
-    DateTimeOffset? UpdatedAt = null)
+    DateTimeOffset? UpdatedAt = null,
+    bool NotificationWebhookConfigured = false,
+    string? NotificationWebhookHost = null,
+    string? NotificationWebhookUrlProtected = null)
 {
     public static TenantAccessPolicy FromDeploymentDefaults(TenantId tenant, AccessPolicyOptions options)
     {

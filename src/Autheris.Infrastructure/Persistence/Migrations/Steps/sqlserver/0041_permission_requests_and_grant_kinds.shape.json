@@ -1,0 +1,85 @@
+{
+  "ops": [
+    { "op": "addColumn", "table": "CONSENT_REQUESTS", "column": { "name": "grant_kind", "type": "NVARCHAR", "family": "string", "nullable": false } },
+    { "op": "addColumn", "table": "CONSENT_REQUESTS", "column": { "name": "target_columns", "type": "NVARCHAR", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "CONSENT_REQUESTS", "column": { "name": "container_kind", "type": "NVARCHAR", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "CONSENT_REQUESTS", "column": { "name": "container_id", "type": "NVARCHAR", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "CONSENT_REQUESTS", "column": { "name": "approver_capacity", "type": "NVARCHAR", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "CONSENT_REQUESTS", "column": { "name": "self_grant", "type": "BIT", "family": "boolean", "nullable": false } },
+    { "op": "addColumn", "table": "CONSENT_REQUESTS", "column": { "name": "bundle_id", "type": "NVARCHAR", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "CONSENT_REQUESTS", "column": { "name": "decided_by", "type": "NVARCHAR", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "CONSENT_REQUESTS", "column": { "name": "decided_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": true } },
+    { "op": "addIndex", "table": "CONSENT_REQUESTS", "name": "IX_CONSENT_REQUESTS_REQUESTER_STATUS", "unique": false, "columns": ["tenant_id", "requester_sid", "status"] },
+    { "op": "addIndex", "table": "CONSENT_REQUESTS", "name": "IX_CONSENT_REQUESTS_BUNDLE", "unique": false, "columns": ["tenant_id", "bundle_id"] },
+    { "op": "addColumn", "table": "CONSENTS", "column": { "name": "grant_kind", "type": "NVARCHAR", "family": "string", "nullable": false } },
+    { "op": "addColumn", "table": "CONSENTS", "column": { "name": "approver_capacity", "type": "NVARCHAR", "family": "string", "nullable": true } },
+    { "op": "addColumn", "table": "CONSENTS", "column": { "name": "self_grant", "type": "BIT", "family": "boolean", "nullable": false } },
+    { "op": "addColumn", "table": "CONSENTS", "column": { "name": "target_columns", "type": "NVARCHAR", "family": "string", "nullable": true } },
+    { "op": "addIndex", "table": "CONSENTS", "name": "IX_CONSENTS_GRANT_KIND", "unique": false, "columns": ["tenant_id", "grant_kind", "is_revoked"] },
+    {
+      "op": "addTable",
+      "table": "CATALOG_VISIBILITY_GRANTS",
+      "newTable": {
+        "name": "CATALOG_VISIBILITY_GRANTS",
+        "columns": [
+          { "name": "id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "container_kind", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "container_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "grantee_type", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "grantee_sid", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "grantee_sid_norm", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "valid_from", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false },
+          { "name": "valid_to", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": true },
+          { "name": "granted_by_sid", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "approver_capacity", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "request_id", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "is_revoked", "type": "BIT", "family": "boolean", "nullable": false },
+          { "name": "revoked_by_sid", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "revoked_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": true },
+          { "name": "revoke_reason", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "created_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false }
+        ],
+        "primaryKey": ["id"],
+        "indexes": []
+      }
+    },
+    { "op": "addIndex", "table": "CATALOG_VISIBILITY_GRANTS", "name": "IX_CATALOG_VISIBILITY_GRANTS_GRANTEE", "unique": false, "columns": ["tenant_id", "grantee_sid_norm", "is_revoked"] },
+    { "op": "addIndex", "table": "CATALOG_VISIBILITY_GRANTS", "name": "IX_CATALOG_VISIBILITY_GRANTS_CONTAINER", "unique": false, "columns": ["tenant_id", "container_kind", "container_id", "is_revoked"] },
+    {
+      "op": "addTable",
+      "table": "MIGRATION_PURGE_REPORT",
+      "newTable": {
+        "name": "MIGRATION_PURGE_REPORT",
+        "columns": [
+          { "name": "id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "step", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "table_name", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "row_count", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "ledger_head_hash", "type": "NVARCHAR", "family": "string", "nullable": true },
+          { "name": "purged_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false },
+          { "name": "audited_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": true }
+        ],
+        "primaryKey": ["id"],
+        "indexes": []
+      }
+    },
+    { "op": "addIndex", "table": "MIGRATION_PURGE_REPORT", "name": "IX_MIGRATION_PURGE_REPORT_STEP", "unique": false, "columns": ["step", "audited_at"] },
+    {
+      "op": "addTable",
+      "table": "GRANT_RECORD_HEADS_ARCHIVE",
+      "newTable": {
+        "name": "GRANT_RECORD_HEADS_ARCHIVE",
+        "columns": [
+          { "name": "tenant_id", "type": "NVARCHAR", "family": "string", "nullable": false },
+          { "name": "last_seq", "type": "BIGINT", "family": "integer", "nullable": false },
+          { "name": "last_hash", "type": "CHAR", "family": "string", "nullable": false },
+          { "name": "archived_at", "type": "DATETIMEOFFSET", "family": "datetime", "nullable": false },
+          { "name": "step", "type": "NVARCHAR", "family": "string", "nullable": false }
+        ],
+        "primaryKey": ["step", "tenant_id"],
+        "indexes": []
+      }
+    }
+  ]
+}

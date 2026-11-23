@@ -63,7 +63,7 @@ public sealed class ManifestFourEyesAndSelfGrantTests
             ApplyAsync(repo, Policy("User", "S-1-5-21-ALICE"), dryRun: dryRun, sensitive: true));
 
         ex.ErrorCode.ShouldBe(GrantErrorCodes.FourEyesRequired);
-        ex.Decision.Class.ShouldBe(GrantClass.Sensitive);
+        ex.Decision.Class.ShouldBe(GrantClass.DataOwner);
         repo.ReplaceCalls.ShouldBe(0);
         repo.Active(DateTimeOffset.UtcNow).ShouldBeEmpty();
     }
@@ -79,12 +79,10 @@ public sealed class ManifestFourEyesAndSelfGrantTests
             ApplyAsync(repo, Policy("User", "S-1-5-21-ALICE", clearColumn: "id"), dryRun: dryRun));
 
         ex.ErrorCode.ShouldBe(GrantErrorCodes.FourEyesRequired);
-        ex.Decision.Class.ShouldBe(GrantClass.IndividualUnmasked);
+        ex.Decision.Class.ShouldBe(GrantClass.DataOwner);
         repo.ReplaceCalls.ShouldBe(0);
     }
 
-    // The grant policy classifies every service principal as GrantClass.ServicePrincipal (no four-eyes flag); the manifest still
-    // refuses an Allow on a sensitive table or with a Clear column rule for it.
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
@@ -96,7 +94,7 @@ public sealed class ManifestFourEyesAndSelfGrantTests
             ApplyAsync(repo, Policy("ServicePrincipal", "00000000-0000-0000-0000-00000000a11c"), dryRun: dryRun, sensitive: true));
 
         ex.ErrorCode.ShouldBe(GrantErrorCodes.FourEyesRequired);
-        ex.Decision.Class.ShouldBe(GrantClass.ServicePrincipal);
+        ex.Decision.Class.ShouldBe(GrantClass.DataOwner);
         repo.ReplaceCalls.ShouldBe(0);
         repo.Active(DateTimeOffset.UtcNow).ShouldBeEmpty();
     }

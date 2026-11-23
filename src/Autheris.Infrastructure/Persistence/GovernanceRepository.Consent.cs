@@ -32,7 +32,8 @@ public partial class GovernanceRepository
         public const string SelectExpiringConsentsSql = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                    c.grantee_sid, c.valid_from, c.valid_to,
                                    c.is_revoked, t.source_name, t.schema_name, t.table_name,
-                                   c.tenant_id, c.renewal_count, c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at
+                                   c.tenant_id, c.renewal_count,
+                                   c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns
                             FROM CONSENTS c
                             JOIN TABLES t ON c.table_id = t.id
                             WHERE c.is_revoked = 0 AND c.valid_to > @now AND c.valid_to <= @threshold
@@ -43,7 +44,7 @@ public partial class GovernanceRepository
                                        r.business_justification, r.status, r.requested_at, r.requested_valid_to,
                                        t.source_name, t.schema_name, t.table_name, r.tenant_id,
                                        r.requester_identifiers_json, r.context_json, r.requested_write_rules_json,
-                                       r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id
+                                       r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id, r.grant_kind, r.target_columns, r.container_kind, r.container_id, r.approver_capacity, r.self_grant, r.bundle_id, r.decided_by, r.decided_at
                                 FROM CONSENT_REQUESTS r
                                 LEFT JOIN TABLES t ON r.table_id = t.id
                                 WHERE r.id = @id";
@@ -51,7 +52,8 @@ public partial class GovernanceRepository
         public const string SelectRequestsByRequesterBaseSql = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                        r.business_justification, r.status, r.requested_at, r.requested_valid_to,
                                        t.source_name, t.schema_name, t.table_name, r.context_json, r.requested_write_rules_json,
-                                       r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id, r.tenant_id
+                                       r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id, r.grant_kind, r.target_columns, r.container_kind, r.container_id, r.approver_capacity, r.self_grant, r.bundle_id, r.decided_by, r.decided_at,
+                                       r.tenant_id
                                 FROM CONSENT_REQUESTS r
                                 LEFT JOIN TABLES t ON r.table_id = t.id
                                 WHERE r.requester_sid = @reqSid
@@ -60,7 +62,8 @@ public partial class GovernanceRepository
         public const string SelectPendingRequestsForApproverSql = @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                                    r.business_justification, r.status, r.requested_at, r.requested_valid_to,
                                    t.source_name, t.schema_name, t.table_name, r.context_json, r.requested_write_rules_json,
-                                   r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id, r.tenant_id
+                                   r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id, r.grant_kind, r.target_columns, r.container_kind, r.container_id, r.approver_capacity, r.self_grant, r.bundle_id, r.decided_by, r.decided_at,
+                                   r.tenant_id
                             FROM CONSENT_REQUESTS r
                             LEFT JOIN TABLES t ON r.table_id = t.id
                             WHERE r.status IN ('PENDING', 'PENDING_SECOND_APPROVAL')
@@ -155,11 +158,12 @@ public partial class GovernanceRepository
             cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                        c.grantee_sid, c.valid_from, c.valid_to,
                                        c.is_revoked, c.revoked_by_sid, c.revoked_at, c.revoke_reason,
-                                       c.tenant_id, " + ConsentWorkflowSql.ConsentColumns + @"
+                                       c.tenant_id,
+                                       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns
                                 FROM CONSENTS c
                                 JOIN TABLES t ON c.table_id = t.id
                                 WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
-                                  AND c.is_revoked = 0 AND c.tenant_id = @tenantId" + ConsentSubjectFilter.InListPredicate(chunk.Count);
+                                  AND c.is_revoked = 0 AND c.tenant_id = @tenantId AND c.grant_kind = 'DATA'" + ConsentSubjectFilter.InListPredicate(chunk.Count);
             for (var si = 0; si < chunk.Count; si++)
             {
                 cmd.AddBound("@s" + si, chunk[si]);
@@ -206,10 +210,11 @@ public partial class GovernanceRepository
             cmd.CommandText = @"SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
                                        c.grantee_sid, c.valid_from, c.valid_to,
                                        c.is_revoked, t.source_name, t.schema_name, t.table_name,
-                                       c.tenant_id, " + ConsentWorkflowSql.ConsentColumns + @"
+                                       c.tenant_id,
+                                       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns
                                 FROM CONSENTS c
                                 JOIN TABLES t ON c.table_id = t.id
-                                WHERE c.is_revoked = 0 AND c.tenant_id = @tenantId" + ConsentSubjectFilter.InListPredicate(chunk.Count);
+                                WHERE c.is_revoked = 0 AND c.tenant_id = @tenantId AND c.grant_kind = 'DATA'" + ConsentSubjectFilter.InListPredicate(chunk.Count);
             for (var si = 0; si < chunk.Count; si++)
             {
                 cmd.AddBound("@s" + si, chunk[si]);
@@ -325,7 +330,11 @@ public partial class GovernanceRepository
             WorkflowMode = source.WorkflowMode,
             ProfileItemNo = source.ProfileItemNo,
             ApprovingOwners = source.ApprovingOwners,
-            ClassificationAccess = source.ClassificationAccess
+            ClassificationAccess = source.ClassificationAccess,
+            GrantKind = source.GrantKind,
+            ApproverCapacity = source.ApproverCapacity,
+            SelfGrant = source.SelfGrant,
+            TargetColumns = source.TargetColumns?.ToArray()
         };
 
     private static GrantRecordInput BuildConsentGrantInput(Consent consent, string tenantId, string requestedBy, string decisionJson, DateTimeOffset decidedAt, GrantRecordType? recordType = null) =>
@@ -533,6 +542,29 @@ public partial class GovernanceRepository
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         return await ConsentSqlCore.GetPendingRequestsForApproverAsync(conn, ConsentSql.SelectPendingRequestsForApproverSql, approverSid, validTenant, TimeProvider.System.GetUtcNow(), ct).ConfigureAwait(false);
     }
+
+    private PermissionRequestStore? _permissionRequestStore;
+
+    private PermissionRequestStore PermissionRequests => _permissionRequestStore ??= new PermissionRequestStore(_dialect, TimeProvider.System);
+
+    public Task<int> CountPendingRequestsForRequesterAsync(TenantId tenantId, Sid requesterSid, CancellationToken ct = default) =>
+        PermissionRequests.CountPendingRequestsForRequesterAsync(tenantId, requesterSid, ct);
+
+    public Task<IReadOnlyList<Consent>> GetActiveUnmaskGrantsForSubjectsAsync(
+        IEnumerable<Sid> subjects,
+        TableIdentifier table,
+        DateTimeOffset atTime,
+        TenantId tenantId,
+        CancellationToken ct = default) =>
+        PermissionRequests.GetActiveUnmaskGrantsForSubjectsAsync(tenantId, table, subjects, atTime, ct);
+
+    public Task<Autheris.Application.Governance.Requests.DecisionCasResult> TryDecideAsync(
+        Guid requestId,
+        int expectedVersion,
+        Func<Autheris.Application.Governance.Requests.IGovernanceTransaction, ConsentRequest, Task<Autheris.Application.Governance.Requests.PermissionDecisionRecord>> decideInTransaction,
+        Func<Autheris.Application.Governance.Requests.IGovernanceTransaction, Autheris.Application.Governance.Requests.PermissionDecisionRecord, ConsentRequest, Task<IReadOnlyList<Autheris.Application.Governance.Requests.GrantRef>>> applyEffect,
+        CancellationToken ct = default) =>
+        PermissionRequests.TryDecideAsync(requestId, expectedVersion, decideInTransaction, applyEffect, ct);
 
     public Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default) => ApproveConsentRequestStepAsync(requestId, approverSid, false, ct);
 
