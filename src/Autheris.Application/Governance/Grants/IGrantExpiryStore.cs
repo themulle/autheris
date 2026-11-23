@@ -22,12 +22,23 @@ public sealed record GrantExpirySweepSummary(
 /// </summary>
 public interface IGrantExpiryStore
 {
-    Task<IReadOnlyList<ExpiringGrantCandidate>> GetGrantsWithoutExpiryNoticeAsync(
+    /// <summary>
+    /// Active grants expiring between <paramref name="now"/> and <paramref name="horizon"/> whose reminder stage is below
+    /// <paramref name="maxStage"/>, least-reminded and soonest-expiring first, bounded per call.
+    /// </summary>
+    Task<IReadOnlyList<ExpiringGrantCandidate>> GetGrantsWithPendingReminderAsync(
         DateTimeOffset now,
+        DateTimeOffset horizon,
+        int maxStage,
         CancellationToken ct = default);
 
-    Task<bool> MarkExpiryNoticeSentAsync(
+    /// <summary>
+    /// Records that reminder <paramref name="stage"/> was sent (compare-and-set: only raises the stored stage) and
+    /// appends the <c>grant.expiring</c> event carrying the stage. Returns false when the stage was already recorded.
+    /// </summary>
+    Task<bool> MarkReminderStageSentAsync(
         ExpiringGrantCandidate candidate,
+        int stage,
         DateTimeOffset sentAt,
         CancellationToken ct = default);
 

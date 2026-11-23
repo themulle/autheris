@@ -6,6 +6,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.Governance.Caching;
+using Autheris.Application.Governance.Grants;
 using Autheris.Application.Identity.Caching;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
@@ -42,6 +43,7 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
     private readonly IAuditWriter? _auditWriter;
     private readonly Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore? _subscriptionStore;
     private readonly IGovernanceChangeNotifier? _governanceChangeNotifier;
+    private readonly IGrantRevocationService? _grantRevocationService;
     private readonly TimeProvider _timeProvider;
 
     public IdentityDeprovisioningService(
@@ -52,7 +54,8 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
         IAuditWriter? auditWriter = null,
         Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore? subscriptionStore = null,
         IGovernanceChangeNotifier? governanceChangeNotifier = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IGrantRevocationService? grantRevocationService = null)
     {
         _storeRepository = storeRepository ?? throw new ArgumentNullException(nameof(storeRepository));
         _tokenRevocationService = tokenRevocationService;
@@ -62,6 +65,7 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
         _subscriptionStore = subscriptionStore;
         _governanceChangeNotifier = governanceChangeNotifier;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _grantRevocationService = grantRevocationService;
     }
 
     public async Task DeprovisionAndLockSubjectAsync(
@@ -150,5 +154,30 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
 
             await _auditWriter.RecordRequiredAsync(entry, ct).ConfigureAwait(false);
         }
+
+        // 7. Revoke every data, unmask and catalog grant and withdraw pending requests. The lock and deactivation above stay
+        // in force; an incomplete run fails the call so the deprovisioning is retried idempotently.
+        if (_grantRevocationService != null)
+        {
+            var revocation = new GrantRevocationResult(0, 0, 0, 0, false);
+            foreach (var form in SubjectForms(realmId, userKey))
+            {
+                var partial = await _grantRevocationService.RevokeAllForSubjectAsync(tenantId, form, reason, ct).ConfigureAwait(false);
+                revocation = new GrantRevocationResult(
+                    revocation.GrantsRevoked + partial.GrantsRevoked,
+                    revocation.CatalogGrantsRevoked + partial.CatalogGrantsRevoked,
+                    revocation.RequestsWithdrawn + partial.RequestsWithdrawn,
+                    revocation.Failed + partial.Failed,
+                    revocation.Truncated || partial.Truncated);
+            }
+
+            if (!revocation.Complete)
+            {
+                throw new GrantRevocationIncompleteException(revocation);
+            }
+        }
     }
+
+    private static Sid[] SubjectForms(string realmId, string userKey) =>
+        [new Sid(userKey), new Sid($"{realmId}|{userKey}")];
 }

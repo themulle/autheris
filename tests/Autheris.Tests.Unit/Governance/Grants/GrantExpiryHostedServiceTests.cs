@@ -24,19 +24,19 @@ public sealed class GrantExpiryHostedServiceTests
     [Fact]
     public async Task ExpiryNotice_SentOnce_BeforeLeadTime()
     {
-        var clock = new FakeTimeProvider(BaseTime.AddHours(-25));
+        var clock = new FakeTimeProvider(BaseTime.AddDays(-31));
         var consent = BuildConsent(validFrom: BaseTime.AddDays(-10), validTo: BaseTime);
         var candidate = new ExpiringGrantCandidate(consent, ConsentWorkflowMode.Internal, null);
 
         DateTimeOffset? sentAt = null;
         var store = Substitute.For<IGrantExpiryStore>();
-        store.GetGrantsWithoutExpiryNoticeAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+        store.GetGrantsWithPendingReminderAsync(Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(_ => sentAt.HasValue ? [] : [candidate]);
-        store.MarkExpiryNoticeSentAsync(candidate, Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
+        store.MarkReminderStageSentAsync(candidate, Arg.Any<int>(), Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>())
             .Returns(ci =>
             {
                 if (sentAt.HasValue) return false;
-                sentAt = (DateTimeOffset)ci[1];
+                sentAt = (DateTimeOffset)ci[2];
                 return true;
             });
         store.GetExpiredGrantsWithoutRecordAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns([]);
@@ -44,16 +44,16 @@ public sealed class GrantExpiryHostedServiceTests
 
         var router = Substitute.For<IConsentWorkflowRouter>();
         router.ResolveForTableAsync(Tenant, Table, Arg.Any<CancellationToken>())
-            .Returns(new ConsentWorkflowRouteResolution(ConsentWorkflowMode.Internal, null, 60, 30, ExpiryNoticeLeadHours: 24, true, WorkflowRouteScopeKind.Tenant));
+            .Returns(new ConsentWorkflowRouteResolution(ConsentWorkflowMode.Internal, null, 60, 30, true, WorkflowRouteScopeKind.Tenant));
 
         var service = new GrantExpiryHostedService(store, router, NullLogger<GrantExpiryHostedService>.Instance, timeProvider: clock);
 
-        // Before lead window (25h remaining vs 24h lead): no notice yet
+        // Before the first default reminder (31 days remaining vs 30): no notice yet
         var first = await service.RunSweepAsync();
         first.NoticesSent.ShouldBe(0);
 
-        // Inside lead window (12h remaining): notice sent once
-        clock.Advance(TimeSpan.FromHours(13));
+        // Inside the first reminder window (29 days remaining): stage 1 sent once
+        clock.Advance(TimeSpan.FromDays(2));
         var second = await service.RunSweepAsync();
         second.NoticesSent.ShouldBe(1);
         sentAt.ShouldBe(clock.GetUtcNow());
@@ -64,18 +64,6 @@ public sealed class GrantExpiryHostedServiceTests
     }
 
     [Fact]
-    public void ComputeExpiryNoticeTime_ShortGrant_FiresAtHalfLifetime()
-    {
-        // Lifetime is 20 hours, lead is 72 hours (< 2 * 72h = 144h) -> fires at midpoint (validUntil - 10h).
-        var validFrom = BaseTime;
-        var validUntil = BaseTime.AddHours(20);
-
-        var fireAt = GrantExpiryHostedService.ComputeExpiryNoticeTime(validFrom, validUntil, expiryNoticeLeadHours: 72);
-
-        fireAt.ShouldBe(BaseTime.AddHours(10));
-    }
-
-    [Fact]
     public async Task ExpiredGrant_WritesExpiredRecord()
     {
         var clock = new FakeTimeProvider(BaseTime);
@@ -83,7 +71,7 @@ public sealed class GrantExpiryHostedServiceTests
         var candidate = new ExpiringGrantCandidate(consent, ConsentWorkflowMode.External, Guid.NewGuid());
 
         var store = Substitute.For<IGrantExpiryStore>();
-        store.GetGrantsWithoutExpiryNoticeAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns([]);
+        store.GetGrantsWithPendingReminderAsync(Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns([]);
         store.GetExpiredGrantsWithoutRecordAsync(BaseTime, Arg.Any<CancellationToken>()).Returns([candidate]);
         store.RecordGrantExpiryAsync(candidate, BaseTime, Arg.Any<CancellationToken>()).Returns(true);
         store.GetOpenPendingRequestsAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns([]);
@@ -131,14 +119,14 @@ public sealed class GrantExpiryHostedServiceTests
         };
 
         var store = Substitute.For<IGrantExpiryStore>();
-        store.GetGrantsWithoutExpiryNoticeAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns([]);
+        store.GetGrantsWithPendingReminderAsync(Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<CancellationToken>()).Returns([]);
         store.GetExpiredGrantsWithoutRecordAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>()).Returns([]);
         store.GetOpenPendingRequestsAsync(BaseTime, Arg.Any<CancellationToken>()).Returns([staleRequest, freshRequest]);
         store.ExpirePendingRequestAsync(staleRequest, BaseTime, Arg.Any<CancellationToken>()).Returns(true);
 
         var router = Substitute.For<IConsentWorkflowRouter>();
         router.ResolveForTableAsync(Tenant, Table, Arg.Any<CancellationToken>())
-            .Returns(new ConsentWorkflowRouteResolution(ConsentWorkflowMode.Internal, null, 60, RequestTimeoutDays: 14, 72, true, WorkflowRouteScopeKind.Tenant));
+            .Returns(new ConsentWorkflowRouteResolution(ConsentWorkflowMode.Internal, null, 60, RequestTimeoutDays: 14, RequireResolvableApprover: true, MatchedScopeKind: WorkflowRouteScopeKind.Tenant));
 
         var service = new GrantExpiryHostedService(store, router, NullLogger<GrantExpiryHostedService>.Instance, timeProvider: clock);
 
@@ -168,7 +156,7 @@ public sealed class GrantExpiryHostedServiceTests
         var result = await service.RunSweepWithLockAsync(CancellationToken.None);
 
         result.ShouldBeNull();
-        await store.DidNotReceive().GetGrantsWithoutExpiryNoticeAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+        await store.DidNotReceive().GetGrantsWithPendingReminderAsync(Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 
     private static Consent BuildConsent(DateTimeOffset validFrom, DateTimeOffset validTo) => new()

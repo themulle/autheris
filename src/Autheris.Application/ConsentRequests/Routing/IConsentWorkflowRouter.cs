@@ -12,7 +12,6 @@ public sealed record ConsentWorkflowRouteResolution(
     Guid? ExternalSystemId,
     int MaxDurationDays,
     int RequestTimeoutDays,
-    int ExpiryNoticeLeadHours,
     bool RequireResolvableApprover,
     WorkflowRouteScopeKind? MatchedScopeKind,
     bool ConflictDetected = false);

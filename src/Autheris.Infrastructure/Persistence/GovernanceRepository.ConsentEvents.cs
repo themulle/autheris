@@ -398,8 +398,10 @@ WHERE event_id IN (SELECT id FROM CONSENT_EVENTS WHERE created_at < @cutoff)";
         }
     }
 
-    public async Task<IReadOnlyList<ExpiringGrantCandidate>> GetGrantsWithoutExpiryNoticeAsync(
+    public async Task<IReadOnlyList<ExpiringGrantCandidate>> GetGrantsWithPendingReminderAsync(
         DateTimeOffset now,
+        DateTimeOffset horizon,
+        int maxStage,
         CancellationToken ct = default)
     {
         var isPg = _dialect is PostgreSqlGovernanceDialect;
@@ -410,36 +412,44 @@ WHERE event_id IN (SELECT id FROM CONSENT_EVENTS WHERE created_at < @cutoff)";
        c.grantee_sid, c.valid_from, c.valid_to,
        c.is_revoked, t.source_name, t.schema_name, t.table_name,
        c.tenant_id, c.renewal_count,
-       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns,
+       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_stage, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns,
        r.workflow_mode, r.external_system_id
 FROM CONSENTS c
 JOIN TABLES t ON c.table_id = t.id
 LEFT JOIN CONSENT_REQUESTS r ON r.id = c.consent_request_id
-WHERE c.is_revoked = 0 AND c.expiry_notice_sent_at IS NULL AND c.valid_to > @now
-ORDER BY c.valid_to
+WHERE c.is_revoked = 0 AND c.expiry_notice_stage < @maxStage AND c.valid_to > @now AND c.valid_to <= @horizon
+ORDER BY c.expiry_notice_stage, c.valid_to
 LIMIT 500"
             : @"SELECT TOP (500) c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
        c.grantee_sid, c.valid_from, c.valid_to,
        c.is_revoked, t.source_name, t.schema_name, t.table_name,
        c.tenant_id, c.renewal_count,
-       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns,
+       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_stage, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns,
        r.workflow_mode, r.external_system_id
 FROM dbo.CONSENTS c
 JOIN dbo.TABLES t ON c.table_id = t.id
 LEFT JOIN dbo.CONSENT_REQUESTS r ON r.id = c.consent_request_id
-WHERE c.is_revoked = 0 AND c.expiry_notice_sent_at IS NULL AND c.valid_to > @now
-ORDER BY c.valid_to";
+WHERE c.is_revoked = 0 AND c.expiry_notice_stage < @maxStage AND c.valid_to > @now AND c.valid_to <= @horizon
+ORDER BY c.expiry_notice_stage, c.valid_to";
         cmd.AddBound("@now", now.ToString("O"));
+        cmd.AddBound("@horizon", horizon.ToUniversalTime().ToString("O"));
+        cmd.AddBound("@maxStage", maxStage, DbType.Int32);
 
         return await ReadExpiringGrantCandidatesAsync(cmd, ct).ConfigureAwait(false);
     }
 
-    public async Task<bool> MarkExpiryNoticeSentAsync(
+    public async Task<bool> MarkReminderStageSentAsync(
         ExpiringGrantCandidate candidate,
+        int stage,
         DateTimeOffset sentAt,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(candidate);
+        if (stage < 1)
+        {
+            throw new ArgumentOutOfRangeException(nameof(stage), "Reminder stage must be positive.");
+        }
+
         var consent = candidate.Consent;
         TenantScope.RequireTenant(consent.TenantId, nameof(GovernanceTable.Consents));
         StoredTenant.RequireWritable(consent.TenantId);
@@ -453,9 +463,9 @@ ORDER BY c.valid_to";
             {
                 cmd.Transaction = tx;
                 cmd.CommandText = @"UPDATE CONSENTS
-SET expiry_notice_sent_at = @sentAt
-WHERE id = @id AND tenant_id = @tenant AND is_revoked = 0 AND expiry_notice_sent_at IS NULL";
-                cmd.AddBound("@sentAt", sentAt.ToUniversalTime(), DbType.DateTimeOffset);
+SET expiry_notice_stage = @stage
+WHERE id = @id AND tenant_id = @tenant AND is_revoked = 0 AND expiry_notice_stage < @stage";
+                cmd.AddBound("@stage", stage, DbType.Int32);
                 cmd.AddBound("@id", consent.Id.ToString("D"));
                 cmd.AddBound("@tenant", consent.TenantId.Value);
                 updated = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
@@ -475,7 +485,7 @@ WHERE id = @id AND tenant_id = @tenant AND is_revoked = 0 AND expiry_notice_sent
                 TargetTable = consent.TableIdentifier.ToString(),
                 Decision = "EXPIRING_NOTICE",
                 TraceId = Guid.NewGuid().ToString("N"),
-                DetailsJson = JsonSerializer.Serialize(new { consentId = consent.Id, validUntil = consent.ValidTo })
+                DetailsJson = JsonSerializer.Serialize(new { consentId = consent.Id, validUntil = consent.ValidTo, stage })
             }, tx, ct).ConfigureAwait(false);
 
             var payload = ConsentEventPayloads.ForGrant(
@@ -483,7 +493,8 @@ WHERE id = @id AND tenant_id = @tenant AND is_revoked = 0 AND expiry_notice_sent
                 candidate.WorkflowMode,
                 1,
                 "EXPIRING",
-                sentAt);
+                sentAt,
+                stage);
             var eventId = Guid.NewGuid();
             await AppendConsentEventInTransactionAsync(
                 conn,
@@ -521,7 +532,7 @@ WHERE id = @id AND tenant_id = @tenant AND is_revoked = 0 AND expiry_notice_sent
        c.grantee_sid, c.valid_from, c.valid_to,
        c.is_revoked, t.source_name, t.schema_name, t.table_name,
        c.tenant_id, c.renewal_count,
-       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns,
+       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_stage, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns,
        r.workflow_mode, r.external_system_id
 FROM CONSENTS c
 JOIN TABLES t ON c.table_id = t.id
@@ -537,7 +548,7 @@ LIMIT 500"
        c.grantee_sid, c.valid_from, c.valid_to,
        c.is_revoked, t.source_name, t.schema_name, t.table_name,
        c.tenant_id, c.renewal_count,
-       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns,
+       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_stage, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns,
        r.workflow_mode, r.external_system_id
 FROM dbo.CONSENTS c
 JOIN dbo.TABLES t ON c.table_id = t.id
