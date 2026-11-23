@@ -57,6 +57,10 @@ public sealed class CatalogGrantedAccessScaleTests : IClassFixture<CatalogGrante
     {
         await _fixture.SeedAsync(TableCount);
 
+        // The page itself (metadata of its 50 items) costs a bounded number of statements on a cold metadata cache; warm it with an
+        // unfiltered page first, so the budget measures the access filter whatever order the tests run in.
+        await MeasureAsync("/api/v1/catalog/objects?pageSize=50");
+
         // Cold (first request of a fresh host scope cache) and warm request.
         var cold = await MeasureAsync(path);
         var warm = await MeasureAsync(path);
