@@ -343,9 +343,9 @@ WHERE c.tenant_id = @tenantId
         await ConsentPatternSql.InsertApprovingOwnersAsync(transaction, consent, ct).ConfigureAwait(false);
     }
 
-    Task IProfileAssignmentStore.IncrementTableEpochInTransactionAsync(
-        DbTransaction transaction, TableIdentifier table, CancellationToken ct) =>
-        IncrementTableEpochInternalAsync(transaction.Connection!, transaction, table, ct);
+    // A pattern consent (no table) advances the catalog version instead of a table epoch, as its direct create and revoke do.
+    Task IProfileAssignmentStore.IncrementTableEpochInTransactionAsync(DbTransaction transaction, TableIdentifier table, CancellationToken ct) =>
+        string.IsNullOrWhiteSpace(table.TableName) ? BumpCatalogVersionInternalAsync(transaction.Connection!, transaction, 0, 1, ct) : IncrementTableEpochInternalAsync(transaction.Connection!, transaction, table, ct);
 
     Task IProfileAssignmentStore.RecordAuditInTransactionAsync(
         DbTransaction transaction, AuditLogEntry entry, CancellationToken ct) =>
@@ -381,10 +381,9 @@ WHERE c.tenant_id = @tenantId
     {
         foreach (var table in tables)
         {
-            if (!string.IsNullOrWhiteSpace(table.TableName))
-            {
-                await InvalidateTableEpochAsync(table, ct).ConfigureAwait(false);
-            }
+            await (string.IsNullOrWhiteSpace(table.TableName)
+                ? PublishCatalogChangedEventAsync(await GetCatalogVersionAsync(ct).ConfigureAwait(false), ct)
+                : InvalidateTableEpochAsync(table, ct)).ConfigureAwait(false);
         }
     }
 
