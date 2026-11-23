@@ -124,6 +124,71 @@ public sealed class ProtectionSnapshotProvider : IProtectionSnapshotProvider, IG
         throw new InvalidOperationException("Protection snapshot resolution could not stabilize.");
     }
 
+    /// <summary>
+    /// Snapshots for a batch of decisions over <paramref name="tables"/> (the metadata those decisions use): a valid cache entry is returned
+    /// as <see cref="GetAsync"/> would; every other active table is resolved exactly as <see cref="LoadSnapshotAsync"/> resolves it, but from
+    /// the given metadata and with set-based container and protection reads instead of a metadata, a container and a protection read per
+    /// table. Those snapshots are NOT cached: they were built from caller-supplied metadata, so they serve only this batch (the caller bounds
+    /// their age). Inactive tables, data product tables and tables the batch reads did not answer are left out, so the decision resolves them
+    /// per table. Errors propagate (the caller then resolves per table, where a failure is fail-closed).
+    /// </summary>
+    public async ValueTask<IReadOnlyDictionary<TableIdentifier, EffectiveProtection>> ResolveManyAsync(
+        TenantId tenant, IReadOnlyList<TableMetadata> tables, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(tables);
+        var tenantKey = RequireValidTenant(tenant);
+        var result = new Dictionary<TableIdentifier, EffectiveProtection>(tables.Count);
+        if (tables.Count == 0)
+        {
+            return result;
+        }
+
+        var catalogVersion = await _catalogVersionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
+        var governanceEpoch = await _epochProvider.GetEpochAsync(tenant, ct).ConfigureAwait(false);
+
+        var resolvable = new Dictionary<TableIdentifier, TableMetadata>();
+        foreach (var meta in tables)
+        {
+            RequireValidTable(meta.Identifier);
+            if (result.ContainsKey(meta.Identifier) || resolvable.ContainsKey(meta.Identifier))
+            {
+                continue;
+            }
+
+            if (_cache.TryGet(new CacheKey(tenantKey, meta.Identifier, catalogVersion, governanceEpoch), out var cached) && !IsExpired(cached))
+            {
+                result[meta.Identifier] = cached.Protection;
+            }
+            else if (meta.Table.IsActive &&
+                     meta.Table.Id != Guid.Empty &&
+                     (_productRepository is null ||
+                      !string.Equals(meta.Table.SourceName, ProductSource.Name, StringComparison.OrdinalIgnoreCase)))
+            {
+                resolvable[meta.Identifier] = meta;
+            }
+        }
+
+        if (resolvable.Count == 0)
+        {
+            return result;
+        }
+
+        var ids = resolvable.Values.Select(static m => m.Table.Id).Distinct().ToList();
+        var containers = await _domainRepository.GetContainersForTablesAsync(tenant, ids, ct).ConfigureAwait(false);
+        var protections = await _domainRepository.GetProtectionBatchAsync(tenant, ids, ct).ConfigureAwait(false);
+        foreach (var (table, meta) in resolvable)
+        {
+            if (containers.TryGetValue(meta.Table.Id, out var container) &&
+                protections.TryGetValue(meta.Table.Id, out var protection))
+            {
+                var columnNames = meta.Columns.Select(static c => c.ColumnName).ToList();
+                result[table] = EffectiveProtectionResolver.Resolve(container, protection.Table, protection.Columns, columnNames);
+            }
+        }
+
+        return result;
+    }
+
     public void InvalidateTenant(string tenantId)
     {
         if (string.IsNullOrWhiteSpace(tenantId))

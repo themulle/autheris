@@ -15,7 +15,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.Governance.Protection;
 
 [Trait("Category", "Security")]
-public sealed class ProtectionSnapshotProviderTests
+public sealed partial class ProtectionSnapshotProviderTests
 {
     private static readonly TenantId TenantA = new("tenant-a");
     private static readonly TenantId TenantB = new("tenant-b");

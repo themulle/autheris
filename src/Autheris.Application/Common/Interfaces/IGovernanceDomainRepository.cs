@@ -26,4 +26,38 @@ public interface IGovernanceDomainRepository
     Task SetProtectionAsync(TenantId tenant, Guid tableId, string column, ObjectProtection protection, Sid actor, CancellationToken ct = default);
     Task SetTableProtectionAsync(TenantId tenant, Guid tableId, ObjectProtection protection, IReadOnlyList<string>? clearColumns, Sid actor, CancellationToken ct = default);
     Task<ContainerDefaults> GetContainerForTableAsync(TenantId tenant, Guid tableId, CancellationToken ct = default);
+
+    /// <summary>
+    /// <see cref="GetProtectionAsync"/> for several tables of one tenant (every requested id is present in the result). Implementations
+    /// read set-based; the default reads table by table.
+    /// </summary>
+    async Task<IReadOnlyDictionary<Guid, (ObjectProtection? Table, IReadOnlyDictionary<string, ObjectProtection> Columns)>> GetProtectionBatchAsync(
+        TenantId tenant, IReadOnlyCollection<Guid> tableIds, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(tableIds);
+        var result = new Dictionary<Guid, (ObjectProtection? Table, IReadOnlyDictionary<string, ObjectProtection> Columns)>(tableIds.Count);
+        foreach (var id in tableIds)
+        {
+            result[id] = await GetProtectionAsync(tenant, id, ct).ConfigureAwait(false);
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// <see cref="GetContainerForTableAsync"/> for several tables of one tenant (every requested id is present in the result). Implementations
+    /// read set-based; the default reads table by table.
+    /// </summary>
+    async Task<IReadOnlyDictionary<Guid, ContainerDefaults>> GetContainersForTablesAsync(
+        TenantId tenant, IReadOnlyCollection<Guid> tableIds, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(tableIds);
+        var result = new Dictionary<Guid, ContainerDefaults>(tableIds.Count);
+        foreach (var id in tableIds)
+        {
+            result[id] = await GetContainerForTableAsync(tenant, id, ct).ConfigureAwait(false);
+        }
+
+        return result;
+    }
 }

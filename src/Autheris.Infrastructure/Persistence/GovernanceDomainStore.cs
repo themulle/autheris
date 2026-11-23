@@ -40,6 +40,13 @@ public sealed class GovernanceDomainStore(
     internal const string DeleteProtectionSql = "DELETE FROM OBJECT_PROTECTION WHERE tenant_id = @tenantId AND table_id = @tableId AND column_name = @columnName";
     internal const string ClearColumnClassSql = "UPDATE OBJECT_PROTECTION SET protection_class = NULL, updated_by = @updatedBy, updated_at = @updatedAt WHERE tenant_id = @tenantId AND table_id = @tableId AND LOWER(column_name) = LOWER(@columnName) AND mask_category IS NOT NULL";
     internal const string DeleteEmptyColumnProtectionSql = "DELETE FROM OBJECT_PROTECTION WHERE tenant_id = @tenantId AND table_id = @tableId AND LOWER(column_name) = LOWER(@columnName) AND mask_category IS NULL";
+    internal const string GetProtectionBatchSqlPrefix = "SELECT table_id, column_name, protection_class, mask_category FROM OBJECT_PROTECTION WHERE tenant_id = @tenantId AND table_id IN (";
+    internal const string GetProtectionBatchSqlSuffix = ") ORDER BY table_id, column_name";
+    internal const string GetContainersForTablesSqlPrefix = "SELECT dt.table_id, d.id, d.owner_group_sid, d.default_class, d.visibility FROM GOVERNANCE_DOMAIN_TABLES dt LEFT JOIN GOVERNANCE_DOMAINS d ON d.tenant_id = dt.tenant_id AND d.id = dt.domain_id WHERE dt.tenant_id = @tenantId AND dt.table_id IN (";
+    internal const string GetContainersForTablesSqlSuffix = ")";
+    internal const string GetUnassignedContainerSql = "SELECT d.id, d.owner_group_sid, d.default_class, d.visibility FROM GOVERNANCE_DOMAINS d WHERE d.tenant_id = @tenantId AND d.id = @unassignedId";
+    private const int BatchChunkSize = 500;
+
     internal const string GetContainerForTableSql = "SELECT d.id, d.owner_group_sid, d.default_class, d.visibility FROM GOVERNANCE_DOMAIN_TABLES dt INNER JOIN GOVERNANCE_DOMAINS d ON d.tenant_id = dt.tenant_id AND d.id = dt.domain_id WHERE dt.tenant_id = @tenantId AND dt.table_id = @tableId UNION ALL SELECT d.id, d.owner_group_sid, d.default_class, d.visibility FROM GOVERNANCE_DOMAINS d WHERE d.tenant_id = @tenantId AND d.id = @unassignedId AND NOT EXISTS (SELECT 1 FROM GOVERNANCE_DOMAIN_TABLES dt WHERE dt.tenant_id = @tenantId AND dt.table_id = @tableId)";
     internal const string GetEpochSql = "SELECT epoch FROM GOVERNANCE_EPOCHS WHERE tenant_id = @tenantId";
     internal const string BumpEpochPgSql = "INSERT INTO GOVERNANCE_EPOCHS (tenant_id, epoch, updated_at) VALUES (@tenantId, 1, @updatedAt) ON CONFLICT (tenant_id) DO UPDATE SET epoch = GOVERNANCE_EPOCHS.epoch + 1, updated_at = EXCLUDED.updated_at RETURNING epoch";
@@ -51,7 +58,8 @@ public sealed class GovernanceDomainStore(
         DeleteDomainTablesByDomainSql, DeleteDomainSql, EnsureUnassignedPgSql, EnsureUnassignedSsSql,
         UpsertDomainTablePgSql, UpsertDomainTableSsSql, GetProtectionSql, UpsertProtectionPgSql,
         UpsertProtectionSsSql, DeleteProtectionSql, ClearColumnClassSql, DeleteEmptyColumnProtectionSql,
-        GetContainerForTableSql, GetEpochSql, BumpEpochPgSql, BumpEpochSsSql
+        GetContainerForTableSql, GetEpochSql, BumpEpochPgSql, BumpEpochSsSql,
+        GetProtectionBatchSqlPrefix, GetContainersForTablesSqlPrefix, GetUnassignedContainerSql
     ];
 
     private readonly IGovernanceSqlDialect _dialect = dialect ?? throw new ArgumentNullException(nameof(dialect));
@@ -262,29 +270,39 @@ public sealed class GovernanceDomainStore(
         await using var conn = await OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = Cmd(conn, null, GetProtectionSql, tenantId, ("@tableId", tableId.ToString("D"), null));
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        ObjectProtection? tableProtection = null;
-        var columns = new Dictionary<string, ObjectProtection>(StringComparer.OrdinalIgnoreCase);
+        var acc = new ProtectionAccumulator();
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            var col = reader.GetString(0);
-            ProtectionClass? cls = reader.IsDBNull(1) ? null : ProtectionClassExtensions.ParseOrConfidential(reader.GetString(1));
-            var mask = reader.IsDBNull(2) || string.IsNullOrWhiteSpace(reader.GetString(2)) || string.Equals(reader.GetString(2).Trim(), "PUBLIC", StringComparison.OrdinalIgnoreCase)
-                ? null
-                : reader.GetString(2).Trim();
-            var prot = new ObjectProtection(cls, mask);
-            if (col.Length == 0)
+            acc.Add(reader, 0);
+        }
+
+        return acc.Result();
+    }
+
+    public async Task<IReadOnlyDictionary<Guid, (ObjectProtection? Table, IReadOnlyDictionary<string, ObjectProtection> Columns)>> GetProtectionBatchAsync(
+        TenantId tenant, IReadOnlyCollection<Guid> tableIds, CancellationToken ct = default)
+    {
+        var (tenantId, ids) = RequireBatchScope(tenant, tableIds, GovernanceTable.ObjectProtection);
+        var accumulators = ids.ToDictionary(static id => id, static _ => new ProtectionAccumulator());
+        if (ids.Count > 0)
+        {
+            await using var conn = await OpenAsync(ct).ConfigureAwait(false);
+            foreach (var chunk in ids.Chunk(BatchChunkSize))
             {
-                tableProtection = prot;
-            }
-            else
-            {
-                columns[col] = columns.TryGetValue(col, out var ex)
-                    ? new(ex.Class is { } a && cls is { } b ? ProtectionClassExtensions.Max(a, b) : ex.Class ?? cls, ex.MaskCategory ?? mask)
-                    : prot;
+                await using var cmd = Cmd(conn, null, string.Empty, tenantId);
+                cmd.CommandText = GetProtectionBatchSqlPrefix + BindTableIds(cmd, chunk) + GetProtectionBatchSqlSuffix;
+                await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    if (Guid.TryParse(reader.GetString(0), out var id) && accumulators.TryGetValue(id, out var acc))
+                    {
+                        acc.Add(reader, 1);
+                    }
+                }
             }
         }
 
-        return (tableProtection, columns.AsReadOnly());
+        return accumulators.ToDictionary(static kv => kv.Key, static kv => kv.Value.Result());
     }
 
     public async Task SetProtectionAsync(TenantId tenant, Guid tableId, string column, ObjectProtection protection, Sid actor, CancellationToken ct = default)
@@ -338,19 +356,114 @@ public sealed class GovernanceDomainStore(
         await using var conn = await OpenAsync(ct).ConfigureAwait(false);
         await using var cmd = Cmd(conn, null, GetContainerForTableSql, tenantId, ("@tableId", tableId.ToString("D"), null), ("@unassignedId", UnassignedId, null));
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
+        return await reader.ReadAsync(ct).ConfigureAwait(false) ? ReadContainer(reader, 0) : ContainerDefaults.Unassigned;
+    }
+
+    /// <summary>
+    /// Same result per table as <see cref="GetContainerForTableAsync"/>: the assigned domain (the Unassigned sentinel when its domain row
+    /// is missing); for a table without assignment the tenant's Unassigned domain row, else <see cref="ContainerDefaults.Unassigned"/>.
+    /// </summary>
+    public async Task<IReadOnlyDictionary<Guid, ContainerDefaults>> GetContainersForTablesAsync(
+        TenantId tenant, IReadOnlyCollection<Guid> tableIds, CancellationToken ct = default)
+    {
+        var (tenantId, ids) = RequireBatchScope(tenant, tableIds, GovernanceTable.GovernanceDomainTables);
+        var result = new Dictionary<Guid, ContainerDefaults>(ids.Count);
+        if (ids.Count == 0)
         {
-            return ContainerDefaults.Unassigned;
+            return result;
         }
 
-        var ownerSid = reader.IsDBNull(1) || string.IsNullOrWhiteSpace(reader.GetString(1)) ? (Sid?)null : new Sid(reader.GetString(1));
-        ProtectionClass? defaultClass = reader.IsDBNull(2) ? null : ProtectionClassExtensions.ParseOrConfidential(reader.GetString(2));
+        await using var conn = await OpenAsync(ct).ConfigureAwait(false);
+        foreach (var chunk in ids.Chunk(BatchChunkSize))
+        {
+            await using var cmd = Cmd(conn, null, string.Empty, tenantId);
+            cmd.CommandText = GetContainersForTablesSqlPrefix + BindTableIds(cmd, chunk) + GetContainersForTablesSqlSuffix;
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                // An assignment whose domain row is missing resolves to the Unassigned sentinel, as the per-table read does.
+                if (Guid.TryParse(reader.GetString(0), out var id))
+                {
+                    result.TryAdd(id, reader.IsDBNull(1) ? ContainerDefaults.Unassigned : ReadContainer(reader, 1));
+                }
+            }
+        }
+
+        if (result.Count < ids.Count)
+        {
+            await using var cmd = Cmd(conn, null, GetUnassignedContainerSql, tenantId, ("@unassignedId", UnassignedId, null));
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            var unassigned = await reader.ReadAsync(ct).ConfigureAwait(false) ? ReadContainer(reader, 0) : ContainerDefaults.Unassigned;
+            foreach (var id in ids)
+            {
+                result.TryAdd(id, unassigned);
+            }
+        }
+
+        return result;
+    }
+
+    private static ContainerDefaults ReadContainer(DbDataReader reader, int o)
+    {
+        var ownerSid = reader.IsDBNull(o + 1) || string.IsNullOrWhiteSpace(reader.GetString(o + 1)) ? (Sid?)null : new Sid(reader.GetString(o + 1));
+        ProtectionClass? defaultClass = reader.IsDBNull(o + 2) ? null : ProtectionClassExtensions.ParseOrConfidential(reader.GetString(o + 2));
         return new ContainerDefaults(
-            new(ContainerKind.Domain, Guid.Parse(reader.GetString(0))),
+            new(ContainerKind.Domain, Guid.Parse(reader.GetString(o))),
             ownerSid,
             defaultClass,
-            CatalogVisibilityModeExtensions.ParseOrOnRequest(reader.IsDBNull(3) ? null : reader.GetString(3)),
+            CatalogVisibilityModeExtensions.ParseOrOnRequest(reader.IsDBNull(o + 3) ? null : reader.GetString(o + 3)),
             IsValid: true);
+    }
+
+    private static string BindTableIds(DbCommand cmd, Guid[] ids)
+    {
+        var names = new string[ids.Length];
+        for (var i = 0; i < ids.Length; i++)
+        {
+            names[i] = "@tid" + i.ToString(CultureInfo.InvariantCulture);
+            cmd.AddBound(names[i], ids[i].ToString("D"));
+        }
+
+        return string.Join(",", names);
+    }
+
+    private static (string TenantId, List<Guid> Ids) RequireBatchScope(TenantId tenant, IReadOnlyCollection<Guid> tableIds, GovernanceTable table)
+    {
+        ArgumentNullException.ThrowIfNull(tableIds);
+        var tenantId = RequireTenant(tenant, table);
+        var ids = tableIds.Distinct().ToList();
+        return ids.Contains(Guid.Empty)
+            ? throw new ArgumentException("TableId cannot be empty.", nameof(tableIds))
+            : (tenantId, ids);
+    }
+
+    /// <summary>Merges OBJECT_PROTECTION rows of one table (empty column name = table row) like the per-table read always has.</summary>
+    private sealed class ProtectionAccumulator
+    {
+        private readonly Dictionary<string, ObjectProtection> _columns = new(StringComparer.OrdinalIgnoreCase);
+        private ObjectProtection? _table;
+
+        public void Add(DbDataReader reader, int o)
+        {
+            var col = reader.GetString(o);
+            ProtectionClass? cls = reader.IsDBNull(o + 1) ? null : ProtectionClassExtensions.ParseOrConfidential(reader.GetString(o + 1));
+            var mask = reader.IsDBNull(o + 2) || string.IsNullOrWhiteSpace(reader.GetString(o + 2)) || string.Equals(reader.GetString(o + 2).Trim(), "PUBLIC", StringComparison.OrdinalIgnoreCase)
+                ? null
+                : reader.GetString(o + 2).Trim();
+            var prot = new ObjectProtection(cls, mask);
+            if (col.Length == 0)
+            {
+                _table = prot;
+            }
+            else
+            {
+                _columns[col] = _columns.TryGetValue(col, out var ex)
+                    ? new(ex.Class is { } a && cls is { } b ? ProtectionClassExtensions.Max(a, b) : ex.Class ?? cls, ex.MaskCategory ?? mask)
+                    : prot;
+            }
+        }
+
+        public (ObjectProtection? Table, IReadOnlyDictionary<string, ObjectProtection> Columns) Result() => (_table, _columns.AsReadOnly());
     }
 
     public async Task<long> GetEpochAsync(TenantId tenant, CancellationToken ct = default)

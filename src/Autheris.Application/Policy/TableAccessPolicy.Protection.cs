@@ -59,7 +59,12 @@ public sealed partial class TableAccessPolicy
         var effectiveTableClass = RollupEffectiveTableClass(protection);
 
         TenantAccessPolicy tenantPolicy;
-        if (_accessPolicySettings is not null)
+        if (query.TenantPolicyPrefetch is { } policyPrefetch &&
+            policyPrefetch.TryGet(query.Tenant, _timeProvider.GetUtcNow(), out var prefetchedPolicy))
+        {
+            tenantPolicy = prefetchedPolicy;
+        }
+        else if (_accessPolicySettings is not null)
         {
             try
             {

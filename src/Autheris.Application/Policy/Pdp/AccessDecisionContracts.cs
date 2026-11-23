@@ -69,6 +69,18 @@ public sealed record AccessRequest(
     /// read once. Null reads them per decision.
     /// </summary>
     public Autheris.Application.Policy.ConsentBatchPrefetch? ConsentPrefetch { get; init; }
+
+    /// <summary>
+    /// The caller tenant's effective access policy for a batch of decisions (<see cref="IAccessDecisionPoint.DecideManyAsync"/>),
+    /// read once. Null reads it per decision.
+    /// </summary>
+    public Autheris.Application.Policy.TenantPolicyPrefetch? TenantPolicyPrefetch { get; init; }
+
+    /// <summary>
+    /// The protection snapshots of a batch of decisions (<see cref="IAccessDecisionPoint.DecideManyAsync"/>), resolved once.
+    /// Null resolves the snapshot per decision.
+    /// </summary>
+    public Autheris.Application.Policy.ProtectionBatchPrefetch? ProtectionPrefetch { get; init; }
 }
 
 public interface IAccessDecisionPoint

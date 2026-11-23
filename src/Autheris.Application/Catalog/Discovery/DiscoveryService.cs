@@ -642,6 +642,11 @@ public sealed partial class DiscoveryService : IDiscoveryService
             tenantPolicy = await _accessPolicySettings.GetEffectiveAsync(caller.Tenant, ct).ConfigureAwait(false);
         }
 
+        // Protection snapshots of the page, resolved set-based; a table the batch does not answer is resolved per table below.
+        var batchProtections = _protectionProvider is null
+            ? null
+            : await _protectionProvider.ResolveManyAsync(caller.Tenant, uncachedTables, ct).ConfigureAwait(false);
+
         for (var i = 0; i < uncached.Count; i++)
         {
             var (targetIdx, table) = uncached[i];
@@ -677,7 +682,9 @@ public sealed partial class DiscoveryService : IDiscoveryService
 
             var protection = _protectionProvider is null
                 ? null
-                : await _protectionProvider.GetAsync(caller.Tenant, table.Identifier, ct).ConfigureAwait(false);
+                : batchProtections is not null && batchProtections.TryGetValue(table.Identifier, out var batchProtection)
+                    ? batchProtection
+                    : await _protectionProvider.GetAsync(caller.Tenant, table.Identifier, ct).ConfigureAwait(false);
             var mapped = DiscoveryAccessMapper.Map(
                 table, decision, owners, isPending, isExpired, artifacts, language,
                 isHidden: table.Table.DiscoveryHidden, insertDecisions[i], updateDecisions[i], deleteDecisions[i], defs, repoColClasses, caller.Tenant.Value,
