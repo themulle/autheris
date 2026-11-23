@@ -163,6 +163,19 @@ public sealed class DeprovisioningGrantRevocationTests
         result.Complete.ShouldBeTrue();
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task More_active_grants_than_the_scan_ceiling_leaves_the_run_incomplete()
+    {
+        var f = new Fixture();
+        for (var i = 0; i < 4; i++) f.AddGrant();
+
+        var result = await f.Build(maxActiveGrantsScanned: 3).RevokeAllForSubjectAsync(Tenant, Subject, Reason);
+
+        result.Complete.ShouldBeFalse();
+        result.Truncated.ShouldBeTrue();
+    }
+
     private sealed class Fixture
     {
         public List<Consent> Active { get; } = [];
@@ -176,7 +189,7 @@ public sealed class DeprovisioningGrantRevocationTests
         public int EnumerationCalls { get; private set; }
         public int WrongTenantCalls { get; private set; }
 
-        public GrantRevocationService Build(int maxItemsPerRun = GrantRevocationService.DefaultMaxItemsPerRun)
+        public GrantRevocationService Build(int maxItemsPerRun = GrantRevocationService.DefaultMaxItemsPerRun, int maxActiveGrantsScanned = GrantRevocationService.MaxActiveGrantsScanned)
         {
             var consents = NullFake.Create<IConsentRepository>((m, args) =>
             {
@@ -189,9 +202,10 @@ public sealed class DeprovisioningGrantRevocationTests
                     case nameof(IConsentRepository.GetActiveGrantsForSubjectsAsync):
                         EnumerationCalls++;
                     {
+                        // Like the real store: a positive bound means Allow-only rows, bounded in the query.
                         var rows = Active.Where(c => !Revoked.Contains(c.Id));
                         var cap = (int)args![3]!;
-                        return Task.FromResult<IReadOnlyList<Consent>>((cap > 0 ? rows.Take(cap) : rows).ToList());
+                        return Task.FromResult<IReadOnlyList<Consent>>((cap > 0 ? rows.Where(c => c.Effect == ConsentEffect.Allow).Take(cap) : rows).ToList());
                     }
                     case nameof(IConsentRepository.RevokeSystemConsentByIdAsync):
                         var id = (Guid)args![1]!;
@@ -229,7 +243,7 @@ public sealed class DeprovisioningGrantRevocationTests
                         return NullFake.UseDefault;
                 }
             });
-            return new GrantRevocationService(consents, approvals, Audit, catalog, maxItemsPerRun, null, new FakeTimeProvider(Now));
+            return new GrantRevocationService(consents, approvals, Audit, catalog, maxItemsPerRun, null, new FakeTimeProvider(Now), null, maxActiveGrantsScanned);
         }
 
         public Consent AddGrant(PermissionGrantKind kind = PermissionGrantKind.Data)

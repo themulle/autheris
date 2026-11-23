@@ -55,6 +55,9 @@ public sealed class GrantRevocationService : IGrantRevocationService
     /// <summary>Wall-clock budget for one run; exceeding it leaves the run incomplete (the subject stays locked).</summary>
     public static readonly TimeSpan DefaultTimeout = TimeSpan.FromSeconds(60);
 
+    /// <summary>Hard ceiling of active Allow grants scanned per run; more than this leaves the run incomplete (subject stays locked).</summary>
+    public const int MaxActiveGrantsScanned = 50_000;
+
     private static readonly Sid SystemActor = new("SYSTEM:DEPROVISIONING");
 
     private readonly IConsentRepository _consents;
@@ -62,6 +65,7 @@ public sealed class GrantRevocationService : IGrantRevocationService
     private readonly IConsentApprovalRepository _approvals;
     private readonly IAuditWriter _audit;
     private readonly int _maxItemsPerRun;
+    private readonly int _maxActiveGrantsScanned;
     private readonly TimeSpan _timeout;
     private readonly TimeProvider _time;
     private readonly ILogger<GrantRevocationService>? _logger;
@@ -74,7 +78,8 @@ public sealed class GrantRevocationService : IGrantRevocationService
         int maxItemsPerRun = DefaultMaxItemsPerRun,
         TimeSpan? timeout = null,
         TimeProvider? timeProvider = null,
-        ILogger<GrantRevocationService>? logger = null)
+        ILogger<GrantRevocationService>? logger = null,
+        int maxActiveGrantsScanned = MaxActiveGrantsScanned)
     {
         _consents = consents ?? throw new ArgumentNullException(nameof(consents));
         _approvals = approvals ?? throw new ArgumentNullException(nameof(approvals));
@@ -84,6 +89,7 @@ public sealed class GrantRevocationService : IGrantRevocationService
         _timeout = timeout ?? DefaultTimeout;
         _time = timeProvider ?? TimeProvider.System;
         _logger = logger;
+        _maxActiveGrantsScanned = Math.Max(1, maxActiveGrantsScanned);
     }
 
     public async Task<GrantRevocationResult> RevokeAllForSubjectAsync(TenantId tenant, Sid subject, string reason, CancellationToken ct = default)
@@ -111,9 +117,15 @@ public sealed class GrantRevocationService : IGrantRevocationService
 
         try
         {
-            // Uncapped read (0): the cap must apply to revocable rows only, otherwise Deny or non-revocable
-            // rows would consume it and hide revocable Allow grants while the result still reads Complete.
-            var grants = await _consents.GetActiveGrantsForSubjectsAsync(tenant, subjects, now, 0, token).ConfigureAwait(false);
+            // The store bounds the read at ceiling+1 and returns only Allow rows, so Deny rows never consume the
+            // ceiling; the per-run cap below then applies to revocable rows only.
+            var grants = await _consents.GetActiveGrantsForSubjectsAsync(tenant, subjects, now, _maxActiveGrantsScanned + 1, token).ConfigureAwait(false);
+            if (grants.Count > _maxActiveGrantsScanned)
+            {
+                truncated = true;
+                _logger?.LogWarning("Deprovisioning revocation scanned more than {Ceiling} active grants; the run is incomplete and will be retried.", _maxActiveGrantsScanned);
+            }
+
             foreach (var consent in grants.Where(IsRevocableGrant))
             {
                 if (handled++ >= maxItems)

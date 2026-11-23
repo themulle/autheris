@@ -74,6 +74,7 @@ internal sealed class SelfGrantHarness
     public Consent? Existing { get; set; }
     public List<Consent> CreatedConsents { get; } = [];
     public List<Guid> RevokedConsents { get; } = [];
+    public Func<Guid, bool>? RevokeReturnsFalse { get; set; }
     public List<TenantId> RevokedForTenants { get; } = [];
     public Func<Guid, bool>? FailRevokeConsent { get; set; }
     public Func<Guid, Consent?>? ConsentLookup { get; set; }
@@ -152,6 +153,11 @@ internal sealed class SelfGrantHarness
                     if (FailRevokeConsent is not null && FailRevokeConsent((Guid)args![1]!))
                     {
                         throw new InvalidOperationException("revoke failed");
+                    }
+
+                    if (RevokeReturnsFalse is not null && RevokeReturnsFalse((Guid)args![1]!))
+                    {
+                        return Task.FromResult(false);
                     }
 
                     RevokedConsents.Add((Guid)args![1]!);

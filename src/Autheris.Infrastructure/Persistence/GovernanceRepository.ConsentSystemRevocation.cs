@@ -21,11 +21,12 @@ using Autheris.Infrastructure.Persistence.Dialects;
 /// <summary>System revocation by id and the kind-complete grant enumeration used by deprovisioning and grant renewal.</summary>
 public partial class GovernanceRepository
 {
+    /// <summary>All grant kinds; with <paramref name="maxResults"/> &gt; 0 only Allow rows are read and the SQL read is bounded at that count.</summary>
     public async Task<IReadOnlyList<Consent>> GetActiveGrantsForSubjectsAsync(
         TenantId tenantId, IReadOnlyCollection<Sid> subjects, DateTimeOffset atTime, int maxResults, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(subjects);
-        var all = await AllActiveCoreAsync(subjects, atTime, TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), false, ct).ConfigureAwait(false);
+        var all = await AllActiveCoreAsync(subjects, atTime, TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), false, maxResults, ct).ConfigureAwait(false);
         return maxResults > 0 && all.Count > maxResults ? all.Take(maxResults).ToList() : all;
     }
 

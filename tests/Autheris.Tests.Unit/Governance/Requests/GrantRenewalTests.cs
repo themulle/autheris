@@ -102,6 +102,17 @@ public sealed class GrantRenewalTests
     }
 
     [Fact]
+    public async Task Rollback_revoke_returning_false_is_audited()
+    {
+        var c = Grant();
+        var h = Harness(c);
+        h.RevokeReturnsFalse = _ => true;
+        await Should.ThrowAsync<InvalidOperationException>(() => h.Engine.RenewGrantAsync(Cmd(c, H.Actor("user:dg", "GovernanceAdmin"))));
+        var created = h.CreatedConsents.ShouldHaveSingleItem();
+        h.Audit.Entries.Single(e => e.EventType == AuditEventTypes.GrantRenewalRollbackFailed).DetailsJson.ShouldContain(created.Id.ToString());
+    }
+
+    [Fact]
     public async Task Renewal_by_grantee_denied()
     {
         var c = Grant(grantee: "user:alice");
