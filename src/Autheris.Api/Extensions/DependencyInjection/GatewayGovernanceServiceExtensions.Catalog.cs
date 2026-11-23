@@ -45,7 +45,8 @@ public static partial class GatewayGovernanceServiceExtensions
             sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>(),
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<GatewayOptions>>(),
             sp.GetService<TimeProvider>(),
-            sp.GetService<Autheris.Application.Common.Interfaces.IEventBus>()));
+            sp.GetService<Autheris.Application.Common.Interfaces.IEventBus>(),
+            sp.GetService<Autheris.Application.Common.Interfaces.IGovernanceCapabilities>()));
         services.AddSingleton<Autheris.Application.Audit.AuditGroupCommitOptions>();
         services.AddSingleton<Autheris.Application.Audit.AuditGroupCommitSink>();
     }

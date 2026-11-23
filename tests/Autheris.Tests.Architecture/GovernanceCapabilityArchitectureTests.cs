@@ -14,13 +14,13 @@ using Xunit;
 [Trait("Category", "Security")]
 public sealed class GovernanceCapabilityArchitectureTests
 {
-    // Classification & policy write endpoint files awaiting future W1-06 / W1-09 migration to IGovernanceCapabilities (shrink-only).
+    // Closed list: remaining writer files whose authorization is enforced by a named gateway policy or by the service layer they call
+    // (grants, declarative apply, access profiles, virtual filters). Classification, mask, owner-group and policy writers already use
+    // IGovernanceCapabilities. Shrink-only.
     private static readonly HashSet<string> LegacyWriterAllowlist = new(StringComparer.Ordinal)
     {
         "src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs",
-        "src/Autheris.Api/Endpoints/ClassificationAdminEndpoints.cs",
         "src/Autheris.Api/Endpoints/ConsentApiEndpoints.Grants.cs",
-        "src/Autheris.Api/Endpoints/GovernanceClassificationEndpoints.cs",
         "src/Autheris.Api/Endpoints/GovernanceEndpoints.Access.cs",
         "src/Autheris.Api/Endpoints/GovernanceEndpoints.Catalog.cs",
         "src/Autheris.Api/Endpoints/GovernanceEndpoints.cs",

@@ -190,8 +190,8 @@ public sealed class ApproverEligibilityTests
 
         var workflowConfig = new RemovedScopeRouteRepo(
         [
-            new ConsentWorkflowRoute(TenantA.Value, WorkflowRouteScopeKind.DataOwner, "owner-x", ConsentWorkflowMode.External, Guid.NewGuid(), 30, 14, 24, false, "admin", now),
-            new ConsentWorkflowRoute(TenantA.Value, WorkflowRouteScopeKind.DataSource, "sales", ConsentWorkflowMode.External, Guid.NewGuid(), 30, 14, 24, false, "admin", now)
+            new ConsentWorkflowRoute(TenantA.Value, WorkflowRouteScopeKind.DataOwner, "owner-x", ConsentWorkflowMode.External, Guid.NewGuid(), 30, 14, false, "admin", now),
+            new ConsentWorkflowRoute(TenantA.Value, WorkflowRouteScopeKind.DataSource, "sales", ConsentWorkflowMode.External, Guid.NewGuid(), 30, 14, false, "admin", now)
         ]);
 
         var metadata = NullFake.Create<ITableMetadataRepository>((m, _) =>

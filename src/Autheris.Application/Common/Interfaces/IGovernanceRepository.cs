@@ -270,7 +270,8 @@ public interface IConsentRepository
     /// <summary>
     /// SEC E-05 / EX-02: System revocation of a consent owned by an automated sync. Only revokes when the consent carries
     /// <paramref name="consentRequestId"/> (the sync marker); there is no data-owner check because the system actor is not
-    /// a table owner and a revocation can only tighten access. Returns false when nothing was revoked.
+    /// a table owner and a revocation can only tighten access. <see cref="Guid.Empty"/> as the marker matches consents that carry no request id
+    /// (deprovisioning revokes every live grant of a subject). Returns false when nothing was revoked.
     /// </summary>
     Task<bool> RevokeSystemConsentAsync(Guid consentId, Guid consentRequestId, Sid revokedBySid, string reason, CancellationToken ct = default);
 

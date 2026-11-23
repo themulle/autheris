@@ -45,6 +45,7 @@ public sealed partial class PermissionRequestEngine
     private readonly IIdentitySubjectResolver? _subjectResolver;
     private readonly IRateLimiterService? _rateLimiter;
     private readonly IGovernanceNotificationDispatcher? _notificationDispatcher;
+    private readonly IConsentRepository? _consentRepository;
     private readonly IGovernanceCapabilities? _capabilities;
     private readonly IGovernanceCacheInvalidator? _cacheInvalidator;
     private readonly IPolicyEpochRepository? _policyEpochRepository;
@@ -79,7 +80,8 @@ public sealed partial class PermissionRequestEngine
         IOptions<GatewayOptions>? gatewayOptions = null,
         IOptions<CatalogDiscoveryOptions>? discoveryOptions = null,
         TimeProvider? timeProvider = null,
-        ILogger<PermissionRequestEngine>? logger = null)
+        ILogger<PermissionRequestEngine>? logger = null,
+        IConsentRepository? consentRepository = null)
     {
         _approvalRepository = approvalRepository ?? throw new ArgumentNullException(nameof(approvalRepository));
         _auditWriter = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
@@ -108,6 +110,7 @@ public sealed partial class PermissionRequestEngine
         _discoveryOptions = discoveryOptions?.Value;
         _time = timeProvider ?? TimeProvider.System;
         _logger = logger;
+        _consentRepository = consentRepository;
     }
 
     private static PermissionGrantKind MapGrantKind(ConsentRequestKind kind) => kind switch
