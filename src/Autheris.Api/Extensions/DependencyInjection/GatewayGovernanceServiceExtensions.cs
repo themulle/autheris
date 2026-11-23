@@ -147,7 +147,9 @@ public static partial class GatewayGovernanceServiceExtensions
                 sp.GetService<Microsoft.Extensions.Options.IOptions<GovernanceCacheSettings>>(),
                 sp.GetService<Autheris.Application.Governance.Caching.IGovernanceChangeNotifier>(),
                 sp.GetService<TimeProvider>(),
-                sp.GetService<Autheris.Application.Products.IDataProductRepository>()));
+                sp.GetService<Autheris.Application.Products.IDataProductRepository>(),
+                sp.GetService<Microsoft.Extensions.Options.IOptions<AccessPolicyOptions>>(),
+                sp.GetService<Microsoft.Extensions.Logging.ILogger<Autheris.Application.Catalog.Visibility.ContainerVisibilitySnapshotProvider>>()));
         services.AddSingleton<Autheris.Application.Catalog.Visibility.IContainerVisibilitySnapshotProvider>(sp =>
             sp.GetRequiredService<Autheris.Application.Catalog.Visibility.ContainerVisibilitySnapshotProvider>());
         services.AddSingleton<Autheris.Application.Governance.Caching.IGovernanceCacheInvalidator>(sp =>

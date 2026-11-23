@@ -29,7 +29,7 @@ public static class CatalogViewShaping
 
         return view switch
         {
-            CatalogView.Granted => CatalogOutputShape.Full,
+            CatalogView.Granted or CatalogView.ContainerVisible => CatalogOutputShape.Full,
             _ => CatalogOutputShape.NotFound
         };
     }

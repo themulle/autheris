@@ -56,6 +56,8 @@ type Query {
     @cost(weight: "10")
   calculateConsentRevocationImpact(consentId: UUID!): ConsentRevocationImpactReport!
     @cost(weight: "10")
+  containers(kind: String, limit: Int): [ContainerTile!]! @cost(weight: "10")
+  container(kind: String!, id: UUID!): ContainerTile @cost(weight: "10")
 }
 
 type Mutation {
@@ -159,6 +161,16 @@ type ConsentRevocationImpactReport {
   affectedDownstreamCount: Int!
   affectedEntities: [AffectedEntity!]!
   containsCycles: Boolean!
+}
+
+type ContainerTile {
+  kind: String!
+  id: UUID!
+  name: String!
+  description: String
+  contact: String
+  visibility: String!
+  accessState: String!
 }
 
 type DataCatalogSyncPayload {

@@ -93,7 +93,7 @@ public sealed class CatalogContainerVisibilityTests
         var visible = await f.Service().GetVisibleAsync(Caller());
 
         visible.Tables.Select(t => t.Identifier).ShouldBe([InOpen]);
-        visible.Tables.Single().CatalogView.ShouldBe(CatalogView.Granted);
+        visible.Tables.Single().CatalogView.ShouldBe(CatalogView.ContainerVisible);
     }
 
     [Fact]

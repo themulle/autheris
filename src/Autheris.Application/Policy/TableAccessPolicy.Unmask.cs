@@ -63,9 +63,27 @@ public sealed partial class TableAccessPolicy
         }
 
         var coverage = await ResolveUnmaskCoverageAsync(query, groupsComplete, ct).ConfigureAwait(false);
-        var toMask = coverage.WholeTable
-            ? []
-            : candidates.Where(c => !coverage.Covers(c.Column)).ToList();
+        if (coverage.WholeTable)
+        {
+            return decision;
+        }
+
+        if (!coverage.IsEmpty)
+        {
+            // In-place compaction: keep only the columns the unmask grants do not cover.
+            var kept = 0;
+            for (var i = 0; i < candidates.Count; i++)
+            {
+                if (!coverage.Covers(candidates[i].Column))
+                {
+                    candidates[kept++] = candidates[i];
+                }
+            }
+
+            candidates.RemoveRange(kept, candidates.Count - kept);
+        }
+
+        var toMask = candidates;
         if (toMask.Count == 0)
         {
             return decision;
@@ -88,9 +106,7 @@ public sealed partial class TableAccessPolicy
             return UnmaskCoverage.None;
         }
 
-        IReadOnlyCollection<Sid> subjects = query.AllUserSids is { Count: > 0 }
-            ? query.AllUserSids
-            : query.GroupSids.Append(query.UserSid).Distinct().ToList();
+        IReadOnlyCollection<Sid> subjects = query.AllUserSids is { Count: > 0 } all ? all : SubjectsOf(query);
         try
         {
             return await _unmaskResolver.ResolveAsync(query.Tenant, subjects, groupsComplete, query.Metadata.Identifier, ct).ConfigureAwait(false);
@@ -99,6 +115,19 @@ public sealed partial class TableAccessPolicy
         {
             return UnmaskCoverage.None;
         }
+    }
+
+    private static List<Sid> SubjectsOf(TableAccessQuery query)
+    {
+        var groups = query.GroupSids;
+        var subjects = new List<Sid>(groups.Count + 1);
+        subjects.AddRange(groups);
+        if (!groups.Contains(query.UserSid))
+        {
+            subjects.Add(query.UserSid);
+        }
+
+        return subjects;
     }
 
     /// <summary>

@@ -38,9 +38,7 @@ public sealed partial class TableAccessPolicy
         }
 
         var now = _timeProvider.GetUtcNow();
-        IReadOnlyCollection<Sid> subjects = query.AllUserSids is { Count: > 0 }
-            ? query.AllUserSids
-            : query.GroupSids.Append(query.UserSid).Distinct().ToList();
+        IReadOnlyCollection<Sid> subjects = query.AllUserSids is { Count: > 0 } all ? all : SubjectsOf(query);
 
         // Issue #1043: from the batch prefetch when it covers this decision, otherwise from the repository.
         IReadOnlyList<Consent> loaded = query.ConsentPrefetch is { } consentPrefetch &&

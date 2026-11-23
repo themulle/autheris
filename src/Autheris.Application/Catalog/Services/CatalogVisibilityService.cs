@@ -48,6 +48,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
     private readonly IProtectionSnapshotProvider? _protectionProvider;
     private readonly IContainerVisibilitySnapshotProvider? _containerVisibility;
     private readonly IUnmaskGrantResolver? _unmaskResolver;
+    private const int DefaultMaxVisibilityCandidates = 1000;
     private readonly Lock _memoLock = new();
     private readonly Dictionary<MemoKey, CatalogVisibleSet> _memo = [];
 
@@ -381,6 +382,11 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         }
 
         var snapshot = await _containerVisibility.GetAsync(context.Tenant, context.Principal, ct).ConfigureAwait(false);
+        if (!CanAddAnything(snapshot))
+        {
+            return engineOutput;
+        }
+
         var already = new HashSet<TableIdentifier>(engineOutput.Count);
         foreach (var table in engineOutput)
         {
@@ -388,7 +394,19 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         }
 
         var candidates = CatalogVisibility.DropForeignVirtualTables(rows.Where(r => !already.Contains(r.Identifier)).ToList(), context.Tenant);
+        var maxCandidates = Math.Max(0, _options?.Governance.AccessPolicy.MaxTablesPerAssignment ?? DefaultMaxVisibilityCandidates);
+        if (candidates.Count > maxCandidates)
+        {
+            // Bounded evaluation: rows beyond the bound are not added (fail-closed).
+            _logger.LogWarning(
+                "Catalog container visibility evaluated only the first {Bound} of {Count} candidate tables; the rest stay hidden.",
+                maxCandidates,
+                candidates.Count);
+            candidates = [.. candidates.Take(maxCandidates)];
+        }
+
         var extras = new List<TableMetadata>();
+        var subjects = BuildSubjects(context);
         var classes = new Dictionary<TableIdentifier, Autheris.Domain.Security.ProtectionClass>();
         foreach (var row in candidates)
         {
@@ -404,14 +422,14 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
             }
 
             var visible = snapshot.IsTableVisible(protection.Container, row.Identifier)
-                || await HasUnmaskGrantAsync(context, snapshot, protection, row, ct).ConfigureAwait(false);
+                || await HasUnmaskGrantAsync(context, subjects, snapshot, protection, row, ct).ConfigureAwait(false);
             if (!visible)
             {
                 continue;
             }
 
             classes[row.Identifier] = protection.TableClass;
-            extras.Add(row with { CatalogView = CatalogView.Granted });
+            extras.Add(row with { CatalogView = CatalogView.ContainerVisible });
         }
 
         if (extras.Count == 0)
@@ -423,8 +441,40 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         return allowed.Count == 0 ? engineOutput : [.. engineOutput, .. allowed];
     }
 
+    /// <summary>
+    /// False when no row can become visible through the container rule, so no per-row protection lookup is needed: nothing is
+    /// open, granted or owned, there are no data grants, the caller sees everything through another scope, and no unmask check applies.
+    /// </summary>
+    private bool CanAddAnything(ContainerVisibilitySnapshot snapshot)
+    {
+        if (snapshot.SeesEverything || (_unmaskResolver is not null && snapshot.GroupsComplete))
+        {
+            return true;
+        }
+
+        if (!snapshot.IsAvailable)
+        {
+            return false;
+        }
+
+        if (snapshot.CatalogGrantedContainers.Count > 0 || snapshot.OwnedContainers.Count > 0 || snapshot.DataGrantedTables.Count > 0)
+        {
+            return true;
+        }
+
+        foreach (var info in snapshot.Containers.Values)
+        {
+            if (info.Visibility == CatalogVisibilityMode.Open)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
     private async ValueTask<bool> HasUnmaskGrantAsync(
-        Context context, ContainerVisibilitySnapshot snapshot, EffectiveProtection protection, TableMetadata row, CancellationToken ct)
+        Context context, List<Sid> subjects, ContainerVisibilitySnapshot snapshot, EffectiveProtection protection, TableMetadata row, CancellationToken ct)
     {
         if (_unmaskResolver is null || !snapshot.GroupsComplete)
         {
@@ -438,10 +488,11 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
             return false;
         }
 
-        var subjects = new List<Sid>(context.Principal.GetGroupSids()) { context.Sid };
         var coverage = await _unmaskResolver.ResolveAsync(context.Tenant, subjects, snapshot.GroupsComplete, row.Identifier, ct).ConfigureAwait(false);
         return !coverage.IsEmpty;
     }
+
+    private static List<Sid> BuildSubjects(Context context) => new(context.Principal.GetGroupSids()) { context.Sid };
 
     private bool TryGetMemo(MemoKey key, out CatalogVisibleSet set)
     {

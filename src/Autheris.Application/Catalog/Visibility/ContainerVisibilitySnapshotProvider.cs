@@ -8,6 +8,8 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 
 namespace Autheris.Application.Catalog.Visibility;
@@ -27,7 +29,6 @@ public interface IContainerVisibilitySnapshotProvider
 public sealed class ContainerVisibilitySnapshotProvider : IContainerVisibilitySnapshotProvider, IGovernanceCacheInvalidator, IDisposable
 {
     private const int DefaultCapacity = 2048;
-    private const int MaxContainers = 500;
 
     private readonly record struct CacheKey(string TenantId, string SubjectKey, bool IsGovernance, bool IsItAdmin, bool GroupsComplete, long GovernanceEpoch);
 
@@ -39,6 +40,9 @@ public sealed class ContainerVisibilitySnapshotProvider : IContainerVisibilitySn
     private readonly IGovernanceCapabilities _capabilities;
     private readonly GovernanceEpochProvider _epochProvider;
     private readonly IDataProductRepository? _products;
+    private readonly int _maxContainers;
+    private readonly int _maxDataGrants;
+    private readonly ILogger _logger;
     private readonly TimeSpan _maxTtl;
     private readonly TimeProvider _time;
     private readonly BoundedCache<CacheKey, Cached> _cache;
@@ -57,7 +61,9 @@ public sealed class ContainerVisibilitySnapshotProvider : IContainerVisibilitySn
         IOptions<GovernanceCacheSettings>? cacheSettings = null,
         IGovernanceChangeNotifier? changeNotifier = null,
         TimeProvider? timeProvider = null,
-        IDataProductRepository? products = null)
+        IDataProductRepository? products = null,
+        IOptions<AccessPolicyOptions>? accessPolicy = null,
+        ILogger<ContainerVisibilitySnapshotProvider>? logger = null)
     {
         _domains = domains ?? throw new ArgumentNullException(nameof(domains));
         _catalogGrants = catalogGrants ?? throw new ArgumentNullException(nameof(catalogGrants));
@@ -65,6 +71,12 @@ public sealed class ContainerVisibilitySnapshotProvider : IContainerVisibilitySn
         _capabilities = capabilities ?? throw new ArgumentNullException(nameof(capabilities));
         _epochProvider = epochProvider ?? throw new ArgumentNullException(nameof(epochProvider));
         _products = products;
+        _logger = logger ?? NullLogger<ContainerVisibilitySnapshotProvider>.Instance;
+        var policy = accessPolicy?.Value ?? new AccessPolicyOptions();
+        ArgumentOutOfRangeException.ThrowIfLessThan(policy.MaxPageSize, 1);
+        ArgumentOutOfRangeException.ThrowIfLessThan(policy.MaxTablesPerAssignment, 1);
+        _maxContainers = policy.MaxPageSize;
+        _maxDataGrants = policy.MaxTablesPerAssignment;
 
         var settings = cacheSettings?.Value ?? new GovernanceCacheSettings();
         ArgumentOutOfRangeException.ThrowIfLessThan(settings.MaxTtlSeconds, 1);
@@ -201,7 +213,13 @@ public sealed class ContainerVisibilitySnapshotProvider : IContainerVisibilitySn
         var now = _time.GetUtcNow();
         var containers = new Dictionary<ContainerRef, ContainerInfo>();
 
-        var domains = await _domains.ListAsync(tenant, MaxContainers, 0, ct).ConfigureAwait(false);
+        var domains = await _domains.ListAsync(tenant, _maxContainers, 0, ct).ConfigureAwait(false);
+        if (domains.Count >= _maxContainers)
+        {
+            // Truncated: containers beyond the bound are absent from the snapshot and therefore invisible (fail-closed).
+            _logger.LogWarning("Catalog visibility read hit the domain bound ({Bound}); further domains stay invisible.", _maxContainers);
+        }
+
         foreach (var domain in domains)
         {
             if (domain.Tenant != tenant)
@@ -222,7 +240,12 @@ public sealed class ContainerVisibilitySnapshotProvider : IContainerVisibilitySn
 
         if (_products is not null)
         {
-            var products = await _products.ListProductsAsync(tenant, null, MaxContainers, ct).ConfigureAwait(false);
+            var products = await _products.ListProductsAsync(tenant, null, _maxContainers, ct).ConfigureAwait(false);
+            if (products.Count >= _maxContainers)
+            {
+                _logger.LogWarning("Catalog visibility read hit the data product bound ({Bound}); further products stay invisible.", _maxContainers);
+            }
+
             foreach (var product in products)
             {
                 if (product.Tenant != tenant)
@@ -271,8 +294,15 @@ public sealed class ContainerVisibilitySnapshotProvider : IContainerVisibilitySn
             }
 
             var consents = await _consents.GetAllActiveConsentsForSubjectsAsync(subjects, null, now, tenant, ct).ConfigureAwait(false);
+            var dataGrantsTruncated = false;
             foreach (var consent in consents)
             {
+                if (dataTables.Count >= _maxDataGrants)
+                {
+                    dataGrantsTruncated = true;
+                    break;
+                }
+
                 if (consent.GrantKind == PermissionGrantKind.Data
                     && consent.Effect == ConsentEffect.Allow
                     && consent.TenantId == tenant
@@ -282,6 +312,11 @@ public sealed class ContainerVisibilitySnapshotProvider : IContainerVisibilitySn
                     dataTables.Add(consent.TableIdentifier);
                     earliest = Earlier(earliest, consent.ValidTo);
                 }
+            }
+
+            if (dataGrantsTruncated)
+            {
+                _logger.LogWarning("Catalog visibility read hit the data grant bound ({Bound}); further data grants do not widen visibility.", _maxDataGrants);
             }
         }
 
