@@ -42,7 +42,7 @@ public sealed class ProtectionClassEgressMatrixTests(GovernancePostgresFixture f
         bool hasInternalEmployeeGroup,
         bool expectedAllowed)
     {
-        const string employeeGroupSid = "S-1-5-21-EMP-1";
+        const string employeeGroupSid = "S-1-5-21-1000-2000-3000-1101";
         // Internal access is proven only through a configured employee group (the test subject carries no member claims).
         await using var store = await GovernanceTestStore.CreatePostgreSqlAsync(
             fixture,

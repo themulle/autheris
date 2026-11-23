@@ -30,7 +30,7 @@ public sealed class ProtectionEmployeeGroupBaselineTests
 {
     private static readonly TenantId Tenant = new("t1");
     private static readonly TableIdentifier TableId = new("crm", "public", "matrix_internal");
-    private static readonly Sid EmpGroup = new("S-1-5-21-EMP-1");
+    private static readonly Sid EmpGroup = new("S-1-5-21-1000-2000-3000-1101");
 
     [Theory]
     [InlineData(true, true)]
