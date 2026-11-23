@@ -16,7 +16,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.Persistence;
 
 [Trait("Category", "Security")]
-public sealed class GovernanceDomainStoreSqlTests
+public sealed partial class GovernanceDomainStoreSqlTests
 {
     private static readonly TenantId TenantA = new("tenant-a");
     private static readonly Sid Actor = new("S-1-5-21-1001");

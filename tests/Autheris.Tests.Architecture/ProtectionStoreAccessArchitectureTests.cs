@@ -13,13 +13,16 @@ namespace Autheris.Tests.Architecture;
 public sealed class ProtectionStoreAccessArchitectureTests
 {
     private const string DomainRepoInterface = "Autheris.Application.Common.Interfaces.IGovernanceDomainRepository";
-    private const string GetProtectionMethod = "GetProtectionAsync";
+    // The per-table and the set-based read (protection snapshot prefetch) are both guarded.
+    private static readonly HashSet<string> GetProtectionMethods = new(StringComparer.Ordinal) { "GetProtectionAsync", "GetProtectionBatchAsync" };
 
     private static readonly HashSet<string> AllowedGetProtectionCallers = new(StringComparer.Ordinal)
     {
         typeof(ProtectionSnapshotProvider).FullName!,
         typeof(GovernanceDomainService).FullName!,
-        typeof(GovernanceDomainStore).FullName!
+        typeof(GovernanceDomainStore).FullName!,
+        // The default GetProtectionBatchAsync of the interface only delegates to its own (guarded) GetProtectionAsync.
+        DomainRepoInterface
     };
 
     private static IEnumerable<TypeDefinition> AllTypes(ModuleDefinition module)
@@ -87,7 +90,7 @@ public sealed class ProtectionStoreAccessArchitectureTests
                     {
                         if (instr.OpCode.Code is Code.Call or Code.Callvirt or Code.Ldftn &&
                             instr.Operand is MethodReference mr &&
-                            mr.Name == GetProtectionMethod &&
+                            GetProtectionMethods.Contains(mr.Name) &&
                             (mr.DeclaringType.FullName == DomainRepoInterface ||
                              mr.DeclaringType.FullName == typeof(GovernanceDomainStore).FullName))
                         {

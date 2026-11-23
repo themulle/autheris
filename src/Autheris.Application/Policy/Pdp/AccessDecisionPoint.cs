@@ -552,6 +552,20 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
             }
         }
 
+        // The protection gate resolves a protection snapshot per table; load the uncached ones of the block set-based. A failure leaves
+        // them to the per-table read, which fails closed (PROTECTION_UNAVAILABLE).
+        if (_protectionProvider is not null)
+        {
+            try
+            {
+                await _protectionProvider.PrefetchAsync(subject.TenantId, block.Select(static o => o.Identifier).ToList(), ct).ConfigureAwait(false);
+            }
+            catch (Exception) when (!ct.IsCancellationRequested)
+            {
+                // Per-table resolution below.
+            }
+        }
+
         return (rowPrefetch, consentPrefetch, policyPrefetch);
     }
 

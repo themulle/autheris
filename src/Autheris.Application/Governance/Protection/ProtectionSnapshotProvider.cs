@@ -124,6 +124,92 @@ public sealed class ProtectionSnapshotProvider : IProtectionSnapshotProvider, IG
         throw new InvalidOperationException("Protection snapshot resolution could not stabilize.");
     }
 
+    /// <summary>
+    /// Loads the uncached snapshots of <paramref name="tables"/> with one metadata batch read and set-based container and protection reads
+    /// instead of a metadata, a container and a protection read per table. Each snapshot is resolved exactly as <see cref="LoadSnapshotAsync"/>
+    /// resolves it and is cached under the key <see cref="GetAsync"/> uses, only when no invalidation happened during the load; data product
+    /// tables keep the per-table path. Errors propagate (the caller then decides per table, where a failure is fail-closed).
+    /// </summary>
+    public async ValueTask PrefetchAsync(TenantId tenant, IReadOnlyList<TableIdentifier> tables, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(tables);
+        var tenantKey = RequireValidTenant(tenant);
+        if (tables.Count == 0)
+        {
+            return;
+        }
+
+        var startGlobalGen = Volatile.Read(ref _globalGeneration);
+        var startTenantGen = _tenantGenerations.GetValueOrDefault(tenantKey);
+        var catalogVersion = await _catalogVersionProvider.GetCatalogVersionAsync(ct).ConfigureAwait(false);
+        var governanceEpoch = await _epochProvider.GetEpochAsync(tenant, ct).ConfigureAwait(false);
+
+        var missing = new List<TableIdentifier>();
+        foreach (var table in tables.Distinct())
+        {
+            RequireValidTable(table);
+            if (!_cache.TryGet(new CacheKey(tenantKey, table, catalogVersion, governanceEpoch), out var cached) || IsExpired(cached))
+            {
+                missing.Add(table);
+            }
+        }
+
+        if (missing.Count == 0)
+        {
+            return;
+        }
+
+        var metadata = await _tableMetadataRepository.GetTableMetadataBatchAsync(missing, ct).ConfigureAwait(false);
+        var resolvable = new List<(TableIdentifier Table, TableMetadata Metadata)>(missing.Count);
+        var snapshots = new List<(TableIdentifier Table, CachedSnapshot Snapshot)>(missing.Count);
+        for (var i = 0; i < missing.Count; i++)
+        {
+            var meta = i < metadata.Count ? metadata[i] : null;
+            if (meta is null || !meta.Table.IsActive)
+            {
+                var negative = EffectiveProtectionResolver.Resolve(ContainerDefaults.Unassigned, null, null, null);
+                snapshots.Add((missing[i], new CachedSnapshot(negative, IsNegative: true, _time.GetTimestamp())));
+            }
+            else if (_productRepository is null ||
+                     !string.Equals(meta.Table.SourceName, ProductSource.Name, StringComparison.OrdinalIgnoreCase))
+            {
+                resolvable.Add((missing[i], meta));
+            }
+        }
+
+        if (resolvable.Count > 0)
+        {
+            var ids = resolvable.Select(static r => r.Metadata.Table.Id).ToList();
+            var containers = await _domainRepository.GetContainersForTablesAsync(tenant, ids, ct).ConfigureAwait(false);
+            var protections = await _domainRepository.GetProtectionBatchAsync(tenant, ids, ct).ConfigureAwait(false);
+            foreach (var (table, meta) in resolvable)
+            {
+                var tableId = meta.Table.Id;
+                if (!containers.TryGetValue(tableId, out var container) || !protections.TryGetValue(tableId, out var protection))
+                {
+                    continue; // Not answered by the batch read: GetAsync loads it per table.
+                }
+
+                var columnNames = meta.Columns.Select(static c => c.ColumnName).ToList();
+                var resolved = EffectiveProtectionResolver.Resolve(container, protection.Table, protection.Columns, columnNames);
+                var isNegative = !container.IsValid
+                    || (container.Container.Id == Guid.Empty && protection.Table is null && protection.Columns.Count == 0);
+                snapshots.Add((table, new CachedSnapshot(resolved, isNegative, _time.GetTimestamp())));
+            }
+        }
+
+        // An invalidation during the load may have made the read rows stale: cache nothing, GetAsync reads again.
+        if (!IsSameGeneration(tenantKey, startGlobalGen, startTenantGen))
+        {
+            return;
+        }
+
+        foreach (var (table, snapshot) in snapshots)
+        {
+            _cache.Set(new CacheKey(tenantKey, table, catalogVersion, governanceEpoch), snapshot);
+        }
+    }
+
     public void InvalidateTenant(string tenantId)
     {
         if (string.IsNullOrWhiteSpace(tenantId))

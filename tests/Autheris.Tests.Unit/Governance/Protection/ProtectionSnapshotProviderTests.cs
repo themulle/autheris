@@ -15,7 +15,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.Governance.Protection;
 
 [Trait("Category", "Security")]
-public sealed class ProtectionSnapshotProviderTests
+public sealed partial class ProtectionSnapshotProviderTests
 {
     private static readonly TenantId TenantA = new("tenant-a");
     private static readonly TenantId TenantB = new("tenant-b");
@@ -313,6 +313,7 @@ public sealed class ProtectionSnapshotProviderTests
         private readonly ConcurrentDictionary<TableIdentifier, TableMetadata> _tables = new();
         public Exception? Failure { get; set; }
         public int ReadCount { get; private set; }
+        public Action? OnRead { get; set; }
 
         public FakeTableMetadataRepository(params TableMetadata[] initial)
         {
@@ -327,6 +328,7 @@ public sealed class ProtectionSnapshotProviderTests
         public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default)
         {
             ReadCount++;
+            OnRead?.Invoke();
             if (Failure is { } ex)
             {
                 return Task.FromException<TableMetadata?>(ex);
