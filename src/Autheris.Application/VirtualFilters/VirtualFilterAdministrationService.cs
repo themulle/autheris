@@ -1,5 +1,6 @@
 namespace Autheris.Application.VirtualFilters;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -113,7 +114,7 @@ public sealed partial class VirtualFilterAdministrationService
     private readonly ITableMetadataRepository? _catalog;
     private readonly Autheris.Application.Identity.Attributes.ICallerAttributeRegistry? _callerAttributes;
     private readonly SqlDataSourceOptions? _dataSources;
-    private readonly IDataOwnershipRepository? _ownership;
+    private readonly IContainerOwnership? _ownership;
     private readonly System.Collections.Concurrent.ConcurrentDictionary<TenantId, List<(DateTimeOffset Timestamp, int Count)>> _removalHistory = new();
 
     private readonly Autheris.Application.State.IDistributedClusterStateProvider _clusterState;
@@ -126,7 +127,7 @@ public sealed partial class VirtualFilterAdministrationService
         ITableMetadataRepository? catalog = null,
         Autheris.Application.Identity.Attributes.ICallerAttributeRegistry? callerAttributes = null,
         Autheris.Application.State.IDistributedClusterStateProvider? clusterState = null,
-        IDataOwnershipRepository? ownership = null)
+        IContainerOwnership? ownership = null)
     {
         _callerAttributes = options?.Value?.CallerAttributes?.Enabled == true ? callerAttributes : null;
         _catalog = catalog;

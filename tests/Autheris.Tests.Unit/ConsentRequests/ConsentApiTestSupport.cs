@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.ConsentRequests;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -119,7 +120,7 @@ internal sealed class ConsentApiTestHarness : IAsyncDisposable
         services.AddSingleton<IConsentWorkflowConfigRepository>(store);
         services.AddSingleton<IConsentEventOutbox>(store);
         services.AddSingleton<ITableMetadataRepository>(store);
-        services.AddSingleton<IDataOwnershipRepository>(store);
+        services.AddSingleton<IContainerOwnership>(store);
         services.AddSingleton<IAuditWriter>(new InMemoryAuditWriter());
         services.AddSingleton<IExternalDecisionService>(new HarnessExternalDecisionService(store, clock));
         services.AddScoped<IPermissionRequestEngine>(sp => new PermissionRequestEngine(

@@ -1,5 +1,6 @@
 namespace Autheris.Application.Governance.Analysis;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -28,7 +29,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
 {
     private readonly ITableMetadataRepository _metadataRepository;
     private readonly IConsentRepository _consentRepository;
-    private readonly IDataOwnershipRepository? _dataOwnershipRepository;
+    private readonly IContainerOwnership? _dataOwnershipRepository;
     private readonly IAuditLogRepository? _auditLogRepository;
     private readonly IAccessProfileRepository? _accessProfileRepository;
     private readonly ISchemaSunsettingService? _sunsettingService;
@@ -48,7 +49,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         ITableMetadataRepository metadataRepository,
         IConsentRepository consentRepository,
         IAuditLogRepository auditLogRepository,
-        IDataOwnershipRepository? dataOwnershipRepository = null,
+        IContainerOwnership? dataOwnershipRepository = null,
         IAccessProfileRepository? accessProfileRepository = null,
         ISchemaSunsettingService? sunsettingService = null,
         IOptions<GatewayOptions>? gatewayOptions = null,
@@ -94,7 +95,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
     public QueryAnalysisService(
         ITableMetadataRepository metadataRepository,
         IConsentRepository consentRepository,
-        IDataOwnershipRepository? dataOwnershipRepository = null,
+        IContainerOwnership? dataOwnershipRepository = null,
         IAccessProfileRepository? accessProfileRepository = null,
         ISchemaSunsettingService? sunsettingService = null,
         IOptions<GatewayOptions>? gatewayOptions = null,

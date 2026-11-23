@@ -147,9 +147,9 @@ public sealed class DbtGovernanceOwnerImportTests : IDisposable
     }
 
     [Fact]
-    public async Task Import_FlagOn_AssignsOwner_DescribeDatasetShowsDataOwner()
+    public async Task Import_FlagOn_AssignsOwner_DescribeDatasetDoesNotShowLegacyOwner()
     {
-        // Issue acceptance: an imported owner appears in describe_dataset.
+        // W3-12a: owner meta is stored but ownership is read from containers only.
         var result = await Import(Service(), Payload(_table, OwnerObj("S-1-5-21-5004", "Grace Hopper", "grace@corp.example")));
 
         result.Success.ShouldBeTrue();
@@ -160,12 +160,12 @@ public sealed class DbtGovernanceOwnerImportTests : IDisposable
         var consents = Wp0.Consents(Wp0.Allow(_table, "S-USER", Wp0.TenantA, "id"));
         var mcp = new Autheris.Application.Mcp.Services.McpDatasetCatalog(
             catalogTables, consents, Substitute.For<Autheris.Application.Common.Interfaces.IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
-            options: Options.Create(gatewayOptions), dataOwnershipRepository: _repo,
+            options: Options.Create(gatewayOptions), dataOwnershipRepository: null,
             visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(catalogTables, consents, gatewayOptions, null));
         var description = await mcp.DescribeDatasetAsync(Wp0.User("S-USER", "tenant-a"), $"{_table.Domain}.{_table.Schema}.{_table.TableName}");
 
-        description.DataOwner.ShouldNotBeNull();
-        description.DataOwner.ShouldContain("Grace Hopper");
+        // Table ownership is defined by the container owner group; imported legacy owner rows no longer surface in the catalog.
+        description.DataOwner.ShouldBeNull();
     }
 
     [Fact]

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Policy.RowScopes;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -277,7 +278,7 @@ public sealed class RowPolicyApprovalTests
         public void Invalidate() { }
     }
 
-    private sealed class InMemoryOwnershipRepo : IDataOwnershipRepository
+    private sealed class InMemoryOwnershipRepo : IContainerOwnership
     {
         private readonly HashSet<(string Domain, string Schema, string Table, string Sid)> _allowed = new();
 

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Application.Governance.Ownership;
 using System.Security.Claims;
 using Autheris.Application.Audit;
 using Autheris.Application.Governance.Interfaces;
@@ -22,7 +23,7 @@ public sealed class DatasetCatalogAdminServiceTests
     private static readonly TableIdentifier Orders = new("sales", "dbo", "orders");
 
     private readonly ITableMetadataRepository _tables = Substitute.For<ITableMetadataRepository>();
-    private readonly IDataOwnershipRepository _owners = Substitute.For<IDataOwnershipRepository>();
+    private readonly IContainerOwnership _owners = Substitute.For<IContainerOwnership>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly TestTime _time = new();
     private DatasetCatalogSettings _state = new([]);
@@ -80,7 +81,7 @@ public sealed class DatasetCatalogAdminServiceTests
             });
     }
 
-    private DatasetCatalogAdminService Create(string? mode = null, int maxTags = 32, string[]? shared = null, IDataOwnershipRepository? owners = null)
+    private DatasetCatalogAdminService Create(string? mode = null, int maxTags = 32, string[]? shared = null, IContainerOwnership? owners = null)
         => new(_tables, owners ?? _owners, _audit,
             new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions
             {

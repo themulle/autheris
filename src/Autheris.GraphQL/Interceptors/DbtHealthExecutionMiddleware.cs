@@ -1,5 +1,6 @@
 namespace Autheris.GraphQL.Interceptors;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -77,7 +78,7 @@ public sealed class DbtHealthExecutionMiddleware
 
         var accessResolver = context.RequestServices.GetService<ITableAccessResolver>();
         var tableRepo = context.RequestServices.GetService<ITableMetadataRepository>();
-        var ownershipRepo = context.RequestServices.GetService<IDataOwnershipRepository>();
+        var ownershipRepo = context.RequestServices.GetService<IContainerOwnership>();
 
         // 1. Extract referenced models (field names, nested selections, and name arguments / variables)
         System.Text.Json.JsonElement? rawVariables = (context.Request as OperationRequest)?.VariableValues?.Document.RootElement;

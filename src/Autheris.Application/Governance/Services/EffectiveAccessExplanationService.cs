@@ -1,5 +1,6 @@
 namespace Autheris.Application.Governance.Services;
 
+using Autheris.Application.Governance.Ownership;
 using Autheris.Application.Tenancy;
 using System;
 using System.Collections.Generic;
@@ -22,7 +23,7 @@ public sealed class EffectiveAccessExplanationService(
     ITableMetadataRepository metadataRepository,
     IConsentRepository consentRepository,
     IConsentResolutionService resolutionService,
-    IDataOwnershipRepository? ownershipRepository = null,
+    IContainerOwnership? ownershipRepository = null,
     IOptions<GatewayOptions>? gatewayOptions = null,
     IOptions<GovernanceTextOptions>? textOptions = null) : IEffectiveAccessExplanationService
 {

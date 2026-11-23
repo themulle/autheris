@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
@@ -573,8 +574,8 @@ public sealed class DbtSemanticManifestIngestionServiceTests
 
         var ownerSid = new Sid("S-1-5-21-TABLE-OWNER");
         var unrelatedOwnerSid = new Sid("S-1-5-21-OTHER-DATA-OWNER");
-        var ownershipRepo = NullFake.Create<IDataOwnershipRepository>((method, args) =>
-            method.Name == nameof(IDataOwnershipRepository.IsAuthorizedApproverForTableAsync)
+        var ownershipRepo = NullFake.Create<IContainerOwnership>((method, args) =>
+            method.Name == nameof(IContainerOwnership.IsAuthorizedApproverForTableAsync)
                 ? Task.FromResult(
                     args![0] is TableIdentifier t && t.Equals(TargetTable) &&
                     args[1] is Sid s && s.Equals(ownerSid))

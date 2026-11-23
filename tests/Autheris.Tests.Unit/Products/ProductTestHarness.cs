@@ -1,4 +1,5 @@
 #pragma warning disable CA2012 // NSubstitute .Returns(...) configures a ValueTask member; the instance is not consumed here.
+using Autheris.Application.Governance.Ownership;
 using Autheris.Application.Audit;
 using Autheris.Application.ConsentRequests.Events;
 using Autheris.Application.Products;
@@ -217,7 +218,7 @@ internal sealed class ProductHarness
 
     public ProductHarness()
     {
-        var ownership = Substitute.For<IDataOwnershipRepository>();
+        var ownership = Substitute.For<IContainerOwnership>();
         ownership.GetOwnedOrDelegatedTablesAsync(default, default!, default, default).ReturnsForAnyArgs(call =>
         {
             var sid = call.ArgAt<Sid>(0).Value;

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog.Discovery;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Threading;
@@ -86,7 +87,7 @@ public sealed class DiscoveryTenantScopeTests
         owners.BatchOwnerCalls.ShouldBe(1);
     }
 
-    private sealed class CountingOwnershipRepository : IDataOwnershipRepository
+    private sealed class CountingOwnershipRepository : IContainerOwnership
     {
         public int BatchOwnerCalls { get; private set; }
         public Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default) => throw new NotSupportedException();

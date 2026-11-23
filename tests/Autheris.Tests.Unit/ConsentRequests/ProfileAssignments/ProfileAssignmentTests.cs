@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.ConsentRequests.ProfileAssignments;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Data;
@@ -319,7 +320,7 @@ public sealed class ProfileAssignmentTests
     }
 
     private sealed class Fixture :
-        IAccessProfileRepository, ITableMetadataRepository, IConsentApprovalRepository, IDataOwnershipRepository,
+        IAccessProfileRepository, ITableMetadataRepository, IConsentApprovalRepository, IContainerOwnership,
         IProfileAssignmentStore, IConsentWorkflowConfigRepository, IConsentWorkflowAdminRepository, IGrantRecordStore, IAuditLogRepository
     {
         private long _seq;

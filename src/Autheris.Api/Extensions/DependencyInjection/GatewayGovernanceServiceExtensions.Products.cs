@@ -1,5 +1,6 @@
 namespace Autheris.Api.Extensions.DependencyInjection;
 
+using Autheris.Application.Governance.Ownership;
 using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests.Events;
@@ -37,7 +38,7 @@ public static partial class GatewayGovernanceServiceExtensions
             sp.GetRequiredService<IAuditWriter>(),
             sp.GetService<TimeProvider>()));
         services.AddSingleton(sp => new ProductAuthorityService(
-            sp.GetRequiredService<IDataOwnershipRepository>(),
+            sp.GetRequiredService<IContainerOwnership>(),
             sp.GetRequiredService<IDataProductRepository>(),
             sp.GetService<TimeProvider>(),
             sp.GetService<IGovernanceCapabilities>(),
@@ -48,7 +49,7 @@ public static partial class GatewayGovernanceServiceExtensions
             sp.GetRequiredService<ProductAuthorityService>(),
             sp.GetRequiredService<IProductCatalogColumns>(),
             sp.GetRequiredService<TrinoSqlEngine.ISqlEngine>(),
-            sp.GetRequiredService<IDataOwnershipRepository>(),
+            sp.GetRequiredService<IContainerOwnership>(),
             sp.GetRequiredService<IAuditWriter>(),
             sp.GetService<IConsentEventOutbox>(),
             sp.GetService<TimeProvider>(),

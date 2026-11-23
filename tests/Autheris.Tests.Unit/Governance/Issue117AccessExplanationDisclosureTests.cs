@@ -1,3 +1,4 @@
+using Autheris.Application.Governance.Ownership;
 using Autheris.Tests.Unit.TestSupport;
 using System;
 using System.Collections.Generic;
@@ -26,7 +27,7 @@ public sealed class Issue117AccessExplanationDisclosureTests
 
     private sealed record Fixture(
         EffectiveAccessExplanationService Service,
-        IDataOwnershipRepository Ownership,
+        IContainerOwnership Ownership,
         IConsentResolutionService Resolution);
 
     private static ClaimsPrincipal User(params Claim[] extra) =>
@@ -63,7 +64,7 @@ public sealed class Issue117AccessExplanationDisclosureTests
                 Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>(), Arg.Any<IReadOnlySet<Sid>?>(), Arg.Any<IReadOnlySet<string>?>())
             .Returns(decision);
 
-        var ownership = Substitute.For<IDataOwnershipRepository>();
+        var ownership = Substitute.For<IContainerOwnership>();
         ownership.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>())
             .Returns(owner);
 

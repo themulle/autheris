@@ -1,5 +1,6 @@
 namespace Autheris.Application.Policy.Pdp;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Frozen;
 using System.Collections.Generic;
@@ -50,7 +51,7 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
     private readonly TimeProvider _timeProvider;
     private readonly Autheris.Application.Policy.RowScopes.RowScopeCompiler? _rowScopeCompiler;
     private readonly Autheris.Application.Catalog.ICatalogVersionProvider? _catalogVersionProvider;
-    private readonly IDataOwnershipRepository? _ownershipRepository;
+    private readonly IContainerOwnership? _ownershipRepository;
     private readonly Autheris.Application.Products.IDataProductRepository? _productRepository;
     private readonly IProtectionSnapshotProvider? _protectionProvider;
     private readonly Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? _accessPolicySettings;
@@ -77,7 +78,7 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         TimeProvider? timeProvider = null,
         Autheris.Application.Policy.RowScopes.RowScopeCompiler? rowScopeCompiler = null,
         Autheris.Application.Catalog.ICatalogVersionProvider? catalogVersionProvider = null,
-        IDataOwnershipRepository? ownershipRepository = null,
+        IContainerOwnership? ownershipRepository = null,
         Autheris.Application.Products.IDataProductRepository? productRepository = null,
         IProtectionSnapshotProvider? protectionProvider = null,
         Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? accessPolicySettings = null,

@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Linq;
 using System.Threading;
@@ -303,7 +304,7 @@ public static partial class ConsentApiEndpoints
         IConsentWorkflowConfigRepository workflowConfigRepo,
         [FromServices] IProfileAssignmentStore assignmentStore,
         [FromServices] IProfileAssignmentRequestService profileAssignmentService,
-        IDataOwnershipRepository ownershipRepo,
+        IContainerOwnership ownershipRepo,
         IIdempotencyStore? idempotencyStore = null,
         IRateLimiterService? rateLimiter = null,
         IOptions<GovernanceOptions>? governanceOptions = null,

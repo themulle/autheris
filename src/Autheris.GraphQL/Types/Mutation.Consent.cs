@@ -1,3 +1,4 @@
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -124,7 +125,7 @@ public sealed partial class Mutation
         string? description,
         [Service] IConsentRepository consentRepository,
         [Service] IConsentDescriptionRepository descriptionRepository,
-        [Service] IDataOwnershipRepository ownershipRepository,
+        [Service] IContainerOwnership ownershipRepository,
         [Service] IHttpContextAccessor httpContextAccessor,
         [Service] IOptions<GovernanceTextOptions>? textOptions = null,
         HotChocolate.Resolvers.IResolverContext? resolverContext = null,

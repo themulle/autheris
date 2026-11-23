@@ -1,3 +1,4 @@
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -160,7 +161,7 @@ public static class SlaValidationBenchmark
         var consentRepo = Substitute.For<IConsentRepository>();
         consentRepo.GetConsentByIdAsync(consentId, Arg.Any<CancellationToken>()).Returns(consent);
 
-        var ownershipRepo = Substitute.For<IDataOwnershipRepository>();
+        var ownershipRepo = Substitute.For<IContainerOwnership>();
         ownershipRepo.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>()).Returns(true);
 
         var service = new LineageImpactAnalyzerService(consentRepo, ownershipRepo, graphStore, NullLogger<LineageImpactAnalyzerService>.Instance);

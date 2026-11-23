@@ -1,5 +1,6 @@
 namespace Autheris.Application.ConsentRequests;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -37,7 +38,7 @@ public interface IConsentDecisionPipeline
 public sealed partial class ConsentDecisionPipeline(
     IConsentApprovalRepository approvalRepository,
     ITableMetadataRepository? metadataRepository,
-    IDataOwnershipRepository ownershipRepository,
+    IContainerOwnership ownershipRepository,
     IConsentDecisionGuard decisionGuard,
     IGrantPolicy grantPolicy,
     IGrantValidityPolicy grantValidityPolicy,
@@ -59,7 +60,7 @@ public sealed partial class ConsentDecisionPipeline(
     private static readonly JsonSerializerOptions CaseInsensitiveJsonOptions = new() { PropertyNameCaseInsensitive = true };
     private readonly IConsentApprovalRepository _approvalRepository = approvalRepository ?? throw new ArgumentNullException(nameof(approvalRepository));
     private readonly ITableMetadataRepository? _metadataRepository = metadataRepository;
-    private readonly IDataOwnershipRepository _ownershipRepository = ownershipRepository ?? throw new ArgumentNullException(nameof(ownershipRepository));
+    private readonly IContainerOwnership _ownershipRepository = ownershipRepository ?? throw new ArgumentNullException(nameof(ownershipRepository));
     private readonly IConsentDecisionGuard _decisionGuard = decisionGuard ?? throw new ArgumentNullException(nameof(decisionGuard));
     private readonly IGrantPolicy _grantPolicy = grantPolicy ?? throw new ArgumentNullException(nameof(grantPolicy));
     private readonly IGrantValidityPolicy _grantValidityPolicy = grantValidityPolicy ?? throw new ArgumentNullException(nameof(grantValidityPolicy));

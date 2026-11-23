@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Application.Governance.Ownership;
 using Autheris.Api.Errors;
 using System;
 using System.Linq;
@@ -216,7 +217,7 @@ public static class HitLEndpoints
             return Results.NotFound();
         }
 
-        var ownershipRepository = context.RequestServices.GetService<IDataOwnershipRepository>();
+        var ownershipRepository = context.RequestServices.GetService<IContainerOwnership>();
         if (ownershipRepository == null)
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);

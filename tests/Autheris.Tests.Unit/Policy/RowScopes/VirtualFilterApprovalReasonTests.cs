@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Policy.RowScopes;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -339,7 +340,7 @@ public sealed class VirtualFilterApprovalReasonTests
         public Task<bool> VerifyAuditHashChainAsync(CancellationToken ct = default) => Task.FromResult(true);
     }
 
-    private sealed class InMemoryOwnershipRepo : IDataOwnershipRepository
+    private sealed class InMemoryOwnershipRepo : IContainerOwnership
     {
         private readonly HashSet<(string Domain, string Schema, string Table, string Sid)> _allowed = new();
 

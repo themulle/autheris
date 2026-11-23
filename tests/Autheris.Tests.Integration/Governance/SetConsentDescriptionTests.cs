@@ -1,3 +1,4 @@
+using Autheris.Application.Governance.Ownership;
 using System.Security.Claims;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
@@ -24,7 +25,7 @@ public sealed class SetConsentDescriptionTests : IDisposable
 
     private readonly PostgreSqlGovernanceRepository _repository = GovernanceTestDatabase.CreateRepository(new EpochValidationService());
     private readonly Mutation _mutation = new();
-    private readonly IDataOwnershipRepository _ownership = Substitute.For<IDataOwnershipRepository>();
+    private readonly IContainerOwnership _ownership = Substitute.For<IContainerOwnership>();
     private readonly ServiceProvider _services = DecisionServices.Build();
 
     private async Task<string?> StoredDescriptionAsync(Guid id)

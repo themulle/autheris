@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -519,7 +520,7 @@ public static partial class GovernanceEndpoints
                 return ApiProblems.Forbidden(ApiErrorCodes.DataOwnerApprovalRequired, "Individual unmasked assignments cannot be approved for wildcard target tables.", context);
             }
 
-            var owners = context.RequestServices.GetService<IDataOwnershipRepository>();
+            var owners = context.RequestServices.GetService<IContainerOwnership>();
             var metaRepo = context.RequestServices.GetService<ITableMetadataRepository>();
             if (owners == null || metaRepo == null)
             {

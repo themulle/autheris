@@ -1,5 +1,6 @@
 namespace Autheris.Application.Compliance;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -16,14 +17,14 @@ using Microsoft.Extensions.Options;
 
 public sealed class GdprDisclosureReportService : IGdprDisclosureReportService
 {
-    private readonly IDataOwnershipRepository _ownershipRepo;
+    private readonly IContainerOwnership _ownershipRepo;
     private readonly IAuditLogRepository _auditRepo;
     private readonly ITableMetadataRepository? _tableMetadataRepo;
     private readonly ILogger<GdprDisclosureReportService>? _logger;
     private readonly int _maxGdprAuditEvents;
 
     public GdprDisclosureReportService(
-        IDataOwnershipRepository ownershipRepo,
+        IContainerOwnership ownershipRepo,
         IAuditLogRepository auditRepo,
         ITableMetadataRepository? tableMetadataRepo = null,
         IOptions<GdprReportOptions>? gdprReportOptions = null,

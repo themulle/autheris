@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Governance.Catalog;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -335,7 +336,7 @@ public sealed class CatalogCallerMigrationBatch3Tests
             ValueTask.FromResult<IReadOnlySet<TableIdentifier>>(tables.Where(t => t.Table.IsActive && candidates.Contains(t.Identifier)).Select(t => t.Identifier).ToHashSet());
     }
 
-    private sealed class StubOwnershipRepo : IDataOwnershipRepository
+    private sealed class StubOwnershipRepo : IContainerOwnership
     {
         public Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<DataOwner>>([]);

@@ -1,5 +1,6 @@
 namespace Autheris.Application.Catalog.Discovery;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Globalization;
@@ -49,7 +50,7 @@ public sealed partial class DiscoveryService : IDiscoveryService
     private readonly IAccessDecisionPoint? _decisionPoint;
     private readonly IConsentRepository? _consentRepository;
     private readonly IConsentApprovalRepository? _approvalRepository;
-    private readonly IDataOwnershipRepository? _ownershipRepository;
+    private readonly IContainerOwnership? _ownershipRepository;
     private readonly IDiscoveryArtifactStore? _artifactStore;
     private readonly IAuditWriter? _auditWriter;
     private readonly GatewayOptions _gatewayOptions;
@@ -86,7 +87,7 @@ public sealed partial class DiscoveryService : IDiscoveryService
         IAccessDecisionPoint? decisionPoint,
         IConsentRepository? consentRepository,
         IConsentApprovalRepository? approvalRepository,
-        IDataOwnershipRepository? ownershipRepository,
+        IContainerOwnership? ownershipRepository,
         IDiscoveryArtifactStore? artifactStore,
         IAuditWriter? auditWriter,
         IOptions<GatewayOptions> gatewayOptions,

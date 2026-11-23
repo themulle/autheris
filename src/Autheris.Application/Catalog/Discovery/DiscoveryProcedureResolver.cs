@@ -1,5 +1,6 @@
 namespace Autheris.Application.Catalog.Discovery;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -148,7 +149,7 @@ internal static class DiscoveryProcedureResolver
 
     public static async Task<IReadOnlyList<DiscoveryObject>> ResolveBatchAsync(
         IAccessDecisionPoint decisionPoint,
-        IDataOwnershipRepository? ownershipRepository,
+        IContainerOwnership? ownershipRepository,
         SecurityPrincipalContext subject,
         IReadOnlyList<EligibleDiscoveryProcedure> items,
         IReadOnlySet<TableIdentifier> pendingTables,

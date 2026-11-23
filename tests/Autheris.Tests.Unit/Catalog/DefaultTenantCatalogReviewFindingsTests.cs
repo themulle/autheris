@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -58,7 +59,7 @@ public sealed class DefaultTenantCatalogReviewFindingsTests
     // ---- finding 1: DatasetCatalogAdminService ----
 
     private static DatasetCatalogAdminService AdminService(ITableMetadataRepository tables) => new(
-        tables, Substitute.For<IDataOwnershipRepository>(), Substitute.For<IAuditWriter>(),
+        tables, Substitute.For<IContainerOwnership>(), Substitute.For<IAuditWriter>(),
         new StaticOptionsMonitor<GatewayOptions>(new GatewayOptions { Tenancy = new TenancyOptions { DefaultTenantId = D.Value } }),
         TimeProvider.System);
 

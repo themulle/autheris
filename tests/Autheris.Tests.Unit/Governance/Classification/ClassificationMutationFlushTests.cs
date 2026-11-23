@@ -1,3 +1,4 @@
+using Autheris.Application.Governance.Ownership;
 using System.Reflection;
 using Autheris.Application.Catalog;
 using Autheris.Application.Common.Interfaces;
@@ -114,7 +115,7 @@ public sealed class ClassificationMutationFlushTests
         var columnId = Guid.NewGuid();
         var table = new TableIdentifier("crm", "public", "customers");
         repo.ColumnTables[columnId.ToString()] = table;
-        var ownership = Substitute.For<IDataOwnershipRepository>();
+        var ownership = Substitute.For<IContainerOwnership>();
         ownership.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>()).Returns(true);
         var caller = new ClassificationAdminCaller(new TenantId("tenant-a"), "S-1-OWNER", IsClusterAdmin: false, IsGovernanceAdmin: false);
         var meta = new TableMetadata

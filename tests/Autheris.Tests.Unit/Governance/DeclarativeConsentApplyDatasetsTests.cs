@@ -1,3 +1,4 @@
+using Autheris.Application.Governance.Ownership;
 using Autheris.Tests.Unit.TestSupport;
 using Autheris.Tests.Common.Fakes;
 using System.Security.Claims;
@@ -126,7 +127,7 @@ public sealed class DeclarativeConsentApplyDatasetsTests
         var foreign = new TableIdentifier("sales", "dbo", "foreign_t");
         tables.GetActiveTableIdentifierAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(ci => ci.Arg<TableIdentifier>().Equals(foreign) ? foreign : (TableIdentifier?)null);
-        var owners = Substitute.For<IDataOwnershipRepository>();
+        var owners = Substitute.For<IContainerOwnership>();
         var audit = Substitute.For<Autheris.Application.Audit.IAuditWriter>();
         var service = new DatasetCatalogAdminService(tables, owners, audit,
             new Autheris.Tests.Common.StaticOptionsMonitor<Autheris.Domain.Options.GatewayOptions>(new Autheris.Domain.Options.GatewayOptions()), TimeProvider.System);

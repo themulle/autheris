@@ -1,5 +1,6 @@
 namespace Autheris.Application.Lineage;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
@@ -17,7 +18,7 @@ using Microsoft.Extensions.Logging;
 public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
 {
     private readonly IConsentRepository _consentRepo;
-    private readonly IDataOwnershipRepository _ownershipRepo;
+    private readonly IContainerOwnership _ownershipRepo;
     private readonly ILineageGraphStore _graphStore;
     private readonly IAuditLogRepository? _auditRepo;
     private readonly ITableMetadataRepository? _tableMetadataRepo;
@@ -26,7 +27,7 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
 
     public LineageImpactAnalyzerService(
         IConsentRepository consentRepo,
-        IDataOwnershipRepository ownershipRepo,
+        IContainerOwnership ownershipRepo,
         ILineageGraphStore graphStore,
         IAuditLogRepository auditRepo,
         ITableMetadataRepository tableMetadataRepo,
@@ -44,7 +45,7 @@ public sealed class LineageImpactAnalyzerService : ILineageImpactAnalyzerService
 
     public LineageImpactAnalyzerService(
         IConsentRepository consentRepo,
-        IDataOwnershipRepository ownershipRepo,
+        IContainerOwnership ownershipRepo,
         ILineageGraphStore graphStore,
         ILogger<LineageImpactAnalyzerService> logger)
         : this(consentRepo, ownershipRepo, graphStore, null!, null!, logger, null)

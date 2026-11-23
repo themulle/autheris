@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.ConsentRequests;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
@@ -29,7 +30,7 @@ internal sealed class InMemoryConsentStore(
       IConsentEventOutbox,
       IGrantRecordStore,
       ITableMetadataRepository,
-      IDataOwnershipRepository,
+      IContainerOwnership,
       IAuditLogRepository
 {
     private readonly TableMetadata _ordersTable = new()

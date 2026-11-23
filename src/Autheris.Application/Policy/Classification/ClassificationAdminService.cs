@@ -1,5 +1,6 @@
 namespace Autheris.Application.Policy.Classification;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -124,7 +125,7 @@ public interface IClassificationAdminService
 public sealed class ClassificationAdminService(
     IClassificationRepository repository,
     ITableMetadataRepository tableMetadataRepository,
-    IDataOwnershipRepository? ownershipRepository = null,
+    IContainerOwnership? ownershipRepository = null,
     TimeProvider? timeProvider = null) : IClassificationAdminService
 {
     private const string ColumnWideOverride = "_all";

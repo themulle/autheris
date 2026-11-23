@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog.Discovery;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -115,7 +116,7 @@ internal static class DiscoveryTestBuilder
         FakeAccessDecisionPoint? pdp = null,
         FakeDiscoveryConsentRepository? consents = null,
         FakeDiscoveryApprovalRepository? approvals = null,
-        IDataOwnershipRepository? owners = null,
+        IContainerOwnership? owners = null,
         FakeDiscoveryArtifactStore? artifacts = null,
         FakeAuditWriter? audit = null,
         GatewayOptions? gatewayOptions = null,
@@ -267,7 +268,7 @@ internal sealed class FakeDiscoveryApprovalRepository : IConsentApprovalReposito
     public Task DeleteConsentRequestAsync(Guid requestId, CancellationToken ct = default) => throw new NotSupportedException();
 }
 
-internal sealed class FakeDiscoveryOwnershipRepository : IDataOwnershipRepository
+internal sealed class FakeDiscoveryOwnershipRepository : IContainerOwnership
 {
     public Dictionary<TableIdentifier, List<DataOwner>> Owners { get; } = [];
     public HashSet<TableIdentifier> OwnedTables { get; } = [];

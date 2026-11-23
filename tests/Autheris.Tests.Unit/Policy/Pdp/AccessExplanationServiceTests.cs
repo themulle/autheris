@@ -1,6 +1,7 @@
 #pragma warning disable CA2012 // NSubstitute .Returns(...) configures a ValueTask member; the instance is not consumed here.
 namespace Autheris.Tests.Unit.Policy.Pdp;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -35,7 +36,7 @@ public sealed class AccessExplanationServiceTests
     private readonly IAccessDecisionPoint _pdp = Substitute.For<IAccessDecisionPoint>();
     private readonly ITableMetadataRepository _tables = Substitute.For<ITableMetadataRepository>();
     private readonly ICatalogVisibilityService _visibility = Substitute.For<ICatalogVisibilityService>();
-    private readonly IDataOwnershipRepository _owners = Substitute.For<IDataOwnershipRepository>();
+    private readonly IContainerOwnership _owners = Substitute.For<IContainerOwnership>();
     private readonly IConsentRepository _consents = Substitute.For<IConsentRepository>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private readonly IExplainSubjectResolver _resolver = Substitute.For<IExplainSubjectResolver>();

@@ -1,3 +1,4 @@
+using Autheris.Application.Governance.Ownership;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -5,9 +6,9 @@ using Autheris.Domain.Model;
 namespace Autheris.Tests.Common.Fakes;
 
 /// <summary>
-/// In-memory <see cref="IDataOwnershipRepository"/> for unit tests.
+/// In-memory <see cref="IContainerOwnership"/> for unit tests.
 /// </summary>
-public sealed class InMemoryDataOwnershipRepository : IDataOwnershipRepository
+public sealed class InMemoryDataOwnershipRepository : IContainerOwnership
 {
     private readonly object _gate = new();
     private readonly Dictionary<TableIdentifier, List<DataOwner>> _owners = new();

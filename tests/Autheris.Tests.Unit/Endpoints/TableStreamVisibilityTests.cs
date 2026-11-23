@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Endpoints;
 
+using Autheris.Application.Governance.Ownership;
 using Autheris.Application.Policy.Pdp;
 using System;
 using System.Collections.Generic;
@@ -105,7 +106,7 @@ public sealed class TableStreamVisibilityTests
         public object? MaskValue(string columnName, object? rawValue, MaskingRule rule) => rawValue;
     }
 
-    private sealed class FixedOwnershipRepo(string ownerSid) : IDataOwnershipRepository
+    private sealed class FixedOwnershipRepo(string ownerSid) : IContainerOwnership
     {
         public Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default) =>
             Task.FromResult(delegation);
@@ -252,7 +253,7 @@ public sealed class TableStreamVisibilityTests
             .ShouldBe(StatusCodes.Status200OK);
 
         var ownerServices = new ServiceCollection();
-        ownerServices.AddSingleton<IDataOwnershipRepository>(new FixedOwnershipRepo("S-1-owner"));
+        ownerServices.AddSingleton<IContainerOwnership>(new FixedOwnershipRepo("S-1-owner"));
         var owner = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim("sub", "owner"), new Claim(ClaimTypes.PrimarySid, "S-1-owner"), new Claim("tenant", "default")], "Bearer"));
         (await InvokeStreamAsync(hiddenTable, owner, "/api/v1/data/sales/dbo/secret_orders/bulk", ownerServices))

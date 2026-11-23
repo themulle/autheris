@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Lineage;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -47,7 +48,7 @@ public sealed class GdprDisclosureReportTests
         audit.QueryAuditLogsAsync(Arg.Any<string?>(), Arg.Any<Sid?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<int>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(call => Task.FromResult<IReadOnlyList<AuditLogEntry>>(entries.Take(call.ArgAt<int>(3)).ToList()));
         var sut = new GdprDisclosureReportService(
-            Substitute.For<IDataOwnershipRepository>(),
+            Substitute.For<IContainerOwnership>(),
             audit,
             Substitute.For<ITableMetadataRepository>(),
             cap == null ? null : Options.Create(new GdprReportOptions { MaxAuditEvents = cap.Value }));

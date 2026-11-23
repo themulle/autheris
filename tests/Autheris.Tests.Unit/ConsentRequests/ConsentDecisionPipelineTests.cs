@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.ConsentRequests;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Security.Claims;
@@ -104,7 +105,7 @@ public sealed class ConsentDecisionPipelineTests
         ConsentDecisionPipeline Pipeline,
         IConsentApprovalRepository Approvals,
         ITableMetadataRepository Metadata,
-        IDataOwnershipRepository Ownership,
+        IContainerOwnership Ownership,
         IConsentDecisionGuard Guard,
         IConsentWorkflowConfigRepository ConfigRepo,
         IScimUserStore ScimUsers,
@@ -114,7 +115,7 @@ public sealed class ConsentDecisionPipelineTests
         var metadata = Substitute.For<ITableMetadataRepository>();
         metadata.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
             .Returns(TableMeta(tableFourEyes));
-        var ownership = Substitute.For<IDataOwnershipRepository>();
+        var ownership = Substitute.For<IContainerOwnership>();
         ownership.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>())
             .Returns(true);
         var guard = Substitute.For<IConsentDecisionGuard>();

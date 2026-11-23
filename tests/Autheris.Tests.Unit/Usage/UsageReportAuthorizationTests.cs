@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Usage;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -306,7 +307,7 @@ public sealed class UsageReportAuthorizationTests
             Service = new UsageReportService(Repo, new UsageGroupNameResolver(Options, timeProvider: time), new NoOpAuditWriter(), Options, time);
             _sp = new ServiceCollection()
                 .AddLogging()
-                .AddSingleton<IDataOwnershipRepository>(Ownership)
+                .AddSingleton<IContainerOwnership>(Ownership)
                 .AddSingleton<IConsentRepository>(Consents)
                 .BuildServiceProvider();
         }
@@ -381,7 +382,7 @@ public sealed class UsageReportAuthorizationTests
         }
     }
 
-    private sealed class FakeOwnershipRepository : IDataOwnershipRepository
+    private sealed class FakeOwnershipRepository : IContainerOwnership
     {
         public Dictionary<(TableIdentifier, Sid), bool> Owned { get; } = new();
         public Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation d, CancellationToken ct = default) => Task.FromResult(d);

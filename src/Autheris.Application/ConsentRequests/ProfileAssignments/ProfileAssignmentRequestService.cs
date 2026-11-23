@@ -1,5 +1,6 @@
 namespace Autheris.Application.ConsentRequests.ProfileAssignments;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -29,7 +30,7 @@ public sealed partial class ProfileAssignmentRequestService(
     IAccessProfileRepository profileRepository,
     ITableMetadataRepository metadataRepository,
     IConsentApprovalRepository approvalRepository,
-    IDataOwnershipRepository ownershipRepository,
+    IContainerOwnership ownershipRepository,
     IProfileAssignmentStore store,
     IProfileGrantMaterializer materializer,
     IGrantPolicy grantPolicy,
@@ -46,7 +47,7 @@ public sealed partial class ProfileAssignmentRequestService(
     private readonly IAccessProfileRepository _profileRepository = profileRepository ?? throw new ArgumentNullException(nameof(profileRepository));
     private readonly ITableMetadataRepository _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
     private readonly IConsentApprovalRepository _approvalRepository = approvalRepository ?? throw new ArgumentNullException(nameof(approvalRepository));
-    private readonly IDataOwnershipRepository _ownershipRepository = ownershipRepository ?? throw new ArgumentNullException(nameof(ownershipRepository));
+    private readonly IContainerOwnership _ownershipRepository = ownershipRepository ?? throw new ArgumentNullException(nameof(ownershipRepository));
     private readonly IProfileAssignmentStore _store = store ?? throw new ArgumentNullException(nameof(store));
     private readonly IProfileGrantMaterializer _materializer = materializer ?? throw new ArgumentNullException(nameof(materializer));
     private readonly IGrantPolicy _grantPolicy = grantPolicy ?? throw new ArgumentNullException(nameof(grantPolicy));

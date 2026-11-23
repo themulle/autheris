@@ -71,7 +71,7 @@ public class DataPathSecurityTests : IDisposable
             metadataRepository: _repository,
             consentRepository: _repository,
             approvalRepository: _repository,
-            dataOwnershipRepository: _repository,
+            dataOwnershipRepository: null,
             httpContextAccessor: accessor,
             visibilityService: _visibility,
             consentResolution: _resolutionService);

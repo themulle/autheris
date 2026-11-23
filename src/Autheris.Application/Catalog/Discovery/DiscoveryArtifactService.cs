@@ -1,5 +1,6 @@
 namespace Autheris.Application.Catalog.Discovery;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -32,7 +33,7 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
 {
     private readonly ITableMetadataRepository _metadata;
     private readonly IDiscoveryArtifactStore _artifacts;
-    private readonly IDataOwnershipRepository _owners;
+    private readonly IContainerOwnership _owners;
     private readonly IAuditWriter _auditWriter;
     private readonly IGatewayRoleEvaluator _roleEvaluator;
     private readonly IOptions<GatewayOptions> _gatewayOptions;
@@ -48,7 +49,7 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
     public DiscoveryArtifactService(
         ITableMetadataRepository metadata,
         IDiscoveryArtifactStore artifacts,
-        IDataOwnershipRepository owners,
+        IContainerOwnership owners,
         IAuditWriter auditWriter,
         IGatewayRoleEvaluator roleEvaluator,
         IOptions<GatewayOptions> gatewayOptions,

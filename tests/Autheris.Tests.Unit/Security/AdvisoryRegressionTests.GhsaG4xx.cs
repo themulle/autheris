@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections;
 using System.Collections.Generic;
@@ -584,7 +585,7 @@ public sealed partial class AdvisoryRegressionTests
                 classificationRepository: new Autheris.Tests.Unit.Governance.Classification.TestInMemoryClassificationStore(TenantA.Value));
         }
 
-        private readonly IDataOwnershipRepository _owners;
+        private readonly IContainerOwnership _owners;
         private readonly IConsentWorkflowConfigRepository _workflow;
         private readonly IScimGroupStore? _scimGroups;
 
@@ -603,7 +604,7 @@ public sealed partial class AdvisoryRegressionTests
             MetadataRepo = Wave2Proxy<ITableMetadataRepository>.Create((m, args) => m.Name == "GetTableMetadataAsync"
                 ? Task.FromResult(Tables.TryGetValue((TableIdentifier)args![0]!, out var tm) ? tm : null)
                 : throw new NotSupportedException(m.Name));
-            _owners = Wave2Proxy<IDataOwnershipRepository>.Create((m, _) => m.Name == "IsAuthorizedApproverForTableAsync"
+            _owners = Wave2Proxy<IContainerOwnership>.Create((m, _) => m.Name == "IsAuthorizedApproverForTableAsync"
                 ? Task.FromResult(true) : Task.FromResult<IReadOnlyList<DataOwner>>([]));
             _workflow = Wave2Proxy<IConsentWorkflowConfigRepository>.Create((m, args) => m.Name switch
             {

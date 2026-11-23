@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Mcp;
 
+using Autheris.Application.Governance.Ownership;
 using Autheris.Tests.Common;
 using System;
 using System.Collections.Generic;
@@ -48,7 +49,7 @@ public sealed class McpCatalogSummaryViewTests
         Catalog = new DataCatalogOptions { SharedTables = shared.Length == 0 ? SharedList : shared }
     };
 
-    private static McpDatasetCatalog Catalog(GatewayOptions options, IEnumerable<TableMetadata> tables, IDataOwnershipRepository? owners = null, params Consent[] consents)
+    private static McpDatasetCatalog Catalog(GatewayOptions options, IEnumerable<TableMetadata> tables, IContainerOwnership? owners = null, params Consent[] consents)
     {
         var graphQl = Substitute.For<IGraphQlCatalogMap>();
         graphQl.GetTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(ci =>

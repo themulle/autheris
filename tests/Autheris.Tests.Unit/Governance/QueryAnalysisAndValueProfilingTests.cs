@@ -1,3 +1,4 @@
+using Autheris.Application.Governance.Ownership;
 using Autheris.Tests.Unit.TestSupport;
 namespace Autheris.Tests.Unit.Governance;
 
@@ -397,7 +398,7 @@ public sealed class QueryAnalysisAndValueProfilingTests
                 Arg.Any<CancellationToken>())
             .Returns(Array.Empty<Consent>());
 
-        var ownerRepo = Substitute.For<IDataOwnershipRepository>();
+        var ownerRepo = Substitute.For<IContainerOwnership>();
         ownerRepo.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>())
             .Returns(false);
         ownerRepo.GetDataOwnersForTableAsync(ordersTable.Identifier, Arg.Any<CancellationToken>())

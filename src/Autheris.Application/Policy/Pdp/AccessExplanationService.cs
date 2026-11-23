@@ -1,5 +1,6 @@
 namespace Autheris.Application.Policy.Pdp;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -99,7 +100,7 @@ public sealed class AccessExplanationService(
     IAccessDecisionPoint decisionPoint,
     ITableMetadataRepository tables,
     ICatalogVisibilityService visibility,
-    IDataOwnershipRepository owners,
+    IContainerOwnership owners,
     IConsentRepository consents,
     IExplainSubjectResolver subjectResolver,
     IAuditWriter audit,

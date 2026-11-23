@@ -1,5 +1,6 @@
 namespace Autheris.Application.Governance.Services;
 
+using Autheris.Application.Governance.Ownership;
 using Autheris.Application.Tenancy;
 using Autheris.Domain.Tenancy;
 using System.Collections.Concurrent;
@@ -35,7 +36,7 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
     private static readonly TableIdentifier ProbePlaceholder = new("catalog", "probe", "placeholder");
 
     private readonly ITableMetadataRepository _tables;
-    private readonly IDataOwnershipRepository? _owners;
+    private readonly IContainerOwnership? _owners;
     private readonly IAuditWriter _audit;
     private readonly IOptionsMonitor<GatewayOptions> _options;
     private readonly TimeProvider _time;
@@ -54,7 +55,7 @@ public sealed class DatasetCatalogAdminService : IDatasetCatalogAdminService
 
     public DatasetCatalogAdminService(
         ITableMetadataRepository tables,
-        IDataOwnershipRepository? owners,
+        IContainerOwnership? owners,
         IAuditWriter audit,
         IOptionsMonitor<GatewayOptions> options,
         TimeProvider? time = null,

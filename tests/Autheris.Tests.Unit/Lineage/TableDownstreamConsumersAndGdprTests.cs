@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Lineage;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -19,7 +20,7 @@ using Xunit;
 public class TableDownstreamConsumersAndGdprTests
 {
     private readonly IConsentRepository _consentRepo = Substitute.For<IConsentRepository>();
-    private readonly IDataOwnershipRepository _ownershipRepo = Substitute.For<IDataOwnershipRepository>();
+    private readonly IContainerOwnership _ownershipRepo = Substitute.For<IContainerOwnership>();
     private readonly IAuditLogRepository _auditRepo = Substitute.For<IAuditLogRepository>();
     private readonly ITableMetadataRepository _tableMetadataRepo = Substitute.For<ITableMetadataRepository>();
     private readonly LineageGraphStore _graphStore = new();

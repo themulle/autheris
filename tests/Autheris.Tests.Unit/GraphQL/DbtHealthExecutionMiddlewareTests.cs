@@ -1,3 +1,4 @@
+using Autheris.Application.Governance.Ownership;
 using Autheris.Tests.Unit.TestSupport;
 namespace Autheris.Tests.Unit.GraphQL;
 
@@ -30,7 +31,7 @@ public class DbtHealthExecutionMiddlewareTests
         IDbtHealthCircuitBreaker circuitBreaker,
         ITableMetadataRepository tableRepo,
         ITableAccessResolver? accessResolver = null,
-        IDataOwnershipRepository? ownershipRepo = null)
+        IContainerOwnership? ownershipRepo = null)
     {
         var services = new ServiceCollection()
             .AddSingleton(circuitBreaker)
@@ -317,7 +318,7 @@ public class DbtHealthExecutionMiddlewareTests
         var circuitBreaker = Substitute.For<IDbtHealthCircuitBreaker>();
         var tableRepo = Substitute.For<ITableMetadataRepository>();
         var accessResolver = Substitute.For<ITableAccessResolver>();
-        var ownershipRepo = Substitute.For<IDataOwnershipRepository>();
+        var ownershipRepo = Substitute.For<IContainerOwnership>();
 
         var tableId = new TableIdentifier("tenant-1", "default", "orders");
         var meta = new TableMetadata
@@ -337,7 +338,7 @@ public class DbtHealthExecutionMiddlewareTests
                 [new DbtTestFailure("not_null_orders_id", "orders", "id", "error", "secret failure detail", 5)],
                 DateTimeOffset.UtcNow));
 
-        // Caller holds global "DataOwner" role, is NOT an owner of orders in IDataOwnershipRepository, and has no access.
+        // Caller holds global "DataOwner" role, is NOT an owner of orders in IContainerOwnership, and has no access.
         var principal = new ClaimsPrincipal(new ClaimsIdentity(
             new[] { DefaultTenantCaller.Claim, new Claim(ClaimTypes.NameIdentifier, "user-1"), new Claim(ClaimTypes.Role, "DataOwner") },
             "TestAuth"));
@@ -371,7 +372,7 @@ public class DbtHealthExecutionMiddlewareTests
         var circuitBreaker = Substitute.For<IDbtHealthCircuitBreaker>();
         var tableRepo = Substitute.For<ITableMetadataRepository>();
         var accessResolver = Substitute.For<ITableAccessResolver>();
-        var ownershipRepo = Substitute.For<IDataOwnershipRepository>();
+        var ownershipRepo = Substitute.For<IContainerOwnership>();
 
         var tableId = new TableIdentifier("tenant-1", "default", "orders");
         var meta = new TableMetadata

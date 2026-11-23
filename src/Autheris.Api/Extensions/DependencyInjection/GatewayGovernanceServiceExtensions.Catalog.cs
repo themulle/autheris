@@ -1,5 +1,6 @@
 namespace Autheris.Api.Extensions.DependencyInjection;
 
+using Autheris.Application.Governance.Ownership;
 using Autheris.Application.Audit;
 using Autheris.Application.Tenancy;
 using Autheris.Application.Catalog.Interfaces;
@@ -39,9 +40,16 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<IDatasetTagImportService, DatasetTagImportService>();
         services.AddSingleton<Autheris.Application.Catalog.Discovery.IDiscoveryArtifactStore>(sp => new DiscoveryArtifactStore(sp.GetRequiredService<Autheris.Application.Common.Interfaces.IGovernanceRepository>()));
         services.AddHostedService<CatalogGovernanceHostedService>();
+        services.AddSingleton<Autheris.Application.Governance.Ownership.IContainerOwnership>(sp =>
+            new Autheris.Application.Governance.Ownership.ContainerOwnership(
+                sp.GetRequiredService<Autheris.Application.Common.Interfaces.ITableMetadataRepository>(),
+                sp.GetRequiredService<Autheris.Application.Common.Interfaces.IGovernanceDomainRepository>(),
+                sp.GetService<Autheris.Domain.Interfaces.IScimGroupStore>(),
+                sp.GetService<Autheris.Application.Identity.IIdentityRealmRegistry>(),
+                sp.GetService<Autheris.Application.Tenancy.ITenantResolver>()));
         services.AddSingleton<IDatasetCatalogAdminService>(sp => new DatasetCatalogAdminService(
             sp.GetRequiredService<Autheris.Application.Common.Interfaces.ITableMetadataRepository>(),
-            sp.GetService<Autheris.Application.Common.Interfaces.IDataOwnershipRepository>(),
+            sp.GetService<Autheris.Application.Governance.Ownership.IContainerOwnership>(),
             sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>(),
             sp.GetRequiredService<Microsoft.Extensions.Options.IOptionsMonitor<GatewayOptions>>(),
             sp.GetService<TimeProvider>(),

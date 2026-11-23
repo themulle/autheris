@@ -1,5 +1,6 @@
 namespace Autheris.Modules.Dbt;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -48,7 +49,7 @@ public sealed partial class DbtMetadataIngestionService
         IDataOwnerAssignmentRepository? ownerAssignments = null,
         IDataOwnerIdentityVerifier? ownerIdentityVerifier = null,
         IAuditWriter? auditWriter = null,
-        IDataOwnershipRepository? ownershipRepo = null,
+        IContainerOwnership? ownershipRepo = null,
         Autheris.Application.Catalog.ICatalogWriteScopeFactory? catalogWriteScopeFactory = null,
         IClassificationRepository? classificationRepository = null,
         Microsoft.Extensions.Options.IOptions<Autheris.Application.Catalog.Services.CatalogDiscoveryOptions>? discoveryOptions = null,
