@@ -126,6 +126,38 @@ public static partial class GatewayGovernanceServiceExtensions
             sp.GetRequiredService<Autheris.Application.Governance.Protection.ProtectionSnapshotProvider>());
         services.AddSingleton<Autheris.Application.Governance.Caching.IGovernanceCacheInvalidator>(sp =>
             sp.GetRequiredService<Autheris.Application.Governance.Protection.ProtectionSnapshotProvider>());
+        services.AddSingleton<Autheris.Application.Policy.Protection.UnmaskGrantResolver>(sp =>
+            new Autheris.Application.Policy.Protection.UnmaskGrantResolver(
+                sp.GetRequiredService<IConsentRepository>(),
+                sp.GetRequiredService<Autheris.Application.Governance.Caching.GovernanceEpochProvider>(),
+                sp.GetService<Microsoft.Extensions.Options.IOptions<GovernanceCacheSettings>>(),
+                sp.GetService<Autheris.Application.Governance.Caching.IGovernanceChangeNotifier>(),
+                sp.GetService<TimeProvider>()));
+        services.AddSingleton<Autheris.Application.Policy.Protection.IUnmaskGrantResolver>(sp =>
+            sp.GetRequiredService<Autheris.Application.Policy.Protection.UnmaskGrantResolver>());
+        services.AddSingleton<Autheris.Application.Governance.Caching.IGovernanceCacheInvalidator>(sp =>
+            sp.GetRequiredService<Autheris.Application.Policy.Protection.UnmaskGrantResolver>());
+        services.AddSingleton<Autheris.Application.Catalog.Visibility.ContainerVisibilitySnapshotProvider>(sp =>
+            new Autheris.Application.Catalog.Visibility.ContainerVisibilitySnapshotProvider(
+                sp.GetRequiredService<IGovernanceDomainRepository>(),
+                sp.GetRequiredService<ICatalogVisibilityGrantRepository>(),
+                sp.GetRequiredService<IConsentRepository>(),
+                sp.GetRequiredService<IGovernanceCapabilities>(),
+                sp.GetRequiredService<Autheris.Application.Governance.Caching.GovernanceEpochProvider>(),
+                sp.GetService<Microsoft.Extensions.Options.IOptions<GovernanceCacheSettings>>(),
+                sp.GetService<Autheris.Application.Governance.Caching.IGovernanceChangeNotifier>(),
+                sp.GetService<TimeProvider>(),
+                sp.GetService<Autheris.Application.Products.IDataProductRepository>()));
+        services.AddSingleton<Autheris.Application.Catalog.Visibility.IContainerVisibilitySnapshotProvider>(sp =>
+            sp.GetRequiredService<Autheris.Application.Catalog.Visibility.ContainerVisibilitySnapshotProvider>());
+        services.AddSingleton<Autheris.Application.Governance.Caching.IGovernanceCacheInvalidator>(sp =>
+            sp.GetRequiredService<Autheris.Application.Catalog.Visibility.ContainerVisibilitySnapshotProvider>());
+        services.AddScoped<Autheris.Application.Catalog.Visibility.IContainerCatalogService>(sp =>
+            new Autheris.Application.Catalog.Visibility.ContainerCatalogService(
+                sp.GetRequiredService<Autheris.Application.Catalog.Visibility.IContainerVisibilitySnapshotProvider>(),
+                sp.GetService<IConsentApprovalRepository>(),
+                sp.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>()?.Value.Governance?.AccessPolicy?.MaxPageSize
+                    ?? Autheris.Application.Catalog.Visibility.ContainerCatalogService.DefaultMaxPageSize));
         services.AddHostedService<Autheris.Application.Governance.Caching.GovernanceCacheInvalidationHostedService>();
     }
 

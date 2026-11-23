@@ -84,7 +84,10 @@ public static class GatewayCatalogServiceExtensions
                 sp.GetService<ILogger<CatalogVisibilityService>>(),
                 sp.GetService<Autheris.Application.DataSources.IIngressTransportContext>(),
                 sp.GetService<Autheris.Application.DataSources.IDataSourceOptionsResolver>(),
-                sp.GetService<IGovernanceRepository>() is null ? null : sp.GetService<ICatalogSnapshotProvider>()));
+                sp.GetService<IGovernanceRepository>() is null ? null : sp.GetService<ICatalogSnapshotProvider>(),
+                sp.GetService<IGovernanceRepository>() is null ? null : sp.GetService<IProtectionSnapshotProvider>(),
+                sp.GetService<IGovernanceRepository>() is null ? null : sp.GetService<Autheris.Application.Catalog.Visibility.IContainerVisibilitySnapshotProvider>(),
+                sp.GetService<IGovernanceRepository>() is null ? null : sp.GetService<Autheris.Application.Policy.Protection.IUnmaskGrantResolver>()));
         services.TryAddScoped<Autheris.Application.Catalog.Discovery.IDiscoveryArtifactService, Autheris.Application.Catalog.Discovery.DiscoveryArtifactService>();
         services.TryAddScoped<Autheris.Application.Docs.Services.IDocLinkService, Autheris.Application.Docs.Services.DocLinkService>();
         // Optional enrichment: hosts without the document stores (no governance repository) resolve no reader and discovery returns no documents.
