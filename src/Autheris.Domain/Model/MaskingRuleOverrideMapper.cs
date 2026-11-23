@@ -59,6 +59,28 @@ public static class MaskingRuleOverrideMapper
         return (function, string.IsNullOrWhiteSpace(rule.RuleType) ? parameters : WithRuleType(parameters, rule.RuleType.Trim()), keyRef);
     }
 
+    /// <summary>
+    /// Issue #1042: true when both rules persist to the same enforced override, ignoring the declared rule type: the same mask
+    /// function, parameters and key reference. REDACT and TYPE_SAFE_REDACT count as one function because both render the same
+    /// constant redaction. Fields the override does not persist (for example a geo jitter radius) are not compared here.
+    /// </summary>
+    public static bool PersistsToSameMask(MaskingRule left, MaskingRule right)
+    {
+        ArgumentNullException.ThrowIfNull(left);
+        ArgumentNullException.ThrowIfNull(right);
+        var (leftFunction, leftParams, leftKey) = FromRuleCore(left);
+        var (rightFunction, rightParams, rightKey) = FromRuleCore(right);
+        return string.Equals(CanonicalFunction(leftFunction), CanonicalFunction(rightFunction), StringComparison.Ordinal)
+            && string.Equals(leftParams, rightParams, StringComparison.Ordinal)
+            && string.Equals(leftKey ?? string.Empty, rightKey ?? string.Empty, StringComparison.Ordinal);
+    }
+
+    private static readonly string RedactCode = ClassificationMaskFunctions.ToCode(MaskFunction.Redact);
+    private static readonly string TypeSafeRedactCode = ClassificationMaskFunctions.ToCode(MaskFunction.TypeSafeRedact);
+
+    private static string CanonicalFunction(string functionCode) =>
+        string.Equals(functionCode, RedactCode, StringComparison.Ordinal) ? TypeSafeRedactCode : functionCode;
+
     private static string WithRuleType(string? paramsJson, string ruleType)
     {
         var bag = new Dictionary<string, JsonElement>(StringComparer.Ordinal);

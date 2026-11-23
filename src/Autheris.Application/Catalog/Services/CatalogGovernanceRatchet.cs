@@ -256,11 +256,20 @@ public static class CatalogGovernanceRatchet
     /// KeepPrefix/KeepSuffix/FixedLength-revealed chars not larger, Decimals not larger, RadiusMeters not smaller,
     /// and PatternOrFormat, Replacement, MaskChar, HmacKeyId, Mode, TokenDomain equal.
     /// Everything else (incl. type change inside a tier) is a relaxation.
+    /// Issue #1042: a rule that persists to the same enforced override as the stored one (same mask function, parameters and key,
+    /// whatever its declared type name, see <see cref="MaskingRuleOverrideMapper.PersistsToSameMask"/>) is never a relaxation,
+    /// provided the parameters the override does not persist are not looser. HMAC aliases (HMAC, HMAC_SHA256, HASH) and
+    /// TOKENIZE / TOKENIZATION count as the same rule type.
     /// </summary>
     public static bool IsMaskingRelaxation(MaskingRule stored, MaskingRule incoming)
     {
         ArgumentNullException.ThrowIfNull(stored);
         ArgumentNullException.ThrowIfNull(incoming);
+
+        if (MaskingRuleOverrideMapper.PersistsToSameMask(stored, incoming) && !RevealsMoreOutsideOverride(stored, incoming))
+        {
+            return false;
+        }
 
         var storedTier = MaskingRuleStrength(stored);
         var incomingTier = MaskingRuleStrength(incoming);
@@ -275,8 +284,8 @@ public static class CatalogGovernanceRatchet
             return true;
         }
 
-        // Equal tier: rule type must be equal
-        if (!string.Equals(stored.RuleType, incoming.RuleType, StringComparison.OrdinalIgnoreCase))
+        // Equal tier: rule type must be equal (aliases of one rule count as equal)
+        if (!string.Equals(CanonicalRuleType(stored), CanonicalRuleType(incoming), StringComparison.Ordinal))
         {
             return true;
         }
@@ -344,6 +353,23 @@ public static class CatalogGovernanceRatchet
 
         return false;
     }
+
+    private static string CanonicalRuleType(MaskingRule rule) => (rule.RuleType ?? string.Empty).Trim().ToUpperInvariant() switch
+    {
+        "HMAC" or "HMAC_SHA256" or "HASH" => "HMAC",
+        "TOKENIZATION" => "TOKENIZE",
+        var other => other
+    };
+
+    /// <summary>
+    /// The disclosure parameters a column mask override does not persist (geo jitter mode and radius, partial mask fixed length,
+    /// token domain): an incoming rule that loosens one of them is not covered by an equal persisted override.
+    /// </summary>
+    private static bool RevealsMoreOutsideOverride(MaskingRule stored, MaskingRule incoming) =>
+        (stored.FixedLength == true && incoming.FixedLength != true)
+        || (incoming.RadiusMeters ?? 0.0) < (stored.RadiusMeters ?? 0.0)
+        || !string.Equals(stored.Mode ?? string.Empty, incoming.Mode ?? string.Empty, StringComparison.OrdinalIgnoreCase)
+        || !string.Equals(stored.TokenDomain ?? string.Empty, incoming.TokenDomain ?? string.Empty, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// EXT-2: SourceName selects the database connection (SqlTableReadExecutor, procedures, plugins). A sync never
