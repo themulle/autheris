@@ -121,6 +121,17 @@ public static partial class GatewayGovernanceServiceExtensions
                 sp.GetRequiredService<Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter>()));
         services.AddScoped<Autheris.Application.Governance.Requests.IPermissionRequestEngine>(sp => sp.GetRequiredService<Autheris.Application.Governance.Requests.PermissionRequestEngine>());
         services.AddScoped<Autheris.Application.Governance.Requests.SelfGrantService>();
+        services.AddSingleton<Autheris.Application.Governance.Requests.GrantRevokeAuthority>();
+        services.AddScoped<Autheris.Application.Governance.Requests.PermissionInboxService>(sp =>
+            new Autheris.Application.Governance.Requests.PermissionInboxService(
+                sp.GetRequiredService<Autheris.Application.Common.Interfaces.IConsentApprovalRepository>(),
+                sp.GetRequiredService<Autheris.Application.Common.Interfaces.IConsentRepository>(),
+                sp.GetRequiredService<Autheris.Application.Governance.Requests.ApproverResolver>(),
+                sp.GetRequiredService<Autheris.Application.Governance.Requests.ApproverEligibility>(),
+                sp.GetRequiredService<Autheris.Application.Governance.ConsentRequests.ISeparationOfDutiesService>(),
+                sp.GetRequiredService<Autheris.Application.Common.Interfaces.IGovernanceCapabilities>(),
+                sp.GetService<Autheris.Application.Common.Interfaces.IGovernanceDomainRepository>(),
+                sp.GetService<TimeProvider>()));
         services.AddSingleton<Autheris.Application.Governance.Grants.IGrantRevocationService>(sp => new Autheris.Application.Governance.Grants.GrantRevocationService(
             sp.GetRequiredService<Autheris.Application.Common.Interfaces.IConsentRepository>(),
             sp.GetRequiredService<Autheris.Application.Common.Interfaces.IConsentApprovalRepository>(),

@@ -31,6 +31,27 @@ public partial class GovernanceRepository
             where.Append(" AND LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)");
         }
 
+        if (query.TableIds is { } tableIds)
+        {
+            if (tableIds.Count == 0)
+            {
+                return new ConsentPage([], null);
+            }
+
+            if (tableIds.Count > ConsentPageQuery.MaxTableIds)
+            {
+                throw new ArgumentException($"At most {ConsentPageQuery.MaxTableIds} table ids can be queried at once.", nameof(query));
+            }
+
+            where.Append(" AND c.table_id IN (");
+            for (var i = 0; i < tableIds.Count; i++)
+            {
+                where.Append(i == 0 ? "@tid" : ", @tid").Append(i.ToString(System.Globalization.CultureInfo.InvariantCulture));
+            }
+
+            where.Append(')');
+        }
+
         if (query.GranteeType is not null)
         {
             where.Append(" AND c.grantee_type = @gtype");
@@ -70,6 +91,16 @@ public partial class GovernanceRepository
                 cmd.AddBound("@domain", table.Domain);
                 cmd.AddBound("@schema", table.Schema);
                 cmd.AddBound("@table", table.TableName);
+            }
+
+            if (query.TableIds is { } boundTableIds)
+            {
+                var index = 0;
+                foreach (var tableId in boundTableIds)
+                {
+                    cmd.AddBound("@tid" + index.ToString(System.Globalization.CultureInfo.InvariantCulture), tableId.ToString());
+                    index++;
+                }
             }
 
             if (query.GranteeType is { } type)

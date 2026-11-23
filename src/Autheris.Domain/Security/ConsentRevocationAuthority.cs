@@ -33,6 +33,13 @@ public sealed class ConsentRevocationAuthority
 
     public TenantId? TenantId { get; }
 
+    /// <summary>
+    /// Authority for a revocation that the grant revoke authority check already authorized for <paramref name="tenant"/>
+    /// (grantee, container owner member, governance, or IT for grants it may decide). Never derive it from caller input.
+    /// </summary>
+    public static ConsentRevocationAuthority ForVerifiedRevocation(TenantId tenant) =>
+        new(ConsentRevocationScope.TenantGovernanceAdmin, tenant);
+
     public static ConsentRevocationAuthority FromPrincipal(ClaimsPrincipal? principal)
     {
         if (principal?.Identity?.IsAuthenticated != true)

@@ -93,8 +93,12 @@ public sealed record ConsentPageQuery(
     bool IncludeInactive = false,
     Guid? AfterId = null,
     int PageSize = ConsentPageQuery.DefaultPageSize,
-    Autheris.Domain.Model.PermissionGrantKind? GrantKind = Autheris.Domain.Model.PermissionGrantKind.Data)
+    Autheris.Domain.Model.PermissionGrantKind? GrantKind = Autheris.Domain.Model.PermissionGrantKind.Data,
+    IReadOnlyCollection<Guid>? TableIds = null)
 {
+    /// <summary>Upper bound for <see cref="TableIds"/> (one statement parameter each).</summary>
+    public const int MaxTableIds = 1000;
+
     public const int DefaultPageSize = 100;
     public const int MaxPageSize = 500;
 
