@@ -108,4 +108,14 @@ public sealed class ConsentBatchPrefetchTests
         prefetch.TryGetActiveConsents([User], Orders, ReadAt, Tenant, out var consents).ShouldBeTrue();
         consents.Select(static c => c.Id).ShouldBe([futureDeny.Id]);
     }
+
+    [Fact]
+    public async Task StalePrefetch_IsNotAnswered_SoARevokeIsSeenByTheRepositoryRead()
+    {
+        var prefetch = await LoadAsync([Grant(Orders, User, ReadAt.AddDays(-1), ReadAt.AddDays(1))], User);
+
+        prefetch.TryGetActiveConsents([User], Orders, ReadAt + ConsentBatchPrefetch.MaxAge, Tenant, out _).ShouldBeTrue();
+        prefetch.TryGetActiveConsents([User], Orders, ReadAt + ConsentBatchPrefetch.MaxAge + TimeSpan.FromMilliseconds(1), Tenant, out _).ShouldBeFalse();
+        prefetch.TryGetActivePatternConsents(Tenant, ReadAt + ConsentBatchPrefetch.MaxAge + TimeSpan.FromMilliseconds(1), out _).ShouldBeFalse();
+    }
 }

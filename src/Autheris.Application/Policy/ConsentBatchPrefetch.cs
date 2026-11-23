@@ -15,10 +15,11 @@ using Autheris.Domain.Model;
 /// <para>
 /// A decision at time <c>now</c> gets exactly the rows the per-table reads would return at <c>now</c>, restricted to what existed at
 /// <see cref="ReadAt"/>: the row filter of the per-table read (subject, <c>now &lt; valid_to</c>, <c>now &gt;= valid_from</c> unless deny) and its
-/// final activity rule are applied again at <c>now</c>. A consent that only became valid, or was created, after <see cref="ReadAt"/> is
-/// therefore missing (fail closed: no grant); an expired one is dropped. A subject outside the prefetched set, another tenant, a table
-/// that was not prefetched or a time before <see cref="ReadAt"/> is not answered (the caller reads from the repository as before).
-/// It lives for one batch of decisions only.
+/// final activity rule are applied again at <c>now</c>. An Allow that only became valid, or was created, after <see cref="ReadAt"/> is
+/// therefore missing (fail closed: no grant); an expired one is dropped; a Deny that starts during the batch applies. A revoke or a new
+/// Deny after <see cref="ReadAt"/> is not seen, so the prefetch answers only within <see cref="MaxAge"/> of <see cref="ReadAt"/> (the
+/// catalog version cache has the same bound). A subject outside the prefetched set, another tenant, a table that was not prefetched or
+/// a time outside that window is not answered (the caller reads from the repository as before). It lives for one batch only.
 /// </para>
 /// </summary>
 public sealed class ConsentBatchPrefetch
@@ -41,6 +42,9 @@ public sealed class ConsentBatchPrefetch
         _tenantPatterns = tenantPatterns;
     }
 
+    /// <summary>The longest time after <see cref="ReadAt"/> a decision may use the prefetch.</summary>
+    public static readonly TimeSpan MaxAge = TimeSpan.FromSeconds(5);
+
     public TenantId Tenant { get; }
 
     public DateTimeOffset ReadAt { get; }
@@ -59,7 +63,7 @@ public sealed class ConsentBatchPrefetch
         ArgumentNullException.ThrowIfNull(tables);
         var subjectSet = subjects.ToHashSet();
         var byTable = await repository.GetActiveConsentsForSubjectsBatchAsync(subjectSet, tables, readAt, tenant, ct).ConfigureAwait(false);
-        var patterns = await repository.GetActivePatternConsentsAsync(tenant, readAt, ct).ConfigureAwait(false);
+        var patterns = await repository.GetPatternConsentsWithPendingDeniesAsync(tenant, readAt, ct).ConfigureAwait(false);
         return new ConsentBatchPrefetch(tenant, subjectSet, readAt, byTable, patterns);
     }
 
@@ -75,7 +79,7 @@ public sealed class ConsentBatchPrefetch
         out List<Consent> consents)
     {
         consents = [];
-        if (tenant != Tenant || now < ReadAt || !_byTable.TryGetValue(table, out var prefetched))
+        if (tenant != Tenant || !IsFresh(now) || !_byTable.TryGetValue(table, out var prefetched))
         {
             return false;
         }
@@ -113,7 +117,7 @@ public sealed class ConsentBatchPrefetch
     public bool TryGetActivePatternConsents(TenantId tenant, DateTimeOffset now, out List<Consent> consents)
     {
         consents = [];
-        if (tenant != Tenant || now < ReadAt)
+        if (tenant != Tenant || !IsFresh(now))
         {
             return false;
         }
@@ -128,4 +132,6 @@ public sealed class ConsentBatchPrefetch
 
         return true;
     }
+
+    private bool IsFresh(DateTimeOffset now) => now >= ReadAt && now - ReadAt <= MaxAge;
 }

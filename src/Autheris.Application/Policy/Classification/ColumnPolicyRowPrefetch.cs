@@ -8,7 +8,8 @@ using Autheris.Domain.Model;
 /// Issue #1043: the persisted column classifications and column mask overrides of a set of tables, read for one tenant in a few
 /// set-based statements before a batch of access decisions (<c>IAccessDecisionPoint.DecideManyAsync</c>), so each decision does not
 /// read them again per table. It holds exactly the rows the per-table reads of <see cref="ClassificationAccessResolver"/> return for
-/// the covered columns; a column it does not cover, or another tenant, is read as before. It lives for one batch of decisions only.
+/// the covered columns; a column it does not cover, another tenant, or a decision more than <see cref="Autheris.Application.Policy.ConsentBatchPrefetch.MaxAge"/>
+/// after <see cref="ReadAt"/> is read as before. It lives for one batch of decisions only.
 /// </summary>
 public sealed class ColumnPolicyRowPrefetch
 {
@@ -21,6 +22,7 @@ public sealed class ColumnPolicyRowPrefetch
 
     public ColumnPolicyRowPrefetch(
         string tenantId,
+        DateTimeOffset readAt,
         IReadOnlyCollection<string> coveredColumnIds,
         IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>> classifications,
         IReadOnlyDictionary<string, IReadOnlyList<ColumnMaskOverride>> overrides)
@@ -28,6 +30,7 @@ public sealed class ColumnPolicyRowPrefetch
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
         ArgumentNullException.ThrowIfNull(coveredColumnIds);
         TenantId = tenantId;
+        ReadAt = readAt;
         _covered = new HashSet<string>(coveredColumnIds, StringComparer.OrdinalIgnoreCase);
         _classifications = classifications ?? throw new ArgumentNullException(nameof(classifications));
         _overrides = overrides ?? throw new ArgumentNullException(nameof(overrides));
@@ -35,10 +38,13 @@ public sealed class ColumnPolicyRowPrefetch
 
     public string TenantId { get; }
 
-    /// <summary>True when the prefetch was read for <paramref name="tenantId"/> and covers every one of <paramref name="columnIds"/>.</summary>
-    public bool Covers(string tenantId, IReadOnlyCollection<string> columnIds)
+    public DateTimeOffset ReadAt { get; }
+
+    /// <summary>True when the prefetch was read for <paramref name="tenantId"/>, is fresh at <paramref name="now"/> and covers every one of <paramref name="columnIds"/>.</summary>
+    public bool Covers(string tenantId, IReadOnlyCollection<string> columnIds, DateTimeOffset now)
     {
-        if (!string.Equals(TenantId, tenantId, StringComparison.Ordinal))
+        if (!string.Equals(TenantId, tenantId, StringComparison.Ordinal) ||
+            now < ReadAt || now - ReadAt > Autheris.Application.Policy.ConsentBatchPrefetch.MaxAge)
         {
             return false;
         }

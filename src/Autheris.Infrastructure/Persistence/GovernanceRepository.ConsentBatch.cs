@@ -19,19 +19,15 @@ public partial class GovernanceRepository
     public async Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<Consent>>> GetActiveConsentsForSubjectsBatchAsync(
         IEnumerable<Sid> subjects, IReadOnlyCollection<TableIdentifier> tables, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(subjects);
         ArgumentNullException.ThrowIfNull(tables);
         var tenant = TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents));
-        var subjectEnumerated = subjects.ToList();
+        var subjectEnumerated = (subjects ?? throw new ArgumentNullException(nameof(subjects))).ToList();
         var subjectSet = subjectEnumerated.ToHashSet();
 
         // TableIdentifier equality is case-insensitive, like the LOWER() match of the per-table read; the first spelling is kept.
         var lists = new Dictionary<TableIdentifier, List<Consent>>();
         var spelling = new Dictionary<TableIdentifier, TableIdentifier>();
-        foreach (var table in tables)
-        {
-            if (lists.TryAdd(table, [])) spelling[table] = table;
-        }
+        foreach (var table in tables.Where(t => lists.TryAdd(t, []))) spelling[table] = table;
 
         if (lists.Count > 0 && subjectSet.Count > 0)
         {
@@ -49,12 +45,14 @@ public partial class GovernanceRepository
                 await using var reader = await ExecuteReaderAsync(cmd, "Consent.GetActiveForSubjectsBatch", ct).ConfigureAwait(false);
                 ConsentSqlCore.ReadSubjectConsentRows(
                     reader,
-                    r => spelling.TryGetValue(new TableIdentifier(r.GetString(9), r.GetString(10), r.GetString(11)), out var requested) ? requested : null,
+                    r => TableIdentifier.TryCreate(r.GetString(9), r.GetString(10), r.GetString(11), out var row) && spelling.TryGetValue(row, out var requested) ? requested : null,
                     atTime, subjectSet, seen, (table, consent) => lists[table].Add(consent));
             }
 
             // Pattern consents of each table's domain after its direct consents, as the per-table read appends them (one read per domain).
+            // One instance per pattern consent id (domains equal under the DB collation may read it twice), so every instance is hydrated.
             var patternsByDomain = new Dictionary<string, List<Consent>>(StringComparer.OrdinalIgnoreCase);
+            var canonical = new Dictionary<Guid, Consent>();
             foreach (var (table, list) in lists)
             {
                 var domainKey = table.Domain?.Trim() ?? string.Empty;
@@ -62,6 +60,7 @@ public partial class GovernanceRepository
                 {
                     patternsByDomain[domainKey] = patterns = [];
                     await ConsentPatternSql.ReadActivePatternConsentsForDomainAsync(conn, table.Domain, tenant, atTime, subjectSet, [], patterns, ct).ConfigureAwait(false);
+                    patterns = patternsByDomain[domainKey] = patterns.ConvertAll(p => canonical.TryAdd(p.Id, p) ? p : canonical[p.Id]);
                 }
 
                 var present = list.Select(static c => c.Id).ToHashSet();
