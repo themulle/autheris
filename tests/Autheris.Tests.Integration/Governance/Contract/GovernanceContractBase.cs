@@ -262,6 +262,8 @@ public sealed class GovernanceTestStore : IAsyncDisposable
 
         var services = new ServiceCollection();
         services.AddLogging();
+        // The production host registers IMemoryCache; governance services such as ConsentCacheService depend on it.
+        services.AddMemoryCache();
         services.AddSingleton<IConfiguration>(configuration);
         services.AddSingleton(TimeProvider.System);
         services.AddSingleton<IHostEnvironment>(hostEnv);
