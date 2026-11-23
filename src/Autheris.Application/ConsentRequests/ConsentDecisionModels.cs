@@ -37,38 +37,6 @@ public enum ConsentDecisionKind
     Reject
 }
 
-public enum ConsentDecisionChannel
-{
-    Internal,
-    External
-}
-
-public sealed record ConsentDecisionCommand(
-    Guid RequestId,
-    ConsentDecisionKind Decision,
-    ConsentDecisionChannel Channel,
-    ClaimsPrincipal? Principal,
-    int? ExpectedVersion = null,
-    DateTimeOffset? ApprovedValidTo = null,
-    string? Reason = null,
-    string? Description = null,
-    IReadOnlyList<WriteRule>? WriteRules = null,
-    string? ColumnMaskingJson = null,
-    string? RowFilterJson = null,
-    string? IdempotencyKey = null,
-    ExternalDecisionAttribution? ExternalAttribution = null,
-    TenantId? ContextTenantId = null,
-    IReadOnlyList<ConsentRowFilter>? PrebuiltRowFilters = null,
-    IReadOnlyList<ConsentColumnRule>? PrebuiltColumnRules = null,
-    bool HasPrebuiltRestrictions = false,
-    IReadOnlyList<int>? ApprovedProfileItems = null,
-    IReadOnlyList<string>? ApprovedClearColumns = null,
-    IReadOnlyList<string>? ApprovedClearClassifications = null);
-
-public sealed record ConsentDecisionResult(
-    ConsentRequest Request,
-    Consent? ActivatedConsent = null);
-
 public sealed class ConsentDecisionException(string errorCode, string message, int statusCode = 400)
     : Exception(message)
 {

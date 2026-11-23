@@ -20,7 +20,6 @@ public sealed class TenantIngressArchitectureTests
         ["src/Autheris.Api/Security/ScimAuthenticationHandler.cs"] = 1,                 // ingress (realm binding)
         ["src/Autheris.Api/Security/TenantStamping.cs"] = 1,                            // wraps the identity the resolver reads (claims transformation helper)
         ["src/Autheris.Api/Security/TestAuthHandler.cs"] = 2,                           // test-host ingress
-        ["src/Autheris.Application/ConsentRequests/ConsentDecisionPipeline.cs"] = 1,   // external decision actor principal (stamped with request tenant)
         ["src/Autheris.Application/ConsentRequests/RealmExternalApproverResolver.cs"] = 1, // external approver principal: mapped through the realm, stamped with the request tenant
         ["src/Autheris.Application/Governance/Analysis/QueryAnalysisService.cs"] = 1,   // simulated target: the analysed caller's tenant
         ["src/Autheris.Application/Policy/Pdp/AccessDecisionPoint.WriteGrants.cs"] = 1, // write-grant fallback: resolved subject tenant or unresolved

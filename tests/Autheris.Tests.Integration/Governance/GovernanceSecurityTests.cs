@@ -113,26 +113,6 @@ public class GovernanceSecurityTests : IDisposable
     }
 
     [Fact]
-    public async Task Idempotency_WhenDifferentUsersUseSameKey_ExecutesSeparately()
-    {
-        var userA = new Sid("S-1-5-21-USER-AAA");
-        var userB = new Sid("S-1-5-21-USER-BBB");
-        const string sharedIdempotencyKey = "shared-client-key-42";
-
-        var accessorA = CreateAccessor(userA);
-        var accessorB = CreateAccessor(userB);
-
-        var payloadA = await _mutation.RequestTableAccessAsync(
-            "finance", "dbo", "finance_table_1", "Quarterly reporting for user A", 7, sharedIdempotencyKey, new ConsentRequestService(_repository, _repository), accessorA);
-
-        var payloadB = await _mutation.RequestTableAccessAsync(
-            "finance", "dbo", "finance_table_1", "Quarterly reporting for user B", 7, sharedIdempotencyKey, new ConsentRequestService(_repository, _repository), accessorB);
-
-        // Payloads must not collide!
-        payloadA.RequestId.ShouldNotBe(payloadB.RequestId);
-    }
-
-    [Fact]
     public async Task GetPendingRequestsForApprover_ReturnsOnlyAssignedTables()
     {
         var tableFinance = new TableIdentifier("finance", "dbo", "finance_table_1");
@@ -424,6 +404,18 @@ public class GovernanceSecurityTests : IDisposable
         });
     }
 
+    private ConsentRequestEndpointAdapter CreateConsentRequestService() =>
+        new(new Autheris.Application.Governance.Requests.PermissionRequestEngine(
+            _repository,
+            new Autheris.Tests.Common.Fakes.InMemoryAuditWriter(),
+            new Autheris.Application.Governance.Requests.ApproverResolver(),
+            new Autheris.Application.Governance.Requests.ApproverEligibility(new Autheris.Application.Security.GovernanceCapabilities()),
+            new Autheris.Application.Governance.ConsentRequests.SeparationOfDutiesService(),
+            new Autheris.Application.Governance.Grants.GrantPolicy(),
+            Autheris.Application.Governance.Grants.GrantValidityPolicy.CreateDefault(),
+            Array.Empty<Autheris.Application.Governance.Requests.IGrantEffectApplier>(),
+            metadataRepository: _repository));
+
     [Theory]
     [InlineData("")]
     [InlineData("   ")]
@@ -433,7 +425,7 @@ public class GovernanceSecurityTests : IDisposable
         var accessor = CreateAccessor(new Sid("S-1-5-21-USER-1"));
         var ex = await Should.ThrowAsync<GraphQLException>(async () =>
         {
-            await _mutation.RequestTableAccessAsync("finance", "dbo", "finance_table_1", justification, 7, null, new ConsentRequestService(_repository, _repository), accessor);
+            await _mutation.RequestTableAccessAsync("finance", "dbo", "finance_table_1", justification, 7, null, CreateConsentRequestService(), accessor);
         });
         ex.Errors.ShouldContain(e => e.Code == "VALIDATION_ERROR");
     }
@@ -446,7 +438,7 @@ public class GovernanceSecurityTests : IDisposable
         var accessor = CreateAccessor(new Sid("S-1-5-21-USER-1"));
         var ex = await Should.ThrowAsync<GraphQLException>(async () =>
         {
-            await _mutation.RequestTableAccessAsync("finance", "dbo", "finance_table_1", "Valid justification here", durationDays, null, new ConsentRequestService(_repository, _repository), accessor);
+            await _mutation.RequestTableAccessAsync("finance", "dbo", "finance_table_1", "Valid justification here", durationDays, null, CreateConsentRequestService(), accessor);
         });
         ex.Errors.ShouldContain(e => e.Code == "VALIDATION_ERROR");
     }
@@ -589,20 +581,6 @@ public class GovernanceSecurityTests : IDisposable
             _repository.ApproveConsentRequestStepAsync(req.Id, new Sid("S-1-5-21-1000-1000-1000-1001")));
 
         (await _repository.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("PENDING_EXTERNAL_APPROVAL");
-    }
-
-    [Fact]
-    public async Task R2_5_ItsmApprovalWithoutNamedApprover_OnOwnedTable_IsRejected()
-    {
-        var req = await CreateExternalRequestAsync("S-1-5-21-REQ-R25");
-        var guard = new Autheris.Application.ConsentRequests.LegacyExternalDecisionGuard();
-        var cmd = new Autheris.Application.ConsentRequests.ConsentDecisionCommand(
-            req.Id, Autheris.Application.ConsentRequests.ConsentDecisionKind.Approve, Autheris.Application.ConsentRequests.ConsentDecisionChannel.External, null,
-            ExternalAttribution: new ExternalDecisionAttribution(req.ExternalSystemId!.Value, req.ExternalReference!, "APPROVED", null, DateTimeOffset.UtcNow));
-        var system = new ExternalWorkflowSystem(req.ExternalSystemId.Value, req.TenantId.Value, "Sys", "client-1", "https://ext.local/hook", "sec", true, "admin", DateTimeOffset.UtcNow, null);
-        var route = new ConsentWorkflowRoute(req.TenantId.Value, WorkflowRouteScopeKind.Tenant, req.TenantId.Value, ConsentWorkflowMode.External, req.ExternalSystemId, 30, 30, false, "admin", DateTimeOffset.UtcNow);
-
-        await Should.ThrowAsync<Autheris.Application.ConsentRequests.ConsentDecisionException>(() => guard.ValidateAsync(cmd, req, route, system));
     }
 
     [Fact]

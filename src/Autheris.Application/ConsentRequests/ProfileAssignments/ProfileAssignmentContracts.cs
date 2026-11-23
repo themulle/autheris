@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Data.Common;
 using System.Security.Claims;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Domain.Audit;
@@ -36,20 +37,6 @@ public sealed record ProfileAssignmentItemRow(
     string OwnerDecision,
     string? DecidedBy = null,
     DateTimeOffset? DecidedAt = null);
-
-public sealed record ProfileAssignmentSubmission(
-    Guid ProfileId,
-    Sid CallerSid,
-    ClaimsPrincipal Principal,
-    TenantId? ContextTenant = null,
-    string? GranteeRef = null,
-    string? GranteeType = null,
-    string? Justification = null,
-    string? RequestedDuration = null,
-    DateTimeOffset? RequestedValidFrom = null,
-    DateTimeOffset? RequestedValidTo = null,
-    int? DurationDays = null,
-    string? IdempotencyKey = null);
 
 public interface IProfileAssignmentTransaction : IAsyncDisposable
 {
@@ -132,12 +119,8 @@ public interface IProfileAssignmentStore
         CancellationToken ct = default);
 }
 
-public interface IProfileAssignmentRequestService
+public interface IProfileAssignmentMaintenanceService
 {
-    Task<SubmitConsentRequestResult> SubmitAsync(
-        ProfileAssignmentSubmission submission,
-        CancellationToken ct = default);
-
     Task HandlePatternNewOwnerAsync(
         Consent patternConsent,
         TableMetadata newTable,
@@ -150,16 +133,6 @@ public interface IProfileAssignmentRequestService
         Guid profileAssignmentId,
         Sid actorSid,
         string reason,
-        CancellationToken ct = default);
-}
-
-public interface IProfileAssignmentDecisionHandler
-{
-    Task<ConsentDecisionResult> DecideAsync(
-        ConsentDecisionCommand command,
-        ConsentRequest req,
-        Sid actorSid,
-        IReadOnlyList<Sid> externalApproverSids,
         CancellationToken ct = default);
 }
 
@@ -196,4 +169,34 @@ public interface IProfileGrantMaterializer
         Sid actorSid,
         string reason,
         CancellationToken ct = default);
+}
+
+/// <summary>Reads the snapshot stored in the context of a profile assignment request.</summary>
+public static class ProfileAssignmentSnapshots
+{
+    public static ProfileAssignmentRequestContext Parse(ConsentRequest req)
+    {
+        if (!string.IsNullOrWhiteSpace(req.ContextJson))
+        {
+            try
+            {
+                var parsed = JsonSerializer.Deserialize<ProfileAssignmentRequestContext>(req.ContextJson);
+                if (parsed is { Items.Count: > 0 })
+                {
+                    return parsed;
+                }
+            }
+            catch (JsonException)
+            {
+            }
+        }
+
+        var fallbackTarget = req.TableIdentifier.ToString();
+        return new ProfileAssignmentRequestContext(
+            req.ProfileId ?? req.Id,
+            "AccessProfile",
+            MaskingPolicyMode.Default,
+            [],
+            [new ProfileAssignmentSnapshotItem(0, fallbackTarget, fallbackTarget.Contains('*', StringComparison.Ordinal), req.TableIdentifier.Domain, req.RequestedWriteRules ?? [])]);
+    }
 }

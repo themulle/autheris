@@ -25,7 +25,6 @@ src/Autheris.Application/Catalog/Services/DatasourceTestingService.cs|1
 src/Autheris.Application/Common/Serialization/ParquetExportService.cs|1
 src/Autheris.Application/Compliance/GdprAuditReportPdfExporter.cs|2
 src/Autheris.Application/Compliance/GdprDisclosureReportService.cs|2
-src/Autheris.Application/ConsentRequests/ConsentRequestService.cs|1
 src/Autheris.Application/DataSources/Changes/GovernedChangeDetectionService.Cursors.cs|2
 src/Autheris.Application/Docs/Services/MarkdownDocIngestor.cs|1
 src/Autheris.Application/Federation/Services/SubgraphContextPropagationService.cs|1

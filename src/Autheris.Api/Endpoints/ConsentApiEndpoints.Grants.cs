@@ -303,7 +303,7 @@ public static partial class ConsentApiEndpoints
         IConsentApprovalRepository approvalRepo,
         IConsentWorkflowConfigRepository workflowConfigRepo,
         [FromServices] IProfileAssignmentStore assignmentStore,
-        [FromServices] IProfileAssignmentRequestService profileAssignmentService,
+        [FromServices] IProfileAssignmentMaintenanceService profileAssignmentService,
         IContainerOwnership ownershipRepo,
         IIdempotencyStore? idempotencyStore = null,
         IRateLimiterService? rateLimiter = null,

@@ -27,7 +27,7 @@ public sealed class ConsentRequestEndpointAdapter(
     {
         ArgumentNullException.ThrowIfNull(command);
         var principal = command.Principal;
-        ConsentSubmissionPipeline.EnsurePersonSubject(principal, subjectResolver);
+        ConsentSubmissionGuards.EnsurePersonSubject(principal, subjectResolver);
 
         if (!TableIdentifier.TryCreate(command.Domain, command.Schema, command.TableName, out var table))
         {
@@ -80,7 +80,7 @@ public sealed class ConsentRequestEndpointAdapter(
     public Task<bool> WithdrawAsync(Guid requestId, ClaimsPrincipal principal, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(principal);
-        ConsentSubmissionPipeline.EnsurePersonSubject(principal, subjectResolver);
+        ConsentSubmissionGuards.EnsurePersonSubject(principal, subjectResolver);
         return _engine.WithdrawAsync(requestId, principal, ct);
     }
 

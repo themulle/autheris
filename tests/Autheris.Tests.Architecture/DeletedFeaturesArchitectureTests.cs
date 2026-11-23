@@ -71,6 +71,15 @@ public sealed class DeletedFeaturesArchitectureTests
     [InlineData("FinOpsOptions")]
     [InlineData("FocusCostRecord")]
     [InlineData("BudgetStatus")]
+    [InlineData("ConsentRequestService")]
+    [InlineData("ConsentSubmissionPipeline")]
+    [InlineData("ConsentDecisionPipeline")]
+    [InlineData("IConsentDecisionPipeline")]
+    [InlineData("ProfileAssignmentRequestService")]
+    [InlineData("IProfileAssignmentRequestService")]
+    [InlineData("IProfileAssignmentDecisionHandler")]
+    [InlineData("LegacyExternalDecisionGuard")]
+    [InlineData("ILegacyExternalDecisionGuard")]
     public void Deleted_Types_Do_Not_Exist_In_Production_Assemblies(string typeName)
     {
         foreach (var assembly in ProductionAssemblies)

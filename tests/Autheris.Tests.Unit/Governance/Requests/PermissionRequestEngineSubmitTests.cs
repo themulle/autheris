@@ -239,6 +239,34 @@ public sealed class PermissionRequestEngineSubmitTests
         res.Request.Status.ShouldBe("PENDING");
     }
 
+    [Fact]
+    public async Task Delete_write_rule_is_rejected_before_the_request_is_stored()
+    {
+        var engine = CreateEngine(CapturingApprovals());
+
+        var ex = await Should.ThrowAsync<ConsentRequestException>(() => engine.SubmitAsync(new PermissionRequestSubmission(
+            UserPrincipal(), TenantA, ConsentRequestKind.Data, PermissionTarget.ForTable(OrdersTable),
+            GranteeType.User, "user:alice", "Need orders write access for billing.", ValidTo: Now.AddDays(30),
+            RequestedWriteRules: [new WriteRule(Guid.Empty, WriteOperation.Delete, ["amount"], WriteRowScope.OwnRows, null, null)],
+            IncludeReadAccess: false)));
+
+        ex.Code.ShouldBe("VALIDATION_ERROR");
+    }
+
+    [Fact]
+    public async Task Write_rule_on_unknown_column_is_rejected()
+    {
+        var engine = CreateEngine(CapturingApprovals());
+
+        var ex = await Should.ThrowAsync<ConsentRequestException>(() => engine.SubmitAsync(new PermissionRequestSubmission(
+            UserPrincipal(), TenantA, ConsentRequestKind.Data, PermissionTarget.ForTable(OrdersTable),
+            GranteeType.User, "user:alice", "Need orders write access for billing.", ValidTo: Now.AddDays(30),
+            RequestedWriteRules: [new WriteRule(Guid.Empty, WriteOperation.Insert, ["does_not_exist"], WriteRowScope.OwnRows, null, null)],
+            IncludeReadAccess: false)));
+
+        ex.Code.ShouldBe("VALIDATION_ERROR");
+    }
+
     private static ITableMetadataRepository DefaultMetadata(params TableMetadata[] extra)
     {
         var byTable = new Dictionary<TableIdentifier, TableMetadata>

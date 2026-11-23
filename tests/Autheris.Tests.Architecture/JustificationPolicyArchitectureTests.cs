@@ -21,8 +21,7 @@ public sealed partial class JustificationPolicyArchitectureTests
         var violations = new List<string>();
         foreach (var file in RepositoryScan.ProductionFiles)
         {
-            if (file.RelativePath.EndsWith("JustificationPolicy.cs", StringComparison.OrdinalIgnoreCase)
-                || file.RelativePath.EndsWith("ConsentSubmissionPipeline.cs", StringComparison.OrdinalIgnoreCase))
+            if (file.RelativePath.EndsWith("JustificationPolicy.cs", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }

@@ -81,7 +81,7 @@ public sealed class GrantRecordLifecycleE2ETests(GovernancePostgresFixture fixtu
             externalSystemId,
             MaxDurationDays: 30,
             RequestTimeoutDays: 14,
-            // The lifecycle test has no SCIM directory; approver resolution is covered by the LegacyExternalDecisionGuard tests.
+            // The lifecycle test has no SCIM directory; approver resolution is covered by the external decision guard tests.
             RequireResolvableApprover: false,
             UpdatedBy: "admin-e2e",
             UpdatedAt: now));
@@ -103,21 +103,22 @@ public sealed class GrantRecordLifecycleE2ETests(GovernancePostgresFixture fixtu
         submission.Status.Should().Be("PENDING_EXTERNAL_APPROVAL");
 
         // 3. Approve via external decision pipeline -> Consent activated + signed ISSUED record
-        var decisionPipeline = store.Services.GetRequiredService<IConsentDecisionPipeline>();
-        var approved = await decisionPipeline.DecideAsync(new ConsentDecisionCommand(
+        var engine = store.Services.GetRequiredService<Autheris.Application.Governance.Requests.IPermissionRequestEngine>();
+        var ownerPrincipal = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.PrimarySid, owner1Sid.Value),
+            new Claim("tenant_id", tenant.Value),
+            new Claim(ClaimTypes.Role, "DataOwner")
+        ], "Test"));
+        var approved = await engine.DecideAsync(new Autheris.Application.Governance.Requests.PermissionDecisionCommand(
             submission.RequestId,
-            ConsentDecisionKind.Approve,
-            ConsentDecisionChannel.External,
-            Principal: null,
-            ExternalAttribution: new ExternalDecisionAttribution(
-                externalSystemId,
-                "SNOW-CHG-1001",
-                "APPROVED",
-                new AssertedApprover("approver@corp.local", ResolvedSid: approverSid.Value),
-                now)));
+            1,
+            SecurityPrincipalContext.FromPrincipal(ownerPrincipal),
+            Approve: true,
+            External: new Autheris.Application.Governance.Requests.ExternalDecisionEvidence(externalSystemId, "SNOW-CHG-1001")));
 
-        approved.ActivatedConsent.Should().NotBeNull();
-        var grantId = approved.ActivatedConsent!.Id;
+        approved.PrimaryGrant.Should().NotBeNull();
+        var grantId = approved.PrimaryGrant!.GrantId;
 
         // Seed correlated data-access audit log entry for grantId
         await store.AuditLogs.RecordAuditEventAsync(new AuditLogEntry
@@ -137,8 +138,8 @@ public sealed class GrantRecordLifecycleE2ETests(GovernancePostgresFixture fixtu
                     new
                     {
                         grantId = grantId.ToString("D"),
-                        grantValidFrom = approved.ActivatedConsent.ValidFrom,
-                        grantValidUntil = approved.ActivatedConsent.ValidTo
+                        grantValidFrom = approved.PrimaryGrant.ValidFrom,
+                        grantValidUntil = approved.PrimaryGrant.ValidTo
                     }
                 }
             })
@@ -186,18 +187,13 @@ public sealed class GrantRecordLifecycleE2ETests(GovernancePostgresFixture fixtu
             Principal: requesterPrincipal,
             ContextTenant: tenant));
 
-        var expiringApproved = await decisionPipeline.DecideAsync(new ConsentDecisionCommand(
+        var expiringApproved = await engine.DecideAsync(new Autheris.Application.Governance.Requests.PermissionDecisionCommand(
             expiringSubmission.RequestId,
-            ConsentDecisionKind.Approve,
-            ConsentDecisionChannel.External,
-            Principal: null,
-            ExternalAttribution: new ExternalDecisionAttribution(
-                externalSystemId,
-                "SNOW-CHG-1002",
-                "APPROVED",
-                new AssertedApprover("approver@corp.local", ResolvedSid: approverSid.Value),
-                now)));
-        var expiringGrantId = expiringApproved.ActivatedConsent!.Id;
+            1,
+            SecurityPrincipalContext.FromPrincipal(ownerPrincipal),
+            Approve: true,
+            External: new Autheris.Application.Governance.Requests.ExternalDecisionEvidence(externalSystemId, "SNOW-CHG-1002")));
+        var expiringGrantId = expiringApproved.PrimaryGrant!.GrantId;
 
         var futureClock = new FakeTimeProvider(now.AddDays(5));
         var workflowRouter = store.Services.GetRequiredService<IConsentWorkflowRouter>();

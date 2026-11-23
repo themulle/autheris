@@ -116,7 +116,7 @@ public sealed class PatternCoverageMonitor : BackgroundService
             var ownershipRepo = scope.ServiceProvider.GetRequiredService<IContainerOwnership>();
             var approvalRepo = scope.ServiceProvider.GetService<IConsentApprovalRepository>();
             var auditRepo = scope.ServiceProvider.GetService<IAuditLogRepository>();
-            var profileAssignmentService = scope.ServiceProvider.GetService<IProfileAssignmentRequestService>();
+            var profileAssignmentService = scope.ServiceProvider.GetService<IProfileAssignmentMaintenanceService>();
 
             var tables = await CatalogTablePageReader.ReadAllAsync(
                 catalogRepo,
@@ -203,7 +203,7 @@ public sealed class PatternCoverageMonitor : BackgroundService
         DateTimeOffset now,
         IConsentApprovalRepository? approvalRepo,
         IAuditLogRepository? auditRepo,
-        IProfileAssignmentRequestService? profileAssignmentService,
+        IProfileAssignmentMaintenanceService? profileAssignmentService,
         CancellationToken ct)
     {
         int ownerCount = authorizedOwners.Count;

@@ -158,7 +158,7 @@ public static class ApprovalEffectPreviewHelper
     {
         if (request.RequestKind == ConsentRequestKind.ProfileAssignment)
         {
-            var context = ProfileAssignmentRequestService.ParseSnapshot(request);
+            var context = ProfileAssignmentSnapshots.Parse(request);
             if (context.Items.Count == 0)
             {
                 return Array.Empty<GrantPreviewRequestedItem>();
