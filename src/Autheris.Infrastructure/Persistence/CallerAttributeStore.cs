@@ -10,15 +10,12 @@ using Autheris.Domain.Model;
 
 /// <summary>
 /// Caller attribute registry and service sets (129 C-3, C-5): storage shared by the three governance repositories (portable SQL,
-/// named parameters). Every four-eyes step is one transaction that reads the row, compares the hash the approver reviewed and refuses an
-/// approver equal to the creator, so the store itself never activates an unapproved definition (BC-129-10). Each successful write
-/// increments the generation once.
+/// named parameters). A save is one transaction that upserts the active row; the service checks the writer's capacity first.
+/// Each successful write increments the generation once.
 /// </summary>
 internal static class CallerAttributeStore
 {
     private const int Active = (int)FilterApprovalStatus.Active;
-    private const int Pending = (int)FilterApprovalStatus.PendingApproval;
-    private const int Rejected = (int)FilterApprovalStatus.Rejected;
 
     private sealed record DefinitionDto(
         string Name, CallerAttributeType ValueType, CallerAttributeCardinality Cardinality, int MaxValues, int TtlSeconds,
@@ -32,8 +29,7 @@ internal static class CallerAttributeStore
 
         var attributes = new List<CallerAttributeRecord>();
         await using (var cmd = Command(connection, tx, @"
-            SELECT id, tenant_id, name, definition_json, status, created_by, approved_by, approved_at,
-                   draft_definition_json, draft_created_by, pending_deletion, deletion_requested_by, updated_at
+            SELECT id, tenant_id, name, definition_json, status, created_by, approved_by, approved_at, updated_at
             FROM CALLER_ATTRIBUTES ORDER BY tenant_id, name;", []))
         await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {
@@ -47,18 +43,13 @@ internal static class CallerAttributeStore
                     reader.GetString(5),
                     reader.IsDBNull(6) ? null : reader.GetString(6),
                     reader.IsDBNull(7) ? null : ParseTime(reader.GetString(7)),
-                    reader.IsDBNull(8) ? null : FromJson(reader.GetString(8), Guid.NewGuid(), tenant, FilterApprovalStatus.PendingApproval),
-                    reader.IsDBNull(9) ? null : reader.GetString(9),
-                    reader.GetInt32(10) != 0,
-                    reader.IsDBNull(11) ? null : reader.GetString(11),
-                    ParseTime(reader.GetString(12))));
+                    ParseTime(reader.GetString(8))));
             }
         }
 
         var sets = new List<ServiceAttributeSetRecord>();
         await using (var cmd = Command(connection, tx, @"
-            SELECT id, tenant_id, application_id, attribute_name, values_json, status, created_by, approved_by, approved_at,
-                   draft_values_json, draft_created_by, updated_at
+            SELECT id, tenant_id, application_id, attribute_name, values_json, status, created_by, approved_by, approved_at, updated_at
             FROM CALLER_ATTRIBUTE_SERVICE_SETS ORDER BY tenant_id, application_id, attribute_name;", []))
         await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
         {
@@ -71,9 +62,7 @@ internal static class CallerAttributeStore
                     reader.GetString(6),
                     reader.IsDBNull(7) ? null : reader.GetString(7),
                     reader.IsDBNull(8) ? null : ParseTime(reader.GetString(8)),
-                    reader.IsDBNull(9) ? null : Values(reader.GetString(9)),
-                    reader.IsDBNull(10) ? null : reader.GetString(10),
-                    ParseTime(reader.GetString(11))));
+                    ParseTime(reader.GetString(9))));
             }
         }
 
@@ -87,36 +76,27 @@ internal static class CallerAttributeStore
 
     public static Task<long> GetGenerationAsync(DbConnection connection, CancellationToken ct) => ReadGenerationAsync(connection, null, ct);
 
-    public static async Task<CallerAttributeChangeResult> SubmitDefinitionAsync(DbConnection connection, CallerAttributeDefinition def, string actor, DateTimeOffset at, CancellationToken ct)
+    public static async Task<CallerAttributeChangeResult> SaveDefinitionAsync(DbConnection connection, CallerAttributeDefinition def, string actor, DateTimeOffset at, CancellationToken ct)
     {
         await using var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-        var existing = await ReadRowAsync(connection, tx, def.Tenant.Value, def.Name, ct).ConfigureAwait(false);
+        var exists = await ExistsAsync(connection, tx, "SELECT 1 FROM CALLER_ATTRIBUTES WHERE tenant_id = @tenant AND name = @name;", [("@tenant", def.Tenant.Value), ("@name", def.Name)], ct).ConfigureAwait(false);
         var json = ToJson(def);
         var hash = def.ComputeDefinitionHash();
         var stamp = Time(at);
-        if (existing is null)
+        if (!exists)
         {
             await ExecuteAsync(connection, tx, @"
-                INSERT INTO CALLER_ATTRIBUTES (id, tenant_id, name, definition_json, definition_hash, status, created_by, updated_by, updated_at)
-                VALUES (@id, @tenant, @name, @json, @hash, @status, @by, @by, @at);",
-                [("@id", def.Id.ToString()), ("@tenant", def.Tenant.Value), ("@name", def.Name), ("@json", json), ("@hash", hash), ("@status", Pending), ("@by", actor), ("@at", stamp)], ct).ConfigureAwait(false);
-        }
-        else if (existing.Status == Active)
-        {
-            await ExecuteAsync(connection, tx, @"
-                UPDATE CALLER_ATTRIBUTES SET draft_definition_json = @json, draft_definition_hash = @hash, draft_created_by = @by,
-                    pending_deletion = 0, deletion_requested_by = NULL, updated_by = @by, updated_at = @at
-                WHERE tenant_id = @tenant AND name = @name;",
-                [("@json", json), ("@hash", hash), ("@by", actor), ("@at", stamp), ("@tenant", def.Tenant.Value), ("@name", def.Name)], ct).ConfigureAwait(false);
+                INSERT INTO CALLER_ATTRIBUTES (id, tenant_id, name, definition_json, definition_hash, status, created_by, approved_by, approved_at, updated_by, updated_at)
+                VALUES (@id, @tenant, @name, @json, @hash, @status, @by, @by, @at, @by, @at);",
+                [("@id", def.Id.ToString()), ("@tenant", def.Tenant.Value), ("@name", def.Name), ("@json", json), ("@hash", hash), ("@status", Active), ("@by", actor), ("@at", stamp)], ct).ConfigureAwait(false);
         }
         else
         {
-            // Never approved (pending or rejected): the first version is replaced; there is no last-known-good to protect.
             await ExecuteAsync(connection, tx, @"
-                UPDATE CALLER_ATTRIBUTES SET definition_json = @json, definition_hash = @hash, status = @status, created_by = @by,
-                    approved_by = NULL, approved_at = NULL, updated_by = @by, updated_at = @at
+                UPDATE CALLER_ATTRIBUTES SET definition_json = @json, definition_hash = @hash, status = @status,
+                    approved_by = @by, approved_at = @at, updated_by = @by, updated_at = @at
                 WHERE tenant_id = @tenant AND name = @name;",
-                [("@json", json), ("@hash", hash), ("@status", Pending), ("@by", actor), ("@at", stamp), ("@tenant", def.Tenant.Value), ("@name", def.Name)], ct).ConfigureAwait(false);
+                [("@json", json), ("@hash", hash), ("@status", Active), ("@by", actor), ("@at", stamp), ("@tenant", def.Tenant.Value), ("@name", def.Name)], ct).ConfigureAwait(false);
         }
 
         await BumpAsync(connection, tx, ct).ConfigureAwait(false);
@@ -124,129 +104,16 @@ internal static class CallerAttributeStore
         return CallerAttributeChangeResult.Applied;
     }
 
-    public static async Task<CallerAttributeChangeResult> RequestDeletionAsync(DbConnection connection, TenantId tenant, string name, string actor, DateTimeOffset at, CancellationToken ct)
+    public static async Task<CallerAttributeChangeResult> DeleteDefinitionAsync(DbConnection connection, TenantId tenant, string name, CancellationToken ct)
     {
         await using var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-        var existing = await ReadRowAsync(connection, tx, tenant.Value, name, ct).ConfigureAwait(false);
-        if (existing is null)
+        var affected = await ExecuteAsync(connection, tx, "DELETE FROM CALLER_ATTRIBUTES WHERE tenant_id = @tenant AND name = @name;",
+            [("@tenant", tenant.Value), ("@name", name)], ct).ConfigureAwait(false);
+        if (affected == 0)
         {
             return CallerAttributeChangeResult.NotFound;
         }
 
-        if (existing.Status == Active)
-        {
-            await ExecuteAsync(connection, tx, @"
-                UPDATE CALLER_ATTRIBUTES SET pending_deletion = 1, deletion_requested_by = @by, updated_by = @by, updated_at = @at
-                WHERE tenant_id = @tenant AND name = @name;",
-                [("@by", actor), ("@at", Time(at)), ("@tenant", tenant.Value), ("@name", name)], ct).ConfigureAwait(false);
-        }
-        else
-        {
-            // A never-approved definition grants nothing: removing it needs no second person.
-            await ExecuteAsync(connection, tx, "DELETE FROM CALLER_ATTRIBUTES WHERE tenant_id = @tenant AND name = @name;",
-                [("@tenant", tenant.Value), ("@name", name)], ct).ConfigureAwait(false);
-        }
-
-        await BumpAsync(connection, tx, ct).ConfigureAwait(false);
-        await tx.CommitAsync(ct).ConfigureAwait(false);
-        return CallerAttributeChangeResult.Applied;
-    }
-
-    public static async Task<CallerAttributeChangeResult> ApproveDefinitionAsync(
-        DbConnection connection, TenantId tenant, string name, string approver, string expectedHash, DateTimeOffset at, CancellationToken ct)
-    {
-        await using var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-        var row = await ReadRowAsync(connection, tx, tenant.Value, name, ct).ConfigureAwait(false);
-        if (row is null)
-        {
-            return CallerAttributeChangeResult.NotFound;
-        }
-
-        var stamp = Time(at);
-        if (row.PendingDeletion)
-        {
-            var guard = Guard(row.DefinitionHash, row.DeletionRequestedBy, approver, expectedHash);
-            if (guard != CallerAttributeChangeResult.Applied)
-            {
-                return guard;
-            }
-
-            await ExecuteAsync(connection, tx, "DELETE FROM CALLER_ATTRIBUTES WHERE tenant_id = @tenant AND name = @name AND definition_hash = @hash;",
-                [("@tenant", tenant.Value), ("@name", name), ("@hash", row.DefinitionHash)], ct).ConfigureAwait(false);
-        }
-        else if (row.DraftJson is not null)
-        {
-            var guard = Guard(row.DraftHash ?? string.Empty, row.DraftCreatedBy, approver, expectedHash);
-            if (guard != CallerAttributeChangeResult.Applied)
-            {
-                return guard;
-            }
-
-            var affected = await ExecuteAsync(connection, tx, @"
-                UPDATE CALLER_ATTRIBUTES SET definition_json = draft_definition_json, definition_hash = draft_definition_hash,
-                    created_by = draft_created_by, approved_by = @approver, approved_at = @at,
-                    draft_definition_json = NULL, draft_definition_hash = NULL, draft_created_by = NULL,
-                    updated_by = @approver, updated_at = @at
-                WHERE tenant_id = @tenant AND name = @name AND draft_definition_hash = @hash;",
-                [("@approver", approver), ("@at", stamp), ("@tenant", tenant.Value), ("@name", name), ("@hash", row.DraftHash ?? string.Empty)], ct).ConfigureAwait(false);
-            if (affected != 1)
-            {
-                return CallerAttributeChangeResult.HashMismatch;
-            }
-        }
-        else if (row.Status != Active)
-        {
-            var guard = Guard(row.DefinitionHash, row.CreatedBy, approver, expectedHash);
-            if (guard != CallerAttributeChangeResult.Applied)
-            {
-                return guard;
-            }
-
-            var affected = await ExecuteAsync(connection, tx, @"
-                UPDATE CALLER_ATTRIBUTES SET status = @active, approved_by = @approver, approved_at = @at, updated_by = @approver, updated_at = @at
-                WHERE tenant_id = @tenant AND name = @name AND definition_hash = @hash AND status <> @active;",
-                [("@active", Active), ("@approver", approver), ("@at", stamp), ("@tenant", tenant.Value), ("@name", name), ("@hash", row.DefinitionHash)], ct).ConfigureAwait(false);
-            if (affected != 1)
-            {
-                return CallerAttributeChangeResult.HashMismatch;
-            }
-        }
-        else
-        {
-            return CallerAttributeChangeResult.NothingPending;
-        }
-
-        await BumpAsync(connection, tx, ct).ConfigureAwait(false);
-        await tx.CommitAsync(ct).ConfigureAwait(false);
-        return CallerAttributeChangeResult.Applied;
-    }
-
-    public static async Task<CallerAttributeChangeResult> RejectDefinitionAsync(DbConnection connection, TenantId tenant, string name, string actor, DateTimeOffset at, CancellationToken ct)
-    {
-        await using var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-        var row = await ReadRowAsync(connection, tx, tenant.Value, name, ct).ConfigureAwait(false);
-        if (row is null)
-        {
-            return CallerAttributeChangeResult.NotFound;
-        }
-
-        string sql;
-        if (row.PendingDeletion || row.DraftJson is not null)
-        {
-            sql = @"UPDATE CALLER_ATTRIBUTES SET pending_deletion = 0, deletion_requested_by = NULL,
-                        draft_definition_json = NULL, draft_definition_hash = NULL, draft_created_by = NULL, updated_by = @by, updated_at = @at
-                    WHERE tenant_id = @tenant AND name = @name;";
-        }
-        else if (row.Status == Pending)
-        {
-            sql = "UPDATE CALLER_ATTRIBUTES SET status = " + Rejected.ToString(CultureInfo.InvariantCulture) + ", updated_by = @by, updated_at = @at WHERE tenant_id = @tenant AND name = @name;";
-        }
-        else
-        {
-            return CallerAttributeChangeResult.NothingPending;
-        }
-
-        await ExecuteAsync(connection, tx, sql, [("@by", actor), ("@at", Time(at)), ("@tenant", tenant.Value), ("@name", name)], ct).ConfigureAwait(false);
         await BumpAsync(connection, tx, ct).ConfigureAwait(false);
         await tx.CommitAsync(ct).ConfigureAwait(false);
         return CallerAttributeChangeResult.Applied;
@@ -254,121 +121,33 @@ internal static class CallerAttributeStore
 
     // ---- service sets --------------------------------------------------------------------------------------------------------
 
-    public static async Task<CallerAttributeChangeResult> SubmitServiceSetAsync(
+    public static async Task<CallerAttributeChangeResult> SaveServiceSetAsync(
         DbConnection connection, TenantId tenant, string applicationId, string attributeName, IReadOnlyList<string> values, string actor, DateTimeOffset at, CancellationToken ct)
     {
         var app = CallerAttributeNameRules.CanonicalApplicationId(applicationId);
         await using var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-        var existing = await ReadSetAsync(connection, tx, tenant.Value, app, attributeName, ct).ConfigureAwait(false);
+        var exists = await ExistsAsync(connection, tx,
+            "SELECT 1 FROM CALLER_ATTRIBUTE_SERVICE_SETS WHERE tenant_id = @tenant AND application_id = @app AND attribute_name = @name;",
+            [("@tenant", tenant.Value), ("@app", app), ("@name", attributeName)], ct).ConfigureAwait(false);
         var json = JsonSerializer.Serialize(values);
         var stamp = Time(at);
-        if (existing is null)
-        {
-            var set = new ServiceAttributeSet(Guid.NewGuid(), tenant, app, attributeName, values, FilterApprovalStatus.PendingApproval);
-            await ExecuteAsync(connection, tx, @"
-                INSERT INTO CALLER_ATTRIBUTE_SERVICE_SETS (id, tenant_id, application_id, attribute_name, values_json, values_hash, status, created_by, updated_at)
-                VALUES (@id, @tenant, @app, @name, @json, @hash, @status, @by, @at);",
-                [("@id", set.Id.ToString()), ("@tenant", tenant.Value), ("@app", app), ("@name", attributeName), ("@json", json), ("@hash", set.ComputeValuesHash()), ("@status", Pending), ("@by", actor), ("@at", stamp)], ct).ConfigureAwait(false);
-        }
-        else if (existing.Status == Active)
+        var set = new ServiceAttributeSet(Guid.NewGuid(), tenant, app, attributeName, values, FilterApprovalStatus.Active);
+        if (!exists)
         {
             await ExecuteAsync(connection, tx, @"
-                UPDATE CALLER_ATTRIBUTE_SERVICE_SETS SET draft_values_json = @json, draft_created_by = @by, updated_at = @at
-                WHERE tenant_id = @tenant AND application_id = @app AND attribute_name = @name;",
-                [("@json", json), ("@by", actor), ("@at", stamp), ("@tenant", tenant.Value), ("@app", app), ("@name", attributeName)], ct).ConfigureAwait(false);
+                INSERT INTO CALLER_ATTRIBUTE_SERVICE_SETS (id, tenant_id, application_id, attribute_name, values_json, values_hash, status, created_by, approved_by, approved_at, updated_at)
+                VALUES (@id, @tenant, @app, @name, @json, @hash, @status, @by, @by, @at, @at);",
+                [("@id", set.Id.ToString()), ("@tenant", tenant.Value), ("@app", app), ("@name", attributeName), ("@json", json), ("@hash", set.ComputeValuesHash()), ("@status", Active), ("@by", actor), ("@at", stamp)], ct).ConfigureAwait(false);
         }
         else
         {
-            var set = new ServiceAttributeSet(Guid.Empty, tenant, app, attributeName, values, FilterApprovalStatus.PendingApproval);
             await ExecuteAsync(connection, tx, @"
                 UPDATE CALLER_ATTRIBUTE_SERVICE_SETS SET values_json = @json, values_hash = @hash, status = @status, created_by = @by,
-                    approved_by = NULL, approved_at = NULL, updated_at = @at
+                    approved_by = @by, approved_at = @at, updated_at = @at
                 WHERE tenant_id = @tenant AND application_id = @app AND attribute_name = @name;",
-                [("@json", json), ("@hash", set.ComputeValuesHash()), ("@status", Pending), ("@by", actor), ("@at", stamp), ("@tenant", tenant.Value), ("@app", app), ("@name", attributeName)], ct).ConfigureAwait(false);
+                [("@json", json), ("@hash", set.ComputeValuesHash()), ("@status", Active), ("@by", actor), ("@at", stamp), ("@tenant", tenant.Value), ("@app", app), ("@name", attributeName)], ct).ConfigureAwait(false);
         }
 
-        await BumpAsync(connection, tx, ct).ConfigureAwait(false);
-        await tx.CommitAsync(ct).ConfigureAwait(false);
-        return CallerAttributeChangeResult.Applied;
-    }
-
-    public static async Task<CallerAttributeChangeResult> ApproveServiceSetAsync(
-        DbConnection connection, TenantId tenant, string applicationId, string attributeName, string approver, string expectedHash, DateTimeOffset at, CancellationToken ct)
-    {
-        var app = CallerAttributeNameRules.CanonicalApplicationId(applicationId);
-        await using var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-        var row = await ReadSetAsync(connection, tx, tenant.Value, app, attributeName, ct).ConfigureAwait(false);
-        if (row is null)
-        {
-            return CallerAttributeChangeResult.NotFound;
-        }
-
-        var stamp = Time(at);
-        if (row.DraftValuesJson is not null)
-        {
-            var draftValues = Values(row.DraftValuesJson);
-            var draftHash = new ServiceAttributeSet(Guid.Empty, tenant, app, attributeName, draftValues, FilterApprovalStatus.PendingApproval).ComputeValuesHash();
-            var guard = Guard(draftHash, row.DraftCreatedBy, approver, expectedHash);
-            if (guard != CallerAttributeChangeResult.Applied)
-            {
-                return guard;
-            }
-
-            await ExecuteAsync(connection, tx, @"
-                UPDATE CALLER_ATTRIBUTE_SERVICE_SETS SET values_json = draft_values_json, values_hash = @hash, created_by = draft_created_by,
-                    approved_by = @approver, approved_at = @at, draft_values_json = NULL, draft_created_by = NULL, updated_at = @at
-                WHERE tenant_id = @tenant AND application_id = @app AND attribute_name = @name AND draft_values_json = @draft;",
-                [("@hash", draftHash), ("@approver", approver), ("@at", stamp), ("@tenant", tenant.Value), ("@app", app), ("@name", attributeName), ("@draft", row.DraftValuesJson)], ct).ConfigureAwait(false);
-        }
-        else if (row.Status != Active)
-        {
-            var guard = Guard(row.ValuesHash, row.CreatedBy, approver, expectedHash);
-            if (guard != CallerAttributeChangeResult.Applied)
-            {
-                return guard;
-            }
-
-            await ExecuteAsync(connection, tx, @"
-                UPDATE CALLER_ATTRIBUTE_SERVICE_SETS SET status = @active, approved_by = @approver, approved_at = @at, updated_at = @at
-                WHERE tenant_id = @tenant AND application_id = @app AND attribute_name = @name AND values_hash = @hash;",
-                [("@active", Active), ("@approver", approver), ("@at", stamp), ("@tenant", tenant.Value), ("@app", app), ("@name", attributeName), ("@hash", row.ValuesHash)], ct).ConfigureAwait(false);
-        }
-        else
-        {
-            return CallerAttributeChangeResult.NothingPending;
-        }
-
-        await BumpAsync(connection, tx, ct).ConfigureAwait(false);
-        await tx.CommitAsync(ct).ConfigureAwait(false);
-        return CallerAttributeChangeResult.Applied;
-    }
-
-    public static async Task<CallerAttributeChangeResult> RejectServiceSetAsync(
-        DbConnection connection, TenantId tenant, string applicationId, string attributeName, string actor, DateTimeOffset at, CancellationToken ct)
-    {
-        var app = CallerAttributeNameRules.CanonicalApplicationId(applicationId);
-        await using var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
-        var row = await ReadSetAsync(connection, tx, tenant.Value, app, attributeName, ct).ConfigureAwait(false);
-        if (row is null)
-        {
-            return CallerAttributeChangeResult.NotFound;
-        }
-
-        string sql;
-        if (row.DraftValuesJson is not null)
-        {
-            sql = "UPDATE CALLER_ATTRIBUTE_SERVICE_SETS SET draft_values_json = NULL, draft_created_by = NULL, updated_at = @at WHERE tenant_id = @tenant AND application_id = @app AND attribute_name = @name;";
-        }
-        else if (row.Status == Pending)
-        {
-            sql = "UPDATE CALLER_ATTRIBUTE_SERVICE_SETS SET status = " + Rejected.ToString(CultureInfo.InvariantCulture) + ", updated_at = @at WHERE tenant_id = @tenant AND application_id = @app AND attribute_name = @name;";
-        }
-        else
-        {
-            return CallerAttributeChangeResult.NothingPending;
-        }
-
-        await ExecuteAsync(connection, tx, sql, [("@at", Time(at)), ("@tenant", tenant.Value), ("@app", app), ("@name", attributeName)], ct).ConfigureAwait(false);
         await BumpAsync(connection, tx, ct).ConfigureAwait(false);
         await tx.CommitAsync(ct).ConfigureAwait(false);
         return CallerAttributeChangeResult.Applied;
@@ -376,53 +155,11 @@ internal static class CallerAttributeStore
 
     // ---- helpers -------------------------------------------------------------------------------------------------------------
 
-    /// <summary>Hash the approver saw must equal the stored one; the approver must not be the creator (immutable subject key, case-insensitive like <see cref="Sid"/>).</summary>
-    private static CallerAttributeChangeResult Guard(string storedHash, string? creator, string approver, string expectedHash)
+    private static async Task<bool> ExistsAsync(DbConnection connection, DbTransaction tx, string sql, (string Name, object? Value)[] parameters, CancellationToken ct)
     {
-        if (string.IsNullOrWhiteSpace(approver) || string.IsNullOrWhiteSpace(creator) ||
-            string.Equals(approver, creator, StringComparison.OrdinalIgnoreCase))
-        {
-            return CallerAttributeChangeResult.SameSubject;
-        }
-
-        return string.Equals(storedHash, expectedHash, StringComparison.Ordinal) ? CallerAttributeChangeResult.Applied : CallerAttributeChangeResult.HashMismatch;
-    }
-
-    private sealed record Row(
-        int Status, string CreatedBy, string DefinitionHash, string? DraftJson, string? DraftHash, string? DraftCreatedBy, bool PendingDeletion, string? DeletionRequestedBy);
-
-    private sealed record SetRow(int Status, string CreatedBy, string ValuesHash, string? DraftValuesJson, string? DraftCreatedBy);
-
-    private static async Task<Row?> ReadRowAsync(DbConnection connection, DbTransaction tx, string tenant, string name, CancellationToken ct)
-    {
-        await using var cmd = Command(connection, tx, @"
-            SELECT status, created_by, definition_hash, draft_definition_json, draft_definition_hash, draft_created_by, pending_deletion, deletion_requested_by
-            FROM CALLER_ATTRIBUTES WHERE tenant_id = @tenant AND name = @name;", [("@tenant", tenant), ("@name", name)]);
+        await using var cmd = Command(connection, tx, sql, parameters);
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            return null;
-        }
-
-        return new Row(
-            reader.GetInt32(0), reader.GetString(1), reader.GetString(2),
-            reader.IsDBNull(3) ? null : reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetString(4), reader.IsDBNull(5) ? null : reader.GetString(5),
-            reader.GetInt32(6) != 0, reader.IsDBNull(7) ? null : reader.GetString(7));
-    }
-
-    private static async Task<SetRow?> ReadSetAsync(DbConnection connection, DbTransaction tx, string tenant, string app, string name, CancellationToken ct)
-    {
-        await using var cmd = Command(connection, tx, @"
-            SELECT status, created_by, values_hash, draft_values_json, draft_created_by
-            FROM CALLER_ATTRIBUTE_SERVICE_SETS WHERE tenant_id = @tenant AND application_id = @app AND attribute_name = @name;",
-            [("@tenant", tenant), ("@app", app), ("@name", name)]);
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        if (!await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            return null;
-        }
-
-        return new SetRow(reader.GetInt32(0), reader.GetString(1), reader.GetString(2), reader.IsDBNull(3) ? null : reader.GetString(3), reader.IsDBNull(4) ? null : reader.GetString(4));
+        return await reader.ReadAsync(ct).ConfigureAwait(false);
     }
 
     private static string ToJson(CallerAttributeDefinition d) => JsonSerializer.Serialize(new DefinitionDto(

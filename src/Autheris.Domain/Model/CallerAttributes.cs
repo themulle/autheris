@@ -90,21 +90,15 @@ public sealed record CallerAttributeDefinition(
     internal static void Append(StringBuilder sb, string part) => sb.Append('|').Append(part.Length.ToString(CultureInfo.InvariantCulture)).Append(':').Append(part);
 }
 
-/// <summary>A registered attribute with its approval state (four-eyes, last-known-good: the active definition stays while a draft waits).</summary>
+/// <summary>A registered attribute with the person who last saved it (a save takes effect at once, single approval).</summary>
 public sealed record CallerAttributeRecord(
     CallerAttributeDefinition Definition,
     string CreatedBy,
     string? ApprovedBy,
     DateTimeOffset? ApprovedAt,
-    CallerAttributeDefinition? Draft,
-    string? DraftCreatedBy,
-    bool PendingDeletion,
-    string? DeletionRequestedBy,
     DateTimeOffset UpdatedAt)
 {
     public string DefinitionHash => Definition.ComputeDefinitionHash();
-
-    public string? DraftHash => Draft?.ComputeDefinitionHash();
 }
 
 /// <summary>Static values of an application-only caller (V-129-9, Q-129-6): per tenant, application id and attribute.</summary>
@@ -131,14 +125,12 @@ public sealed record ServiceAttributeSet(
     }
 }
 
-/// <summary>A service set with its approval state.</summary>
+/// <summary>A service set with the person who last saved it.</summary>
 public sealed record ServiceAttributeSetRecord(
     ServiceAttributeSet Set,
     string CreatedBy,
     string? ApprovedBy,
     DateTimeOffset? ApprovedAt,
-    IReadOnlyList<string>? DraftValues,
-    string? DraftCreatedBy,
     DateTimeOffset UpdatedAt);
 
 /// <summary>All registered attributes and service sets with the generation they belong to.</summary>

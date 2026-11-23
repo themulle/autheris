@@ -89,9 +89,8 @@ INSERT INTO air_broken SELECT * FROM air1;";
             {
                 var definition = new CallerAttributeDefinition(
                     Guid.NewGuid(), TenantValue, name, CallerAttributeType.Whole, CallerAttributeCardinality.List, 50, 60,
-                    new CallerAttributeProviderBinding("attribute-table", config), null, FilterApprovalStatus.PendingApproval);
-                (await store.SubmitDefinitionAsync(definition, "seed-author", DateTimeOffset.UtcNow)).ShouldBe(CallerAttributeChangeResult.Applied);
-                (await store.ApproveDefinitionAsync(TenantValue, name, "seed-approver", definition.ComputeDefinitionHash(), DateTimeOffset.UtcNow)).ShouldBe(CallerAttributeChangeResult.Applied);
+                    new CallerAttributeProviderBinding("attribute-table", config), null, FilterApprovalStatus.Active);
+                (await store.SaveDefinitionAsync(definition, "seed-approver", DateTimeOffset.UtcNow)).ShouldBe(CallerAttributeChangeResult.Applied);
             }
 
             Dictionary<string, string> Table(string table) => new()
@@ -103,9 +102,7 @@ INSERT INTO air_broken SELECT * FROM air1;";
             await Activate("client_ids", Table("person_attributes"));
             await Activate("broken_ids", Table("no_such_table"));
 
-            var set = new ServiceAttributeSet(Guid.Empty, TenantValue, AppId, "client_ids", ["2"], FilterApprovalStatus.PendingApproval);
-            (await store.SubmitServiceSetAsync(TenantValue, AppId, "client_ids", ["2"], "seed-author", DateTimeOffset.UtcNow)).ShouldBe(CallerAttributeChangeResult.Applied);
-            (await store.ApproveServiceSetAsync(TenantValue, AppId, "client_ids", "seed-approver", set.ComputeValuesHash(), DateTimeOffset.UtcNow)).ShouldBe(CallerAttributeChangeResult.Applied);
+            (await store.SaveServiceSetAsync(TenantValue, AppId, "client_ids", ["2"], "seed-approver", DateTimeOffset.UtcNow)).ShouldBe(CallerAttributeChangeResult.Applied);
         }
     }
 

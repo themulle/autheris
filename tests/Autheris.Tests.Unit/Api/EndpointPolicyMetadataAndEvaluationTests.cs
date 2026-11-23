@@ -106,19 +106,15 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
     public void CallerAttributeAdminEndpoints_AttachExpectedNamedPolicies_AndNoBareRequireAuthorization()
     {
         var endpoints = MapAndGetEndpoints(b => b.MapCallerAttributeAdminEndpoints());
-        endpoints.Count.ShouldBe(10);
+        endpoints.Count.ShouldBe(6);
         AssertAllProtectedRoutesHaveNamedPolicy(endpoints);
 
         const string prefix = "/api/v1/governance/caller-attributes";
         AssertProtectedRoutePolicy(endpoints, "GET", $"{prefix}/", GatewayPolicies.CallerAttributeRead);
         AssertProtectedRoutePolicy(endpoints, "GET", $"{prefix}/service-sets", GatewayPolicies.CallerAttributeRead);
-        AssertProtectedRoutePolicy(endpoints, "PUT", $"{prefix}/{{name}}", GatewayPolicies.GovernanceAdmin);
-        AssertProtectedRoutePolicy(endpoints, "DELETE", $"{prefix}/{{name}}", GatewayPolicies.GovernanceAdmin);
-        AssertProtectedRoutePolicy(endpoints, "PUT", $"{prefix}/service-sets", GatewayPolicies.GovernanceAdmin);
-        AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/{{name}}/approve", GatewayPolicies.CallerAttributeApprove);
-        AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/{{name}}/reject", GatewayPolicies.CallerAttributeApprove);
-        AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/service-sets/approve", GatewayPolicies.CallerAttributeApprove);
-        AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/service-sets/reject", GatewayPolicies.CallerAttributeApprove);
+        AssertProtectedRoutePolicy(endpoints, "PUT", $"{prefix}/{{name}}", GatewayPolicies.CallerAttributeApprove);
+        AssertProtectedRoutePolicy(endpoints, "DELETE", $"{prefix}/{{name}}", GatewayPolicies.CallerAttributeApprove);
+        AssertProtectedRoutePolicy(endpoints, "PUT", $"{prefix}/service-sets", GatewayPolicies.CallerAttributeApprove);
         AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/simulate", GatewayPolicies.CallerAttributeSimulate);
     }
 

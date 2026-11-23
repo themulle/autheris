@@ -18,7 +18,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-/// <summary>PLAN-GOV-129 WP-1 test 12: four-eyes, last-known-good, generation, audit with hashes only (BC-129-10, BC-129-03, BC-129-15).</summary>
+/// <summary>Caller attribute administration on a real store: a save applies at once (single approval), generation, audit with hashes only, approver role for data-granting providers.</summary>
 public sealed class CallerAttributeAdministrationServiceTests : IDisposable
 {
     private static readonly TenantId Tenant = new("tenant_a");
@@ -56,153 +56,107 @@ public sealed class CallerAttributeAdministrationServiceTests : IDisposable
     };
 
     [Fact]
-    public async Task Disabled_RefusesSubmit_AndApproval()
+    public async Task Disabled_RefusesSave_AndDelete()
     {
         var (service, _) = Create(enabled: false);
-        await Should.ThrowAsync<CallerAttributeAdminException>(() => service.SubmitDefinitionAsync(Claims(), Alice));
-        await Should.ThrowAsync<CallerAttributeAdminException>(() => service.ApproveDefinitionAsync(Tenant, "cost_center", "h", Bob));
+        await Should.ThrowAsync<CallerAttributeAdminException>(() => service.SaveDefinitionAsync(Claims(), Bob));
+        await Should.ThrowAsync<CallerAttributeAdminException>(() => service.DeleteDefinitionAsync(Tenant, "cost_center", Bob));
     }
 
     [Theory]
-    [InlineData("Cost")]
-    [InlineData("cost__center")]
-    [InlineData("1cost")]
-    [InlineData("cost-center")]
-    [InlineData("cost_")]
     [InlineData("")]
+    [InlineData("Upper")]
+    [InlineData("double__underscore")]
+    [InlineData("1leading")]
     public async Task InvalidName_IsRefused(string name)
     {
         var (service, _) = Create();
-        await Should.ThrowAsync<CallerAttributeAdminException>(() => service.SubmitDefinitionAsync(Claims(name), Alice));
+        await Should.ThrowAsync<CallerAttributeAdminException>(() => service.SaveDefinitionAsync(Claims(name), Alice));
     }
 
     [Fact]
-    public async Task OutOfRangeLimits_AreRefused()
+    public async Task OutOfRangeTtlOrMaxValues_AreRefused()
     {
         var (service, _) = Create();
-        await Should.ThrowAsync<CallerAttributeAdminException>(() => service.SubmitDefinitionAsync(Claims() with { TtlSeconds = 301 }, Alice));
-        await Should.ThrowAsync<CallerAttributeAdminException>(() => service.SubmitDefinitionAsync(Claims() with { TtlSeconds = 0 }, Alice));
-        await Should.ThrowAsync<CallerAttributeAdminException>(() => service.SubmitDefinitionAsync(Claims() with { MaxValues = 201 }, Alice));
-        await Should.ThrowAsync<CallerAttributeAdminException>(() => service.SubmitDefinitionAsync(Claims() with { MaxValues = 0 }, Alice));
+        await Should.ThrowAsync<CallerAttributeAdminException>(() => service.SaveDefinitionAsync(Claims() with { TtlSeconds = 301 }, Alice));
+        await Should.ThrowAsync<CallerAttributeAdminException>(() => service.SaveDefinitionAsync(Claims() with { TtlSeconds = 0 }, Alice));
+        await Should.ThrowAsync<CallerAttributeAdminException>(() => service.SaveDefinitionAsync(Claims() with { MaxValues = 201 }, Alice));
+        await Should.ThrowAsync<CallerAttributeAdminException>(() => service.SaveDefinitionAsync(Claims() with { MaxValues = 0 }, Alice));
     }
 
     [Fact]
-    public async Task Submit_StoresPending_Audits_WithHashesOnly_AndInvalidatesTheRegistry()
+    public async Task Save_AppliesAtOnce_Audits_WithHashesOnly_AndInvalidatesTheRegistry()
     {
         var (service, registry) = Create();
         var def = Claims();
         (await registry.GetAsync(default)).Definitions.ShouldBeEmpty();
 
-        await service.SubmitDefinitionAsync(def, Alice);
+        await service.SaveDefinitionAsync(def, Alice);
 
         var entry = _entries.ShouldHaveSingleItem();
-        entry.EventType.ShouldBe(AuditEventTypes.CallerAttributeDefinitionPending);
+        entry.EventType.ShouldBe(AuditEventTypes.CallerAttributeDefinitionApplied);
         entry.DetailsJson.ShouldContain(def.ComputeDefinitionHash());
         entry.DetailsJson.ShouldNotContain("department");   // provider configuration is not audited in clear
-        (await registry.GetAsync(default)).Definitions.ShouldBeEmpty();   // pending is not active
+        (await registry.GetAsync(default)).Definitions.ShouldHaveSingleItem();   // active at once
     }
 
     [Fact]
-    public async Task Approve_ByTheCreator_IsRefused_ByAnotherPerson_Activates()
+    public async Task Save_OfAnExistingDefinition_ReplacesIt_AndAuditsBeforeAndAfter()
     {
         var (service, registry) = Create();
         var def = Claims();
-        await service.SubmitDefinitionAsync(def, Alice);
+        await service.SaveDefinitionAsync(def, Alice);
+        var changed = Claims(description: "v2");
 
-        var selfApprover = Alice with { HoldsApproverRole = true };
-        var ex = await Should.ThrowAsync<CallerAttributeAdminException>(() => service.ApproveDefinitionAsync(Tenant, def.Name, def.ComputeDefinitionHash(), selfApprover));
-        ex.Code.ShouldBe(CallerAttributeChangeResult.SameSubject.ToString());
+        await service.SaveDefinitionAsync(changed, Alice);
 
-        await service.ApproveDefinitionAsync(Tenant, def.Name, def.ComputeDefinitionHash(), Bob);
-        (await registry.GetAsync(default)).TryGetDefinition(Tenant, def.Name, out var active).ShouldBeTrue();
-        active.Status.ShouldBe(FilterApprovalStatus.Active);
-        _entries.Last().EventType.ShouldBe(AuditEventTypes.CallerAttributeDefinitionApplied);
+        _entries.Last().DetailsJson.ShouldContain(def.ComputeDefinitionHash());
+        _entries.Last().DetailsJson.ShouldContain(changed.ComputeDefinitionHash());
+        (await registry.GetAsync(default)).Definitions.Single().Description.ShouldBe("v2");
     }
 
     [Fact]
-    public async Task Approve_WithAStaleHash_IsRefused()
+    public async Task AttributeTableProvider_NeedsTheApproverRole_WhenRequired()
     {
         var (service, _) = Create();
-        var def = Claims();
-        await service.SubmitDefinitionAsync(def, Alice);
-        var ex = await Should.ThrowAsync<CallerAttributeAdminException>(() => service.ApproveDefinitionAsync(Tenant, def.Name, "not-the-hash", Bob));
-        ex.Code.ShouldBe(CallerAttributeChangeResult.HashMismatch.ToString());
-    }
-
-    [Fact]
-    public async Task AttributeTableProvider_NeedsAnApproverWithTheSeparateRole_WhenRequired()
-    {
-        var (service, _) = Create(separateRole: true);
         var def = Table();
-        await service.SubmitDefinitionAsync(def, Alice);
 
-        var noRole = Bob with { HoldsApproverRole = false };
-        await Should.ThrowAsync<CallerAttributeAdminException>(() => service.ApproveDefinitionAsync(Tenant, def.Name, def.ComputeDefinitionHash(), noRole));
-        await service.ApproveDefinitionAsync(Tenant, def.Name, def.ComputeDefinitionHash(), Bob);
+        var ex = await Should.ThrowAsync<CallerAttributeAdminException>(() => service.SaveDefinitionAsync(def, Bob with { HoldsApproverRole = false }));
+        ex.Code.ShouldBe("ApproverRoleRequired");
+        await service.SaveDefinitionAsync(def, Bob);
     }
 
     [Fact]
-    public async Task ClaimsProvider_DoesNotNeedTheSeparateRole()
+    public async Task AttributeTableProvider_NeedsNoApproverRole_WhenNotRequired()
     {
-        var (service, registry) = Create(separateRole: true);
-        var def = Claims();
-        await service.SubmitDefinitionAsync(def, Alice);
-        await service.ApproveDefinitionAsync(Tenant, def.Name, def.ComputeDefinitionHash(), Bob with { HoldsApproverRole = false });
-        (await registry.GetAsync(default)).TryGetDefinition(Tenant, def.Name, out _).ShouldBeTrue();
+        var (service, _) = Create(separateRole: false);
+        await service.SaveDefinitionAsync(Table(), Bob with { HoldsApproverRole = false });
     }
 
     [Fact]
-    public async Task ActiveDefinition_StaysLastKnownGood_WhileAChangeWaits_AndTheGenerationAdvances()
+    public async Task Delete_RemovesTheDefinition_AtOnce_AndAudits()
     {
         var (service, registry) = Create();
         var def = Claims();
-        await service.SubmitDefinitionAsync(def, Alice);
-        await service.ApproveDefinitionAsync(Tenant, def.Name, def.ComputeDefinitionHash(), Bob);
-        var generation = (await registry.GetAsync(default)).Generation;
+        await service.SaveDefinitionAsync(def, Alice);
 
-        var changed = def with { Description = "v2" };
-        await service.SubmitDefinitionAsync(changed, Alice);
+        await service.DeleteDefinitionAsync(Tenant, def.Name, Alice);
 
-        var snapshot = await registry.GetAsync(default);
-        snapshot.Generation.ShouldBeGreaterThan(generation);
-        snapshot.TryGetDefinition(Tenant, def.Name, out var active).ShouldBeTrue();
-        active.Description.ShouldBe("v1");
-    }
-
-    [Fact]
-    public async Task Deletion_IsFourEyes_AndRemovesTheAttributeFromTheRegistry()
-    {
-        var (service, registry) = Create();
-        var def = Claims();
-        await service.SubmitDefinitionAsync(def, Alice);
-        await service.ApproveDefinitionAsync(Tenant, def.Name, def.ComputeDefinitionHash(), Bob);
-
-        await service.RequestDeletionAsync(Tenant, def.Name, Alice);
-        (await registry.GetAsync(default)).TryGetDefinition(Tenant, def.Name, out _).ShouldBeTrue();   // still active until approved
-        await Should.ThrowAsync<CallerAttributeAdminException>(() => service.ApproveDefinitionAsync(Tenant, def.Name, def.ComputeDefinitionHash(), Alice with { HoldsApproverRole = true }));
-        await service.ApproveDefinitionAsync(Tenant, def.Name, def.ComputeDefinitionHash(), Bob);
-
-        (await registry.GetAsync(default)).TryGetDefinition(Tenant, def.Name, out _).ShouldBeFalse();
+        (await registry.GetAsync(default)).Definitions.ShouldBeEmpty();
         _entries.Last().EventType.ShouldBe(AuditEventTypes.CallerAttributeDefinitionDeleted);
     }
 
     [Fact]
-    public async Task ServiceSet_RequiresARegisteredActiveAttribute_AndFourEyes()
+    public async Task ServiceSet_RequiresARegisteredActiveAttribute_AndTheApproverRole()
     {
         var (service, registry) = Create();
         var app = "11111111-1111-1111-1111-111111111111";
-        await Should.ThrowAsync<CallerAttributeAdminException>(() => service.SubmitServiceSetAsync(Tenant, app, "cost_center", ["secret-4711"], Alice));
+        await Should.ThrowAsync<CallerAttributeAdminException>(() => service.SaveServiceSetAsync(Tenant, app, "cost_center", ["secret-4711"], Bob));
 
-        var def = Claims();
-        await service.SubmitDefinitionAsync(def, Alice);
-        await service.ApproveDefinitionAsync(Tenant, def.Name, def.ComputeDefinitionHash(), Bob);
+        await service.SaveDefinitionAsync(Claims(), Alice);
 
-        await service.SubmitServiceSetAsync(Tenant, app, "cost_center", ["secret-4711"], Alice);
-        (await registry.GetAsync(default)).TryGetServiceSet(Tenant, app, "cost_center", out _).ShouldBeFalse();   // pending: not applied
-
-        var set = new ServiceAttributeSet(Guid.Empty, Tenant, app, "cost_center", ["secret-4711"], FilterApprovalStatus.PendingApproval);
-        await Should.ThrowAsync<CallerAttributeAdminException>(() => service.ApproveServiceSetAsync(Tenant, app, "cost_center", set.ComputeValuesHash(), Alice with { HoldsApproverRole = true }));
-        await service.ApproveServiceSetAsync(Tenant, app, "cost_center", set.ComputeValuesHash(), Bob);
+        await Should.ThrowAsync<CallerAttributeAdminException>(() => service.SaveServiceSetAsync(Tenant, app, "cost_center", ["secret-4711"], Alice));
+        await service.SaveServiceSetAsync(Tenant, app, "cost_center", ["secret-4711"], Bob);
         (await registry.GetAsync(default)).TryGetServiceSet(Tenant, app.ToUpperInvariant(), "cost_center", out var values).ShouldBeTrue();
         values.ShouldBe(["secret-4711"]);
         _entries.Last().EventType.ShouldBe(AuditEventTypes.CallerAttributeServiceSetChanged);
@@ -210,12 +164,22 @@ public sealed class CallerAttributeAdministrationServiceTests : IDisposable
     }
 
     [Fact]
+    public async Task ServiceSet_ForTheWritersOwnIdentifier_IsRefused()
+    {
+        var (service, _) = Create();
+        await service.SaveDefinitionAsync(Claims(), Alice);
+        var self = Bob with { OwnIdentifiers = ["app-self"] };
+
+        var ex = await Should.ThrowAsync<CallerAttributeAdminException>(() => service.SaveServiceSetAsync(Tenant, "app-self", "cost_center", ["1"], self));
+        ex.Code.ShouldBe("SelfWidening");
+    }
+
+    [Fact]
     public async Task ServiceSet_ValueCountAboveTheDefinitionMaximum_IsRefused()
     {
         var (service, _) = Create();
         var def = Claims() with { MaxValues = 2 };
-        await service.SubmitDefinitionAsync(def, Alice);
-        await service.ApproveDefinitionAsync(Tenant, def.Name, def.ComputeDefinitionHash(), Bob);
-        await Should.ThrowAsync<CallerAttributeAdminException>(() => service.SubmitServiceSetAsync(Tenant, "app", def.Name, ["1", "2", "3"], Alice));
+        await service.SaveDefinitionAsync(def, Alice);
+        await Should.ThrowAsync<CallerAttributeAdminException>(() => service.SaveServiceSetAsync(Tenant, "app", def.Name, ["1", "2", "3"], Bob));
     }
 }
