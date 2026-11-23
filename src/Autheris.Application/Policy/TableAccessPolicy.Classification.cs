@@ -78,6 +78,14 @@ public sealed partial class TableAccessPolicy
             return decision;
         }
 
+        // Issue #1047: below, only the per-cell compilation of several row-scoped grants can turn the allow into a deny; everything else
+        // sets column levels, which an allow-only decision does not carry. The authorization hooks see those levels, so they need them.
+        var perCellCanApply = _rowScopeCompiler is not null && allowGrants.Count > 1 && allowGrants.Any(c => c.RowFilters.Count > 0 || c.RowScope.Count > 0);
+        if (query.AllowOnly && !perCellCanApply && !AuthorizationHooksActive)
+        {
+            return decision;
+        }
+
         var callerScopes = ResolveClassificationCallerScopes(query);
         var (perGrant, combinedWinners) = await _classificationResolver!.ResolveForTableAsync(
             query.Metadata, allowGrants, query.Tenant, callerScopes, ct: ct, columnRowPrefetch: query.ColumnRowPrefetch).ConfigureAwait(false);
@@ -87,11 +95,9 @@ public sealed partial class TableAccessPolicy
             return decision;
         }
 
-        if (_rowScopeCompiler is not null &&
-            allowGrants.Count > 1 &&
-            allowGrants.Any(c => c.RowFilters.Count > 0 || c.RowScope.Count > 0))
+        if (perCellCanApply)
         {
-            var perCellResult = await _rowScopeCompiler.CompilePerCellConsentsAsync(
+            var perCellResult = await _rowScopeCompiler!.CompilePerCellConsentsAsync(
                 decision, query, applicable, allowGrants, _callerAttributes, ct).ConfigureAwait(false);
             if (!perCellResult.Decision.IsAllowed || perCellResult.Decision.PerCellColumns is not null)
             {

@@ -34,6 +34,11 @@ public sealed class EpochValidationService : IEpochValidationService, IHostedSer
     private readonly ITableSensitivityLookup _sensitivityLookup;
     private readonly object _subscriptionLock = new();
     private IDisposable? _invalidationSubscription;
+    private IDisposable? _wideInvalidationSubscriptions;
+
+    // Issue #1044: every invalidation applied by this process (own writes, peer announcements, catalog and access-profile changes,
+    // reconnects), for caches that revalidate incrementally (the catalog access view).
+    private readonly Autheris.Application.Policy.Services.PolicyInvalidationLog _invalidationLog = new();
 
     // SEC (lost revoke on Redis failure): a local invalidation whose Redis INCR has not been confirmed yet. Value = generation,
     // so a re-invalidation during a running retry is not cleared by that retry. While a key is pending, cached decisions for
@@ -113,6 +118,7 @@ end";
         {
             _logger?.LogInformation("Redis connection restored. Evicting local L1 epoch cache to synchronize with cluster (POL-9).");
             _reconnectGraceUntil = _time.GetUtcNow() + _options.ReconnectEpochGrace;
+            _invalidationLog.Append(Autheris.Application.Policy.Services.PolicyInvalidationLog.AllTables);
             _epochs.Clear();
             _lastEpochRefresh.Clear();
             _microCache.Clear();
@@ -138,6 +144,8 @@ end";
         {
             _invalidationSubscription?.Dispose();
             _invalidationSubscription = null;
+            _wideInvalidationSubscriptions?.Dispose();
+            _wideInvalidationSubscriptions = null;
         }
         return Task.CompletedTask;
     }
@@ -148,23 +156,26 @@ end";
         {
             _invalidationSubscription?.Dispose();
             _invalidationSubscription = null;
+            _wideInvalidationSubscriptions?.Dispose();
+            _wideInvalidationSubscriptions = null;
         }
     }
 
     private void EnsureSubscribed()
     {
-        if (_invalidationSubscription != null) return;
+        if (_invalidationSubscription != null && _wideInvalidationSubscriptions != null) return;
         lock (_subscriptionLock)
         {
-            if (_invalidationSubscription != null) return;
+            if (_invalidationSubscription != null && _wideInvalidationSubscriptions != null) return;
             try
             {
-                _invalidationSubscription = _eventBus.Subscribe<string>(_invalidationChannel, message =>
+                _invalidationSubscription ??= _eventBus.Subscribe<string>(_invalidationChannel, message =>
                 {
                     if (!string.IsNullOrWhiteSpace(message))
                     {
                         var key = message.ToLowerInvariant();
-                        if (_multiplexer != null && !TryConsumeOwnInvalidation(key))
+                        var own = _multiplexer != null && TryConsumeOwnInvalidation(key);
+                        if (_multiplexer != null && !own)
                         {
                             // A peer revoked: until Redis has moved past what this node knew, the Redis epoch is not trusted.
                             RaiseEpochFloor(key);
@@ -173,9 +184,31 @@ end";
                         _epochs.AddOrUpdate(key, 2, (_, current) => current + 1);
                         _lastEpochRefresh[key] = _time.GetUtcNow();
                         _microCache.TryRemove(key, out _);
+                        if (!own)
+                        {
+                            // Issue #1044: one log entry per cluster invalidation (the own echo was logged by InvalidateEpochAsync).
+                            _invalidationLog.Append(key);
+                        }
                     }
                     return Task.CompletedTask;
                 });
+
+                // Issue #1044: catalog version changes (pattern consents, classification definitions, catalog sync) and access profile
+                // changes of any replica can affect every table.
+                if (_wideInvalidationSubscriptions is null)
+                {
+                    var catalog = _eventBus.Subscribe<object>(Autheris.Application.Catalog.ICatalogVersionProvider.CatalogChangedEventChannel, _ => AppendAllTables());
+                    try
+                    {
+                        var profiles = _eventBus.Subscribe<string>(Autheris.Application.Policy.Services.AccessProfileCache.InvalidationChannel, _ => AppendAllTables());
+                        _wideInvalidationSubscriptions = new CompositeSubscription(catalog, profiles);
+                    }
+                    catch
+                    {
+                        catalog.Dispose();
+                        throw;
+                    }
+                }
             }
             catch (Exception ex)
             {
@@ -608,6 +641,10 @@ end";
             var redisKey = (RedisKey)$"{_redisPrefix}epoch:{key}";
             var incremented = await db.StringIncrementAsync(redisKey).ConfigureAwait(false);
 
+            // Issue #1044: one cluster-wide count per table invalidation, before the invalidation is announced; a replica whose log knows
+            // fewer invalidations than this count has missed an announcement.
+            await db.StringIncrementAsync(ClusterSequenceKey).ConfigureAwait(false);
+
             _highestSeenRedisEpoch.TryGetValue(key, out var highestSeen);
             var hasFloor = _epochFloors.TryGetValue(key, out var floor);
             var minRequired = Math.Max(highestSeen, hasFloor ? floor : 0) + 1;
@@ -742,6 +779,64 @@ end";
         return current == cachedEpoch;
     }
 
+    public long? InvalidationGeneration
+    {
+        get
+        {
+            EnsureSubscribed();
+            // Without the subscriptions, peer and catalog-wide invalidations would not reach the log.
+            if (_invalidationSubscription is null || _wideInvalidationSubscriptions is null ||
+                (_multiplexer != null && (!_multiplexer.IsConnected || !_pendingRedisBumps.IsEmpty || _time.GetUtcNow() < _reconnectGraceUntil)))
+            {
+                return null;
+            }
+
+            return _invalidationLog.Generation;
+        }
+    }
+
+    public IReadOnlySet<string>? GetInvalidatedSince(long generation) => _invalidationLog.InvalidatedSince(generation);
+
+    private RedisKey ClusterSequenceKey => $"{_redisPrefix}epoch:__invalidation_sequence";
+
+    public async ValueTask<long?> GetClusterInvalidationSequenceAsync(CancellationToken ct = default)
+    {
+        if (_multiplexer is null)
+        {
+            return 0; // single node: the local log is complete
+        }
+
+        try
+        {
+            var value = await _multiplexer.GetDatabase().StringGetAsync(ClusterSequenceKey).WaitAsync(ct).ConfigureAwait(false);
+            return value.IsNull ? 0 : long.TryParse(value.ToString(), out var parsed) ? parsed : null;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            _logger?.LogDebug(ex, "Reading the cluster invalidation sequence failed; cached access views are bypassed.");
+            return null;
+        }
+    }
+
+    public void InvalidateAllTables() => _invalidationLog.Append(Autheris.Application.Policy.Services.PolicyInvalidationLog.AllTables);
+
+    private Task AppendAllTables()
+    {
+        InvalidateAllTables();
+        return Task.CompletedTask;
+    }
+
+    private sealed class CompositeSubscription(params IDisposable[] parts) : IDisposable
+    {
+        public void Dispose()
+        {
+            foreach (var part in parts)
+            {
+                part?.Dispose();
+            }
+        }
+    }
+
     public async Task InvalidateEpochAsync(TableIdentifier table, CancellationToken ct = default)
     {
         EnsureSubscribed();
@@ -757,6 +852,9 @@ end";
 
         _epochs.AddOrUpdate(key, 2, (_, current) => current + 1);
         _lastEpochRefresh[key] = _time.GetUtcNow();
+
+        // Issue #1044: logged after the local epoch moved, so a reader of the new generation never re-validates against the old epoch.
+        _invalidationLog.Append(key);
 
         if (_multiplexer != null)
         {

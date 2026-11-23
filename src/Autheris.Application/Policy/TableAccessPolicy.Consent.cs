@@ -26,7 +26,9 @@ public sealed partial class TableAccessPolicy
         }
 
         // MISC-06: a query with supplemental (metric) consents is never answered from, nor written to, the per-user decision cache.
-        var useCache = _cacheService != null && query.SupplementalConsents is not { Count: > 0 };
+        // Issue #1044: neither is an allow-only batch decision with a consent prefetch: it is decided from the prefetch (never cached,
+        // see below), so a cache read and an epoch snapshot would only add one or two cache round trips per table.
+        var useCache = _cacheService != null && query.SupplementalConsents is not { Count: > 0 } && !(query.AllowOnly && query.ConsentPrefetch is not null);
         if (useCache)
         {
             contextHash = IConsentCacheService.ComputeSubjectContextHash(query.GroupSids, query.Roles, scopes);

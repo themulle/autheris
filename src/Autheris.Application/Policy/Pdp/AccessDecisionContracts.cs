@@ -2,6 +2,7 @@ namespace Autheris.Application.Policy.Pdp;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -81,12 +82,43 @@ public sealed record AccessRequest(
     /// Null resolves the snapshot per decision.
     /// </summary>
     public Autheris.Application.Policy.ProtectionBatchPrefetch? ProtectionPrefetch { get; init; }
+
+    /// <summary>
+    /// Issue #1047: only <see cref="TableAccessDecision.IsAllowed"/> of the result is used (set by
+    /// <see cref="IAccessDecisionPoint.DecideAllowedManyAsync"/> only). The policy may skip steps that only set column levels, so the
+    /// decision's column states, masks and row filters are incomplete and must never be used.
+    /// </summary>
+    internal bool AllowOnly { get; init; }
 }
 
 public interface IAccessDecisionPoint
 {
     ValueTask<TableAccessDecision> DecideAsync(AccessRequest request, CancellationToken ct = default);
     ValueTask<IReadOnlyList<TableAccessDecision>> DecideManyAsync(SecurityPrincipalContext subject, IReadOnlyList<TableMetadata> objects, AccessOperation operation, AccessTransport transport, CancellationToken ct = default);
+
+    /// <summary>
+    /// Issue #1047: <see cref="DecideManyAsync(SecurityPrincipalContext, IReadOnlyList{TableMetadata}, AccessOperation, AccessTransport, CancellationToken)"/>
+    /// for several operations on the same objects; the result has one list per operation, in order. The decision point may share its
+    /// batch reads between the operations; each decision is the one the single-operation call returns.
+    /// </summary>
+    async ValueTask<IReadOnlyList<IReadOnlyList<TableAccessDecision>>> DecideOperationsManyAsync(SecurityPrincipalContext subject, IReadOnlyList<TableMetadata> objects, IReadOnlyList<AccessOperation> operations, AccessTransport transport, CancellationToken ct = default)
+    {
+        var results = new List<IReadOnlyList<TableAccessDecision>>(operations.Count);
+        foreach (var operation in operations)
+        {
+            results.Add(await DecideManyAsync(subject, objects, operation, transport, ct).ConfigureAwait(false));
+        }
+
+        return results;
+    }
+
+    /// <summary>
+    /// Issue #1047: whether <see cref="AccessOperation.Discover"/> on the discovery transport is allowed for each object, as
+    /// <see cref="DecideManyAsync"/> would decide it. Only the allow bit is returned: it selects discovery set membership (the
+    /// <c>accessStatus</c> filter) and never replaces a decision for a page item or a data request.
+    /// </summary>
+    async ValueTask<IReadOnlyList<bool>> DecideAllowedManyAsync(SecurityPrincipalContext subject, IReadOnlyList<TableMetadata> objects, CancellationToken ct = default)
+        => (await DecideManyAsync(subject, objects, AccessOperation.Discover, AccessTransport.Discovery, ct).ConfigureAwait(false)).Select(static d => d.IsAllowed).ToList();
     ValueTask<AccessExplanation> ExplainAsync(AccessRequest request, CancellationToken ct = default);
 }
 

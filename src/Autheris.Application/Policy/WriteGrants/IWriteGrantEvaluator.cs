@@ -15,7 +15,11 @@ public sealed record WriteGrantQuery(
     TenantId Tenant,
     TableMetadata Table,
     WriteOperation Operation,
-    IReadOnlySet<string> WrittenColumns);
+    IReadOnlySet<string> WrittenColumns)
+{
+    /// <summary>Issue #1047: the caller's consents read once for a batch of decisions; null reads them per decision.</summary>
+    public Autheris.Application.Policy.ConsentBatchPrefetch? ConsentPrefetch { get; init; }
+}
 
 public sealed record WriteGrantDecision(
     bool IsAllowed,

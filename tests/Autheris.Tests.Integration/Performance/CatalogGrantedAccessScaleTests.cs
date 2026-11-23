@@ -49,13 +49,14 @@ public sealed class CatalogGrantedAccessScaleTests : IClassFixture<CatalogGrante
     private static int TableCount =>
         int.TryParse(Environment.GetEnvironmentVariable("AUTHERIS_GRANTED_SCALE_TABLES"), out var n) && n > 0 ? n : 240;
 
-    // Budgets: the granted-access filter and the facets must cost a constant number of statements; the list may cost a bounded number
-    // per item of the 50-item page (write-capability decisions, artifacts). One statement per granted table (240) would exceed each budget.
+    // Budgets: the cold request (it builds the caller's access view, and the search index for a search) may read a few statements per
+    // 1,000 tables; the warm request (issue #1044: cached access view, issue #1047: batched page) costs a constant number of statements,
+    // whatever the number of granted tables.
     [Theory]
-    [InlineData("/api/v1/catalog/objects?pageSize=50&accessStatus=granted", 1000)]
-    [InlineData("/api/v1/catalog/objects?pageSize=50&accessStatus=granted&q=t0001&sort=relevance", 200)]
-    [InlineData("/api/v1/catalog/objects/facets?accessStatus=granted", 200)]
-    public async Task GrantedAccessFilter_StatementCount_DoesNotGrowWithTheGrantedTables(string path, int budget)
+    [InlineData("/api/v1/catalog/objects?pageSize=50&accessStatus=granted", 200, 60)]
+    [InlineData("/api/v1/catalog/objects?pageSize=50&accessStatus=granted&q=t0001&sort=relevance", 200, 70)]
+    [InlineData("/api/v1/catalog/objects/facets?accessStatus=granted", 200, 20)]
+    public async Task GrantedAccessFilter_StatementCount_DoesNotGrowWithTheGrantedTables(string path, int budget, int warmBudget)
     {
         await _fixture.SeedAsync(TableCount);
 
@@ -85,7 +86,22 @@ public sealed class CatalogGrantedAccessScaleTests : IClassFixture<CatalogGrante
         // Set-based reads bind at most 1,000 ids per statement, so a few statements per 1,000 columns are allowed on top.
         budget += 4 * ((TableCount * ColumnsPerTable + 999) / 1000);
         cold.Statements.ShouldBeLessThan(budget, $"cold request issued {cold.Statements} statements for {TableCount} granted tables");
-        warm.Statements.ShouldBeLessThan(budget, $"warm request issued {warm.Statements} statements for {TableCount} granted tables");
+        warm.Statements.ShouldBeLessThan(warmBudget, $"warm request issued {warm.Statements} statements for {TableCount} granted tables");
+    }
+
+    // Issue #1050: one catalog object (found and unknown) must not read the whole catalog per request.
+    [Theory]
+    [InlineData("/api/v1/catalog/objects/dom_scale.main.t0001", HttpStatusCode.OK)]
+    [InlineData("/api/v1/catalog/objects/dom_scale.main.does_not_exist", HttpStatusCode.NotFound)]
+    public async Task SingleObject_StatementCount_DoesNotGrowWithTheCatalog(string path, HttpStatusCode expected)
+    {
+        await _fixture.SeedAsync(TableCount);
+        await MeasureAsync(path);
+
+        var warm = await MeasureAsync(path);
+
+        warm.Status.ShouldBe(expected, warm.Body);
+        warm.Statements.ShouldBeLessThan(60, $"a single-object request issued {warm.Statements} statements for {TableCount} tables");
     }
 
     private async Task<Measurement> MeasureAsync(string path)

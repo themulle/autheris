@@ -243,7 +243,8 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
             {
                 ColumnRowPrefetch = request.ColumnRowPrefetch,
                 ConsentPrefetch = request.ConsentPrefetch,
-                TenantPolicyPrefetch = request.TenantPolicyPrefetch
+                TenantPolicyPrefetch = request.TenantPolicyPrefetch,
+                AllowOnly = request.AllowOnly
             };
 
             var decision = await _policy.DecideAsync(query, ct).ConfigureAwait(false);
@@ -485,23 +486,44 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         ArgumentNullException.ThrowIfNull(subject);
         ArgumentNullException.ThrowIfNull(objects);
 
-        // Issue #1043: the caller's consents and the column classification / mask override rows are read once per block of objects
-        // instead of once or twice per decision. Blocks bound the memory of a request and keep every prefetch well inside its MaxAge.
-        var results = new List<TableAccessDecision>(objects.Count);
+        return (await DecideOperationsManyAsync(subject, objects, [operation], transport, ct).ConfigureAwait(false))[0];
+    }
+
+    /// <summary>
+    /// <see cref="IAccessDecisionPoint.DecideOperationsManyAsync"/>:
+    /// issue #1043 reads the caller's consents and the column classification / mask override rows once per block of objects instead of once
+    /// or twice per decision; issue #1047 shares that read between the operations (a discovery page decides Discover, Insert, Update and
+    /// Delete). Blocks bound the memory of a request and keep every prefetch well inside its MaxAge.
+    /// </summary>
+    public async ValueTask<IReadOnlyList<IReadOnlyList<TableAccessDecision>>> DecideOperationsManyAsync(
+        SecurityPrincipalContext subject,
+        IReadOnlyList<TableMetadata> objects,
+        IReadOnlyList<AccessOperation> operations,
+        AccessTransport transport,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(subject);
+        ArgumentNullException.ThrowIfNull(objects);
+        ArgumentNullException.ThrowIfNull(operations);
+
+        var results = operations.Select(_ => new List<TableAccessDecision>(objects.Count)).ToList();
         for (var offset = 0; offset < objects.Count; offset += PrefetchBlockSize)
         {
             var block = objects.Skip(offset).Take(PrefetchBlockSize).ToList();
-            var (rowPrefetch, consentPrefetch, policyPrefetch, protectionPrefetch) = await PrefetchBlockAsync(subject, block, operation, ct).ConfigureAwait(false);
-            foreach (var obj in block)
+            var (rowPrefetch, consentPrefetch, policyPrefetch, protectionPrefetch) = await PrefetchBlockAsync(subject, block, operations, ct).ConfigureAwait(false);
+            for (var op = 0; op < operations.Count; op++)
             {
-                var req = new AccessRequest(subject, obj, operation, transport)
+                foreach (var obj in block)
                 {
-                    ColumnRowPrefetch = rowPrefetch,
-                    ConsentPrefetch = consentPrefetch,
-                    TenantPolicyPrefetch = policyPrefetch,
-                    ProtectionPrefetch = protectionPrefetch
-                };
-                results.Add(await DecideAsync(req, ct).ConfigureAwait(false));
+                    var req = new AccessRequest(subject, obj, operations[op], transport)
+                    {
+                        ColumnRowPrefetch = rowPrefetch,
+                        ConsentPrefetch = consentPrefetch,
+                        TenantPolicyPrefetch = policyPrefetch,
+                        ProtectionPrefetch = protectionPrefetch
+                    };
+                    results[op].Add(await DecideAsync(req, ct).ConfigureAwait(false));
+                }
             }
         }
 
@@ -518,71 +540,163 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         Autheris.Application.Policy.ProtectionBatchPrefetch?)> PrefetchBlockAsync(
         SecurityPrincipalContext subject,
         IReadOnlyList<TableMetadata> block,
-        AccessOperation operation,
+        IReadOnlyList<AccessOperation> operations,
         CancellationToken ct)
     {
-        if (_policy == null || block.Count < 2 || operation == AccessOperation.ExecuteWrite)
+        // Write execution reads neither. Only read decisions reach the table policy and its column rows; the Insert / Update / Delete
+        // decisions read the caller's consents of the table with the same per-table read (issue #1047).
+        if (_policy == null || block.Count < 2 || operations.Contains(AccessOperation.ExecuteWrite))
         {
             return (null, null, null, null);
         }
 
-        var isWriteOperation = operation is AccessOperation.Insert or AccessOperation.Update or AccessOperation.Delete;
-        var rowPrefetch = isWriteOperation
-            ? null
-            : await _policy.PrefetchColumnRowsAsync(block, subject.TenantId, ct).ConfigureAwait(false);
+        var hasReadOperation = operations.Any(static op => op is not (AccessOperation.Insert or AccessOperation.Update or AccessOperation.Delete));
+        var rowPrefetch = hasReadOperation
+            ? await _policy.PrefetchColumnRowsAsync(block, subject.TenantId, ct).ConfigureAwait(false)
+            : null;
 
         if (!subject.IsAuthenticated || string.IsNullOrWhiteSpace(subject.TenantId.Value))
         {
             return (rowPrefetch, null, null, null);
         }
 
-        Autheris.Application.Policy.ConsentBatchPrefetch? consentPrefetch = null;
-        if (!isWriteOperation &&
-            _consentRepository != null &&
-            !_options.Value.IsConsentBypassed &&
-            !string.IsNullOrWhiteSpace(subject.UserSid.Value) &&
-            subject.GroupResolutionStatus == GroupResolutionStatus.Complete)
-        {
-            // Every subject set a decision reads with: the token's user SIDs, the user SID and the group SIDs.
-            var subjects = new HashSet<Sid>(subject.Principal?.GetAllUserSids() ?? []) { subject.UserSid };
-            subjects.UnionWith(subject.GroupSids);
-            consentPrefetch = await Autheris.Application.Policy.ConsentBatchPrefetch.LoadAsync(
-                _consentRepository, subjects, block.Select(static o => o.Identifier).ToList(), subject.TenantId, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
-        }
-
-        // The protection gate reads the tenant policy in read decisions; read it once per block. A failed read leaves it per decision,
-        // where the gate fails closed (PROTECTION_UNAVAILABLE).
-        Autheris.Application.Policy.TenantPolicyPrefetch? policyPrefetch = null;
-        if (!isWriteOperation && _accessPolicySettings is not null)
-        {
-            try
-            {
-                policyPrefetch = await Autheris.Application.Policy.TenantPolicyPrefetch.LoadAsync(
-                    _accessPolicySettings, subject.TenantId, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
-            }
-            catch (Exception) when (!ct.IsCancellationRequested)
-            {
-                policyPrefetch = null;
-            }
-        }
-
-        // The protection gate resolves a protection snapshot per table for both read and write decisions; resolve those of the block
-        // set-based from the block's own metadata. A failure leaves them to the per-table resolution, which fails closed.
-        Autheris.Application.Policy.ProtectionBatchPrefetch? protectionPrefetch = null;
-        if (_protectionProvider is not null)
-        {
-            try
-            {
-                protectionPrefetch = await Autheris.Application.Policy.ProtectionBatchPrefetch.LoadAsync(
-                    _protectionProvider, subject.TenantId, block, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
-            }
-            catch (Exception) when (!ct.IsCancellationRequested)
-            {
-                protectionPrefetch = null;
-            }
-        }
+        var consentPrefetch = hasReadOperation
+            ? await PrefetchConsentsAsync(subject, block, ct).ConfigureAwait(false)
+            : null;
+        var policyPrefetch = hasReadOperation
+            ? await PrefetchTenantPolicyAsync(subject.TenantId, ct).ConfigureAwait(false)
+            : null;
+        var protectionPrefetch = await PrefetchProtectionAsync(subject.TenantId, block, ct).ConfigureAwait(false);
 
         return (rowPrefetch, consentPrefetch, policyPrefetch, protectionPrefetch);
+    }
+
+    /// <summary>
+    /// Issue #1047: allow-only Discover decisions (see <see cref="IAccessDecisionPoint.DecideAllowedManyAsync"/>). The caller's consents,
+    /// tenant access policy, and protection snapshots are read once for the run instead of once per block, and refreshed for the
+    /// remaining objects before the prefetch reaches half of <see cref="Autheris.Application.Policy.ConsentBatchPrefetch.MaxAge"/>.
+    /// No column rows are prefetched: an allow-only decision skips the classification stage unless that stage can turn the allow into
+    /// a deny (then it reads them itself).
+    /// </summary>
+    public async ValueTask<IReadOnlyList<bool>> DecideAllowedManyAsync(
+        SecurityPrincipalContext subject,
+        IReadOnlyList<TableMetadata> objects,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(subject);
+        ArgumentNullException.ThrowIfNull(objects);
+
+        var allowed = new List<bool>(objects.Count);
+        Autheris.Application.Policy.ConsentBatchPrefetch? consents = null;
+        Autheris.Application.Policy.TenantPolicyPrefetch? policyPrefetch = null;
+        Autheris.Application.Policy.ProtectionBatchPrefetch? protectionPrefetch = null;
+        var consentPrefetchEnabled = _policy != null && objects.Count > 1;
+        var gatePrefetchEnabled = _policy != null && objects.Count > 1 && !string.IsNullOrWhiteSpace(subject.TenantId.Value);
+        var sinceLoad = 0;
+        var maxHalfAge = Autheris.Application.Policy.ConsentBatchPrefetch.MaxAge / 2;
+        foreach (var obj in objects)
+        {
+            var now = _timeProvider.GetUtcNow();
+            // Re-read for the remaining objects before the prefetch reaches half its MaxAge, but at most once per block: a slow read must
+            // not turn into one read per object (decisions after MaxAge fall back to the per-table read, which is correct).
+            if (consentPrefetchEnabled && (consents is null || (sinceLoad >= PrefetchBlockSize && now - consents.ReadAt >= maxHalfAge)))
+            {
+                consents = await PrefetchConsentsAsync(subject, objects.Skip(allowed.Count).ToList(), ct).ConfigureAwait(false);
+                consentPrefetchEnabled = consents is not null; // no prefetch for this subject (preconditions, bypass): never ask again
+                sinceLoad = 0;
+            }
+
+            if (gatePrefetchEnabled && (policyPrefetch is null || (sinceLoad >= PrefetchBlockSize && now - policyPrefetch.ReadAt >= maxHalfAge)))
+            {
+                policyPrefetch = await PrefetchTenantPolicyAsync(subject.TenantId, ct).ConfigureAwait(false);
+                if (policyPrefetch is null)
+                {
+                    gatePrefetchEnabled = false;
+                }
+            }
+
+            if (gatePrefetchEnabled && (protectionPrefetch is null || (sinceLoad >= PrefetchBlockSize && now - protectionPrefetch.ReadAt >= maxHalfAge)))
+            {
+                protectionPrefetch = await PrefetchProtectionAsync(subject.TenantId, objects.Skip(allowed.Count).ToList(), ct).ConfigureAwait(false);
+            }
+
+            sinceLoad++;
+
+            var request = new AccessRequest(subject, obj, AccessOperation.Discover, AccessTransport.Discovery)
+            {
+                ConsentPrefetch = consents,
+                TenantPolicyPrefetch = policyPrefetch,
+                ProtectionPrefetch = protectionPrefetch,
+                AllowOnly = true
+            };
+            allowed.Add((await DecideAsync(request, ct).ConfigureAwait(false)).IsAllowed);
+        }
+
+        return allowed;
+    }
+
+    private async ValueTask<Autheris.Application.Policy.TenantPolicyPrefetch?> PrefetchTenantPolicyAsync(
+        TenantId tenantId,
+        CancellationToken ct)
+    {
+        if (_accessPolicySettings is null || string.IsNullOrWhiteSpace(tenantId.Value))
+        {
+            return null;
+        }
+
+        try
+        {
+            return await Autheris.Application.Policy.TenantPolicyPrefetch.LoadAsync(
+                _accessPolicySettings, tenantId, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
+    private async ValueTask<Autheris.Application.Policy.ProtectionBatchPrefetch?> PrefetchProtectionAsync(
+        TenantId tenantId,
+        IReadOnlyList<TableMetadata> block,
+        CancellationToken ct)
+    {
+        if (_protectionProvider is null || string.IsNullOrWhiteSpace(tenantId.Value))
+        {
+            return null;
+        }
+
+        try
+        {
+            return await Autheris.Application.Policy.ProtectionBatchPrefetch.LoadAsync(
+                _protectionProvider, tenantId, block, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return null;
+        }
+    }
+
+    private async ValueTask<Autheris.Application.Policy.ConsentBatchPrefetch?> PrefetchConsentsAsync(
+        SecurityPrincipalContext subject,
+        IReadOnlyList<TableMetadata> objects,
+        CancellationToken ct)
+    {
+        // Consents only for subjects the preconditions of DecideAsync let through (others are denied without reading consents).
+        if (_consentRepository == null ||
+            _options.Value.IsConsentBypassed ||
+            !subject.IsAuthenticated ||
+            string.IsNullOrWhiteSpace(subject.UserSid.Value) ||
+            subject.GroupResolutionStatus != GroupResolutionStatus.Complete ||
+            string.IsNullOrWhiteSpace(subject.TenantId.Value))
+        {
+            return null;
+        }
+
+        // Every subject set a decision reads with: the token's user SIDs, the user SID and the group SIDs.
+        var subjects = new HashSet<Sid>(subject.Principal?.GetAllUserSids() ?? []) { subject.UserSid };
+        subjects.UnionWith(subject.GroupSids);
+        return await Autheris.Application.Policy.ConsentBatchPrefetch.LoadAsync(
+            _consentRepository, subjects, objects.Select(static o => o.Identifier).ToList(), subject.TenantId, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
     }
 
     public async ValueTask<AccessExplanation> ExplainAsync(AccessRequest request, CancellationToken ct = default)

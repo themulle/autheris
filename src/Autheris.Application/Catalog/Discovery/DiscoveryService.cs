@@ -64,6 +64,10 @@ public sealed partial class DiscoveryService : IDiscoveryService
     private readonly ICatalogSnapshotProvider? _snapshotProvider;
     private readonly IProtectionSnapshotProvider? _protectionProvider;
     private readonly Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? _accessPolicySettings;
+    private readonly CatalogAccessViewCache? _accessViewCache;
+
+    // Issue #1044: set for the rest of this (scoped) service once the page guard found a stale cached view.
+    private bool _viewCacheBypassed;
 
     private readonly Lock _memoLock = new();
     private readonly Dictionary<ScopeMemoKey, ScopedCatalog> _scopeMemo = [];
@@ -96,9 +100,11 @@ public sealed partial class DiscoveryService : IDiscoveryService
         ICatalogSnapshotProvider? snapshotProvider = null,
         IProtectionSnapshotProvider? protectionProvider = null,
         Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? accessPolicySettings = null,
-        Autheris.Application.Catalog.Visibility.IContainerVisibilitySnapshotProvider? containerVisibility = null)
+        Autheris.Application.Catalog.Visibility.IContainerVisibilitySnapshotProvider? containerVisibility = null,
+        CatalogAccessViewCache? accessViewCache = null)
     {
         _containerVisibility = containerVisibility;
+        _accessViewCache = accessViewCache;
         _docLinks = docLinks;
         _snapshotProvider = snapshotProvider;
         _protectionProvider = protectionProvider;
@@ -139,6 +145,11 @@ public sealed partial class DiscoveryService : IDiscoveryService
             return new DiscoveryPage([], 0, false);
         }
 
+        return await ListCoreAsync(query, caller, sid, ct).ConfigureAwait(false);
+    }
+
+    private async ValueTask<DiscoveryPage> ListCoreAsync(DiscoveryQuery query, CatalogCaller caller, Sid sid, CancellationToken ct)
+    {
         try
         {
             var scopeKey = BuildScopeMemoKey(sid, caller);
@@ -207,6 +218,11 @@ public sealed partial class DiscoveryService : IDiscoveryService
 
             var tableObjects = await ResolveObjectsBatchAsync(
                 caller, sid, scopeKey, pageTables, query.Language, ct).ConfigureAwait(false);
+            if (query.Access is { } listedAccess && ContradictsCachedView(scopeKey, listedAccess, tableObjects))
+            {
+                return await ListCoreAsync(query, caller, sid, ct).ConfigureAwait(false);
+            }
+
             var procObjects = await ResolveProceduresBatchAsync(
                 caller, sid, scopeKey, pageProcedures, ct).ConfigureAwait(false);
 
@@ -327,6 +343,11 @@ public sealed partial class DiscoveryService : IDiscoveryService
             return [];
         }
 
+        return await SearchCoreAsync(text, options, caller, sid, ct).ConfigureAwait(false);
+    }
+
+    private async ValueTask<IReadOnlyList<DiscoveryObject>> SearchCoreAsync(string? text, DiscoverySearchOptions options, CatalogCaller caller, Sid sid, CancellationToken ct)
+    {
         try
         {
             var scopeKey = BuildScopeMemoKey(sid, caller);
@@ -461,6 +482,11 @@ public sealed partial class DiscoveryService : IDiscoveryService
 
             var tableObjects = await ResolveObjectsBatchAsync(
                 caller, sid, scopeKey, matchedTables, options.Language, ct).ConfigureAwait(false);
+            if (options.Access is { } listedAccess && ContradictsCachedView(scopeKey, listedAccess, tableObjects))
+            {
+                return await SearchCoreAsync(text, options, caller, sid, ct).ConfigureAwait(false);
+            }
+
             var procObjects = await ResolveProceduresBatchAsync(
                 caller, sid, scopeKey, matchedProcedures, ct).ConfigureAwait(false);
 
@@ -599,8 +625,10 @@ public sealed partial class DiscoveryService : IDiscoveryService
             : _ownershipRepository.GetDataOwnersForTablesAsync(uncachedIds, ct);
 
         var subject = SecurityPrincipalContext.FromPrincipal(caller.Principal!, caller.Tenant);
-        var decisionsTask = _decisionPoint!.DecideManyAsync(
-            subject, uncachedTables, AccessOperation.Discover, AccessTransport.Discovery, ct).AsTask();
+
+        // Issue #1047: the read and the write capabilities of the page (canonical PDP path, zero data reads) share one batch read.
+        var decisionsTask = _decisionPoint!.DecideOperationsManyAsync(
+            subject, uncachedTables, [AccessOperation.Discover, AccessOperation.Insert, AccessOperation.Update, AccessOperation.Delete], AccessTransport.Discovery, ct).AsTask();
 
         var pendingTask = LoadPendingRequestTablesAsync(sid, caller.Tenant, ct);
         var expiredTask = LoadRecentlyExpiredTablesAsync(sid, caller.Tenant, ct);
@@ -608,35 +636,35 @@ public sealed partial class DiscoveryService : IDiscoveryService
         await Task.WhenAll(ownersTask, decisionsTask, pendingTask, expiredTask).ConfigureAwait(false);
 
         var ownersByTable = await ownersTask.ConfigureAwait(false);
-        var decisions = await decisionsTask.ConfigureAwait(false);
+        var byOperation = await decisionsTask.ConfigureAwait(false);
         var pendingTables = await pendingTask.ConfigureAwait(false);
         var expiredTables = await expiredTask.ConfigureAwait(false);
 
-        if (decisions.Count != uncachedTables.Count)
+        if (byOperation.Count != 4 || byOperation.Any(d => d.Count != uncachedTables.Count))
         {
             throw new InvalidOperationException("AccessDecisionPoint returned mismatched decision count.");
         }
 
-        // Evaluate write capabilities sequentially on the shared scoped repositories via the canonical PDP path (zero data reads).
-        var insertDecisions = await _decisionPoint.DecideManyAsync(
-            subject, uncachedTables, AccessOperation.Insert, AccessTransport.Discovery, ct).ConfigureAwait(false);
-        var updateDecisions = await _decisionPoint.DecideManyAsync(
-            subject, uncachedTables, AccessOperation.Update, AccessTransport.Discovery, ct).ConfigureAwait(false);
-        var deleteDecisions = await _decisionPoint.DecideManyAsync(
-            subject, uncachedTables, AccessOperation.Delete, AccessTransport.Discovery, ct).ConfigureAwait(false);
-
-        if (insertDecisions.Count != uncachedTables.Count ||
-            updateDecisions.Count != uncachedTables.Count ||
-            deleteDecisions.Count != uncachedTables.Count)
-        {
-            throw new InvalidOperationException("AccessDecisionPoint returned mismatched write decision count.");
-        }
+        var (decisions, insertDecisions, updateDecisions, deleteDecisions) = (byOperation[0], byOperation[1], byOperation[2], byOperation[3]);
 
         var defs = _classificationRepository is null
             ? ClassificationAccessResolver.BuiltInCatalog(caller.Tenant.Value).Definitions
             : ClassificationHierarchyValidator.ResolveEffective(await _classificationRepository.GetClassificationsAsync(caller.Tenant.Value, includeInactive: true, ct).ConfigureAwait(false), caller.Tenant.Value);
 
         var docLinks = await LoadDocumentLinksAsync(caller.Tenant.Value, uncachedTables, ct).ConfigureAwait(false);
+
+        // Issue #1043 / #1047: the column classifications of the page's visible, not yet classified columns in one read.
+        var unclassifiedColumns = _classificationRepository is null
+            ? []
+            : uncachedTables
+                .Where(static t => !t.Table.DiscoveryHidden)
+                .SelectMany(static t => t.Columns.Where(c => !c.DiscoveryHidden && !t.ColumnClassifications.ContainsKey(c.ColumnName)))
+                .Select(static c => c.Id.ToString())
+                .Distinct()
+                .ToList();
+        var classificationsByColumnId = unclassifiedColumns.Count == 0
+            ? new Dictionary<string, IReadOnlyList<ColumnClassification>>()
+            : await _classificationRepository!.GetColumnClassificationsBatchAsync(unclassifiedColumns, caller.Tenant.Value, ct).ConfigureAwait(false);
 
         TenantAccessPolicy? tenantPolicy = null;
         if (_accessPolicySettings is not null)
@@ -666,18 +694,11 @@ public sealed partial class DiscoveryService : IDiscoveryService
             Dictionary<string, IReadOnlyList<ColumnClassification>>? repoColClasses = null;
             if (_classificationRepository is not null && !table.Table.DiscoveryHidden)
             {
-                // Issue #1043: one read for the table's columns instead of one per column.
-                var unclassified = table.Columns.Where(c => !c.DiscoveryHidden && !table.ColumnClassifications.ContainsKey(c.ColumnName)).ToList();
-                if (unclassified.Count > 0)
+                foreach (var col in table.Columns.Where(c => !c.DiscoveryHidden && !table.ColumnClassifications.ContainsKey(c.ColumnName)))
                 {
-                    var byColumnId = await _classificationRepository.GetColumnClassificationsBatchAsync(
-                        unclassified.Select(static c => c.Id.ToString()).ToList(), caller.Tenant.Value, ct).ConfigureAwait(false);
-                    foreach (var col in unclassified)
+                    if (classificationsByColumnId.TryGetValue(col.Id.ToString(), out var rows) && rows.Count > 0)
                     {
-                        if (byColumnId.TryGetValue(col.Id.ToString(), out var rows) && rows.Count > 0)
-                        {
-                            (repoColClasses ??= new(StringComparer.OrdinalIgnoreCase))[col.ColumnName] = rows;
-                        }
+                        (repoColClasses ??= new(StringComparer.OrdinalIgnoreCase))[col.ColumnName] = rows;
                     }
                 }
             }

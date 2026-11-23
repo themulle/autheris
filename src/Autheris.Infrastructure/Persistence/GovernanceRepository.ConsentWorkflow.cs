@@ -92,7 +92,6 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
         }
     }
 
-
     public async Task<Consent> ExecuteExternalAtomicApprovalWithConsentAsync(
         Guid requestId,
         ExternalDecisionAttribution attribution,
@@ -195,7 +194,6 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
             throw;
         }
     }
-
 
     public async Task<ConsentRequest> RejectExternalConsentRequestAsync(
         Guid requestId,
