@@ -81,7 +81,8 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         Autheris.Application.Products.IDataProductRepository? productRepository = null,
         IProtectionSnapshotProvider? protectionProvider = null,
         Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? accessPolicySettings = null,
-        Autheris.Application.Identity.IIdentityRealmRegistry? realmRegistry = null)
+        Autheris.Application.Identity.IIdentityRealmRegistry? realmRegistry = null,
+        Autheris.Application.Policy.Protection.IUnmaskGrantResolver? unmaskResolver = null)
     {
         _options = options ?? throw new ArgumentNullException(nameof(options));
         _protectionProvider = protectionProvider;
@@ -135,7 +136,8 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
                 _typedPolicies?.ClassificationResolver,
                 _protectionProvider,
                 _accessPolicySettings,
-                _realmRegistry);
+                _realmRegistry,
+                unmaskResolver);
         }
     }
 

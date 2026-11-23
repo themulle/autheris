@@ -108,6 +108,7 @@ public sealed partial class TableAccessPolicy
     private readonly IDataOwnershipRepository? _ownershipRepository;
     private readonly Autheris.Application.Policy.Classification.ClassificationAccessResolver? _classificationResolver;
     private readonly IProtectionSnapshotProvider? _protectionProvider;
+    private readonly Autheris.Application.Policy.Protection.IUnmaskGrantResolver? _unmaskResolver;
     private readonly Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? _accessPolicySettings;
     private readonly Autheris.Application.Identity.IIdentityRealmRegistry? _realmRegistry;
     private readonly TimeProvider _timeProvider;
@@ -139,8 +140,10 @@ public sealed partial class TableAccessPolicy
         Autheris.Application.Policy.Classification.ClassificationAccessResolver? classificationResolver = null,
         IProtectionSnapshotProvider? protectionProvider = null,
         Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? accessPolicySettings = null,
-        Autheris.Application.Identity.IIdentityRealmRegistry? realmRegistry = null)
+        Autheris.Application.Identity.IIdentityRealmRegistry? realmRegistry = null,
+        Autheris.Application.Policy.Protection.IUnmaskGrantResolver? unmaskResolver = null)
     {
+        _unmaskResolver = unmaskResolver;
         _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
         _callerAttributes = callerAttributes;
         _rowPolicyFactory = rowPolicyFactory;
