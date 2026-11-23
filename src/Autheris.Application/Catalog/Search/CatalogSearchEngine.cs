@@ -367,6 +367,8 @@ public sealed class CatalogSearchEngine : ICatalogSearchEngine, ICatalogSearchSt
     {
         var docs = new PreparedDocument[tables.Count];
         var hiddenResolver = new ClassificationAccessResolver.IndexingHiddenTextResolver(_classificationRepository);
+        // Issue #1043: the column rows of all tables in set-based statements instead of two reads per table.
+        await hiddenResolver.PrefetchAsync(tables, ct).ConfigureAwait(false);
         for (int i = 0; i < tables.Count; i++)
         {
             ct.ThrowIfCancellationRequested();

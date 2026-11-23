@@ -56,7 +56,20 @@ public sealed record AccessRequest(
     IReadOnlyList<string>? Columns = null,
     IReadOnlyList<Consent>? SupplementalConsents = null,
     WriteGrantQuery? Write = null,
-    bool Trace = false);
+    bool Trace = false)
+{
+    /// <summary>
+    /// Issue #1043: the column classification and mask override rows of this object, read once for a batch of decisions
+    /// (<see cref="IAccessDecisionPoint.DecideManyAsync"/>). Null reads them per decision.
+    /// </summary>
+    public Autheris.Application.Policy.Classification.ColumnPolicyRowPrefetch? ColumnRowPrefetch { get; init; }
+
+    /// <summary>
+    /// Issue #1043: the caller's consents for the objects of a batch of decisions (<see cref="IAccessDecisionPoint.DecideManyAsync"/>),
+    /// read once. Null reads them per decision.
+    /// </summary>
+    public Autheris.Application.Policy.ConsentBatchPrefetch? ConsentPrefetch { get; init; }
+}
 
 public interface IAccessDecisionPoint
 {

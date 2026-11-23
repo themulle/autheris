@@ -37,6 +37,12 @@ public sealed record TableAccessQuery(
     ClaimsPrincipal? Principal = null,
     IReadOnlyList<Consent>? SupplementalConsents = null)
 {
+    /// <summary>Issue #1043: batch-prefetched column classification and mask override rows (see <see cref="AccessRequest.ColumnRowPrefetch"/>).</summary>
+    public Autheris.Application.Policy.Classification.ColumnPolicyRowPrefetch? ColumnRowPrefetch { get; init; }
+
+    /// <summary>Issue #1043: batch-prefetched consents (see <see cref="AccessRequest.ConsentPrefetch"/>).</summary>
+    public ConsentBatchPrefetch? ConsentPrefetch { get; init; }
+
     public static TableAccessQuery ForPrincipal(
         ClaimsPrincipal principal,
         Sid userSid,
@@ -153,6 +159,23 @@ public sealed partial class TableAccessPolicy
                 memoryCache ?? new Microsoft.Extensions.Caching.Memory.MemoryCache(new Microsoft.Extensions.Caching.Memory.MemoryCacheOptions()),
                 options != null ? Microsoft.Extensions.Options.Options.Create(options) : null);
         }
+    }
+
+    /// <summary>
+    /// Issue #1043: reads the column classification and mask override rows of <paramref name="tables"/> for one batch of decisions.
+    /// Null when this policy does not evaluate classifications from the repository.
+    /// </summary>
+    public async ValueTask<Autheris.Application.Policy.Classification.ColumnPolicyRowPrefetch?> PrefetchColumnRowsAsync(
+        IReadOnlyList<TableMetadata> tables,
+        TenantId tenant,
+        CancellationToken ct)
+    {
+        if (_classificationResolver is not { HasRepository: true } || string.IsNullOrWhiteSpace(tenant.Value) || _options.IsConsentBypassed)
+        {
+            return null;
+        }
+
+        return await _classificationResolver.PrefetchColumnRowsAsync(tables, tenant.Value, ct).ConfigureAwait(false);
     }
 
     public async Task<TableAccessDecision> DecideAsync(TableAccessQuery query, CancellationToken ct)

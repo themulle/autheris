@@ -214,7 +214,11 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
                 ObjectKind: isProcedure ? FilterObjectKinds.ProcedureResult : FilterObjectKinds.Relation,
                 AllUserSids: isProcedure ? null : (principal?.GetAllUserSids() ?? [subject.UserSid]),
                 Principal: principal,
-                SupplementalConsents: request.SupplementalConsents);
+                SupplementalConsents: request.SupplementalConsents)
+            {
+                ColumnRowPrefetch = request.ColumnRowPrefetch,
+                ConsentPrefetch = request.ConsentPrefetch
+            };
 
             var decision = await _policy.DecideAsync(query, ct).ConfigureAwait(false);
             if (isProduct)
@@ -455,10 +459,39 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         ArgumentNullException.ThrowIfNull(subject);
         ArgumentNullException.ThrowIfNull(objects);
 
+        // Issue #1043: the column classification and mask override rows of all objects are read once for the batch instead of once
+        // per decision. Only read decisions evaluate them (writes and write execution never reach the table policy).
+        // The caller's consents of all objects are read once as well; each decision re-applies the per-table consent rules at its own time.
+        Autheris.Application.Policy.Classification.ColumnPolicyRowPrefetch? prefetch = null;
+        Autheris.Application.Policy.ConsentBatchPrefetch? consentPrefetch = null;
+        if (_policy != null &&
+            objects.Count > 1 &&
+            operation is not (AccessOperation.Insert or AccessOperation.Update or AccessOperation.Delete or AccessOperation.ExecuteWrite))
+        {
+            prefetch = await _policy.PrefetchColumnRowsAsync(objects, subject.TenantId, ct).ConfigureAwait(false);
+            if (_consentRepository != null &&
+                !_options.Value.IsConsentBypassed &&
+                subject.IsAuthenticated &&
+                !string.IsNullOrWhiteSpace(subject.TenantId.Value))
+            {
+                // Every subject set a decision reads with: the token's user SIDs, the user SID and the group SIDs.
+                var subjects = new HashSet<Sid>(subject.Principal?.GetAllUserSids() ?? []) { subject.UserSid };
+                subjects.UnionWith(subject.GroupSids);
+                var tables = new List<TableIdentifier>(objects.Count);
+                foreach (var obj in objects)
+                {
+                    tables.Add(obj.Identifier);
+                }
+
+                consentPrefetch = await Autheris.Application.Policy.ConsentBatchPrefetch.LoadAsync(
+                    _consentRepository, subjects, tables, subject.TenantId, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
+            }
+        }
+
         var results = new List<TableAccessDecision>(objects.Count);
         foreach (var obj in objects)
         {
-            var req = new AccessRequest(subject, obj, operation, transport);
+            var req = new AccessRequest(subject, obj, operation, transport) { ColumnRowPrefetch = prefetch, ConsentPrefetch = consentPrefetch };
             results.Add(await DecideAsync(req, ct).ConfigureAwait(false));
         }
         return results;

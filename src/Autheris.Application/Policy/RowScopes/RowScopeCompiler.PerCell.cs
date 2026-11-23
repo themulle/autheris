@@ -43,7 +43,7 @@ public sealed partial class RowScopeCompiler
              _classificationResolver.HasRepository))
         {
             (perGrantOutcomes, combinedClassWinners) = await _classificationResolver.ResolveForTableAsync(
-                metadata, contributingAllows, query.Tenant, callerScopes, ct: ct).ConfigureAwait(false);
+                metadata, contributingAllows, query.Tenant, callerScopes, ct: ct, columnRowPrefetch: query.ColumnRowPrefetch).ConfigureAwait(false);
         }
 
         var (hardDenied, hardMasked) = CollectFilterlessDenyColumnCaps(

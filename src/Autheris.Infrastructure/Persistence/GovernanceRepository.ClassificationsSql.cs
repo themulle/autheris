@@ -136,15 +136,7 @@ WHEN NOT MATCHED THEN INSERT
 VALUES
     (@scope, @code, @mask_function, @params_json, @key_ref, @catalog_text, @version, @updated_by, @updated_at);";
 
-        public const string SelectColumnClassificationsGlobalSql = @"SELECT scope, table_column_id, code, source, assigned_by, assigned_at
-FROM COLUMN_CLASSIFICATIONS
-WHERE table_column_id = @table_column_id AND scope = '*'
-ORDER BY code ASC, scope ASC";
 
-        public const string SelectColumnClassificationsScopedSql = @"SELECT scope, table_column_id, code, source, assigned_by, assigned_at
-FROM COLUMN_CLASSIFICATIONS
-WHERE table_column_id = @table_column_id AND (scope = '*' OR scope = @scope)
-ORDER BY code ASC, scope ASC";
 
         public const string UpsertColumnClassificationSqlPg = @"INSERT INTO COLUMN_CLASSIFICATIONS
 (scope, table_column_id, code, source, assigned_by, assigned_at)
@@ -169,15 +161,18 @@ VALUES
         public const string DeleteColumnClassificationSql = @"DELETE FROM COLUMN_CLASSIFICATIONS
 WHERE scope = @scope AND table_column_id = @table_column_id AND code = @code";
 
-        public const string SelectColumnMaskOverridesGlobalSql = @"SELECT id, scope, table_column_id, code, mask_function, params_json, key_ref, catalog_text, updated_by, updated_at
-FROM COLUMN_MASK_OVERRIDES
-WHERE table_column_id = @table_column_id AND scope = '*'
-ORDER BY code ASC, scope ASC";
 
-        public const string SelectColumnMaskOverridesScopedSql = @"SELECT id, scope, table_column_id, code, mask_function, params_json, key_ref, catalog_text, updated_by, updated_at
-FROM COLUMN_MASK_OVERRIDES
-WHERE table_column_id = @table_column_id AND (scope = '*' OR scope = @scope)
-ORDER BY code ASC, scope ASC";
+
+        // Issue #1043: classifications / mask overrides of a set of columns (one column = the former per-column read). @scope is the tenant,
+        // or '*' for the global rows only; the caller appends BindIdInClause placeholders and SelectColumnBatchSuffix.
+        public const string SelectColumnClassificationsBatchPrefix = "SELECT scope, table_column_id, code, source, assigned_by, assigned_at FROM COLUMN_CLASSIFICATIONS WHERE (scope = '*' OR scope = @scope) AND table_column_id IN (";
+        public const string SelectColumnMaskOverridesBatchPrefix = "SELECT id, scope, table_column_id, code, mask_function, params_json, key_ref, catalog_text, updated_by, updated_at FROM COLUMN_MASK_OVERRIDES WHERE (scope = '*' OR scope = @scope) AND table_column_id IN (";
+        public const string SelectColumnBatchSuffix = ") ORDER BY table_column_id ASC, code ASC, scope ASC";
+
+
+
+
+
 
         public const string UpsertColumnMaskOverrideWithCodeSqlPg = @"INSERT INTO COLUMN_MASK_OVERRIDES
 (id, scope, table_column_id, code, mask_function, params_json, key_ref, catalog_text, updated_by, updated_at)

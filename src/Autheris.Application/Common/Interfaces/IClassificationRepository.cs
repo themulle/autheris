@@ -1,5 +1,6 @@
 namespace Autheris.Application.Common.Interfaces;
 
+using System;
 using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
@@ -61,6 +62,54 @@ public interface IClassificationRepository
         string tableColumnId,
         string? tenantScope = null,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Issue #1043: the classifications of the columns <paramref name="tableColumnIds"/> in one read (instead of one read per column),
+    /// keyed by table column id, each list with the rows and order of <see cref="GetColumnClassificationsAsync"/> for that column.
+    /// A column without rows has no entry. The default reads column by column.
+    /// </summary>
+    async Task<IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>>> GetColumnClassificationsBatchAsync(
+        IReadOnlyCollection<string> tableColumnIds,
+        string? tenantScope = null,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(tableColumnIds);
+        var result = new Dictionary<string, IReadOnlyList<ColumnClassification>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var id in tableColumnIds)
+        {
+            var rows = await GetColumnClassificationsAsync(id, tenantScope, ct).ConfigureAwait(false);
+            if (rows.Count > 0)
+            {
+                result[id] = rows;
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>
+    /// Issue #1043: the mask overrides of the columns <paramref name="tableColumnIds"/> in one read (instead of one read per column),
+    /// keyed by table column id, each list with the rows and order of <see cref="GetColumnMaskOverridesAsync"/> for that column.
+    /// A column without rows has no entry. The default reads column by column.
+    /// </summary>
+    async Task<IReadOnlyDictionary<string, IReadOnlyList<ColumnMaskOverride>>> GetColumnMaskOverridesBatchAsync(
+        IReadOnlyCollection<string> tableColumnIds,
+        string? tenantScope = null,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(tableColumnIds);
+        var result = new Dictionary<string, IReadOnlyList<ColumnMaskOverride>>(StringComparer.OrdinalIgnoreCase);
+        foreach (var id in tableColumnIds)
+        {
+            var rows = await GetColumnMaskOverridesAsync(id, tenantScope, ct).ConfigureAwait(false);
+            if (rows.Count > 0)
+            {
+                result[id] = rows;
+            }
+        }
+
+        return result;
+    }
 
     Task<ColumnMaskOverride> UpsertColumnMaskOverrideAsync(
         ColumnMaskOverride maskOverride,
