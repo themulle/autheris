@@ -392,6 +392,9 @@ public sealed class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.BindByNameOracleCommand", "DbCommand decorator: forwards the text the binder gave it to the Oracle command (BindByName)"),
         ("Autheris.Infrastructure.Persistence.GoldenQueries.GoldenQueryStoreOperations", "governance-store access with fixed, parameterised SQL constants (golden queries); no caller-supplied text"),
         ("Autheris.Infrastructure.Persistence.MetadataGuardedCommand", "DbCommand decorator: forwards the text to the inner command; the text is checked before every execution"),
+        // -- constructors of the PermissionDecisionCommand record: it carries a decision reason string, never SQL text --
+        ("Autheris.Api.Endpoints.ConsentApiEndpoints", "builds the PermissionDecisionCommand record (reason text, not SQL) for the engine decision"),
+        ("Autheris.Application.ConsentRequests.ExternalDecisionService", "builds the PermissionDecisionCommand record (reason text, not SQL) for the engine decision"),
         // -- the allowed exceptions of §28.9 (the text comes from the typed IR / the compiler, never from a client string) --
         ("Autheris.Application.Sql.Tree.GovernedTreeQueryService", "§28.9 OQ-GQL: executes compiled.Sql of the GraphQL tree compiler"),
         ("Autheris.Application.Olap.DuckDbOlapEngine", "§28.9 DuckDB staging: runs on the in-process staged copy, after the governed fetch"),
