@@ -60,7 +60,8 @@ public sealed class PermissionRequestEngineSubmitTests
         IProtectionSnapshotProvider? protection = null,
         IGovernanceDomainRepository? domainRepo = null,
         FakeTimeProvider? time = null,
-        InMemoryAuditWriter? audit = null)
+        InMemoryAuditWriter? audit = null,
+        Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter? router = null)
     {
         metadata ??= DefaultMetadata();
         return new PermissionRequestEngine(
@@ -78,7 +79,50 @@ public sealed class PermissionRequestEngineSubmitTests
             accessPolicyProvider: policyProvider,
             catalogVisibilityRepository: catalogRepo,
             capabilities: new GovernanceCapabilities(domainRepository: domainRepo),
-            timeProvider: time ?? new FakeTimeProvider(Now));
+            timeProvider: time ?? new FakeTimeProvider(Now),
+            workflowRouter: router);
+    }
+
+    private static Autheris.Application.ConsentRequests.Routing.ConsentWorkflowRouteResolution Route(ConsentWorkflowMode mode, Guid? systemId, WorkflowRouteScopeKind? scope) =>
+        new(mode, systemId, 30, 30, 72, false, scope);
+
+    private static Task<PermissionSubmitResult> SubmitOrdersAsync(PermissionRequestEngine engine) =>
+        engine.SubmitAsync(new PermissionRequestSubmission(
+            UserPrincipal(), TenantA, ConsentRequestKind.Data, PermissionTarget.ForTable(OrdersTable),
+            GranteeType.User, "user:alice", "Need orders data access for billing.", ValidTo: Now.AddDays(30)));
+
+    private static IConsentApprovalRepository CapturingApprovals() =>
+        NullFake.Create<IConsentApprovalRepository>((m, args) =>
+            m.Name == nameof(IConsentApprovalRepository.CreateConsentRequestAsync)
+                ? Task.FromResult((ConsentRequest)args![0]!)
+                : NullFake.UseDefault);
+
+    [Fact]
+    public async Task Domain_routed_external_request_is_created_with_the_domain_route_system()
+    {
+        var systemId = Guid.NewGuid();
+        var engine = CreateEngine(
+            CapturingApprovals(),
+            router: new StubRouter(Route(ConsentWorkflowMode.External, systemId, WorkflowRouteScopeKind.Domain)));
+
+        var res = await SubmitOrdersAsync(engine);
+
+        res.Request.WorkflowMode.ShouldBe(ConsentWorkflowMode.External);
+        res.Request.ExternalSystemId.ShouldBe(systemId);
+    }
+
+    [Fact]
+    public async Task Unknown_route_kind_stays_internal_with_standard_approvers()
+    {
+        var engine = CreateEngine(
+            CapturingApprovals(),
+            router: new StubRouter(Route(ConsentWorkflowMode.Internal, null, null)));
+
+        var res = await SubmitOrdersAsync(engine);
+
+        res.Request.WorkflowMode.ShouldBe(ConsentWorkflowMode.Internal);
+        res.Request.ExternalSystemId.ShouldBeNull();
+        res.Request.Status.ShouldBe("PENDING");
     }
 
     private static ITableMetadataRepository DefaultMetadata(params TableMetadata[] extra)
@@ -403,4 +447,14 @@ public sealed class PermissionRequestEngineSubmitTests
                 GranteeType.User, "user:alice", "Valid justification text here.", ValidTo: Now.AddDays(10))));
         noMetaEx.Code.ShouldBe("COLUMN_METADATA_UNAVAILABLE");
     }
+}
+
+file sealed class StubRouter(Autheris.Application.ConsentRequests.Routing.ConsentWorkflowRouteResolution resolution)
+    : Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter
+{
+    public Task<Autheris.Application.ConsentRequests.Routing.ConsentWorkflowRouteResolution> ResolveForTableAsync(TenantId tenantId, TableIdentifier table, CancellationToken ct = default) =>
+        Task.FromResult(resolution);
+
+    public Task<Autheris.Application.ConsentRequests.Routing.ConsentWorkflowRouteResolution> ResolveForTablesAsync(TenantId tenantId, IReadOnlyList<TableIdentifier> tables, CancellationToken ct = default) =>
+        Task.FromResult(resolution);
 }

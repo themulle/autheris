@@ -158,7 +158,7 @@ public sealed partial class PermissionRequestEngine
             profileId,
             ct).ConfigureAwait(false);
 
-        var (workflowMode, externalSystemId) = await ResolveTenantOnlyWorkflowRouteAsync(validTenant, ct).ConfigureAwait(false);
+        var (workflowMode, externalSystemId) = await ResolveWorkflowRouteAsync(validTenant, tableIdentifier, ct).ConfigureAwait(false);
         var grantKind = MapGrantKind(submission.RequestKind);
         var requesterIds = SeparationOfDutiesService.CollectSubjectIdentifiers(submission.Caller, callerCtx.UserSid.Value).ToList();
 
@@ -575,6 +575,26 @@ public sealed partial class PermissionRequestEngine
                 throw new ConsentRequestException("DUPLICATE_PENDING_REQUEST", "A duplicate pending permission request already exists.");
             }
         }
+    }
+
+    /// <summary>
+    /// The route that directs a new request: the same resolution as the external decision uses (domain, then tenant; removed or unknown
+    /// scope kinds are inert). Requests without a table target fall back to the tenant route.
+    /// </summary>
+    private async Task<(ConsentWorkflowMode Mode, Guid? ExternalSystemId)> ResolveWorkflowRouteAsync(
+        TenantId tenant,
+        TableIdentifier table,
+        CancellationToken ct)
+    {
+        if (_workflowRouter is not null && table.TableName is not null)
+        {
+            var resolution = await _workflowRouter.ResolveForTableAsync(tenant, table, ct).ConfigureAwait(false);
+            return resolution is { Mode: ConsentWorkflowMode.External, ExternalSystemId: { } systemId }
+                ? (ConsentWorkflowMode.External, systemId)
+                : (ConsentWorkflowMode.Internal, null);
+        }
+
+        return await ResolveTenantOnlyWorkflowRouteAsync(tenant, ct).ConfigureAwait(false);
     }
 
     private async Task<(ConsentWorkflowMode Mode, Guid? ExternalSystemId)> ResolveTenantOnlyWorkflowRouteAsync(

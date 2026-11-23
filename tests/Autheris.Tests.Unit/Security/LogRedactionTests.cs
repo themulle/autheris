@@ -32,8 +32,13 @@ public sealed partial class LogRedactionTests
         "Justification", "Reason", "Group", "Url", "Uri", "Webhook", "Secret", "Token", "Signature", "Nonce", "Email", ".Message"
     ];
 
-    [GeneratedRegex(@"\b_?logger\??\.Log(?:Trace|Debug|Information|Warning|Error|Critical)\((?<args>.*?)\);", RegexOptions.Singleline)]
-    private static partial Regex LogCall();
+    // Every ILogger / ILogger<T> field, parameter or local of a file: the receiver names are resolved per file.
+    [GeneratedRegex(@"\bILogger(?:<[^>]+>)?\??\s+(?<name>@?[A-Za-z_]\w*)")]
+    private static partial Regex LoggerDeclaration();
+
+    // Source-generated logging methods: the parameter list is the argument surface.
+    [GeneratedRegex(@"\[LoggerMessage\b[^\]]*\][^;{]*?\((?<args>[^)]*)\)\s*;", RegexOptions.Singleline)]
+    private static partial Regex LoggerMessageMethod();
 
     [GeneratedRegex("\"(?:[^\"\\\\]|\\\\.)*\"")]
     private static partial Regex StringLiteral();
@@ -53,11 +58,10 @@ public sealed partial class LogRedactionTests
         var callsSeen = 0;
         foreach (var file in files)
         {
-            foreach (Match call in LogCall().Matches(File.ReadAllText(file)))
+            var text = File.ReadAllText(file);
+            foreach (var arguments in LogArguments(text))
             {
                 callsSeen++;
-                // The message template is free text; only the arguments are inspected.
-                var arguments = StringLiteral().Replace(call.Groups["args"].Value, "\"\"");
                 foreach (var word in Forbidden)
                 {
                     if (arguments.Contains(word, StringComparison.OrdinalIgnoreCase))
@@ -70,6 +74,59 @@ public sealed partial class LogRedactionTests
 
         callsSeen.ShouldBeGreaterThan(0, "The scan must see the logger calls of the scanned services.");
         violations.ShouldBeEmpty();
+    }
+
+    /// <summary>The argument text (string literals blanked: the message template is free text) of every logger call and generated logging method of a file.</summary>
+    private static IEnumerable<string> LogArguments(string text)
+    {
+        var names = LoggerDeclaration().Matches(text).Select(m => m.Groups["name"].Value.TrimStart('@')).Distinct(StringComparer.Ordinal).ToArray();
+        if (names.Length > 0)
+        {
+            var callPattern = new Regex(
+                @"\b(?:" + string.Join('|', names.Select(Regex.Escape)) + @")\??\.Log\w*\(",
+                RegexOptions.CultureInvariant);
+            foreach (Match call in callPattern.Matches(text))
+            {
+                yield return StringLiteral().Replace(BalancedArguments(text, call.Index + call.Length), "\"\"");
+            }
+        }
+
+        foreach (Match method in LoggerMessageMethod().Matches(text))
+        {
+            yield return StringLiteral().Replace(method.Groups["args"].Value, "\"\"");
+        }
+    }
+
+    // text from just after an opening parenthesis up to its matching closing one (string literals skipped)
+    private static string BalancedArguments(string text, int start)
+    {
+        var depth = 1;
+        for (var i = start; i < text.Length; i++)
+        {
+            switch (text[i])
+            {
+                case '"':
+                    i++;
+                    while (i < text.Length && text[i] != '"')
+                    {
+                        i += text[i] == '\\' ? 2 : 1;
+                    }
+
+                    break;
+                case '(':
+                    depth++;
+                    break;
+                case ')':
+                    if (--depth == 0)
+                    {
+                        return text[start..i];
+                    }
+
+                    break;
+            }
+        }
+
+        return text[start..];
     }
 
     private static string FindRepoRoot()

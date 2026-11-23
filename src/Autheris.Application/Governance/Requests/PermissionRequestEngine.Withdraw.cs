@@ -41,7 +41,18 @@ public sealed partial class PermissionRequestEngine
         // (fail closed). Should the withdrawal itself then lose a race, the failure is audited as well.
         await RecordWithdrawAuditAsync(req, callerCtx, "WITHDRAWN", ct).ConfigureAwait(false);
 
-        if (!await _approvalRepository.WithdrawConsentRequestAsync(requestId, req.RequesterSid, ct).ConfigureAwait(false))
+        bool withdrawn;
+        try
+        {
+            withdrawn = await _approvalRepository.WithdrawConsentRequestAsync(requestId, req.RequesterSid, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            await RecordWithdrawAuditAsync(req, callerCtx, "WITHDRAW_FAILED", ct).ConfigureAwait(false);
+            throw;
+        }
+
+        if (!withdrawn)
         {
             await RecordWithdrawAuditAsync(req, callerCtx, "WITHDRAW_FAILED", ct).ConfigureAwait(false);
             throw new ConsentRequestException("INVALID_STATE", "The consent request could not be withdrawn.");

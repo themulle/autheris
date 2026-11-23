@@ -314,6 +314,20 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
     }
 
     [Fact]
+    public async Task AuthenticatedCaller_RejectsAnonymous_AndAcceptsAnyAuthenticatedUser()
+    {
+        await using var provider = BuildAuthorizationProvider();
+        var authz = provider.GetRequiredService<IAuthorizationService>();
+
+        var anonymous = new ClaimsPrincipal(new ClaimsIdentity());
+        (await authz.AuthorizeAsync(anonymous, null, GatewayPolicies.AuthenticatedCaller)).Succeeded.ShouldBeFalse();
+        (await authz.AuthorizeAsync(anonymous, new DefaultHttpContext { User = anonymous }, GatewayPolicies.AuthenticatedCaller)).Succeeded.ShouldBeFalse();
+
+        var user = Principal();
+        (await authz.AuthorizeAsync(user, new DefaultHttpContext { User = user }, GatewayPolicies.AuthenticatedCaller)).Succeeded.ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task ProductAccess_BlocksSyncOnlyCallers_AndAllowsOwnersAdminsAndMixedAdminSync()
     {
         await using var provider = BuildAuthorizationProvider();

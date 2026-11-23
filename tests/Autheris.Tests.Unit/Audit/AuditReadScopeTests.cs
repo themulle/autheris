@@ -58,7 +58,7 @@ public sealed class AuditReadScopeTests
     private static AuditReadService Service(InMemoryAuditLogRepository repo, int? maxPageSize = null) => new(
         repo,
         new Tables("default.sales.orders", "default.hr.salaries"),
-        new Snapshots(t => t.Schema == "sales" ? OwnContainer : ForeignContainer),
+        new Domains((OwnContainer.Id, true, ["default.sales.orders"]), (ForeignContainer.Id, true, ["default.hr.salaries"])),
         new Capabilities(OwnContainer),
         maxPageSize is null ? null : Options.Create(new AccessPolicyOptions { MaxPageSize = maxPageSize.Value }));
 
@@ -94,11 +94,64 @@ public sealed class AuditReadScopeTests
     [Fact]
     public async Task Caller_without_ownership_is_refused()
     {
+        var tables = new Tables("default.sales.orders");
         var service = new AuditReadService(
             Repo(),
-            new Tables("default.sales.orders"),
-            new Snapshots(_ => ForeignContainer),
+            tables,
+            new Domains((ForeignContainer.Id, true, ["default.sales.orders"])),
             new Capabilities(OwnContainer));
+
+        (await service.ReadAsync(Request(tenantWide: false))).Outcome.ShouldBe(AuditReadOutcome.Forbidden);
+        tables.IdLookups.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Owner_of_nothing_is_refused_without_any_table_lookup()
+    {
+        var tables = new Tables("default.hr.salaries");
+        var domains = new Domains((ForeignContainer.Id, true, ["default.hr.salaries"]), (Guid.NewGuid(), false, ["default.x.y"]));
+        var service = new AuditReadService(Repo(), tables, domains, new Capabilities(OwnContainer));
+
+        (await service.ReadAsync(Request(tenantWide: false))).Outcome.ShouldBe(AuditReadOutcome.Forbidden);
+
+        tables.IdLookups.ShouldBe(0);
+        domains.TableListCalls.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Owner_enumerates_only_the_tables_of_owned_containers()
+    {
+        var tables = new Tables("default.sales.orders", "default.hr.salaries", "default.hr.bonus");
+        var domains = new Domains((OwnContainer.Id, true, ["default.sales.orders"]), (ForeignContainer.Id, true, ["default.hr.salaries", "default.hr.bonus"]));
+        var service = new AuditReadService(Repo(), tables, domains, new Capabilities(OwnContainer));
+
+        var result = await service.ReadAsync(Request(tenantWide: false));
+
+        result.Outcome.ShouldBe(AuditReadOutcome.Ok);
+        result.ScopeTruncated.ShouldBeFalse();
+        tables.IdLookups.ShouldBe(1);
+        domains.TableListCalls.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Oversized_ownership_is_cut_deterministically_and_flagged()
+    {
+        var names = Enumerable.Range(0, AuditReadService.MaxScopedObjects + 5).Select(i => $"default.big.t{i:D5}").ToArray();
+        var service = new AuditReadService(Repo(), new Tables(names), new Domains((OwnContainer.Id, true, names)), new Capabilities(OwnContainer));
+
+        var first = await service.ReadAsync(Request(tenantWide: false));
+        var second = await service.ReadAsync(Request(tenantWide: false));
+
+        first.Outcome.ShouldBe(AuditReadOutcome.Ok);
+        first.ScopeTruncated.ShouldBeTrue();
+        second.ScopeTruncated.ShouldBeTrue();
+        (await Service(Repo()).ReadAsync(Request(tenantWide: false))).ScopeTruncated.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Owner_read_with_failing_domain_store_is_refused()
+    {
+        var service = new AuditReadService(Repo(), new Tables(), new Domains(throwOnList: true), new Capabilities(OwnContainer));
 
         (await service.ReadAsync(Request(tenantWide: false))).Outcome.ShouldBe(AuditReadOutcome.Forbidden);
     }
@@ -191,16 +244,26 @@ public sealed class AuditReadScopeTests
     }
 }
 
+file static class TableIds
+{
+    public static Guid For(string name) => new(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(name)).AsSpan(0, 16));
+}
+
 file sealed class Tables(params string[] names) : ITableMetadataRepository
 {
+    public int IdLookups { get; private set; }
+
     public Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult<TableMetadata?>(null);
 
     public Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default) =>
-        Task.FromResult<IReadOnlyList<TableMetadata>>(names.Select(n =>
-        {
-            var id = TableIdentifier.Parse(n);
-            return new TableMetadata { Identifier = id, Table = new Table { Id = Guid.NewGuid(), SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName } };
-        }).ToList());
+        Task.FromResult<IReadOnlyList<TableMetadata>>([]);
+
+    public Task<TableIdentifier?> GetActiveTableIdentifierByIdAsync(Guid tableId, CancellationToken ct = default)
+    {
+        IdLookups++;
+        var name = names.FirstOrDefault(n => TableIds.For(n) == tableId);
+        return Task.FromResult<TableIdentifier?>(name is null ? null : TableIdentifier.Parse(name));
+    }
 
     public Task<TableMetadata> UpsertTableMetadataAsync(TableMetadata metadata, CancellationToken ct = default) => Task.FromResult(metadata);
 
@@ -212,17 +275,52 @@ file sealed class Tables(params string[] names) : ITableMetadataRepository
         CancellationToken ct = default) => Task.FromResult<TableKeyDefinitionChange?>(null);
 }
 
-file sealed class Snapshots(Func<TableIdentifier, ContainerRef> container) : IProtectionSnapshotProvider
+file sealed class Domains : IGovernanceDomainRepository
 {
-    public ValueTask<EffectiveProtection> GetAsync(TenantId tenant, TableIdentifier table, CancellationToken ct = default) =>
-        ValueTask.FromResult(new EffectiveProtection(
-            container(table),
-            new Sid("S-1-5-21-OWNERS"),
-            ProtectionClass.Internal,
-            ProtectionClass.Internal,
-            null,
-            new Dictionary<string, ColumnProtection>(),
-            CatalogVisibilityMode.Open));
+    private readonly List<(Guid Id, bool HasOwner, string[] Tables)> _domains;
+    private readonly bool _throwOnList;
+
+    public Domains(params (Guid Id, bool HasOwner, string[] Tables)[] domains)
+    {
+        _domains = [.. domains];
+    }
+
+    public Domains(bool throwOnList)
+    {
+        _domains = [];
+        _throwOnList = throwOnList;
+    }
+
+    public int TableListCalls { get; private set; }
+
+    public Task<IReadOnlyList<GovernanceDomain>> ListAsync(TenantId tenant, int limit = 100, int offset = 0, CancellationToken ct = default)
+    {
+        if (_throwOnList)
+        {
+            throw new InvalidOperationException("store down");
+        }
+
+        var now = DateTimeOffset.UnixEpoch;
+        return Task.FromResult<IReadOnlyList<GovernanceDomain>>(_domains.Skip(offset).Take(limit).Select(d => new GovernanceDomain(
+            d.Id, tenant, "d", null, null, d.HasOwner ? new Sid("S-1-5-21-OWNERS") : (Sid?)null, ProtectionClass.Internal,
+            CatalogVisibilityMode.Open, false, 1, now, now)).ToList());
+    }
+
+    public Task<IReadOnlyList<Guid>> ListDomainTableIdsAsync(TenantId tenant, Guid domainId, int limit, CancellationToken ct = default)
+    {
+        TableListCalls++;
+        return Task.FromResult<IReadOnlyList<Guid>>(_domains.Where(d => d.Id == domainId).SelectMany(d => d.Tables).Order(StringComparer.Ordinal).Take(limit).Select(TableIds.For).ToList());
+    }
+
+    public Task<GovernanceDomain?> GetAsync(TenantId tenant, Guid domainId, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<GovernanceDomainUpsertResult> UpsertAsync(GovernanceDomain domain, int expectedVersion, Sid actor, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<bool> DeleteAsync(TenantId tenant, Guid domainId, int expectedVersion, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<GovernanceDomain> EnsureUnassignedAsync(TenantId tenant, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task AssignTablesAsync(TenantId tenant, Guid domainId, IReadOnlyList<Guid> tableIds, Sid actor, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<(ObjectProtection? Table, IReadOnlyDictionary<string, ObjectProtection> Columns)> GetProtectionAsync(TenantId tenant, Guid tableId, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task SetProtectionAsync(TenantId tenant, Guid tableId, string column, ObjectProtection protection, Sid actor, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task SetTableProtectionAsync(TenantId tenant, Guid tableId, ObjectProtection protection, IReadOnlyList<string>? clearColumns, Sid actor, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<ContainerDefaults> GetContainerForTableAsync(TenantId tenant, Guid tableId, CancellationToken ct = default) => throw new NotSupportedException();
 }
 
 file sealed class Capabilities(ContainerRef ownedContainer) : IGovernanceCapabilities

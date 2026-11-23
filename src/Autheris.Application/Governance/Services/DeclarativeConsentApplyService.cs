@@ -153,7 +153,7 @@ public sealed partial class DeclarativeConsentApplyService(
         HashSet<Guid> PrunedIds,
         List<(string Id, DatasetCatalogEdit Edit)> DatasetEdits,
         int SkippedDatasets,
-        bool GrantPolicyChecked = true);
+        int PolicyEvaluatedGrants);
 
     private async Task<BuildResult> BuildAsync(
         ClaimsPrincipal caller,
@@ -182,6 +182,7 @@ public sealed partial class DeclarativeConsentApplyService(
         int unchanged = 0;
         int revoked = 0;
         int updated = 0;
+        var policyEvaluatedGrants = 0;
         var details = new List<string>();
 
         var hasDatasets = manifest.Datasets is { Count: > 0 };
@@ -201,7 +202,7 @@ public sealed partial class DeclarativeConsentApplyService(
                 actorSid,
                 ComputeStateHash(stateParts),
                 manifest.Version,
-                [], [], [], [], [], [], 0);
+                [], [], [], [], [], [], 0, 0);
         }
 
         var policies = manifest.Policies ?? [];
@@ -347,6 +348,7 @@ public sealed partial class DeclarativeConsentApplyService(
                     Justification: description,
                     Effect: effect));
                 GrantPolicyViolationException.ThrowIfDenied(decision);
+                policyEvaluatedGrants++;
 
                 // The manifest activates the consent immediately and carries no approvals, so an Allow on a sensitive table or with a
                 // Clear column rule (or any class the policy marks as four-eyes) is refused here (also in dry-run) and must use the consent
@@ -675,7 +677,8 @@ public sealed partial class DeclarativeConsentApplyService(
             auditEntries,
             prunedIdSet,
             datasetEdits,
-            skippedDatasets);
+            skippedDatasets,
+            policyEvaluatedGrants);
     }
 
     private static string ComputeStateHash(List<string> parts)
@@ -687,9 +690,9 @@ public sealed partial class DeclarativeConsentApplyService(
 
     private async Task CommitAsync(BuildResult build, ClaimsPrincipal caller, CancellationToken ct)
     {
-        if (!build.GrantPolicyChecked)
+        if (build.CreateList.Count > build.PolicyEvaluatedGrants)
         {
-            throw new InvalidOperationException("A declarative plan is written only after every grant was evaluated by the grant policy.");
+            throw new InvalidOperationException("A declarative plan is written only after every created grant was evaluated by the IGrantPolicy.");
         }
 
         var (revokeIds, createList, descriptionUpdates, auditEntries, prunedIdSet) =

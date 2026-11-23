@@ -95,13 +95,8 @@ public static partial class GovernanceEndpoints
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
 
-        var services = context.RequestServices;
-        var reader = new AuditReadService(
-            auditRepository,
-            services.GetService<ITableMetadataRepository>(),
-            services.GetService<IProtectionSnapshotProvider>(),
-            services.GetService<IGovernanceCapabilities>(),
-            services.GetService<Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AccessPolicyOptions>>());
+        // without the registered service only the tenant-wide path works; an owner scope then fails closed (403)
+        var reader = context.RequestServices.GetService<AuditReadService>() ?? new AuditReadService(auditRepository);
 
         var result = await reader.ReadAsync(
             new AuditReadRequest(caller, effectiveTenant, tenantWide, targetTable, actor, since, view, cursor, pageSize),
@@ -136,7 +131,8 @@ public static partial class GovernanceEndpoints
                 tenantId = e.TenantId.Value
             }),
             nextCursor = result.NextCursor,
-            pageSize = result.PageSize
+            pageSize = result.PageSize,
+            scopeTruncated = result.ScopeTruncated
         });
     }
 

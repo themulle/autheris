@@ -75,6 +75,9 @@ public static partial class GatewayGovernanceServiceExtensions
             .ValidateOnStart();
         Autheris.Application.Governance.Grants.IndividualGrantServiceCollectionExtensions.AddIndividualGrantPolicy(services);
         services.AddSingleton<Autheris.Application.Governance.Interfaces.IDeclarativeConsentApplyService, Autheris.Application.Governance.Services.DeclarativeConsentApplyService>();
+        services.AddSingleton<Autheris.Application.Governance.Interfaces.IDeclarativeManifestPlanner>(sp =>
+            (Autheris.Application.Governance.Interfaces.IDeclarativeManifestPlanner)sp.GetRequiredService<Autheris.Application.Governance.Interfaces.IDeclarativeConsentApplyService>());
+        services.AddScoped<Autheris.Application.Audit.AuditReadService>();
     }
 
     private static void AddTriageAndContracts(IServiceCollection services)

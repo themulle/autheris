@@ -52,6 +52,7 @@ public sealed partial class PermissionRequestEngine : IPermissionRequestEngine
     private readonly CatalogDiscoveryOptions? _discoveryOptions;
     private readonly TimeProvider _time;
     private readonly ILogger<PermissionRequestEngine>? _logger;
+    private readonly Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter? _workflowRouter;
 
     public PermissionRequestEngine(
         IConsentApprovalRepository approvalRepository,
@@ -79,7 +80,8 @@ public sealed partial class PermissionRequestEngine : IPermissionRequestEngine
         IOptions<GatewayOptions>? gatewayOptions = null,
         IOptions<CatalogDiscoveryOptions>? discoveryOptions = null,
         TimeProvider? timeProvider = null,
-        ILogger<PermissionRequestEngine>? logger = null)
+        ILogger<PermissionRequestEngine>? logger = null,
+        Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter? workflowRouter = null)
     {
         _approvalRepository = approvalRepository ?? throw new ArgumentNullException(nameof(approvalRepository));
         _auditWriter = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
@@ -108,6 +110,7 @@ public sealed partial class PermissionRequestEngine : IPermissionRequestEngine
         _discoveryOptions = discoveryOptions?.Value;
         _time = timeProvider ?? TimeProvider.System;
         _logger = logger;
+        _workflowRouter = workflowRouter;
     }
 
     private static PermissionGrantKind MapGrantKind(ConsentRequestKind kind) => kind switch

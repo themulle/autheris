@@ -73,7 +73,7 @@ public sealed class AuditChainIntegrityMonitor : BackgroundService
         {
             bool intact = await _auditRepository.VerifyAuditHashChainAsync(ct).ConfigureAwait(false);
             Interlocked.Exchange(ref _lastCheckedUtcTicks, _time.GetUtcNow().UtcTicks);
-            Volatile.Write(ref _state, intact ? 1 : 2);
+            var wasViolated = Interlocked.Exchange(ref _state, intact ? 1 : 2) == 2;
             Volatile.Write(ref _lastRunFailed, 0);
 
             if (intact)
@@ -83,10 +83,15 @@ public sealed class AuditChainIntegrityMonitor : BackgroundService
             else
             {
                 _logger.LogCritical("AUDIT HASH CHAIN VIOLATION: the tamper-evident audit log failed verification. Investigate immediately (see operations runbook).");
-                await NotifyAsync(
-                    ViolationEventType,
-                    "The audit hash chain failed verification (chain break or tail truncation). Investigate immediately.",
-                    ct).ConfigureAwait(false);
+
+                // notify on the transition only: a violation that stays latched is not re-announced on every run
+                if (!wasViolated)
+                {
+                    await NotifyAsync(
+                        ViolationEventType,
+                        "The audit hash chain failed verification (chain break or tail truncation). Investigate immediately.",
+                        ct).ConfigureAwait(false);
+                }
             }
 
             return intact;
@@ -98,12 +103,16 @@ public sealed class AuditChainIntegrityMonitor : BackgroundService
         catch (Exception ex)
         {
             // The chain state (in particular a latched violation) is kept; only the failure of this run is recorded.
-            Volatile.Write(ref _lastRunFailed, 1);
+            var alreadyFailing = Interlocked.Exchange(ref _lastRunFailed, 1) == 1;
             _logger.LogError(ex, "Audit hash chain verification could not be completed.");
-            await NotifyAsync(
-                VerificationIncompleteEventType,
-                "The audit hash chain verification could not be completed; the integrity of the audit log is unknown.",
-                ct).ConfigureAwait(false);
+            if (!alreadyFailing)
+            {
+                await NotifyAsync(
+                    VerificationIncompleteEventType,
+                    "The audit hash chain verification could not be completed; the integrity of the audit log is unknown.",
+                    ct).ConfigureAwait(false);
+            }
+
             return false;
         }
     }

@@ -210,4 +210,39 @@ public class AuditEndpointCoverageTests : IClassFixture<AuditEndpointCoverageTes
         unreviewed.ShouldBeEmpty(
             $"FR-03 Violation: Delegated audit routes without an approved justification (add to {nameof(ApprovedDelegatedRoutes)} after review):\n{string.Join("\n", unreviewed)}");
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task No_cross_tenant_rows()
+    {
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var audit = scope.ServiceProvider.GetRequiredService<Autheris.Application.Common.Interfaces.IAuditLogRepository>();
+            foreach (var tenant in new[] { "tenant-default", "other-tenant" })
+            {
+                await audit.RecordAuditEventAsync(new Autheris.Domain.Model.AuditLogEntry
+                {
+                    TenantId = new Autheris.Domain.Common.TenantId(tenant),
+                    TargetTable = "default.sales.orders",
+                    EventType = AuditEventTypes.PermissionApproved,
+                    ActorSid = new Autheris.Domain.Common.Sid("S-1-5-21-SEED"),
+                    Decision = "ALLOW"
+                });
+            }
+        }
+
+        using var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-GOV");
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant-default");
+
+        var response = await client.GetAsync("/api/v1/governance/audit?pageSize=200");
+        response.StatusCode.ShouldBe(System.Net.HttpStatusCode.OK);
+        var items = System.Text.Json.JsonDocument.Parse(await response.Content.ReadAsStringAsync()).RootElement.GetProperty("items").EnumerateArray().ToList();
+        items.ShouldNotBeEmpty();
+        items.ShouldAllBe(i => i.GetProperty("tenantId").GetString() == "tenant-default");
+
+        // a foreign tenant bucket is not readable for a non-ClusterAdmin caller
+        (await client.GetAsync("/api/v1/governance/audit?tenant=other-tenant")).StatusCode.ShouldBe(System.Net.HttpStatusCode.Forbidden);
+    }
 }

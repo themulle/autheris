@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Security;
 
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Governance.Notifications;
@@ -52,6 +53,43 @@ public sealed class AuditChainIntegrityMonitorTests
         var message = dispatcher.Messages.ShouldHaveSingleItem();
         message.EventType.ShouldBe(AuditChainIntegrityMonitor.VerificationIncompleteEventType);
         message.Summary.ShouldNotContain("Password");
+    }
+
+    [Fact]
+    public async Task A_latched_violation_is_notified_once_and_again_after_recovery()
+    {
+        var results = new Queue<bool>([false, false, true, false]);
+        var repo = Substitute.For<IAuditLogRepository>();
+        repo.VerifyAuditHashChainAsync(Arg.Any<System.Threading.CancellationToken>()).Returns(_ => Task.FromResult(results.Dequeue()));
+        var dispatcher = new RecordingDispatcher();
+        var monitor = Monitor(repo, dispatcher);
+
+        await monitor.VerifyNowAsync();
+        await monitor.VerifyNowAsync();
+        dispatcher.Messages.Count.ShouldBe(1);
+
+        await monitor.VerifyNowAsync();
+        await monitor.VerifyNowAsync();
+        dispatcher.Messages.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task A_repeatedly_incomplete_verification_is_notified_once_until_a_run_completes()
+    {
+        var calls = 0;
+        var repo = Substitute.For<IAuditLogRepository>();
+        repo.VerifyAuditHashChainAsync(Arg.Any<System.Threading.CancellationToken>()).Returns<Task<bool>>(_ =>
+            ++calls == 3 ? Task.FromResult(true) : throw new InvalidOperationException("down"));
+        var dispatcher = new RecordingDispatcher();
+        var monitor = Monitor(repo, dispatcher);
+
+        await monitor.VerifyNowAsync();
+        await monitor.VerifyNowAsync();
+        dispatcher.Messages.Count.ShouldBe(1);
+
+        await monitor.VerifyNowAsync();
+        await monitor.VerifyNowAsync();
+        dispatcher.Messages.Count.ShouldBe(2);
     }
 
     [Fact]
