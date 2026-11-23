@@ -135,11 +135,11 @@ public sealed class ManifestIndividualGrantTests
     public async Task SEC_SC_20_GroupManifestGrants_RequireExplicitValidUntil()
     {
         await Should.ThrowAsync<GrantPolicyViolationException>(() =>
-            ApplyAsync(new DeclarativeConsentPolicy("default", "sales", "orders", "Group", "S-1-5-21-1-2-3-2002", "Allow")));
+            ApplyAsync(new DeclarativeConsentPolicy("default", "sales", "orders", "Group", "S-1-5-21-1-2-3-2002", "Allow", Description: "analytics access")));
 
         var repo = await ApplyAsync(new DeclarativeConsentPolicy(
             "default", "sales", "orders", "Group", "S-1-5-21-1-2-3-2002", "Allow",
-            ValidUntil: DateTimeOffset.UtcNow.AddDays(30)));
+            Description: "analytics access", ValidUntil: DateTimeOffset.UtcNow.AddDays(30)));
 
         var c = repo.Active(DateTimeOffset.UtcNow).ShouldHaveSingleItem();
         (c.ValidTo - c.ValidFrom).TotalDays.ShouldBe(30, 0.5);
@@ -183,11 +183,11 @@ public sealed class ManifestIndividualGrantTests
     public async Task SEC_SC_20_Manifest_DenyWithoutValidUntil_IsRejected_AndWithValidUntilStaysActive()
     {
         await Should.ThrowAsync<GrantPolicyViolationException>(() =>
-            ApplyAsync(new DeclarativeConsentPolicy("default", "sales", "orders", "User", "S-1-5-21-ALICE", "Deny", Description: "block")));
+            ApplyAsync(new DeclarativeConsentPolicy("default", "sales", "orders", "User", "S-1-5-21-ALICE", "Deny", Description: "block access to table")));
 
         var repo = await ApplyAsync(new DeclarativeConsentPolicy(
             "default", "sales", "orders", "User", "S-1-5-21-ALICE", "Deny",
-            Description: "block", ValidUntil: DateTimeOffset.UtcNow.AddDays(30)));
+            Description: "block access to table", ValidUntil: DateTimeOffset.UtcNow.AddDays(30)));
 
         var deny = repo.Active(DateTimeOffset.UtcNow.AddDays(1)).Single();
         deny.Effect.ShouldBe(ConsentEffect.Deny);

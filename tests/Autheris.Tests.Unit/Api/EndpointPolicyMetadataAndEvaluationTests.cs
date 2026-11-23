@@ -184,7 +184,7 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
         AssertProtectedRoutePolicy(endpoints, "POST", "/api/v1/profiles/{id}/assignments/approve", GatewayPolicies.GovernanceAdmin);
         AssertProtectedRoutePolicy(endpoints, "POST", "/api/v1/governance/consents/apply", GatewayPolicies.GovernanceAdmin);
         AssertProtectedRoutePolicy(endpoints, "POST", "/api/governance/consents/apply", GatewayPolicies.GovernanceAdmin);
-        AssertProtectedRoutePolicy(endpoints, "GET", "/api/v1/governance/audit", GatewayPolicies.AuditRead);
+        AssertProtectedRoutePolicy(endpoints, "GET", "/api/v1/governance/audit", GatewayPolicies.AuthenticatedCaller);
         AssertProtectedRoutePolicy(endpoints, "GET", "/api/v1/governance/grants", GatewayPolicies.AuditRead);
         AssertProtectedRoutePolicy(endpoints, "GET", "/api/governance/sunsetting/rules", GatewayPolicies.SunsettingRead);
         AssertProtectedRoutePolicy(endpoints, "POST", "/api/governance/sunsetting/rules", GatewayPolicies.ClusterAdmin);
@@ -251,7 +251,7 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
     [InlineData(GatewayPolicies.EffectiveFilterInspect, new[] { "FilterAdmin", "GovernanceAdmin", "SecurityAuditor" }, "Consumer")]
     [InlineData(GatewayPolicies.ProductSync, new[] { "DataProductSync" }, "ClusterAdmin")]
     [InlineData(GatewayPolicies.OpenApiPublish, new[] { "GovernanceAdmin", "SchemaPublisher", "TenantAdmin" }, "Consumer")]
-    [InlineData(GatewayPolicies.ProfileAdmin, new[] { "TenantAdmin", "GovernanceAdmin" }, "SecurityAuditor")]
+    [InlineData(GatewayPolicies.ProfileAdmin, new[] { "GovernanceAdmin" }, "TenantAdmin")]
     [InlineData(GatewayPolicies.ProfileRead, new[] { "TenantAdmin", "GovernanceAdmin", "SecurityAuditor" }, "Consumer")]
     [InlineData(GatewayPolicies.AuditRead, new[] { "GovernanceAdmin", "SecurityAuditor" }, "Consumer")]
     [InlineData(GatewayPolicies.SunsettingRead, new[] { "GovernanceAdmin", "SchemaPublisher", "TenantAdmin" }, "SecurityAuditor")]

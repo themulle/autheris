@@ -303,13 +303,14 @@ public sealed class DeclarativeConsentApplyPruneSecurityTests
             ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
             ValidTo = DateTimeOffset.UtcNow.AddDays(30),
             IsRevoked = false,
+            Description = "test grant justification",
             GrantSource = source
         };
 
     private static DeclarativeConsentManifest ManifestFor(params (string Table, string Grantee)[] entries) =>
         new(
             "1",
-            entries.Select(e => new DeclarativeConsentPolicy("default", "sales", e.Table, "Group", e.Grantee, "Allow", ValidUntil: DateTimeOffset.UtcNow.AddDays(30))).ToList());
+            entries.Select(e => new DeclarativeConsentPolicy("default", "sales", e.Table, "Group", e.Grantee, "Allow", Description: "test grant justification", ValidUntil: DateTimeOffset.UtcNow.AddDays(30))).ToList());
 
     private static DeclarativeConsentApplyService CreateService(
         InMemoryPruneConsentRepository repo,
@@ -329,8 +330,8 @@ public sealed class DeclarativeConsentApplyPruneSecurityTests
         var manifest = new DeclarativeConsentManifest(
             "1",
             [
-                new DeclarativeConsentPolicy("default", "sales", "orders", "Group", GroupAlpha, "Allow", ValidUntil: DateTimeOffset.UtcNow.AddDays(30)),
-                new DeclarativeConsentPolicy("default", "sales", "missing_table_is_not_a_loophole", granteeType, "analysts", "Deny", ValidUntil: DateTimeOffset.UtcNow.AddDays(30))
+                new DeclarativeConsentPolicy("default", "sales", "orders", "Group", GroupAlpha, "Allow", Description: "test grant justification", ValidUntil: DateTimeOffset.UtcNow.AddDays(30)),
+                new DeclarativeConsentPolicy("default", "sales", "missing_table_is_not_a_loophole", granteeType, "analysts", "Deny", Description: "test grant justification", ValidUntil: DateTimeOffset.UtcNow.AddDays(30))
             ]);
 
         var ex = await Should.ThrowAsync<DeclarativeManifestValidationException>(() => svc.ApplyManifestAsync(AdminPrincipal(), manifest, dryRun));

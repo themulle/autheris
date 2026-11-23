@@ -94,7 +94,7 @@ public sealed class DbtSyncCatalogRegistrationPostgreSqlTests : IClassFixture<Po
         {
           "version": "v1",
           "policies": [
-            { "domain": "warehouse", "schema": "public", "tableName": "orders", "granteeType": "Group", "granteeRef": "S-1-5-21-1-2-3-2002", "effect": "ALLOW", "validUntil": "{{validUntil}}",
+            { "domain": "warehouse", "schema": "public", "tableName": "orders", "granteeType": "Group", "granteeRef": "S-1-5-21-1-2-3-2002", "effect": "ALLOW", "description": "dbt sync integration grant", "validUntil": "{{validUntil}}",
               "columnRules": [ { "columnName": "id", "accessLevel": "CLEAR" }, { "columnName": "email", "accessLevel": "MASKED" } ] }
           ]
         }

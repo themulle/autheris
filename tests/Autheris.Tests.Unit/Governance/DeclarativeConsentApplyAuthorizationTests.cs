@@ -123,6 +123,7 @@ public sealed class DeclarativeConsentApplyAuthorizationTests
                     "Group",
                     "S-1-5-21-GROUP-1",
                     "Allow",
+                    Description: "test grant justification",
                     ValidUntil: DateTimeOffset.UtcNow.AddDays(30),
                     TenantId: policyTenant)
             ],
@@ -162,14 +163,14 @@ public sealed class DeclarativeConsentApplyAuthorizationTests
     }
 
     [Fact]
-    public async Task Apply_CanonicalClusterAdmin_IsAccepted()
+    public async Task Apply_CanonicalClusterAdmin_IsRefused_ItAdministrationNeverAppliesDirectly()
     {
         var (svc, _, consents) = CreateSut();
 
-        var result = await svc.ApplyManifestAsync(Admin("ClusterAdmin", tenant: null), SinglePolicyManifest());
+        await Should.ThrowAsync<ConsentApplyForbiddenException>(() =>
+            svc.ApplyManifestAsync(Admin("ClusterAdmin", tenant: null), SinglePolicyManifest()));
 
-        result.Applied.ShouldBe(1);
-        consents.ReplaceCalls.ShouldBe(1);
+        consents.ReplaceCalls.ShouldBe(0);
     }
 
     [Fact]

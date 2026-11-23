@@ -97,7 +97,7 @@ public static class GatewayPolicies
     public static readonly string[] EffectiveFilterInspectRoles = ["FilterAdmin", "GovernanceAdmin", "SecurityAuditor"];
     public static readonly string[] ProductSyncRoles = ["DataProductSync"];
     public static readonly string[] OpenApiPublishRoles = ["GovernanceAdmin", "SchemaPublisher", "TenantAdmin"];
-    public static readonly string[] ProfileAdminRoles = ["TenantAdmin", "GovernanceAdmin"];
+    public static readonly string[] ProfileAdminRoles = ["GovernanceAdmin"];
     public static readonly string[] ProfileReadRoles = ["TenantAdmin", "GovernanceAdmin", "SecurityAuditor"];
     public static readonly string[] SunsettingReadRoles = ["GovernanceAdmin", "SchemaPublisher", "TenantAdmin"];
     public static readonly string[] SunsettingEvaluateRoles = ["GovernanceAdmin", "SchemaPublisher", "Consumer", "TenantAdmin"];
@@ -406,7 +406,7 @@ public static class GatewayPolicies
         AddSecurityRolePolicy(options, OpenApiPublish,
             [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher, GatewayRole.TenantAdmin]);
         AddSecurityRolePolicy(options, ProfileAdmin,
-            [GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin]);
+            [GatewayRole.GovernanceAdmin]);
         AddSecurityRolePolicy(options, ProfileRead,
             [GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin, GatewayRole.SecurityAuditor]);
         AddSecurityRolePolicy(options, SunsettingRead,

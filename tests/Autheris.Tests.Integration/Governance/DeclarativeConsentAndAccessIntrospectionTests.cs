@@ -72,7 +72,7 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
                     "Allow",
                     ColumnRules: [new DeclarativeColumnRule("secret_notes", "Mask", ["Agent.Read"])],
                     RowFilters: [new DeclarativeRowFilter("tenant_id", "EQ", "string", "[\"tenant_test\"]")],
-                    ValidUntil: DateTimeOffset.UtcNow.AddDays(30)
+                    Description: "integration test grant", ValidUntil: DateTimeOffset.UtcNow.AddDays(30)
                 )
             ]);
 
@@ -124,7 +124,7 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
                     "Group",
                     "S-1-5-21-DATA-SCIENTISTS",
                     "Allow",
-                    ValidUntil: DateTimeOffset.UtcNow.AddDays(30)
+                    Description: "integration test grant", ValidUntil: DateTimeOffset.UtcNow.AddDays(30)
                 )
             ]);
 
@@ -413,6 +413,19 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
             "/api/v1/governance/consents/apply",
             new StringContent(manifestJson, Encoding.UTF8, "application/json"));
         legacyResponse.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+
+        // IT administration (ClusterAdmin, TenantAdmin) never applies a manifest directly.
+        foreach (var itRole in new[] { "ClusterAdmin", "TenantAdmin" })
+        {
+            using var itClient = host.CreateClient();
+            itClient.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-IT-1");
+            itClient.DefaultRequestHeaders.Add("X-Test-Roles", itRole);
+            itClient.DefaultRequestHeaders.Add("X-Test-Tenant", DefaultTenantCaller.Claim.Value);
+            var itResponse = await itClient.PostAsync(
+                "/api/v1/governance/consents/apply",
+                new StringContent(manifestJson, Encoding.UTF8, "application/json"));
+            itResponse.StatusCode.ShouldBe(HttpStatusCode.Forbidden, itRole);
+        }
 
         using var adminClient = host.CreateClient();
         adminClient.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-ADMIN-1");

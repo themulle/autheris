@@ -264,7 +264,7 @@ public abstract class ConsentQueryContractTestsBase : IAsyncLifetime
             new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.Role, "GovernanceAdmin"),
             new System.Security.Claims.Claim("tenant_id", TenantA.Value)
         ], "test"));
-        var policy = new DeclarativeConsentPolicy(seed.Table.Domain, seed.Table.Schema, seed.Table.TableName, "Group", "S-1-5-21-MANIFEST-GROUP", "Allow", ValidUntil: DateTimeOffset.UtcNow.AddDays(30));
+        var policy = new DeclarativeConsentPolicy(seed.Table.Domain, seed.Table.Schema, seed.Table.TableName, "Group", "S-1-5-21-MANIFEST-GROUP", "Allow", Description: "integration test grant", ValidUntil: DateTimeOffset.UtcNow.AddDays(30));
         var epochBefore = await Repo.GetTableEpochAsync(seed.Table);
 
         var first = await svc.ApplyManifestAsync(caller, new DeclarativeConsentManifest("1", [policy]));

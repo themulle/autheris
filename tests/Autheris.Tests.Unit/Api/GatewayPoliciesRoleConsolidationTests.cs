@@ -353,7 +353,7 @@ public sealed class GatewayPoliciesRoleConsolidationTests
         var tenantAdminCtx = HandlerContext(scopedTenantAdmin, "tenant-a");
         (await authz.AuthorizeAsync(scopedTenantAdmin, tenantAdminCtx, GatewayPolicies.ItAdmin)).Succeeded.ShouldBeTrue();
         (await authz.AuthorizeAsync(scopedTenantAdmin, tenantAdminCtx, GatewayPolicies.UsageAdmin)).Succeeded.ShouldBeTrue();
-        (await authz.AuthorizeAsync(scopedTenantAdmin, tenantAdminCtx, GatewayPolicies.ProfileAdmin)).Succeeded.ShouldBeTrue();
+        (await authz.AuthorizeAsync(scopedTenantAdmin, tenantAdminCtx, GatewayPolicies.ProfileAdmin)).Succeeded.ShouldBeFalse();
         (await authz.AuthorizeAsync(scopedTenantAdmin, tenantAdminCtx, GatewayPolicies.AuditRead)).Succeeded.ShouldBeTrue();
         (await authz.AuthorizeAsync(scopedTenantAdmin, tenantAdminCtx, GatewayPolicies.GovernanceAdmin)).Succeeded.ShouldBeFalse();
         GatewayPolicies.HasAnyRequestRole(tenantAdminCtx, GatewayPolicies.UsageAdminRoles).ShouldBeTrue();

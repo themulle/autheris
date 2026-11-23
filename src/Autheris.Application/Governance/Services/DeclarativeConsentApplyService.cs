@@ -12,6 +12,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Interfaces;
+using Autheris.Application.Governance.Requests;
 using Autheris.Application.Governance.Validation;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Security;
@@ -24,7 +25,7 @@ using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Microsoft.Extensions.Options;
 
-public sealed class DeclarativeConsentApplyService(
+public sealed partial class DeclarativeConsentApplyService(
     ITableMetadataRepository metadataRepository,
     IConsentRepository consentRepository,
     IAuditLogRepository auditLogRepository,
@@ -33,7 +34,7 @@ public sealed class DeclarativeConsentApplyService(
     IOptions<GovernanceTextOptions>? textOptions = null,
     IGatewayRoleEvaluator? roleEvaluator = null,
     IDataOwnershipRepository? dataOwnershipRepository = null,
-    IGrantValidityPolicy? grantValidityPolicy = null) : IDeclarativeConsentApplyService
+    IGrantValidityPolicy? grantValidityPolicy = null) : IDeclarativeConsentApplyService, IDeclarativeManifestPlanner
 {
     public const int MaxDeclarativePruneCount = 10_000;
     public const string PrunedByManifestReason = "PRUNED_BY_MANIFEST";
@@ -47,7 +48,8 @@ public sealed class DeclarativeConsentApplyService(
 
     private static readonly object GranteeLocksGate = new();
     private static readonly Dictionary<string, KeyedLockEntry> GranteeLocks = new(StringComparer.Ordinal);
-    private static readonly GatewayRole[] RequiredApplyRoles = [GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin];
+    // Declarative grants are authored by Data Governance only; IT administration never applies a manifest directly.
+    private static readonly GatewayRole[] RequiredApplyRoles = [GatewayRole.GovernanceAdmin];
 
     // the policy is stateless; without an injected instance the test-default validity maxima apply (never "no policy").
     // Kept for constructor/DI compatibility: the APPLIED audit entries are written by ReplaceConsentsAsync inside its transaction, never separately.
@@ -72,8 +74,98 @@ public sealed class DeclarativeConsentApplyService(
         ArgumentNullException.ThrowIfNull(caller);
         ArgumentNullException.ThrowIfNull(manifest);
 
+        AuthorizeCaller(caller, manifest, out _, out var tenantId);
+        await using var granteeLocks = await AcquireGranteeLocksAsync(dryRun ? [] : LockKeys(manifest, tenantId), ct).ConfigureAwait(false);
+
+        var build = await BuildAsync(caller, manifest, dryRun, callerContext, pruneMode, ct).ConfigureAwait(false);
+        if (!dryRun)
+        {
+            await CommitAsync(build, caller, ct).ConfigureAwait(false);
+        }
+
+        return build.Result;
+    }
+
+    /// <inheritdoc />
+    public async Task<DeclarativeManifestPlan> ValidateAndDiffAsync(
+        ClaimsPrincipal caller,
+        DeclarativeConsentManifest manifest,
+        SecurityPrincipalContext? callerContext = null,
+        DeclarativePruneMode pruneMode = DeclarativePruneMode.False,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(caller);
+        ArgumentNullException.ThrowIfNull(manifest);
+
+        // Side-effect free: nothing is written, no lock is taken, no audit entry is produced.
+        var build = await BuildAsync(caller, manifest, dryRun: true, callerContext, pruneMode, ct).ConfigureAwait(false);
+        return new DeclarativeManifestPlan(manifest, pruneMode, callerContext, build.TenantId, build.ActorSid, build.StateHash, build.Result);
+    }
+
+    /// <inheritdoc />
+    public async Task<DeclarativeApplyResult> ApplyAsync(
+        DeclarativeManifestPlan plan,
+        ClaimsPrincipal caller,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(plan);
+        ArgumentNullException.ThrowIfNull(caller);
+
+        AuthorizeCaller(caller, plan.Manifest, out var actorSid, out var tenantId);
+        if (tenantId != plan.TenantId || actorSid != plan.ActorSid)
+        {
+            throw new ConsentApplyForbiddenException();
+        }
+
+        await using var granteeLocks = await AcquireGranteeLocksAsync(LockKeys(plan.Manifest, tenantId), ct).ConfigureAwait(false);
+
+        // The plan is re-validated against the current state under the grantee locks: a grant set that changed since the diff makes the plan stale.
+        var build = await BuildAsync(caller, plan.Manifest, dryRun: false, plan.CallerContext, plan.PruneMode, ct).ConfigureAwait(false);
+        if (!string.Equals(build.StateHash, plan.StateHash, StringComparison.Ordinal))
+        {
+            throw new DeclarativePlanStaleException();
+        }
+
+        await CommitAsync(build, caller, ct).ConfigureAwait(false);
+        return build.Result;
+    }
+
+    private static string[] LockKeys(DeclarativeConsentManifest manifest, TenantId tenantId) =>
+        manifest.Policies is { Count: > 0 } policies
+            ? policies
+                .Where(p => !string.IsNullOrWhiteSpace(p.GranteeRef))
+                .Select(p => $"{tenantId.Value.ToUpperInvariant()}|{p.GranteeRef.Trim().ToUpperInvariant()}")
+                .Distinct(StringComparer.Ordinal)
+                .OrderBy(k => k, StringComparer.Ordinal)
+                .ToArray()
+            : [];
+
+    private sealed record BuildResult(
+        DeclarativeApplyResult Result,
+        TenantId TenantId,
+        Sid ActorSid,
+        string StateHash,
+        string ManifestVersion,
+        List<Guid> RevokeIds,
+        List<Consent> CreateList,
+        List<ConsentDescriptionUpdate> DescriptionUpdates,
+        List<AuditLogEntry> AuditEntries,
+        HashSet<Guid> PrunedIds,
+        List<(string Id, DatasetCatalogEdit Edit)> DatasetEdits,
+        int SkippedDatasets,
+        bool GrantPolicyChecked = true);
+
+    private async Task<BuildResult> BuildAsync(
+        ClaimsPrincipal caller,
+        DeclarativeConsentManifest manifest,
+        bool dryRun,
+        SecurityPrincipalContext? callerContext,
+        DeclarativePruneMode pruneMode,
+        CancellationToken ct)
+    {
         AuthorizeCaller(caller, manifest, out var actorSid, out var tenantId);
         var now = DateTimeOffset.UtcNow;
+        var stateParts = new List<string>();
 
         // SR-M-10: the self-grant check compares against every identifier form of the actor and the groups and roles it holds.
         var actorIdentifiers = ActorIdentifiers.Collect(caller, actorSid, callerContext);
@@ -95,15 +187,21 @@ public sealed class DeclarativeConsentApplyService(
         var hasDatasets = manifest.Datasets is { Count: > 0 };
         if ((manifest.Policies == null || manifest.Policies.Count == 0) && !hasDatasets)
         {
-            return new DeclarativeApplyResult(
-                0,
-                0,
-                0,
-                0,
-                dryRun,
-                ["Empty manifest; 0 policies processed."],
-                PrunedCount: 0,
-                Pruned: pruneMode != DeclarativePruneMode.False ? Array.Empty<DeclarativePrunedConsentDto>() : null);
+            return new BuildResult(
+                new DeclarativeApplyResult(
+                    0,
+                    0,
+                    0,
+                    0,
+                    dryRun,
+                    ["Empty manifest; 0 policies processed."],
+                    PrunedCount: 0,
+                    Pruned: pruneMode != DeclarativePruneMode.False ? Array.Empty<DeclarativePrunedConsentDto>() : null),
+                tenantId,
+                actorSid,
+                ComputeStateHash(stateParts),
+                manifest.Version,
+                [], [], [], [], [], [], 0);
         }
 
         var policies = manifest.Policies ?? [];
@@ -134,13 +232,20 @@ public sealed class DeclarativeConsentApplyService(
         var descriptions = new string?[policies.Count];
         for (var i = 0; i < policies.Count; i++)
         {
+            // Every entry carries a business justification (no fallback text): normalised as untrusted text and at least as long as the
+            // justification of a request, so a manifest grant is never less justified than a requested one.
             var check = UntrustedText.Normalize(policies[i].Description, _descriptionMaxLength, allowLineFeed: false);
-            if (!check.IsValid)
+            if (!check.IsValid
+                || string.IsNullOrWhiteSpace(check.Value)
+                || !JustificationPolicy.TryValidate(check.Value, out _, out _))
             {
                 throw new DeclarativeManifestValidationException(i);
             }
 
             descriptions[i] = check.Value;
+
+            // The end date is mandatory and bounded for every entry, also for tables that are skipped later, so the whole manifest is refused.
+            _grantValidityPolicy.ValidateDeclarativeValidTo(policies[i].ValidUntil, now);
 
             // A blank scope entry is stored as no scope and would turn a scope rule into a base rule for every scope (fail closed).
             foreach (var rule in policies[i].ColumnRules ?? [])
@@ -151,17 +256,6 @@ public sealed class DeclarativeConsentApplyService(
                 }
             }
         }
-
-        var lockKeys = !dryRun && policies.Count > 0
-            ? policies
-                .Where(p => !string.IsNullOrWhiteSpace(p.GranteeRef))
-                .Select(p => $"{tenantId.Value.ToUpperInvariant()}|{p.GranteeRef.Trim().ToUpperInvariant()}")
-                .Distinct(StringComparer.Ordinal)
-                .OrderBy(k => k, StringComparer.Ordinal)
-                .ToArray()
-            : [];
-
-        await using var granteeLocks = await AcquireGranteeLocksAsync(lockKeys, ct).ConfigureAwait(false);
 
         var revokeIds = new List<Guid>();
         var descriptionUpdates = new List<ConsentDescriptionUpdate>();
@@ -235,12 +329,12 @@ public sealed class DeclarativeConsentApplyService(
                     "Group grant refused: the group memberships of the actor could not be resolved completely (group resolution degraded), so a self-grant through a group cannot be ruled out. Use a token with a resolvable group list or the consent request/approval workflow."));
             }
 
-            _grantValidityPolicy.ValidateDeclarativeValidTo(policy.ValidUntil, now);
             var validTo = policy.ValidUntil!.Value;
-            if (individual)
             {
                 var sensitivity = GrantClassifier.Classify([metadata]);
                 var hasClearColumnRule = HasClearColumnRule(policy);
+
+                // The same class rules and configured maxima as for requests apply to every grantee type (group grants included).
                 var decision = _grantPolicy.Evaluate(new GrantRequest(
                     granteeType,
                     policy.GranteeRef,
@@ -250,7 +344,7 @@ public sealed class DeclarativeConsentApplyService(
                     sensitivity,
                     hasClearColumnRule ? MaskingPolicyMode.Unmasked : MaskingPolicyMode.Default,
                     Requester: actorSid.Value,
-                    Justification: description ?? "GitOps manifest",
+                    Justification: description,
                     Effect: effect));
                 GrantPolicyViolationException.ThrowIfDenied(decision);
 
@@ -258,7 +352,7 @@ public sealed class DeclarativeConsentApplyService(
                 // Clear column rule (or any class the policy marks as four-eyes) is refused here (also in dry-run) and must use the consent
                 // request/approval workflow. Sensitivity and Clear are checked directly because the policy classifies every service
                 // principal as GrantClass.ServicePrincipal, which carries no four-eyes flag. The manifest never sets a privileged right.
-                if (effect == ConsentEffect.Allow &&
+                if (individual && effect == ConsentEffect.Allow &&
                     (sensitivity == GrantSensitivity.Sensitive || hasClearColumnRule || decision.RequiresFourEyes))
                 {
                     throw new GrantPolicyViolationException(GrantDecision.Deny(
@@ -276,6 +370,11 @@ public sealed class DeclarativeConsentApplyService(
             var activeExisting = existingConsents
                 .Where(c => c.IsActive(now) && c.TenantId == tenantId && !c.IsPatternGrant && c.TableIdentifier.Equals(tableId) && MatchesGrantee(c, granteeType, granteeSid))
                 .ToList();
+
+            foreach (var existing in activeExisting)
+            {
+                stateParts.Add($"E|{existing.Id}|{existing.ValidTo.UtcTicks}");
+            }
 
             // Issue #116: scope-only column rules never grant access (fail closed); surface that as a non-blocking warning.
             if (policy.ColumnRules != null)
@@ -301,22 +400,19 @@ public sealed class DeclarativeConsentApplyService(
                 if (!string.Equals(storedNormalized, description, StringComparison.Ordinal))
                 {
                     updated++;
-                    if (!dryRun)
+                    descriptionUpdates.Add(new ConsentDescriptionUpdate(matchingConsent.Id, tenantId, description));
+                    var (length, prefix) = ConsentDescriptionText.Fingerprint(description);
+                    auditEntries.Add(new AuditLogEntry
                     {
-                        descriptionUpdates.Add(new ConsentDescriptionUpdate(matchingConsent.Id, tenantId, description));
-                        var (length, prefix) = ConsentDescriptionText.Fingerprint(description);
-                        auditEntries.Add(new AuditLogEntry
-                        {
-                            Id = Guid.NewGuid(),
-                            OccurredAt = now,
-                            EventType = "GITOPS_CONSENT_APPLY",
-                            ActorSid = actorSid,
-                            TargetTable = tableId.ToString(),
-                            Decision = "APPLIED",
-                            DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { Version = manifest.Version, Update = "description", DescriptionLength = length, DescriptionSha256Prefix = prefix }),
-                            TenantId = tenantId
-                        });
-                    }
+                        Id = Guid.NewGuid(),
+                        OccurredAt = now,
+                        EventType = "GITOPS_CONSENT_APPLY",
+                        ActorSid = actorSid,
+                        TargetTable = tableId.ToString(),
+                        Decision = "APPLIED",
+                        DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { Version = manifest.Version, Update = "description", DescriptionLength = length, DescriptionSha256Prefix = prefix }),
+                        TenantId = tenantId
+                    });
 
                     details.Add($"{(dryRun ? "[DryRun] Would update" : "Updated")} description for '{tableId}' -> '{policy.GranteeRef}'.");
                     continue;
@@ -329,92 +425,89 @@ public sealed class DeclarativeConsentApplyService(
 
             // Needs apply / change
             revoked += activeExisting.Count;
-            if (!dryRun)
+            revokeIds.AddRange(activeExisting.Select(c => c.Id));
+
+            // Construct new Consent
+            var consentId = Guid.NewGuid();
+            var newConsent = new Consent
             {
-                revokeIds.AddRange(activeExisting.Select(c => c.Id));
+                Id = consentId,
+                TableId = metadata.Table.Id,
+                TableIdentifier = tableId,
+                TenantId = tenantId,
+                Effect = effect,
+                GranteeType = granteeType,
+                GranteeSid = granteeSid,
+                Description = description,
+                ValidFrom = now,
+                ValidTo = validTo,
+                IsRevoked = false,
+                GrantSource = ConsentGrantSource.Declarative
+            };
 
-                // Construct new Consent
-                var consentId = Guid.NewGuid();
-                var newConsent = new Consent
+            // Build column rules
+            if (policy.ColumnRules != null && policy.ColumnRules.Count > 0)
+            {
+                var colRules = new List<ConsentColumnRule>();
+                foreach (var cr in policy.ColumnRules)
                 {
-                    Id = consentId,
-                    TableId = metadata.Table.Id,
-                    TableIdentifier = tableId,
-                    TenantId = tenantId,
-                    Effect = effect,
-                    GranteeType = granteeType,
-                    GranteeSid = granteeSid,
-                    Description = description,
-                    ValidFrom = now,
-                    ValidTo = validTo,
-                    IsRevoked = false,
-                    GrantSource = ConsentGrantSource.Declarative
-                };
-
-                // Build column rules
-                if (policy.ColumnRules != null && policy.ColumnRules.Count > 0)
-                {
-                    var colRules = new List<ConsentColumnRule>();
-                    foreach (var cr in policy.ColumnRules)
+                    var colMeta = metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, cr.ColumnName, StringComparison.OrdinalIgnoreCase));
+                    colRules.Add(new ConsentColumnRule
                     {
-                        var colMeta = metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, cr.ColumnName, StringComparison.OrdinalIgnoreCase));
-                        colRules.Add(new ConsentColumnRule
-                        {
-                            Id = Guid.NewGuid(),
-                            ConsentId = consentId,
-                            TableColumnId = colMeta?.Id ?? Guid.NewGuid(),
-                            ColumnName = cr.ColumnName,
-                            AccessLevel = ParseAccessLevel(cr.AccessLevel),
-                            ApplicableScopes = cr.ApplicableScopes ?? Array.Empty<string>()
-                        });
-                    }
-                    newConsent.ColumnRules = colRules;
+                        Id = Guid.NewGuid(),
+                        ConsentId = consentId,
+                        TableColumnId = colMeta?.Id ?? Guid.NewGuid(),
+                        ColumnName = cr.ColumnName,
+                        AccessLevel = ParseAccessLevel(cr.AccessLevel),
+                        ApplicableScopes = cr.ApplicableScopes ?? Array.Empty<string>()
+                    });
                 }
-
-                // Build row filters
-                if (policy.RowFilters != null && policy.RowFilters.Count > 0)
-                {
-                    var rowFilters = new List<ConsentRowFilter>();
-                    foreach (var rf in policy.RowFilters)
-                    {
-                        var colMeta = metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, rf.ColumnName, StringComparison.OrdinalIgnoreCase));
-                        rowFilters.Add(new ConsentRowFilter
-                        {
-                            Id = Guid.NewGuid(),
-                            ConsentId = consentId,
-                            FilterGroup = 0,
-                            TableColumnId = colMeta?.Id ?? Guid.NewGuid(),
-                            ColumnName = rf.ColumnName,
-                            Operator = rf.Operator,
-                            ValueType = rf.ValueType,
-                            ValueJson = rf.ValueJson,
-                            ValueSource = rf.ValueSource ?? "LITERAL",
-                            UserAttribute = rf.UserAttribute
-                        });
-                    }
-                    newConsent.RowFilters = rowFilters;
-                }
-
-                createList.Add(newConsent);
-                var (fingerprintLength, fingerprintPrefix) = ConsentDescriptionText.Fingerprint(description);
-                auditEntries.Add(new AuditLogEntry
-                {
-                    Id = Guid.NewGuid(),
-                    OccurredAt = now,
-                    EventType = "GITOPS_CONSENT_APPLY",
-                    ActorSid = actorSid,
-                    TargetTable = tableId.ToString(),
-                    Decision = "APPLIED",
-                    DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
-                    {
-                        Reason = $"Applied declarative policy version {manifest.Version}",
-                        Version = manifest.Version,
-                        DescriptionLength = fingerprintLength,
-                        DescriptionSha256Prefix = fingerprintPrefix
-                    }),
-                    TenantId = tenantId
-                });
+                newConsent.ColumnRules = colRules;
             }
+
+            // Build row filters
+            if (policy.RowFilters != null && policy.RowFilters.Count > 0)
+            {
+                var rowFilters = new List<ConsentRowFilter>();
+                foreach (var rf in policy.RowFilters)
+                {
+                    var colMeta = metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, rf.ColumnName, StringComparison.OrdinalIgnoreCase));
+                    rowFilters.Add(new ConsentRowFilter
+                    {
+                        Id = Guid.NewGuid(),
+                        ConsentId = consentId,
+                        FilterGroup = 0,
+                        TableColumnId = colMeta?.Id ?? Guid.NewGuid(),
+                        ColumnName = rf.ColumnName,
+                        Operator = rf.Operator,
+                        ValueType = rf.ValueType,
+                        ValueJson = rf.ValueJson,
+                        ValueSource = rf.ValueSource ?? "LITERAL",
+                        UserAttribute = rf.UserAttribute
+                    });
+                }
+                newConsent.RowFilters = rowFilters;
+            }
+
+            createList.Add(newConsent);
+            var (fingerprintLength, fingerprintPrefix) = ConsentDescriptionText.Fingerprint(description);
+            auditEntries.Add(new AuditLogEntry
+            {
+                Id = Guid.NewGuid(),
+                OccurredAt = now,
+                EventType = "GITOPS_CONSENT_APPLY",
+                ActorSid = actorSid,
+                TargetTable = tableId.ToString(),
+                Decision = "APPLIED",
+                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
+                {
+                    Reason = $"Applied declarative policy version {manifest.Version}",
+                    Version = manifest.Version,
+                    DescriptionLength = fingerprintLength,
+                    DescriptionSha256Prefix = fingerprintPrefix
+                }),
+                TenantId = tenantId
+            });
 
             applied++;
             details.Add($"{(dryRun ? "[DryRun] Would apply" : "Applied")} policy for '{tableId}' -> '{policy.GranteeRef}'.");
@@ -423,6 +516,7 @@ public sealed class DeclarativeConsentApplyService(
         // Issue #111 (A-7, BC-11): the dataset entries run the service dry run first (same authorization, tenant rule and validation as the
         // apply), so one rejected entry stops the whole manifest before anything is written.
         var datasetEdits = new List<(string Id, DatasetCatalogEdit Edit)>();
+        var skippedDatasets = 0;
         if (hasDatasets)
         {
             if (datasetCatalog is null)
@@ -458,11 +552,8 @@ public sealed class DeclarativeConsentApplyService(
                     }
                 }
 
-                // The dry-run pass writes no per-entry probe audit; a real apply writes one aggregated entry per manifest (throttled). A dry run writes no audit.
-                if (skipped > 0 && !dryRun)
-                {
-                    await datasetCatalog.RecordManifestProbesAsync(caller, skipped, ct).ConfigureAwait(false);
-                }
+                // The dry-run pass writes no per-entry probe audit; a real apply writes one aggregated entry per manifest (throttled; see CommitAsync).
+                skippedDatasets = skipped;
             }
         }
 
@@ -490,6 +581,11 @@ public sealed class DeclarativeConsentApplyService(
                 .ThenBy(c => c.GranteeSid!.Value.Value, StringComparer.OrdinalIgnoreCase)
                 .ThenBy(c => c.Id)
                 .ToList();
+
+            foreach (var candidate in pruneCandidates)
+            {
+                stateParts.Add($"P|{candidate.Id}|{candidate.ValidTo.UtcTicks}");
+            }
 
             if (pruneCandidates.Count > 0)
             {
@@ -533,38 +629,85 @@ public sealed class DeclarativeConsentApplyService(
                         candidate.TableIdentifier.TableName));
                     details.Add($"{(dryRun ? "[DryRun] Would prune" : "Pruned")} declarative consent '{candidate.Id}' for '{candidate.TableIdentifier}' -> '{candidate.GranteeSid!.Value.Value}'.");
 
-                    if (!dryRun)
+                    prunedIdSet.Add(candidate.Id);
+                    auditEntries.Add(new AuditLogEntry
                     {
-                        prunedIdSet.Add(candidate.Id);
-                        auditEntries.Add(new AuditLogEntry
+                        Id = Guid.NewGuid(),
+                        OccurredAt = now,
+                        EventType = AuditEventTypes.ConsentRevoked,
+                        ActorSid = actorSid,
+                        TargetTable = candidate.TableIdentifier.ToString(),
+                        Decision = "PRUNED",
+                        DetailsJson = JsonSerializer.Serialize(new
                         {
-                            Id = Guid.NewGuid(),
-                            OccurredAt = now,
-                            EventType = AuditEventTypes.ConsentRevoked,
-                            ActorSid = actorSid,
-                            TargetTable = candidate.TableIdentifier.ToString(),
-                            Decision = "PRUNED",
-                            DetailsJson = JsonSerializer.Serialize(new
-                            {
-                                ConsentId = candidate.Id,
-                                Grantee = candidate.GranteeSid!.Value.Value,
-                                TableId = candidate.TableIdentifier.ToString(),
-                                Reason = PrunedByManifestReason,
-                                ManifestSha256 = manifestSha256
-                            }),
-                            TenantId = tenantId
-                        });
-                    }
+                            ConsentId = candidate.Id,
+                            Grantee = candidate.GranteeSid!.Value.Value,
+                            TableId = candidate.TableIdentifier.ToString(),
+                            Reason = PrunedByManifestReason,
+                            ManifestSha256 = manifestSha256
+                        }),
+                        TenantId = tenantId
+                    });
                 }
             }
+        }
+
+        var result = new DeclarativeApplyResult(
+            totalEvaluated,
+            applied,
+            unchanged,
+            revoked,
+            dryRun,
+            details,
+            updated,
+            PrunedCount: prunedDtos.Count,
+            Pruned: pruneMode != DeclarativePruneMode.False ? prunedDtos : null);
+
+        return new BuildResult(
+            result,
+            tenantId,
+            actorSid,
+            ComputeStateHash(stateParts),
+            manifest.Version,
+            revokeIds,
+            createList,
+            descriptionUpdates,
+            auditEntries,
+            prunedIdSet,
+            datasetEdits,
+            skippedDatasets);
+    }
+
+    private static string ComputeStateHash(List<string> parts)
+    {
+        parts.Sort(StringComparer.Ordinal);
+        var bytes = System.Text.Encoding.UTF8.GetBytes(string.Join('\n', parts));
+        return Convert.ToHexStringLower(SHA256.HashData(bytes));
+    }
+
+    private async Task CommitAsync(BuildResult build, ClaimsPrincipal caller, CancellationToken ct)
+    {
+        if (!build.GrantPolicyChecked)
+        {
+            throw new InvalidOperationException("A declarative plan is written only after every grant was evaluated by the grant policy.");
+        }
+
+        var (revokeIds, createList, descriptionUpdates, auditEntries, prunedIdSet) =
+            (build.RevokeIds, build.CreateList, build.DescriptionUpdates, build.AuditEntries, build.PrunedIds);
+        var actorSid = build.ActorSid;
+        var authority = ConsentRevocationAuthority.FromPrincipal(caller);
+
+        if (build.SkippedDatasets > 0 && datasetCatalog is not null)
+        {
+            await datasetCatalog.RecordManifestProbesAsync(caller, build.SkippedDatasets, ct).ConfigureAwait(false);
         }
 
         // one transaction and one epoch bump for the whole manifest; a fault leaves nothing changed and writes no audit.
         // M2: the APPLIED audit entries travel into the same transaction, so a committed change always has its (Tier-A, anchored) record and a failing
         // epoch invalidation after the commit cannot lose it.
-        if (!dryRun && (createList.Count > 0 || revokeIds.Count > 0 || descriptionUpdates.Count > 0 || prunedIdSet.Count > 0))
+        if ((createList.Count > 0 || revokeIds.Count > 0 || descriptionUpdates.Count > 0 || prunedIdSet.Count > 0))
         {
-            var supersededReason = $"Superseded by GitOps declarative apply (version: {manifest.Version})";
+            var supersededReason = $"Superseded by GitOps declarative apply (version: {build.ManifestVersion})";
             if (prunedIdSet.Count == 0)
             {
                 if (descriptionUpdates.Count == 0)
@@ -614,9 +757,8 @@ public sealed class DeclarativeConsentApplyService(
         }
 
         // Not atomic with the consent commit above: validation is all-or-nothing, a storage fault in the middle is not rolled back across the two stores.
-        if (!dryRun)
         {
-            foreach (var (datasetId, edit) in datasetEdits)
+            foreach (var (datasetId, edit) in build.DatasetEdits)
             {
                 var result = await datasetCatalog!.ApplyAsync(caller, datasetId, edit, "manifest", ct).ConfigureAwait(false);
                 if (!result.IsSuccess && result.Outcome != DatasetCatalogOutcome.NotFound)
@@ -625,303 +767,6 @@ public sealed class DeclarativeConsentApplyService(
                 }
             }
         }
-
-        return new DeclarativeApplyResult(
-            totalEvaluated,
-            applied,
-            unchanged,
-            revoked,
-            dryRun,
-            details,
-            updated,
-            PrunedCount: prunedDtos.Count,
-            Pruned: pruneMode != DeclarativePruneMode.False ? prunedDtos : null);
-    }
-
-    private static string ComputeManifestSha256(DeclarativeConsentManifest manifest)
-    {
-        var utf8Bytes = JsonSerializer.SerializeToUtf8Bytes(manifest);
-        return Convert.ToHexStringLower(SHA256.HashData(utf8Bytes));
-    }
-
-    private static async Task<GranteeLockLease> AcquireGranteeLocksAsync(string[] lockKeys, CancellationToken ct)
-    {
-        if (lockKeys.Length == 0)
-        {
-            return GranteeLockLease.Empty;
-        }
-
-        var acquired = new List<(string Key, KeyedLockEntry Entry)>(lockKeys.Length);
-        try
-        {
-            foreach (var key in lockKeys)
-            {
-                KeyedLockEntry entry;
-                lock (GranteeLocksGate)
-                {
-                    if (!GranteeLocks.TryGetValue(key, out entry!))
-                    {
-                        entry = new KeyedLockEntry();
-                        GranteeLocks[key] = entry;
-                    }
-
-                    entry.RefCount++;
-                }
-
-                try
-                {
-                    await entry.Semaphore.WaitAsync(ct).ConfigureAwait(false);
-                    acquired.Add((key, entry));
-                }
-                catch
-                {
-                    ReleaseLockEntry(key, entry, releaseSemaphore: false);
-                    throw;
-                }
-            }
-
-            return new GranteeLockLease(acquired);
-        }
-        catch
-        {
-            await new GranteeLockLease(acquired).DisposeAsync().ConfigureAwait(false);
-            throw;
-        }
-    }
-
-    private static void ReleaseLockEntry(string key, KeyedLockEntry entry, bool releaseSemaphore)
-    {
-        if (releaseSemaphore)
-        {
-            entry.Semaphore.Release();
-        }
-
-        KeyedLockEntry? toDispose = null;
-        lock (GranteeLocksGate)
-        {
-            entry.RefCount--;
-            if (entry.RefCount <= 0 && GranteeLocks.TryGetValue(key, out var current) && ReferenceEquals(current, entry))
-            {
-                GranteeLocks.Remove(key);
-                toDispose = entry;
-            }
-        }
-
-        toDispose?.Dispose();
-    }
-
-    private sealed class GranteeLockLease(List<(string Key, KeyedLockEntry Entry)> entries) : IAsyncDisposable
-    {
-        public static readonly GranteeLockLease Empty = new([]);
-
-        public ValueTask DisposeAsync()
-        {
-            for (var i = entries.Count - 1; i >= 0; i--)
-            {
-                var (key, entry) = entries[i];
-                ReleaseLockEntry(key, entry, releaseSemaphore: true);
-            }
-
-            entries.Clear();
-            return ValueTask.CompletedTask;
-        }
-    }
-
-    // A Clear column rule exposes the column in clear text: the grant is classified like an Unmasked one.
-    private static bool HasClearColumnRule(DeclarativeConsentPolicy policy) =>
-        policy.ColumnRules?.Any(r => ParseAccessLevel(r.AccessLevel) == ColumnAccessLevel.Clear) == true;
-
-    private static bool MatchesGrantee(Consent consent, GranteeType type, Sid? sid)
-    {
-        if (consent.GranteeType != type) return false;
-        return consent.GranteeSid == sid;
-    }
-
-    /// <summary>
-    /// Issue #806: true only when <paramref name="existing"/> equals what the create path would store for <paramref name="policy"/>,
-    /// so an unchanged manifest writes nothing and every real difference takes the revoke/create path. Column rules and row filters are compared
-    /// as multisets independent of order; strings ordinally, because the create path stores them verbatim.
-    /// </summary>
-    /// <param name="desiredValidTo">
-    /// The validUntil of the policy. An EARLIER expiry than the stored one is a change (the manifest shortens the grant); a later or equal one is not
-    /// (a re-apply never extends a grant: an individual grant needs a renewal with its own approval).
-    /// </param>
-    private static bool IsIdentical(Consent existing, ConsentEffect desiredEffect, DeclarativeConsentPolicy policy, DateTimeOffset desiredValidTo)
-    {
-        if (existing.Effect != desiredEffect || desiredValidTo < existing.ValidTo)
-        {
-            return false;
-        }
-
-        // The manifest creates none of these, so an existing consent that carries them grants or restricts differently.
-        if (existing.WriteRules is { Count: > 0 } || existing.RowScope is { Count: > 0 } || existing.ClassificationAccess is { Count: > 0 })
-        {
-            return false;
-        }
-
-        var desiredColumnRules = policy.ColumnRules ?? [];
-        var desiredRowFilters = policy.RowFilters ?? [];
-        return existing.ColumnRules.Count == desiredColumnRules.Count
-            && existing.RowFilters.Count == desiredRowFilters.Count
-            && SameMultiset(existing.ColumnRules.Select(ColumnRuleKey.Of), desiredColumnRules.Select(ColumnRuleKey.Of), existing.ColumnRules.Count)
-            && SameMultiset(existing.RowFilters.Select(RowFilterKey.Of), desiredRowFilters.Select(RowFilterKey.Of), existing.RowFilters.Count);
-    }
-
-    /// <summary>Both sequences hold <paramref name="count"/> keys; true when every key occurs equally often in both.</summary>
-    private static bool SameMultiset<TKey>(IEnumerable<TKey> existing, IEnumerable<TKey> desired, int count)
-        where TKey : notnull
-    {
-        if (count == 0)
-        {
-            return true;
-        }
-
-        var remaining = new Dictionary<TKey, int>(count);
-        foreach (var key in existing)
-        {
-            remaining[key] = remaining.GetValueOrDefault(key) + 1;
-        }
-
-        foreach (var key in desired)
-        {
-            if (!remaining.TryGetValue(key, out var left) || left == 0)
-            {
-                return false;
-            }
-
-            remaining[key] = left - 1;
-        }
-
-        return true;
-    }
-
-    /// <summary>The access level of a manifest column rule as stored: parsed by name (ignoring case); unknown or undefined values are <c>Deny</c>.</summary>
-    private static ColumnAccessLevel ParseAccessLevel(string? accessLevel) =>
-        Enum.TryParse<ColumnAccessLevel>(accessLevel, ignoreCase: true, out var level) && level is ColumnAccessLevel.Deny or ColumnAccessLevel.Mask or ColumnAccessLevel.Clear
-            ? level
-            : ColumnAccessLevel.Deny;
-
-    /// <summary>
-    /// The scopes of a column rule in their stored form (the repository writes them comma-joined and reads them back split, trimmed and without
-    /// empty entries), de-duplicated and ordinally sorted: the rule applies when the caller holds any of them, so order and duplicates do not matter.
-    /// </summary>
-    private static string CanonicalScopes(IReadOnlyList<string?>? scopes)
-    {
-        if (scopes is not { Count: > 0 })
-        {
-            return string.Empty;
-        }
-
-        var set = new SortedSet<string>(StringComparer.Ordinal);
-        foreach (var scope in scopes)
-        {
-            foreach (var part in (scope ?? string.Empty).Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                set.Add(part);
-            }
-        }
-
-        return string.Join(',', set);
-    }
-
-    private readonly record struct ColumnRuleKey(string Column, ColumnAccessLevel Level, string Scopes)
-    {
-        public static ColumnRuleKey Of(ConsentColumnRule rule) => new(rule.ColumnName, rule.AccessLevel, CanonicalScopes(rule.ApplicableScopes));
-
-        public static ColumnRuleKey Of(DeclarativeColumnRule rule) => new(rule.ColumnName, ParseAccessLevel(rule.AccessLevel), CanonicalScopes(rule.ApplicableScopes));
-    }
-
-    private readonly record struct RowFilterKey(
-        int FilterGroup,
-        RowFilterType FilterType,
-        string Column,
-        string Operator,
-        string ValueType,
-        string ValueJson,
-        string ValueSource,
-        string? UserAttribute)
-    {
-        private const string DefaultValueSource = "LITERAL";
-
-        public static RowFilterKey Of(ConsentRowFilter filter) => new(
-            filter.FilterGroup, filter.FilterType, filter.ColumnName, filter.Operator, filter.ValueType, filter.ValueJson, filter.ValueSource ?? DefaultValueSource, filter.UserAttribute);
-
-        // The create path writes every manifest filter into group 0 as a simple column predicate.
-        public static RowFilterKey Of(DeclarativeRowFilter filter) => new(
-            0, RowFilterType.SimpleColumnPredicate, filter.ColumnName, filter.Operator, filter.ValueType, filter.ValueJson, filter.ValueSource ?? DefaultValueSource, filter.UserAttribute);
-    }
-
-    private void AuthorizeCaller(ClaimsPrincipal caller, DeclarativeConsentManifest manifest, out Sid actorSid, out TenantId tenantId)
-    {
-        if (caller.Identity?.IsAuthenticated != true)
-        {
-            throw new ConsentApplyForbiddenException();
-        }
-
-        var isCanonicalClusterAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(caller);
-        try
-        {
-            tenantId = caller.GetTenantId();
-        }
-        catch (TenantUnresolvedException) when (isCanonicalClusterAdmin)
-        {
-            tenantId = TenantId.Platform;
-        }
-        catch (GatewaySecurityException)
-        {
-            throw new ConsentApplyForbiddenException();
-        }
-
-        if (!_roleEvaluator.HasAnyRole(caller, RequiredApplyRoles, tenantId.Value))
-        {
-            throw new ConsentApplyForbiddenException();
-        }
-
-        RejectForeignManifestTenant(manifest, tenantId);
-
-        actorSid = caller.GetUserSid()
-            ?? throw new System.Security.SecurityException("Caller must carry a user SID to apply declarative consent manifests.");
-    }
-
-    private static void RejectForeignManifestTenant(DeclarativeConsentManifest manifest, TenantId callerTenant)
-    {
-        if (!MatchesCallerTenant(manifest.TenantId, callerTenant))
-        {
-            throw new ConsentApplyForbiddenException();
-        }
-
-        if (manifest.Policies is not null)
-        {
-            foreach (var policy in manifest.Policies)
-            {
-                if (!MatchesCallerTenant(policy.TenantId, callerTenant))
-                {
-                    throw new ConsentApplyForbiddenException();
-                }
-            }
-        }
-
-        if (manifest.Datasets is not null)
-        {
-            foreach (var dataset in manifest.Datasets)
-            {
-                if (!MatchesCallerTenant(dataset.TenantId, callerTenant))
-                {
-                    throw new ConsentApplyForbiddenException();
-                }
-            }
-        }
-    }
-
-    private static bool MatchesCallerTenant(string? declaredTenant, TenantId callerTenant)
-    {
-        if (string.IsNullOrWhiteSpace(declaredTenant))
-        {
-            return true;
-        }
-
-        return TenantId.TryParse(declaredTenant.Trim(), out var parsedTenant)
-            && string.Equals(parsedTenant.Value, callerTenant.Value, StringComparison.OrdinalIgnoreCase);
     }
 }
 
@@ -966,3 +811,7 @@ public sealed class DeclarativePruneThresholdExceededException(int candidateCoun
     public int CandidateCount { get; } = candidateCount;
     public int TotalCount { get; } = totalCount;
 }
+
+/// <summary>Raised when the grant set changed between the validated plan and its apply; the plan must be validated again (maps to 409).</summary>
+public sealed class DeclarativePlanStaleException()
+    : Exception("The grant set changed since the manifest was validated; validate the manifest again.");

@@ -38,7 +38,7 @@ public sealed class DeclarativeConsentScopeEntryValidationTests
     }
 
     private static DeclarativeConsentPolicy Policy(string table, params DeclarativeColumnRule[] rules) =>
-        new("default", "sales", table, "Group", "S-1-5-21-GROUP-DS", "Allow", rules, ValidUntil: DateTimeOffset.UtcNow.AddDays(30));
+        new("default", "sales", table, "Group", "S-1-5-21-GROUP-DS", "Allow", rules, Description: "test grant justification", ValidUntil: DateTimeOffset.UtcNow.AddDays(30));
 
     [Theory]
     [InlineData("", false)]

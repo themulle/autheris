@@ -82,7 +82,7 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
         await EnsureTableAsync();
         var svc = new Autheris.Application.Governance.Services.DeclarativeConsentApplyService(_repo, _repo, _repo);
         var caller = ManifestAdmin(Admin.Value, TenantA.Value);
-        var policy = new DeclarativeConsentPolicy(_table.Domain, _table.Schema, _table.TableName, "Group", "S-1-5-21-MANIFEST-GROUP", "Allow", ValidUntil: DateTimeOffset.UtcNow.AddDays(30));
+        var policy = new DeclarativeConsentPolicy(_table.Domain, _table.Schema, _table.TableName, "Group", "S-1-5-21-MANIFEST-GROUP", "Allow", Description: "integration test grant", ValidUntil: DateTimeOffset.UtcNow.AddDays(30));
         var epochBefore = await _repo.GetTableEpochAsync(_table);
 
         var first = await svc.ApplyManifestAsync(caller, new DeclarativeConsentManifest("1", [policy]));
@@ -113,7 +113,7 @@ public sealed class ConsentReplaceRepositoryTests : IDisposable
             _table.Domain, _table.Schema, _table.TableName, "Group", grantee.Value, "Allow",
             ColumnRules: [new DeclarativeColumnRule("id", "Clear"), new DeclarativeColumnRule("id", "Mask", ["Agent.Read"])],
             RowFilters: [new DeclarativeRowFilter("id", "GT", "int", "[0]"), new DeclarativeRowFilter("id", "LT", "int", "[1000]")],
-            ValidUntil: DateTimeOffset.UtcNow.AddDays(30));
+            Description: "integration test grant", ValidUntil: DateTimeOffset.UtcNow.AddDays(30));
 
         var first = await svc.ApplyManifestAsync(caller, new DeclarativeConsentManifest("1", [policy]));
         var stored = (await _repo.GetActiveConsentsForSubjectsAsync([grantee], _table, DateTimeOffset.UtcNow, TenantA)).Single(c => c.GranteeType == GranteeType.Group);

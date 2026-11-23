@@ -41,7 +41,7 @@ public sealed class DeclarativeConsentApplyIdempotencyTests
         IReadOnlyList<DeclarativeColumnRule>? rules = null,
         IReadOnlyList<DeclarativeRowFilter>? filters = null,
         DateTimeOffset? until = null) =>
-        new("default", "sales", "orders", "Group", Group, "Allow", rules, filters, ValidUntil: until ?? Until);
+        new("default", "sales", "orders", "Group", Group, "Allow", rules, filters, Description: "test grant justification", ValidUntil: until ?? Until);
 
     private static DeclarativeColumnRule Rule(string column, string level, params string[] scopes) =>
         new(column, level, scopes.Length == 0 ? null : scopes);
@@ -269,6 +269,7 @@ public sealed class DeclarativeConsentApplyIdempotencyTests
         ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
         ValidTo = Until,
         GrantSource = ConsentGrantSource.Declarative,
+        Description = "test grant justification",
         ColumnRules = rules,
         RowFilters = filters ?? [],
     };
