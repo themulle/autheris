@@ -386,8 +386,10 @@ public static class CatalogGovernanceRatchet
             : existing ?? string.Empty;
     }
 
+    /// <summary>Strictness tier of a masking rule (higher is stricter). DENY blocks the column entirely, so it outranks every mask; unknown types rank lowest.</summary>
     public static int MaskingRuleStrength(MaskingRule rule) => (rule.RuleType ?? string.Empty).Trim().ToUpperInvariant() switch
     {
+        "DENY" => 5,
         "NULLIFY" => 4,
         "REDACT" => 3,
         "HMAC" or "HMAC_SHA256" or "TOKENIZE" or "TOKENIZATION" => 2,

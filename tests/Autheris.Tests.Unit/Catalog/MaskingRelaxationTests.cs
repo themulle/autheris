@@ -77,4 +77,44 @@ public class MaskingRelaxationTests
 
         CatalogGovernanceRatchet.IsMaskingRelaxation(rule1, rule2).ShouldBeFalse();
     }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("HMAC")]
+    [InlineData("REDACT")]
+    [InlineData("NULLIFY")]
+    [InlineData("MASK_EMAIL")]
+    public void IsMaskingRelaxation_Deny_ToAnyMask_IsRelaxation(string incomingType)
+    {
+        var stored = new MaskingRule { RuleType = "DENY" };
+        var incoming = new MaskingRule { RuleType = incomingType };
+
+        CatalogGovernanceRatchet.IsMaskingRelaxation(stored, incoming).ShouldBeTrue($"A denied column must not become readable through {incomingType}.");
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("HMAC")]
+    [InlineData("REDACT")]
+    [InlineData("NULLIFY")]
+    [InlineData("MASK_EMAIL")]
+    public void IsMaskingRelaxation_AnyMask_ToDeny_IsNotRelaxation(string storedType)
+    {
+        var stored = new MaskingRule { RuleType = storedType };
+        var incoming = new MaskingRule { RuleType = "DENY" };
+
+        CatalogGovernanceRatchet.IsMaskingRelaxation(stored, incoming).ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void MaskingRuleStrength_Deny_IsStrictestTier()
+    {
+        var deny = CatalogGovernanceRatchet.MaskingRuleStrength(new MaskingRule { RuleType = " deny " });
+
+        foreach (var other in new[] { "NULLIFY", "REDACT", "HMAC", "TOKENIZE", "MASK_EMAIL" })
+        {
+            deny.ShouldBeGreaterThan(CatalogGovernanceRatchet.MaskingRuleStrength(new MaskingRule { RuleType = other }));
+        }
+    }
 }

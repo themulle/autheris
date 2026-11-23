@@ -153,6 +153,28 @@ public sealed class CatalogGovernanceRatchetTests
         TenantColumnName = "tenant_id"
     };
 
+    /// <summary>A stored DENY rule survives a sync that carries a weaker mask; a denied column must never become readable through a catalog merge.</summary>
+    [Theory]
+    [InlineData("HMAC")]
+    [InlineData("REDACT")]
+    [InlineData("NULLIFY")]
+    [InlineData("MASK_EMAIL")]
+    public void Merge_StoredDenyRule_IsNotReplacedByWeakerIncomingMask(string incomingType)
+    {
+        var existing = Meta(["a"], [], false) with
+        {
+            ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["a"] = new MaskingRule { RuleType = "DENY" } }
+        };
+        var incoming = Meta(["a"], [], false) with
+        {
+            ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["a"] = new MaskingRule { RuleType = incomingType } }
+        };
+
+        var merged = CatalogGovernanceRatchet.Merge(incoming, existing);
+
+        merged.ColumnMaskingRules["a"].RuleType.ShouldBe("DENY");
+    }
+
     /// <summary>SEC-RATCHET-01: a catalog snapshot only carries catalog fields; it must not wipe anything else on the next sync.</summary>
     [Fact]
     public void Merge_RoundTrip_PreservesEveryNonCatalogTableProperty()
