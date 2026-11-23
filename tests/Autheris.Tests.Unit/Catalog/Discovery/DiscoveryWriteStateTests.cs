@@ -265,34 +265,8 @@ public sealed class DiscoveryWriteStateTests
 
         var pending = approvals.Requests.ShouldHaveSingleItem();
 
-        // Non-owner cannot approve the routed request
-        var nonOwnerEx = await Should.ThrowAsync<GraphQLException>(() => new Mutation().ApproveConsentRequestAsync(
-            pending.Id,
-            null,
-            approvals,
-            ownership,
-            consents,
-            tableRepo,
-            CreateHttpAccessor(BuildPrincipal(NonOwnerSid))));
-        nonOwnerEx.Errors.ShouldContain(e => string.Equals(e.Code, "FORBIDDEN", StringComparison.Ordinal));
-
-        // DataOwner approves the write request
-        var ownerResult = await new Mutation().ApproveConsentRequestAsync(
-            pending.Id,
-            null,
-            approvals,
-            ownership,
-            consents,
-            tableRepo,
-            CreateHttpAccessor(BuildPrincipal(DataOwnerSid)));
-        ownerResult.Status.ShouldBe("APPROVED");
-
-        // Fresh Discovery instance reflects approved write grant computed by PDP
-        var freshDiscovery = CreateDiscoveryService([orders], consents, approvals, ownership, CreateRealPdp(consents));
-        var after = await freshDiscovery.GetAsync(orders.Identifier, caller);
-        after.ShouldNotBeNull();
-        after!.Write!.CanInsert.ShouldBeTrue();
-        after.Write.InsertColumns.ShouldBe(["status", "amount"]);
+        // Deciding the routed request is the engine's job (PermissionRequestEngineDecideTests); no GraphQL mutation decides.
+        pending.Status.ShouldBe("PENDING");
     }
 
     private static TableMetadata MakeOrdersTable(string name)

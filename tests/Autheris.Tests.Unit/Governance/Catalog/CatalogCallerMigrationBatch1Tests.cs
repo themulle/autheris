@@ -157,7 +157,7 @@ public sealed class CatalogCallerMigrationBatch1Tests
         var hidden = MakeTable("crm", "dbo", "secrets");
         hidden = hidden with { Table = hidden.Table with { DiscoveryHidden = true } };
         var repo = new RecordingCatalogRepository([visible, hidden]);
-        var service = new BundledConsentRequestService(repo, new StubConsentRepository([]));
+        var service = new BundledConsentRequestService(repo, new StubConsentRepository([]), engine: new Autheris.Tests.Unit.TestSupport.RecordingPermissionRequestEngine());
 
         var ok = await service.SubmitBundledRequestAsync(
             UserWithSid(),

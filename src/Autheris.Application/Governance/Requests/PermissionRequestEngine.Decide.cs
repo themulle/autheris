@@ -319,7 +319,9 @@ public sealed partial class PermissionRequestEngine
                 SelfGrant: decision.SelfGrant,
                 RequestId: updatedReq.Id,
                 ActorKind: actorKind,
-                GrantKind: updatedReq.GrantKind.ToSqlString()).ToDetailsJson()
+                GrantKind: updatedReq.GrantKind.ToSqlString(),
+                ExternalSystemId: command.External?.ExternalSystemId,
+                ExternalReference: command.External?.ExternalReference).ToDetailsJson()
         }, ct).ConfigureAwait(false);
 
         return grants;

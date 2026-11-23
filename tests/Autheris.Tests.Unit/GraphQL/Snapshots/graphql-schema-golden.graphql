@@ -80,20 +80,6 @@ type Mutation {
   ): ConsentRequestPayload! @cost(weight: "10")
   withdrawAccessRequest(requestId: UUID!): ConsentRequestPayload!
     @cost(weight: "10")
-  approveConsentRequest(
-    requestId: UUID!
-    idempotencyKey: String
-    rowFilter: RowFilterInput
-    columnMasking: ColumnMaskingInput
-    description: String
-    writeRules: [ConsentWriteRuleInput!]
-  ): ConsentRequestPayload! @cost(weight: "10")
-  rejectConsentRequest(
-    requestId: UUID!
-    reason: String!
-    idempotencyKey: String
-  ): ConsentRequestPayload! @cost(weight: "10")
-  revokeConsent(consentId: UUID!, reason: String!): Boolean! @cost(weight: "10")
 }
 
 type AffectedEntity {

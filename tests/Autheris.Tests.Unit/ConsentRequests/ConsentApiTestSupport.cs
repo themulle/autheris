@@ -20,6 +20,9 @@ using Autheris.Application.ConsentRequests.ProfileAssignments;
 using Autheris.Application.ConsentRequests.Routing;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Grants;
+using Autheris.Application.Governance.Requests;
+using Autheris.Application.Security;
+using Autheris.Tests.Common.Fakes;
 using Autheris.Application.Governance.Grants.Records;
 using Autheris.Application.Governance.Paging;
 using Autheris.Application.Policy.Pdp;
@@ -118,29 +121,20 @@ internal sealed class ConsentApiTestHarness : IAsyncDisposable
         services.AddSingleton<IConsentEventOutbox>(store);
         services.AddSingleton<ITableMetadataRepository>(store);
         services.AddSingleton<IDataOwnershipRepository>(store);
-        services.AddSingleton<IExternalDecisionGuard>(new ExternalDecisionGuard());
-        services.AddScoped<IConsentDecisionPipeline>(sp => new ConsentDecisionPipeline(
-            sp.GetRequiredService<IConsentApprovalRepository>(),
-            sp.GetRequiredService<ITableMetadataRepository>(),
-            sp.GetRequiredService<IDataOwnershipRepository>(),
-            sp.GetRequiredService<IConsentDecisionGuard>(),
+        services.AddSingleton<IAuditWriter>(new InMemoryAuditWriter());
+        services.AddSingleton<IExternalDecisionService>(new HarnessExternalDecisionService(store, clock));
+        services.AddScoped<IPermissionRequestEngine>(sp => new PermissionRequestEngine(
+            store,
+            sp.GetRequiredService<IAuditWriter>(),
+            new ApproverResolver(),
+            new ApproverEligibility(new GovernanceCapabilities()),
+            new SeparationOfDutiesService(),
             sp.GetRequiredService<IGrantPolicy>(),
             sp.GetRequiredService<IGrantValidityPolicy>(),
-            sp.GetRequiredService<IExternalDecisionGuard>(),
-            sp.GetRequiredService<IConsentDecisionDenialRecorder>(),
-            sp.GetRequiredService<IConsentWorkflowConfigRepository>(),
-            timeProvider: clock,
-            eventOutbox: sp.GetRequiredService<IConsentEventOutbox>()));
-        services.AddScoped<IConsentRequestService>(sp => new ConsentRequestService(
-            sp.GetRequiredService<ITableMetadataRepository>(),
-            sp.GetRequiredService<IConsentApprovalRepository>(),
-            sp.GetRequiredService<IIdempotencyStore>(),
-            grantPolicy: sp.GetRequiredService<IGrantPolicy>(),
+            Array.Empty<IGrantEffectApplier>(),
+            metadataRepository: store,
             subjectResolver: resolver,
-            grantValidityPolicy: sp.GetRequiredService<IGrantValidityPolicy>(),
-            timeProvider: clock,
-            workflowConfigRepository: sp.GetRequiredService<IConsentWorkflowConfigRepository>(),
-            eventOutbox: sp.GetRequiredService<IConsentEventOutbox>()));
+            timeProvider: clock));
         services.AddSingleton<IAuthorizationHandler, ExternalSystemRequirementHandler>();
         services.AddAuthorization(options => options.AddGatewayAuthorizationPolicies());
 
@@ -216,7 +210,8 @@ internal sealed class ConsentApiTestHarness : IAsyncDisposable
         string? idempotencyKey,
         string? ifMatch,
         string? reason = "Approved via external ticket",
-        string? approverSid = null)
+        string? approverSid = null,
+        int? expectedVersion = null)
     {
         if (!(await AuthorizeAsync(caller, GatewayPolicies.ConsentDecide)).Succeeded)
         {
@@ -234,16 +229,24 @@ internal sealed class ConsentApiTestHarness : IAsyncDisposable
             ctx.Request.Headers["If-Match"] = ifMatch;
         }
 
-        var body = new ConsentDecisionBody(Decision: decision, Reason: reason, ApproverSid: approverSid);
+        var body = new ConsentDecisionBody(
+            Decision: decision,
+            Reason: reason,
+            ApproverSid: approverSid,
+            ExpectedVersion: expectedVersion,
+            DecidedAt: FixedNow,
+            Nonce: Guid.NewGuid().ToString("N"),
+            Signature: "00");
         await using var scope = _services.CreateAsyncScope();
         var sp = scope.ServiceProvider;
         var result = await ConsentApiEndpoints.DecideRequestAsync(
             requestId,
             body,
             ctx,
-            sp.GetRequiredService<IConsentDecisionPipeline>(),
+            sp.GetRequiredService<IPermissionRequestEngine>(),
             sp.GetRequiredService<IConsentApprovalRepository>(),
             sp.GetRequiredService<IConsentWorkflowConfigRepository>(),
+            sp.GetService<IExternalDecisionService>(),
             sp.GetService<IIdempotencyStore>(),
             sp.GetService<IRateLimiterService>(),
             sp.GetService<IOptions<GovernanceOptions>>(),
@@ -265,9 +268,8 @@ internal sealed class ConsentApiTestHarness : IAsyncDisposable
         var result = await ConsentApiEndpoints.CreateRequestAsync(
             body,
             ctx,
-            sp.GetRequiredService<IConsentRequestService>(),
+            sp.GetRequiredService<IPermissionRequestEngine>(),
             sp.GetRequiredService<IConsentApprovalRepository>(),
-            sp.GetService<IProfileAssignmentRequestService>(),
             sp.GetService<IRateLimiterService>(),
             sp.GetService<IOptions<GovernanceOptions>>());
         return await ExecuteResultAsync(ctx, result);
@@ -327,7 +329,7 @@ internal sealed class ConsentApiTestHarness : IAsyncDisposable
         var result = await ConsentApiEndpoints.WithdrawRequestAsync(
             requestId,
             ctx,
-            sp.GetRequiredService<IConsentRequestService>(),
+            sp.GetRequiredService<IPermissionRequestEngine>(),
             sp.GetRequiredService<IConsentApprovalRepository>(),
             sp.GetService<IRateLimiterService>(),
             sp.GetService<IOptions<GovernanceOptions>>());
@@ -536,5 +538,49 @@ internal sealed class InMemoryTestIdempotencyStore : IIdempotencyStore
     {
         var json = JsonSerializer.Serialize(value, Opts);
         return Task.FromResult(_entries.TryAdd(key, json));
+    }
+}
+
+/// <summary>External decision double: the evidence/engine path is covered by ExternalDecisionEngineTests; this only applies the CAS and one grant.</summary>
+internal sealed class HarnessExternalDecisionService(InMemoryConsentStore store, TimeProvider clock) : IExternalDecisionService
+{
+    public async Task<PermissionDecisionResult> DecideAsync(ExternalDecisionEnvelope envelope, TenantId tenant, CancellationToken ct = default)
+    {
+        var existing = store.Requests.FirstOrDefault(r => r.Id == envelope.RequestId);
+        if (existing is null || existing.TenantId != tenant)
+        {
+            throw new ConsentDecisionException("NOT_FOUND", "Permission request was not found.", 404);
+        }
+
+        if (existing.Version != envelope.ExpectedVersion || !existing.Status.StartsWith("PENDING", StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ConsentDecisionException("REQUEST_ALREADY_DECIDED", "Permission request has already been decided.", 409);
+        }
+
+        var now = clock.GetUtcNow();
+        var approver = new Sid(envelope.Approver.Subject);
+        var step = new ApprovalStep { Id = Guid.NewGuid(), StepNumber = 1, ApproverSid = approver, Decision = envelope.Approve ? "APPROVED" : "REJECTED" };
+        if (!envelope.Approve)
+        {
+            var rejected = await store.RejectExternalConsentRequestAsync(
+                existing.Id, new ExternalDecisionAttribution(envelope.ExternalSystemId, envelope.ExternalReference, "REJECT", envelope.Approver, now), approver, envelope.Reason ?? "rejected", ct);
+            return new PermissionDecisionResult(rejected, []);
+        }
+
+        var consent = new Consent
+        {
+            Id = Guid.NewGuid(),
+            TenantId = existing.TenantId,
+            TableIdentifier = existing.TableIdentifier,
+            ConsentRequestId = existing.Id,
+            GranteeType = existing.RequestedGranteeType,
+            GranteeSid = existing.RequesterSid,
+            ValidFrom = now,
+            ValidTo = existing.RequestedValidTo
+        };
+        await store.ExecuteExternalAtomicApprovalWithConsentAsync(
+            existing.Id, new ExternalDecisionAttribution(envelope.ExternalSystemId, envelope.ExternalReference, "APPROVE", envelope.Approver, now), step, consent, [], [], ct);
+        var updated = store.Requests.First(r => r.Id == existing.Id);
+        return new PermissionDecisionResult(updated, [new GrantRef(consent.Id, PermissionGrantKind.Data, ValidFrom: now, ValidTo: consent.ValidTo)]);
     }
 }

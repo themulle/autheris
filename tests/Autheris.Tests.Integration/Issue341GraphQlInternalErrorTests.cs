@@ -54,14 +54,10 @@ public sealed class Issue341GraphQlInternalErrorTests : IClassFixture<Issue341Gr
 
     public static TheoryData<string> UnknownIdMutations => new()
     {
-        "mutation { rejectConsentRequest(requestId: \"3f2504e0-4f89-41d3-9a0c-0305e82c3301\", reason: \"\") { __typename } }",
-        "mutation { rejectConsentRequest(requestId: \"3f2504e0-4f89-41d3-9a0c-0305e82c3301\", reason: \"no longer needed\") { __typename } }",
         "mutation { requestTableAccess(domain: \"\", schema: \"\", tableName: \"\", justification: \"\", durationDays: 0) { __typename } }",
         "mutation { requestTableAccess(domain: \"\", schema: \"\", tableName: \"\", justification: \"audit evidence\", durationDays: 7) { __typename } }",
         "mutation { requestTableAccess(domain: \"a.b\", schema: \"dbo\", tableName: \"t\", justification: \"audit evidence\", durationDays: 7) { __typename } }",
         "mutation { requestTableAccess(domain: \"finance\", schema: \"dbo\", tableName: \"nope\", justification: \"\", durationDays: 0) { __typename } }",
-        "mutation { revokeConsent(consentId: \"3f2504e0-4f89-41d3-9a0c-0305e82c3301\", reason: \"\") }",
-        "mutation { revokeConsent(consentId: \"3f2504e0-4f89-41d3-9a0c-0305e82c3301\", reason: \"no longer needed\") }",
         "mutation { syncDataCatalog(dryRun: false) { __typename } }",
         "query { calculateConsentRevocationImpact(consentId: \"3f2504e0-4f89-41d3-9a0c-0305e82c3301\") { __typename } }",
     };

@@ -294,7 +294,11 @@ public sealed partial class ProfileAssignmentRequestService(
 
         if (command.Channel == ConsentDecisionChannel.External)
         {
-            return await DecideExternalAsync(command, req, snapshot, tenantTables, actorSid, externalApproverSids, now, ct).ConfigureAwait(false);
+            // External decisions reach profile assignments only through the permission request engine.
+            throw new ConsentDecisionException(
+                ConsentDecisionErrorCodes.WorkflowModeMismatch,
+                "Profile assignment decisions from external transports are handled by the permission request engine.",
+                statusCode: 409);
         }
 
         return await DecideInternalAsync(command, req, snapshot, tenantTables, actorSid, now, ct).ConfigureAwait(false);

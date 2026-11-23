@@ -24,7 +24,7 @@ namespace Autheris.Application.Governance.Requests;
 /// Unified permission request and single-decision engine covering Data, Unmask, Catalog, and ProfileAssignment requests.
 /// All decisions commit CAS state update, grant effect materialization, and fail-closed audit in a single transaction.
 /// </summary>
-public sealed partial class PermissionRequestEngine
+public sealed partial class PermissionRequestEngine : IPermissionRequestEngine
 {
     private readonly IConsentApprovalRepository _approvalRepository;
     private readonly IAuditWriter _auditWriter;

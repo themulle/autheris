@@ -135,7 +135,8 @@ public sealed class DiscoveryAccessRequestTests
             TableIdentifier = Orders,
             TenantId = new TenantId("tenant-a"),
             Status = "PENDING",
-            ContextJson = RequestedClearCodec.Merge(null, [new RequestedClearItem("PII", ["email"])])
+            RequestKind = ConsentRequestKind.Unmask,
+            TargetColumns = ["email"]
         };
         _approvals.GetRequestsByRequesterSidAsync(Arg.Any<Sid>(), Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
             .Returns(new[] { existing });

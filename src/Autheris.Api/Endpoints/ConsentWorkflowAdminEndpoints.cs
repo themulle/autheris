@@ -127,7 +127,7 @@ public static partial class ConsentWorkflowAdminEndpoints
             }
         }
 
-        if (parsedScope is WorkflowRouteScopeKind.DataOwner or WorkflowRouteScopeKind.DataSource)
+        if (parsedScope == WorkflowRouteScopeKind.Domain)
         {
             var tenantRoute = await adminRepo.GetWorkflowRouteAsync(
                 tenantId, WorkflowRouteScopeKind.Tenant, "*", ct).ConfigureAwait(false);
@@ -136,7 +136,7 @@ public static partial class ConsentWorkflowAdminEndpoints
                 return SafeErrorResults.Problem(
                     StatusCodes.Status422UnprocessableEntity,
                     ConsentDecisionErrorCodes.ValidityExceedsMaximum,
-                    "Owner or data-source route maxDurationDays cannot exceed the tenant route maximum.",
+                    "Domain route maxDurationDays cannot exceed the tenant route maximum.",
                     context);
             }
         }
@@ -410,13 +410,8 @@ public static partial class ConsentWorkflowAdminEndpoints
             case "TENANT":
                 scopeKind = WorkflowRouteScopeKind.Tenant;
                 return true;
-            case "DATA_SOURCE":
-            case "DATASOURCE":
-                scopeKind = WorkflowRouteScopeKind.DataSource;
-                return true;
-            case "DATA_OWNER":
-            case "DATAOWNER":
-                scopeKind = WorkflowRouteScopeKind.DataOwner;
+            case "DOMAIN":
+                scopeKind = WorkflowRouteScopeKind.Domain;
                 return true;
             default:
                 scopeKind = default;

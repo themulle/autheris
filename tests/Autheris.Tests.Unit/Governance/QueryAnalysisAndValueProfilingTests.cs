@@ -407,21 +407,12 @@ public sealed class QueryAnalysisAndValueProfilingTests
         ownerRepo.GetDataOwnersForTableAsync(shipmentsTable.Identifier, Arg.Any<CancellationToken>())
             .Returns(new[] { new DataOwner { AdSid = new Sid("owner-logistics"), DisplayName = "Logistics Owner", IsActive = true } });
 
-        var createdRequests = new List<ConsentRequest>();
-        var approvalRepo = Substitute.For<IConsentApprovalRepository>();
-        approvalRepo.CreateConsentRequestAsync(Arg.Any<ConsentRequest>(), Arg.Any<CancellationToken>())
-            .Returns(callInfo =>
-            {
-                var req = callInfo.Arg<ConsentRequest>();
-                createdRequests.Add(req);
-                return Task.FromResult(req);
-            });
-
+        var engine = new Autheris.Tests.Unit.TestSupport.RecordingPermissionRequestEngine();
         var service = new BundledConsentRequestService(
             metadataRepo,
             consentRepo,
-            approvalRepo,
-            ownerRepo);
+            dataOwnershipRepository: ownerRepo,
+            engine: engine);
 
         var requester = CreatePrincipal("app-checkout-svc");
         var bundleResult = await service.SubmitBundledRequestAsync(
@@ -448,8 +439,9 @@ public sealed class QueryAnalysisAndValueProfilingTests
         logisticsTicket.ConsumerReference.Should().Be("PR-4821");
         logisticsTicket.Datasets.Should().ContainSingle().Which.Should().Be("logistics.public.shipments");
 
-        createdRequests.Should().HaveCount(3);
-        createdRequests.Should().OnlyContain(r => r.BusinessJustification!.Contains("[Ref:PR-4821]"));
+        engine.Bundles.Should().ContainSingle().Which.Should().HaveCount(3);
+        engine.Submissions.Should().OnlyContain(r => r.Justification!.Contains("[Ref:PR-4821]"));
+        engine.Submissions.Count(r => r.RequestKind == ConsentRequestKind.Unmask).Should().Be(1);
     }
 
     // =========================================================================

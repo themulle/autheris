@@ -41,11 +41,15 @@ public enum ConsentGrantSource
     SelfGrant = 6
 }
 
+/// <summary>
+/// Scope of a workflow route. <see cref="Unknown"/> is what a stored value with a removed (data owner, data source) or unrecognised
+/// scope parses to; such routes are inert and never match.
+/// </summary>
 public enum WorkflowRouteScopeKind
 {
+    Unknown = -1,
     Tenant = 0,
-    DataOwner = 1,
-    DataSource = 2
+    Domain = 1
 }
 
 public static class ConsentWorkflowSqlMapping
@@ -254,8 +258,7 @@ public static class ConsentWorkflowSqlMapping
     public static string ToSqlString(this WorkflowRouteScopeKind scopeKind) => scopeKind switch
     {
         WorkflowRouteScopeKind.Tenant => "TENANT",
-        WorkflowRouteScopeKind.DataOwner => "DATA_OWNER",
-        WorkflowRouteScopeKind.DataSource => "DATA_SOURCE",
+        WorkflowRouteScopeKind.Domain => "DOMAIN",
         _ => throw new ArgumentOutOfRangeException(nameof(scopeKind), scopeKind, "Unsupported workflow route scope kind.")
     };
 
@@ -266,14 +269,11 @@ public static class ConsentWorkflowSqlMapping
             case "TENANT":
                 scopeKind = WorkflowRouteScopeKind.Tenant;
                 return true;
-            case "DATA_OWNER":
-                scopeKind = WorkflowRouteScopeKind.DataOwner;
-                return true;
-            case "DATA_SOURCE":
-                scopeKind = WorkflowRouteScopeKind.DataSource;
+            case "DOMAIN":
+                scopeKind = WorkflowRouteScopeKind.Domain;
                 return true;
             default:
-                scopeKind = WorkflowRouteScopeKind.Tenant;
+                scopeKind = WorkflowRouteScopeKind.Unknown;
                 return false;
         }
     }

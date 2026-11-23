@@ -623,15 +623,18 @@
           "profileId": { "type": "string", "format": "uuid", "nullable": true },
           "grantee": { "type": "string", "nullable": true },
           "granteeType": { "type": "string", "nullable": true },
-          "requestedClear": {
-            "type": "array",
+          "target": {
+            "type": "object",
             "nullable": true,
-            "items": {
-              "type": "object",
-              "properties": {
-                "classification": { "type": "string" },
-                "columns": { "type": "array", "items": { "type": "string" } }
-              }
+            "properties": {
+              "domain": { "type": "string", "nullable": true },
+              "schema": { "type": "string", "nullable": true },
+              "tableName": { "type": "string", "nullable": true },
+              "table": { "type": "string", "nullable": true },
+              "columns": { "type": "array", "items": { "type": "string" }, "nullable": true },
+              "containerKind": { "type": "string", "nullable": true },
+              "containerId": { "type": "string", "format": "uuid", "nullable": true },
+              "profileId": { "type": "string", "format": "uuid", "nullable": true }
             }
           }
         }
@@ -640,21 +643,18 @@
         "type": "object",
         "properties": {
           "decision": { "type": "string", "nullable": true },
+          "expectedVersion": { "type": "integer", "nullable": true },
           "approvedValidTo": { "type": "string", "format": "date-time", "nullable": true },
           "reason": { "type": "string", "nullable": true },
-          "description": { "type": "string", "nullable": true },
-          "writeRules": { "type": "array", "items": { "type": "object" }, "nullable": true },
-          "columnMaskingJson": { "type": "string", "nullable": true },
-          "rowFilterJson": { "type": "string", "nullable": true },
+          "acknowledgeCoveredStricterColumns": { "type": "boolean" },
           "externalReference": { "type": "string", "nullable": true },
           "correlationId": { "type": "string", "nullable": true },
           "decidedAt": { "type": "string", "format": "date-time", "nullable": true },
           "approverSid": { "type": "string", "nullable": true },
           "approver": { "type": "object", "nullable": true },
           "approvers": { "type": "array", "items": { "type": "object" }, "nullable": true },
-          "approvedItems": { "type": "array", "items": { "type": "integer" }, "nullable": true },
-          "approvedClearColumns": { "type": "array", "items": { "type": "string" }, "nullable": true },
-          "approvedClearClassifications": { "type": "array", "items": { "type": "string" }, "nullable": true }
+          "nonce": { "type": "string", "nullable": true },
+          "signature": { "type": "string", "nullable": true }
         }
       },
       "RevokeConsentGrantBody": {

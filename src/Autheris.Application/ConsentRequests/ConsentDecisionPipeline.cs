@@ -41,7 +41,7 @@ public sealed partial class ConsentDecisionPipeline(
     IConsentDecisionGuard decisionGuard,
     IGrantPolicy grantPolicy,
     IGrantValidityPolicy grantValidityPolicy,
-    IExternalDecisionGuard externalDecisionGuard,
+    ILegacyExternalDecisionGuard externalDecisionGuard,
     IConsentDecisionDenialRecorder? denialRecorder = null,
     IConsentWorkflowConfigRepository? workflowConfigRepository = null,
     IScimGroupStore? groupStore = null,
@@ -63,7 +63,7 @@ public sealed partial class ConsentDecisionPipeline(
     private readonly IConsentDecisionGuard _decisionGuard = decisionGuard ?? throw new ArgumentNullException(nameof(decisionGuard));
     private readonly IGrantPolicy _grantPolicy = grantPolicy ?? throw new ArgumentNullException(nameof(grantPolicy));
     private readonly IGrantValidityPolicy _grantValidityPolicy = grantValidityPolicy ?? throw new ArgumentNullException(nameof(grantValidityPolicy));
-    private readonly IExternalDecisionGuard _externalDecisionGuard = externalDecisionGuard ?? throw new ArgumentNullException(nameof(externalDecisionGuard));
+    private readonly ILegacyExternalDecisionGuard _externalDecisionGuard = externalDecisionGuard ?? throw new ArgumentNullException(nameof(externalDecisionGuard));
     private readonly IConsentWorkflowConfigRepository? _workflowConfigRepository = workflowConfigRepository ?? (approvalRepository as IConsentWorkflowConfigRepository);
     private readonly IConsentEventOutbox? _eventOutbox = eventOutbox ?? (approvalRepository as IConsentEventOutbox);
     private readonly TimeProvider _timeProvider = timeProvider ?? TimeProvider.System;

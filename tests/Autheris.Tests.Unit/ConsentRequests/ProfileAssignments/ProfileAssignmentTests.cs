@@ -18,6 +18,7 @@ using Autheris.Application.ConsentRequests.Routing;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Grants.Records;
+using Autheris.Application.Governance.Requests;
 using Autheris.Application.Governance.Paging;
 using Autheris.Application.Services;
 using Autheris.Domain.Audit;
@@ -146,42 +147,6 @@ public sealed class ProfileAssignmentTests
     }
 
     [Fact]
-    public async Task ExternalApproval_AllowsNarrowing_AndRejectsWideningWith422()
-    {
-        var fx = new Fixture(multiSource: true, tenantRouteExternal: true);
-        var sub = await fx.Service.SubmitAsync(new ProfileAssignmentSubmission(
-            fx.ProfileId, Requester, fx.UserPrincipal(Requester), Tenant, DurationDays: 20));
-
-        var widenItemsEx = await Should.ThrowAsync<ConsentDecisionException>(() => fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
-            sub.RequestId, ConsentDecisionKind.Approve, ConsentDecisionChannel.External, Principal: null,
-            ExternalAttribution: fx.ExternalAttribution(), ContextTenantId: Tenant, ApprovedProfileItems: [0, 99])));
-        widenItemsEx.StatusCode.ShouldBe(422);
-        widenItemsEx.ErrorCode.ShouldBe(ConsentDecisionErrorCodes.DecisionExceedsRequest);
-
-        var widenColsEx = await Should.ThrowAsync<ConsentDecisionException>(() => fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
-            sub.RequestId, ConsentDecisionKind.Approve, ConsentDecisionChannel.External, Principal: null,
-            ExternalAttribution: fx.ExternalAttribution(), ContextTenantId: Tenant, ApprovedClearColumns: ["secret_ssn"])));
-        widenColsEx.StatusCode.ShouldBe(422);
-        widenColsEx.ErrorCode.ShouldBe(ConsentDecisionErrorCodes.DecisionExceedsRequest);
-
-        var step1Ext = await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
-            sub.RequestId, ConsentDecisionKind.Approve, ConsentDecisionChannel.External, Principal: null,
-            ExternalAttribution: fx.ExternalAttribution(), ContextTenantId: Tenant));
-        step1Ext.Request.Status.ShouldBe("PENDING_EXTERNAL_APPROVAL");
-        fx.Consents.ShouldBeEmpty();
-
-        var approved = await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
-            sub.RequestId, ConsentDecisionKind.Approve, ConsentDecisionChannel.External, Principal: null,
-            ApprovedValidTo: FixedNow.AddDays(10),
-            ExternalAttribution: fx.ExternalAttribution(OwnerB), ContextTenantId: Tenant,
-            ApprovedProfileItems: [0], ApprovedClearColumns: ["id", "total"]));
-        approved.Request.Status.ShouldBe("APPROVED");
-        fx.Consents.Count.ShouldBe(1);
-        fx.Consents[0].ValidTo.ShouldBe(FixedNow.AddDays(10));
-        fx.Consents[0].ColumnRules.ShouldContain(c => c.ColumnName == "id" && c.AccessLevel == ColumnAccessLevel.Clear);
-    }
-
-    [Fact]
     public async Task PatternNewOwnerHook_ExtendsApprovingOwners_WithNewSignedGrantRecord()
     {
         var fx = new Fixture();
@@ -277,9 +242,20 @@ public sealed class ProfileAssignmentTests
         };
         reqCtx.Request.Headers["Idempotency-Key"] = "key-create-1";
 
+        var engine = new PermissionRequestEngine(
+            fx,
+            new Autheris.Tests.Common.Fakes.InMemoryAuditWriter(),
+            new ApproverResolver(),
+            new ApproverEligibility(new Autheris.Application.Security.GovernanceCapabilities()),
+            new Autheris.Application.Governance.ConsentRequests.SeparationOfDutiesService(),
+            new GrantPolicy(),
+            GrantValidityPolicy.CreateDefault(),
+            Array.Empty<IGrantEffectApplier>(),
+            accessProfileRepository: fx,
+            timeProvider: fx.Clock);
         var badRoleResult = await ConsentApiEndpoints.CreateRequestAsync(
             new CreateConsentRequestBody(Kind: "profileAssignment", ProfileId: fx.ProfileId, Grantee: "AnalystRole", GranteeType: "Role", DurationDays: 14),
-            reqCtx, new UnsupportedRequestService(), fx, fx.Service);
+            reqCtx, engine, fx);
         await badRoleResult.ExecuteAsync(reqCtx);
         reqCtx.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
 
@@ -287,10 +263,14 @@ public sealed class ProfileAssignmentTests
         okCtx.Request.Headers["Idempotency-Key"] = "key-create-ok";
         var okResult = await ConsentApiEndpoints.CreateRequestAsync(
             new CreateConsentRequestBody(Kind: "profileAssignment", ProfileId: fx.ProfileId, Justification: "Need access", DurationDays: 14),
-            okCtx, new UnsupportedRequestService(), fx, fx.Service);
+            okCtx, engine, fx);
         await okResult.ExecuteAsync(okCtx);
         okCtx.Response.StatusCode.ShouldBe(StatusCodes.Status201Created);
-        var reqId = fx.Requests.Single().Id;
+        fx.Requests.Single().RequestKind.ShouldBe(ConsentRequestKind.ProfileAssignment);
+
+        // Decisions and revocation of an already materialised assignment: submitted through the profile service so the item snapshot exists.
+        var reqId = (await fx.Service.SubmitAsync(new ProfileAssignmentSubmission(
+            fx.ProfileId, new Sid("S-1-5-21-OTHER-REQUESTER"), fx.UserPrincipal(new Sid("S-1-5-21-OTHER-REQUESTER")), Tenant, DurationDays: 14))).RequestId;
 
         await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(reqId, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerA), ContextTenantId: Tenant));
         await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(reqId, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerB), ContextTenantId: Tenant));
@@ -309,12 +289,6 @@ public sealed class ProfileAssignmentTests
         await okRevoke.ExecuteAsync(revokeOkCtx);
         revokeOkCtx.Response.StatusCode.ShouldBe(StatusCodes.Status200OK);
         fx.Consents.All(c => c.IsRevoked).ShouldBeTrue();
-    }
-
-    private sealed class UnsupportedRequestService : IConsentRequestService
-    {
-        public Task<SubmitConsentRequestResult> SubmitAsync(ConsentRequestSubmission submission, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<bool> WithdrawAsync(Guid requestId, ClaimsPrincipal principal, CancellationToken ct = default) => throw new NotSupportedException();
     }
 
     private sealed class Fixture :
@@ -365,7 +339,7 @@ public sealed class ProfileAssignmentTests
             }
             else
             {
-                Routes.Add(new ConsentWorkflowRoute(Tenant.Value, WorkflowRouteScopeKind.DataSource, "pg",
+                Routes.Add(new ConsentWorkflowRoute(Tenant.Value, WorkflowRouteScopeKind.Tenant, Tenant.Value,
                     ConsentWorkflowMode.Internal, null, 60, 30, 72, false, "admin", FixedNow));
             }
 
@@ -378,7 +352,7 @@ public sealed class ProfileAssignmentTests
                 this, this, this, this, this, Materializer, grantPolicy, validityPolicy, writer, router, timeProvider: Clock);
             Pipeline = new ConsentDecisionPipeline(
                 this, this, this, new ConsentDecisionGuard(new IdentitySubjectResolver()),
-                grantPolicy, validityPolicy, new ExternalDecisionGuard(),
+                grantPolicy, validityPolicy, new LegacyExternalDecisionGuard(),
                 workflowConfigRepository: this, timeProvider: Clock, fallbackTenantId: Tenant, profileAssignmentHandler: Service);
         }
 

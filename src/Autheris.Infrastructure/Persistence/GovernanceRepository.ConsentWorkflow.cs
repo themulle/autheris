@@ -289,7 +289,7 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
         {
             routes.Add(new ConsentWorkflowRoute(
                 StoredTenant.Parse(reader.GetString(0)).Value,
-                ConsentWorkflowSqlMapping.TryParseRouteScopeKind(reader.GetString(1), out var scopeKind) ? scopeKind : WorkflowRouteScopeKind.Tenant,
+                ConsentWorkflowSqlMapping.TryParseRouteScopeKind(reader.GetString(1), out var scopeKind) ? scopeKind : WorkflowRouteScopeKind.Unknown,
                 reader.GetString(2),
                 ConsentWorkflowSqlMapping.ParseWorkflowModeOrDefault(reader.GetString(3)),
                 ConsentWorkflowSql.ReadOptionalGuid(reader, 4),
@@ -301,24 +301,7 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
                 ConsentWorkflowSql.ReadOptionalTimestamp(reader, 10) ?? TimeProvider.System.GetUtcNow()));
         }
 
-        var dataSourceRoute = routes.FirstOrDefault(
-            r => r.ScopeKind == WorkflowRouteScopeKind.DataSource && string.Equals(r.ScopeRef, table.Domain, StringComparison.OrdinalIgnoreCase));
-        if (dataSourceRoute is not null)
-        {
-            return dataSourceRoute;
-        }
-
-        if (routes.Any(r => r.ScopeKind == WorkflowRouteScopeKind.DataOwner))
-        {
-            var tableOwnerIds = await GetTableOwnerIdsForRouteAsync(conn, table, ct).ConfigureAwait(false);
-            var dataOwnerRoute = routes.FirstOrDefault(
-                r => r.ScopeKind == WorkflowRouteScopeKind.DataOwner && tableOwnerIds.Contains(r.ScopeRef));
-            if (dataOwnerRoute is not null)
-            {
-                return dataOwnerRoute;
-            }
-        }
-
+        // Removed (data owner, data source) and unknown scope kinds are inert; only the tenant route applies here.
         return routes.FirstOrDefault(r => r.ScopeKind == WorkflowRouteScopeKind.Tenant);
     }
 

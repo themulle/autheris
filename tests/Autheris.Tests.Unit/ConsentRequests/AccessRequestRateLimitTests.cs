@@ -1,14 +1,20 @@
 namespace Autheris.Tests.Unit.ConsentRequests;
 
+using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
+using Autheris.Application.Governance.Grants;
+using Autheris.Application.Governance.ConsentRequests;
+using Autheris.Application.Governance.Requests;
+using Autheris.Application.Security;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Tests.Common;
+using Autheris.Tests.Common.Fakes;
 using Autheris.Tests.Unit.Catalog;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -17,14 +23,20 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-/// <summary>The one access-request limit per (tenant, sid) sits in <see cref="ConsentRequestService"/>, so REST, GraphQL and MCP share it.</summary>
+/// <summary>The one access-request limit per (tenant, sid) sits in the permission request engine, so REST, GraphQL and MCP share it.</summary>
 public sealed class AccessRequestRateLimitTests
 {
-    private static ConsentRequestService Service(IRateLimiterService limiter) => new(
-        Substitute.For<ITableMetadataRepository>(),
+    private static PermissionRequestEngine Engine(IRateLimiterService limiter) => new(
         Substitute.For<IConsentApprovalRepository>(),
-        gatewayOptions: Options.Create(new GatewayOptions { Tenancy = TenancyShape.Multi.Options() }),
-        rateLimiter: limiter);
+        new InMemoryAuditWriter(),
+        new ApproverResolver(),
+        new ApproverEligibility(new GovernanceCapabilities()),
+        new SeparationOfDutiesService(),
+        new GrantPolicy(),
+        GrantValidityPolicy.CreateDefault(),
+        Array.Empty<IGrantEffectApplier>(),
+        rateLimiter: limiter,
+        gatewayOptions: Options.Create(new GatewayOptions { Tenancy = TenancyShape.Multi.Options() }));
 
     private static IRateLimiterService Denying(int retryAfter)
     {
@@ -43,7 +55,7 @@ public sealed class AccessRequestRateLimitTests
     {
         var limiter = Denying(120);
 
-        var ex = await Should.ThrowAsync<ConsentRequestException>(() => Service(limiter).SubmitAsync(Command()));
+        var ex = await Should.ThrowAsync<ConsentRequestException>(() => new ConsentRequestEndpointAdapter(Engine(limiter)).SubmitAsync(Command()));
 
         ex.Code.ShouldBe("RATE_LIMIT_EXCEEDED");
         ex.RetryAfterSeconds.ShouldBe(120);
@@ -61,7 +73,7 @@ public sealed class AccessRequestRateLimitTests
         var body = new CreateConsentRequestBody(Domain: "sales", Schema: "dbo", TableName: "orders", Justification: "Quarterly audit", DurationDays: 7);
 
         var result = await ConsentApiEndpoints.CreateRequestAsync(
-            body, context, Service(Denying(90)), Substitute.For<IConsentApprovalRepository>());
+            body, context, Engine(Denying(90)), Substitute.For<IConsentApprovalRepository>());
         await result.ExecuteAsync(context);
 
         context.Response.StatusCode.ShouldBe(StatusCodes.Status429TooManyRequests);

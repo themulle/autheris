@@ -26,7 +26,9 @@ public sealed record PermissionAuditDetails(
     PermissionAuditActorKind ActorKind = PermissionAuditActorKind.User,
     string? GrantKind = null,
     string? ErrorCode = null,
-    int? ExpectedVersion = null)
+    int? ExpectedVersion = null,
+    Guid? ExternalSystemId = null,
+    string? ExternalReference = null)
 {
     public static PermissionAuditActorKind ResolveActorKind(SecurityPrincipalContext? context)
     {

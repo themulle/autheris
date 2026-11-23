@@ -139,49 +139,6 @@ public class Issue113AccessRequestsSecurityTests
         return services.BuildServiceProvider();
     }
 
-    // ---------------- SEC-TEST-113-01 ----------------
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task SEC_TEST_113_01_ReadOnlyToken_CannotExecuteApproveMutation()
-    {
-        var services = CreateServices();
-        var principal = CreateReadOnlyPrincipal("S-1-5-21-APPROVER", "data.access.review");
-        var accessor = CreateAccessor(principal, services);
-
-        var approvalRepo = Substitute.For<IConsentApprovalRepository>();
-        var ownershipRepo = Substitute.For<IDataOwnershipRepository>();
-        var consentRepo = new InMemoryConsentRepository();
-        var metaRepo = new InMemoryTableMetadataRepository();
-
-        var mutation = new Mutation();
-        var ex = await Should.ThrowAsync<GraphQLException>(() => mutation.ApproveConsentRequestAsync(
-            Guid.NewGuid(), null, approvalRepo, ownershipRepo, consentRepo, metaRepo, accessor));
-
-        ex.Errors.ShouldContain(e => e.Code == "DECISION_NOT_PERMITTED");
-        await approvalRepo.DidNotReceiveWithAnyArgs().ApproveConsentRequestStepAsync(default, default);
-    }
-
-    // ---------------- SEC-TEST-113-02 ----------------
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task SEC_TEST_113_02_ReadOnlyToken_CannotExecuteRejectMutation()
-    {
-        var services = CreateServices();
-        var principal = CreateReadOnlyPrincipal("S-1-5-21-APPROVER", "data.access.review");
-        var accessor = CreateAccessor(principal, services);
-
-        var approvalRepo = Substitute.For<IConsentApprovalRepository>();
-        var ownershipRepo = Substitute.For<IDataOwnershipRepository>();
-
-        var mutation = new Mutation();
-        var ex = await Should.ThrowAsync<GraphQLException>(() => mutation.RejectConsentRequestAsync(
-            Guid.NewGuid(), "Need more detail", null, approvalRepo, ownershipRepo, accessor));
-
-        ex.Errors.ShouldContain(e => e.Code == "DECISION_NOT_PERMITTED");
-        await approvalRepo.DidNotReceiveWithAnyArgs().RejectConsentRequestAsync(
-            Arg.Any<Guid>(), Arg.Any<Sid>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
-    }
-
     // ---------------- SEC-TEST-113-03 ----------------
     [Fact]
     [Trait("Category", "Security")]

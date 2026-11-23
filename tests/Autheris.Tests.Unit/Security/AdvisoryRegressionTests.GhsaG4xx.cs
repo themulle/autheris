@@ -178,7 +178,7 @@ public sealed partial class AdvisoryRegressionTests
         var sysId = Guid.NewGuid();
         var system = new ExternalWorkflowSystem(sysId, TenantA.Value, "snow", "svc", "https://sn.local", "sec", true, "admin", DateTimeOffset.UtcNow, null);
         var route = new ConsentWorkflowRoute(TenantA.Value, WorkflowRouteScopeKind.Tenant, TenantA.Value, ConsentWorkflowMode.External, sysId, 90, 30, 72, false, "admin", DateTimeOffset.UtcNow);
-        var guard = new ExternalDecisionGuard();
+        var guard = new LegacyExternalDecisionGuard();
 
         foreach (var (gType, gRef, subject) in new[]
         {
@@ -237,7 +237,7 @@ public sealed partial class AdvisoryRegressionTests
             scimEx.ErrorCode.ShouldBe(ConsentDecisionErrorCodes.SelfApprovalForbidden);
 
             var extReq = Wave2Request("S-1-5-21-REQ-1", GranteeType.Group, targetGroup, external: true, externalSystemId: sysId);
-            var guard = new ExternalDecisionGuard(groupStore: scimGroups);
+            var guard = new LegacyExternalDecisionGuard(groupStore: scimGroups);
             var extCmd = new ConsentDecisionCommand(
                 extReq.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.External, null,
                 ExternalAttribution: new ExternalDecisionAttribution(sysId, "EXT-2", "APPROVED", new AssertedApprover("S-1-5-21-EXT", ResolvedSid: "S-1-5-21-EXT"), DateTimeOffset.UtcNow));
@@ -248,7 +248,7 @@ public sealed partial class AdvisoryRegressionTests
         scimResult = new EffectiveScimGroupsResult(new HashSet<string>(), false, false);
         var extReqDegraded = Wave2Request("S-1-5-21-REQ-1", GranteeType.Group, targetGroup, external: true, externalSystemId: sysId);
         var degradedCaller = Wave2Principal("svc-webhook", extraClaims: [new Claim(RoleResolutionClaims.ClaimType, RoleResolutionClaims.Degraded)]);
-        var degradedGuard = new ExternalDecisionGuard(groupStore: scimGroups);
+        var degradedGuard = new LegacyExternalDecisionGuard(groupStore: scimGroups);
         var degradedExtEx = await Should.ThrowAsync<ConsentDecisionException>(() => degradedGuard.ValidateAsync(
             new ConsentDecisionCommand(extReqDegraded.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.External, degradedCaller,
                 ExternalAttribution: new ExternalDecisionAttribution(sysId, "EXT-3", "APPROVED", new AssertedApprover("S-1-5-21-EXT", ResolvedSid: "S-1-5-21-EXT"), DateTimeOffset.UtcNow)),
@@ -604,7 +604,7 @@ public sealed partial class AdvisoryRegressionTests
             return new ConsentDecisionPipeline(
                 ApprovalRepo, MetadataRepo, _owners, new ConsentDecisionGuard(new IdentitySubjectResolver()),
                 new GrantPolicy(), GrantValidityPolicy.CreateDefault(),
-                new ExternalDecisionGuard(groupStore: _scimGroups),
+                new LegacyExternalDecisionGuard(groupStore: _scimGroups),
                 workflowConfigRepository: _workflow, groupStore: _scimGroups,
                 classificationRepository: new Autheris.Tests.Unit.Governance.Classification.TestInMemoryClassificationStore(TenantA.Value));
         }

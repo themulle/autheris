@@ -75,7 +75,7 @@ public sealed class ExternalDecisionGuardTests
     [Fact]
     public async Task ValidateAsync_InternalRequestOrMissingDisabledOrWrongClientSystem_FailsClosed()
     {
-        var guard = new ExternalDecisionGuard();
+        var guard = new LegacyExternalDecisionGuard();
         var internalReq = ExternalRequest(mode: ConsentWorkflowMode.Internal);
         var modeEx = await Should.ThrowAsync<ConsentDecisionException>(() => guard.ValidateAsync(
             ExternalCommand(internalReq.Id, new AssertedApprover("a")), internalReq, Route(false), ActiveSystem()));
@@ -100,7 +100,7 @@ public sealed class ExternalDecisionGuardTests
     public async Task ValidateAsync_RequireResolvableApprover_RefusesUnknownAndInactiveScimUsers()
     {
         var userStore = Substitute.For<IScimUserStore>();
-        var guard = new ExternalDecisionGuard(userStore);
+        var guard = new LegacyExternalDecisionGuard(userStore);
         var req = ExternalRequest();
 
         var unknownEx = await Should.ThrowAsync<ConsentDecisionException>(() => guard.ValidateAsync(
@@ -120,7 +120,7 @@ public sealed class ExternalDecisionGuardTests
     {
         var userStore = Substitute.For<IScimUserStore>();
         var groupStore = Substitute.For<IScimGroupStore>();
-        var guard = new ExternalDecisionGuard(userStore, groupStore);
+        var guard = new LegacyExternalDecisionGuard(userStore, groupStore);
         var req = ExternalRequest(GranteeType.Group, "S-1-5-21-TARGET-GRP");
 
         // Resolved SCIM user reveals requester OID even if external subject used alias
@@ -153,7 +153,7 @@ public sealed class ExternalDecisionGuardTests
     public async Task ValidateAsync_DuplicatePriorOrIntraPayloadApprover_RefusesFourEyes_AndAllowsDistinctApprovers()
     {
         var userStore = Substitute.For<IScimUserStore>();
-        var guard = new ExternalDecisionGuard(userStore);
+        var guard = new LegacyExternalDecisionGuard(userStore);
         var req = ExternalRequest(steps: [new ApprovalStep { ApproverSid = new Sid("S-1-5-21-A1"), Decision = "APPROVED" }]);
 
         userStore.GetUserByUpnAsync(TenantA, "default", "a1@corp.local", Arg.Any<CancellationToken>())

@@ -1,317 +1,218 @@
 namespace Autheris.Application.ConsentRequests;
 
 using System;
-using System.Collections.Generic;
-using System.Linq;
-using System.Security.Claims;
+using System.Globalization;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
-using Autheris.Application.Governance.ConsentRequests;
-using Autheris.Application.Identity;
-using Autheris.Domain.Common;
-using Autheris.Domain.Identity;
-using Autheris.Domain.Interfaces;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Webhooks;
 using Autheris.Domain.Model;
-using Autheris.Domain.Tenancy;
-
-public interface IExternalDecisionGuard
-{
-    Task<IReadOnlyList<Sid>> ValidateAsync(
-        ConsentDecisionCommand command,
-        ConsentRequest request,
-        ConsentWorkflowRoute? route,
-        ExternalWorkflowSystem? system,
-        CancellationToken ct = default);
-}
 
 /// <summary>
-/// Fail-closed guard for external consent decisions. Validates system authorization, reference binding,
-/// asserted approvers, optional SCIM directory resolution (<c>require_resolvable_approver</c>),
-/// requester/group self-approval prohibition, and four-eyes distinctness.
+/// Fail-closed evidence validation for external workflow decisions: system and reference binding, an HMAC over the
+/// request id, version, decision and approver bound to a timestamp and a single-use nonce, replay rejection, and mapping of
+/// the approver to an Autheris principal through the identity realm (never by e-mail). It does not evaluate eligibility or
+/// separation of duties: the engine does that for the mapped principal. A missing secret, replay store or mapping fails closed.
 /// </summary>
 public sealed class ExternalDecisionGuard(
-    IScimUserStore? userStore = null,
-    IScimGroupStore? groupStore = null,
-    IIdentityRealmRegistry? realmRegistry = null,
-    ISeparationOfDutiesService? separationOfDutiesService = null) : IExternalDecisionGuard
+    IExternalApproverResolver? approverResolver = null,
+    IWebhookSecretProtector? secretProtector = null,
+    IIdempotencyStore? replayStore = null,
+    TimeProvider? timeProvider = null) : IExternalDecisionGuard
 {
-    private readonly ISeparationOfDutiesService _sod = separationOfDutiesService ?? new SeparationOfDutiesService(groupStore, realmRegistry);
-    public async Task<IReadOnlyList<Sid>> ValidateAsync(
-        ConsentDecisionCommand command,
+    public const string InvalidEvidenceCode = "EXTERNAL_EVIDENCE_INVALID";
+    public const string ReplayCode = "EXTERNAL_EVIDENCE_REPLAY";
+    public static readonly TimeSpan MaxClockSkew = TimeSpan.FromMinutes(5);
+    private static readonly TimeSpan ReplayRetention = TimeSpan.FromHours(24);
+    private const int MaxNonceLength = 128;
+    private const string SignatureContext = "autheris-external-decision-v1";
+
+    private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+
+    /// <summary>Canonical MAC over the evidence fields. Exposed so transports and tests sign exactly what the guard verifies.</summary>
+    public static string ComputeSignature(string secret, ExternalDecisionEnvelope envelope)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(secret);
+        ArgumentNullException.ThrowIfNull(envelope);
+        var canonical = string.Join(
+            '\n',
+            SignatureContext,
+            envelope.RequestId.ToString("D"),
+            envelope.ExpectedVersion.ToString(CultureInfo.InvariantCulture),
+            envelope.ExternalSystemId.ToString("D"),
+            envelope.ExternalReference,
+            envelope.Approve ? "APPROVE" : "REJECT",
+            envelope.Approver.Subject,
+            envelope.Timestamp.ToUnixTimeSeconds().ToString(CultureInfo.InvariantCulture),
+            envelope.Nonce);
+        var mac = HMACSHA256.HashData(Encoding.UTF8.GetBytes(secret), Encoding.UTF8.GetBytes(canonical));
+        return Convert.ToHexStringLower(mac);
+    }
+
+    public async Task<ValidatedExternalDecision> ValidateAsync(
+        ExternalDecisionEnvelope envelope,
         ConsentRequest request,
         ConsentWorkflowRoute? route,
         ExternalWorkflowSystem? system,
         CancellationToken ct = default)
     {
-        ArgumentNullException.ThrowIfNull(command);
+        ArgumentNullException.ThrowIfNull(envelope);
         ArgumentNullException.ThrowIfNull(request);
 
         if (request.WorkflowMode != ConsentWorkflowMode.External)
         {
             throw new ConsentDecisionException(
                 ConsentDecisionErrorCodes.WorkflowModeMismatch,
-                $"Consent request '{request.Id}' uses internal workflow mode and cannot be decided externally.",
-                statusCode: 409);
+                "The request uses the internal workflow and cannot be decided externally.",
+                409);
         }
 
-        var attribution = command.ExternalAttribution
-            ?? throw new ConsentDecisionException(
-                "VALIDATION_ERROR",
-                "External decision attribution is required for external workflow decisions.",
-                statusCode: 400);
-
-        if (string.IsNullOrWhiteSpace(attribution.ExternalReference))
+        if (envelope.RequestId != request.Id || envelope.ExpectedVersion <= 0 || string.IsNullOrWhiteSpace(envelope.ExternalReference))
         {
-            throw new ConsentDecisionException(
-                "VALIDATION_ERROR",
-                "External decision attribution requires a non-empty external reference.",
-                statusCode: 400);
+            throw Invalid("External evidence does not match the request.");
         }
 
-        ValidateExternalSystem(command.Principal, request, route, system, attribution);
+        ValidateSystemBinding(envelope, request, route, system);
 
-        var assertedApprovers = attribution.EffectiveApprovers;
-        if (assertedApprovers.Count == 0)
+        var now = _time.GetUtcNow();
+        if (envelope.Timestamp > now + MaxClockSkew || envelope.Timestamp < now - MaxClockSkew)
         {
+            throw Invalid("External evidence is outside the accepted time window.");
+        }
+
+        if (string.IsNullOrWhiteSpace(envelope.Nonce) || envelope.Nonce.Length > MaxNonceLength ||
+            string.IsNullOrWhiteSpace(envelope.Signature) || string.IsNullOrWhiteSpace(envelope.Approver?.Subject))
+        {
+            throw Invalid("External evidence is incomplete.");
+        }
+
+        var secret = ResolveSecret(system!)
+            ?? throw new ConsentDecisionException(ConsentDecisionErrorCodes.ExternalSystemNotAuthorized, "External evidence cannot be verified.", 403);
+        VerifySignature(secret, envelope);
+
+        // The evidence is authentic from here on; consume the nonce before anything else can fail.
+        if (replayStore is null)
+        {
+            throw new ConsentDecisionException(ConsentDecisionErrorCodes.ExternalSystemNotAuthorized, "External evidence cannot be verified.", 403);
+        }
+
+        var replayKey = $"external-evidence:{system!.Id:D}:{envelope.Nonce}";
+        if (!await replayStore.SetIfNotExistsAsync(replayKey, new ReplayMarker(request.Id), ReplayRetention, ct).ConfigureAwait(false))
+        {
+            throw new ConsentDecisionException(ReplayCode, "External evidence was already used.", 409);
+        }
+
+        var approver = approverResolver is null
+            ? null
+            : await approverResolver.ResolveAsync(request.TenantId, envelope.Approver!, ct).ConfigureAwait(false);
+        if (approver is null || !approver.IsAuthenticated)
+        {
+            // Unmapped identity: nothing is decided and the request stays pending.
             throw new ConsentDecisionException(
                 ConsentDecisionErrorCodes.ApproverUnresolved,
-                "External decision attribution must identify at least one approver.",
-                statusCode: 400);
+                "The external approver could not be mapped to a principal of the identity realm.",
+                403);
         }
 
-        var requireResolvable = route?.RequireResolvableApprover ?? true;
-        var realmId = realmRegistry?.GetDefaultRealm()?.Id ?? "default";
-        if (request.RequestedGranteeType == GranteeType.Group &&
-            SeparationOfDutiesService.IsDegradedGroupOrRoleResolution(command.Principal))
-        {
-            throw new ConsentDecisionException(
-                ConsentDecisionErrorCodes.SelfApprovalForbidden,
-                "Separation of duties violated: group or role resolution is degraded; denied fail-closed.",
-                statusCode: 403);
-        }
-
-        var resolvedSids = new List<Sid>(assertedApprovers.Count);
-        var seenInPayload = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-
-        foreach (var asserted in assertedApprovers)
-        {
-            var rawCandidates = CollectAssertedIdentifiers(asserted);
-            if (rawCandidates.Count == 0)
-            {
-                throw new ConsentDecisionException(
-                    ConsentDecisionErrorCodes.ApproverUnresolved,
-                    "External approver attribution is missing an identifier.",
-                    statusCode: 400);
-            }
-
-            ScimUser? scimUser = null;
-            if (userStore != null)
-            {
-                scimUser = await ResolveScimUserAsync(request.TenantId, realmId, asserted, ct).ConfigureAwait(false);
-            }
-
-            if (requireResolvable && (userStore == null || scimUser == null))
-            {
-                throw new ConsentDecisionException(
-                    ConsentDecisionErrorCodes.ApproverUnresolved,
-                    $"Asserted external approver '{asserted.Subject}' could not be resolved in the identity directory.",
-                    statusCode: 403);
-            }
-
-            if (scimUser != null && !scimUser.Active)
-            {
-                throw new ConsentDecisionException(
-                    ConsentDecisionErrorCodes.ApproverUnresolved,
-                    $"Asserted external approver '{asserted.Subject}' is inactive in the identity directory.",
-                    statusCode: 403);
-            }
-
-            var allIds = new HashSet<string>(rawCandidates, StringComparer.OrdinalIgnoreCase);
-            if (scimUser != null)
-            {
-                AddNonEmpty(allIds, scimUser.Id);
-                AddNonEmpty(allIds, scimUser.ObjectSid);
-                AddNonEmpty(allIds, scimUser.ExternalId);
-                AddNonEmpty(allIds, scimUser.UserName);
-                AddNonEmpty(allIds, scimUser.Email);
-                AddNonEmpty(allIds, scimUser.UserPrincipalName);
-                AddNonEmpty(allIds, scimUser.EntraObjectId);
-            }
-
-            var effectiveSidValue = FirstNonEmpty(scimUser?.ObjectSid, asserted.ResolvedSid, scimUser?.Id, asserted.Subject, asserted.Email);
-            if (string.IsNullOrWhiteSpace(effectiveSidValue))
-            {
-                throw new ConsentDecisionException(
-                    ConsentDecisionErrorCodes.ApproverUnresolved,
-                    "External approver attribution could not be mapped to an approver SID.",
-                    statusCode: 403);
-            }
-
-            var effectiveSid = new Sid(effectiveSidValue);
-
-            var sod = await _sod.CheckConsentApprovalAsync(
-                request.TenantId,
-                request,
-                principal: null,
-                effectiveSid,
-                additionalActorIdentifiers: allIds,
-                checkPriorApprovers: true,
-                groupLookupKeys: [scimUser?.UserKey ?? effectiveSid.Value],
-                ct: ct).ConfigureAwait(false);
-            if (!sod.Allowed)
-            {
-                throw new ConsentDecisionException(
-                    sod.Kind == SodViolationKind.SameApprover
-                        ? ConsentDecisionErrorCodes.FourEyesSameApprover
-                        : ConsentDecisionErrorCodes.SelfApprovalForbidden,
-                    sod.Reason,
-                    statusCode: sod.Kind == SodViolationKind.SameApprover ? 409 : 403);
-            }
-
-            var normIds = SeparationOfDutiesService.CollectSubjectIdentifiers(null, effectiveSid.Value, allIds);
-            if (normIds.Overlaps(seenInPayload))
-            {
-                throw new ConsentDecisionException(
-                    ConsentDecisionErrorCodes.FourEyesSameApprover,
-                    "Four-eyes principle violated: duplicate approvers in external decision payload.",
-                    statusCode: 409);
-            }
-
-            seenInPayload.UnionWith(normIds);
-            resolvedSids.Add(effectiveSid);
-        }
-
-        return resolvedSids;
+        return new ValidatedExternalDecision(
+            approver,
+            new Autheris.Application.Governance.Requests.ExternalDecisionEvidence(system.Id, envelope.ExternalReference, envelope.Reason));
     }
 
-    private static void ValidateExternalSystem(
-        ClaimsPrincipal? principal,
-        ConsentRequest request,
-        ConsentWorkflowRoute? route,
-        ExternalWorkflowSystem? system,
-        ExternalDecisionAttribution attribution)
+    private static void VerifySignature(string secret, ExternalDecisionEnvelope envelope)
     {
-        if (request.ExternalSystemId.HasValue && request.ExternalSystemId.Value != attribution.ExternalSystemId)
+        var expected = Convert.FromHexString(ComputeSignature(secret, envelope));
+        byte[] provided;
+        try
         {
-            throw new ConsentDecisionException(
-                ConsentDecisionErrorCodes.ExternalSystemNotAuthorized,
-                "External decision system does not match the request's assigned external system.",
-                statusCode: 403);
+            provided = Convert.FromHexString(envelope.Signature.Trim());
+        }
+        catch (FormatException)
+        {
+            throw Invalid("External evidence signature is invalid.");
         }
 
-        if (route?.ExternalSystemId is { } routeSystemId && routeSystemId != attribution.ExternalSystemId)
+        if (!CryptographicOperations.FixedTimeEquals(provided, expected))
         {
-            throw new ConsentDecisionException(
-                ConsentDecisionErrorCodes.ExternalSystemNotAuthorized,
-                "External decision system does not match the active workflow route.",
-                statusCode: 403);
+            throw Invalid("External evidence signature is invalid.");
+        }
+    }
+
+    private static void ValidateSystemBinding(
+        ExternalDecisionEnvelope envelope,
+        ConsentRequest request,
+        ConsentWorkflowRoute? route,
+        ExternalWorkflowSystem? system)
+    {
+        if (system is null || !system.Enabled || system.Id != envelope.ExternalSystemId ||
+            !string.Equals(system.TenantId, request.TenantId.Value, StringComparison.OrdinalIgnoreCase))
+        {
+            throw NotAuthorized("The external workflow system is missing, disabled or belongs to another tenant.");
+        }
+
+        if (request.ExternalSystemId.HasValue && request.ExternalSystemId.Value != envelope.ExternalSystemId)
+        {
+            throw NotAuthorized("The external workflow system does not match the request.");
+        }
+
+        if (route?.ExternalSystemId is { } routeSystem && routeSystem != envelope.ExternalSystemId)
+        {
+            throw NotAuthorized("The external workflow system does not match the active route.");
         }
 
         if (!string.IsNullOrWhiteSpace(request.ExternalReference) &&
-            !string.Equals(request.ExternalReference, attribution.ExternalReference, StringComparison.Ordinal))
+            !string.Equals(request.ExternalReference, envelope.ExternalReference, StringComparison.Ordinal))
         {
-            throw new ConsentDecisionException(
-                ConsentDecisionErrorCodes.ExternalSystemNotAuthorized,
-                "External reference does not match the consent request.",
-                statusCode: 403);
+            throw NotAuthorized("The external reference does not match the request.");
         }
 
-        if (system is null || !system.Enabled || system.Id != attribution.ExternalSystemId || system.TenantId != request.TenantId)
+        if (envelope.Caller is not null && !string.IsNullOrWhiteSpace(system.ClientId))
         {
-            throw new ConsentDecisionException(
-                ConsentDecisionErrorCodes.ExternalSystemNotAuthorized,
-                "External workflow system is missing, disabled, or belongs to another tenant.",
-                statusCode: 403);
-        }
-
-        if (principal != null && !string.IsNullOrWhiteSpace(system.ClientId))
-        {
-            var callerClientId = principal.FindFirst("azp")?.Value
-                ?? principal.FindFirst("appid")?.Value
-                ?? principal.FindFirst("client_id")?.Value;
+            var callerClientId = envelope.Caller.FindFirst("azp")?.Value
+                ?? envelope.Caller.FindFirst("appid")?.Value
+                ?? envelope.Caller.FindFirst("client_id")?.Value;
             if (!string.IsNullOrWhiteSpace(callerClientId) &&
                 !string.Equals(callerClientId, system.ClientId, StringComparison.OrdinalIgnoreCase))
             {
-                throw new ConsentDecisionException(
-                    ConsentDecisionErrorCodes.ExternalSystemNotAuthorized,
-                    "Caller client identity does not match the registered external workflow system.",
-                    statusCode: 403);
+                throw NotAuthorized("The caller does not match the registered external workflow system.");
             }
         }
     }
 
-    private async Task<ScimUser?> ResolveScimUserAsync(
-        TenantId tenantId,
-        string realmId,
-        AssertedApprover asserted,
-        CancellationToken ct)
+    private string? ResolveSecret(ExternalWorkflowSystem system)
     {
-        if (userStore == null)
+        var stored = system.WebhookSecretProtected;
+        if (string.IsNullOrEmpty(stored))
         {
             return null;
         }
 
-        foreach (var candidate in CollectAssertedIdentifiers(asserted))
+        if (stored.StartsWith("enc:v1:", StringComparison.Ordinal))
         {
-            var bySid = await userStore.GetUserByObjectSidAsync(tenantId, realmId, candidate, ct).ConfigureAwait(false);
-            if (bySid != null) return bySid;
-
-            var byId = await userStore.GetUserAsync(tenantId, realmId, candidate, ct).ConfigureAwait(false);
-            if (byId != null) return byId;
-
-            var byExt = await userStore.GetUserByExternalIdAsync(tenantId, realmId, candidate, ct).ConfigureAwait(false);
-            if (byExt != null) return byExt;
-
-            var byName = await userStore.GetUserByUserNameAsync(tenantId, realmId, candidate, ct).ConfigureAwait(false);
-            if (byName != null) return byName;
-
-            var byUpn = await userStore.GetUserByUpnAsync(tenantId, realmId, candidate, ct).ConfigureAwait(false);
-            if (byUpn != null) return byUpn;
-
-            var byUpnOrName = await userStore.GetUsersByUpnOrUserNameAsync(tenantId, realmId, candidate, ct).ConfigureAwait(false);
-            if (byUpnOrName.Count > 1)
+            if (secretProtector is null)
             {
                 return null;
             }
 
-            if (byUpnOrName.Count == 1)
+            try
             {
-                return byUpnOrName[0];
+                return secretProtector.Unprotect(system.TenantId, system.Id.ToString("D"), stored);
+            }
+            catch (WebhookSecretUnavailableException)
+            {
+                return null;
             }
         }
 
-        return null;
+        return secretProtector is null ? stored : null;
     }
 
-    private static List<string> CollectAssertedIdentifiers(AssertedApprover asserted)
-    {
-        var list = new List<string>(3);
-        void AddIfSet(string? val)
-        {
-            if (!string.IsNullOrWhiteSpace(val))
-            {
-                var trimmed = val.Trim();
-                if (!list.Contains(trimmed, StringComparer.OrdinalIgnoreCase))
-                {
-                    list.Add(trimmed);
-                }
-            }
-        }
+    private static ConsentDecisionException Invalid(string message) => new(InvalidEvidenceCode, message, 403);
 
-        AddIfSet(asserted.ResolvedSid);
-        AddIfSet(asserted.Subject);
-        AddIfSet(asserted.Email);
-        return list;
-    }
+    private static ConsentDecisionException NotAuthorized(string message) =>
+        new(ConsentDecisionErrorCodes.ExternalSystemNotAuthorized, message, 403);
 
-    private static void AddNonEmpty(HashSet<string> set, string? value)
-    {
-        if (!string.IsNullOrWhiteSpace(value))
-        {
-            set.Add(value.Trim());
-        }
-    }
-
-    private static string? FirstNonEmpty(params string?[] candidates)
-        => candidates.FirstOrDefault(c => !string.IsNullOrWhiteSpace(c))?.Trim();
+    private sealed record ReplayMarker(Guid RequestId);
 }

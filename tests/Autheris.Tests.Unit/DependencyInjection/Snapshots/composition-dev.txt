@@ -398,7 +398,7 @@
 0397 Autheris.Application.Governance.Grants.IGrantValidityPolicy Singleton key=- type:Autheris.Application.Governance.Grants.GrantValidityPolicy
 0398 Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter Singleton key=- type:Autheris.Application.ConsentRequests.Routing.ConsentWorkflowRouter
 0399 Autheris.Application.Governance.ConsentRequests.ISeparationOfDutiesService Singleton key=- type:Autheris.Application.Governance.ConsentRequests.SeparationOfDutiesService
-0400 Autheris.Application.ConsentRequests.IExternalDecisionGuard Singleton key=- type:Autheris.Application.ConsentRequests.ExternalDecisionGuard
+0400 Autheris.Application.ConsentRequests.ILegacyExternalDecisionGuard Singleton key=- type:Autheris.Application.ConsentRequests.LegacyExternalDecisionGuard
 0401 Microsoft.AspNetCore.Authorization.IAuthorizationHandler Singleton key=- type:Autheris.Api.Security.ExternalSystemRequirementHandler
 0402 Autheris.Application.ConsentRequests.IConsentDecisionPipeline Scoped key=- type:Autheris.Application.ConsentRequests.ConsentDecisionPipeline
 0403 Autheris.Application.ConsentRequests.IConsentRequestService Scoped key=- type:Autheris.Application.ConsentRequests.ConsentRequestService
