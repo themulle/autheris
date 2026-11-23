@@ -644,10 +644,19 @@ public sealed partial class DiscoveryService : IDiscoveryService
             Dictionary<string, IReadOnlyList<ColumnClassification>>? repoColClasses = null;
             if (_classificationRepository is not null && !table.Table.DiscoveryHidden)
             {
-                foreach (var col in table.Columns.Where(c => !c.DiscoveryHidden && !table.ColumnClassifications.ContainsKey(c.ColumnName)))
+                // Issue #1043: one read for the table's columns instead of one per column.
+                var unclassified = table.Columns.Where(c => !c.DiscoveryHidden && !table.ColumnClassifications.ContainsKey(c.ColumnName)).ToList();
+                if (unclassified.Count > 0)
                 {
-                    var rows = await _classificationRepository.GetColumnClassificationsAsync(col.Id.ToString(), caller.Tenant.Value, ct).ConfigureAwait(false);
-                    if (rows.Count > 0) (repoColClasses ??= new(StringComparer.OrdinalIgnoreCase))[col.ColumnName] = rows;
+                    var byColumnId = await _classificationRepository.GetColumnClassificationsBatchAsync(
+                        unclassified.Select(static c => c.Id.ToString()).ToList(), caller.Tenant.Value, ct).ConfigureAwait(false);
+                    foreach (var col in unclassified)
+                    {
+                        if (byColumnId.TryGetValue(col.Id.ToString(), out var rows) && rows.Count > 0)
+                        {
+                            (repoColClasses ??= new(StringComparer.OrdinalIgnoreCase))[col.ColumnName] = rows;
+                        }
+                    }
                 }
             }
 

@@ -42,10 +42,17 @@ public sealed partial class TableAccessPolicy
             ? query.AllUserSids
             : query.GroupSids.Append(query.UserSid).Distinct().ToList();
 
-        var loaded = await _consentRepository.GetActiveConsentsForSubjectsAsync(
-            subjects, query.Metadata.Identifier, now, query.Tenant, ct).ConfigureAwait(false);
-        var patternConsents = await _consentRepository.GetActivePatternConsentsAsync(
-            query.Tenant, now, ct).ConfigureAwait(false);
+        // Issue #1043: from the batch prefetch when it covers this decision, otherwise from the repository.
+        IReadOnlyList<Consent> loaded = query.ConsentPrefetch is { } consentPrefetch &&
+            consentPrefetch.TryGetActiveConsents(subjects, query.Metadata.Identifier, now, query.Tenant, out var prefetchedLoaded)
+                ? prefetchedLoaded
+                : await _consentRepository.GetActiveConsentsForSubjectsAsync(
+                    subjects, query.Metadata.Identifier, now, query.Tenant, ct).ConfigureAwait(false);
+        IReadOnlyList<Consent> patternConsents = query.ConsentPrefetch is { } patternPrefetch &&
+            patternPrefetch.TryGetActivePatternConsents(query.Tenant, now, out var prefetchedPatterns)
+                ? prefetchedPatterns
+                : await _consentRepository.GetActivePatternConsentsAsync(
+                    query.Tenant, now, ct).ConfigureAwait(false);
 
         var combinedConsents = new List<Consent>(loaded.Count + patternConsents.Count + (query.SupplementalConsents?.Count ?? 0));
         var seenIds = new HashSet<Guid>();
@@ -75,7 +82,7 @@ public sealed partial class TableAccessPolicy
 
         var callerScopes = ResolveClassificationCallerScopes(query);
         var (perGrant, combinedWinners) = await _classificationResolver!.ResolveForTableAsync(
-            query.Metadata, allowGrants, query.Tenant, callerScopes, ct: ct).ConfigureAwait(false);
+            query.Metadata, allowGrants, query.Tenant, callerScopes, ct: ct, columnRowPrefetch: query.ColumnRowPrefetch).ConfigureAwait(false);
 
         if (perGrant.Values.All(m => m.Count == 0))
         {

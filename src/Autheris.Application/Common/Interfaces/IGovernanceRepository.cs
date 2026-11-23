@@ -9,6 +9,14 @@ public interface ITableMetadataRepository : Autheris.Application.Catalog.ICatalo
     Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default);
 
     /// <summary>
+    /// Issue #1043: the table, its columns, masking rules and global classifications (the epoch-validated structural metadata) without
+    /// the dataset catalog overlay (tags, discovery visibility, group size, non-personal flag). For readers that need none of the overlay,
+    /// such as the table sensitivity lookup. Default: <see cref="GetTableMetadataAsync"/>.
+    /// </summary>
+    Task<TableMetadata?> GetStructuralTableMetadataAsync(TableIdentifier table, CancellationToken ct = default) =>
+        GetTableMetadataAsync(table, ct);
+
+    /// <summary>
     /// Resolves several tables for one request (one entry per requested identifier in request order, null = unknown or inactive).
     /// Same per-table semantics as <see cref="GetTableMetadataAsync"/> (an unavailable table still throws); implementations
     /// validate all cached entries with one batched epoch read. Default: sequential single lookups.
@@ -239,6 +247,30 @@ public interface ITableMetadataRepository : Autheris.Application.Catalog.ICatalo
 public interface IConsentRepository
 {
     Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Issue #1043: <see cref="GetActiveConsentsForSubjectsAsync"/> for several tables in a few set-based statements. Each requested table
+    /// maps to exactly the consents (direct and pattern, including not-yet-valid denies) that the per-table read returns for it at
+    /// <paramref name="atTime"/>. Default: one per-table read per table.
+    /// </summary>
+    async Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<Consent>>> GetActiveConsentsForSubjectsBatchAsync(
+        IEnumerable<Sid> subjects, IReadOnlyCollection<TableIdentifier> tables, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(subjects);
+        ArgumentNullException.ThrowIfNull(tables);
+        var subjectList = subjects.ToList();
+        var result = new Dictionary<TableIdentifier, IReadOnlyList<Consent>>();
+        foreach (var table in tables)
+        {
+            if (!result.ContainsKey(table))
+            {
+                result[table] = await GetActiveConsentsForSubjectsAsync(subjectList, table, atTime, tenantId, ct).ConfigureAwait(false);
+            }
+        }
+
+        return result;
+    }
+
     Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default);
     Task<Consent> CreateConsentAsync(Consent consent, CancellationToken ct = default);
     Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default);
@@ -317,6 +349,14 @@ public interface IConsentRepository
     Task<IReadOnlyList<Consent>> GetActivePatternConsentsAsync(
         TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<Consent>>([]);
+
+    /// <summary>
+    /// Issue #1043: <see cref="GetActivePatternConsentsAsync"/> plus the not-yet-valid Deny pattern grants, for a batch prefetch that
+    /// re-applies the activity rule at each decision's time (a Deny that starts during the batch must not be lost).
+    /// </summary>
+    Task<IReadOnlyList<Consent>> GetPatternConsentsWithPendingDeniesAsync(
+        TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default)
+        => GetActivePatternConsentsAsync(tenantId, atTime, ct);
 
     /// <summary>Returns all active non-revoked Internal-workflow Allow pattern grants across tenants at <paramref name="atTime"/>.</summary>
     Task<IReadOnlyList<Consent>> GetActiveInternalPatternConsentsAsync(

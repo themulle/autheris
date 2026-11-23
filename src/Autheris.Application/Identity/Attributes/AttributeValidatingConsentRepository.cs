@@ -133,6 +133,10 @@ public sealed class AttributeValidatingConsentRepository : IConsentRepository, I
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default) =>
         _inner.GetActiveConsentsForSubjectsAsync(subjects, table, atTime, tenantId, ct);
 
+    public Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<Consent>>> GetActiveConsentsForSubjectsBatchAsync(
+        IEnumerable<Sid> subjects, IReadOnlyCollection<TableIdentifier> tables, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default) =>
+        _inner.GetActiveConsentsForSubjectsBatchAsync(subjects, tables, atTime, tenantId, ct);
+
     public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default) =>
         _inner.GetAllActiveConsentsForSubjectsAsync(subjects, roles, atTime, tenantId, ct);
 
@@ -157,6 +161,9 @@ public sealed class AttributeValidatingConsentRepository : IConsentRepository, I
 
     public Task<IReadOnlyList<Consent>> GetActivePatternConsentsAsync(TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default) =>
         _inner.GetActivePatternConsentsAsync(tenantId, atTime, ct);
+
+    public Task<IReadOnlyList<Consent>> GetPatternConsentsWithPendingDeniesAsync(TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default) =>
+        _inner.GetPatternConsentsWithPendingDeniesAsync(tenantId, atTime, ct);
 
     public Task<IReadOnlyList<Consent>> GetActiveInternalPatternConsentsAsync(DateTimeOffset atTime, CancellationToken ct = default) =>
         _inner.GetActiveInternalPatternConsentsAsync(atTime, ct);

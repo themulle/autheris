@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.10.5] - 2026-11-23
+
+### Fixed
+- The dbt governance import no longer rejects an unchanged governance file as a masking relaxation after an upgrade from 1.8.x: a rule that persists to the same column mask override as the stored one (same mask function, parameters and key; `REDACT` and `TYPE_SAFE_REDACT` with the same constant count as equal) is not a weakening, and `HMAC`/`HMAC_SHA256`/`HASH` count as one rule type. Genuine weakenings are still rejected; upgraded deployments recover on the next import without a data migration (#1042).
+- `GET /api/v1/catalog/objects?accessStatus=granted` and `/objects/facets?accessStatus=granted` no longer issue governance statements per granted table and column. A batch of access decisions (`IAccessDecisionPoint.DecideManyAsync`) now reads the caller's consents, the tenant's pattern consents, and the column classifications and mask overrides once per block of 500 objects in set-based statements. Each decision re-applies the per-table consent validity rules at its own time, a prefetch older than 5 s is not used, and decisions built from it are not written to the consent decision cache. Classification and mask override reads in the classification resolver, the indexing hidden-text resolver (search index build) and the discovery page are per table instead of per column; the table sensitivity lookup reads the structural metadata without the dataset overlay and its tenant classifications in one statement, and stops when the request is cancelled (#1043).
+
 ## [1.10.4] - 2026-11-22
 
 ### Fixed

@@ -35,6 +35,9 @@ public partial class GovernanceRepository
         return DatasetCatalogStore.Apply(structural, overlay);
     }
 
+    public Task<TableMetadata?> GetStructuralTableMetadataAsync(TableIdentifier table, CancellationToken ct = default) =>
+        GetTableMetadataCoreAsync(table, null, ct);
+
     public Task<IReadOnlyList<TableMetadata?>> GetTableMetadataBatchAsync(IReadOnlyList<TableIdentifier> tables, CancellationToken ct = default)
         => CatalogMetadataBatchReader.ReadAsync(this, tables, ct);
 

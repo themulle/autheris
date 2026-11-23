@@ -2,6 +2,7 @@ namespace Autheris.Infrastructure.Persistence;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Data;
 using System.Data.Common;
 using System.Threading;
@@ -191,42 +192,10 @@ public partial class GovernanceRepository : IClassificationRepository
     }
 
     public async Task<IReadOnlyList<ColumnClassification>> GetColumnClassificationsAsync(
-        string tableColumnId,
-        string? tenantScope = null,
-        CancellationToken ct = default)
+        string tableColumnId, string? tenantScope = null, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tableColumnId);
-        var validatedTenant = ValidateOptionalTenantFilter(tenantScope);
-
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var cmd = conn.CreateCommand();
-        cmd.AddBound("@table_column_id", tableColumnId);
-        if (validatedTenant is null)
-        {
-            cmd.CommandText = ClassificationsSql.SelectColumnClassificationsGlobalSql;
-        }
-        else
-        {
-            cmd.CommandText = ClassificationsSql.SelectColumnClassificationsScopedSql;
-            cmd.AddBound("@scope", validatedTenant);
-        }
-
-        var list = new List<ColumnClassification>();
-        await using var reader = await ExecuteReaderAsync(cmd, "Classifications.GetColumnClassifications", ct).ConfigureAwait(false);
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            list.Add(new ColumnClassification
-            {
-                Scope = reader.GetString(0),
-                TableColumnId = reader.GetString(1),
-                Code = reader.GetString(2),
-                Source = reader.GetString(3),
-                AssignedBy = reader.GetString(4),
-                AssignedAt = reader.GetFieldValue<DateTimeOffset>(5)
-            });
-        }
-
-        return list;
+        return (await GetColumnClassificationsBatchAsync([tableColumnId], tenantScope, ct).ConfigureAwait(false)).TryGetValue(tableColumnId, out var rows) ? rows : [];
     }
 
     public async Task AssignColumnClassificationAsync(
@@ -323,34 +292,50 @@ public partial class GovernanceRepository : IClassificationRepository
     }
 
     public async Task<IReadOnlyList<ColumnMaskOverride>> GetColumnMaskOverridesAsync(
-        string tableColumnId,
-        string? tenantScope = null,
-        CancellationToken ct = default)
+        string tableColumnId, string? tenantScope = null, CancellationToken ct = default)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tableColumnId);
-        var validatedTenant = ValidateOptionalTenantFilter(tenantScope);
+        return (await GetColumnMaskOverridesBatchAsync([tableColumnId], tenantScope, ct).ConfigureAwait(false)).TryGetValue(tableColumnId, out var rows) ? rows : [];
+    }
 
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var cmd = conn.CreateCommand();
-        cmd.AddBound("@table_column_id", tableColumnId);
-        if (validatedTenant is null)
+    // Issue #1043: the rows of the per-column reads for a set of columns, keyed by table column id (1,000 ids per statement).
+    public Task<IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>>> GetColumnClassificationsBatchAsync(
+        IReadOnlyCollection<string> tableColumnIds, string? tenantScope = null, CancellationToken ct = default) =>
+        ReadColumnBatchAsync(tableColumnIds, tenantScope, SelectColumnClassificationsBatchPrefix, "Classifications.GetColumnClassifications", static r => new ColumnClassification
         {
-            cmd.CommandText = ClassificationsSql.SelectColumnMaskOverridesGlobalSql;
-        }
-        else
+            Scope = r.GetString(0), TableColumnId = r.GetString(1), Code = r.GetString(2), Source = r.GetString(3), AssignedBy = r.GetString(4), AssignedAt = r.GetFieldValue<DateTimeOffset>(5)
+        }, static c => c.TableColumnId, ct);
+
+    public Task<IReadOnlyDictionary<string, IReadOnlyList<ColumnMaskOverride>>> GetColumnMaskOverridesBatchAsync(
+        IReadOnlyCollection<string> tableColumnIds, string? tenantScope = null, CancellationToken ct = default) =>
+        ReadColumnBatchAsync(tableColumnIds, tenantScope, SelectColumnMaskOverridesBatchPrefix, "Classifications.GetColumnOverrides", ReadColumnMaskOverride, static o => o.TableColumnId, ct);
+
+    private async Task<IReadOnlyDictionary<string, IReadOnlyList<T>>> ReadColumnBatchAsync<T>(
+        IReadOnlyCollection<string> tableColumnIds, string? tenantScope, string prefix, string fragmentId, Func<DbDataReader, T> map, Func<T, string> columnIdOf, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(tableColumnIds);
+        var scope = ValidateOptionalTenantFilter(tenantScope) ?? ClassificationScopes.Global;
+        var byColumn = new Dictionary<string, List<T>>(StringComparer.OrdinalIgnoreCase);
+        var ids = tableColumnIds.Distinct(StringComparer.Ordinal).ToArray();
+        Array.ForEach(ids, static id => ArgumentException.ThrowIfNullOrWhiteSpace(id, nameof(tableColumnIds)));
+        if (ids.Length > 0)
         {
-            cmd.CommandText = ClassificationsSql.SelectColumnMaskOverridesScopedSql;
-            cmd.AddBound("@scope", validatedTenant);
+            await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+            foreach (var chunk in ConsentSubjectFilter.Chunks(ids))
+            {
+                await using var cmd = conn.CreateCommand();
+                cmd.CommandText = prefix + ConsentSqlCore.BindIdInClause(cmd, "c", chunk) + SelectColumnBatchSuffix;
+                cmd.AddBound("@scope", scope);
+                await using var reader = await ExecuteReaderAsync(cmd, fragmentId, ct).ConfigureAwait(false);
+                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                {
+                    var row = map(reader);
+                    (byColumn.TryGetValue(columnIdOf(row), out var list) ? list : byColumn[columnIdOf(row)] = []).Add(row);
+                }
+            }
         }
 
-        var list = new List<ColumnMaskOverride>();
-        await using var reader = await ExecuteReaderAsync(cmd, "Classifications.GetColumnOverrides", ct).ConfigureAwait(false);
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            list.Add(ReadColumnMaskOverride(reader));
-        }
-
-        return list;
+        return byColumn.ToDictionary(static kv => kv.Key, static kv => (IReadOnlyList<T>)kv.Value, StringComparer.OrdinalIgnoreCase);
     }
 
     public async Task<ColumnMaskOverride> UpsertColumnMaskOverrideAsync(

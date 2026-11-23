@@ -52,7 +52,16 @@ public sealed partial class TableAccessPolicy
             .Distinct()
             .ToList();
         var now = _timeProvider.GetUtcNow();
-        var activeConsents = (await _consentRepository.GetActiveConsentsForSubjectsAsync(subjects, table, now, query.Tenant, ct).ConfigureAwait(false))
+        // Issue #1043: a batch of decisions reads the consents once (ConsentBatchPrefetch re-applies the per-table rules at `now`).
+        // A decision built from prefetched consents is never written to the decision cache: the prefetch was read before the epoch
+        // snapshot above, so the compare-and-set (RR-L4-06) could not detect a revoke in between.
+        List<Consent> prefetchedConsents = [];
+        var fromPrefetch = query.ConsentPrefetch is { } consentPrefetch &&
+            consentPrefetch.TryGetActiveConsents(subjects, table, now, query.Tenant, out prefetchedConsents);
+        IReadOnlyList<Consent> loadedConsents = fromPrefetch
+            ? prefetchedConsents
+            : await _consentRepository.GetActiveConsentsForSubjectsAsync(subjects, table, now, query.Tenant, ct).ConfigureAwait(false);
+        var activeConsents = loadedConsents
             .Where(c => c.TenantId == query.Tenant) // multi-tenancy isolation
             .ToList();
         if (query.SupplementalConsents is { Count: > 0 } supplemental)
@@ -114,7 +123,7 @@ public sealed partial class TableAccessPolicy
             HasDistinctGrantColumnRules(contributingAllows) &&
             (_rowScopeCompiler != null || (_rowPolicyFactory != null && query.Metadata.DataSourceType == DataSourceType.Sql && !query.Metadata.IsDelegatedSource));
 
-        if (useCache && !hasGrantRowScopes && !hasMultiSignatureLegacy)
+        if (useCache && !fromPrefetch && !hasGrantRowScopes && !hasMultiSignatureLegacy)
         {
             bool catalogVersionStable = true;
             if (_catalogVersionProvider != null && catalogVersionAtLoad is not null)

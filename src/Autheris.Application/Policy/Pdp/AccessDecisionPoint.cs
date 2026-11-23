@@ -221,7 +221,11 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
                 ObjectKind: isProcedure ? FilterObjectKinds.ProcedureResult : FilterObjectKinds.Relation,
                 AllUserSids: isProcedure ? null : (principal?.GetAllUserSids() ?? [subject.UserSid]),
                 Principal: principal,
-                SupplementalConsents: request.SupplementalConsents);
+                SupplementalConsents: request.SupplementalConsents)
+            {
+                ColumnRowPrefetch = request.ColumnRowPrefetch,
+                ConsentPrefetch = request.ConsentPrefetch
+            };
 
             var decision = await _policy.DecideAsync(query, ct).ConfigureAwait(false);
             if (isProduct)
@@ -462,13 +466,58 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         ArgumentNullException.ThrowIfNull(subject);
         ArgumentNullException.ThrowIfNull(objects);
 
+        // Issue #1043: the caller's consents and the column classification / mask override rows are read once per block of objects
+        // instead of once or twice per decision. Blocks bound the memory of a request and keep every prefetch well inside its MaxAge.
         var results = new List<TableAccessDecision>(objects.Count);
-        foreach (var obj in objects)
+        for (var offset = 0; offset < objects.Count; offset += PrefetchBlockSize)
         {
-            var req = new AccessRequest(subject, obj, operation, transport);
-            results.Add(await DecideAsync(req, ct).ConfigureAwait(false));
+            var block = objects.Skip(offset).Take(PrefetchBlockSize).ToList();
+            var (rowPrefetch, consentPrefetch) = await PrefetchBlockAsync(subject, block, operation, ct).ConfigureAwait(false);
+            foreach (var obj in block)
+            {
+                var req = new AccessRequest(subject, obj, operation, transport) { ColumnRowPrefetch = rowPrefetch, ConsentPrefetch = consentPrefetch };
+                results.Add(await DecideAsync(req, ct).ConfigureAwait(false));
+            }
         }
+
         return results;
+    }
+
+    /// <summary>Objects decided with one prefetch (issue #1043): bounds the prefetched rows per request and their age.</summary>
+    internal const int PrefetchBlockSize = 500;
+
+    private async ValueTask<(Autheris.Application.Policy.Classification.ColumnPolicyRowPrefetch?, Autheris.Application.Policy.ConsentBatchPrefetch?)> PrefetchBlockAsync(
+        SecurityPrincipalContext subject,
+        IReadOnlyList<TableMetadata> block,
+        AccessOperation operation,
+        CancellationToken ct)
+    {
+        // Only read decisions reach the table policy (writes and write execution never evaluate these rows).
+        if (_policy == null || block.Count < 2 ||
+            operation is AccessOperation.Insert or AccessOperation.Update or AccessOperation.Delete or AccessOperation.ExecuteWrite)
+        {
+            return (null, null);
+        }
+
+        var rowPrefetch = await _policy.PrefetchColumnRowsAsync(block, subject.TenantId, ct).ConfigureAwait(false);
+
+        // Consents only for subjects the preconditions of DecideAsync let through (others are denied without reading consents).
+        if (_consentRepository == null ||
+            _options.Value.IsConsentBypassed ||
+            !subject.IsAuthenticated ||
+            string.IsNullOrWhiteSpace(subject.UserSid.Value) ||
+            subject.GroupResolutionStatus != GroupResolutionStatus.Complete ||
+            string.IsNullOrWhiteSpace(subject.TenantId.Value))
+        {
+            return (rowPrefetch, null);
+        }
+
+        // Every subject set a decision reads with: the token's user SIDs, the user SID and the group SIDs.
+        var subjects = new HashSet<Sid>(subject.Principal?.GetAllUserSids() ?? []) { subject.UserSid };
+        subjects.UnionWith(subject.GroupSids);
+        var consentPrefetch = await Autheris.Application.Policy.ConsentBatchPrefetch.LoadAsync(
+            _consentRepository, subjects, block.Select(static o => o.Identifier).ToList(), subject.TenantId, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
+        return (rowPrefetch, consentPrefetch);
     }
 
     public async ValueTask<AccessExplanation> ExplainAsync(AccessRequest request, CancellationToken ct = default)

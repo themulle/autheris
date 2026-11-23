@@ -31,17 +31,32 @@ public sealed class TableMetadataSensitivityLookup : ITableSensitivityLookup
         {
             var repo = _repositoryAccessor();
             if (repo == null) return true;
-            var metadata = await repo.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
+            // Issue #1043: sensitivity depends on the table, its columns, masking rules and classifications only, never on the dataset
+            // catalog overlay, so the epoch-validated structural metadata is read (one statement on a cache hit instead of four).
+            var metadata = await repo.GetStructuralTableMetadataAsync(table, ct).ConfigureAwait(false);
             if (metadata?.Table != null)
             {
                 if (ClassificationMetadata.IsTableSensitive(metadata)) return true;
                 if (_classificationRepoAccessor?.Invoke() is { } classRepo && metadata.Columns is { Count: > 0 })
-                    foreach (var col in metadata.Columns.Where(static c => c.Id != Guid.Empty))
-                        if ((await classRepo.GetColumnClassificationsAsync(col.Id.ToString(), metadata.OwnerTenantId, ct).ConfigureAwait(false)).Any(static r => !string.Equals(r.Code, ClassificationScopes.PublicCode, StringComparison.OrdinalIgnoreCase)))
+                {
+                    // Issue #1043: one read for all columns (the owner tenant's rows on top of the hydrated global ones), not one per column.
+                    var columnIds = metadata.Columns.Where(static c => c.Id != Guid.Empty).Select(static c => c.Id.ToString()).ToList();
+                    if (columnIds.Count > 0)
+                    {
+                        var rows = await classRepo.GetColumnClassificationsBatchAsync(columnIds, metadata.OwnerTenantId, ct).ConfigureAwait(false);
+                        if (rows.Values.Any(static list => list.Any(static r => !string.Equals(r.Code, ClassificationScopes.PublicCode, StringComparison.OrdinalIgnoreCase))))
                             return true;
+                    }
+                }
+
                 return false;
             }
             return true;
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // The caller gave up: stop instead of continuing with a fail-closed answer nobody reads.
+            throw;
         }
         catch (Exception ex)
         {
