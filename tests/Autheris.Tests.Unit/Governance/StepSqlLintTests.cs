@@ -215,7 +215,8 @@ public sealed class StepSqlLintTests
                 (42, "expiry_notice_stages"),
                 (43, "single_approval_cleanup"),
                 (44, "retire_classification_clear"),
-                (45, "drop_table_ownership")
+                (45, "drop_table_ownership"),
+                (46, "manifest_proposals")
             ]);
         }
     }
