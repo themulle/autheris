@@ -40,23 +40,24 @@ using Xunit;
 public sealed class ProfileAssignmentTests
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 11, 15, 10, 0, 0, TimeSpan.Zero);
-    private static readonly TenantId Tenant = new("tenant-a");
-    private static readonly Sid Requester = new("S-1-5-21-USER-ALICE");
+    internal static readonly TenantId Tenant = new("tenant-a");
+    internal static readonly Sid Requester = new("S-1-5-21-USER-ALICE");
     private static readonly Sid OwnerA = new("S-1-5-21-OWNER-A");
     private static readonly Sid OwnerB = new("S-1-5-21-OWNER-B");
-    private static readonly Sid OwnerC = new("S-1-5-21-OWNER-C");
+    internal static readonly Sid OwnerC = new("S-1-5-21-OWNER-C");
 
     [Fact]
     public async Task PatternNewOwnerHook_QueuesOwnerApprovalForTheNewObject()
     {
         var fx = new Fixture();
+        var assignment = fx.SeedApprovedAssignment();
         var patternConsent = new Consent
         {
             Id = Guid.NewGuid(),
             TenantId = Tenant,
             GranteeType = GranteeType.User,
             GranteeSid = Requester,
-            ProfileAssignmentId = Guid.NewGuid(),
+            ProfileAssignmentId = assignment.Id,
             ProfileItemNo = 1,
             ObjectPattern = "pg.analytics.*",
             WorkflowMode = ConsentWorkflowMode.Internal,
@@ -68,15 +69,69 @@ public sealed class ProfileAssignmentTests
 
         await fx.Maintenance.HandlePatternNewOwnerAsync(patternConsent, newTable, [OwnerC.Value], fx.Clock.GetUtcNow());
 
-        var extReq = fx.Requests.ShouldHaveSingleItem();
+        var extReq = fx.Requests.Single(r => r.Id != assignment.Id);
         extReq.RequestKind.ShouldBe(ConsentRequestKind.ProfileAssignment);
-        extReq.ProfileId.ShouldBe(patternConsent.ProfileAssignmentId);
+        extReq.ProfileId.ShouldBe(fx.ProfileId);
+        extReq.RequesterSid.ShouldBe(ProfileAssignmentMaintenanceService.PatternCoverageRequester);
+        extReq.RequestedGranteeRef.ShouldBe(Requester.Value);
+        ProfileAssignmentSnapshots.Parse(extReq).ExtendingConsentId.ShouldBe(patternConsent.Id);
         extReq.Status.ShouldBe("PENDING");
         fx.Items.ShouldHaveSingleItem().OwnerSid.ShouldBe(OwnerC.Value);
 
         // The same object is not queued twice.
         await fx.Maintenance.HandlePatternNewOwnerAsync(patternConsent, newTable, [OwnerC.Value], fx.Clock.GetUtcNow());
-        fx.Requests.Count.ShouldBe(1);
+        fx.Requests.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task PatternNewOwnerHook_DoesNotConsumeTheGranteesPendingRequestCap()
+    {
+        var fx = new Fixture();
+        var assignment = fx.SeedApprovedAssignment();
+        var patternConsent = new Consent
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Tenant,
+            GranteeType = GranteeType.User,
+            GranteeSid = Requester,
+            ProfileAssignmentId = assignment.Id,
+            ObjectPattern = "pg.analytics.*",
+            WorkflowMode = ConsentWorkflowMode.Internal,
+            ValidTo = FixedNow.AddDays(30)
+        };
+
+        for (var i = 0; i < 3; i++)
+        {
+            var table = Fixture.BuildTable("pg", "analytics", "events_" + i, "LOW");
+            fx.Tables.Add(table);
+            await fx.Maintenance.HandlePatternNewOwnerAsync(patternConsent, table, [OwnerC.Value], fx.Clock.GetUtcNow());
+        }
+
+        // The pending cap counts requests by requester SID; system-initiated requests never use the grantee as requester.
+        fx.Requests.Count(r => r.Id != assignment.Id).ShouldBe(3);
+        fx.Requests.Count(r => r.RequesterSid == Requester && r.Status == "PENDING").ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task PatternNewOwnerHook_IgnoresGrantWhoseAssignmentRequestIsUnknown()
+    {
+        var fx = new Fixture();
+        var patternConsent = new Consent
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Tenant,
+            GranteeType = GranteeType.User,
+            GranteeSid = Requester,
+            ProfileAssignmentId = Guid.NewGuid(),
+            ObjectPattern = "pg.analytics.*",
+            WorkflowMode = ConsentWorkflowMode.Internal,
+            ValidTo = FixedNow.AddDays(30)
+        };
+        var newTable = Fixture.BuildTable("pg", "analytics", "events_v2", "LOW");
+
+        await fx.Maintenance.HandlePatternNewOwnerAsync(patternConsent, newTable, [OwnerC.Value], fx.Clock.GetUtcNow());
+
+        fx.Requests.ShouldBeEmpty();
     }
 
     [Fact]
@@ -119,7 +174,7 @@ public sealed class ProfileAssignmentTests
         fx.Requests.Single().RequestKind.ShouldBe(ConsentRequestKind.ProfileAssignment);
     }
 
-    private sealed class Fixture :
+    internal sealed class Fixture :
         IAccessProfileRepository, ITableMetadataRepository, IConsentApprovalRepository, IContainerOwnership,
         IProfileAssignmentStore, IConsentWorkflowConfigRepository, IConsentWorkflowAdminRepository, IGrantRecordStore, IAuditLogRepository
     {
@@ -179,6 +234,30 @@ public sealed class ProfileAssignmentTests
         }
 
         private List<ConsentWorkflowRoute> Routes { get; } = [];
+
+        /// <summary>The original profile assignment request whose id becomes the assignment id of its grants.</summary>
+        public ConsentRequest SeedApprovedAssignment(string status = "APPROVED")
+        {
+            var request = new ConsentRequest
+            {
+                Id = Guid.NewGuid(),
+                TenantId = Tenant,
+                RequesterSid = Requester,
+                RequestedGranteeType = GranteeType.User,
+                RequestedGranteeRef = Requester.Value,
+                BusinessJustification = "Analyst onboarding for the analytics profile.",
+                Status = status,
+                RequestedAt = FixedNow,
+                RequestedValidFrom = FixedNow,
+                RequestedValidTo = FixedNow.AddDays(30),
+                RequestKind = ConsentRequestKind.ProfileAssignment,
+                GrantKind = PermissionGrantKind.Data,
+                ProfileId = ProfileId,
+                WorkflowMode = ConsentWorkflowMode.Internal
+            };
+            Requests.Add(request);
+            return request;
+        }
 
         public static TableMetadata BuildTable(string domain, string schema, string name, string sensitivity)
         {

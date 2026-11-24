@@ -1,10 +1,12 @@
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
+using Autheris.Application.ConsentRequests.ProfileAssignments;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Grants.Records;
 using Autheris.Application.Governance.Requests;
@@ -12,6 +14,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Grants;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Tests.Unit.ConsentRequests.ProfileAssignments;
 using Autheris.Tests.Unit.Security;
 using Shouldly;
 using Xunit;
@@ -115,6 +118,82 @@ public sealed class ProfileAssignmentApplierTests
         inserted[0].GrantSource.ShouldBe(ConsentGrantSource.AccessProfile);
         inserted[0].ApproverCapacity.ShouldBe(ApproverCapacity.Governance);
         inserted[0].ValidTo.ShouldBe(Now.AddDays(90));
+    }
+
+    [Fact]
+    public async Task PatternNewOwnerHook_ExtendsApprovingOwners_WithNewSignedGrantRecord()
+    {
+        var fx = new ProfileAssignmentTests.Fixture();
+        var writer = new GrantWriter(fx, fx.Signer, fx.Clock);
+        var applier = new ProfileAssignmentApplier(fx, fx, writer, assignmentStore: fx, materializer: fx.Materializer);
+        var decidedAt = fx.Clock.GetUtcNow();
+
+        // The original assignment materializes one concrete grant and one pattern grant.
+        var assignment = fx.SeedApprovedAssignment();
+        await ApplyInTransactionAsync(fx, applier, new ApprovedPermission(
+            assignment, new Sid("user:dg"), ApproverCapacity.Governance, false, decidedAt, decidedAt, decidedAt.AddDays(30)));
+        var patternConsent = fx.Consents.Single(c => c.IsPatternGrant);
+        var grantCount = fx.Consents.Count;
+
+        // A new object matches the pattern; its owner is queued for approval by a system request.
+        var newTable = ProfileAssignmentTests.Fixture.BuildTable("pg", "analytics", "events_v2", "LOW");
+        fx.Tables.Add(newTable);
+        fx.TableOwners[newTable.Identifier] = [ProfileAssignmentTests.OwnerC.Value];
+        fx.Clock.Advance(TimeSpan.FromHours(1));
+        await fx.Maintenance.HandlePatternNewOwnerAsync(patternConsent, newTable, [ProfileAssignmentTests.OwnerC.Value], fx.Clock.GetUtcNow());
+        var extReq = fx.Requests.Single(r => r.Id != assignment.Id);
+
+        var refs = await ApplyInTransactionAsync(fx, applier, new ApprovedPermission(
+            extReq, new Sid("user:dg"), ApproverCapacity.Governance, false, fx.Clock.GetUtcNow(), fx.Clock.GetUtcNow(), patternConsent.ValidTo));
+
+        // The existing grant is extended (no new profile grant) and the extension is a new signed record on its chain.
+        refs.ShouldHaveSingleItem().GrantId.ShouldBe(patternConsent.Id);
+        fx.Consents.Count.ShouldBe(grantCount);
+        fx.Consents.Single(c => c.Id == patternConsent.Id).ApprovingOwners.ShouldContain(ProfileAssignmentTests.OwnerC.Value);
+        fx.Records.Count(r => r.ConsentId == patternConsent.Id && r.RecordType == GrantRecordType.Issued).ShouldBe(2);
+        (await new GrantChainVerifier(fx, fx.Signer).VerifyTenantChainAsync(ProfileAssignmentTests.Tenant.Value)).IsValid.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Caller_made_request_cannot_extend_a_pattern_grant_through_its_context()
+    {
+        var fx = new ProfileAssignmentTests.Fixture();
+        var applier = new ProfileAssignmentApplier(fx, fx, new GrantWriter(fx, fx.Signer, fx.Clock), assignmentStore: fx, materializer: fx.Materializer);
+        var decidedAt = fx.Clock.GetUtcNow();
+        var assignment = fx.SeedApprovedAssignment();
+        await ApplyInTransactionAsync(fx, applier, new ApprovedPermission(
+            assignment, new Sid("user:dg"), ApproverCapacity.Governance, false, decidedAt, decidedAt, decidedAt.AddDays(30)));
+        var patternConsent = fx.Consents.Single(c => c.IsPatternGrant);
+
+        var forged = new ConsentRequest
+        {
+            Id = Guid.NewGuid(),
+            TenantId = ProfileAssignmentTests.Tenant,
+            RequesterSid = ProfileAssignmentTests.Requester,
+            RequestedGranteeType = GranteeType.User,
+            RequestedGranteeRef = ProfileAssignmentTests.Requester.Value,
+            BusinessJustification = "Forged extension of an existing pattern grant.",
+            RequestKind = ConsentRequestKind.ProfileAssignment,
+            GrantKind = PermissionGrantKind.Data,
+            ProfileId = fx.ProfileId,
+            ContextJson = System.Text.Json.JsonSerializer.Serialize(new ProfileAssignmentRequestContext(
+                fx.ProfileId, "x", MaskingPolicyMode.Default, [], [new ProfileAssignmentSnapshotItem(0, "pg.analytics.*", true, "pg", [])],
+                IncludesFutureObjects: true, ExtendingConsentId: patternConsent.Id))
+        };
+
+        var ex = await Should.ThrowAsync<ConsentDecisionException>(() => ApplyInTransactionAsync(fx, applier, new ApprovedPermission(
+            forged, new Sid("user:dg"), ApproverCapacity.Governance, false, decidedAt, decidedAt, decidedAt.AddDays(30))));
+        ex.StatusCode.ShouldBe(422);
+        fx.Consents.Single(c => c.Id == patternConsent.Id).ApprovingOwners.ShouldBeEmpty();
+    }
+
+    private static async Task<IReadOnlyList<GrantRef>> ApplyInTransactionAsync(
+        ProfileAssignmentTests.Fixture fx, ProfileAssignmentApplier applier, ApprovedPermission approved)
+    {
+        await using var assignmentTx = await fx.BeginTransactionAsync();
+        var tx = NullFake.Create<IGovernanceTransaction>((m, _) =>
+            m.Name == "get_" + nameof(IGovernanceTransaction.Transaction) ? assignmentTx.Transaction : NullFake.UseDefault);
+        return await applier.ApplyAsync(tx, approved);
     }
 
     private static ConsentRequest CreateRequest() => new()

@@ -32,6 +32,12 @@ public sealed class ProfileAssignmentMaintenanceService(
     private readonly IGrantPolicy _grantPolicy = grantPolicy ?? throw new ArgumentNullException(nameof(grantPolicy));
     private readonly IConsentEventOutbox? _eventOutbox = eventOutbox;
 
+    /// <summary>
+    /// Requester of system-initiated pattern coverage requests. Using a system identity keeps these requests out of the
+    /// grantee's pending-request cap; separation of duties still checks the grantee through the requested grantee.
+    /// </summary>
+    public static readonly Sid PatternCoverageRequester = new("system:pattern-coverage");
+
     public async Task HandlePatternNewOwnerAsync(
         Consent patternConsent,
         TableMetadata newTable,
@@ -58,16 +64,33 @@ public sealed class ProfileAssignmentMaintenanceService(
             return;
         }
 
+        if (patternConsent.GranteeSid is not { } grantee || string.IsNullOrWhiteSpace(grantee.Value))
+        {
+            return;
+        }
+
+        // The assignment id is the id of the original profile assignment request; the request carries the real profile id.
+        var assignment = await _approvalRepository.GetConsentRequestAsync(assignmentId, ct).ConfigureAwait(false);
+        if (assignment is null ||
+            assignment.TenantId != patternConsent.TenantId ||
+            assignment.RequestKind != ConsentRequestKind.ProfileAssignment ||
+            assignment.ProfileId is not { } profileId ||
+            profileId == Guid.Empty)
+        {
+            return;
+        }
+
         var existingPending = await _approvalRepository.GetRequestsByRequesterSidAsync(
-            patternConsent.GranteeSid ?? new Sid(patternConsent.RequestedGranteeOrSystem()),
+            PatternCoverageRequester,
             patternConsent.TenantId,
             "PENDING",
             ct).ConfigureAwait(false);
         if (existingPending.Any(r =>
             r.TenantId == patternConsent.TenantId &&
             r.RequestKind == ConsentRequestKind.ProfileAssignment &&
-            r.ProfileId == assignmentId &&
-            r.TableIdentifier == newTable.Identifier))
+            string.Equals(r.Status, "PENDING", StringComparison.OrdinalIgnoreCase) &&
+            r.TableIdentifier == newTable.Identifier &&
+            ProfileAssignmentSnapshots.Parse(r).ExtendingConsentId == patternConsent.Id))
         {
             return;
         }
@@ -75,7 +98,7 @@ public sealed class ProfileAssignmentMaintenanceService(
         var itemNo = patternConsent.ProfileItemNo ?? 0;
         var objectPattern = patternConsent.ObjectPattern ?? newTable.Identifier.ToString();
         var context = new ProfileAssignmentRequestContext(
-            assignmentId,
+            profileId,
             "PatternCoverageExtension",
             MaskingPolicyMode.Default,
             patternConsent.RowScope,
@@ -85,11 +108,11 @@ public sealed class ProfileAssignmentMaintenanceService(
             ExtendingItemNo: itemNo);
 
         var requestId = Guid.NewGuid();
-        var requesterSid = patternConsent.GranteeSid ?? new Sid("SYSTEM");
+        var requesterSid = PatternCoverageRequester;
         var justification = $"Pattern grant '{patternConsent.Id:D}' matched new object '{newTable.Identifier}' requiring owner approval.";
         var grantDecision = _grantPolicy.Evaluate(new GrantRequest(
             patternConsent.GranteeType,
-            patternConsent.GranteeSid?.Value ?? string.Empty,
+            grantee.Value,
             GrantKind.Consent,
             patternConsent.ValidTo,
             now,
@@ -109,7 +132,7 @@ public sealed class ProfileAssignmentMaintenanceService(
             TableIdentifier = newTable.Identifier,
             RequesterSid = requesterSid,
             RequestedGranteeType = patternConsent.GranteeType,
-            RequestedGranteeRef = patternConsent.GranteeSid?.Value ?? string.Empty,
+            RequestedGranteeRef = grantee.Value,
             BusinessJustification = justification,
             Status = "PENDING",
             RequestedAt = now,
@@ -120,7 +143,8 @@ public sealed class ProfileAssignmentMaintenanceService(
             WorkflowMode = ConsentWorkflowMode.Internal,
             ContextJson = JsonSerializer.Serialize(context),
             RequestKind = ConsentRequestKind.ProfileAssignment,
-            ProfileId = assignmentId
+            GrantKind = PermissionGrantKind.Data,
+            ProfileId = profileId
         };
 
         var created = await _approvalRepository.CreateConsentRequestAsync(req, ct).ConfigureAwait(false);
@@ -163,10 +187,4 @@ public sealed class ProfileAssignmentMaintenanceService(
             transaction: null,
             ct: ct).ConfigureAwait(false);
     }
-}
-
-internal static class ConsentExtensionsForProfileMonitor
-{
-    public static string RequestedGranteeOrSystem(this Consent consent) =>
-        consent.GranteeSid?.Value ?? "SYSTEM";
 }

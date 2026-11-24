@@ -24,12 +24,16 @@ public sealed class ProfileAssignmentApplier(
     IAccessProfileRepository profileRepository,
     ITableMetadataRepository metadataRepository,
     IGrantWriter grantWriter,
-    IConsentExtrasWriter? extrasWriter = null) : IGrantEffectApplier
+    IConsentExtrasWriter? extrasWriter = null,
+    IProfileAssignmentStore? assignmentStore = null,
+    IProfileGrantMaterializer? materializer = null) : IGrantEffectApplier
 {
     private readonly IAccessProfileRepository _profileRepository = profileRepository ?? throw new ArgumentNullException(nameof(profileRepository));
     private readonly ITableMetadataRepository _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
     private readonly IGrantWriter _grantWriter = grantWriter ?? throw new ArgumentNullException(nameof(grantWriter));
     private readonly IConsentExtrasWriter? _extrasWriter = extrasWriter;
+    private readonly IProfileAssignmentStore? _assignmentStore = assignmentStore;
+    private readonly IProfileGrantMaterializer? _materializer = materializer;
 
     public ConsentRequestKind RequestKind => ConsentRequestKind.ProfileAssignment;
 
@@ -52,6 +56,11 @@ public sealed class ProfileAssignmentApplier(
         }
 
         var req = approved.Request;
+        if (ProfileAssignmentSnapshots.Parse(req).ExtendingConsentId is { } extendingConsentId)
+        {
+            return await ExtendPatternCoverageAsync(transaction, approved, extendingConsentId, ct).ConfigureAwait(false);
+        }
+
         if (!req.ProfileId.HasValue || req.ProfileId.Value == Guid.Empty)
         {
             throw new ConsentDecisionException("VALIDATION_ERROR", "Profile assignment requests require a valid profileId.", 422);
@@ -93,7 +102,7 @@ public sealed class ProfileAssignmentApplier(
                 var spec = ObjectPatternSpec.Parse(rawTarget);
                 objectPattern = spec.NormalizedPattern;
                 dataSource = spec.DataSource;
-                tableIdentifier = new TableIdentifier(spec.DataSource, string.Empty, string.Empty);
+                tableIdentifier = default;
             }
             else
             {
@@ -189,6 +198,66 @@ public sealed class ProfileAssignmentApplier(
         }
 
         return created;
+    }
+
+    /// <summary>
+    /// A system-initiated pattern coverage request extends the approving owners of the existing pattern grant with the
+    /// owners of the newly matched object (with a new signed grant record) instead of creating another profile grant.
+    /// </summary>
+    private async Task<IReadOnlyList<GrantRef>> ExtendPatternCoverageAsync(
+        IGovernanceTransaction transaction,
+        ApprovedPermission approved,
+        Guid extendingConsentId,
+        CancellationToken ct)
+    {
+        if (_assignmentStore is null || _materializer is null)
+        {
+            throw new ConsentDecisionException("SERVICE_UNAVAILABLE", "Pattern coverage extension is not available.", 503);
+        }
+
+        var req = approved.Request;
+        if (req.RequesterSid != ProfileAssignmentMaintenanceService.PatternCoverageRequester)
+        {
+            // Only the pattern coverage monitor creates extension requests; a caller-made request never extends a grant.
+            throw new ConsentDecisionException("VALIDATION_ERROR", "Only system pattern coverage requests can extend a pattern grant.", 422);
+        }
+
+        var existing = await _assignmentStore.GetConsentByIdInTransactionAsync(transaction.Transaction, extendingConsentId, ct).ConfigureAwait(false);
+        if (existing is null ||
+            existing.TenantId != req.TenantId ||
+            !existing.IsPatternGrant ||
+            existing.ProfileAssignmentId is null ||
+            existing.IsRevoked ||
+            existing.ValidTo <= approved.DecidedAt ||
+            existing.GranteeSid is not { } grantee ||
+            !string.Equals(grantee.Value, req.RequestedGranteeRef, StringComparison.OrdinalIgnoreCase))
+        {
+            throw new ConsentDecisionException("CONFLICT", "The pattern grant this request extends is no longer active.", 409);
+        }
+
+        var owners = (await _assignmentStore.GetAssignmentItemsAsync(transaction.Transaction, req.Id, ct).ConfigureAwait(false))
+            .Where(i => i.TenantId == req.TenantId && !string.IsNullOrWhiteSpace(i.OwnerSid))
+            .Select(i => i.OwnerSid)
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        if (owners.Count == 0)
+        {
+            throw new ConsentDecisionException("VALIDATION_ERROR", "Pattern coverage request names no owners to add.", 422);
+        }
+
+        var extended = await _materializer.ExtendApprovingOwnersAsync(
+            transaction.Transaction, existing, req.Id, owners, approved.DecidedBy, approved.DecidedAt, ct).ConfigureAwait(false);
+
+        return
+        [
+            new GrantRef(
+                extended.Id,
+                PermissionGrantKind.Data,
+                Table: null,
+                ValidFrom: extended.ValidFrom,
+                ValidTo: extended.ValidTo,
+                GrantRecordSeq: extended.GrantRecordSeq)
+        ];
     }
 
     private static IReadOnlyList<WriteRule> MapWriteRules(
