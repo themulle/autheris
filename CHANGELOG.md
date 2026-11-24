@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.10.7] - 2026-11-24
+
+### Fixed
+- `describe_dataset` without `brief` (including `include` narrowing on densely related sources) no longer performs a blind transitive graph walk up to 500 datasets when loading golden query examples or repeated per-relation target metadata queries. When a dataset has zero candidate golden queries, example loading returns immediately without touching relation targets; otherwise `GoldenQueryCallerView` walks only the relation fields referenced in candidate GraphQL queries while preserving fail-closed visibility and hidden-column verification. `McpDescribeNarrowing` section (`include`) and `relations` filters now run before computing skipped sections, relation target visibility and visible columns are resolved in single-evaluation snapshot batches (`ICatalogVisibilityService.FindVisibleManyAsync` with `ICatalogSnapshotProvider`), and example/describe resolution durations are logged numerically (#1068).
+- `CatalogGraphQlMap` no longer rebuilds its `CatalogSchemaModel` every 30 seconds inside request threads via multi-page metadata/relation scans. It reuses the live `CatalogGraphQlTypeModule` model when available, builds from the in-memory `CatalogSnapshotProvider` when rebuilding, keeps the cached model while the catalog version is unchanged, serves warm requests lock-free with O(1) dictionary lookups and memoized table mappings, coalesces concurrent cold starts via single-flight with per-caller wait cancellation isolation, and refreshes asynchronously in the background on `catalog:changed` events and the 10-minute backstop without blocking active callers (#1069).
+
 ## [1.10.6] - 2026-11-23
 
 ### Fixed
