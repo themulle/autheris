@@ -200,7 +200,7 @@ public static class GatewayCatalogServiceExtensions
             sp.GetRequiredService<ITableMetadataRepository>(),
             sp.GetRequiredService<Autheris.Application.Catalog.Discovery.IDiscoveryService>(),
             sp.GetRequiredService<IConsentRepository>(),
-            sp.GetRequiredService<IDataOwnershipRepository>(),
+            sp.GetRequiredService<IContainerOwnership>(),
             sp.GetRequiredService<Autheris.Application.ConsentRequests.IConsentWorkflowConfigRepository>(),
             sp.GetRequiredService<Autheris.Application.Catalog.External.ICatalogChangeStore>(),
             sp.GetRequiredService<IOptions<GatewayOptions>>(),
