@@ -64,7 +64,6 @@ public sealed partial class DiscoveryService : IDiscoveryService
     private readonly ICatalogSnapshotProvider? _snapshotProvider;
     private readonly IProtectionSnapshotProvider? _protectionProvider;
     private readonly Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? _accessPolicySettings;
-    private readonly Autheris.Application.Catalog.Visibility.IContainerVisibilitySnapshotProvider? _containerVisibility;
 
     private readonly Lock _memoLock = new();
     private readonly Dictionary<ScopeMemoKey, ScopedCatalog> _scopeMemo = [];

@@ -14,6 +14,8 @@ using Autheris.Domain.Model;
 
 public sealed partial class DiscoveryService
 {
+    private readonly Autheris.Application.Catalog.Visibility.IContainerVisibilitySnapshotProvider? _containerVisibility;
+
     private async Task<TableMetadata?> FindSingleScopedTableAsync(
         TableIdentifier id,
         CatalogCaller caller,
