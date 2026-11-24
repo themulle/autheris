@@ -190,6 +190,7 @@ public sealed partial class GovernedSqlExecutor
         if (pageOutcome?.Page != null && rows.Count > pageOutcome.Page.Size)
         {
             rows = rows.Take(pageOutcome.Page.Size).ToList();
+            isTruncated = true;
         }
 
         return new GovernedSqlResult(

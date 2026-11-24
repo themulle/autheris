@@ -27,6 +27,7 @@ public static class McpRowCap
     public static string? LimitArgument(string toolName) => toolName.ToLowerInvariant() switch
     {
         "query_dataset" => "limit",
+        "query_sql" => "limit",
         "call_procedure" => "max_rows",
         "sample_rows" => "count",
         _ => null
@@ -81,8 +82,9 @@ public static class McpRowCap
                 }
             }
 
-            // continuation properties of the payloads: query_sql "next"/"page" (GovernedSqlResult), query_dataset "hasMore".
+            // continuation properties of the payloads: query_sql "next"/"cursor"/"page" (GovernedSqlResult), query_dataset "hasMore".
             obj.Remove("next");
+            obj.Remove("cursor");
             obj.Remove("page");
             if (obj["hasMore"] is not null)
             {
