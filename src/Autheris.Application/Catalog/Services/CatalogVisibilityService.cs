@@ -136,10 +136,25 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
             return null;
         }
 
+        if (TryGetMemo(KeyOf(context, null), out var memoised))
+        {
+            return memoised.Find(table) is { } m && memoised.ShapeOf(table) == CatalogOutputShape.Full
+                ? new CatalogVisibleRow(m, CatalogOutputShape.Full)
+                : null;
+        }
+
         TableMetadata? row;
         try
         {
-            row = await _metadataRepository!.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
+            if (_snapshotProvider is not null)
+            {
+                var snapshot = await _snapshotProvider.GetSnapshotAsync(ct).ConfigureAwait(false);
+                row = snapshot.FindTable(table);
+            }
+            else
+            {
+                row = await _metadataRepository!.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
+            }
         }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
@@ -168,28 +183,12 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         CatalogCaller caller, IReadOnlyCollection<TableIdentifier> candidates, CancellationToken ct = default)
     {
         ct.ThrowIfCancellationRequested();
-        if (candidates is null or { Count: 0 })
+        if (candidates is null or { Count: 0 } || Prepare(caller) is not { } context)
         {
             return new HashSet<TableIdentifier>();
         }
 
-        if (Prepare(caller) is not { } context)
-        {
-            return new HashSet<TableIdentifier>();
-        }
-
-        // De-duplicated and capped: the excess is denied, never evaluated.
-        var wanted = new HashSet<TableIdentifier>(Math.Min(candidates.Count, MaxCandidates));
-        foreach (var candidate in candidates)
-        {
-            if (wanted.Count == MaxCandidates)
-            {
-                break;
-            }
-
-            wanted.Add(candidate);
-        }
-
+        var wanted = DeduplicateCandidates(candidates);
         if (TryGetMemo(KeyOf(context, null), out var memoised))
         {
             var fromMemo = new HashSet<TableIdentifier>(wanted.Count);
@@ -202,6 +201,110 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
             }
 
             return fromMemo;
+        }
+
+        var rows = await LoadCandidateRowsAsync(wanted, ct).ConfigureAwait(false);
+        var visible = rows is null or { Count: 0 } ? null : await EvaluateAsync(context, rows, null, ct).ConfigureAwait(false);
+        var result = new HashSet<TableIdentifier>(visible?.Count ?? 0);
+        if (visible != null)
+        {
+            foreach (var table in visible)
+            {
+                result.Add(table.Identifier);
+            }
+        }
+
+        return result;
+    }
+
+    public async ValueTask<CatalogVisibleBatch> FindVisibleManyAsync(
+        CatalogCaller caller, IReadOnlyCollection<TableIdentifier> candidates, CancellationToken ct = default)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (candidates is null or { Count: 0 } || Prepare(caller) is not { } context)
+        {
+            return CatalogVisibleBatch.Empty;
+        }
+
+        var wanted = DeduplicateCandidates(candidates);
+        if (TryGetMemo(KeyOf(context, null), out var memoised))
+        {
+            var fromMemo = new Dictionary<TableIdentifier, CatalogVisibleRow>(wanted.Count);
+            foreach (var id in wanted)
+            {
+                if (memoised.Find(id) is { } m && memoised.ShapeOf(id) == CatalogOutputShape.Full)
+                {
+                    fromMemo[id] = new CatalogVisibleRow(m, CatalogOutputShape.Full);
+                }
+            }
+
+            return CatalogVisibleBatch.Of(fromMemo);
+        }
+
+        var rows = await LoadCandidateRowsAsync(wanted, ct).ConfigureAwait(false);
+        if (rows is null or { Count: 0 })
+        {
+            return CatalogVisibleBatch.Empty;
+        }
+
+        var visible = await EvaluateAsync(context, rows, null, ct).ConfigureAwait(false);
+        if (visible is null or { Count: 0 })
+        {
+            return CatalogVisibleBatch.Empty;
+        }
+
+        var result = new Dictionary<TableIdentifier, CatalogVisibleRow>(visible.Count);
+        foreach (var table in visible)
+        {
+            if (CatalogViewShaping.Resolve(context.IsAdminView, table.CatalogView) == CatalogOutputShape.Full)
+            {
+                result[table.Identifier] = new CatalogVisibleRow(table, CatalogOutputShape.Full);
+            }
+        }
+
+        return CatalogVisibleBatch.Of(result);
+    }
+
+    private static HashSet<TableIdentifier> DeduplicateCandidates(IReadOnlyCollection<TableIdentifier> candidates)
+    {
+        // De-duplicated and capped: the excess is denied, never evaluated.
+        var wanted = new HashSet<TableIdentifier>(Math.Min(candidates.Count, MaxCandidates));
+        foreach (var candidate in candidates)
+        {
+            if (wanted.Count == MaxCandidates)
+            {
+                break;
+            }
+
+            wanted.Add(candidate);
+        }
+
+        return wanted;
+    }
+
+    private async Task<List<TableMetadata>?> LoadCandidateRowsAsync(HashSet<TableIdentifier> wanted, CancellationToken ct)
+    {
+        if (_snapshotProvider is not null)
+        {
+            try
+            {
+                var snapshot = await _snapshotProvider.GetSnapshotAsync(ct).ConfigureAwait(false);
+                var snapshotRows = new List<TableMetadata>(wanted.Count);
+                foreach (var id in wanted)
+                {
+                    if (snapshot.FindTable(id) is { Table.IsActive: true } match && match.Identifier == id)
+                    {
+                        snapshotRows.Add(match);
+                    }
+                }
+
+                return snapshotRows;
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                LogFailure(ex);
+                return null;
+            }
         }
 
         // Bounded read: only the candidates are loaded (no whole-catalog read), at most MaxParallelChunks reads in flight.
@@ -238,17 +341,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
             }
         }
 
-        var visible = rows.Count == 0 ? null : await EvaluateAsync(context, rows, null, ct).ConfigureAwait(false);
-        var result = new HashSet<TableIdentifier>(visible?.Count ?? 0);
-        if (visible != null)
-        {
-            foreach (var table in visible)
-            {
-                result.Add(table.Identifier);
-            }
-        }
-
-        return result;
+        return rows;
     }
 
     /// <summary>One resolution of the caller class; null means "empty answer" (no repository or memo is touched).</summary>

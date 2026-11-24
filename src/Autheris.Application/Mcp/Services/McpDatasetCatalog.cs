@@ -4,6 +4,7 @@ using Autheris.Application.Catalog;
 using Autheris.Application.Tenancy;
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading;
@@ -461,6 +462,16 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         CancellationToken ct = default) =>
         DescribeDatasetAsync(principal, dataset, graphQlField, sqlName: null, language, brief, ct);
 
+    public Task<McpDatasetDescription> DescribeDatasetAsync(
+        ClaimsPrincipal principal,
+        string? dataset,
+        string? graphQlField,
+        string? sqlName,
+        string? language,
+        bool brief,
+        CancellationToken ct = default) =>
+        DescribeDatasetAsync(principal, dataset, graphQlField, sqlName, language, brief, narrowing: null, ct);
+
     public async Task<McpDatasetDescription> DescribeDatasetAsync(
         ClaimsPrincipal principal,
         string? dataset,
@@ -468,19 +479,22 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         string? sqlName,
         string? language,
         bool brief,
+        McpDescribeNarrowing.Request? narrowing,
         CancellationToken ct = default)
     {
         var effectiveDataset = await ResolveDescribeTargetAsync(dataset, graphQlField, sqlName, ct).ConfigureAwait(false);
         if (effectiveDataset.TrimStart().StartsWith("procedure:", StringComparison.OrdinalIgnoreCase))
         {
-            return await DescribeProcedureDatasetAsync(principal, effectiveDataset.Trim(), ct).ConfigureAwait(false);
+            var procDesc = await DescribeProcedureDatasetAsync(principal, effectiveDataset.Trim(), ct).ConfigureAwait(false);
+            return narrowing is null ? procDesc : McpDescribeNarrowing.Apply(procDesc, narrowing);
         }
 
         if (_discoveryService != null && !IsBypassed)
         {
-            return await DescribeDatasetWithDiscoveryAsync(principal, effectiveDataset, language, brief, ct).ConfigureAwait(false);
+            return await DescribeDatasetWithDiscoveryAsync(principal, effectiveDataset, language, brief, narrowing, ct).ConfigureAwait(false);
         }
 
+        var totalStart = Stopwatch.GetTimestamp();
         var (table, shape) = await FindVisibleAsync(principal, effectiveDataset, ct).ConfigureAwait(false);
         var id = table.Identifier;
 
@@ -493,7 +507,8 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             bypass: options?.Value.IsMcpAuthBypassed == true);
         var sunsetRules = await LoadSunsettingRulesAsync(ct).ConfigureAwait(false);
 
-        var graphQl = graphQlMap == null ? null : await graphQlMap.GetTableAsync(id, ct).ConfigureAwait(false);
+        var skipGraphQlMap = brief || (narrowing is not null && !narrowing.WantsColumns && !narrowing.WantsGraphQl && !narrowing.WantsExamples);
+        var graphQl = skipGraphQlMap || graphQlMap == null ? null : await graphQlMap.GetTableAsync(id, ct).ConfigureAwait(false);
         var graphQlColumns = (graphQl?.Columns ?? []).ToDictionary(c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
 
         // The access label is the data-path level seen through the sensitivity rule: a column graded sensitive is never reported as clear
@@ -539,7 +554,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                 table, briefColumns.Select(static c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase));
 
             var tableResolvedBrief = negotiatedLanguage != null ? table.Table.Texts.Resolve(negotiatedLanguage) : null;
-            return new McpDatasetDescription(
+            var briefResult = new McpDatasetDescription(
                 DatasetId(id),
                 McpCatalogText.DisplayName(tableResolvedBrief?.Title ?? table.Table.DisplayName, id.TableName),
                 id.Domain,
@@ -566,7 +581,11 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                 PrimaryKeyOrder: keyView.PrimaryKeyOrder,
                 Size: DatasetSizeClassifier.Resolve(table),
                 SqlName: SqlNameOf(id, options?.Value));
+            LogDescribeTiming(brief: true, examplesMs: 0, graphQlMs: 0, totalStart, relationCount: 0, exampleCount: 0);
+            return narrowing is null ? briefResult : McpDescribeNarrowing.Apply(briefResult, narrowing);
         }
+
+        var includeLongDesc = narrowing is null || narrowing.WantsLongDescription;
         var columns = table.Columns
             .Select(c =>
             {
@@ -591,16 +610,32 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                     ValueProfile: null,
                     Access: AccessLabel(c),
                     DisplayName: colDisplayName,
-                    LongDescription: hideText ? null : DiscoveryTextSanitizer.SanitizeText(colResolved?.LongDescription ?? c.LongDescription, DiscoveryTextSanitizer.MaxDescriptionRunes * 4, allowNewlinesAndTabs: true),
+                    LongDescription: hideText || !includeLongDesc ? null : DiscoveryTextSanitizer.SanitizeText(colResolved?.LongDescription ?? c.LongDescription, DiscoveryTextSanitizer.MaxDescriptionRunes * 4, allowNewlinesAndTabs: true),
                     SqlName: c.ColumnName);
             })
             .ToList();
 
-        var exampleHidden = new HashSet<string>(hiddenCols, StringComparer.OrdinalIgnoreCase);
-        exampleHidden.UnionWith(columnAccessLevels.Where(kv => kv.Value == Autheris.Domain.Interfaces.ColumnAccessLevel.Deny).Select(kv => kv.Key));
-        var examples = await LoadExamplesAsync(principal, id, graphQl, graphQlColumns, exampleHidden, ct).ConfigureAwait(false);
+        long examplesMs = 0;
+        IReadOnlyList<McpDatasetExample> examples = [];
+        if (narrowing is null || narrowing.WantsExamples)
+        {
+            var examplesStart = Stopwatch.GetTimestamp();
+            var exampleHidden = new HashSet<string>(hiddenCols, StringComparer.OrdinalIgnoreCase);
+            exampleHidden.UnionWith(columnAccessLevels.Where(kv => kv.Value == Autheris.Domain.Interfaces.ColumnAccessLevel.Deny).Select(kv => kv.Key));
+            examples = await LoadExamplesAsync(principal, id, graphQl, graphQlColumns, exampleHidden, ct).ConfigureAwait(false);
+            examplesMs = (long)Stopwatch.GetElapsedTime(examplesStart).TotalMilliseconds;
+        }
 
         var (dataOwner, dataOwnerDelegates) = await LoadOwnersAsync(id, displayNameOnly: false, ct).ConfigureAwait(false);
+
+        long graphQlMs = 0;
+        McpGraphQlAccess? graphQlAccess = null;
+        if (graphQl is not null && (narrowing is null || narrowing.WantsGraphQl))
+        {
+            var graphQlStart = Stopwatch.GetTimestamp();
+            graphQlAccess = await GraphQlAccessAsync(principal, graphQl, columns, ct, hiddenCols, narrowing).ConfigureAwait(false);
+            graphQlMs = (long)Stopwatch.GetElapsedTime(graphQlStart).TotalMilliseconds;
+        }
 
         // Issue #807: required filters only over the columns this answer lists.
         var requiredFilters = Autheris.Application.DataSources.Services.RequiredFilterColumnProjection.Project(
@@ -611,7 +646,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         var tableDescription = tableResolved?.Description ?? table.Table.Description;
         var tableLongDescription = tableResolved?.LongDescription ?? table.Table.LongDescription;
 
-        return new McpDatasetDescription(
+        var fullDescription = new McpDatasetDescription(
             DatasetId(id),
             tableDisplayName,
             id.Domain,
@@ -623,7 +658,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             table.Table.RequiresFourEyes,
             columns,
             examples,
-            graphQl == null ? null : await GraphQlAccessAsync(principal, graphQl, columns, ct, hiddenCols).ConfigureAwait(false),
+            graphQlAccess,
             DatasetAccess(id),
             Tags: table.CatalogTags,
             DataOwner: dataOwner,
@@ -637,6 +672,9 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             PrimaryKeyOrder: keyView.PrimaryKeyOrder,
             Size: DatasetSizeClassifier.Resolve(table),
             SqlName: SqlNameOf(id, options?.Value));
+
+        LogDescribeTiming(brief: false, examplesMs, graphQlMs, totalStart, graphQlAccess?.Relations.Count ?? 0, examples.Count);
+        return narrowing is null ? fullDescription : McpDescribeNarrowing.Apply(fullDescription, narrowing);
     }
 
     /// <summary>
@@ -1094,31 +1132,6 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         return hidden;
     }
 
-    private async Task<McpGraphQlAccess> GraphQlAccessAsync(
-        ClaimsPrincipal principal,
-        GraphQlTableMapping graphQl,
-        IReadOnlyList<McpDatasetColumn> columns,
-        CancellationToken ct,
-        IReadOnlySet<string>? hiddenTextColumns = null)
-    {
-        // Relations are offered only to datasets the caller can see, so hidden table names do not leak.
-        var visibleIds = await VisibleRelationTargetsAsync(principal, graphQl, ct).ConfigureAwait(false);
-        var relations = await new McpRelationColumnProjector(
-            (id, token) => VisibleTargetColumnsAsync(principal, id, token)).BuildAsync(graphQl.Relations, visibleIds, DatasetId, columns, ct).ConfigureAwait(false);
-
-        var topFields = columns.Where(c => c.GraphQlField != null).Take(ExampleColumns).ToList();
-        string? example = hiddenTextColumns is { Count: > 0 } && topFields.Any(c => hiddenTextColumns.Contains(c.Name))
-            ? null
-            : $"query {{ {graphQl.QueryField}(first: 10) {{ {string.Join(' ', topFields.Select(c => c.GraphQlField))} }} }}";
-        var arguments =
-            $"where: {graphQl.FilterType} – per field eq, neq, gt, gte, lt, lte, in, nin, contains, startsWith, endsWith, isNull; " +
-            $"combine with and/or (lists) and not. orderBy: [{graphQl.OrderByType}] – {{ field: ASC | DESC }}. " +
-            "first: Int (default 100), offset: Int. Always pass a small first: queries above the complexity budget are rejected. " +
-            "Filter and sort only on columns you can read in clear text.";
-
-        return new McpGraphQlAccess(GraphQlEndpoint, graphQl.QueryField, graphQl.TypeName, graphQl.FilterType, graphQl.OrderByType, arguments, example, relations);
-    }
-
     /// <summary>Dataset ids use the same <c>domain.schema.table</c> form as catalog objects.</summary>
     public static string DatasetId(TableIdentifier id) => $"{id.Domain}.{id.Schema}.{id.TableName}".ToLowerInvariant();
 
@@ -1169,30 +1182,6 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
 
         var set = await visibility.GetVisibleAsync(CallerOf(principal), contract: null, ct).ConfigureAwait(false);
         return (set.Tables, set.IsAdminView);
-    }
-
-    private async Task<HashSet<string>> VisibleRelationTargetsAsync(ClaimsPrincipal principal, GraphQlTableMapping graphQl, CancellationToken ct)
-    {
-        if (IsBypassed)
-        {
-            var wanted = graphQl.Relations.Select(r => r.Target).Distinct().ToList();
-            if (wanted.Count == 0)
-            {
-                return new HashSet<string>(StringComparer.Ordinal);
-            }
-
-            var found = await _metadataRepository.GetTablesAsync(wanted, ct).ConfigureAwait(false);
-            return found.Select(t => DatasetId(t.Identifier)).ToHashSet(StringComparer.Ordinal);
-        }
-
-        if (visibility == null)
-        {
-            return new HashSet<string>(StringComparer.Ordinal);
-        }
-
-        var targets = graphQl.Relations.Select(r => r.Target).Distinct().ToList();
-        var visible = await visibility.FilterVisibleAsync(CallerOf(principal), targets, ct).ConfigureAwait(false);
-        return visible.Select(DatasetId).ToHashSet(StringComparer.Ordinal);
     }
 
     private async Task<(TableMetadata Table, CatalogOutputShape Shape)> FindVisibleAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct)

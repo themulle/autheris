@@ -506,13 +506,19 @@ public sealed class SemanticMcpCompiler(
 
         var domain = t.Identifier.Domain;
         var table = t.Identifier.TableName;
+        var callerTenant = principal is null ? (TenantId?)null : McpCatalogVisibility.TryTenantId(principal);
+        var candidateSet = await _goldenQueryService.GetCandidateQueriesAsync(callerTenant, domain, table, ct).ConfigureAwait(false);
+        if (candidateSet.HasKnownCandidates && candidateSet.Queries.Count == 0)
+        {
+            return null;
+        }
+
         IReadOnlyList<GoldenQuery> goldens;
 
         if (_options?.Value.IsMcpAuthBypassed == true)
         {
-            var bypassTenant = principal is null ? (TenantId?)null : McpCatalogVisibility.TryTenantId(principal);
             goldens = await _goldenQueryService.GetGoldenQueriesAsync(
-                GoldenQueryReadContext.AllVisible(bypassTenant), domain, table, ct).ConfigureAwait(false);
+                GoldenQueryReadContext.AllVisible(callerTenant), domain, table, ct).ConfigureAwait(false);
         }
         else if (principal is null || _consentRepo is null)
         {
@@ -590,9 +596,10 @@ public sealed class SemanticMcpCompiler(
                 (id, _, _, _, _) => Task.FromResult<IReadOnlySet<string>?>(id is { } ident && hiddenByTable.TryGetValue(ident, out var h)
                     ? h
                     : new HashSet<string>(StringComparer.OrdinalIgnoreCase)),
+                candidateSet.HasKnownCandidates ? candidateSet.Queries : null,
                 ct).ConfigureAwait(false);
             goldens = await _goldenQueryService.GetGoldenQueriesAsync(
-                view.ToContext(McpCatalogVisibility.TryTenantId(principal)), domain, table, ct).ConfigureAwait(false);
+                view.ToContext(callerTenant), domain, table, ct).ConfigureAwait(false);
         }
 
         if (goldens.Count == 0)

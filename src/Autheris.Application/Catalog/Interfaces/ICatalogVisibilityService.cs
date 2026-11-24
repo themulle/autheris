@@ -85,6 +85,23 @@ public sealed class CatalogVisibleSet
 }
 
 /// <summary>
+/// Result of <see cref="ICatalogVisibilityService.FindVisibleManyAsync"/>. <c>default</c> has <see cref="IsAuthoritative"/> = <c>false</c>
+/// so unconfigured test doubles cleanly trigger fallback to individual visibility lookups.
+/// </summary>
+public readonly record struct CatalogVisibleBatch(
+    bool IsAuthoritative,
+    IReadOnlyDictionary<TableIdentifier, CatalogVisibleRow> Rows)
+{
+    private static readonly IReadOnlyDictionary<TableIdentifier, CatalogVisibleRow> EmptyRows =
+        new Dictionary<TableIdentifier, CatalogVisibleRow>();
+
+    public static CatalogVisibleBatch Empty { get; } = new(true, EmptyRows);
+
+    public static CatalogVisibleBatch Of(IReadOnlyDictionary<TableIdentifier, CatalogVisibleRow>? rows) =>
+        new(true, rows ?? EmptyRows);
+}
+
+/// <summary>
 /// The only discovery visibility entry point (always the discovery surface): caller scope, consent and tier engine,
 /// and shaping in one place. Every failure answers empty / null, never an unfiltered fallback.
 /// </summary>
@@ -96,4 +113,30 @@ public interface ICatalogVisibilityService
     ValueTask<CatalogVisibleRow?> FindVisibleAsync(CatalogCaller caller, TableIdentifier table, CancellationToken ct = default);
 
     ValueTask<IReadOnlySet<TableIdentifier>> FilterVisibleAsync(CatalogCaller caller, IReadOnlyCollection<TableIdentifier> candidates, CancellationToken ct = default);
+
+    /// <summary>
+    /// Evaluates visibility and column shaping for a batch of <paramref name="candidates"/> in one pass so callers can resolve both
+    /// target dataset existence and target visible columns without repeating per-target visibility queries.
+    /// </summary>
+    async ValueTask<CatalogVisibleBatch> FindVisibleManyAsync(
+        CatalogCaller caller,
+        IReadOnlyCollection<TableIdentifier> candidates,
+        CancellationToken ct = default)
+    {
+        if (candidates is null or { Count: 0 })
+        {
+            return CatalogVisibleBatch.Empty;
+        }
+
+        var rows = new Dictionary<TableIdentifier, CatalogVisibleRow>();
+        foreach (var candidate in candidates)
+        {
+            if (!rows.ContainsKey(candidate) && await FindVisibleAsync(caller, candidate, ct).ConfigureAwait(false) is { } visible)
+            {
+                rows[candidate] = visible;
+            }
+        }
+
+        return CatalogVisibleBatch.Of(rows);
+    }
 }

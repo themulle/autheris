@@ -576,7 +576,7 @@
 0575 Autheris.Application.Mcp.Interfaces.IGoldenQueryService Singleton key=- type:Autheris.Application.Mcp.Services.GoldenQueryService
 0576 Autheris.Application.Mcp.Interfaces.ISemanticMcpCompiler Scoped key=- type:Autheris.Application.Mcp.Services.SemanticMcpCompiler
 0577 Autheris.Application.Mcp.Interfaces.IMcpDatasetCatalog Scoped key=- type:Autheris.Application.Mcp.Services.McpDatasetCatalog
-0578 Autheris.Application.Mcp.Interfaces.IGraphQlCatalogMap Singleton key=- type:Autheris.GraphQL.Mcp.CatalogGraphQlMap
+0578 Autheris.Application.Mcp.Interfaces.IGraphQlCatalogMap Singleton key=- factory:Autheris.Application.Mcp.Interfaces.IGraphQlCatalogMap
 0579 Autheris.Application.Mcp.Interfaces.IPreFlightQuerySimulator Transient key=- type:Autheris.Application.Mcp.Services.PreFlightQuerySimulator
 0580 Autheris.Application.Mcp.Interfaces.IMcpProvenanceEnricher Singleton key=- type:Autheris.Application.Mcp.Services.McpProvenanceEnricher
 0581 Autheris.Application.Mcp.Interfaces.IReadPathSwitches Singleton key=- factory:Autheris.Application.Mcp.Interfaces.IReadPathSwitches
