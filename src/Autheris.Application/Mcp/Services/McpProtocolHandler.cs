@@ -44,7 +44,10 @@ public static class McpProtocolHandler
         !string.IsNullOrWhiteSpace(claimType) &&
         !RoleAndGroupClaimTypes.Contains(claimType) &&
         !string.Equals(claimType, IdentityKindClaimType, StringComparison.Ordinal) &&
-        !string.Equals(claimType, Autheris.Domain.Security.TokenAccessScope.ClaimType, StringComparison.Ordinal);
+        !string.Equals(claimType, Autheris.Domain.Security.TokenAccessScope.ClaimType, StringComparison.Ordinal) &&
+        !string.Equals(claimType, "client_id", StringComparison.OrdinalIgnoreCase) &&
+        !string.Equals(claimType, "azp", StringComparison.OrdinalIgnoreCase) &&
+        !string.Equals(claimType, "appid", StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
     /// The principal of an MCP caller as the catalog, resource and tool services expect it (SID, tenant, roles, groups, claims, read-only
@@ -69,6 +72,13 @@ public static class McpProtocolHandler
         if (!string.IsNullOrWhiteSpace(session.TenantId))
         {
             identity.AddClaim(new System.Security.Claims.Claim("tenant_id", session.TenantId));
+        }
+        var hasDistinctClientId = !string.IsNullOrWhiteSpace(session.ServicePrincipalId)
+            && !string.Equals(session.ServicePrincipalId, sid, StringComparison.Ordinal);
+        if (hasDistinctClientId)
+        {
+            identity.AddClaim(new System.Security.Claims.Claim("client_id", session.ServicePrincipalId!));
+            identity.AddClaim(new System.Security.Claims.Claim("azp", session.ServicePrincipalId!));
         }
         if (session.Roles != null)
         {

@@ -136,7 +136,7 @@ public sealed class ClientTierResolver : IClientTierResolver
             // Check Scope-to-Tier mappings and ScopeLimits (prioritize scope mapping ahead of default role fallback, clamped by anti-escalation ceiling)
             var scopes = Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims);
             ClientTier? matchedScopeTier = null;
-            ClientTierLimitOverride? matchedScopeLimit = null;
+            List<ClientTierLimitOverride>? matchedScopeLimits = null;
 
             if (scopes != null && scopes.Count > 0)
             {
@@ -146,7 +146,7 @@ public sealed class ClientTierResolver : IClientTierResolver
                     var bareScope = Autheris.Domain.Security.ScopeNames.ToBareName(rawScope.Trim());
                     if (string.IsNullOrWhiteSpace(bareScope)) continue;
 
-                    if (tierOptions?.ScopeTierMappings != null && tierOptions.ScopeTierMappings.TryGetValue(bareScope, out var mappedTierStr))
+                    if (tierOptions?.ScopeTierMappings != null && TryGetByBareScope(tierOptions.ScopeTierMappings, bareScope, out var mappedTierStr))
                     {
                         if (Enum.TryParse<ClientTier>(mappedTierStr, true, out var mappedScopeTierVal))
                         {
@@ -162,9 +162,12 @@ public sealed class ClientTierResolver : IClientTierResolver
                         }
                     }
 
-                    if (tierOptions?.ScopeLimits != null && tierOptions.ScopeLimits.TryGetValue(bareScope, out var scopeLimitDef))
+                    if (tierOptions?.ScopeLimits != null &&
+                        TryGetByBareScope(tierOptions.ScopeLimits, bareScope, out var scopeLimitDef) &&
+                        scopeLimitDef != null)
                     {
-                        matchedScopeLimit ??= scopeLimitDef;
+                        matchedScopeLimits ??= [];
+                        matchedScopeLimits.Add(scopeLimitDef);
                     }
                 }
             }
@@ -181,15 +184,9 @@ public sealed class ClientTierResolver : IClientTierResolver
                 effectiveTier = explicitClaimTier ?? highestRoleTier ?? ClientTier.Standard;
             }
 
-            ClientQuotaPolicy effectivePolicy;
-            if (matchedScopeLimit != null)
-            {
-                effectivePolicy = ClientQuotaPolicy.ForScopeLimit(effectiveTier, matchedScopeLimit, tierOptions);
-            }
-            else
-            {
-                effectivePolicy = ClientQuotaPolicy.ForTier(effectiveTier, tierOptions);
-            }
+            ClientQuotaPolicy effectivePolicy = matchedScopeLimits is { Count: > 0 }
+                ? ClientQuotaPolicy.CombineStrictestScopeLimits(effectiveTier, matchedScopeLimits, tierOptions)
+                : ClientQuotaPolicy.ForTier(effectiveTier, tierOptions);
 
             return Task.FromResult(new ClientQuotaContext(subjectId, effectiveTier, effectivePolicy, canonicalScope));
         }
@@ -347,5 +344,28 @@ public sealed class ClientTierResolver : IClientTierResolver
                 _apiKeyCache.Clear();
             }
         }
+    }
+
+    private static bool TryGetByBareScope<TValue>(
+        IReadOnlyDictionary<string, TValue> map,
+        string bareScope,
+        out TValue value)
+    {
+        if (map.TryGetValue(bareScope, out value!))
+        {
+            return true;
+        }
+
+        foreach (var (configuredScope, configuredValue) in map)
+        {
+            if (string.Equals(Autheris.Domain.Security.ScopeNames.ToBareName(configuredScope.Trim()), bareScope, StringComparison.OrdinalIgnoreCase))
+            {
+                value = configuredValue;
+                return true;
+            }
+        }
+
+        value = default!;
+        return false;
     }
 }

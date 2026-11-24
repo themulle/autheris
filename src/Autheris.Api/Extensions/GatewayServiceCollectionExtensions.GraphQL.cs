@@ -139,6 +139,7 @@ public static partial class GatewayServiceCollectionExtensions
         // M-16: Singleton so registered API keys and the key cache persist across requests.
         services.AddSingleton<IClientTierResolver, ClientTierResolver>();
         services.AddSingleton<Autheris.Application.Common.Quota.IQueryCostQuota, Autheris.Application.Common.Quota.QueryCostQuota>();
+        services.AddSingleton<Autheris.Application.Common.Quota.IScopeQueryExecutionGuard, Autheris.Application.Common.Quota.ScopeQueryExecutionGuard>();
         services.AddHttpClient("OpenApiIngestion").AddSecureOutboundHandlers(EgressIntegrations.OpenApiIngestion);
 
         services.AddFusionFederationServices(gatewayOptions);

@@ -24,7 +24,7 @@ internal static class GatewayExceptionStatusMapper
                 return mapped.Status;
             }
 
-            if (ex is GatewayThrottledException)
+            if (ex is GatewayThrottledException or ScopeConcurrencyExceededException)
             {
                 return StatusCodes.Status429TooManyRequests;
             }
@@ -42,6 +42,7 @@ internal static class GatewayExceptionStatusMapper
         Autheris.Application.Catalog.Services.CatalogReservedSourceNameException => StatusCodes.Status400BadRequest,
         GatewayInvalidQueryException => StatusCodes.Status400BadRequest,
         GatewayThrottledException => StatusCodes.Status429TooManyRequests,
+        ScopeConcurrencyExceededException => StatusCodes.Status429TooManyRequests,
         Autheris.Application.Audit.AuditUnavailableException => StatusCodes.Status503ServiceUnavailable,
         Autheris.Application.Governance.Grants.Records.GrantRecordUnavailableException => StatusCodes.Status503ServiceUnavailable,
         GatewayNotImplementedException => StatusCodes.Status501NotImplemented,

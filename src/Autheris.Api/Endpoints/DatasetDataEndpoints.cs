@@ -194,6 +194,16 @@ public static class DatasetDataEndpoints
             var envelope = await queryService.ExecuteQueryAsync(request, requestContext, ct).ConfigureAwait(false);
             await StreamDatasetEnvelopeAsync(httpContext.Response, envelope, ct).ConfigureAwait(false);
         }
+        catch (Autheris.Domain.Exceptions.ScopeConcurrencyExceededException ex)
+        {
+            logger.LogWarning("Dataset query rejected due to scope concurrency limit for {Table}", tableId);
+            await ApiProblems.WriteTooManyRequests(
+                httpContext,
+                ApiErrorCodes.ScopeConcurrencyExceeded,
+                "Too many concurrent queries are active for this client scope. Retry later.",
+                ex.RetryAfterSeconds,
+                ct).ConfigureAwait(false);
+        }
         catch (Exception ex) when (SqlCompilerErrorMapper.TryMap(ex, out mapped))
         {
             if (mapped.Code == TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.SyntaxError)
@@ -237,6 +247,15 @@ public static class DatasetDataEndpoints
             // WebSQL policy) are fail-closed 403s, never 500s. Details stay in the log, not in the response.
             logger.LogWarning("Governed data query denied for {Table}: {Message}", tableId, ex.Message);
             await ApiProblems.WriteAsync(httpContext, StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, GenericForbiddenMessage, httpContext.RequestAborted).ConfigureAwait(false);
+        }
+        catch (TimeoutException ex)
+        {
+            logger.LogWarning(ex, "Governed data query timed out for {Table}", tableId);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status504GatewayTimeout, ApiErrorCodes.GatewayTimeout, "The query exceeded the execution time limit.", httpContext.RequestAborted).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return;
         }
         catch (Exception ex)
         {

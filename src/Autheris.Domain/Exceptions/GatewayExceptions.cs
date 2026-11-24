@@ -134,6 +134,24 @@ public sealed class GatewayThrottledException : Exception
     }
 }
 
+/// <summary>Too many concurrent queries are active for the resolved client scope or tier (HTTP 429 with Retry-After).</summary>
+public sealed class ScopeConcurrencyExceededException : Exception
+{
+    public string ErrorCode => "SCOPE_CONCURRENCY_EXCEEDED";
+    public int RetryAfterSeconds { get; }
+    public string? Scope { get; }
+
+    public ScopeConcurrencyExceededException(int maxConcurrentQueries, string? scope = null, int retryAfterSeconds = 1)
+        : base("Too many concurrent queries are active for this client scope. Retry later.")
+    {
+        RetryAfterSeconds = Math.Max(1, retryAfterSeconds);
+        Scope = scope;
+        MaxConcurrentQueries = maxConcurrentQueries;
+    }
+
+    public int MaxConcurrentQueries { get; }
+}
+
 /// <summary>
 /// O12: The database driver cannot materialize a column type (e.g. SQL Server geography/hierarchyid without
 /// Microsoft.SqlServer.Types). The message names the column so the client can exclude it with $select; the driver

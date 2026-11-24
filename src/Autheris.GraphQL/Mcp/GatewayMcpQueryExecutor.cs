@@ -45,6 +45,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
     // Issue #447: the in-process GraphQL request runs in the MCP request scope, so it inherits the stamped ingress.
     // Without it HotChocolate would open a fresh scope with no ingress, which the transport gate denies.
     private readonly IServiceProvider? _services;
+    private readonly Autheris.Application.Common.Quota.IScopeQueryExecutionGuard _scopeGuard;
 
     // Mcp:MaxResultRows is re-read per call; a value <= 0 falls back to the default cap (never unbounded).
     private readonly IOptionsMonitor<GatewayOptions> _options;
@@ -61,7 +62,13 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         return trimmed;
     }
 
-    private int RowCap() => McpRowCap.ResolveCap(_options.CurrentValue.Mcp.MaxResultRows);
+    private int RowCap()
+    {
+        var cap = McpRowCap.ResolveCap(_options.CurrentValue.Mcp.MaxResultRows);
+        return Autheris.Application.Common.Quota.ScopeQueryExecutionGuard.TryGetCurrent(out var scopeLease)
+            ? scopeLease.ClampRows(cap)
+            : cap;
+    }
 
     public GatewayMcpQueryExecutor(
         IRequestExecutorProvider executorProvider,
@@ -74,8 +81,10 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         IMcpDatasetCatalog? datasetCatalog = null,
         IMcpToolExecutionHandler? toolExecutionHandler = null,
         IServiceProvider? services = null,
-        Autheris.Application.Catalog.Discovery.IDiscoveryAccessRequestService? accessRequests = null)
+        Autheris.Application.Catalog.Discovery.IDiscoveryAccessRequestService? accessRequests = null,
+        Autheris.Application.Common.Quota.IScopeQueryExecutionGuard? scopeGuard = null)
     {
+        _scopeGuard = scopeGuard ?? Autheris.Application.Common.Quota.NullScopeQueryExecutionGuard.Instance;
         _accessRequests = accessRequests;
         _services = services;
         _options = gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions));
@@ -164,6 +173,37 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotAvailable, "Query simulator is not available.");
         }
 
+        try
+        {
+            return await _scopeGuard.RunAsync(principal, apiKey: null, sessionContext.ClientIp, (_, scopedCt) =>
+                ExecuteOperationCoreAsync(tool, principal, sessionContext, variables, argumentsJson, scopedCt), cancellationToken).ConfigureAwait(false);
+        }
+        catch (Autheris.Domain.Exceptions.ScopeConcurrencyExceededException)
+        {
+            return CreateErrorResult(
+                sessionContext.TenantId,
+                tool.Name,
+                "SCOPE_CONCURRENCY_EXCEEDED",
+                "Too many concurrent queries are active for this client scope. Retry later.");
+        }
+        catch (TimeoutException)
+        {
+            return CreateErrorResult(
+                sessionContext.TenantId,
+                tool.Name,
+                "QUERY_TIMEOUT",
+                "The query exceeded the maximum allowed execution duration.");
+        }
+    }
+
+    private async Task<string> ExecuteOperationCoreAsync(
+        McpToolDefinition tool,
+        ClaimsPrincipal principal,
+        McpSessionContext sessionContext,
+        Dictionary<string, object?> variables,
+        string argumentsJson,
+        CancellationToken cancellationToken)
+    {
         // Hybrid tools: SQL, dataset REST, catalog discovery, permissions, datasources, lineage, dynamic API
         if (_toolExecutionHandler != null && _toolExecutionHandler.CanHandle(tool.Name))
         {
@@ -262,6 +302,10 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
                 return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.Forbidden, "Access denied by data governance policy.");
             }
             catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+            {
+                throw;
+            }
+            catch (TimeoutException)
             {
                 throw;
             }
@@ -404,6 +448,10 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, "The tool arguments are invalid.");
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (TimeoutException)
         {
             throw;
         }
@@ -553,6 +601,11 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
 
         var raw = FormatOperationResult(result);
         var json = Capped(tool.Name, raw, McpRowCap.TrimGraphQl(raw, RowCap()));
+        if (result.Errors is not null && result.Errors.Any(e => string.Equals(e.Code, "TIMEOUT", StringComparison.OrdinalIgnoreCase)))
+        {
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, "QUERY_TIMEOUT", "The query exceeded the maximum allowed execution duration.", json);
+        }
+
         return result.Errors is null || result.Errors.Count == 0
             ? json
             : CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.ExecutionFailed, "GraphQL execution returned errors.", json);

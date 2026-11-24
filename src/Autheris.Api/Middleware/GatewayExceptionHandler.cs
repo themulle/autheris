@@ -77,6 +77,13 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
             retryAfter = throttled.RetryAfterSeconds;
             code = "TOO_MANY_REQUESTS";
         }
+        else if (exception is ScopeConcurrencyExceededException scopeThrottled)
+        {
+            status = StatusCodes.Status429TooManyRequests;
+            title = "Too many concurrent queries are active for this client scope. Retry later.";
+            retryAfter = scopeThrottled.RetryAfterSeconds;
+            code = ApiErrorCodes.ScopeConcurrencyExceeded;
+        }
         else if (exception is GatewayInvalidQueryException invalidQuery)
         {
             (status, title, retryAfter) = Map(exception);
@@ -148,6 +155,7 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
         Autheris.Application.Catalog.Services.CatalogReservedSourceNameException => (StatusCodes.Status400BadRequest, "The dataset references a reserved system or catalog name.", null),
         GatewayInvalidQueryException => (StatusCodes.Status400BadRequest, "The query is invalid.", null),
         GatewayThrottledException e => (StatusCodes.Status429TooManyRequests, "Too many concurrent requests. Retry later.", e.RetryAfterSeconds),
+        ScopeConcurrencyExceededException e => (StatusCodes.Status429TooManyRequests, "Too many concurrent queries are active for this client scope. Retry later.", e.RetryAfterSeconds),
         Autheris.Application.Audit.AuditUnavailableException => (StatusCodes.Status503ServiceUnavailable, "The audit store is temporarily unavailable. Retry later.", UnavailableRetryAfterSeconds),
         Autheris.Application.Governance.Grants.Records.GrantRecordUnavailableException => (StatusCodes.Status503ServiceUnavailable, "The grant record store is temporarily unavailable. Retry later.", UnavailableRetryAfterSeconds),
         // migrations still pending: fail closed with a retryable 503 instead of a 500 plus error log.

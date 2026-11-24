@@ -179,6 +179,11 @@ internal static class ConnectionGraphQlTypes
             // Fallback
         }
 
+        if (Autheris.Application.Common.Quota.ScopeQueryExecutionGuard.TryGetCurrent(out var scopeLease))
+        {
+            maxResponseRows = scopeLease.ClampRows(maxResponseRows);
+        }
+
         string opId;
         lock (ctx.ContextData)
         {
@@ -209,7 +214,7 @@ internal static class ConnectionGraphQlTypes
         }
 
         // 2. Parse arguments
-        int first = 100;
+        int first = Math.Min(100, maxResponseRows);
         bool pageRangeViolated = false;
         if (ctx.Selection.Arguments.TryGetValue("first", out var firstArg) && firstArg?.ValueLiteral != null)
         {

@@ -13,13 +13,16 @@ using System.Threading.Tasks;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Api.Serialization;
+using Autheris.Application.Common;
 using Autheris.Application.Common.Serialization;
 using Autheris.Application.Sql;
+using Autheris.Application.Sql.Errors;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Endpoints.Interfaces;
 using Autheris.Application.Sql.Endpoints.Services;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Builder;
@@ -499,6 +502,30 @@ public static class SqlEndpointRoutes
             logger.LogWarning(secEx, "Security policy violation when executing endpoint '{EndpointName}'.", name);
             await ApiProblems.WriteAsync(httpContext, StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, WebSqlEndpoints.GenericForbiddenMessage, ct).ConfigureAwait(false);
         }
+        catch (ScopeConcurrencyExceededException scEx)
+        {
+            logger.LogWarning("SQL endpoint '{EndpointName}' rejected due to scope concurrency limit.", name);
+            await ApiProblems.WriteTooManyRequests(
+                httpContext,
+                ApiErrorCodes.ScopeConcurrencyExceeded,
+                "Too many concurrent queries are active for this client scope. Retry later.",
+                scEx.RetryAfterSeconds,
+                ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception timeoutEx) when (DataAccessErrorClassifier.Classify(timeoutEx) == DataAccessErrorKind.Timeout || SqlFailureClassifier.IsExecutionTimeout(timeoutEx))
+        {
+            logger.LogWarning(timeoutEx, "SQL endpoint '{EndpointName}' timed out.", name);
+            await ApiProblems.WriteAsync(
+                httpContext,
+                StatusCodes.Status504GatewayTimeout,
+                ApiErrorCodes.GatewayTimeout,
+                "The query exceeded the execution time limit.",
+                ct).ConfigureAwait(false);
+        }
         catch (Exception ex)
         {
             logger.LogError(ex, "Unexpected error executing SQL endpoint '{EndpointName}'.", name);
@@ -588,6 +615,30 @@ public static class SqlEndpointRoutes
         {
             logger.LogWarning(secEx, "Security policy violation when executing endpoint '{EndpointName}'.", name);
             await ApiProblems.WriteAsync(httpContext, StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, WebSqlEndpoints.GenericForbiddenMessage, ct).ConfigureAwait(false);
+        }
+        catch (ScopeConcurrencyExceededException scEx)
+        {
+            logger.LogWarning("SQL endpoint '{EndpointName}' rejected due to scope concurrency limit.", name);
+            await ApiProblems.WriteTooManyRequests(
+                httpContext,
+                ApiErrorCodes.ScopeConcurrencyExceeded,
+                "Too many concurrent queries are active for this client scope. Retry later.",
+                scEx.RetryAfterSeconds,
+                ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            return;
+        }
+        catch (Exception timeoutEx) when (DataAccessErrorClassifier.Classify(timeoutEx) == DataAccessErrorKind.Timeout || SqlFailureClassifier.IsExecutionTimeout(timeoutEx))
+        {
+            logger.LogWarning(timeoutEx, "SQL endpoint '{EndpointName}' timed out.", name);
+            await ApiProblems.WriteAsync(
+                httpContext,
+                StatusCodes.Status504GatewayTimeout,
+                ApiErrorCodes.GatewayTimeout,
+                "The query exceeded the execution time limit.",
+                ct).ConfigureAwait(false);
         }
         catch (Exception ex)
         {

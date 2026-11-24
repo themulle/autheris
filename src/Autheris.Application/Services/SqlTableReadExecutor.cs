@@ -119,6 +119,14 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
         // Planner callers: this executor (ExecuteAsync/StreamAsync) and GovernedDataQueryService (REST/MCP). Out of #301 scope and
         // unchanged: GovernedTableReadPlanner.Keyset (stream slices), TableStreamEndpoints (slice limit) and LakehouseDataSourceExecutor.
         var limit = Math.Max(0, context.Limit);
+        if (!context.Items.ContainsKey("SkipScopeRowClamp") &&
+            Autheris.Application.Common.Quota.ScopeQueryExecutionGuard.TryGetCurrent(out var activeScopeLease) &&
+            limit > 0)
+        {
+            limit = context.Items.ContainsKey("AllowScopeProbeRow") && activeScopeLease.MaxResultRows is > 0 and var scopedMax
+                ? (int)Math.Min(limit, scopedMax + 1L)
+                : activeScopeLease.ClampRows(limit);
+        }
         var intent = new TableReadIntent(
             metadata.Identifier,
             selected,
@@ -200,6 +208,14 @@ public sealed class SqlTableReadExecutor : IDataSourceExecutor
         // Planner callers: this executor (ExecuteAsync/StreamAsync) and GovernedDataQueryService (REST/MCP). Out of #301 scope and
         // unchanged: GovernedTableReadPlanner.Keyset (stream slices), TableStreamEndpoints (slice limit) and LakehouseDataSourceExecutor.
         var limit = Math.Max(0, context.Limit);
+        if (!context.Items.ContainsKey("SkipScopeRowClamp") &&
+            Autheris.Application.Common.Quota.ScopeQueryExecutionGuard.TryGetCurrent(out var activeScopeLease) &&
+            limit > 0)
+        {
+            limit = context.Items.ContainsKey("AllowScopeProbeRow") && activeScopeLease.MaxResultRows is > 0 and var scopedMax
+                ? (int)Math.Min(limit, scopedMax + 1L)
+                : activeScopeLease.ClampRows(limit);
+        }
         var intent = new TableReadIntent(
             metadata.Identifier,
             selected,

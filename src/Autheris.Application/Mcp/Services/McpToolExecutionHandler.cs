@@ -63,6 +63,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
     private readonly Autheris.Application.Catalog.Visibility.IContainerCatalogService? _containerCatalog;
     private readonly ILogger<McpToolExecutionHandler> _logger;
     private readonly TimeProvider _timeProvider;
+    private readonly Autheris.Application.Common.Quota.IScopeQueryExecutionGuard _scopeGuard;
 
     public McpToolExecutionHandler(
         IGovernedSqlExecutionService sqlExecutionService,
@@ -80,9 +81,11 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         ICatalogSearchEngine? searchEngine = null,
         ILogger<McpToolExecutionHandler>? logger = null,
         TimeProvider? timeProvider = null,
-        Autheris.Application.Catalog.Visibility.IContainerCatalogService? containerCatalog = null)
+        Autheris.Application.Catalog.Visibility.IContainerCatalogService? containerCatalog = null,
+        Autheris.Application.Common.Quota.IScopeQueryExecutionGuard? scopeGuard = null)
     {
         _containerCatalog = containerCatalog;
+        _scopeGuard = scopeGuard ?? Autheris.Application.Common.Quota.NullScopeQueryExecutionGuard.Instance;
         _catalogOwner = TenantResolver.EffectiveDefaultOf(gatewayOptions?.Value.Tenancy);
         _gatewayOptions = gatewayOptions?.Value;
         _sqlExecutionService = sqlExecutionService ?? throw new ArgumentNullException(nameof(sqlExecutionService));
@@ -161,7 +164,21 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
     {
         try
         {
-            return await ExecuteToolCoreAsync(tool, argumentsJson, sessionContext, ct).ConfigureAwait(false);
+            var userPrincipal = BuildUserPrincipal(sessionContext);
+            return await _scopeGuard.RunAsync(userPrincipal, apiKey: null, sessionContext.ClientIp, (_, scopedCt) =>
+                ExecuteToolCoreAsync(tool, argumentsJson, sessionContext, scopedCt), ct).ConfigureAwait(false);
+        }
+        catch (Autheris.Domain.Exceptions.ScopeConcurrencyExceededException)
+        {
+            return CreateMcpError(
+                sessionContext.TenantId, tool.Name, "SCOPE_CONCURRENCY_EXCEEDED",
+                "Too many concurrent queries are active for this client scope. Retry later.");
+        }
+        catch (TimeoutException)
+        {
+            return CreateMcpError(
+                sessionContext.TenantId, tool.Name, "QUERY_TIMEOUT",
+                "The query exceeded the maximum allowed execution duration.");
         }
         catch (TransportNotAllowedException)
         {
@@ -243,12 +260,21 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             {
                 effectiveLimit = (int)maxAllowedRows;
             }
+            bool hasSqlScope = Autheris.Application.Common.Quota.ScopeQueryExecutionGuard.TryGetCurrent(out var activeSqlScope);
+            if (hasSqlScope && effectiveLimit > 0)
+            {
+                effectiveLimit = activeSqlScope.ClampRows(effectiveLimit);
+            }
 
             var pageWindow = cursor is null || requestedLimit.HasValue
                 ? new SqlPageWindow(0, effectiveLimit, 1)
                 : null;
             var boundedRowLimit = Autheris.Application.Sql.SqlRowLimit.For(_gatewayOptions?.WebSql ?? new WebSqlOptions())
                 .CappedAt(effectiveLimit);
+            if (hasSqlScope && activeSqlScope.MaxResultRows is > 0)
+            {
+                boundedRowLimit = activeSqlScope.ClampRowLimit(boundedRowLimit);
+            }
 
             try
             {
@@ -308,6 +334,10 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             var filter = root.TryGetProperty("filter", out var fProp) ? fProp.GetString() : null;
             var orderBy = root.TryGetProperty("orderBy", out var oProp) ? oProp.GetString() : null;
             var limit = root.TryGetProperty("limit", out var lProp) && lProp.TryGetInt32(out var l) ? l : 50;
+            if (Autheris.Application.Common.Quota.ScopeQueryExecutionGuard.TryGetCurrent(out var activeScope) && limit > 0)
+            {
+                limit = activeScope.ClampRows(limit);
+            }
             var offset = root.TryGetProperty("offset", out var offProp) && offProp.TryGetInt32(out var off) ? off : 0;
 
             try
@@ -787,7 +817,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         {
             return CreateMcpError(sessionContext.TenantId, McpDatasetTools.CallProcedure, "FORBIDDEN", "Access denied by data governance policy.");
         }
-        catch (Exception ex) when (ex is not OperationCanceledException and not TransportNotAllowedException)
+        catch (Exception ex) when (ex is not OperationCanceledException and not TransportNotAllowedException and not TimeoutException)
         {
             return CreateMcpError(sessionContext.TenantId, McpDatasetTools.CallProcedure, "EXECUTION_FAILED", "Procedure execution failed.");
         }

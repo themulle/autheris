@@ -85,6 +85,8 @@ public sealed partial class ODataHandler : IODataHandler
         init => _epochProvider = value;
     }
 
+    internal Autheris.Application.Common.Quota.IScopeQueryExecutionGuard? ScopeGuard { get; init; }
+
     internal Func<string, TableFilterClause> ParseFilter { get; init; } = static filter => ODataFilterParser.Parse(filter);
 
     /// <summary>
@@ -491,46 +493,64 @@ public sealed partial class ODataHandler : IODataHandler
             requestedFields = fields;
         }
 
-        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows;
-        TableAccessDecision decision;
-        long? totalCount;
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows = [];
+        TableAccessDecision decision = null!;
+        long? totalCount = null;
         var unordered = false;
 
         try
         {
-            var tableMeta = await _metadataRepo.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
-            if (tableMeta != null && !IsExposableObjectKind(tableMeta.Table.ObjectKind))
+            var guard = ScopeGuard ?? Autheris.Application.Common.Quota.NullScopeQueryExecutionGuard.Instance;
+            var earlyResult = await guard.RunAsync(principal, apiKey: null, clientIp: null, async (lease, scopedCt) =>
             {
-                _logger.LogWarning("OData query for {Table} refused: object kind {ObjectKind} is not queryable over OData.", table, tableMeta.Table.ObjectKind);
-                var message = _verboseErrors ? $"Dataset '{table}' is not queryable over OData." : GenericDenied;
-                return new ODataQueryResult(
-                    Success: false,
-                    StatusCode: 403,
-                    Payload: ODataResponseFormatter.FormatErrorResponse("ACCESS_DENIED", message),
-                    ErrorCode: "ACCESS_DENIED",
-                    ErrorMessage: message);
-            }
+                var scopedTop = effectiveTop > 0 ? Math.Clamp(lease.ClampRows(effectiveTop), 1, effectiveTop) : 0;
+                var tableMeta = await _metadataRepo.GetTableMetadataAsync(table, scopedCt).ConfigureAwait(false);
+                if (tableMeta != null && !IsExposableObjectKind(tableMeta.Table.ObjectKind))
+                {
+                    _logger.LogWarning("OData query for {Table} refused: object kind {ObjectKind} is not queryable over OData.", table, tableMeta.Table.ObjectKind);
+                    var message = _verboseErrors ? $"Dataset '{table}' is not queryable over OData." : GenericDenied;
+                    return new ODataQueryResult(
+                        Success: false,
+                        StatusCode: 403,
+                        Payload: ODataResponseFormatter.FormatErrorResponse("ACCESS_DENIED", message),
+                        ErrorCode: "ACCESS_DENIED",
+                        ErrorMessage: message);
+                }
 
-            // O5 / 4a.3 / 2.1: $count is the total under the same row filter and $filter, counted by the data source in the same statement
-            // context; a source that cannot count answers 501, never the number of rows on the page.
-            var page = await _executionService.ExecuteTablePageAsync(
-                principal,
-                table,
-                new TablePageRequest(
-                    First: effectiveTop + 1,
-                    After: effectiveSkip,
-                    RequestedFields: requestedFields,
-                    OrderBy: orderByColumns,
-                    Filter: filterClause,
-                    IncludeTotalCount: includeCount,
-                    RequestHeaders: headers),
-                ct).ConfigureAwait(false);
-            (rows, decision, totalCount) = (page.Rows, page.Decision, page.TotalCount);
-            unordered = page.Unordered;
-            if (includeCount && totalCount == null && decision.IsAllowed)
+                // O5 / 4a.3 / 2.1: $count is the total under the same row filter and $filter, counted by the data source in the same statement
+                // context; a source that cannot count answers 501, never the number of rows on the page.
+                var page = await _executionService.ExecuteTablePageAsync(
+                    principal,
+                    table,
+                    new TablePageRequest(
+                        First: scopedTop + 1,
+                        After: effectiveSkip,
+                        RequestedFields: requestedFields,
+                        OrderBy: orderByColumns,
+                        Filter: filterClause,
+                        IncludeTotalCount: includeCount,
+                        RequestHeaders: headers,
+                        IncludeProbeRow: true),
+                    scopedCt).ConfigureAwait(false);
+                (rows, decision, totalCount) = (page.Rows, page.Decision, page.TotalCount);
+                unordered = page.Unordered;
+                effectiveTop = scopedTop;
+                if (includeCount && totalCount == null && decision.IsAllowed)
+                {
+                    return Error(501, "NotImplemented", "The total row count cannot be determined for this data source.");
+                }
+
+                return (ODataQueryResult?)null;
+            }, ct).ConfigureAwait(false);
+            if (earlyResult is not null)
             {
-                return Error(501, "NotImplemented", "The total row count cannot be determined for this data source.");
+                return earlyResult;
             }
+        }
+        catch (Autheris.Domain.Exceptions.ScopeConcurrencyExceededException scEx)
+        {
+            _logger.LogWarning("OData query for {Table} throttled by scope concurrency limit.", table);
+            return Error(429, "SCOPE_CONCURRENCY_EXCEEDED", "Too many concurrent queries are active for this client scope. Retry later.", scEx.RetryAfterSeconds);
         }
         catch (Exception ex) when (ct.IsCancellationRequested)
         {

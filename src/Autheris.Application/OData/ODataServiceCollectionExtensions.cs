@@ -33,7 +33,8 @@ public static class ODataServiceCollectionExtensions
             sp.GetRequiredService<Autheris.Application.DataSources.IIngressTransportContext>(),
             sp.GetRequiredService<IODataQueryPolicyEnforcer>())
         {
-            EpochProvider = sp.GetService<Autheris.Application.Governance.Caching.GovernanceEpochProvider>()
+            EpochProvider = sp.GetService<Autheris.Application.Governance.Caching.GovernanceEpochProvider>(),
+            ScopeGuard = sp.GetService<Autheris.Application.Common.Quota.IScopeQueryExecutionGuard>()
         });
         return services;
     }

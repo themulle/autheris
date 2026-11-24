@@ -47,6 +47,7 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
     private readonly GatewayOptions _options;
     private readonly int _maxOffset;
     private readonly IGovernedTableReadPlanner _planner;
+    private readonly Autheris.Application.Common.Quota.IScopeQueryExecutionGuard _scopeGuard;
 
     public GovernedDataQueryService(
         ITableMetadataRepository metadataRepository,
@@ -57,8 +58,10 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
         IOptions<GatewayOptions>? options = null,
         IOptions<AnalyticsOptions>? analyticsOptions = null,
         IGovernedTableReadPlanner? planner = null,
-        Microsoft.Extensions.Logging.ILogger<GovernedDataQueryService>? logger = null)
+        Microsoft.Extensions.Logging.ILogger<GovernedDataQueryService>? logger = null,
+        Autheris.Application.Common.Quota.IScopeQueryExecutionGuard? scopeGuard = null)
     {
+        _scopeGuard = scopeGuard ?? Autheris.Application.Common.Quota.NullScopeQueryExecutionGuard.Instance;
         _logger = logger;
         _planner = planner ?? new GovernedTableReadPlanner();
         _options = options?.Value ?? new GatewayOptions();
@@ -70,13 +73,24 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
         _maskingProvider = maskingProvider ?? throw new ArgumentNullException(nameof(maskingProvider));
     }
 
-    public async Task<DatasetQueryEnvelope> ExecuteQueryAsync(
+    public Task<DatasetQueryEnvelope> ExecuteQueryAsync(
         DatasetQueryRequest request,
         RequestContext context,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(context);
+
+        return _scopeGuard.RunAsync(context.User, apiKey: null, context.ClientIp, (lease, scopedCt) =>
+            ExecuteQueryCoreAsync(request, context, lease, scopedCt), ct);
+    }
+
+    private async Task<DatasetQueryEnvelope> ExecuteQueryCoreAsync(
+        DatasetQueryRequest request,
+        RequestContext context,
+        Autheris.Application.Common.Quota.ScopeExecutionLease lease,
+        CancellationToken ct)
+    {
 
         // 1. Resolve table metadata from repository or virtual system tables
         TableMetadata? metadata;
@@ -123,6 +137,10 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
         }
 
         var limit = Math.Min(request.Limit, MaxLimit);
+        if (limit > 0)
+        {
+            limit = lease.ClampRows(limit);
+        }
         var offset = request.Offset >= 0 ? request.Offset : 0;
 
         // Single-source SQL tables push the page down as Trino-form pagination (OFFSET n ROWS LIMIT m): the governed compile

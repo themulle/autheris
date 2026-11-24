@@ -150,7 +150,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         ArgumentNullException.ThrowIfNull(request);
         return ExecutePageCoreAsync(
             principal, table, request.First, request.After, queryArguments: null, request.RequestedFields, request.RequestHeaders,
-            request.OrderBy, request.Filter, request.IncludeTotalCount, request.RequireTotalCount, ct);
+            request.OrderBy, request.Filter, request.IncludeTotalCount, request.RequireTotalCount, ct, request.IncludeProbeRow);
     }
 
     private async Task<TableQueryPage> ExecutePageCoreAsync(
@@ -165,7 +165,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         TableFilterClause? filter,
         bool countTotal,
         bool requireTotalCount,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool includeProbeRow = false)
     {
         // GQL-03: bound the offset for every caller (negative values are invalid SQL, huge ones force deep OFFSET scans).
         var maxOffset = _options?.GraphQL?.MaxAllowedOffset >= 0 ? _options.GraphQL.MaxAllowedOffset : 10_000;
@@ -202,7 +203,21 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
             Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(metadata), ct).ConfigureAwait(false);
 
         // Generate/Fetch query result via IDataSourceExecutor (SQL, Declarative HTTP, or Plugin)
+        bool hasScope = Autheris.Application.Common.Quota.ScopeQueryExecutionGuard.TryGetCurrent(out var scopeLease);
+        using var scopeLinkedCts = hasScope && scopeLease.CancellationToken.CanBeCanceled
+            ? CancellationTokenSource.CreateLinkedTokenSource(ct, scopeLease.CancellationToken)
+            : null;
+        if (scopeLinkedCts is not null)
+        {
+            ct = scopeLinkedCts.Token;
+        }
+
         var maxRows = _options?.GraphQL?.MaxResponseRows > 0 ? _options.GraphQL.MaxResponseRows : 1000;
+        if (hasScope && scopeLease.MaxResultRows is > 0)
+        {
+            var clampedMax = scopeLease.ClampRows(maxRows);
+            maxRows = includeProbeRow ? (int)Math.Min((long)clampedMax + 1, int.MaxValue) : clampedMax;
+        }
         var rowLimit = Math.Clamp(first ?? 50, 1, maxRows);
 
         var execArgs = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
@@ -226,8 +241,12 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
         // O1/O2/O13: requested columns are validated, never dropped silently (a dropped column used to widen the
         // projection to all columns). Unknown and denied columns are rejected with the same message.
-        List<string> effectiveRequestedFields;
+        var effectiveRequestedFields = new List<string>(0);
         var pageItems = new Dictionary<string, object?>(StringComparer.Ordinal);
+        if (includeProbeRow)
+        {
+            pageItems["AllowScopeProbeRow"] = true;
+        }
         IDataSourceExecutor? executor;
         try
         {

@@ -845,6 +845,11 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
             // Fallback to default
         }
 
+        if (Autheris.Application.Common.Quota.ScopeQueryExecutionGuard.TryGetCurrent(out var scopeLease))
+        {
+            maxResponseRows = scopeLease.ClampRows(maxResponseRows);
+        }
+
         string opId;
         lock (ctx.ContextData)
         {
