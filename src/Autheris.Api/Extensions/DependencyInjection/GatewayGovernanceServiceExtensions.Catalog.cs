@@ -45,7 +45,9 @@ public static partial class GatewayGovernanceServiceExtensions
                 sp.GetRequiredService<Autheris.Application.Common.Interfaces.ITableMetadataRepository>(),
                 sp.GetRequiredService<Autheris.Application.Common.Interfaces.IGovernanceDomainRepository>(),
                 sp.GetService<Autheris.Domain.Interfaces.IScimGroupStore>(),
-                sp.GetService<Autheris.Application.Identity.IIdentityRealmRegistry>()));
+                sp.GetService<Autheris.Application.Identity.IIdentityRealmRegistry>(),
+                Autheris.Application.Tenancy.TenantResolver.EffectiveDefaultOf(
+                    sp.GetRequiredService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>().Value.Tenancy)));
         services.AddSingleton<IDatasetCatalogAdminService>(sp => new DatasetCatalogAdminService(
             sp.GetRequiredService<Autheris.Application.Common.Interfaces.ITableMetadataRepository>(),
             sp.GetService<Autheris.Application.Governance.Ownership.IContainerOwnership>(),

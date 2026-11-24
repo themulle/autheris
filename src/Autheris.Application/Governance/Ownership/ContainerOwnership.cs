@@ -13,8 +13,9 @@ using Autheris.Domain.Model;
 
 /// <summary>
 /// <see cref="IContainerOwnership"/> on the container model: table to container (<see cref="IGovernanceDomainRepository"/>), container to
-/// owner group, owner group to members through the group store. The tenant is the owner tenant of the table (target) only: a table
-/// without a valid owner tenant has no owner (no fallback to a default tenant). An identifier without a realm prefix resolves group
+/// owner group, owner group to members through the group store. The tenant is the owner tenant of the table (target). A table without an
+/// owner tenant belongs to the explicitly configured catalog owner tenant (<c>Tenancy:DefaultTenantId</c>), as discovery scopes it; without
+/// a configured catalog owner it has no owner. A malformed or reserved owner tenant owns nothing and never falls back. An identifier without a realm prefix resolves group
 /// membership only when exactly one identity realm is configured; otherwise it is never a member (fail closed). Batch reads resolve
 /// tables, containers and the actor's groups set-based instead of once per table.
 /// </summary>
@@ -22,7 +23,8 @@ public sealed class ContainerOwnership(
     ITableMetadataRepository tables,
     IGovernanceDomainRepository domains,
     IScimGroupStore? groupStore = null,
-    IIdentityRealmRegistry? realmRegistry = null) : IContainerOwnership
+    IIdentityRealmRegistry? realmRegistry = null,
+    TenantId? catalogOwnerTenant = null) : IContainerOwnership
 {
     private readonly record struct Resolved(TenantId Tenant, ContainerDefaults Container, Sid OwnerGroup);
 
@@ -197,8 +199,7 @@ public sealed class ContainerOwnership(
                     continue;
                 }
 
-                // The owner tenant of the table is the only tenant; a missing, malformed or reserved value owns nothing.
-                if (!TenantId.TryParse(meta.OwnerTenantId, out var tenant) || string.IsNullOrWhiteSpace(tenant.Value) || TenantId.IsReserved(tenant))
+                if (OwnerTenantOf(meta) is not { } tenant)
                 {
                     continue;
                 }
@@ -234,6 +235,22 @@ public sealed class ContainerOwnership(
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// The owner tenant of the table; a table without one belongs to the configured catalog owner tenant (as discovery scopes it). A
+    /// malformed or reserved owner tenant, or a missing one without a configured catalog owner, has no tenant and therefore no owner.
+    /// </summary>
+    private TenantId? OwnerTenantOf(TableMetadata meta)
+    {
+        if (string.IsNullOrWhiteSpace(meta.OwnerTenantId))
+        {
+            return catalogOwnerTenant is { } owner && !string.IsNullOrWhiteSpace(owner.Value) && !TenantId.IsReserved(owner) ? owner : (TenantId?)null;
+        }
+
+        return TenantId.TryParse(meta.OwnerTenantId, out var tenant) && !string.IsNullOrWhiteSpace(tenant.Value) && !TenantId.IsReserved(tenant)
+            ? (TenantId?)tenant
+            : null;
     }
 
     /// <summary>The effective groups of <paramref name="identifier"/>; empty when unknown, degraded or not resolvable to exactly one realm.</summary>

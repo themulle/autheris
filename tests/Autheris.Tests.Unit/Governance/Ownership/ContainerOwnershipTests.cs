@@ -215,12 +215,53 @@ public sealed class ContainerOwnershipTests
     [InlineData(null)]
     [InlineData("")]
     [InlineData("   ")]
-    [InlineData("bad tenant/../x")]
-    [InlineData("_reserved")]
-    public async Task Table_without_a_valid_owner_tenant_has_no_owner_and_never_falls_back(string? ownerTenant)
+    public async Task Table_without_an_owner_tenant_has_no_owner_when_no_catalog_owner_is_configured(string? ownerTenant)
     {
         var domains = new StubDomains { Container = Assigned(OwnerGroup) };
         var sut = Create(domains, Meta(ownerTenant: ownerTenant), GroupsOf(OwnerGroup.Value));
+
+        (await sut.IsAuthorizedApproverForTableAsync(Orders, Member)).ShouldBeFalse();
+        (await sut.IsAuthorizedApproverForTableAsync(Orders, OwnerGroup)).ShouldBeFalse();
+        (await sut.GetDataOwnersForTableAsync(Orders)).ShouldBeEmpty();
+        domains.SeenTenant.ShouldBeNull("no container is read without an owner tenant or a configured catalog owner");
+    }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    public async Task Table_without_an_owner_tenant_belongs_to_the_configured_catalog_owner_tenant(string? ownerTenant)
+    {
+        var domains = new StubDomains { Container = Assigned(OwnerGroup) };
+        var sut = new ContainerOwnership(
+            new InMemoryTableMetadataRepository(Meta(ownerTenant: ownerTenant)), domains, GroupsOf(OwnerGroup.Value), Realms("realm-1"),
+            catalogOwnerTenant: new TenantId("catalog-owner"));
+
+        (await sut.IsAuthorizedApproverForTableAsync(Orders, Member)).ShouldBeTrue();
+        domains.SeenTenant.ShouldBe(new TenantId("catalog-owner"));
+    }
+
+    [Fact]
+    public async Task Table_with_an_owner_tenant_never_uses_the_catalog_owner_tenant()
+    {
+        var domains = new StubDomains { Container = Assigned(OwnerGroup) };
+        var sut = new ContainerOwnership(
+            new InMemoryTableMetadataRepository(Meta(ownerTenant: "tenant-b")), domains, GroupsOf(OwnerGroup.Value), Realms("realm-1"),
+            catalogOwnerTenant: new TenantId("catalog-owner"));
+
+        (await sut.IsAuthorizedApproverForTableAsync(Orders, Member)).ShouldBeTrue();
+        domains.SeenTenant.ShouldBe(new TenantId("tenant-b"));
+    }
+
+    [Theory]
+    [InlineData("bad tenant/../x")]
+    [InlineData("_reserved")]
+    public async Task Table_with_an_invalid_owner_tenant_has_no_owner_and_never_falls_back(string ownerTenant)
+    {
+        var domains = new StubDomains { Container = Assigned(OwnerGroup) };
+        var sut = new ContainerOwnership(
+            new InMemoryTableMetadataRepository(Meta(ownerTenant: ownerTenant)), domains, GroupsOf(OwnerGroup.Value), Realms("realm-1"),
+            catalogOwnerTenant: new TenantId("catalog-owner"));
 
         (await sut.IsAuthorizedApproverForTableAsync(Orders, Member)).ShouldBeFalse();
         (await sut.IsAuthorizedApproverForTableAsync(Orders, OwnerGroup)).ShouldBeFalse();
