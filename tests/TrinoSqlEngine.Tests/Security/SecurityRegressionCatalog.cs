@@ -203,7 +203,7 @@ internal static class SecurityRegressionCatalog
         new("SR15-41", LegacyIdKind.Application, "degraded epoch store fails closed on sensitive tables", Array.Empty<string>(), new[] { "Autheris.Tests.Unit/Security/EpochRedisFailureInf1Tests.cs" }),
         new("SR15-43", LegacyIdKind.Application, "WebSQL short-name catalog fallback to the default domain", Array.Empty<string>(), new[] { "Autheris.Tests.Unit/Sql/GovernedSqlExecutionMultiSchemaShortNameTests.cs" },
             Note: "WebSQL service behavior; the AST path resolves short names through the catalog default schema (SQ-04)."),
-        new("SR15-47", LegacyIdKind.Application, "dynamic status reporting of filter states", Array.Empty<string>(), new[] { "Autheris.Tests.Integration/Governance/VirtualFilterEndpointsTests.cs" }),
+        new("SR15-47", LegacyIdKind.Application, "dynamic status reporting of filter states (single approval since #1009)", Array.Empty<string>(), new[] { "Autheris.Tests.Integration/Governance/VirtualFilterEndpointsTests.cs" }),
         new("SR15-49", LegacyIdKind.Application, "error messages do not leak internal database details", Array.Empty<string>(), new[] { "Autheris.Tests.Integration/Governance/VirtualFilterEndpointsTests.cs" }),
         new("SR15-52", LegacyIdKind.Application, "a user-specific consent deny beats an unconstrained allow", Array.Empty<string>(), new[] { "Autheris.Tests.Unit/Security/McpResourceColumnFilterMcp1Tests.cs" })
     };

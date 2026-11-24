@@ -295,6 +295,7 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
     [Fact]
     public async Task ConfigSyncStatus_ReturnsMetadataAndCounts()
     {
+        // SR15-47: dynamic status reporting of filter states (single approval since #1009: a save is active, so the status is InSync).
         await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), new VirtualFilterActor(new Sid("S-1-5-21-A"), false));
         var context = Context(Tenant, null, "GovernanceAdmin");
 
