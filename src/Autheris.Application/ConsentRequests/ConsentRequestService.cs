@@ -318,26 +318,8 @@ public sealed class ConsentRequestService : IConsentRequestService
     /// X-Tenant-ID). The token claim only serves as a cross-check: a different claim tenant is forbidden, except for
     /// canonical ClusterAdmins. Without a context tenant the claim tenant applies.
     /// </summary>
-    public static TenantId ResolveTenantId(ClaimsPrincipal? principal, TenantId contextTenant, bool isCrossTenantAdmin)
-    {
-        // DT-A-3: claims only, no legacy sentinel. An absent or invalid claim is no cross-check value (the HTTP gate has already
-        // rejected such principals); the context tenant decides, and without either the request is unresolved.
-        var claim = TenantClaimReader.Read(principal);
-        var principalTenant = claim.Kind == ClaimTenantKind.Valid ? (TenantId?)claim.Tenant : null;
-        var hasContext = contextTenant.Value is not null;
-
-        if (principalTenant is { } own && hasContext && own != contextTenant && !isCrossTenantAdmin)
-        {
-            throw new ConsentRequestException("FORBIDDEN", "Cross-tenant access forbidden: The token tenant does not match the tenant of the connection context.");
-        }
-
-        if (hasContext)
-        {
-            return contextTenant;
-        }
-
-        return principalTenant ?? throw new Autheris.Domain.Exceptions.TenantUnresolvedException();
-    }
+    public static TenantId ResolveTenantId(ClaimsPrincipal? principal, TenantId contextTenant, bool isCrossTenantAdmin) =>
+        ConsentTenantResolver.Resolve(principal, contextTenant, isCrossTenantAdmin);
 
     /// <summary>All identifiers (SID, object id, UPN, e-mail, ...) a principal is known by.</summary>
     public static List<string> ExtractPrincipalIdentifiers(ClaimsPrincipal? principal, string? fallbackSid = null) =>

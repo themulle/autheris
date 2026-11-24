@@ -87,7 +87,7 @@ public sealed class QueryAnalysisUnconsentedTableTests
     [Fact]
     public async Task BundledRequest_ColumnItem_ForUnconsentedTable_DoesNotValidatePerColumn()
     {
-        var service = new BundledConsentRequestService(Wp0.Tables(Orders()), Wp0.Consents());
+        var service = new BundledConsentRequestService(Wp0.Tables(Orders()), Wp0.Consents(), engine: new Autheris.Tests.Unit.TestSupport.RecordingPermissionRequestEngine());
         var requester = Wp0.User("S-NOBODY", "tenant-a");
 
         var real = await service.SubmitBundledRequestAsync(requester,

@@ -28,10 +28,12 @@ public sealed record PermissionRequestSubmission(
     Guid? BundleId = null,
     SecurityPrincipalContext? CallerContext = null);
 
+/// <param name="AutoApproved">True only when the Development-only insecure auto-approve switch activated the grant at submission.</param>
 public sealed record PermissionSubmitResult(
     ConsentRequest Request,
     IReadOnlyList<ConsentRequest>? BundleRequests = null,
-    Guid? BundleId = null);
+    Guid? BundleId = null,
+    bool AutoApproved = false);
 
 /// <summary>
 /// Authenticated external workflow decision reference attached to a <see cref="PermissionDecisionCommand"/>.

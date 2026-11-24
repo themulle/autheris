@@ -34,7 +34,7 @@ public sealed class DeclarativeConsentApplyAtomicTests
     }
 
     private static DeclarativeConsentPolicy RolePolicy(string table = "orders", string role = "S-1-5-21-GROUP-DS") =>
-        new("default", "sales", table, "Group", role, "Allow", ValidUntil: DateTimeOffset.UtcNow.AddDays(30));
+        new("default", "sales", table, "Group", role, "Allow", Description: "test grant justification", ValidUntil: DateTimeOffset.UtcNow.AddDays(30));
 
     [Fact]
     public async Task SEC_SC_03_RoleManifest_AppliedTwice_SecondApplyIsUnchanged()

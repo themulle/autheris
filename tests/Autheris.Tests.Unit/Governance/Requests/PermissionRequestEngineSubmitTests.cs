@@ -60,7 +60,10 @@ public sealed class PermissionRequestEngineSubmitTests
         IProtectionSnapshotProvider? protection = null,
         IGovernanceDomainRepository? domainRepo = null,
         FakeTimeProvider? time = null,
-        InMemoryAuditWriter? audit = null)
+        InMemoryAuditWriter? audit = null,
+        Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter? router = null,
+        GatewayOptions? gatewayOptions = null,
+        Autheris.Application.ConsentRequests.Events.IConsentEventOutbox? eventOutbox = null)
     {
         metadata ??= DefaultMetadata();
         return new PermissionRequestEngine(
@@ -78,7 +81,162 @@ public sealed class PermissionRequestEngineSubmitTests
             accessPolicyProvider: policyProvider,
             catalogVisibilityRepository: catalogRepo,
             capabilities: new GovernanceCapabilities(domainRepository: domainRepo),
-            timeProvider: time ?? new FakeTimeProvider(Now));
+            gatewayOptions: gatewayOptions is null ? null : Microsoft.Extensions.Options.Options.Create(gatewayOptions),
+            timeProvider: time ?? new FakeTimeProvider(Now),
+            workflowRouter: router,
+            eventOutbox: eventOutbox);
+    }
+
+    [Theory]
+    [InlineData(ConsentWorkflowMode.Internal)]
+    [InlineData(ConsentWorkflowMode.External)]
+    public async Task Submitted_request_appends_the_request_created_event_for_workflow_consumers(ConsentWorkflowMode mode)
+    {
+        var events = new List<Autheris.Application.ConsentRequests.Events.ConsentEventWrite>();
+        var outbox = NullFake.Create<Autheris.Application.ConsentRequests.Events.IConsentEventOutbox>((m, args) =>
+        {
+            if (m.Name == nameof(Autheris.Application.ConsentRequests.Events.IConsentEventOutbox.AppendAsync))
+            {
+                events.Add((Autheris.Application.ConsentRequests.Events.ConsentEventWrite)args![0]!);
+                return Task.FromResult(1L);
+            }
+
+            return NullFake.UseDefault;
+        });
+        var systemId = mode == ConsentWorkflowMode.External ? Guid.NewGuid() : (Guid?)null;
+        var engine = CreateEngine(
+            CapturingApprovals(),
+            router: new StubRouter(Route(mode, systemId, mode == ConsentWorkflowMode.External ? WorkflowRouteScopeKind.Domain : null)),
+            eventOutbox: outbox);
+
+        var res = await SubmitOrdersAsync(engine);
+
+        var created = events.ShouldHaveSingleItem();
+        created.EventType.ShouldBe(Autheris.Application.ConsentRequests.Events.ConsentEventTypes.RequestCreated);
+        created.SubjectId.ShouldBe(res.Request.Id.ToString("D"));
+        created.TenantId.ShouldBe(TenantA.Value);
+        created.ExternalSystemId.ShouldBe(systemId);
+    }
+
+    private static GatewayOptions AutoApproveOptions() =>
+        new() { Insecure = new InsecureGettingStartedOptions { warn_auto_approve_access_requests = true } };
+
+    /// <summary>Approval fake: captures created requests and records insecure auto-approve activations.</summary>
+    private static IConsentApprovalRepository AutoApproveApprovals(List<Guid> activated, Dictionary<Guid, ConsentRequest> created) =>
+        NullFake.Create<IConsentApprovalRepository>((m, args) =>
+        {
+            switch (m.Name)
+            {
+                case nameof(IConsentApprovalRepository.CreateConsentRequestAsync):
+                    var req = (ConsentRequest)args![0]!;
+                    created[req.Id] = req;
+                    return Task.FromResult(req);
+                case nameof(IConsentApprovalRepository.ActivateConsentForAutoApproveAsync):
+                    activated.Add((Guid)args![0]!);
+                    created[(Guid)args[0]!].Status = "APPROVED";
+                    return Task.CompletedTask;
+                case nameof(IConsentApprovalRepository.GetConsentRequestAsync):
+                    return Task.FromResult(created.TryGetValue((Guid)args![0]!, out var found) ? found : null);
+                default:
+                    return NullFake.UseDefault;
+            }
+        });
+
+    [Fact]
+    public async Task Insecure_auto_approve_activates_an_internal_data_request_and_audits_the_approval()
+    {
+        var activated = new List<Guid>();
+        var created = new Dictionary<Guid, ConsentRequest>();
+        var audit = new InMemoryAuditWriter();
+        var engine = CreateEngine(
+            AutoApproveApprovals(activated, created),
+            audit: audit,
+            router: new StubRouter(Route(ConsentWorkflowMode.Internal, null, null)),
+            gatewayOptions: AutoApproveOptions());
+
+        var res = await SubmitOrdersAsync(engine);
+
+        activated.ShouldBe([res.Request.Id]);
+        res.Request.Status.ShouldBe("APPROVED");
+        res.AutoApproved.ShouldBeTrue();
+        audit.Entries.ShouldContain(e => e.EventType == Autheris.Domain.Audit.AuditEventTypes.PermissionApproved && e.Decision == "APPROVED");
+    }
+
+    [Fact]
+    public async Task Auto_approve_never_applies_to_an_external_route()
+    {
+        var activated = new List<Guid>();
+        var created = new Dictionary<Guid, ConsentRequest>();
+        var engine = CreateEngine(
+            AutoApproveApprovals(activated, created),
+            router: new StubRouter(Route(ConsentWorkflowMode.External, Guid.NewGuid(), WorkflowRouteScopeKind.Domain)),
+            gatewayOptions: AutoApproveOptions());
+
+        var res = await SubmitOrdersAsync(engine);
+
+        activated.ShouldBeEmpty();
+        res.AutoApproved.ShouldBeFalse();
+        res.Request.Status.ShouldNotBe("APPROVED");
+    }
+
+    [Fact]
+    public async Task Without_the_insecure_switch_a_request_stays_pending()
+    {
+        var activated = new List<Guid>();
+        var created = new Dictionary<Guid, ConsentRequest>();
+        var engine = CreateEngine(
+            AutoApproveApprovals(activated, created),
+            router: new StubRouter(Route(ConsentWorkflowMode.Internal, null, null)),
+            gatewayOptions: new GatewayOptions());
+
+        var res = await SubmitOrdersAsync(engine);
+
+        activated.ShouldBeEmpty();
+        res.AutoApproved.ShouldBeFalse();
+        res.Request.Status.ShouldBe("PENDING");
+    }
+
+    private static Autheris.Application.ConsentRequests.Routing.ConsentWorkflowRouteResolution Route(ConsentWorkflowMode mode, Guid? systemId, WorkflowRouteScopeKind? scope) =>
+        new(mode, systemId, 30, 30, 72, false, scope);
+
+    private static Task<PermissionSubmitResult> SubmitOrdersAsync(PermissionRequestEngine engine) =>
+        engine.SubmitAsync(new PermissionRequestSubmission(
+            UserPrincipal(), TenantA, ConsentRequestKind.Data, PermissionTarget.ForTable(OrdersTable),
+            GranteeType.User, "user:alice", "Need orders data access for billing.", ValidTo: Now.AddDays(30)));
+
+    private static IConsentApprovalRepository CapturingApprovals() =>
+        NullFake.Create<IConsentApprovalRepository>((m, args) =>
+            m.Name == nameof(IConsentApprovalRepository.CreateConsentRequestAsync)
+                ? Task.FromResult((ConsentRequest)args![0]!)
+                : NullFake.UseDefault);
+
+    [Fact]
+    public async Task Domain_routed_external_request_is_created_with_the_domain_route_system()
+    {
+        var systemId = Guid.NewGuid();
+        var engine = CreateEngine(
+            CapturingApprovals(),
+            router: new StubRouter(Route(ConsentWorkflowMode.External, systemId, WorkflowRouteScopeKind.Domain)));
+
+        var res = await SubmitOrdersAsync(engine);
+
+        res.Request.WorkflowMode.ShouldBe(ConsentWorkflowMode.External);
+        res.Request.ExternalSystemId.ShouldBe(systemId);
+        res.Request.Status.ShouldBe("PENDING_EXTERNAL_APPROVAL");
+    }
+
+    [Fact]
+    public async Task Unknown_route_kind_stays_internal_with_standard_approvers()
+    {
+        var engine = CreateEngine(
+            CapturingApprovals(),
+            router: new StubRouter(Route(ConsentWorkflowMode.Internal, null, null)));
+
+        var res = await SubmitOrdersAsync(engine);
+
+        res.Request.WorkflowMode.ShouldBe(ConsentWorkflowMode.Internal);
+        res.Request.ExternalSystemId.ShouldBeNull();
+        res.Request.Status.ShouldBe("PENDING");
     }
 
     private static ITableMetadataRepository DefaultMetadata(params TableMetadata[] extra)
@@ -307,6 +465,44 @@ public sealed class PermissionRequestEngineSubmitTests
     }
 
     [Fact]
+    public async Task Pending_cap_per_requester()
+    {
+        // Deployment default (100) applies without a tenant policy: a requester at the cap cannot open another request.
+        var atDefaultCap = NullFake.Create<IConsentApprovalRepository>((m, _) =>
+            m.Name == nameof(IConsentApprovalRepository.CountPendingRequestsForRequesterAsync) ? Task.FromResult(100) : NullFake.UseDefault);
+        var submission = new PermissionRequestSubmission(UserPrincipal(), TenantA, ConsentRequestKind.Data, PermissionTarget.ForTable(OrdersTable),
+            GranteeType.User, "user:alice", "Valid justification text here.", ValidTo: Now.AddDays(10));
+
+        var ex = await Should.ThrowAsync<ConsentRequestException>(() => CreateEngine(atDefaultCap).SubmitAsync(submission));
+        ex.Code.ShouldBe("PENDING_REQUEST_LIMIT_EXCEEDED");
+
+        // A tenant may tighten the cap.
+        var tightened = NullFake.Create<IAccessPolicySettingsProvider>((m, _) =>
+            m.Name == nameof(IAccessPolicySettingsProvider.GetEffectiveAsync)
+                ? Task.FromResult(TenantAccessPolicy.FromDeploymentDefaults(TenantA, new AccessPolicyOptions { MaxPendingRequestsPerRequester = 3 }))
+                : NullFake.UseDefault);
+        var atTenantCap = NullFake.Create<IConsentApprovalRepository>((m, _) =>
+            m.Name == nameof(IConsentApprovalRepository.CountPendingRequestsForRequesterAsync) ? Task.FromResult(3) : NullFake.UseDefault);
+        var tightEx = await Should.ThrowAsync<ConsentRequestException>(() => CreateEngine(atTenantCap, policyProvider: tightened).SubmitAsync(submission));
+        tightEx.Code.ShouldBe("PENDING_REQUEST_LIMIT_EXCEEDED");
+    }
+
+    [Fact]
+    public async Task Caps_enforced()
+    {
+        // Deployment default bundle cap (50) applies without a tenant policy.
+        var engine = CreateEngine(NullFake.Create<IConsentApprovalRepository>());
+        var oversized = Enumerable.Range(0, 51).Select(_ =>
+            new PermissionRequestSubmission(UserPrincipal(), TenantA, ConsentRequestKind.Data, PermissionTarget.ForTable(OrdersTable),
+                GranteeType.User, "user:alice", "Valid bundle justification text.", ValidTo: Now.AddDays(10))).ToArray();
+        (await Should.ThrowAsync<ConsentRequestException>(() => engine.SubmitBundleAsync(UserPrincipal(), TenantA, oversized)))
+            .Code.ShouldBe("BUNDLE_LIMIT_EXCEEDED");
+
+        // Caps are bounded: a tenant cannot raise a cap beyond the hard maximum.
+        TenantAccessPolicy.FromDeploymentDefaults(TenantA, new AccessPolicyOptions { MaxBundleItems = 5000 }).MaxBundleItems.ShouldBeLessThanOrEqualTo(1000);
+    }
+
+    [Fact]
     public async Task Whitespace_or_blank_target_columns_rejected()
     {
         var engine = CreateEngine(NullFake.Create<IConsentApprovalRepository>());
@@ -365,4 +561,14 @@ public sealed class PermissionRequestEngineSubmitTests
                 GranteeType.User, "user:alice", "Valid justification text here.", ValidTo: Now.AddDays(10))));
         noMetaEx.Code.ShouldBe("COLUMN_METADATA_UNAVAILABLE");
     }
+}
+
+file sealed class StubRouter(Autheris.Application.ConsentRequests.Routing.ConsentWorkflowRouteResolution resolution)
+    : Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter
+{
+    public Task<Autheris.Application.ConsentRequests.Routing.ConsentWorkflowRouteResolution> ResolveForTableAsync(TenantId tenantId, TableIdentifier table, CancellationToken ct = default) =>
+        Task.FromResult(resolution);
+
+    public Task<Autheris.Application.ConsentRequests.Routing.ConsentWorkflowRouteResolution> ResolveForTablesAsync(TenantId tenantId, IReadOnlyList<TableIdentifier> tables, CancellationToken ct = default) =>
+        Task.FromResult(resolution);
 }

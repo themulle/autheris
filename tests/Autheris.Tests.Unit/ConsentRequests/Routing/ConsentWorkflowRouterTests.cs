@@ -14,6 +14,7 @@ using Autheris.Application.ConsentRequests.Routing;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -28,77 +29,93 @@ public sealed class ConsentWorkflowRouterTests
     private static readonly TableIdentifier Table = new("sales_db", "dbo", "orders");
     private static readonly DateTimeOffset FixedNow = new(2026, 6, 1, 12, 0, 0, TimeSpan.Zero);
 
-    [Fact]
-    public async Task DataSource_Route_WinsOverOwnerAndTenant()
+    private static readonly Guid DomainId = Guid.Parse("aaaaaaaa-0000-0000-0000-000000000001");
+
+    private sealed class StubProtection(Guid? domainId) : IProtectionSnapshotProvider
     {
-        var dsSystemId = Guid.NewGuid();
-        var ownerSystemId = Guid.NewGuid();
-        var tenantSystemId = Guid.NewGuid();
+        public ValueTask<EffectiveProtection> GetAsync(TenantId tenant, TableIdentifier table, CancellationToken ct = default) =>
+            ValueTask.FromResult(new EffectiveProtection(
+                domainId is { } id ? new ContainerRef(ContainerKind.Domain, id) : default,
+                null,
+                ProtectionClass.Confidential,
+                ProtectionClass.Confidential,
+                null,
+                new Dictionary<string, ColumnProtection>(),
+                CatalogVisibilityMode.Open));
+    }
 
-        var routes = new List<ConsentWorkflowRoute>
-        {
-            new(Tenant.Value, WorkflowRouteScopeKind.Tenant, "*", ConsentWorkflowMode.External, tenantSystemId, 90, 30, 72, true, "admin", FixedNow),
-            new(Tenant.Value, WorkflowRouteScopeKind.DataOwner, "owner-1", ConsentWorkflowMode.External, ownerSystemId, 45, 20, 48, true, "admin", FixedNow),
-            new(Tenant.Value, WorkflowRouteScopeKind.DataSource, "sales_db", ConsentWorkflowMode.External, dsSystemId, 14, 7, 24, true, "admin", FixedNow)
-        };
-
+    private static ConsentWorkflowRouter Router(IReadOnlyList<ConsentWorkflowRoute> routes, Guid? tableDomain)
+    {
         var adminRepo = Substitute.For<IConsentWorkflowAdminRepository>();
         adminRepo.GetRoutingInputsForTableAsync(Tenant, Table, Arg.Any<CancellationToken>())
             .Returns(new ConsentWorkflowTableInputs(routes, new HashSet<string>(["owner-1"])));
-
-        var router = new ConsentWorkflowRouter(
+        return new ConsentWorkflowRouter(
             auditRepository: Substitute.For<IAuditLogRepository>(),
             adminRepository: adminRepo,
             logger: NullLogger<ConsentWorkflowRouter>.Instance,
-            timeProvider: new FakeTimeProvider(FixedNow));
+            timeProvider: new FakeTimeProvider(FixedNow),
+            protectionProvider: new StubProtection(tableDomain));
+    }
 
-        var resolution = await router.ResolveForTableAsync(Tenant, Table);
+    [Fact]
+    public async Task Domain_Route_WinsOverTenant()
+    {
+        var domainSystemId = Guid.NewGuid();
+        var routes = new List<ConsentWorkflowRoute>
+        {
+            new(Tenant.Value, WorkflowRouteScopeKind.Tenant, "*", ConsentWorkflowMode.External, Guid.NewGuid(), 90, 30, 72, true, "admin", FixedNow),
+            new(Tenant.Value, WorkflowRouteScopeKind.Domain, DomainId.ToString("D"), ConsentWorkflowMode.External, domainSystemId, 14, 7, 24, true, "admin", FixedNow)
+        };
+
+        var resolution = await Router(routes, DomainId).ResolveForTableAsync(Tenant, Table);
 
         resolution.Mode.ShouldBe(ConsentWorkflowMode.External);
-        resolution.ExternalSystemId.ShouldBe(dsSystemId);
+        resolution.ExternalSystemId.ShouldBe(domainSystemId);
         resolution.MaxDurationDays.ShouldBe(14);
-        resolution.RequestTimeoutDays.ShouldBe(7);
-        resolution.ExpiryNoticeLeadHours.ShouldBe(24);
-        resolution.MatchedScopeKind.ShouldBe(WorkflowRouteScopeKind.DataSource);
+        resolution.MatchedScopeKind.ShouldBe(WorkflowRouteScopeKind.Domain);
         resolution.ConflictDetected.ShouldBeFalse();
     }
 
     [Fact]
-    public async Task Conflicting_Owner_Routes_FallBackToInternal()
+    [Trait("Category", "Security")]
+    public async Task Removed_Or_Unknown_Scope_Routes_Are_Inert()
     {
-        var systemA = Guid.NewGuid();
-        var systemB = Guid.NewGuid();
-
+        // Routes whose scope kind was removed (data owner / data source) or is unknown never match, never auto-approve and never act as wildcard.
         var routes = new List<ConsentWorkflowRoute>
         {
-            new(Tenant.Value, WorkflowRouteScopeKind.Tenant, "*", ConsentWorkflowMode.External, systemA, 60, 30, 72, true, "admin", FixedNow),
-            new(Tenant.Value, WorkflowRouteScopeKind.DataOwner, "owner-1", ConsentWorkflowMode.External, systemA, 30, 15, 24, true, "admin", FixedNow),
-            new(Tenant.Value, WorkflowRouteScopeKind.DataOwner, "owner-2", ConsentWorkflowMode.External, systemB, 45, 20, 48, true, "admin", FixedNow)
+            new(Tenant.Value, WorkflowRouteScopeKind.Unknown, "owner-1", ConsentWorkflowMode.External, Guid.NewGuid(), 30, 15, 24, true, "admin", FixedNow),
+            new(Tenant.Value, (WorkflowRouteScopeKind)99, "sales_db", ConsentWorkflowMode.External, Guid.NewGuid(), 30, 15, 24, true, "admin", FixedNow),
+            new(Tenant.Value, WorkflowRouteScopeKind.Unknown, "*", ConsentWorkflowMode.External, Guid.NewGuid(), 30, 15, 24, true, "admin", FixedNow)
         };
 
-        var adminRepo = Substitute.For<IConsentWorkflowAdminRepository>();
-        adminRepo.GetRoutingInputsForTableAsync(Tenant, Table, Arg.Any<CancellationToken>())
-            .Returns(new ConsentWorkflowTableInputs(routes, new HashSet<string>(["owner-1", "owner-2"])));
-
-        var auditEntries = new List<AuditLogEntry>();
-        var auditRepo = Substitute.For<IAuditLogRepository>();
-        auditRepo.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(e => auditEntries.Add(e)), Arg.Any<CancellationToken>())
-            .Returns(Task.CompletedTask);
-
-        var router = new ConsentWorkflowRouter(
-            auditRepository: auditRepo,
-            adminRepository: adminRepo,
-            logger: NullLogger<ConsentWorkflowRouter>.Instance,
-            timeProvider: new FakeTimeProvider(FixedNow));
-
-        var resolution = await router.ResolveForTableAsync(Tenant, Table);
+        var resolution = await Router(routes, DomainId).ResolveForTableAsync(Tenant, Table);
 
         resolution.Mode.ShouldBe(ConsentWorkflowMode.Internal);
         resolution.ExternalSystemId.ShouldBeNull();
-        resolution.ConflictDetected.ShouldBeTrue();
-        auditEntries.ShouldHaveSingleItem();
-        auditEntries[0].EventType.ShouldBe(AuditEventTypes.ConsentRouteConflict);
-        auditEntries[0].Decision.ShouldBe("FALLBACK_INTERNAL");
+        resolution.MatchedScopeKind.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Stored_Removed_Scope_Strings_Parse_To_Unknown_Never_Tenant()
+    {
+        ConsentWorkflowSqlMapping.TryParseRouteScopeKind("DATA_OWNER", out var owner).ShouldBeFalse();
+        ConsentWorkflowSqlMapping.TryParseRouteScopeKind("DATA_SOURCE", out var source).ShouldBeFalse();
+        ConsentWorkflowSqlMapping.TryParseRouteScopeKind("DOMAIN", out var domain).ShouldBeTrue();
+        owner.ShouldBe(WorkflowRouteScopeKind.Unknown);
+        source.ShouldBe(WorkflowRouteScopeKind.Unknown);
+        domain.ShouldBe(WorkflowRouteScopeKind.Domain);
+    }
+
+    [Fact]
+    public async Task Domain_Route_Does_Not_Match_A_Table_In_Another_Or_No_Domain()
+    {
+        var routes = new List<ConsentWorkflowRoute>
+        {
+            new(Tenant.Value, WorkflowRouteScopeKind.Domain, DomainId.ToString("D"), ConsentWorkflowMode.External, Guid.NewGuid(), 14, 7, 24, true, "admin", FixedNow)
+        };
+
+        (await Router(routes, Guid.NewGuid()).ResolveForTableAsync(Tenant, Table)).Mode.ShouldBe(ConsentWorkflowMode.Internal);
+        (await Router(routes, null).ResolveForTableAsync(Tenant, Table)).Mode.ShouldBe(ConsentWorkflowMode.Internal);
     }
 
     [Fact]
@@ -126,7 +143,7 @@ public sealed class ConsentWorkflowRouterTests
     }
 
     [Fact]
-    public async Task Owner_Max_Above_Tenant_IsRejected()
+    public async Task Domain_Max_Above_Tenant_IsRejected()
     {
         var adminRepo = Substitute.For<IConsentWorkflowAdminRepository>();
         adminRepo.GetWorkflowRouteAsync(Tenant, WorkflowRouteScopeKind.Tenant, "*", Arg.Any<CancellationToken>())
@@ -153,8 +170,8 @@ public sealed class ConsentWorkflowRouterTests
         httpContext.Response.Body = new MemoryStream();
 
         var result = await ConsentWorkflowAdminEndpoints.UpsertRouteAsync(
-            "DATA_OWNER",
-            "owner-1",
+            "DOMAIN",
+            "dom-1",
             body,
             httpContext,
             adminRepo,

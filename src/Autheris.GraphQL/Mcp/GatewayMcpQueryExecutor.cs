@@ -778,7 +778,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
 
         try
         {
-            var tenant = Autheris.Application.ConsentRequests.ConsentRequestService.ResolveTenantId(
+            var tenant = Autheris.Application.ConsentRequests.ConsentTenantResolver.Resolve(
                 principal, new Autheris.Domain.Common.TenantId(sessionContext.TenantId), Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal));
             var result = await _accessRequests.RequestAsync(
                 new Autheris.Application.Catalog.Discovery.DiscoveryAccessRequest(

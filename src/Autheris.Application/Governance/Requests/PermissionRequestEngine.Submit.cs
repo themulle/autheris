@@ -158,7 +158,7 @@ public sealed partial class PermissionRequestEngine
             profileId,
             ct).ConfigureAwait(false);
 
-        var (workflowMode, externalSystemId) = await ResolveTenantOnlyWorkflowRouteAsync(validTenant, ct).ConfigureAwait(false);
+        var (workflowMode, externalSystemId) = await ResolveWorkflowRouteAsync(validTenant, tableIdentifier, ct).ConfigureAwait(false);
         var grantKind = MapGrantKind(submission.RequestKind);
         var requesterIds = SeparationOfDutiesService.CollectSubjectIdentifiers(submission.Caller, callerCtx.UserSid.Value).ToList();
 
@@ -171,7 +171,8 @@ public sealed partial class PermissionRequestEngine
             RequestedGranteeType = submission.GranteeType,
             RequestedGranteeRef = submission.GranteeRef.Trim(),
             BusinessJustification = normalizedJustification,
-            Status = "PENDING",
+            // an externally routed request waits for the external system (same status as every other external submission path)
+            Status = workflowMode == ConsentWorkflowMode.External ? "PENDING_EXTERNAL_APPROVAL" : "PENDING",
             RequestedAt = now,
             RequestedValidFrom = validFrom,
             RequestedValidTo = requestedValidTo,
@@ -237,6 +238,23 @@ public sealed partial class PermissionRequestEngine
             throw;
         }
 
+        // the external workflow systems and event-feed consumers learn about a new request from this event
+        if (_eventOutbox is not null)
+        {
+            await _eventOutbox.AppendAsync(
+                new Autheris.Application.ConsentRequests.Events.ConsentEventWrite(
+                    created.TenantId.Value,
+                    Guid.NewGuid(),
+                    Autheris.Application.ConsentRequests.Events.ConsentEventTypes.RequestCreated,
+                    created.Id.ToString("D"),
+                    Autheris.Application.ConsentRequests.Events.ConsentEventPayloads.Serialize(
+                        Autheris.Application.ConsentRequests.Events.ConsentEventPayloads.ForRequest(created, now)),
+                    now,
+                    created.ExternalSystemId),
+                transaction: null,
+                ct: ct).ConfigureAwait(false);
+        }
+
         _logger?.LogInformation(
             "Created permission request {RequestId} of kind {RequestKind} in tenant {TenantId}.",
             created.Id,
@@ -258,7 +276,75 @@ public sealed partial class PermissionRequestEngine
                 ct).ConfigureAwait(false);
         }
 
+        if (await TryInsecureAutoApproveAsync(created, callerCtx, normalizedJustification, ct).ConfigureAwait(false) is { } approved)
+        {
+            return new PermissionSubmitResult(approved, BundleId: approved.BundleId, AutoApproved: true);
+        }
+
         return new PermissionSubmitResult(created, BundleId: created.BundleId);
+    }
+
+    /// <summary>
+    /// Insecure getting-started switch (<c>Insecure:warn_auto_approve_access_requests</c>, refused at startup outside Development): an
+    /// internally routed Data request of a single submission is activated at once. External routes, other request kinds and bundles never are.
+    /// </summary>
+    private async Task<ConsentRequest?> TryInsecureAutoApproveAsync(
+        ConsentRequest created, SecurityPrincipalContext callerCtx, string justification, CancellationToken ct)
+    {
+        if (_gatewayOptions?.IsAutoApproveEnabled != true ||
+            created.WorkflowMode != ConsentWorkflowMode.Internal ||
+            created.RequestKind != ConsentRequestKind.Data ||
+            created.BundleId is not null)
+        {
+            return null;
+        }
+
+        // the activation writes a grant: it must pass the grant policy as an approval would; a refusal leaves the request pending
+        var now = _time.GetUtcNow().ToUniversalTime();
+        var policyDecision = _grantPolicy.Evaluate(new GrantRequest(
+            created.RequestedGranteeType,
+            created.RequestedGranteeRef,
+            MapPolicyGrantKind(created.RequestKind),
+            created.RequestedValidTo,
+            now,
+            RequestKind: created.RequestKind,
+            Capacity: ApproverCapacity.DataOwner,
+            SelfGrant: false,
+            TenantPolicy: await GetTenantPolicyAsync(created.TenantId, ct).ConfigureAwait(false),
+            Justification: justification));
+        if (!policyDecision.Allowed)
+        {
+            return null;
+        }
+
+        await _approvalRepository.ActivateConsentForAutoApproveAsync(created.Id, ct).ConfigureAwait(false);
+        var approved = await _approvalRepository.GetConsentRequestAsync(created.Id, ct).ConfigureAwait(false) ?? created;
+        await _auditWriter.RecordRequiredAsync(new AuditLogEntry
+        {
+            Id = Guid.NewGuid(),
+            OccurredAt = now,
+            EventType = AuditEventTypes.PermissionApproved,
+            ActorSid = callerCtx.UserSid,
+            TargetTable = FormatTargetObject(approved),
+            Decision = "APPROVED",
+            TraceId = GetTraceId(),
+            TenantId = approved.TenantId,
+            DetailsJson = new PermissionAuditDetails(
+                Actor: callerCtx.UserSid.Value,
+                Subject: approved.RequestedGranteeRef,
+                TargetObject: FormatTargetObject(approved),
+                ValidFrom: approved.RequestedValidFrom,
+                ValidTo: approved.RequestedValidTo,
+                Justification: justification,
+                Capacity: null,
+                SelfGrant: false,
+                RequestId: approved.Id,
+                ActorKind: PermissionAuditDetails.ResolveActorKind(callerCtx),
+                GrantKind: approved.GrantKind.ToSqlString()).ToDetailsJson()
+        }, ct).ConfigureAwait(false);
+
+        _logger?.LogWarning("Permission request {RequestId} was auto-approved by the insecure getting-started switch.", approved.Id);
+        return approved;
     }
 
     private SecurityPrincipalContext ValidateAuthenticatedCaller(
@@ -575,6 +661,26 @@ public sealed partial class PermissionRequestEngine
                 throw new ConsentRequestException("DUPLICATE_PENDING_REQUEST", "A duplicate pending permission request already exists.");
             }
         }
+    }
+
+    /// <summary>
+    /// The route that directs a new request: the same resolution as the external decision uses (domain, then tenant; removed or unknown
+    /// scope kinds are inert). Requests without a table target fall back to the tenant route.
+    /// </summary>
+    private async Task<(ConsentWorkflowMode Mode, Guid? ExternalSystemId)> ResolveWorkflowRouteAsync(
+        TenantId tenant,
+        TableIdentifier table,
+        CancellationToken ct)
+    {
+        if (_workflowRouter is not null && table.TableName is not null)
+        {
+            var resolution = await _workflowRouter.ResolveForTableAsync(tenant, table, ct).ConfigureAwait(false);
+            return resolution is { Mode: ConsentWorkflowMode.External, ExternalSystemId: { } systemId }
+                ? (ConsentWorkflowMode.External, systemId)
+                : (ConsentWorkflowMode.Internal, null);
+        }
+
+        return await ResolveTenantOnlyWorkflowRouteAsync(tenant, ct).ConfigureAwait(false);
     }
 
     private async Task<(ConsentWorkflowMode Mode, Guid? ExternalSystemId)> ResolveTenantOnlyWorkflowRouteAsync(

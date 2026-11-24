@@ -100,6 +100,7 @@ public sealed class Issue271SecurityAuditVerificationTests
                     GranteeType: "User",
                     GranteeRef: actorSid, // Self-grant attempt
                     Effect: "Allow",
+                    Description: "test grant justification",
                     ValidUntil: DateTimeOffset.UtcNow.AddDays(30))
             ]);
 

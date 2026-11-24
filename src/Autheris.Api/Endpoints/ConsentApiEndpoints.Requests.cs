@@ -13,6 +13,7 @@ using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.ConsentRequests.Events;
+using Autheris.Application.Governance.Requests;
 using Autheris.Application.ConsentRequests.ProfileAssignments;
 using Autheris.Application.ConsentRequests.Routing;
 using Autheris.Application.Governance.ConsentRequests;
@@ -177,9 +178,7 @@ public static partial class ConsentApiEndpoints
     internal static async Task<IResult> CreateRequestAsync(
         CreateConsentRequestBody? body,
         HttpContext context,
-        IConsentRequestService requestService,
-        IConsentApprovalRepository approvalRepo,
-        [FromServices] IProfileAssignmentRequestService? profileAssignmentService = null,
+        IPermissionRequestEngine engine,
         IRateLimiterService? rateLimiter = null,
         IOptions<GovernanceOptions>? governanceOptions = null,
         CancellationToken ct = default)
@@ -208,83 +207,49 @@ public static partial class ConsentApiEndpoints
             return ApiProblems.Forbidden(ConsentDecisionErrorCodes.DecisionNotPermitted, "Authenticated user SID is required.", context);
         }
 
-        var (domain, schema, tableName) = ResolveTableParts(body);
-        var idempotencyKey = context.Request.Headers.TryGetValue("Idempotency-Key", out var idemVals)
-            ? idemVals.ToString().Trim()
-            : null;
-        if (string.IsNullOrWhiteSpace(idempotencyKey))
+        if (!TryParseRequestKind(body.Kind, out var kind))
         {
-            idempotencyKey = body.IdempotencyKey;
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Unsupported request kind.", context);
         }
+
+        if (string.Equals(body.GranteeType?.Trim(), "Role", StringComparison.OrdinalIgnoreCase))
+        {
+            return ApiProblems.BadRequest(AccessProfileAssignmentRules.RoleSubjectUnsupported, "Access profiles cannot be assigned directly to Role subjects.", context);
+        }
+
+        var granteeType = GranteeType.User;
+        if (!string.IsNullOrWhiteSpace(body.GranteeType) &&
+            !Enum.TryParse(body.GranteeType.Trim(), ignoreCase: true, out granteeType))
+        {
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Unsupported grantee type.", context);
+        }
+
+        var granteeRef = string.IsNullOrWhiteSpace(body.Grantee) ? userSid.Value.Value : body.Grantee.Trim();
 
         try
         {
-            SubmitConsentRequestResult result;
-            if (string.Equals(body.Kind, "profileAssignment", StringComparison.OrdinalIgnoreCase))
-            {
-                if (!body.ProfileId.HasValue || body.ProfileId.Value == Guid.Empty)
-                {
-                    return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "profileId is required when kind is 'profileAssignment'.", context);
-                }
+            var result = await engine.SubmitAsync(
+                new PermissionRequestSubmission(
+                    context.User,
+                    tenantId,
+                    kind,
+                    BuildTarget(body),
+                    granteeType,
+                    granteeRef,
+                    body.Justification,
+                    body.RequestedValidFrom,
+                    body.RequestedValidTo,
+                    body.RequestedValidTo is null && string.IsNullOrWhiteSpace(body.RequestedDuration)
+                        ? body.DurationDays ?? DefaultDurationDays(context)
+                        : null,
+                    body.RequestedDuration,
+                    body.RequestedWriteRules,
+                    IncludeReadAccess: body.RequestWriteOnly != true),
+                ct).ConfigureAwait(false);
 
-                if (profileAssignmentService is null)
-                {
-                    return ApiProblems.Problem(StatusCodes.Status501NotImplemented, ApiErrorCodes.NotImplemented, "Profile assignment requests are not enabled.", context);
-                }
-
-                result = await profileAssignmentService.SubmitAsync(
-                    new ProfileAssignmentSubmission(
-                        body.ProfileId.Value,
-                        userSid.Value,
-                        context.User,
-                        tenantId,
-                        body.Grantee,
-                        body.GranteeType,
-                        body.Justification,
-                        body.RequestedDuration,
-                        body.RequestedValidFrom,
-                        body.RequestedValidTo,
-                        body.DurationDays,
-                        idempotencyKey),
-                    ct).ConfigureAwait(false);
-            }
-            else
-            {
-                result = await requestService.SubmitAsync(
-                    new ConsentRequestSubmission(
-                        domain,
-                        schema,
-                        tableName,
-                        body.Justification ?? string.Empty,
-                        body.DurationDays ?? DefaultDurationDays(context),
-                        idempotencyKey,
-                        userSid.Value,
-                        context.User,
-                        tenantId,
-                        body.Context,
-                        body.RequestedWriteRules,
-                        body.RequestWriteOnly,
-                        body.RequestedDuration,
-                        body.RequestedValidFrom,
-                        body.RequestedValidTo,
-                        body.RequestedClear),
-                    ct).ConfigureAwait(false);
-            }
-
-            var created = await approvalRepo.GetConsentRequestAsync(result.RequestId, ct).ConfigureAwait(false);
-            if (created is not null)
-            {
-                context.Response.Headers.ETag = FormatRequestETag(created.Version);
-                return Results.Created($"/api/v1/consent/requests/{created.Id:D}", ToRequestDto(created));
-            }
-
-            context.Response.Headers.ETag = FormatRequestETag(1);
-            return Results.Created($"/api/v1/consent/requests/{result.RequestId:D}", new
-            {
-                requestId = result.RequestId,
-                status = result.Status,
-                message = result.Message
-            });
+            var created = result.Request;
+            context.Response.Headers.ETag = FormatRequestETag(created.Version);
+            return Results.Created($"/api/v1/consent/requests/{created.Id:D}", ToRequestDto(created));
         }
         catch (ConsentRequestException ex)
         {
@@ -296,9 +261,10 @@ public static partial class ConsentApiEndpoints
         Guid id,
         ConsentDecisionBody? body,
         HttpContext context,
-        IConsentDecisionPipeline pipeline,
+        IPermissionRequestEngine engine,
         IConsentApprovalRepository approvalRepo,
         IConsentWorkflowConfigRepository workflowConfigRepo,
+        IExternalDecisionService? externalDecisions = null,
         IIdempotencyStore? idempotencyStore = null,
         IRateLimiterService? rateLimiter = null,
         IOptions<GovernanceOptions>? governanceOptions = null,
@@ -342,6 +308,32 @@ public static partial class ConsentApiEndpoints
             return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Unsupported decision; expected 'approve' or 'reject'.", context);
         }
 
+        // The version the decider saw is mandatory: in the body, or as the If-Match ETag of the read.
+        int expectedVersion;
+        if (body.ExpectedVersion is { } bodyVersion)
+        {
+            if (bodyVersion <= 0)
+            {
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "expectedVersion must be a positive integer.", context);
+            }
+
+            expectedVersion = bodyVersion;
+        }
+        else
+        {
+            if (!TryParseIfMatchVersion(context, out var ifMatchVersion, out var ifMatchError))
+            {
+                return ifMatchError!;
+            }
+
+            if (ifMatchVersion is not { } fromHeader)
+            {
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "expectedVersion is required.", context);
+            }
+
+            expectedVersion = fromHeader;
+        }
+
         var bodyHash = ComputeBodyHash(body);
         var callerScope = isServicePrincipal ? (callerSystem?.Id.ToString("D") ?? clientId ?? "app") : (userSid?.Value ?? "user");
         var scopedKey = BuildScopedIdempotencyKey("decision", tenantId, callerScope, id, idempotencyKey);
@@ -350,11 +342,6 @@ public static partial class ConsentApiEndpoints
         if (hit)
         {
             return replayResult!;
-        }
-
-        if (!TryParseIfMatchVersion(context, out var expectedVersion, out var ifMatchError))
-        {
-            return ifMatchError!;
         }
 
         var existing = await approvalRepo.GetConsentRequestAsync(id, ct).ConfigureAwait(false);
@@ -368,58 +355,72 @@ public static partial class ConsentApiEndpoints
             return ApiProblems.NotFound(ConsentDecisionErrorCodes.RequestNotFound, $"Consent request '{id}' was not found.", context);
         }
 
-        var now = (timeProvider ?? TimeProvider.System).GetUtcNow();
-        ExternalDecisionAttribution? attribution = null;
-        if (isServicePrincipal)
+        if (!isServicePrincipal && (existing is null || existing.TenantId != tenantId))
         {
-            var approvers = ResolveExternalApprovers(body);
-            attribution = new ExternalDecisionAttribution(
-                callerSystem!.Id,
-                body.ExternalReference ?? existing!.ExternalReference ?? id.ToString("D"),
-                decisionKind == ConsentDecisionKind.Approve ? "APPROVE" : "REJECT",
-                approvers.Count > 0 ? approvers[0] : null,
-                body.DecidedAt ?? now,
-                body.Reason,
-                body.CorrelationId,
-                approvers.Count > 1 ? approvers.Skip(1).ToArray() : null);
+            return ApiProblems.NotFound(ConsentDecisionErrorCodes.RequestNotFound, $"Consent request '{id}' was not found.", context);
         }
 
         try
         {
-            var result = await pipeline.DecideAsync(
-                new ConsentDecisionCommand(
-                    id,
-                    decisionKind,
-                    isServicePrincipal ? ConsentDecisionChannel.External : ConsentDecisionChannel.Internal,
-                    context.User,
-                    expectedVersion,
-                    body.ApprovedValidTo,
-                    body.Reason,
-                    body.Description,
-                    body.WriteRules,
-                    body.ColumnMaskingJson,
-                    body.RowFilterJson,
-                    idempotencyKey,
-                    attribution,
+            PermissionDecisionResult result;
+            if (isServicePrincipal)
+            {
+                if (externalDecisions is null)
+                {
+                    return ApiProblems.NotFound(ConsentDecisionErrorCodes.RequestNotFound, $"Consent request '{id}' was not found.", context);
+                }
+
+                var approver = ResolveExternalApprovers(body).FirstOrDefault();
+                if (approver is null || body.DecidedAt is null || string.IsNullOrWhiteSpace(body.Nonce) || string.IsNullOrWhiteSpace(body.Signature))
+                {
+                    return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "External decisions require approver, decidedAt, nonce and signature.", context);
+                }
+
+                result = await externalDecisions.DecideAsync(
+                    new ExternalDecisionEnvelope(
+                        id,
+                        expectedVersion,
+                        callerSystem!.Id,
+                        body.ExternalReference ?? existing!.ExternalReference ?? string.Empty,
+                        decisionKind == ConsentDecisionKind.Approve,
+                        approver,
+                        body.DecidedAt.Value,
+                        body.Nonce,
+                        body.Signature,
+                        body.Reason,
+                        context.User),
                     tenantId,
-                    ApprovedProfileItems: body.ApprovedItems,
-                    ApprovedClearColumns: body.ApprovedClearColumns,
-                    ApprovedClearClassifications: body.ApprovedClearClassifications),
-                ct).ConfigureAwait(false);
+                    ct).ConfigureAwait(false);
+            }
+            else
+            {
+                var decider = context.GetSecurityContext() ?? SecurityPrincipalContext.FromPrincipal(context.User);
+                result = await engine.DecideAsync(
+                    new PermissionDecisionCommand(
+                        id,
+                        expectedVersion,
+                        decider,
+                        decisionKind == ConsentDecisionKind.Approve,
+                        body.ApprovedValidTo,
+                        body.Reason,
+                        body.AcknowledgeCoveredStricterColumns),
+                    ct).ConfigureAwait(false);
+            }
 
             var eTag = FormatRequestETag(result.Request.Version);
             context.Response.Headers.ETag = eTag;
+            var grants = result.Grants.Select(ToDecisionGrantDto).ToArray();
             var responsePayload = new ConsentDecisionApiResponse(
                 ToRequestDto(result.Request),
-                result.ActivatedConsent is not null ? ToGrantDto(result.ActivatedConsent) : null);
+                grants.Length > 0 ? grants[0] : null,
+                grants);
 
             await StoreIdempotentResponseAsync(idempotencyStore, scopedKey, bodyHash, StatusCodes.Status200OK, responsePayload, eTag, ct).ConfigureAwait(false);
             return Results.Ok(responsePayload);
         }
         catch (ConsentDecisionException ex)
         {
-            if (string.Equals(ex.ErrorCode, ConsentDecisionErrorCodes.ExternalSystemNotAuthorized, StringComparison.Ordinal)
-                && isServicePrincipal)
+            if (isServicePrincipal && ex.ErrorCode is ConsentDecisionErrorCodes.ExternalSystemNotAuthorized or "NOT_FOUND")
             {
                 return ApiProblems.NotFound(ConsentDecisionErrorCodes.RequestNotFound, $"Consent request '{id}' was not found.", context);
             }
@@ -433,7 +434,6 @@ public static partial class ConsentApiEndpoints
                 StatusCodes.Status403Forbidden => "Consent decision is not permitted.",
                 StatusCodes.Status404NotFound => "Consent request was not found.",
                 StatusCodes.Status409Conflict => "Consent request cannot be decided in its current state.",
-                StatusCodes.Status412PreconditionFailed => "Consent request version does not match If-Match.",
                 _ => "Consent decision request is invalid."
             };
             return ApiProblems.Problem(ex.StatusCode, mappedCode, detail, context);
@@ -443,7 +443,7 @@ public static partial class ConsentApiEndpoints
     internal static async Task<IResult> WithdrawRequestAsync(
         Guid id,
         HttpContext context,
-        IConsentRequestService requestService,
+        IPermissionRequestEngine engine,
         IConsentApprovalRepository approvalRepo,
         IRateLimiterService? rateLimiter = null,
         IOptions<GovernanceOptions>? governanceOptions = null,
@@ -471,7 +471,7 @@ public static partial class ConsentApiEndpoints
 
         try
         {
-            var withdrawn = await requestService.WithdrawAsync(id, context.User, ct).ConfigureAwait(false);
+            var withdrawn = await engine.WithdrawAsync(id, context.User, ct).ConfigureAwait(false);
             if (!withdrawn)
             {
                 return ApiProblems.Conflict(
@@ -481,6 +481,13 @@ public static partial class ConsentApiEndpoints
             }
 
             return Results.Ok(new { requestId = id, status = "WITHDRAWN" });
+        }
+        catch (ConsentRequestException ex) when (ex.Code == "INVALID_STATE")
+        {
+            return ApiProblems.Conflict(
+                ConsentDecisionErrorCodes.RequestNotDecidable,
+                $"Consent request '{id}' can no longer be withdrawn.",
+                context);
         }
         catch (ConsentRequestException ex)
         {
@@ -555,24 +562,63 @@ public static partial class ConsentApiEndpoints
         });
     }
 
-    private static (string Domain, string Schema, string TableName) ResolveTableParts(CreateConsentRequestBody body)
+    private static bool TryParseRequestKind(string? raw, out ConsentRequestKind kind)
     {
-        if (!string.IsNullOrWhiteSpace(body.Domain) || !string.IsNullOrWhiteSpace(body.Schema) || !string.IsNullOrWhiteSpace(body.TableName))
+        switch (raw?.Trim().ToUpperInvariant())
         {
-            return (body.Domain ?? string.Empty, body.Schema ?? string.Empty, body.TableName ?? string.Empty);
+            case null:
+            case "":
+            case "DATA":
+                kind = ConsentRequestKind.Data;
+                return true;
+            case "UNMASK":
+                kind = ConsentRequestKind.Unmask;
+                return true;
+            case "CATALOG":
+                kind = ConsentRequestKind.Catalog;
+                return true;
+            case "PROFILEASSIGNMENT":
+            case "PROFILE_ASSIGNMENT":
+                kind = ConsentRequestKind.ProfileAssignment;
+                return true;
+            default:
+                kind = default;
+                return false;
         }
+    }
 
-        if (!string.IsNullOrWhiteSpace(body.Table))
+    /// <summary>
+    /// Builds the permission target from <c>target</c> (or the flat legacy fields). An unparsable table yields a target without a table,
+    /// which the engine answers exactly like an unknown or invisible one.
+    /// </summary>
+    private static PermissionTarget BuildTarget(CreateConsentRequestBody body)
+    {
+        var t = body.Target;
+        var domain = t?.Domain ?? body.Domain;
+        var schema = t?.Schema ?? body.Schema;
+        var tableName = t?.TableName ?? body.TableName;
+        var qualified = t?.Table ?? body.Table;
+        if (string.IsNullOrWhiteSpace(domain) && string.IsNullOrWhiteSpace(schema) && string.IsNullOrWhiteSpace(tableName) && !string.IsNullOrWhiteSpace(qualified))
         {
-            var parts = body.Table.Trim().Split('.', 3, StringSplitOptions.TrimEntries);
+            var parts = qualified.Trim().Split('.', 3, StringSplitOptions.TrimEntries);
             if (parts.Length == 3)
             {
-                return (parts[0], parts[1], parts[2]);
+                (domain, schema, tableName) = (parts[0], parts[1], parts[2]);
             }
         }
 
-        return (string.Empty, string.Empty, string.Empty);
+        TableIdentifier? table = TableIdentifier.TryCreate(domain ?? string.Empty, schema ?? string.Empty, tableName ?? string.Empty, out var id) ? id : null;
+        ContainerKind? containerKind = null;
+        if (ConsentWorkflowSqlMapping.TryParseContainerKind(t?.ContainerKind?.Replace("-", "_", StringComparison.Ordinal), out var parsedKind))
+        {
+            containerKind = parsedKind;
+        }
+
+        return new PermissionTarget(table, t?.Columns, containerKind, t?.ContainerId, t?.ProfileId ?? body.ProfileId);
     }
+
+    private static ConsentDecisionGrantDto ToDecisionGrantDto(GrantRef grant) =>
+        new(grant.GrantId, grant.GrantKind.ToString(), grant.ValidFrom == default ? null : grant.ValidFrom, grant.ValidTo, grant.GrantRecordSeq);
 
     private static bool TryParseDecisionKind(string? raw, out ConsentDecisionKind kind)
     {
@@ -622,7 +668,7 @@ public static partial class ConsentApiEndpoints
         {
             "RATE_LIMIT_EXCEEDED" => ApiProblems.TooManyRequests(ApiErrorCodes.RateLimitExceeded, "Access request rate limit exceeded. Retry later.", context, ex.RetryAfterSeconds ?? 1),
             "FORBIDDEN" => ApiProblems.Forbidden(ConsentDecisionErrorCodes.DecisionNotPermitted, "Consent request operation is not permitted.", context),
-            "TABLE_NOT_FOUND" or "NOT_FOUND" => ApiProblems.NotFound(ApiErrorCodes.TableNotRegistered, "Target table, access profile, or consent request was not found.", context),
+            "TABLE_NOT_FOUND" or "NOT_FOUND" or "TARGET_NOT_FOUND" => ApiProblems.NotFound(ApiErrorCodes.TableNotRegistered, "Target table, access profile, or consent request was not found.", context),
             "CONFLICT" or "IDEMPOTENCY_CONFLICT" => ApiProblems.Conflict(ApiErrorCodes.Conflict, "Consent request conflicts with existing state.", context),
             AccessProfileAssignmentRules.RoleSubjectUnsupported => ApiProblems.BadRequest(AccessProfileAssignmentRules.RoleSubjectUnsupported, "Access profiles cannot be assigned directly to Role subjects.", context),
             _ => ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Consent request payload is invalid.", context)
@@ -638,6 +684,17 @@ public static partial class ConsentApiEndpoints
 
 }
 
+public sealed record CreateConsentRequestTarget(
+    string? Domain = null,
+    string? Schema = null,
+    string? TableName = null,
+    string? Table = null,
+    IReadOnlyList<string>? Columns = null,
+    string? ContainerKind = null,
+    Guid? ContainerId = null,
+    Guid? ProfileId = null);
+
+/// <summary>Submission body. It has no self-grant (or any other decision) field: self-grant status is computed by the engine from separation-of-duties facts.</summary>
 public sealed record CreateConsentRequestBody(
     string? Domain = null,
     string? Schema = null,
@@ -645,8 +702,6 @@ public sealed record CreateConsentRequestBody(
     string? Table = null,
     string? Justification = null,
     int? DurationDays = null,
-    string? IdempotencyKey = null,
-    AccessRequestContextInput? Context = null,
     IReadOnlyList<WriteRule>? RequestedWriteRules = null,
     bool? RequestWriteOnly = null,
     string? RequestedDuration = null,
@@ -656,26 +711,32 @@ public sealed record CreateConsentRequestBody(
     Guid? ProfileId = null,
     string? Grantee = null,
     string? GranteeType = null,
-    IReadOnlyList<Autheris.Application.ConsentRequests.ClassificationClear.RequestedClearItem>? RequestedClear = null);
+    CreateConsentRequestTarget? Target = null);
 
+/// <summary>Decision body. <c>expectedVersion</c> is the request version the decider saw; it has no self-grant field.</summary>
 public sealed record ConsentDecisionBody(
     string? Decision = null,
+    int? ExpectedVersion = null,
     DateTimeOffset? ApprovedValidTo = null,
     string? Reason = null,
-    string? Description = null,
-    IReadOnlyList<WriteRule>? WriteRules = null,
-    string? ColumnMaskingJson = null,
-    string? RowFilterJson = null,
+    bool AcknowledgeCoveredStricterColumns = false,
     string? ExternalReference = null,
     string? CorrelationId = null,
     DateTimeOffset? DecidedAt = null,
     string? ApproverSid = null,
     AssertedApprover? Approver = null,
     IReadOnlyList<AssertedApprover>? Approvers = null,
-    IReadOnlyList<int>? ApprovedItems = null,
-    IReadOnlyList<string>? ApprovedClearColumns = null,
-    IReadOnlyList<string>? ApprovedClearClassifications = null);
+    string? Nonce = null,
+    string? Signature = null);
+
+public sealed record ConsentDecisionGrantDto(
+    Guid Id,
+    string GrantKind,
+    DateTimeOffset? ValidFrom,
+    DateTimeOffset? ValidTo,
+    long GrantRecordSeq);
 
 public sealed record ConsentDecisionApiResponse(
     ConsentRequestDto Request,
-    ConsentGrantDto? ActivatedGrant);
+    ConsentDecisionGrantDto? ActivatedGrant,
+    IReadOnlyList<ConsentDecisionGrantDto> Grants);

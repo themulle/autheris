@@ -82,7 +82,7 @@ public sealed class GrantRecordLifecycleE2ETests(GovernancePostgresFixture fixtu
             MaxDurationDays: 30,
             RequestTimeoutDays: 14,
             ExpiryNoticeLeadHours: 24,
-            // The lifecycle test has no SCIM directory; approver resolution is covered by the ExternalDecisionGuard tests.
+            // The lifecycle test has no SCIM directory; approver resolution is covered by the LegacyExternalDecisionGuard tests.
             RequireResolvableApprover: false,
             UpdatedBy: "admin-e2e",
             UpdatedAt: now));
@@ -261,6 +261,9 @@ public sealed class GrantRecordLifecycleE2ETests(GovernancePostgresFixture fixtu
             ],
             PrimaryKeyColumns = ["id"]
         });
+
+        // the workflow under test needs a table the requester can see (an unassigned table is OnRequest)
+        await OpenDomainSeeder.AssignToOpenDomainAsync(store.Services, store.TenantA, tableId);
 
         await store.DataOwnerAssignments.ApplyTableOwnerAssignmentsAsync(
             new DataOwnerAssignmentRequest(

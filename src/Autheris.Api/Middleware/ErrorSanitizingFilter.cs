@@ -112,7 +112,16 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "JUSTIFICATION_TOO_LONG",
         "REQUEST_ALREADY_DECIDED",
         "SELF_GRANT_SECRET_REFUSED",
-        "SELF_GRANT_EXCEEDS_CEILING"
+        "SELF_GRANT_EXCEEDS_CEILING",
+        // #1009: expected refusals of the permission request engine (GraphQL requestTableAccess); fixed text, a hidden and an unknown target share one code.
+        "TARGET_NOT_FOUND",
+        "DUPLICATE_PENDING_REQUEST",
+        "PENDING_REQUEST_LIMIT_EXCEEDED",
+        "BUNDLE_LIMIT_EXCEEDED",
+        "UNAUTHENTICATED",
+        "INVALID_TENANT",
+        "INVALID_COLUMNS",
+        "COLUMN_METADATA_UNAVAILABLE"
     };
 
     /// <summary>
@@ -134,6 +143,14 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         ["REQUEST_ALREADY_DECIDED"] = "This permission request has already been decided.",
         ["SELF_GRANT_SECRET_REFUSED"] = "Secret objects cannot be granted through self-grant.",
         ["SELF_GRANT_EXCEEDS_CEILING"] = "The target object protection class exceeds the self-grant ceiling.",
+        ["TARGET_NOT_FOUND"] = "The requested target was not found.",
+        ["DUPLICATE_PENDING_REQUEST"] = "An identical permission request is already pending.",
+        ["PENDING_REQUEST_LIMIT_EXCEEDED"] = "The maximum number of pending permission requests has been reached.",
+        ["BUNDLE_LIMIT_EXCEEDED"] = "The request bundle contains too many items.",
+        ["UNAUTHENTICATED"] = "An authenticated subject is required.",
+        ["INVALID_TENANT"] = "A valid tenant is required.",
+        ["INVALID_COLUMNS"] = "One or more requested columns are invalid.",
+        ["COLUMN_METADATA_UNAVAILABLE"] = "Column metadata is unavailable for a column-scoped request.",
         ["GRAPHQL_VALIDATION_FAILED"] = ValidationMessage,
         ["GRAPHQL_VARIABLE_INVALID"] = VariableMessage,
         ["GRAPHQL_PARSE_FAILED"] = ParseMessage,

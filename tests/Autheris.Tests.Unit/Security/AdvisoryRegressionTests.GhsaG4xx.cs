@@ -178,7 +178,7 @@ public sealed partial class AdvisoryRegressionTests
         var sysId = Guid.NewGuid();
         var system = new ExternalWorkflowSystem(sysId, TenantA.Value, "snow", "svc", "https://sn.local", "sec", true, "admin", DateTimeOffset.UtcNow, null);
         var route = new ConsentWorkflowRoute(TenantA.Value, WorkflowRouteScopeKind.Tenant, TenantA.Value, ConsentWorkflowMode.External, sysId, 90, 30, 72, false, "admin", DateTimeOffset.UtcNow);
-        var guard = new ExternalDecisionGuard();
+        var guard = new LegacyExternalDecisionGuard();
 
         foreach (var (gType, gRef, subject) in new[]
         {
@@ -237,7 +237,7 @@ public sealed partial class AdvisoryRegressionTests
             scimEx.ErrorCode.ShouldBe(ConsentDecisionErrorCodes.SelfApprovalForbidden);
 
             var extReq = Wave2Request("S-1-5-21-REQ-1", GranteeType.Group, targetGroup, external: true, externalSystemId: sysId);
-            var guard = new ExternalDecisionGuard(groupStore: scimGroups);
+            var guard = new LegacyExternalDecisionGuard(groupStore: scimGroups);
             var extCmd = new ConsentDecisionCommand(
                 extReq.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.External, null,
                 ExternalAttribution: new ExternalDecisionAttribution(sysId, "EXT-2", "APPROVED", new AssertedApprover("S-1-5-21-EXT", ResolvedSid: "S-1-5-21-EXT"), DateTimeOffset.UtcNow));
@@ -248,7 +248,7 @@ public sealed partial class AdvisoryRegressionTests
         scimResult = new EffectiveScimGroupsResult(new HashSet<string>(), false, false);
         var extReqDegraded = Wave2Request("S-1-5-21-REQ-1", GranteeType.Group, targetGroup, external: true, externalSystemId: sysId);
         var degradedCaller = Wave2Principal("svc-webhook", extraClaims: [new Claim(RoleResolutionClaims.ClaimType, RoleResolutionClaims.Degraded)]);
-        var degradedGuard = new ExternalDecisionGuard(groupStore: scimGroups);
+        var degradedGuard = new LegacyExternalDecisionGuard(groupStore: scimGroups);
         var degradedExtEx = await Should.ThrowAsync<ConsentDecisionException>(() => degradedGuard.ValidateAsync(
             new ConsentDecisionCommand(extReqDegraded.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.External, degradedCaller,
                 ExternalAttribution: new ExternalDecisionAttribution(sysId, "EXT-3", "APPROVED", new AssertedApprover("S-1-5-21-EXT", ResolvedSid: "S-1-5-21-EXT"), DateTimeOffset.UtcNow)),
@@ -435,32 +435,7 @@ public sealed partial class AdvisoryRegressionTests
         step2.Request.Status.ShouldBe("APPROVED");
         h.Consents.Count.ShouldBe(1);
 
-        var reqExt = h.SeedPendingRequest("S-1-5-21-REQ", GranteeType.User, "S-1-5-21-GRANTEE2", MaskingPolicyMode.Default, external: true);
-        var extStep1 = await h.Service.DecideAsync(
-            new ConsentDecisionCommand(reqExt.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.External, null,
-                ExternalAttribution: new ExternalDecisionAttribution(Guid.NewGuid(), "EXT-P1", "APPROVED", new AssertedApprover("S-1-5-21-EXT1", ResolvedSid: "S-1-5-21-EXT1"), DateTimeOffset.UtcNow)),
-            reqExt, new Sid("S-1-5-21-EXT1"), [new Sid("S-1-5-21-EXT1")]);
-        extStep1.Request.Status.ShouldBe("PENDING_EXTERNAL_APPROVAL");
-        h.Consents.Count.ShouldBe(1);
-
-        var updatedExt = h.Requests.Single(r => r.Id == reqExt.Id);
-        var extStep2 = await h.Service.DecideAsync(
-            new ConsentDecisionCommand(reqExt.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.External, null,
-                ExternalAttribution: new ExternalDecisionAttribution(Guid.NewGuid(), "EXT-P2", "APPROVED", new AssertedApprover("S-1-5-21-EXT2", ResolvedSid: "S-1-5-21-EXT2"), DateTimeOffset.UtcNow)),
-            updatedExt, new Sid("S-1-5-21-EXT2"), [new Sid("S-1-5-21-EXT2")]);
-        extStep2.Request.Status.ShouldBe("APPROVED");
-        h.Consents.Count.ShouldBe(2);
-
-        var reqExtDual = h.SeedPendingRequest("S-1-5-21-REQ", GranteeType.User, "S-1-5-21-GRANTEE3", MaskingPolicyMode.Default, external: true);
-        var dualResult = await h.Service.DecideAsync(
-            new ConsentDecisionCommand(reqExtDual.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.External, null,
-                ExternalAttribution: new ExternalDecisionAttribution(Guid.NewGuid(), "EXT-DUAL", "APPROVED",
-                    new AssertedApprover("S-1-5-21-EXT1", ResolvedSid: "S-1-5-21-EXT1"), DateTimeOffset.UtcNow,
-                    AdditionalApprovers: [new AssertedApprover("S-1-5-21-EXT2", ResolvedSid: "S-1-5-21-EXT2")])),
-            reqExtDual, new Sid("S-1-5-21-EXT2"), [new Sid("S-1-5-21-EXT1"), new Sid("S-1-5-21-EXT2")]);
-        dualResult.Request.Status.ShouldBe("APPROVED");
-        h.Requests.Single(r => r.Id == reqExtDual.Id).ApprovalSteps.Select(s => s.ApproverSid.Value)
-            .ShouldBe(["S-1-5-21-EXT1", "S-1-5-21-EXT2"]);
+        // External decisions on profile assignments go through the permission request engine (ExternalDecisionEngineTests).
 
         var reqMulti = h.SeedPendingRequest("S-1-5-21-REQ", GranteeType.User, "S-1-5-21-GRANTEE4", MaskingPolicyMode.Default, external: false, multiItem: true);
         await h.Service.DecideAsync(
@@ -473,14 +448,14 @@ public sealed partial class AdvisoryRegressionTests
             new ConsentDecisionCommand(reqMulti.Id, ConsentDecisionKind.Reject, ConsentDecisionChannel.Internal, Wave2Principal("S-1-5-21-PUBOWN"), Reason: "Deny public table"),
             reqMultiAfter1, new Sid("S-1-5-21-PUBOWN"), []);
         afterReject2.Request.Status.ShouldBe("PENDING_SECOND_APPROVAL");
-        h.Consents.Count.ShouldBe(3);
+        h.Consents.Count.ShouldBe(1);
 
         var reqMultiAfter2 = h.Requests.Single(r => r.Id == reqMulti.Id);
         var multiFinal = await h.Service.DecideAsync(
             new ConsentDecisionCommand(reqMulti.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, Wave2Principal("S-1-5-21-OWN3")),
             reqMultiAfter2, new Sid("S-1-5-21-OWN3"), []);
         multiFinal.Request.Status.ShouldBe("APPROVED");
-        h.Consents.Count.ShouldBe(4);
+        h.Consents.Count.ShouldBe(2);
     }
 
     private static async Task AssertTotpReplayLockoutAndLocalPurgeAsync()
@@ -604,7 +579,7 @@ public sealed partial class AdvisoryRegressionTests
             return new ConsentDecisionPipeline(
                 ApprovalRepo, MetadataRepo, _owners, new ConsentDecisionGuard(new IdentitySubjectResolver()),
                 new GrantPolicy(), GrantValidityPolicy.CreateDefault(),
-                new ExternalDecisionGuard(groupStore: _scimGroups),
+                new LegacyExternalDecisionGuard(groupStore: _scimGroups),
                 workflowConfigRepository: _workflow, groupStore: _scimGroups,
                 classificationRepository: new Autheris.Tests.Unit.Governance.Classification.TestInMemoryClassificationStore(TenantA.Value));
         }

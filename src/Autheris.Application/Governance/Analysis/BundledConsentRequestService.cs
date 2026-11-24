@@ -12,6 +12,8 @@ using Autheris.Application.ConsentRequests;
 using Autheris.Application.ConsentRequests.Events;
 using Autheris.Application.ConsentRequests.Routing;
 using Autheris.Application.Governance.Grants;
+using Autheris.Application.Governance.Policy;
+using Autheris.Application.Governance.Requests;
 using Autheris.Application.Identity.Attributes;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Services;
@@ -23,85 +25,45 @@ using Autheris.Domain.Options;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Issue #79: Splits a bundled multi-table consent request by Data Owner so each Data Owner receives an approval ticket
-/// containing only their own tables while sharing the caller's <c>ConsumerReference</c>.
+/// Issue #79: Derives the items of a bundled multi-table consent request (visibility, canonical dataset, owner grouping) and
+/// submits every item as its own request through <see cref="IPermissionRequestEngine.SubmitBundleAsync"/>; each item is routed and
+/// decided individually. The per-Data-Owner tickets only group the created requests for the caller.
 /// </summary>
 public sealed class BundledConsentRequestService : IBundledConsentRequestService
 {
     private readonly ITableMetadataRepository _metadataRepository;
     private readonly IConsentRepository _consentRepository;
-    private readonly IConsentApprovalRepository? _approvalRepository;
     private readonly IDataOwnershipRepository? _dataOwnershipRepository;
-    private readonly IAuditLogRepository? _auditLogRepository;
-
-    private readonly IGrantPolicy _grantPolicy;
     private readonly IGrantValidityPolicy _grantValidityPolicy;
     private readonly IConsentMaterializationGuard? _materializationGuard;
     private readonly IOptions<GatewayOptions>? _gatewayOptions;
-    private readonly IConsentWorkflowRouter? _workflowRouter;
-    private readonly IConsentWorkflowConfigRepository? _workflowConfigRepository;
-    private readonly IConsentEventOutbox? _eventOutbox;
     private readonly IIdentitySubjectResolver? _subjectResolver;
-    private readonly IRateLimiterService? _rateLimiter;
-    private readonly IOptions<CatalogDiscoveryOptions>? _discoveryOptions;
     private readonly TimeProvider _timeProvider;
+    private readonly IPermissionRequestEngine? _engine;
+    private readonly IAccessPolicySettingsProvider? _policyProvider;
 
-    [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
     public BundledConsentRequestService(
         ITableMetadataRepository metadataRepository,
         IConsentRepository consentRepository,
-        IAuditLogRepository auditLogRepository,
-        IConsentApprovalRepository? approvalRepository = null,
         IDataOwnershipRepository? dataOwnershipRepository = null,
-        IGrantPolicy? grantPolicy = null,
         IConsentMaterializationGuard? materializationGuard = null,
         IGrantValidityPolicy? grantValidityPolicy = null,
         IOptions<GatewayOptions>? gatewayOptions = null,
-        IConsentWorkflowRouter? workflowRouter = null,
-        IConsentWorkflowConfigRepository? workflowConfigRepository = null,
-        IConsentEventOutbox? eventOutbox = null,
         IIdentitySubjectResolver? subjectResolver = null,
-        IRateLimiterService? rateLimiter = null,
-        IOptions<CatalogDiscoveryOptions>? discoveryOptions = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IPermissionRequestEngine? engine = null,
+        IAccessPolicySettingsProvider? policyProvider = null)
     {
+        _engine = engine;
+        _policyProvider = policyProvider;
         _materializationGuard = materializationGuard;
         _grantValidityPolicy = grantValidityPolicy ?? GrantValidityPolicy.CreateDefault();
-        _grantPolicy = grantPolicy ?? new GrantPolicy(validityPolicy: _grantValidityPolicy);
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
-        _auditLogRepository = auditLogRepository ?? throw new ArgumentNullException(nameof(auditLogRepository));
-        _approvalRepository = approvalRepository;
         _dataOwnershipRepository = dataOwnershipRepository;
         _gatewayOptions = gatewayOptions;
-        _workflowRouter = workflowRouter;
-        _workflowConfigRepository = workflowConfigRepository ?? (approvalRepository as IConsentWorkflowConfigRepository);
-        _eventOutbox = eventOutbox ?? (approvalRepository as IConsentEventOutbox);
         _subjectResolver = subjectResolver;
-        _rateLimiter = rateLimiter;
-        _discoveryOptions = discoveryOptions;
         _timeProvider = timeProvider ?? TimeProvider.System;
-    }
-
-    public BundledConsentRequestService(
-        ITableMetadataRepository metadataRepository,
-        IConsentRepository consentRepository,
-        IConsentApprovalRepository? approvalRepository = null,
-        IDataOwnershipRepository? dataOwnershipRepository = null,
-        IGrantPolicy? grantPolicy = null,
-        IConsentMaterializationGuard? materializationGuard = null,
-        IGrantValidityPolicy? grantValidityPolicy = null)
-    {
-        _materializationGuard = materializationGuard;
-        _grantValidityPolicy = grantValidityPolicy ?? GrantValidityPolicy.CreateDefault();
-        _grantPolicy = grantPolicy ?? new GrantPolicy(validityPolicy: _grantValidityPolicy);
-        _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
-        _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
-        _approvalRepository = approvalRepository;
-        _dataOwnershipRepository = dataOwnershipRepository;
-        _workflowConfigRepository = approvalRepository as IConsentWorkflowConfigRepository;
-        _eventOutbox = approvalRepository as IConsentEventOutbox;
-        _timeProvider = TimeProvider.System;
     }
 
     private async Task<Dictionary<string, TableMetadata>> ResolveRequestedTablesAsync(
@@ -220,16 +182,19 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
             return new BundledConsentRequestResult(Array.Empty<OwnerConsentTicket>(), request.ConsumerReference);
         }
 
+        var engine = _engine ?? throw new InvalidOperationException("The permission request engine is not configured; bundled requests are refused (fail closed).");
         var isAdmin = QueryAnalysisService.IsAdminPrincipal(requester);
         var roles = requester.GetUserRoles();
         var tenantId = requester.GetTenantId();
-        await ConsentSubmissionPipeline.CheckAccessRequestRateAsync(
-            tenantId,
-            requesterSid.Value,
-            _rateLimiter,
-            _gatewayOptions?.Value,
-            _discoveryOptions?.Value,
-            ct).ConfigureAwait(false);
+
+        // The bundle cap is checked before any table lookup so an oversized bundle costs nothing.
+        var maxBundle = _policyProvider is null
+            ? _gatewayOptions?.Value.Governance.AccessPolicy.MaxBundleItems ?? new AccessPolicyOptions().MaxBundleItems
+            : (await _policyProvider.GetEffectiveAsync(tenantId, ct).ConfigureAwait(false)).MaxBundleItems;
+        if (request.Items.Count > maxBundle)
+        {
+            throw new ConsentRequestException("BUNDLE_LIMIT_EXCEEDED", $"Bundle exceeds maximum of {maxBundle} items.");
+        }
 
         var tableLookup = await ResolveRequestedTablesAsync(request.Items, ct).ConfigureAwait(false);
         var subjects = requester.GetGroupSids().Append(requesterSid.Value).Distinct().ToList();
@@ -258,9 +223,10 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
                 {
                     isOwner = await _dataOwnershipRepository.IsAuthorizedApproverForTableAsync(table.Identifier, requesterSid.Value, ct).ConfigureAwait(false);
                 }
-                catch
+                catch (Exception ex) when (ex is not OperationCanceledException)
                 {
-                    // Fail-safe
+                    // Fail-safe: an unreadable ownership lookup grants nothing.
+                    isOwner = false;
                 }
             }
 
@@ -269,10 +235,10 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
                 throw new KeyNotFoundException($"Dataset '{item.Dataset}' was not found or is not visible.");
             }
 
-            var (ownerKey, ownerDisplay, primaryOwnerSid) = await ResolveTableOwnerAsync(table, ct).ConfigureAwait(false);
+            var (ownerKey, ownerDisplay) = await ResolveTableOwnerAsync(table, ct).ConfigureAwait(false);
             if (!itemsByOwner.TryGetValue(ownerKey, out var bucket))
             {
-                bucket = new OwnerBucket(ownerKey, ownerDisplay, primaryOwnerSid);
+                bucket = new OwnerBucket(ownerKey, ownerDisplay);
                 itemsByOwner[ownerKey] = bucket;
             }
 
@@ -285,8 +251,7 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
             }
         }
 
-        // GOV-12: a table that cannot carry consents (caller attribute source, A-10) is refused for the whole bundle before any request
-        // is stored, so no partial bundle remains.
+        // A table that cannot carry consents (caller attribute source) is refused for the whole bundle before any request is stored.
         if (_materializationGuard != null)
         {
             foreach (var bucket in itemsByOwner.Values)
@@ -301,157 +266,60 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
         var orderedBuckets = itemsByOwner.Values
             .OrderBy(b => b.OwnerKey, StringComparer.OrdinalIgnoreCase)
             .ToList();
-        var requesterIdentifiers = ConsentSubmissionPipeline.ExtractRequesterIdentifiers(requester, requesterSid.Value.Value);
-        var plannedBuckets = new List<(OwnerBucket Bucket, List<ConsentRequest> Requests)>(orderedBuckets.Count);
 
+        var durationDays = request.RequestedUntilUtc.HasValue
+            ? (int?)null
+            : Math.Max(1, (int)Math.Ceiling(_grantValidityPolicy.DefaultDuration.TotalDays));
+        var submissions = new List<PermissionRequestSubmission>(request.Items.Count);
         foreach (var bucket in orderedBuckets)
         {
-            var plannedRequests = new List<ConsentRequest>(bucket.Items.Count);
             foreach (var (table, item) in bucket.Items)
             {
-                var effectivePurpose = !string.IsNullOrWhiteSpace(request.Purpose)
-                    ? request.Purpose
-                    : item.SuggestedPurpose;
-                var validatedPurpose = ConsentSubmissionPipeline.ValidateJustification(effectivePurpose);
-                var businessJustification = string.IsNullOrWhiteSpace(request.ConsumerReference)
-                    ? validatedPurpose
-                    : ConsentSubmissionPipeline.ValidateJustification($"[Ref:{request.ConsumerReference}] {validatedPurpose}");
+                var effectivePurpose = !string.IsNullOrWhiteSpace(request.Purpose) ? request.Purpose : item.SuggestedPurpose;
+                var justification = string.IsNullOrWhiteSpace(request.ConsumerReference)
+                    ? effectivePurpose
+                    : $"[Ref:{request.ConsumerReference}] {effectivePurpose}";
 
-                var bundledNow = _timeProvider.GetUtcNow();
-                var resolvedValidTo = ConsentSubmissionPipeline.ResolveRequestedValidTo(
-                    _grantValidityPolicy,
-                    bundledNow,
-                    requestedValidFrom: null,
-                    requestedValidTo: request.RequestedUntilUtc);
-                var (workflowMode, externalSystemId, effectiveValidTo) = await ConsentSubmissionPipeline.ResolveWorkflowRouteAsync(
+                // A masked-column exception is an Unmask request over that column; a table gap is a Data request.
+                var isColumn = !string.IsNullOrWhiteSpace(item.Column);
+                submissions.Add(new PermissionRequestSubmission(
+                    requester,
                     tenantId,
-                    [table.Identifier],
-                    bundledNow,
-                    resolvedValidTo,
-                    hasExplicitDuration: request.RequestedUntilUtc.HasValue,
-                    _workflowRouter,
-                    _workflowConfigRepository,
-                    ct).ConfigureAwait(false);
-
-                GrantPolicyViolationException.ThrowIfDenied(_grantPolicy.Evaluate(new GrantRequest(
+                    isColumn ? ConsentRequestKind.Unmask : ConsentRequestKind.Data,
+                    PermissionTarget.ForTable(table.Identifier, isColumn ? [item.Column!.Trim()] : null),
                     GranteeType.User,
                     requesterSid.Value.Value,
-                    GrantKind.Consent,
-                    effectiveValidTo,
-                    bundledNow,
-                    GrantClassifier.Classify([table]),
-                    Requester: requesterSid.Value.Value,
-                    Justification: validatedPurpose)));
-
-                var initialStatus = workflowMode == ConsentWorkflowMode.External
-                    ? "PENDING_EXTERNAL_APPROVAL"
-                    : "PENDING";
-
-                plannedRequests.Add(new ConsentRequest
-                {
-                    Id = Guid.NewGuid(),
-                    TableId = table.Table.Id,
-                    TableIdentifier = table.Identifier,
-                    RequesterSid = requesterSid.Value,
-                    RequestedGranteeType = GranteeType.User,
-                    RequestedGranteeRef = requesterSid.Value.Value,
-                    BusinessJustification = businessJustification,
-                    Status = initialStatus,
-                    WorkflowMode = workflowMode,
-                    ExternalSystemId = externalSystemId,
-                    RequestedAt = bundledNow,
-                    RequestedValidFrom = bundledNow,
-                    RequestedValidTo = effectiveValidTo,
-                    TenantId = tenantId,
-                    RequesterIdentifiers = requesterIdentifiers,
-                    ApprovalSteps = workflowMode == ConsentWorkflowMode.Internal && bucket.PrimaryOwnerSid is { } approverSid
-                        ? new List<ApprovalStep>
-                        {
-                            new()
-                            {
-                                Id = Guid.NewGuid(),
-                                StepNumber = 1,
-                                ApproverSid = approverSid,
-                                Decision = "PENDING"
-                            }
-                        }
-                        : new List<ApprovalStep>()
-                });
+                    justification,
+                    ValidTo: request.RequestedUntilUtc,
+                    DurationDays: durationDays,
+                    IncludeReadAccess: !isColumn));
             }
-
-            plannedBuckets.Add((bucket, plannedRequests));
         }
 
-        var tickets = new List<OwnerConsentTicket>(plannedBuckets.Count);
-
-        foreach (var (bucket, plannedRequests) in plannedBuckets)
+        var submitted = await engine.SubmitBundleAsync(requester, tenantId, submissions, callerContext: null, ct).ConfigureAwait(false);
+        var created = submitted.BundleRequests ?? [submitted.Request];
+        if (created.Count != submissions.Count)
         {
-            var ticketId = Guid.NewGuid();
-            var consentIds = new List<Guid>(plannedRequests.Count);
-            var primaryMode = ConsentWorkflowMode.Internal;
+            // Every item must come back as exactly one request; a short or long result cannot be mapped to owners safely.
+            throw new InvalidOperationException("The permission request engine did not create one request per bundle item; the bundle is refused (fail closed).");
+        }
 
-            foreach (var requestRecord in plannedRequests)
-            {
-                if (requestRecord.WorkflowMode == ConsentWorkflowMode.External)
-                {
-                    primaryMode = ConsentWorkflowMode.External;
-                }
-
-                ConsentRequest effectiveRecord = requestRecord;
-                if (_approvalRepository != null)
-                {
-                    effectiveRecord = await _approvalRepository.CreateConsentRequestAsync(requestRecord, ct).ConfigureAwait(false);
-                }
-
-                consentIds.Add(effectiveRecord.Id);
-
-                if (_eventOutbox != null)
-                {
-                    var eventNow = effectiveRecord.RequestedAt == default ? _timeProvider.GetUtcNow() : effectiveRecord.RequestedAt;
-                    var payload = ConsentEventPayloads.ForRequest(effectiveRecord, eventNow);
-                    await _eventOutbox.AppendAsync(
-                        new ConsentEventWrite(
-                            effectiveRecord.TenantId.Value,
-                            Guid.NewGuid(),
-                            ConsentEventTypes.RequestCreated,
-                            effectiveRecord.Id.ToString("D"),
-                            ConsentEventPayloads.Serialize(payload),
-                            eventNow,
-                            effectiveRecord.ExternalSystemId),
-                        transaction: null,
-                        ct: ct).ConfigureAwait(false);
-                }
-            }
-
+        var tickets = new List<OwnerConsentTicket>(orderedBuckets.Count);
+        var offset = 0;
+        foreach (var bucket in orderedBuckets)
+        {
+            var bucketRequests = created.Skip(offset).Take(bucket.Items.Count).ToList();
+            offset += bucket.Items.Count;
+            var external = bucketRequests.Any(r => r.WorkflowMode == ConsentWorkflowMode.External);
             tickets.Add(new OwnerConsentTicket(
-                TicketId: ticketId,
+                TicketId: Guid.NewGuid(),
                 DataOwnerKey: bucket.OwnerKey,
                 DataOwnerDisplay: bucket.OwnerDisplay,
                 Datasets: bucket.Datasets.ToList(),
                 Items: bucket.Items.Select(x => x.Item).ToList(),
                 ConsumerReference: request.ConsumerReference,
-                Status: primaryMode == ConsentWorkflowMode.External ? "PENDING_EXTERNAL_APPROVAL" : "PENDING",
-                UnderlyingConsentRequestIds: consentIds));
-        }
-
-        if (_auditLogRepository != null)
-        {
-            await _auditLogRepository.RecordAuditEventAsync(new AuditLogEntry
-            {
-                TenantId = tenantId,
-                OccurredAt = DateTimeOffset.UtcNow,
-                EventType = AuditEventTypes.ConsentRequested,
-                ActorSid = requesterSid.Value,
-                TargetTable = string.Join(",", tickets.SelectMany(t => t.Datasets).Distinct(StringComparer.OrdinalIgnoreCase)),
-                Query = $"submit_bundled_consent(tickets={tickets.Count}, ref={request.ConsumerReference ?? "none"})",
-                Decision = "ALLOW",
-                DetailsJson = JsonSerializer.Serialize(new
-                {
-                    ticketCount = tickets.Count,
-                    consumerReference = request.ConsumerReference,
-                    datasets = tickets.SelectMany(t => t.Datasets).Distinct(StringComparer.OrdinalIgnoreCase).ToArray()
-                })
-            }, ct).ConfigureAwait(false);
+                Status: external ? "PENDING_EXTERNAL_APPROVAL" : "PENDING",
+                UnderlyingConsentRequestIds: bucketRequests.Select(r => r.Id).ToList()));
         }
 
         return new BundledConsentRequestResult(
@@ -459,7 +327,7 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
             ConsumerReference: request.ConsumerReference);
     }
 
-    private async Task<(string OwnerKey, string OwnerDisplay, Sid? PrimaryOwnerSid)> ResolveTableOwnerAsync(
+    private async Task<(string OwnerKey, string OwnerDisplay)> ResolveTableOwnerAsync(
         TableMetadata table,
         CancellationToken ct)
     {
@@ -482,23 +350,22 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
                         ? primary.Email
                         : primary.AdAccount;
 
-                return (key, display, primary.AdSid);
+                return (key, display);
             }
         }
 
         if (!string.IsNullOrWhiteSpace(table.OwnerTenantId))
         {
-            return ($"owner:{table.OwnerTenantId}", table.OwnerTenantId, new Sid(table.OwnerTenantId));
+            return ($"owner:{table.OwnerTenantId}", table.OwnerTenantId);
         }
 
-        return ($"domain:{table.Identifier.Domain}", $"Domain Owner ({table.Identifier.Domain})", null);
+        return ($"domain:{table.Identifier.Domain}", $"Domain Owner ({table.Identifier.Domain})");
     }
 
-    private sealed class OwnerBucket(string ownerKey, string ownerDisplay, Sid? primaryOwnerSid)
+    private sealed class OwnerBucket(string ownerKey, string ownerDisplay)
     {
         public string OwnerKey { get; } = ownerKey;
         public string OwnerDisplay { get; } = ownerDisplay;
-        public Sid? PrimaryOwnerSid { get; } = primaryOwnerSid;
         public List<string> Datasets { get; } = new();
         public List<(TableMetadata Table, RequestableConsentItem Item)> Items { get; } = new();
     }

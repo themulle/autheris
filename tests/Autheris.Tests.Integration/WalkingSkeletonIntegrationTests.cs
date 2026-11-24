@@ -173,10 +173,14 @@ public class WalkingSkeletonIntegrationTests : IClassFixture<WalkingSkeletonInte
     }
 
     [Fact]
-    public async Task GraphQLMutation_RequestAndApproveConsent_LifecycleFlow()
+    public async Task GraphQLRequestThenRestApprove_LifecycleFlow()
     {
         var requesterSid = new Sid("S-1-5-21-AUDITOR-99");
         var approverSid = new Sid("S-1-5-21-DATAOWNER-APPROVER");
+
+        // #1009: an unassigned table is OnRequest and cannot be requested without a catalog grant; the lifecycle uses a table of an Open domain.
+        await OpenDomainSeeder.AssignToOpenDomainAsync(
+            _factory.Services, Autheris.Tests.Common.TestTenants.Default, new TableIdentifier("sales", "dbo", "sales_table_1"));
 
         var client = CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", requesterSid.Value);
@@ -213,50 +217,18 @@ public class WalkingSkeletonIntegrationTests : IClassFixture<WalkingSkeletonInte
             .GetProperty("requestId")
             .GetGuid();
 
-        // 2. Legitimate Data Owner approves request
+        // 2. A governance administrator decides through the REST decision endpoint (GraphQL has no decide surface).
         var approverClient = CreateClient();
-        approverClient.DefaultRequestHeaders.Add("X-Test-User-Sid", approverSid.Value);
-        approverClient.DefaultRequestHeaders.Add("X-Test-Roles", "Consumer");
+        approverClient.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-GOVADMIN-APPROVER");
+        approverClient.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
+        approverClient.DefaultRequestHeaders.Add("Idempotency-Key", "key-appr-001");
 
-        var approveMutation = new
-        {
-            query = $@"mutation {{
-                approveConsentRequest(
-                    requestId: ""{requestId}"",
-                    idempotencyKey: ""key-appr-001""
-                ) {{
-                    requestId
-                    status
-                    message
-                }}
-            }}"
-        };
-
-        var apprResponse = await approverClient.PostAsJsonAsync("/graphql", approveMutation);
+        var apprResponse = await approverClient.PostAsJsonAsync(
+            $"/api/v1/consent/requests/{requestId}/decision",
+            new { decision = "approve", expectedVersion = 1 });
         apprResponse.StatusCode.ShouldBe(HttpStatusCode.OK);
         var apprBody = await apprResponse.Content.ReadAsStringAsync();
-        apprBody.ShouldContain("PENDING_SECOND_APPROVAL");
-
-        var approver2Client = CreateClient();
-        approver2Client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-GOVADMIN-APPROVER");
-        approver2Client.DefaultRequestHeaders.Add("X-Test-Roles", "GovernanceAdmin");
-        var approve2Mutation = new
-        {
-            query = $@"mutation {{
-                approveConsentRequest(
-                    requestId: ""{requestId}"",
-                    idempotencyKey: ""key-appr-002""
-                ) {{
-                    requestId
-                    status
-                    message
-                }}
-            }}"
-        };
-        var appr2Response = await approver2Client.PostAsJsonAsync("/graphql", approve2Mutation);
-        appr2Response.StatusCode.ShouldBe(HttpStatusCode.OK);
-        var appr2Body = await appr2Response.Content.ReadAsStringAsync();
-        appr2Body.ShouldContain("APPROVED");
+        apprBody.ShouldContain("APPROVED");
 
         // 3. Requester now queries sales_table_1 -> Access Allowed!
         var query = new

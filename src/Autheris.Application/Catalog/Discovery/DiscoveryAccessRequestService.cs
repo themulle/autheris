@@ -201,15 +201,24 @@ public sealed class DiscoveryAccessRequestService : IDiscoveryAccessRequestServi
             return null;
         }
 
-        var wantedKey = ClearKey(wanted);
+        var wantedColumnKey = ColumnKey(wanted.SelectMany(i => i.Columns).ToArray());
         var requests = await _approvals.GetRequestsByRequesterSidAsync(sid, tenant, status: null, ct).ConfigureAwait(false);
         foreach (var r in requests)
         {
-            if (r.TenantId == tenant &&
-                r.TableIdentifier.Equals(table) &&
-                IsPending(r.Status) &&
-                r.RequestedWriteRules.Count == 0 &&
-                string.Equals(ClearKey(RequestedClearCodec.Parse(r.ContextJson)), wantedKey, StringComparison.Ordinal))
+            if (r.TenantId != tenant || !r.TableIdentifier.Equals(table) || !IsPending(r.Status) || r.RequestedWriteRules.Count != 0)
+            {
+                continue;
+            }
+
+            if (wanted.Count == 0)
+            {
+                if (r.RequestKind == ConsentRequestKind.Data)
+                {
+                    return r;
+                }
+            }
+            else if (r.RequestKind == ConsentRequestKind.Unmask &&
+                string.Equals(ColumnKey(r.TargetColumns), wantedColumnKey, StringComparison.Ordinal))
             {
                 return r;
             }
@@ -223,11 +232,8 @@ public sealed class DiscoveryAccessRequestService : IDiscoveryAccessRequestServi
         string.Equals(status, "ESCALATED", StringComparison.OrdinalIgnoreCase) ||
         string.Equals(status, "SUBMITTED", StringComparison.OrdinalIgnoreCase);
 
-    private static string ClearKey(IReadOnlyList<RequestedClearItem> items) =>
-        string.Join(
-            ';',
-            items.SelectMany(i => i.Columns.Select(c => i.Classification + "|" + c.ToLowerInvariant()))
-                .OrderBy(x => x, StringComparer.Ordinal));
+    private static string ColumnKey(IReadOnlyList<string>? columns) =>
+        string.Join(';', (columns ?? []).Select(c => c.ToLowerInvariant()).Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal));
 
     private async Task AuditDenialAsync(CatalogCaller caller, Sid sid, TableIdentifier? table, string reasonCode, CancellationToken ct)
     {

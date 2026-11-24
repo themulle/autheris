@@ -1,6 +1,8 @@
 namespace Autheris.Tests.Unit.ConsentRequests;
 
 using System.Linq;
+using System.Text.RegularExpressions;
+using Autheris.Api.Endpoints;
 using System.Threading.Tasks;
 using Autheris.Api.Security;
 using Microsoft.AspNetCore.Authorization;
@@ -91,14 +93,14 @@ public sealed class ConsentApiEndpointSecurityTests
     }
 
     [Fact]
-    public async Task StaleIfMatch_Returns412()
+    public async Task StaleExpectedVersion_Returns409()
     {
         await using var harness = ConsentApiTestHarness.Create();
         var req = harness.SeedExternalRequest("tenant-a", harness.RegisteredSystemId, "ext-ref-103");
         var client = ConsentApiTestHarness.BuildAppPrincipal("tenant-a", harness.RegisteredClientId, ExternalApiPermissions.ConsentDecide);
 
         var stale = await harness.DecideAsync(client, req.Id, "approve", "idem-stale-1", ifMatch: "\"r99\"", approverSid: "S-1-5-21-APPROVER-1");
-        stale.StatusCode.ShouldBe(StatusCodes.Status412PreconditionFailed);
+        stale.StatusCode.ShouldBe(StatusCodes.Status409Conflict);
     }
 
     [Fact]
@@ -167,4 +169,94 @@ public sealed class ConsentApiEndpointSecurityTests
         AssertPolicy("/api/v1/consent/grant-records/verify", "POST", GatewayPolicies.GrantVerify);
         AssertPolicy("/api/v1/consent/grant-records/keys", "GET", GatewayPolicies.GrantVerify);
     }
+
+    [Fact]
+    public void No_selfGrant_field_in_any_consent_request_dto()
+    {
+        var dtoTypes = new[]
+        {
+            typeof(CreateConsentRequestBody), typeof(CreateConsentRequestTarget), typeof(ConsentDecisionBody),
+            typeof(ConsentDecisionApiResponse), typeof(ConsentRequestDto)
+        };
+
+        foreach (var type in dtoTypes)
+        {
+            type.GetProperties().ShouldNotContain(
+                p => p.Name.Contains("SelfGrant", System.StringComparison.OrdinalIgnoreCase),
+                $"{type.Name} must not accept or expose a self-grant flag");
+        }
+    }
+
+    [Fact]
+    public async Task ExpectedVersion_is_required_for_a_decision()
+    {
+        await using var harness = ConsentApiTestHarness.Create();
+        var req = harness.SeedExternalRequest("tenant-a", harness.RegisteredSystemId, "ext-ref-ev-1");
+        var client = ConsentApiTestHarness.BuildAppPrincipal("tenant-a", harness.RegisteredClientId, ExternalApiPermissions.ConsentDecide);
+
+        var missing = await harness.DecideAsync(client, req.Id, "approve", "idem-ev-1", ifMatch: null, approverSid: "S-1-5-21-APPROVER-1");
+        missing.StatusCode.ShouldBe(StatusCodes.Status428PreconditionRequired);
+
+        var invalid = await harness.DecideAsync(client, req.Id, "approve", "idem-ev-2", ifMatch: null, approverSid: "S-1-5-21-APPROVER-1", expectedVersion: 0);
+        invalid.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+
+        var given = await harness.DecideAsync(client, req.Id, "approve", "idem-ev-3", ifMatch: null, approverSid: "S-1-5-21-APPROVER-1", expectedVersion: 1);
+        given.StatusCode.ShouldBe(StatusCodes.Status200OK);
+    }
+
+    [Fact]
+    public async Task Invisible_target_same_response_as_missing()
+    {
+        await using var harness = ConsentApiTestHarness.Create();
+        var user = ConsentApiTestHarness.BuildUserPrincipal("tenant-a", "S-1-5-21-USER-7", "Developer");
+
+        var missing = await harness.CreateRequestAsync(user, new CreateConsentRequestBody("pg", "public", "does_not_exist", Justification: "Quarterly revenue report", DurationDays: 7));
+        var malformed = await harness.CreateRequestAsync(user, new CreateConsentRequestBody("pg", "public", "bad.name", Justification: "Quarterly revenue report", DurationDays: 7));
+        var hidden = await harness.CreateRequestAsync(user, new CreateConsentRequestBody("pg", "public", "hidden_payroll", Justification: "Quarterly revenue report", DurationDays: 7));
+
+        missing.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
+        malformed.StatusCode.ShouldBe(missing.StatusCode);
+        Normalize(malformed.Body).ShouldBe(Normalize(missing.Body));
+        hidden.StatusCode.ShouldBe(missing.StatusCode);
+        Normalize(hidden.Body.Replace("hidden_payroll", "does_not_exist")).ShouldBe(Normalize(missing.Body));
+        harness.Store.Requests.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Foreign_tenant_request_same_as_missing()
+    {
+        await using var harness = ConsentApiTestHarness.Create();
+        var foreign = harness.SeedExternalRequest("tenant-b", harness.RegisteredSystemId, "ext-foreign-1");
+        var decider = ConsentApiTestHarness.BuildUserPrincipal("tenant-a", "S-1-5-21-GOV-1", "GovernanceAdmin");
+
+        var foreignResp = await harness.DecideAsync(decider, foreign.Id, "approve", "idem-foreign-1", ifMatch: null, expectedVersion: 1);
+        var missingResp = await harness.DecideAsync(decider, Guid.NewGuid(), "approve", "idem-foreign-1", ifMatch: null, expectedVersion: 1);
+
+        missingResp.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
+        foreignResp.StatusCode.ShouldBe(missingResp.StatusCode);
+        Normalize(foreignResp.Body.Replace(foreign.Id.ToString("D"), "<id>")).ShouldBe(Normalize(missingResp.Body));
+    }
+
+    [Fact]
+    public async Task Reason_codes_leak_no_third_party_data()
+    {
+        await using var harness = ConsentApiTestHarness.Create();
+        var request = harness.SeedExternalRequest("tenant-a", harness.RegisteredSystemId, "ext-ref-leak-1");
+        // The requester holds the governance role and tries to decide their own request: separation of duties denies.
+        var requester = ConsentApiTestHarness.BuildUserPrincipal("tenant-a", request.RequesterSid.Value, "GovernanceAdmin");
+
+        var denied = await harness.DecideAsync(requester, request.Id, "approve", "idem-leak-1", ifMatch: null, expectedVersion: 1);
+
+        denied.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+        denied.Body.ShouldContain("Consent decision is not permitted.");
+        // Neither the requester, the grantee, the target nor any group or grant of a third party is part of the response.
+        denied.Body.ShouldNotContain(request.RequesterSid.Value);
+        denied.Body.ShouldNotContain(request.RequestedGranteeRef);
+        denied.Body.ShouldNotContain("orders");
+        denied.Body.ShouldNotContain("S-1-5-21", Case.Insensitive);
+        denied.Body.ShouldNotContain("group", Case.Insensitive);
+    }
+
+    private static string Normalize(string body) =>
+        Regex.Replace(Regex.Replace(body, "\"(correlationId|traceId)\":\"[^\"]*\"", "\"$1\":\"<id>\""), "[0-9a-fA-F]{32}|[0-9a-fA-F-]{36}", "<id>");
 }

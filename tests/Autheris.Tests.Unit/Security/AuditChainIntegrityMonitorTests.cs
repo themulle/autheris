@@ -1,8 +1,10 @@
 namespace Autheris.Tests.Unit.Security;
 
 using System;
+using System.Collections.Generic;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Governance.Notifications;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -20,6 +22,102 @@ public sealed class AuditChainIntegrityMonitorTests
 {
     private static AuditChainIntegrityMonitor Monitor(IAuditLogRepository repo) =>
         new(repo, Options.Create(new GatewayOptions()), NullLogger<AuditChainIntegrityMonitor>.Instance);
+
+    private static AuditChainIntegrityMonitor Monitor(IAuditLogRepository repo, IGovernanceNotificationDispatcher dispatcher) =>
+        new(repo, Options.Create(new GatewayOptions()), NullLogger<AuditChainIntegrityMonitor>.Instance, notificationDispatcher: dispatcher);
+
+    [Fact]
+    public async Task Failure_notifies_dg_and_audits()
+    {
+        var repo = Substitute.For<IAuditLogRepository>();
+        repo.VerifyAuditHashChainAsync(Arg.Any<System.Threading.CancellationToken>()).Returns(false);
+        var dispatcher = new RecordingDispatcher();
+
+        (await Monitor(repo, dispatcher).VerifyNowAsync()).ShouldBeFalse();
+
+        var message = dispatcher.Messages.ShouldHaveSingleItem();
+        message.EventType.ShouldBe(AuditChainIntegrityMonitor.ViolationEventType);
+        message.Summary.ShouldNotContain("http");
+    }
+
+    [Fact]
+    public async Task Verification_that_cannot_complete_notifies_dg_without_exception_text()
+    {
+        var repo = Substitute.For<IAuditLogRepository>();
+        repo.VerifyAuditHashChainAsync(Arg.Any<System.Threading.CancellationToken>())
+            .Returns<Task<bool>>(_ => throw new InvalidOperationException("Host=db-internal;Password=secret"));
+        var dispatcher = new RecordingDispatcher();
+
+        (await Monitor(repo, dispatcher).VerifyNowAsync()).ShouldBeFalse();
+
+        var message = dispatcher.Messages.ShouldHaveSingleItem();
+        message.EventType.ShouldBe(AuditChainIntegrityMonitor.VerificationIncompleteEventType);
+        message.Summary.ShouldNotContain("Password");
+    }
+
+    [Fact]
+    public async Task A_latched_violation_is_notified_once_and_again_after_recovery()
+    {
+        var results = new Queue<bool>([false, false, true, false]);
+        var repo = Substitute.For<IAuditLogRepository>();
+        repo.VerifyAuditHashChainAsync(Arg.Any<System.Threading.CancellationToken>()).Returns(_ => Task.FromResult(results.Dequeue()));
+        var dispatcher = new RecordingDispatcher();
+        var monitor = Monitor(repo, dispatcher);
+
+        await monitor.VerifyNowAsync();
+        await monitor.VerifyNowAsync();
+        dispatcher.Messages.Count.ShouldBe(1);
+
+        await monitor.VerifyNowAsync();
+        await monitor.VerifyNowAsync();
+        dispatcher.Messages.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task A_repeatedly_incomplete_verification_is_notified_once_until_a_run_completes()
+    {
+        var calls = 0;
+        var repo = Substitute.For<IAuditLogRepository>();
+        repo.VerifyAuditHashChainAsync(Arg.Any<System.Threading.CancellationToken>()).Returns<Task<bool>>(_ =>
+            ++calls == 3 ? Task.FromResult(true) : throw new InvalidOperationException("down"));
+        var dispatcher = new RecordingDispatcher();
+        var monitor = Monitor(repo, dispatcher);
+
+        await monitor.VerifyNowAsync();
+        await monitor.VerifyNowAsync();
+        dispatcher.Messages.Count.ShouldBe(1);
+
+        await monitor.VerifyNowAsync();
+        await monitor.VerifyNowAsync();
+        dispatcher.Messages.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task Intact_chain_sends_no_notification()
+    {
+        var repo = Substitute.For<IAuditLogRepository>();
+        repo.VerifyAuditHashChainAsync(Arg.Any<System.Threading.CancellationToken>()).Returns(true);
+        var dispatcher = new RecordingDispatcher();
+
+        await Monitor(repo, dispatcher).VerifyNowAsync();
+
+        dispatcher.Messages.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Dispatcher_exception_does_not_stop_the_monitor()
+    {
+        var repo = Substitute.For<IAuditLogRepository>();
+        repo.VerifyAuditHashChainAsync(Arg.Any<System.Threading.CancellationToken>()).Returns(false, true);
+        var dispatcher = new RecordingDispatcher(throws: true);
+        var monitor = Monitor(repo, dispatcher);
+
+        (await monitor.VerifyNowAsync()).ShouldBeFalse();
+        monitor.IsViolated.ShouldBeTrue();
+
+        (await monitor.VerifyNowAsync()).ShouldBeTrue();
+        monitor.IsViolated.ShouldBeFalse();
+    }
 
     [Fact]
     public async Task VerifyNow_IntactChain_IsNotViolated()
@@ -215,5 +313,16 @@ public sealed class AuditChainIntegrityMonitorTests
         var entry = ConsentApprovalPolicy.BuildStepAudit(req, new Sid("S-A"), "CONSENT_REQUEST_REJECTED", "REJECTED", "REJECTED", new string('x', 5000));
 
         entry.DetailsJson.Length.ShouldBeLessThan(1000);
+    }
+}
+
+file sealed class RecordingDispatcher(bool throws = false) : IGovernanceNotificationDispatcher
+{
+    public System.Collections.Generic.List<GovernanceNotificationMessage> Messages { get; } = [];
+
+    public Task DispatchAsync(GovernanceNotificationMessage message, System.Threading.CancellationToken ct = default)
+    {
+        Messages.Add(message);
+        return throws ? throw new InvalidOperationException("webhook down https://hooks.example/secret") : Task.CompletedTask;
     }
 }

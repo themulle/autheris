@@ -100,13 +100,13 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
         if (!Store.IsAvailable) return;
 
         var route = new ConsentWorkflowRoute(
-            Store.TenantA.Value, WorkflowRouteScopeKind.DataSource, "sales", ConsentWorkflowMode.Internal,
+            Store.TenantA.Value, WorkflowRouteScopeKind.Domain, "sales", ConsentWorkflowMode.Internal,
             null, 45, 14, 24, true, "admin-a", FixedNow);
         await Store.ConsentWorkflowAdmin.UpsertWorkflowRouteAsync(route);
         await Store.ConsentWorkflowAdmin.UpsertWorkflowRouteAsync(route with { MaxDurationDays = 30 });
 
         var routes = await Store.ConsentWorkflowAdmin.ListWorkflowRoutesAsync(Store.TenantA);
-        routes.Where(r => r.ScopeKind == WorkflowRouteScopeKind.DataSource && r.ScopeRef == "sales")
+        routes.Where(r => r.ScopeKind == WorkflowRouteScopeKind.Domain && r.ScopeRef == "sales")
             .Should().ContainSingle()
             .Which.MaxDurationDays.Should().Be(30);
     }
@@ -171,16 +171,16 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
         if (!Store.IsAvailable) return;
 
         var route = new ConsentWorkflowRoute(
-            Store.TenantA.Value, WorkflowRouteScopeKind.DataOwner, "owner-soft-delete", ConsentWorkflowMode.Internal,
+            Store.TenantA.Value, WorkflowRouteScopeKind.Domain, "owner-soft-delete", ConsentWorkflowMode.Internal,
             null, 30, 14, 24, true, "admin-a", FixedNow);
         await Store.ConsentWorkflowAdmin.UpsertWorkflowRouteAsync(route);
 
         var deleted = await Store.ConsentWorkflowAdmin.DeleteWorkflowRouteAsync(
-            Store.TenantA, WorkflowRouteScopeKind.DataOwner, "owner-soft-delete");
+            Store.TenantA, WorkflowRouteScopeKind.Domain, "owner-soft-delete");
         deleted.Should().BeTrue();
 
         var afterDelete = await Store.ConsentWorkflowAdmin.GetWorkflowRouteAsync(
-            Store.TenantA, WorkflowRouteScopeKind.DataOwner, "owner-soft-delete");
+            Store.TenantA, WorkflowRouteScopeKind.Domain, "owner-soft-delete");
         afterDelete.Should().BeNull();
     }
 }

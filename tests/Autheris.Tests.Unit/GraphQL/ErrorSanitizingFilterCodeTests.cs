@@ -215,4 +215,33 @@ public sealed class ErrorSanitizingFilterCodeTests
         result.Message.ShouldBe("Time bucketing is not supported for this column.");
         result.Message.ShouldNotContain("secret");
     }
+
+    /// <summary>
+    /// #1009 (Mega-PR 3C): GraphQL <c>requestTableAccess</c> submits through the permission request engine. Its expected refusals keep their
+    /// stable code with a fixed message (never the thrower text, never an internal server error); a hidden and an unknown target share one code.
+    /// </summary>
+    [Theory]
+    [InlineData("Development", "TARGET_NOT_FOUND")]
+    [InlineData("Production", "TARGET_NOT_FOUND")]
+    [InlineData("Production", "DUPLICATE_PENDING_REQUEST")]
+    [InlineData("Production", "PENDING_REQUEST_LIMIT_EXCEEDED")]
+    [InlineData("Production", "BUNDLE_LIMIT_EXCEEDED")]
+    [InlineData("Production", "UNAUTHENTICATED")]
+    [InlineData("Production", "INVALID_TENANT")]
+    [InlineData("Production", "INVALID_COLUMNS")]
+    [InlineData("Production", "COLUMN_METADATA_UNAVAILABLE")]
+    [Trait("Category", "Security")]
+    public void PermissionRequestRefusalCodes_KeepCodeWithFixedMessage(string env, string code)
+    {
+        var error = ErrorBuilder.New().SetMessage("Thrower text sales.hr.salaries ssn.").SetCode(code).Build();
+
+        var result = CreateFilter(env).OnError(error);
+
+        result.Code.ShouldBe(code);
+        result.Message.ShouldNotBeNullOrWhiteSpace();
+        result.Message.ShouldNotContain("Thrower");
+        result.Message.ShouldNotContain("salaries");
+        result.Message.ShouldNotContain("ssn");
+        result.Message.ShouldNotBe("An internal server error occurred.");
+    }
 }

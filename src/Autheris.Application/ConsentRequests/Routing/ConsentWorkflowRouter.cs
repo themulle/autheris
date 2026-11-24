@@ -13,15 +13,16 @@ using Autheris.Domain.Model;
 using Microsoft.Extensions.Logging;
 
 /// <summary>
-/// Deterministic workflow router resolving <c>DATA_SOURCE -&gt; DATA_OWNER -&gt; TENANT -&gt; Internal</c>.
-/// Conflicting data-owner routes fall back to <see cref="ConsentWorkflowMode.Internal"/> and emit <c>CONSENT_ROUTE_CONFLICT</c>.
+/// Deterministic workflow router resolving <c>DOMAIN -&gt; TENANT -&gt; Internal</c>. A route whose scope kind was removed
+/// (data owner, data source) or is unknown is inert: it never matches, never auto-approves and is never a wildcard.
 /// </summary>
 public sealed class ConsentWorkflowRouter(
     IAuditLogRepository auditRepository,
     IConsentWorkflowConfigRepository? configRepository = null,
     IConsentWorkflowAdminRepository? adminRepository = null,
     ILogger<ConsentWorkflowRouter>? logger = null,
-    TimeProvider? timeProvider = null) : IConsentWorkflowRouter
+    TimeProvider? timeProvider = null,
+    IProtectionSnapshotProvider? protectionProvider = null) : IConsentWorkflowRouter
 {
     /// <summary>
     /// Route maximum when no route configures one: there is no compiled-in ceiling, so the route imposes no limit
@@ -45,7 +46,7 @@ public sealed class ConsentWorkflowRouter(
         if (_adminRepository != null)
         {
             var inputs = await _adminRepository.GetRoutingInputsForTableAsync(tenantId, table, ct).ConfigureAwait(false);
-            return await EvaluateAsync(tenantId, table, inputs.TenantRoutes, inputs.TableOwnerIds, ct).ConfigureAwait(false);
+            return await EvaluateAsync(tenantId, table, inputs.TenantRoutes, ct).ConfigureAwait(false);
         }
 
         if (_configRepository != null)
@@ -67,31 +68,20 @@ public sealed class ConsentWorkflowRouter(
             return DefaultInternal();
         }
 
-        var distinctSources = tables
-            .Select(t => t.Domain)
-            .Where(d => !string.IsNullOrWhiteSpace(d))
-            .Distinct(StringComparer.OrdinalIgnoreCase)
-            .ToList();
-
         if (_adminRepository != null)
         {
             var routes = await _adminRepository.ListWorkflowRoutesAsync(tenantId, ct).ConfigureAwait(false);
-            if (distinctSources.Count == 1)
+            var domainRoute = await TryMatchDomainRouteAsync(tenantId, tables, routes, ct).ConfigureAwait(false);
+            if (domainRoute is not null)
             {
-                var dsRoute = routes.FirstOrDefault(r =>
-                    r.ScopeKind == WorkflowRouteScopeKind.DataSource &&
-                    string.Equals(r.ScopeRef, distinctSources[0], StringComparison.OrdinalIgnoreCase));
-                if (dsRoute is not null)
-                {
-                    return FromRoute(dsRoute);
-                }
+                return FromRoute(domainRoute);
             }
 
             var tenantRoute = routes.FirstOrDefault(r => r.ScopeKind == WorkflowRouteScopeKind.Tenant);
             return tenantRoute is not null ? FromRoute(tenantRoute) : DefaultInternal();
         }
 
-        if (_configRepository != null && distinctSources.Count == 1)
+        if (_configRepository != null && tables.Count == 1)
         {
             var route = await _configRepository.ResolveWorkflowRouteAsync(tenantId, tables[0], ct).ConfigureAwait(false);
             return route is not null ? FromRoute(route) : DefaultInternal();
@@ -104,80 +94,51 @@ public sealed class ConsentWorkflowRouter(
         TenantId tenantId,
         TableIdentifier table,
         IReadOnlyList<ConsentWorkflowRoute> routes,
-        IReadOnlySet<string> tableOwnerIds,
         CancellationToken ct)
     {
-        var dataSourceRoute = routes.FirstOrDefault(r =>
-            r.ScopeKind == WorkflowRouteScopeKind.DataSource &&
-            string.Equals(r.ScopeRef, table.Domain, StringComparison.OrdinalIgnoreCase));
-        if (dataSourceRoute is not null)
+        var domainRoute = await TryMatchDomainRouteAsync(tenantId, [table], routes, ct).ConfigureAwait(false);
+        if (domainRoute is not null)
         {
-            return FromRoute(dataSourceRoute);
-        }
-
-        var ownerRoutes = routes
-            .Where(r => r.ScopeKind == WorkflowRouteScopeKind.DataOwner && tableOwnerIds.Contains(r.ScopeRef))
-            .ToList();
-
-        if (ownerRoutes.Count > 0)
-        {
-            var distinctModes = ownerRoutes
-                .Select(r => (r.Mode, SystemId: r.Mode == ConsentWorkflowMode.External ? r.ExternalSystemId : null))
-                .Distinct()
-                .ToList();
-
-            if (distinctModes.Count > 1)
-            {
-                await RecordRouteConflictAsync(tenantId, table, ownerRoutes, ct).ConfigureAwait(false);
-                var tenantFallback = routes.FirstOrDefault(r => r.ScopeKind == WorkflowRouteScopeKind.Tenant);
-                return new ConsentWorkflowRouteResolution(
-                    ConsentWorkflowMode.Internal,
-                    null,
-                    tenantFallback?.MaxDurationDays ?? FallbackMaxDurationDays,
-                    tenantFallback?.RequestTimeoutDays ?? FallbackRequestTimeoutDays,
-                    tenantFallback?.ExpiryNoticeLeadHours ?? FallbackExpiryNoticeLeadHours,
-                    tenantFallback?.RequireResolvableApprover ?? true,
-                    MatchedScopeKind: null,
-                    ConflictDetected: true);
-            }
-
-            var effectiveMax = ownerRoutes.Min(r => r.MaxDurationDays);
-            var winner = ownerRoutes.OrderBy(r => r.MaxDurationDays).First();
-            return FromRoute(winner) with { MaxDurationDays = effectiveMax };
+            return FromRoute(domainRoute);
         }
 
         var tenantRoute = routes.FirstOrDefault(r => r.ScopeKind == WorkflowRouteScopeKind.Tenant);
         return tenantRoute is not null ? FromRoute(tenantRoute) : DefaultInternal();
     }
 
-    private async Task RecordRouteConflictAsync(
+    /// <summary>Matches a domain route only when every table resolves to the same governance domain; anything else (unknown scope kinds included) never matches.</summary>
+    private async Task<ConsentWorkflowRoute?> TryMatchDomainRouteAsync(
         TenantId tenantId,
-        TableIdentifier table,
-        IReadOnlyList<ConsentWorkflowRoute> conflictingRoutes,
+        IReadOnlyList<TableIdentifier> tables,
+        IReadOnlyList<ConsentWorkflowRoute> routes,
         CancellationToken ct)
     {
-        _logger?.LogWarning(
-            "Conflicting data-owner workflow routes detected for tenant {TenantId} table {Table}; falling back to Internal mode.",
-            tenantId.Value, table.ToString());
-
-        var details = JsonSerializer.Serialize(new
+        if (protectionProvider is null || !routes.Any(r => r.ScopeKind == WorkflowRouteScopeKind.Domain))
         {
-            Table = table.ToString(),
-            OwnerRoutes = conflictingRoutes.Select(r => new { r.ScopeRef, Mode = r.Mode.ToSqlString(), r.ExternalSystemId })
-        });
+            return null;
+        }
 
-        await _auditRepository.RecordAuditEventAsync(new AuditLogEntry
+        Guid? domainId = null;
+        foreach (var table in tables)
         {
-            Id = Guid.NewGuid(),
-            OccurredAt = _timeProvider.GetUtcNow(),
-            EventType = AuditEventTypes.ConsentRouteConflict,
-            ActorSid = new Sid("SYSTEM"),
-            TargetTable = table.ToString(),
-            Decision = "FALLBACK_INTERNAL",
-            TraceId = Guid.NewGuid().ToString("N"),
-            DetailsJson = details,
-            TenantId = tenantId
-        }, ct).ConfigureAwait(false);
+            var protection = await protectionProvider.GetAsync(tenantId, table, ct).ConfigureAwait(false);
+            if (protection.Container is not { Kind: ContainerKind.Domain } container || container.Id == Guid.Empty)
+            {
+                return null;
+            }
+
+            if (domainId.HasValue && domainId.Value != container.Id)
+            {
+                return null;
+            }
+
+            domainId = container.Id;
+        }
+
+        return domainId is { } id
+            ? routes.FirstOrDefault(r => r.ScopeKind == WorkflowRouteScopeKind.Domain &&
+                string.Equals(r.ScopeRef, id.ToString("D"), StringComparison.OrdinalIgnoreCase))
+            : null;
     }
 
     private static ConsentWorkflowRouteResolution FromRoute(ConsentWorkflowRoute route) =>

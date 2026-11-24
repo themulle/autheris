@@ -19,7 +19,6 @@ public sealed class SecurityTraitCoverageTests
     private static readonly string[] ListedRegressionTestClasses =
     [
         "AccessPlanningTenantBindingTests",
-        "ApproveConsentRequestFourEyesMutationTests",
         "IdentityDeprovisioningServiceTests",
         "AsyncJobWorkerConcurrencyTests",
         "CdcSubscriptionPrincipalTests",

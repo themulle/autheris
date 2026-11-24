@@ -82,10 +82,13 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Governance.Grants.IGrantValidityPolicy, Autheris.Application.Governance.Grants.GrantValidityPolicy>();
         services.AddSingleton<Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter, Autheris.Application.ConsentRequests.Routing.ConsentWorkflowRouter>();
         services.AddSingleton<Autheris.Application.Governance.ConsentRequests.ISeparationOfDutiesService, Autheris.Application.Governance.ConsentRequests.SeparationOfDutiesService>();
-        services.AddSingleton<Autheris.Application.ConsentRequests.IExternalDecisionGuard, Autheris.Application.ConsentRequests.ExternalDecisionGuard>();
+        services.AddSingleton<Autheris.Application.ConsentRequests.ILegacyExternalDecisionGuard, Autheris.Application.ConsentRequests.LegacyExternalDecisionGuard>();
         services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, ExternalSystemRequirementHandler>();
         services.AddScoped<Autheris.Application.ConsentRequests.IConsentDecisionPipeline, Autheris.Application.ConsentRequests.ConsentDecisionPipeline>();
-        services.AddScoped<Autheris.Application.ConsentRequests.IConsentRequestService, Autheris.Application.ConsentRequests.ConsentRequestService>();
+        services.AddScoped<Autheris.Application.ConsentRequests.IConsentRequestService>(sp =>
+            new Autheris.Application.ConsentRequests.ConsentRequestEndpointAdapter(
+                sp.GetRequiredService<Autheris.Application.Governance.Requests.IPermissionRequestEngine>(),
+                sp.GetService<Autheris.Application.Common.Interfaces.IIdentitySubjectResolver>()));
         services.AddSingleton<Autheris.Application.Policy.Classification.IClassificationAdminService, Autheris.Application.Policy.Classification.ClassificationAdminService>();
         services.AddSingleton<Autheris.Application.Governance.Grants.IOwnerGrantService, Autheris.Application.Governance.Grants.OwnerGrantService>();
         services.AddSingleton<Autheris.Application.ConsentRequests.ProfileAssignments.IProfileGrantMaterializer, Autheris.Application.ConsentRequests.ProfileAssignments.ProfileGrantMaterializer>();
@@ -105,6 +108,22 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Governance.Requests.IGrantEffectApplier, Autheris.Application.Governance.Requests.CatalogGrantApplier>();
         services.AddSingleton<Autheris.Application.Governance.Requests.IGrantEffectApplier, Autheris.Application.Governance.Requests.ProfileAssignmentApplier>();
         services.AddScoped<Autheris.Application.Governance.Requests.PermissionRequestEngine>();
+        services.AddScoped<Autheris.Application.ConsentRequests.IExternalDecisionGuard>(sp =>
+            new Autheris.Application.ConsentRequests.ExternalDecisionGuard(
+                sp.GetService<Autheris.Application.ConsentRequests.IExternalApproverResolver>(),
+                sp.GetService<Autheris.Application.Webhooks.IWebhookSecretProtector>(),
+                sp.GetService<Autheris.Application.Common.Interfaces.IClusterWideIdempotencyStore>(),
+                sp.GetService<TimeProvider>(),
+                allowPlaintextSecret: sp.GetService<Microsoft.Extensions.Hosting.IHostEnvironment>() is { } hostEnv && string.Equals(hostEnv.EnvironmentName, "Development", StringComparison.OrdinalIgnoreCase)));
+        services.AddScoped<Autheris.Application.ConsentRequests.IExternalApproverResolver, Autheris.Application.ConsentRequests.RealmExternalApproverResolver>();
+        services.AddScoped<Autheris.Application.ConsentRequests.IExternalDecisionService>(sp =>
+            new Autheris.Application.ConsentRequests.ExternalDecisionService(
+                sp.GetRequiredService<Autheris.Application.Governance.Requests.IPermissionRequestEngine>(),
+                sp.GetRequiredService<Autheris.Application.ConsentRequests.IExternalDecisionGuard>(),
+                sp.GetRequiredService<Autheris.Application.Common.Interfaces.IConsentApprovalRepository>(),
+                sp.GetRequiredService<Autheris.Application.ConsentRequests.IConsentWorkflowConfigRepository>(),
+                sp.GetRequiredService<Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter>()));
+        services.AddScoped<Autheris.Application.Governance.Requests.IPermissionRequestEngine>(sp => sp.GetRequiredService<Autheris.Application.Governance.Requests.PermissionRequestEngine>());
         services.AddHostedService<Autheris.Application.ConsentRequests.Events.ConsentWebhookDispatcherHostedService>();
         services.AddHostedService<Autheris.Application.Governance.Grants.GrantExpiryHostedService>();
         services.AddHostedService<Autheris.Application.Policy.RowScopes.PatternCoverageMonitor>();

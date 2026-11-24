@@ -128,7 +128,7 @@ public sealed class ConsentDecisionPipelineTests
                 Arg.Any<TenantId>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
             .Returns(new EffectiveScimGroupsResult(new HashSet<string>(StringComparer.OrdinalIgnoreCase), false));
 
-        var externalGuard = new ExternalDecisionGuard(scimUsers, scimGroups);
+        var externalGuard = new LegacyExternalDecisionGuard(scimUsers, scimGroups);
         var clock = new FakeTimeProvider(FixedNow);
 
         var pipeline = new ConsentDecisionPipeline(

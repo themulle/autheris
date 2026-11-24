@@ -60,16 +60,23 @@ public static class PageCursor
 
 /// <summary>Keyset page request over the audit chain, newest first. <see cref="BeforeSequence"/> is exclusive.</summary>
 /// <param name="Tenant">Null only for a cluster-wide read (ClusterAdmin); every other caller is bound to its tenant.</param>
+/// <param name="EventTypes">When set, only rows of these event types (exact match). An empty set matches nothing.</param>
+/// <param name="TargetTables">When set, only rows of exactly these objects (ignoring case). An empty set matches nothing.</param>
 public sealed record AuditLogPageQuery(
     TenantId? Tenant,
     string? TargetTable = null,
     Sid? Actor = null,
     DateTimeOffset? Since = null,
     long? BeforeSequence = null,
-    int PageSize = AuditLogPageQuery.DefaultPageSize)
+    int PageSize = AuditLogPageQuery.DefaultPageSize,
+    IReadOnlyCollection<string>? EventTypes = null,
+    IReadOnlyCollection<string>? TargetTables = null)
 {
     public const int DefaultPageSize = 100;
     public const int MaxPageSize = 500;
+
+    /// <summary>Upper bound of values in one <see cref="EventTypes"/> or <see cref="TargetTables"/> filter (bound parameters per statement).</summary>
+    public const int MaxFilterValues = 1000;
 
     public int EffectivePageSize => Math.Clamp(PageSize, 1, MaxPageSize);
 }

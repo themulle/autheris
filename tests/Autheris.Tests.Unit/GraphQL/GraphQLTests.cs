@@ -68,8 +68,9 @@ public class GraphQLTests
         sdl.ShouldContain("table(");
         sdl.ShouldContain("TableRecordPayload");
         sdl.ShouldContain("requestTableAccess");
-        sdl.ShouldContain("approveConsentRequest");
-        sdl.ShouldContain("revokeConsent");
+        sdl.ShouldNotContain("approveConsentRequest");
+        sdl.ShouldNotContain("rejectConsentRequest");
+        sdl.ShouldNotContain("revokeConsent");
     }
 
 

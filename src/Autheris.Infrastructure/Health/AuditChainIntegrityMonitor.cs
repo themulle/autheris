@@ -1,4 +1,6 @@
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Governance.Notifications;
+using Autheris.Domain.Common;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -9,16 +11,21 @@ namespace Autheris.Infrastructure.Health;
 /// <summary>
 /// Review E-11: the audit hash chain is verified periodically at runtime (not only when an export is requested).
 /// A broken chain is logged as critical and, unless disabled, switches the readiness probe to unhealthy so that the
-/// problem is noticed instead of staying hidden until the next manual export.
+/// problem is noticed instead of staying hidden until the next manual export. A violation, and a verification that cannot complete,
+/// also enqueue a Data Governance notification (a no-op when no webhook is configured; a dispatcher fault never stops the monitor).
 /// </summary>
 public sealed class AuditChainIntegrityMonitor : BackgroundService
 {
+    public const string ViolationEventType = "AUDIT_CHAIN_VIOLATION";
+    public const string VerificationIncompleteEventType = "AUDIT_CHAIN_VERIFICATION_INCOMPLETE";
+
     private static readonly TimeSpan InitialDelay = TimeSpan.FromMinutes(2);
 
     private readonly IAuditLogRepository _auditRepository;
     private readonly IOptions<GatewayOptions> _options;
     private readonly ILogger<AuditChainIntegrityMonitor> _logger;
     private readonly TimeProvider _time;
+    private readonly IGovernanceNotificationDispatcher _notifications;
 
     // Chain state: 0 = not verified yet, 1 = intact, 2 = violated. A violation is latched: only a later run that completes and finds
     // the chain intact clears it. A run that throws never overwrites the chain state (an attacker who can make the verification fail
@@ -31,8 +38,10 @@ public sealed class AuditChainIntegrityMonitor : BackgroundService
         IAuditLogRepository auditRepository,
         IOptions<GatewayOptions> options,
         ILogger<AuditChainIntegrityMonitor> logger,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IGovernanceNotificationDispatcher? notificationDispatcher = null)
     {
+        _notifications = notificationDispatcher ?? NoOpGovernanceNotificationDispatcher.Instance;
         _auditRepository = auditRepository;
         _options = options;
         _logger = logger;
@@ -64,7 +73,7 @@ public sealed class AuditChainIntegrityMonitor : BackgroundService
         {
             bool intact = await _auditRepository.VerifyAuditHashChainAsync(ct).ConfigureAwait(false);
             Interlocked.Exchange(ref _lastCheckedUtcTicks, _time.GetUtcNow().UtcTicks);
-            Volatile.Write(ref _state, intact ? 1 : 2);
+            var wasViolated = Interlocked.Exchange(ref _state, intact ? 1 : 2) == 2;
             Volatile.Write(ref _lastRunFailed, 0);
 
             if (intact)
@@ -74,6 +83,15 @@ public sealed class AuditChainIntegrityMonitor : BackgroundService
             else
             {
                 _logger.LogCritical("AUDIT HASH CHAIN VIOLATION: the tamper-evident audit log failed verification. Investigate immediately (see operations runbook).");
+
+                // notify on the transition only: a violation that stays latched is not re-announced on every run
+                if (!wasViolated)
+                {
+                    await NotifyAsync(
+                        ViolationEventType,
+                        "The audit hash chain failed verification (chain break or tail truncation). Investigate immediately.",
+                        ct).ConfigureAwait(false);
+                }
             }
 
             return intact;
@@ -85,9 +103,42 @@ public sealed class AuditChainIntegrityMonitor : BackgroundService
         catch (Exception ex)
         {
             // The chain state (in particular a latched violation) is kept; only the failure of this run is recorded.
-            Volatile.Write(ref _lastRunFailed, 1);
+            var alreadyFailing = Interlocked.Exchange(ref _lastRunFailed, 1) == 1;
             _logger.LogError(ex, "Audit hash chain verification could not be completed.");
+            if (!alreadyFailing)
+            {
+                await NotifyAsync(
+                    VerificationIncompleteEventType,
+                    "The audit hash chain verification could not be completed; the integrity of the audit log is unknown.",
+                    ct).ConfigureAwait(false);
+            }
+
             return false;
+        }
+    }
+
+    private async Task NotifyAsync(string eventType, string summary, CancellationToken ct)
+    {
+        try
+        {
+            // The message is fixed text: it never carries exception text, connection details or audit content.
+            await _notifications.DispatchAsync(
+                new GovernanceNotificationMessage(
+                    eventType,
+                    TenantId.Platform.Value,
+                    RealmId: string.Empty,
+                    SubjectOrGroupId: "audit-log",
+                    summary,
+                    _time.GetUtcNow()),
+                ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex, "The audit chain notification could not be dispatched.");
         }
     }
 

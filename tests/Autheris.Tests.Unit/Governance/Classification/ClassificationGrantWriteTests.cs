@@ -147,7 +147,7 @@ public sealed class ClassificationGrantWriteTests
                 approvals, metadata, ownership, guard,
                 new GrantPolicy(Options.Create(new IndividualGrantOptions())),
                 GrantValidityPolicy.CreateDefault(),
-                new ExternalDecisionGuard(scimUsers, groups),
+                new LegacyExternalDecisionGuard(scimUsers, groups),
                 workflowConfigRepository: workflow,
                 groupStore: groups,
                 timeProvider: new FakeTimeProvider(Now),

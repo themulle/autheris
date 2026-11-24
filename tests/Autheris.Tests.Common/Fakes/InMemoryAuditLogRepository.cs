@@ -1,3 +1,4 @@
+using Autheris.Application.Governance.Paging;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Application.Common.Interfaces;
@@ -49,6 +50,26 @@ public sealed class InMemoryAuditLogRepository : IAuditLogRepository
         if (actorSid is { } a) { q = q.Where(e => e.ActorSid == a); }
         if (since is { } s) { q = q.Where(e => e.OccurredAt >= s); }
         return Task.FromResult<IReadOnlyList<AuditLogEntry>>(q.Take(Math.Max(1, limit)).ToList());
+    }
+
+    /// <summary>Keyset page newest first by chain sequence (the 1-based append position when an entry carries none), honouring the same filters as the SQL stores.</summary>
+    public Task<AuditLogPage> QueryAuditLogPageAsync(AuditLogPageQuery query, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(query);
+        var size = query.EffectivePageSize;
+        var all = Entries;
+        IEnumerable<(AuditLogEntry Entry, long Seq)> q = all.Select((e, i) => (e, e.ChainSequence ?? i + 1L)).Reverse();
+        if (query.Tenant is { } t) { q = q.Where(x => x.Entry.TenantId == t); }
+        if (!string.IsNullOrWhiteSpace(query.TargetTable)) { q = q.Where(x => string.Equals(x.Entry.TargetTable, query.TargetTable, StringComparison.OrdinalIgnoreCase)); }
+        if (query.Actor is { } a) { q = q.Where(x => x.Entry.ActorSid == a); }
+        if (query.Since is { } s) { q = q.Where(x => x.Entry.OccurredAt >= s); }
+        if (query.BeforeSequence is { } before) { q = q.Where(x => x.Seq < before); }
+        if (query.EventTypes is { } types) { q = q.Where(x => types.Contains(x.Entry.EventType, StringComparer.Ordinal)); }
+        if (query.TargetTables is { } tables) { q = q.Where(x => tables.Contains(x.Entry.TargetTable, StringComparer.OrdinalIgnoreCase)); }
+
+        var rows = q.Take(size + 1).ToList();
+        var items = rows.Take(size).Select(x => { x.Entry.ChainSequence = x.Seq; return x.Entry; }).ToList();
+        return Task.FromResult(new AuditLogPage(items, rows.Count > size ? items[^1].ChainSequence : null));
     }
 
     public Task<bool> VerifyAuditHashChainAsync(CancellationToken ct = default)

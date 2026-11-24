@@ -24,7 +24,7 @@ namespace Autheris.Application.Governance.Requests;
 /// Unified permission request and single-decision engine covering Data, Unmask, Catalog, and ProfileAssignment requests.
 /// All decisions commit CAS state update, grant effect materialization, and fail-closed audit in a single transaction.
 /// </summary>
-public sealed partial class PermissionRequestEngine
+public sealed partial class PermissionRequestEngine : IPermissionRequestEngine
 {
     private readonly IConsentApprovalRepository _approvalRepository;
     private readonly IAuditWriter _auditWriter;
@@ -52,6 +52,8 @@ public sealed partial class PermissionRequestEngine
     private readonly CatalogDiscoveryOptions? _discoveryOptions;
     private readonly TimeProvider _time;
     private readonly ILogger<PermissionRequestEngine>? _logger;
+    private readonly Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter? _workflowRouter;
+    private readonly Autheris.Application.ConsentRequests.Events.IConsentEventOutbox? _eventOutbox;
 
     public PermissionRequestEngine(
         IConsentApprovalRepository approvalRepository,
@@ -79,7 +81,9 @@ public sealed partial class PermissionRequestEngine
         IOptions<GatewayOptions>? gatewayOptions = null,
         IOptions<CatalogDiscoveryOptions>? discoveryOptions = null,
         TimeProvider? timeProvider = null,
-        ILogger<PermissionRequestEngine>? logger = null)
+        ILogger<PermissionRequestEngine>? logger = null,
+        Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter? workflowRouter = null,
+        Autheris.Application.ConsentRequests.Events.IConsentEventOutbox? eventOutbox = null)
     {
         _approvalRepository = approvalRepository ?? throw new ArgumentNullException(nameof(approvalRepository));
         _auditWriter = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
@@ -108,6 +112,8 @@ public sealed partial class PermissionRequestEngine
         _discoveryOptions = discoveryOptions?.Value;
         _time = timeProvider ?? TimeProvider.System;
         _logger = logger;
+        _eventOutbox = eventOutbox ?? approvalRepository as Autheris.Application.ConsentRequests.Events.IConsentEventOutbox;
+        _workflowRouter = workflowRouter;
     }
 
     private static PermissionGrantKind MapGrantKind(ConsentRequestKind kind) => kind switch

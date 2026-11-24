@@ -54,14 +54,14 @@ public sealed class DeclarativeConsentDescriptionTests
     public async Task Apply_DescriptionOnlyChange_UpdatesInPlace_SameIdNoRevokeNoEpoch()
     {
         var (svc, repo) = Create();
-        await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("1", [Policy("old")]));
+        await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("1", [Policy("old description")]));
         var id = repo.Active(DateTimeOffset.UtcNow).Single().Id;
 
-        var result = await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("2", [Policy("new text")]));
+        var result = await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("2", [Policy("new description text")]));
 
         var after = repo.Active(DateTimeOffset.UtcNow).Single();
         after.Id.ShouldBe(id);
-        after.Description.ShouldBe("new text");
+        after.Description.ShouldBe("new description text");
         result.Updated.ShouldBe(1);
         result.Applied.ShouldBe(0);
         result.Revoked.ShouldBe(0);
@@ -74,10 +74,10 @@ public sealed class DeclarativeConsentDescriptionTests
     public async Task Apply_LoadsStoredDescriptionOnlyForTheMatchingConsent_OptIn()
     {
         var (svc, repo) = Create();
-        await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("1", [Policy("old")]));
+        await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("1", [Policy("old description")]));
         repo.DescriptionLoadCalls.ShouldBe(0); // the create path compares nothing
 
-        await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("2", [Policy("old")]));
+        await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("2", [Policy("old description")]));
 
         repo.DescriptionLoadCalls.ShouldBe(1);
     }
@@ -86,9 +86,9 @@ public sealed class DeclarativeConsentDescriptionTests
     public async Task Apply_SameDescription_IsUnchangedAndNoReplaceCall()
     {
         var (svc, repo) = Create();
-        await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("1", [Policy("same")]));
+        await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("1", [Policy("same description")]));
 
-        var result = await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("2", [Policy(" same ")]));
+        var result = await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("2", [Policy(" same description ")]));
 
         result.Unchanged.ShouldBe(1);
         result.Updated.ShouldBe(0);
@@ -96,28 +96,28 @@ public sealed class DeclarativeConsentDescriptionTests
     }
 
     [Fact]
-    public async Task Apply_RemovedDescription_ClearsInPlace()
+    public async Task Apply_RemovedDescription_IsRefused_NothingChanges()
     {
         var (svc, repo) = Create();
-        await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("1", [Policy("old")]));
+        await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("1", [Policy("old description")]));
 
-        var result = await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("2", [Policy(null)]));
+        await Should.ThrowAsync<DeclarativeManifestValidationException>(() =>
+            svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("2", [Policy(null)])));
 
-        result.Updated.ShouldBe(1);
-        repo.Active(DateTimeOffset.UtcNow).Single().Description.ShouldBeNull();
+        repo.Active(DateTimeOffset.UtcNow).Single().Description.ShouldBe("old description");
     }
 
     [Fact]
     public async Task Apply_DryRun_DescriptionChange_NoWrite()
     {
         var (svc, repo) = Create();
-        await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("1", [Policy("old")]));
+        await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("1", [Policy("old description")]));
 
-        var result = await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("2", [Policy("new")]), dryRun: true);
+        var result = await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("2", [Policy("new description")]), dryRun: true);
 
         result.Updated.ShouldBe(1);
         repo.ReplaceCalls.ShouldBe(1);
-        repo.Active(DateTimeOffset.UtcNow).Single().Description.ShouldBe("old");
+        repo.Active(DateTimeOffset.UtcNow).Single().Description.ShouldBe("old description");
     }
 
     [Trait("Category", "Security")]
@@ -129,7 +129,7 @@ public sealed class DeclarativeConsentDescriptionTests
         var (svc, repo) = Create();
 
         var ex = await Should.ThrowAsync<DeclarativeManifestValidationException>(() => svc.ApplyManifestAsync(Admin(),
-            new DeclarativeConsentManifest("1", [Policy(null, "items"), Policy(description)])));
+            new DeclarativeConsentManifest("1", [Policy("items description", "items"), Policy(description)])));
 
         ex.PolicyIndex.ShouldBe(1);
         ex.Message.ShouldNotContain("evil");
@@ -176,10 +176,10 @@ public sealed class DeclarativeConsentDescriptionTests
     {
         // T-GOV158I1-09 (SEC-GOV158I1-07): a rule change plus a new description never takes the in-place path.
         var (svc, repo) = Create();
-        await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("1", [Policy("old")]));
+        await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("1", [Policy("old description")]));
         var oldId = repo.Active(DateTimeOffset.UtcNow).Single().Id;
 
-        var changed = Policy("new") with { ColumnRules = [new DeclarativeColumnRule("id", "Mask")] };
+        var changed = Policy("new description") with { ColumnRules = [new DeclarativeColumnRule("id", "Mask")] };
         var result = await svc.ApplyManifestAsync(Admin(), new DeclarativeConsentManifest("2", [changed]));
 
         result.Applied.ShouldBe(1);
@@ -187,7 +187,7 @@ public sealed class DeclarativeConsentDescriptionTests
         result.Updated.ShouldBe(0);
         var now = repo.Active(DateTimeOffset.UtcNow).Single();
         now.Id.ShouldNotBe(oldId);
-        now.Description.ShouldBe("new");
+        now.Description.ShouldBe("new description");
         repo.DescriptionUpdateCount.ShouldBe(0);
     }
 }

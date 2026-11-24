@@ -391,6 +391,9 @@ internal static class AuditSqlCore
             cmd.AddBound("@actorSid", actor.Value);
         }
 
+        AddInFilter(cmd, where, "event_type", "@evt", query.EventTypes, lowerCase: false);
+        AddInFilter(cmd, where, "LOWER(target_table)", "@obj", query.TargetTables, lowerCase: true);
+
         if (query.Since is { } since)
         {
             where.Add("occurred_at >= @since");
@@ -416,6 +419,38 @@ internal static class AuditSqlCore
         }
 
         return AuditPageSlicer.Slice(items, size);
+    }
+
+    // A null set is "no filter"; an empty or oversized set matches nothing (fail closed, never an unbounded statement).
+    private static void AddInFilter(
+        DbCommand cmd,
+        List<string> where,
+        string column,
+        string parameterPrefix,
+        IReadOnlyCollection<string>? values,
+        bool lowerCase)
+    {
+        if (values is null)
+        {
+            return;
+        }
+
+        if (values.Count == 0 || values.Count > AuditLogPageQuery.MaxFilterValues)
+        {
+            where.Add("1 = 0");
+            return;
+        }
+
+        var names = new List<string>(values.Count);
+        var index = 0;
+        foreach (var value in values)
+        {
+            var name = parameterPrefix + index++.ToString(CultureInfo.InvariantCulture);
+            names.Add(name);
+            cmd.AddBound(name, lowerCase ? value.ToLowerInvariant() : value);
+        }
+
+        where.Add(string.Concat(column, " IN (", string.Join(", ", names), ")")); // column is a caller-supplied constant; values are bound parameters
     }
 
     public static async Task<AuditChainRange?> GetAuditChainRangeAsync(

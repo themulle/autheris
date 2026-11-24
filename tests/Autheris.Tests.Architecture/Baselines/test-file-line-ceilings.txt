@@ -1,7 +1,6 @@
 # WP-SIMPL-23 baseline: test files exceeding the 800-line ceiling (ratchet: shrink-only)
 modules/Autheris.Modules.Dbt.Tests/DbtTests.cs	1064
 tests/Autheris.Extensions.Tests/LakehouseAndCatalogExtensionsSecurityTests.cs	1147
-tests/Autheris.Tests.Architecture/CutoverArchitectureTests.cs	860
 tests/Autheris.Tests.Architecture/SimulationIsolationArchitectureTests.cs	1165
 tests/Autheris.Tests.Integration/AstCompilerDmlContract.cs	872
 tests/Autheris.Tests.Integration/Governance/GovernanceSecurityTests.cs	1012

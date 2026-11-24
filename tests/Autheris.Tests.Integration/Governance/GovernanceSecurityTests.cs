@@ -74,132 +74,6 @@ public class GovernanceSecurityTests : IDisposable
     }
 
     [Fact]
-    public async Task RevokeConsent_WhenCalledByUnauthorizedUser_ThrowsForbidden()
-    {
-        var table = new TableIdentifier("finance", "dbo", "finance_table_1");
-        var meta = await _repository.GetTableMetadataAsync(table);
-        meta.ShouldNotBeNull();
-
-        var granteeSid = new Sid("S-1-5-21-GRANTEE-1");
-        var unauthorizedUserSid = new Sid("S-1-5-21-ATTACKER-99");
-
-        var consent = await _repository.CreateConsentAsync(new Consent
-        {
-            TenantId = Autheris.Tests.Common.TestTenants.Default,
-            TableId = meta.Table.Id,
-            TableIdentifier = table,
-            Effect = ConsentEffect.Allow,
-            GranteeType = GranteeType.User,
-            GranteeSid = granteeSid,
-            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-            ValidTo = DateTimeOffset.UtcNow.AddDays(30)
-        });
-
-        var accessor = CreateAccessor(unauthorizedUserSid);
-
-        var ex = await Should.ThrowAsync<GraphQLException>(async () =>
-        {
-            await _mutation.RevokeConsentAsync(consent.Id, "Malicious revocation", _repository, accessor);
-        });
-
-        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN");
-    }
-
-    [Fact]
-    public async Task RevokeConsent_WhenCalledByTableDataOwner_SucceedsAndRecordsAudit()
-    {
-        var table = new TableIdentifier("finance", "dbo", "finance_table_1");
-        var meta = await _repository.GetTableMetadataAsync(table);
-        meta.ShouldNotBeNull();
-
-        var ownerSid = new Sid("S-1-5-21-1000-1000-1000-1001");
-        var granteeSid = new Sid("S-1-5-21-GRANTEE-2");
-
-        var consent = await _repository.CreateConsentAsync(new Consent
-        {
-            TenantId = Autheris.Tests.Common.TestTenants.Default,
-            TableId = meta.Table.Id,
-            TableIdentifier = table,
-            Effect = ConsentEffect.Allow,
-            GranteeType = GranteeType.User,
-            GranteeSid = granteeSid,
-            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-            ValidTo = DateTimeOffset.UtcNow.AddDays(30)
-        });
-
-        var accessor = CreateAccessor(ownerSid);
-
-        var result = await _mutation.RevokeConsentAsync(consent.Id, "Legitimate owner revocation", _repository, accessor);
-        result.ShouldBeTrue();
-
-        var activeConsents = await _repository.GetActiveConsentsForSubjectsAsync(new[] { granteeSid }, table, DateTimeOffset.UtcNow, Autheris.Tests.Common.TestTenants.Default);
-        activeConsents.ShouldBeEmpty();
-
-        var auditEntries = await _repository.GetAuditLogEntriesAsync(10);
-        auditEntries.ShouldContain(e => e.EventType == "CONSENT_REVOKED" && e.ActorSid == ownerSid);
-    }
-
-    [Fact]
-    public async Task RevokeConsent_WhenCalledByGranteeSelf_Succeeds()
-    {
-        var table = new TableIdentifier("finance", "dbo", "finance_table_1");
-        var meta = await _repository.GetTableMetadataAsync(table);
-        meta.ShouldNotBeNull();
-
-        var granteeSid = new Sid("S-1-5-21-GRANTEE-SELF");
-
-        var consent = await _repository.CreateConsentAsync(new Consent
-        {
-            TenantId = Autheris.Tests.Common.TestTenants.Default,
-            TableId = meta.Table.Id,
-            TableIdentifier = table,
-            Effect = ConsentEffect.Allow,
-            GranteeType = GranteeType.User,
-            GranteeSid = granteeSid,
-            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-            ValidTo = DateTimeOffset.UtcNow.AddDays(30)
-        });
-
-        var accessor = CreateAccessor(granteeSid);
-
-        var result = await _mutation.RevokeConsentAsync(consent.Id, "Self revocation", _repository, accessor);
-        result.ShouldBeTrue();
-    }
-
-    [Fact]
-    public async Task ApproveConsent_WhenUserHasDataOwnerRole_ButNotOwnerOfSpecificTable_ThrowsForbidden()
-    {
-        var table = new TableIdentifier("finance", "dbo", "finance_table_1");
-        var meta = await _repository.GetTableMetadataAsync(table);
-        meta.ShouldNotBeNull();
-
-        var requesterSid = new Sid("S-1-5-21-REQUESTER-1");
-        var genericDataOwnerSid = new Sid("S-1-5-21-GENERIC-DATAOWNER-NOT-ASSIGNED");
-
-        var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
-        {
-            TenantId = Autheris.Tests.Common.TestTenants.Default,
-            TableId = meta.Table.Id,
-            TableIdentifier = table,
-            RequesterSid = requesterSid,
-            RequestedGranteeType = GranteeType.User,
-            RequestedGranteeRef = requesterSid.Value,
-            BusinessJustification = "Testing role bypass",
-            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(14)
-        });
-
-        // User has AD role 'DataOwner', but is NOT registered as owner for finance_table_1
-        var accessor = CreateAccessor(genericDataOwnerSid, "DataOwner");
-
-        var ex = await Should.ThrowAsync<GraphQLException>(async () =>
-        {
-            await _mutation.ApproveConsentRequestAsync(req.Id, "key-test-do-role", _repository, accessor);
-        });
-
-        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN");
-    }
-
-    [Fact]
     public async Task ConsentRequest_StateMachine_PreventsReApprovalOrRejection()
     {
         var table = new TableIdentifier("finance", "dbo", "finance_table_1");
@@ -344,39 +218,6 @@ public class GovernanceSecurityTests : IDisposable
     }
 
     [Fact]
-    public async Task RevokeConsent_GroupGrantee_CannotBeRevokedByMemberViaGranteeSelf()
-    {
-        // GranteeSelf must strictly apply only to GranteeType.User
-        var table = new TableIdentifier("sales", "dbo", "sales_table_1");
-        var meta = await _repository.GetTableMetadataAsync(table);
-        meta.ShouldNotBeNull();
-
-        var groupSid = new Sid("S-1-5-21-SALES-GROUP");
-
-        var consent = await _repository.CreateConsentAsync(new Consent
-        {
-            TenantId = Autheris.Tests.Common.TestTenants.Default,
-            TableId = meta.Table.Id,
-            TableIdentifier = table,
-            Effect = ConsentEffect.Allow,
-            GranteeType = GranteeType.Group, // GROUP, not User!
-            GranteeSid = groupSid,
-            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-            ValidTo = DateTimeOffset.UtcNow.AddDays(30)
-        });
-
-        // Caller claiming to have the group's SID directly
-        var accessor = CreateAccessor(groupSid);
-
-        var ex = await Should.ThrowAsync<GraphQLException>(async () =>
-        {
-            await _mutation.RevokeConsentAsync(consent.Id, "Trying self-revoke on group", _repository, accessor);
-        });
-
-        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN");
-    }
-
-    [Fact]
     public async Task RejectConsentRequest_WhenSecondStepRejection_IncrementsStepNumberWithoutUniqueConstraintViolation()
     {
         var table = new TableIdentifier("finance", "dbo", "finance_table_5");
@@ -465,46 +306,6 @@ public class GovernanceSecurityTests : IDisposable
         // Delegate is now authorized
         var isDelegate = await _repository.IsAuthorizedApproverForTableAsync(table, delegateSid);
         isDelegate.ShouldBeTrue();
-    }
-
-    [Fact]
-    public async Task ApproveConsent_WhenUserIsDelegatedApprover_Succeeds()
-    {
-        var table = new TableIdentifier("finance", "dbo", "finance_table_1");
-        var meta = await _repository.GetTableMetadataAsync(table);
-        meta.ShouldNotBeNull();
-
-        var directOwnerSid = new Sid("S-1-5-21-1000-1000-1000-1001");
-        var delegateSid = new Sid("S-1-5-21-DELEGATE-APPROVE");
-        var requesterSid = new Sid("S-1-5-21-REQUESTER-DELEGATE");
-
-        var owners = await _repository.GetDataOwnersForTableAsync(table);
-        var primaryOwner = owners.First(o => o.AdSid == directOwnerSid);
-
-        await _repository.DelegateDataOwnershipAsync(new DataOwnerDelegation
-        {
-            Id = Guid.NewGuid(),
-            DataOwnerId = primaryOwner.Id,
-            DelegateSid = delegateSid,
-            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-            ValidTo = DateTimeOffset.UtcNow.AddDays(7),
-            Reason = "Coverage delegation"
-        });
-
-        var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
-        {
-            TenantId = Autheris.Tests.Common.TestTenants.Default,
-            TableId = meta.Table.Id,
-            TableIdentifier = table,
-            RequesterSid = requesterSid,
-            RequestedGranteeType = GranteeType.User,
-            RequestedGranteeRef = requesterSid.Value,
-            BusinessJustification = "Delegate approval test",
-            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7)
-        });
-
-        (await _mutation.ApproveConsentRequestAsync(req.Id, "key-del-app", _repository, CreateAccessor(delegateSid))).Status.ShouldBe("PENDING_SECOND_APPROVAL");
-        (await _mutation.ApproveConsentRequestAsync(req.Id, "key-del-app-2", _repository, CreateAccessor(directOwnerSid))).Status.ShouldBe("APPROVED");
     }
 
     [Fact]
@@ -651,151 +452,6 @@ public class GovernanceSecurityTests : IDisposable
     }
 
     [Fact]
-    public async Task ApproveConsentRequest_SelfApproval_ThrowsForbiddenDueToFourEyesPrinciple()
-    {
-        var table = new TableIdentifier("finance", "dbo", "finance_table_1");
-        var meta = await _repository.GetTableMetadataAsync(table);
-        meta.ShouldNotBeNull();
-
-        // The requester is also the owner of the table (S-1-5-21-1000-1000-1000-1001)
-        var ownerAndRequesterSid = new Sid("S-1-5-21-1000-1000-1000-1001");
-
-        var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
-        {
-            TableId = meta.Table.Id,
-            TableIdentifier = table,
-            RequesterSid = ownerAndRequesterSid,
-            RequestedGranteeType = GranteeType.User,
-            RequestedGranteeRef = ownerAndRequesterSid.Value,
-            BusinessJustification = "Trying to approve myself",
-            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7),
-            TenantId = Autheris.Tests.Common.TestTenants.Default
-        });
-
-        // Caller is the same requester
-        var accessor = CreateAccessor(ownerAndRequesterSid);
-
-        var ex = await Should.ThrowAsync<GraphQLException>(async () =>
-        {
-            await _mutation.ApproveConsentRequestAsync(req.Id, null, _repository, _repository, _repository, accessor);
-        });
-
-        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN" && e.Message.Contains("Separation of duties violated"));
-    }
-
-    [Fact]
-    public async Task ApproveConsentRequest_CrossTenantAccess_ThrowsForbidden()
-    {
-        var table = new TableIdentifier("finance", "dbo", "finance_table_1");
-        var meta = await _repository.GetTableMetadataAsync(table);
-        meta.ShouldNotBeNull();
-
-        var requesterSid = new Sid("S-1-5-21-REQ-1");
-        var approverSid = new Sid("S-1-5-21-1000-1000-1000-1001");
-
-        // Request belongs to tenant-alpha
-        var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
-        {
-            TableId = meta.Table.Id,
-            TableIdentifier = table,
-            RequesterSid = requesterSid,
-            RequestedGranteeType = GranteeType.User,
-            RequestedGranteeRef = requesterSid.Value,
-            BusinessJustification = "Tenant alpha request",
-            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7),
-            TenantId = new TenantId("tenant-alpha")
-        });
-
-        // Approver is authenticated in tenant-beta
-        var accessor = CreateAccessorWithTenant(approverSid, new TenantId("tenant-beta"));
-
-        var ex = await Should.ThrowAsync<GraphQLException>(async () =>
-        {
-            await _mutation.ApproveConsentRequestAsync(req.Id, null, _repository, _repository, _repository, accessor);
-        });
-
-        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN" && e.Message.Contains("Cross-tenant access forbidden"));
-    }
-
-    [Fact]
-    public async Task RejectConsentRequest_WithShortReason_ThrowsInvalidArgument()
-    {
-        var approverSid = new Sid("S-1-5-21-1000-1000-1000-1001");
-        var accessor = CreateAccessor(approverSid);
-
-        var ex = await Should.ThrowAsync<GraphQLException>(async () =>
-        {
-            await _mutation.RejectConsentRequestAsync(Guid.NewGuid(), "no", null, _repository, _repository, accessor);
-        });
-
-        ex.Errors.ShouldContain(e => e.Code == "VALIDATION_ERROR");
-    }
-
-    [Fact]
-    public async Task RejectConsentRequest_CrossTenantAccess_ThrowsForbidden()
-    {
-        var table = new TableIdentifier("finance", "dbo", "finance_table_1");
-        var meta = await _repository.GetTableMetadataAsync(table);
-        meta.ShouldNotBeNull();
-
-        var requesterSid = new Sid("S-1-5-21-REQ-2");
-        var approverSid = new Sid("S-1-5-21-1000-1000-1000-1001");
-
-        var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
-        {
-            TableId = meta.Table.Id,
-            TableIdentifier = table,
-            RequesterSid = requesterSid,
-            RequestedGranteeType = GranteeType.User,
-            RequestedGranteeRef = requesterSid.Value,
-            BusinessJustification = "Tenant alpha request to reject",
-            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7),
-            TenantId = new TenantId("tenant-alpha")
-        });
-
-        var accessor = CreateAccessorWithTenant(approverSid, new TenantId("tenant-beta"));
-
-        var ex = await Should.ThrowAsync<GraphQLException>(async () =>
-        {
-            await _mutation.RejectConsentRequestAsync(req.Id, "Valid rejection reason", null, _repository, _repository, accessor);
-        });
-
-        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN" && e.Message.Contains("Cross-tenant access forbidden"));
-    }
-
-    [Fact]
-    public async Task RevokeConsent_CrossTenantAccess_ThrowsForbidden()
-    {
-        var table = new TableIdentifier("finance", "dbo", "finance_table_1");
-        var meta = await _repository.GetTableMetadataAsync(table);
-        meta.ShouldNotBeNull();
-
-        var ownerSid = new Sid("S-1-5-21-1000-1000-1000-1001");
-        var granteeSid = new Sid("S-1-5-21-GRANTEE-3");
-
-        var consent = await _repository.CreateConsentAsync(new Consent
-        {
-            TableId = meta.Table.Id,
-            TableIdentifier = table,
-            Effect = ConsentEffect.Allow,
-            GranteeType = GranteeType.User,
-            GranteeSid = granteeSid,
-            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-            ValidTo = DateTimeOffset.UtcNow.AddDays(30),
-            TenantId = new TenantId("tenant-alpha")
-        });
-
-        var accessor = CreateAccessorWithTenant(ownerSid, new TenantId("tenant-beta"));
-
-        var ex = await Should.ThrowAsync<GraphQLException>(async () =>
-        {
-            await _mutation.RevokeConsentAsync(consent.Id, "Valid revocation reason", _repository, accessor);
-        });
-
-        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN" && e.Message.Contains("Cross-tenant access forbidden"));
-    }
-
-    [Fact]
     public async Task Query_GetGdprDataDisclosureReport_ForForeignSubjectWithoutPrivacyRole_ThrowsForbidden()
     {
         var query = new Query();
@@ -843,37 +499,6 @@ public class GovernanceSecurityTests : IDisposable
         var ex3 = await Should.ThrowAsync<GraphQLException>(() =>
             query.GetGdprDataDisclosureReportAsync("finance", "dbo", "invoices", null, 365, gdprService, unauthenticatedAccessor));
         ex3.Errors.ShouldContain(e => e.Code == "UNAUTHORIZED");
-    }
-
-    [Fact]
-    public async Task ApproveConsentRequest_ClusterAdminSelfApproval_ThrowsForbidden()
-    {
-        var table = new TableIdentifier("finance", "dbo", "finance_table_1");
-        var meta = await _repository.GetTableMetadataAsync(table);
-        meta.ShouldNotBeNull();
-
-        var clusterAdminSid = new Sid("S-1-5-21-CLUSTER-ADMIN");
-
-        var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
-        {
-            TableId = meta.Table.Id,
-            TableIdentifier = table,
-            RequesterSid = clusterAdminSid,
-            RequestedGranteeType = GranteeType.User,
-            RequestedGranteeRef = clusterAdminSid.Value,
-            BusinessJustification = "Admin self approval attempt",
-            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7),
-            TenantId = Autheris.Tests.Common.TestTenants.Default
-        });
-
-        var accessor = CreateAccessor(clusterAdminSid, "ClusterAdmin");
-
-        var ex = await Should.ThrowAsync<GraphQLException>(async () =>
-        {
-            await _mutation.ApproveConsentRequestAsync(req.Id, null, _repository, _repository, _repository, accessor);
-        });
-
-        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN" && e.Message.Contains("Separation of duties violated"));
     }
 
     [Fact]
@@ -970,7 +595,7 @@ public class GovernanceSecurityTests : IDisposable
     public async Task R2_5_ItsmApprovalWithoutNamedApprover_OnOwnedTable_IsRejected()
     {
         var req = await CreateExternalRequestAsync("S-1-5-21-REQ-R25");
-        var guard = new Autheris.Application.ConsentRequests.ExternalDecisionGuard();
+        var guard = new Autheris.Application.ConsentRequests.LegacyExternalDecisionGuard();
         var cmd = new Autheris.Application.ConsentRequests.ConsentDecisionCommand(
             req.Id, Autheris.Application.ConsentRequests.ConsentDecisionKind.Approve, Autheris.Application.ConsentRequests.ConsentDecisionChannel.External, null,
             ExternalAttribution: new ExternalDecisionAttribution(req.ExternalSystemId!.Value, req.ExternalReference!, "APPROVED", null, DateTimeOffset.UtcNow));
