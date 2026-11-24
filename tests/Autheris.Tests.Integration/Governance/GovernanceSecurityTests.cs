@@ -427,7 +427,9 @@ public class GovernanceSecurityTests : IDisposable
         {
             await _mutation.RequestTableAccessAsync("finance", "dbo", "finance_table_1", justification, 7, null, CreateConsentRequestService(), accessor);
         });
-        ex.Errors.ShouldContain(e => e.Code == "VALIDATION_ERROR");
+
+        // The engine owns submission validation: every channel reports the same justification code as REST, renewal and self-grant.
+        ex.Errors.ShouldContain(e => e.Code == Autheris.Application.Governance.Requests.JustificationPolicy.TooShortErrorCode);
     }
 
     [Theory]
