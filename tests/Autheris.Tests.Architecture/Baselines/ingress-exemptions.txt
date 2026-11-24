@@ -168,6 +168,7 @@ scope src/Autheris.Application/State/Caching/BoundedCache.cs | exempt: infrastru
 scope src/Autheris.Application/State/Caching/SingleFlightKeySetCache.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/State/Caching/TableCache/TableCacheManager.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Application/Streaming/Services/CdcStreamTailHub.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
+scope src/Autheris.GraphQL/Mcp/CatalogGraphQlMap.cs | exempt: infrastructure background work (MCP GraphQL catalog map refresh under ExecutionContext.SuppressFlow); catalog metadata only, reaches no governed data
 scope src/Autheris.GraphQL/Subscriptions/CdcSubscriptionGovernor.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data
 scope src/Autheris.Infrastructure/Connectors/SqlConnector.cs | copy: copies ConnectorSessionContext.Items into its scope
 scope src/Autheris.Infrastructure/Health/CachedGatewayHealthCheckService.cs | exempt: infrastructure background work (event bus, cache, rate limiter, audit/CDC loop, health); reaches no governed data

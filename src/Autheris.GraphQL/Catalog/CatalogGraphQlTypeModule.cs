@@ -36,7 +36,12 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
     private readonly bool _metricsEnabled;
     private readonly object _timerLock = new();
     private ITimer? _refreshTimer;
-    private sealed record BuiltState(string? Fingerprint, IReadOnlyList<CatalogOmittedTable> OmittedTables);
+    private sealed record BuiltState(
+        string? Fingerprint,
+        IReadOnlyList<CatalogOmittedTable> OmittedTables,
+        CatalogSchemaModel? Model = null,
+        Autheris.Application.Catalog.CatalogVersion? Version = null,
+        System.Collections.Concurrent.ConcurrentDictionary<string, bool>? TransportSeen = null);
     private sealed record PendingBuild(
         CatalogSchemaModel Model,
         string Fingerprint,
@@ -297,25 +302,26 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
         _logger?.LogInformation("GraphQL catalog schema build started: trigger={Trigger}", trigger);
         try
         {
+            Autheris.Application.Catalog.CatalogVersion? publishedVersion = null;
             var pending = Interlocked.Exchange(ref _pendingBuild, null);
             if (pending != null && !TransportVisibilityChanged(pending.TransportSeen))
             {
+                publishedVersion = pending.CatalogVersion;
+                if (!publishedVersion.HasValue && _versionProvider != null)
+                {
+                    publishedVersion = await _versionProvider.GetCatalogVersionAsync(cancellationToken).ConfigureAwait(false);
+                }
+
                 schemaModel = pending.Model;
                 _transportSeen = pending.TransportSeen;
                 _currentSchemaModel = schemaModel;
                 CurrentLookup = GetTableMetadataForField;
-                _built = new BuiltState(pending.Fingerprint, schemaModel.OmittedTables);
-                if (pending.CatalogVersion.HasValue)
+                if (publishedVersion.HasValue)
                 {
-                    Volatile.Write(ref _builtStructureVersion, pending.CatalogVersion.Value.StructureVersion);
-                    Volatile.Write(ref _builtContentVersion, pending.CatalogVersion.Value.ContentVersion);
+                    Volatile.Write(ref _builtStructureVersion, publishedVersion.Value.StructureVersion);
+                    Volatile.Write(ref _builtContentVersion, publishedVersion.Value.ContentVersion);
                 }
-                else if (_versionProvider != null)
-                {
-                    var catVer = await _versionProvider.GetCatalogVersionAsync(cancellationToken).ConfigureAwait(false);
-                    Volatile.Write(ref _builtStructureVersion, catVer.StructureVersion);
-                    Volatile.Write(ref _builtContentVersion, catVer.ContentVersion);
-                }
+                _built = new BuiltState(pending.Fingerprint, schemaModel.OmittedTables, schemaModel, publishedVersion, pending.TransportSeen);
             }
             else
             {
@@ -340,13 +346,16 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
                 _transportSeen = seen;
                 _currentSchemaModel = schemaModel;
                 CurrentLookup = GetTableMetadataForField;
-                _built = new BuiltState(schemaModel.Fingerprint(), schemaModel.OmittedTables);
                 if (catVer.HasValue)
                 {
                     Volatile.Write(ref _builtStructureVersion, catVer.Value.StructureVersion);
                     Volatile.Write(ref _builtContentVersion, catVer.Value.ContentVersion);
                 }
+                publishedVersion = catVer;
+                _built = new BuiltState(schemaModel.Fingerprint(), schemaModel.OmittedTables, schemaModel, catVer, seen);
             }
+
+            NotifySchemaModelBuilt(schemaModel, publishedVersion);
         }
         catch (OperationCanceledException)
         {
@@ -644,18 +653,6 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
         CatalogFieldType.Boolean => "Boolean",
         CatalogFieldType.DateTime => "String",
         _ => "String"
-    };
-
-    private static string GetFilterTypeName(CatalogFieldType type) => type switch
-    {
-        CatalogFieldType.String => "AutherisStringFilter",
-        CatalogFieldType.Int => "AutherisIntFilter",
-        CatalogFieldType.Long => "AutherisLongFilter",
-        CatalogFieldType.Float => "AutherisFloatFilter",
-        CatalogFieldType.Decimal => "AutherisDecimalFilter",
-        CatalogFieldType.Boolean => "AutherisBooleanFilter",
-        CatalogFieldType.DateTime => "AutherisDateTimeFilter",
-        _ => "AutherisStringFilter"
     };
 
     private static object? ReportMasked(IResolverContext ctx, CatalogColumnField col)

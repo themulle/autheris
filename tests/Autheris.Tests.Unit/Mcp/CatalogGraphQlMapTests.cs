@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Mcp;
 
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
@@ -17,7 +18,7 @@ using Xunit;
 /// The MCP view of the catalog GraphQL schema: GraphQL names of a table and the tables a query document reads,
 /// so the guardrail can run ABAC and four-eyes on every table of a query_graphql call.
 /// </summary>
-public sealed class CatalogGraphQlMapTests
+public sealed class CatalogGraphQlMapTests : IDisposable
 {
     private static readonly TableIdentifier Customers = new("crm", "dbo", "customers");
     private static readonly TableIdentifier Orders = new("crm", "dbo", "orders");
@@ -106,7 +107,7 @@ public sealed class CatalogGraphQlMapTests
             JoinKeysChild = ["customer_id"]
         }]);
         relations.GetRelationsForTableAsync(Orders, Arg.Any<CancellationToken>()).Returns([]);
-        var map = new CatalogGraphQlMap(metadata, relations);
+        using var map = new CatalogGraphQlMap(metadata, relations);
 
         var customers = await map.GetTableAsync(Customers);
         var orders = await map.GetTableAsync(Orders);
@@ -129,7 +130,7 @@ public sealed class CatalogGraphQlMapTests
         var metadata = Substitute.For<ITableMetadataRepository>();
         metadata.StubAllTables(Task.FromResult<IReadOnlyList<TableMetadata>>(
             [Table(gps, [new TableColumn { ColumnName = "id", DataType = "int" }])]));
-        var map = new CatalogGraphQlMap(metadata, Substitute.For<ITableRelationRepository>());
+        using var map = new CatalogGraphQlMap(metadata, Substitute.For<ITableRelationRepository>());
 
         (await map.GetRootFieldAsync(gps)).ShouldBe("fleet_ops_raw_v2_gps_position");
         (await map.GetRootFieldAsync(new TableIdentifier("FLEET-OPS", "RAW_V2", "GPS_POSITION"))).ShouldBe("fleet_ops_raw_v2_gps_position");
@@ -227,4 +228,6 @@ public sealed class CatalogGraphQlMapTests
 
         (await _map.ResolveDocumentTablesAsync($"{{ crm_dbo_customers {{ id }} }}{padding}")).ShouldBeNull();
     }
+
+    public void Dispose() => _map.Dispose();
 }

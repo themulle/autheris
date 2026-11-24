@@ -36,7 +36,22 @@ public static class GatewayMcpServiceExtensions
         services.AddSingleton<IGoldenQueryService, GoldenQueryService>();
         services.AddScoped<ISemanticMcpCompiler, SemanticMcpCompiler>();
         services.AddScoped<IMcpDatasetCatalog, McpDatasetCatalog>();
-        services.AddSingleton<IGraphQlCatalogMap, CatalogGraphQlMap>();
+        // Issue #1069: version-tracked, background-refreshed GraphQL catalog map reusing snapshot and GraphQL module state.
+        services.AddSingleton<IGraphQlCatalogMap>(sp =>
+        {
+            var governed = sp.GetService<Autheris.Application.Common.Interfaces.IGovernanceRepository>() is not null;
+            return new CatalogGraphQlMap(
+                sp.GetRequiredService<Autheris.Application.Common.Interfaces.ITableMetadataRepository>(),
+                sp.GetRequiredService<Autheris.Application.Common.Interfaces.ITableRelationRepository>(),
+                versionProvider: governed ? sp.GetService<Autheris.Application.Catalog.ICatalogVersionProvider>() : null,
+                snapshotProvider: governed ? sp.GetService<Autheris.Application.Catalog.ICatalogSnapshotProvider>() : null,
+                eventBus: sp.GetService<Autheris.Application.Common.Interfaces.IEventBus>(),
+                typeModule: sp.GetService<Autheris.GraphQL.Catalog.CatalogGraphQlTypeModule>(),
+                crossSourceEnabled: gatewayOptions.IsCrossSourceEnabled,
+                refreshInterval: TimeSpan.FromSeconds(gatewayOptions.GraphQL.CatalogSchemaRefreshSeconds),
+                timeProvider: sp.GetService<TimeProvider>(),
+                logger: sp.GetService<Microsoft.Extensions.Logging.ILogger<CatalogGraphQlMap>>());
+        });
         services.AddTransient<IPreFlightQuerySimulator, PreFlightQuerySimulator>();
         services.AddSingleton<IMcpProvenanceEnricher, McpProvenanceEnricher>();
         // 115 C-115-8: one startup snapshot drives the registry, the guardrail, the dispatcher, the resources and the route mapping.

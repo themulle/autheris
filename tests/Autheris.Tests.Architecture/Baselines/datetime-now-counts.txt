@@ -94,7 +94,6 @@ modules/Autheris.Modules.Dbt/DbtMetadataIngestionService.cs|4
 modules/Autheris.Modules.Dbt/DbtWebhookReceiver.cs|3
 modules/Autheris.Modules.OpenMetadata/OpenMetadataSyncService.cs|8
 src/Autheris.Extensions/Lineage/OpenJevClient.cs|2
-src/Autheris.GraphQL/Mcp/CatalogGraphQlMap.cs|2
 src/Autheris.GraphQL/Subscriptions/CdcSubscriptionGovernor.cs|2
 src/Autheris.GraphQL/Types/Mutation.Catalog.cs|1
 src/Autheris.GraphQL/Types/Mutation.Consent.cs|5

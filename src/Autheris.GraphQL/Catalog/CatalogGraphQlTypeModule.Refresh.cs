@@ -29,6 +29,55 @@ public sealed partial class CatalogGraphQlTypeModule
     private int _lastBuiltTables;
     private int _lastBuiltOmitted;
 
+    internal event Action<CatalogSchemaModel, Autheris.Application.Catalog.CatalogVersion?>? SchemaModelBuilt;
+
+    internal bool CrossSourceEnabled => _crossSourceEnabled;
+
+    internal bool HasTransportVisibilityChanged() => TransportVisibilityChanged();
+
+    internal bool HasTransportVisibilityChanged(System.Collections.Concurrent.ConcurrentDictionary<string, bool> seen) =>
+        !seen.IsEmpty && TransportVisibilityChanged(seen);
+
+    internal Func<TableMetadata, bool>? CreateCatalogTableFilter(System.Collections.Concurrent.ConcurrentDictionary<string, bool>? seen = null) =>
+        GetTableFilter(seen);
+
+    internal bool TryGetCurrentSchemaModel(
+        [System.Diagnostics.CodeAnalysis.NotNullWhen(true)] out CatalogSchemaModel? model,
+        out Autheris.Application.Catalog.CatalogVersion? version)
+    {
+        var built = _built;
+        if (built.Fingerprint is null ||
+            built.Model is not { } current ||
+            (built.TransportSeen is { } seen ? TransportVisibilityChanged(seen) : TransportVisibilityChanged()))
+        {
+            model = null;
+            version = null;
+            return false;
+        }
+
+        version = built.Version;
+        model = current;
+        return true;
+    }
+
+    private void NotifySchemaModelBuilt(CatalogSchemaModel schemaModel, Autheris.Application.Catalog.CatalogVersion? version)
+    {
+        var handler = SchemaModelBuilt;
+        if (handler is null)
+        {
+            return;
+        }
+
+        try
+        {
+            handler.Invoke(schemaModel, version);
+        }
+        catch (Exception ex)
+        {
+            _logger?.LogDebug(ex, "GraphQL catalog schema built listener failed.");
+        }
+    }
+
     internal Task<bool> CheckForCatalogChangesAsync(CancellationToken ct = default) =>
         CheckForCatalogChangesAsync(fromTimer: false, forceFull: false, ct);
 
@@ -125,13 +174,23 @@ public sealed partial class CatalogGraphQlTypeModule
                 return false;
             }
 
-            if (!transportChanged && string.Equals(current, _built.Fingerprint, StringComparison.Ordinal))
+            var built = _built;
+            if (!transportChanged && string.Equals(current, built.Fingerprint, StringComparison.Ordinal))
             {
                 if (currentVer.HasValue)
                 {
                     // Never lowered (issue #802): a cached provider version may be older than the store read of a forced check.
                     RaiseToAtLeast(ref _builtStructureVersion, currentVer.Value.StructureVersion);
                     RaiseToAtLeast(ref _builtContentVersion, currentVer.Value.ContentVersion);
+                    var raised = built.Version is { } prevVer
+                        ? new Autheris.Application.Catalog.CatalogVersion(
+                            Math.Max(prevVer.StructureVersion, currentVer.Value.StructureVersion),
+                            Math.Max(prevVer.ContentVersion, currentVer.Value.ContentVersion))
+                        : currentVer.Value;
+                    if (built.Version != raised)
+                    {
+                        _built = built with { Version = raised };
+                    }
                 }
                 Volatile.Write(ref _pendingBuild, null);
                 Volatile.Write(ref _deferralStartTimestamp, NoTimestamp);
