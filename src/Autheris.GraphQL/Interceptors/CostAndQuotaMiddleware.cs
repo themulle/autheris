@@ -23,7 +23,7 @@ using Microsoft.Extensions.DependencyInjection;
 using RequestDelegate = HotChocolate.Execution.RequestDelegate;
 using RequestContext = HotChocolate.Execution.RequestContext;
 
-public sealed class CostAndQuotaMiddleware
+public sealed partial class CostAndQuotaMiddleware
 {
     private readonly RequestDelegate _next;
     private readonly IQueryCostQuota _costQuota;
@@ -407,19 +407,7 @@ public sealed class CostAndQuotaMiddleware
         var gatewayOptions = services?.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>()?.Value;
         if (gatewayOptions?.IsRateLimitingDisabled == true)
         {
-            // the validation pass prices a variable page size without its value, so the runtime pass must still bound it here.
-            var (rejected, hints) = await RejectIfOverGatewayComplexityAsync(context, doc, gatewayOptions, httpContext)
-                .ConfigureAwait(false);
-            if (rejected)
-            {
-                return;
-            }
-
-            await _next(context).ConfigureAwait(false);
-            if (!context.RequestAborted.IsCancellationRequested && context.Result is OperationResult disabledOp)
-            {
-                AttachIndexHintsToResult(disabledOp, hints);
-            }
+            await ExecuteDisabledRateLimitingAsync(context, httpContext, doc, services, gatewayOptions).ConfigureAwait(false);
             return;
         }
 
@@ -531,31 +519,19 @@ public sealed class CostAndQuotaMiddleware
             return;
         }
 
-        // Phase 2: Execute query with post-execution settlement in finally block
+        // Phase 2: Execute query with scope execution guard & post-execution settlement
+        var scopeGuard = services?.GetService<IScopeQueryExecutionGuard>() ?? NullScopeQueryExecutionGuard.Instance;
         int actualCost = calculatedCost;
         try
         {
-            await _next(context).ConfigureAwait(false);
-            if (context.RequestAborted.IsCancellationRequested ||
-                context.Result is not OperationResult op ||
-                (op.Errors is not null && op.Errors.Count > 0))
+            var outcome = await ExecuteWithScopeGuardAsync(
+                context, httpContext, scopeGuard, principal, apiKey, clientIp, doc, services, gatewayOptions, admission, calculatedCost, indexHints)
+                .ConfigureAwait(false);
+            actualCost = outcome.ActualCost;
+            if (outcome.ShortCircuit)
             {
-                // Mandatory minimum fee on client abort or execution failure.
-                // the failure fee is only a floor. A partial result (e.g. a successful 1000-row root field next
-                // to a deliberately failing one) is charged for the data it produced, so an error cannot refund real work.
-                actualCost = ComputeFailedCost(context, gatewayOptions?.QueryCost, admission.Policy);
+                return;
             }
-            else
-            {
-                actualCost = ComputeActualCost(context, gatewayOptions?.QueryCost, admission.Policy);
-                AttachIndexHintsToResult(op, indexHints);
-            }
-        }
-        catch
-        {
-            // Mandatory minimum fee on exception (rows already produced are still charged).
-            actualCost = ComputeFailedCost(context, gatewayOptions?.QueryCost, admission.Policy);
-            throw;
         }
         finally
         {

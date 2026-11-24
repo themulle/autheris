@@ -242,18 +242,22 @@ public static class TableStreamEndpoints
         // 5b. Resolve the caller policy and the admissible slice before planning (I418-SC-01..05)
         var rateLimiter = httpContext.RequestServices!.GetService<IRateLimiterService>();
         var tierResolver = httpContext.RequestServices!.GetService<IClientTierResolver>();
-        const int baseCost = 10;
-        const int costPerRow = 1;
-        const int maxSliceLimit = GovernedTableReadPlanner.MaxStreamSliceLimit;
-        const int defaultSliceLimit = GovernedTableReadPlanner.DefaultStreamSliceLimit;
+        var scopeGuard = httpContext.RequestServices!.GetService<Autheris.Application.Common.Quota.IScopeQueryExecutionGuard>()
+            ?? Autheris.Application.Common.Quota.NullScopeQueryExecutionGuard.Instance;
+        string? apiKey = httpContext.Request.Headers.TryGetValue("X-API-Key", out var ak) ? ak.ToString() : null;
+        try
+        {
+            await scopeGuard.RunAsync(httpContext.User, apiKey, clientIp, async (scopeLease, scopedCt) =>
+            {
+        int maxSliceLimit = Math.Max(1, scopeLease.ClampRows(GovernedTableReadPlanner.MaxStreamSliceLimit));
+        int defaultSliceLimit = Math.Max(1, scopeLease.ClampRows(GovernedTableReadPlanner.DefaultStreamSliceLimit));
 
         ClientQuotaPolicy policy;
         ClientQuotaContext? clientContext = null;
         string subjectId = EndpointSecurity.GetCallerIdentity(httpContext) ?? "anonymous";
         if (tierResolver != null)
         {
-            string? apiKey = httpContext.Request.Headers.TryGetValue("X-API-Key", out var ak) ? ak.ToString() : null;
-            clientContext = await tierResolver.ResolveAsync(httpContext.User, apiKey, clientIp, ct).ConfigureAwait(false);
+            clientContext = await tierResolver.ResolveAsync(httpContext.User, apiKey, clientIp, scopedCt).ConfigureAwait(false);
             policy = clientContext.Policy;
             subjectId = clientContext.SubjectId;
         }
@@ -262,18 +266,20 @@ public static class TableStreamEndpoints
             policy = ClientQuotaPolicy.ForTier(ClientTier.Internal);
         }
 
+        const int baseCost = 10;
+        const int costPerRow = 1;
         // I418-SC-02/03: the slice must fit the caller's bucket (capacity - base cost). Long arithmetic avoids overflow;
         // a capacity at or below the base cost can never admit a slice and fails closed.
         long maxAdmissibleLimit = Math.Min((long)policy.MaxTokensCapacity - baseCost, maxSliceLimit);
         if (maxAdmissibleLimit < 1)
         {
-            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "The streaming request cannot be admitted for this caller.", ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "The streaming request cannot be admitted for this caller.", scopedCt).ConfigureAwait(false);
             return;
         }
 
         if (request.Limit is <= 0)
         {
-            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "The streaming arguments are invalid.", ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "The streaming arguments are invalid.", scopedCt).ConfigureAwait(false);
             return;
         }
 
@@ -283,7 +289,7 @@ public static class TableStreamEndpoints
             int requested = Math.Min(request.Limit.Value, maxSliceLimit);
             if (requested > maxAdmissibleLimit)
             {
-                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, $"The limit must not exceed {maxAdmissibleLimit.ToString(CultureInfo.InvariantCulture)} for this caller.", ct).ConfigureAwait(false);
+                await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, $"The limit must not exceed {maxAdmissibleLimit.ToString(CultureInfo.InvariantCulture)} for this caller.", scopedCt).ConfigureAwait(false);
                 return;
             }
 
@@ -305,32 +311,32 @@ public static class TableStreamEndpoints
         catch (InvalidCursorException ex)
         {
             logger.LogWarning(ex, "Invalid cursor in bulk stream request");
-            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.InvalidCursor, "The supplied cursor is invalid.", ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.InvalidCursor, "The supplied cursor is invalid.", scopedCt).ConfigureAwait(false);
             return;
         }
         catch (RequiredFilterColumnMissingException ex)
         {
             logger.LogWarning(ex, "Required filter column missing in bulk stream request");
-            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.RequiredFilterColumnMissing, "A required filter column is missing.", ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.RequiredFilterColumnMissing, "A required filter column is missing.", scopedCt).ConfigureAwait(false);
             return;
         }
         catch (KeysetStreamingUnavailableException ex)
         {
             logger.LogWarning(ex, "Keyset streaming unavailable for bulk stream request");
-            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.KeysetStreamingUnavailable, "Keyset streaming is unavailable for this query.", ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.KeysetStreamingUnavailable, "Keyset streaming is unavailable for this query.", scopedCt).ConfigureAwait(false);
             return;
         }
         catch (ArgumentException ex)
         {
             logger.LogWarning(ex, "Invalid argument in bulk stream request");
-            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "The streaming arguments are invalid.", ct).ConfigureAwait(false);
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, ApiErrorCodes.BadRequest, "The streaming arguments are invalid.", scopedCt).ConfigureAwait(false);
             return;
         }
 
         // 7. Token Bucket Admission (Phase 1: Upfront Reservation); policy and slice were resolved before planning.
         if (rateLimiter != null)
         {
-            var reservation = await rateLimiter.ReserveCostQuotaAsync(subjectId, reservedCost, policy, ct).ConfigureAwait(false);
+            var reservation = await rateLimiter.ReserveCostQuotaAsync(subjectId, reservedCost, policy, scopedCt).ConfigureAwait(false);
             if (!reservation.Allowed)
             {
                 usageRecorder?.Record(
@@ -341,7 +347,7 @@ public static class TableStreamEndpoints
                 {
                     httpContext.Response.Headers["X-RateLimit-Scope"] = clientContext.ResolvedScope;
                 }
-                await ApiProblems.WriteTooManyRequests(httpContext, ApiErrorCodes.TooManyRequests, "Rate limit exceeded. Wait until the next time window.", reservation.RetryAfterSeconds, ct).ConfigureAwait(false);
+                await ApiProblems.WriteTooManyRequests(httpContext, ApiErrorCodes.TooManyRequests, "Rate limit exceeded. Wait until the next time window.", reservation.RetryAfterSeconds, scopedCt).ConfigureAwait(false);
                 return;
             }
         }
@@ -364,7 +370,9 @@ public static class TableStreamEndpoints
         bool hasMore = false;
         string? nextCursor = null;
         string? truncatedReason = null;
-        var deadline = DateTimeOffset.UtcNow.AddSeconds(15);
+        bool preStartError = false;
+        int maxDeadlineSeconds = scopeLease.MaxQueryDurationSeconds is > 0 and var maxSecs ? Math.Min(15, maxSecs) : 15;
+        var deadline = DateTimeOffset.UtcNow.AddSeconds(maxDeadlineSeconds);
 
         try
         {
@@ -481,7 +489,7 @@ public static class TableStreamEndpoints
                         await httpContext.Response.Body.FlushAsync(token).ConfigureAwait(false);
                         microBatch.Clear();
                     }
-                }, ct).ConfigureAwait(false);
+                }, scopedCt).ConfigureAwait(false);
 
                 if (lastRowPk != null && (hasMore || truncatedReason != null))
                 {
@@ -604,7 +612,7 @@ public static class TableStreamEndpoints
                     }
 
                     await bodyWriter.FlushAsync(token).ConfigureAwait(false);
-                }, ct).ConfigureAwait(false);
+                }, scopedCt).ConfigureAwait(false);
 
                 if (lastRowPk != null && (hasMore || truncatedReason != null))
                 {
@@ -629,19 +637,29 @@ public static class TableStreamEndpoints
                     var bodyWriter = httpContext.Response.BodyWriter;
                     bodyWriter.Write(metaBytes);
                     bodyWriter.Write(NewLineBytes);
-                    await bodyWriter.FlushAsync(ct).ConfigureAwait(false);
+                    await bodyWriter.FlushAsync(scopedCt).ConfigureAwait(false);
                 }
             }
         }
         catch (GatewayThrottledException ex) when (!httpContext.Response.HasStarted)
         {
+            preStartError = true;
             httpContext.Response.Clear();
-            await ApiProblems.WriteTooManyRequests(httpContext, ApiErrorCodes.TooManyRequests, "Too many concurrent requests. Retry later.", ex.RetryAfterSeconds, ct).ConfigureAwait(false);
+            await ApiProblems.WriteTooManyRequests(httpContext, ApiErrorCodes.TooManyRequests, "Too many concurrent requests. Retry later.", ex.RetryAfterSeconds, CancellationToken.None).ConfigureAwait(false);
+            return;
+        }
+        catch (TimeoutException) when (!httpContext.Response.HasStarted)
+        {
+            preStartError = true;
+            httpContext.Response.Clear();
+            await ApiProblems.WriteAsync(httpContext, StatusCodes.Status504GatewayTimeout, ApiErrorCodes.GatewayTimeout, "The streaming query exceeded the execution time limit.", CancellationToken.None).ConfigureAwait(false);
             return;
         }
         finally
         {
-            if (httpContext.Response.StatusCode != StatusCodes.Status429TooManyRequests)
+            if (!preStartError &&
+                httpContext.Response.StatusCode != StatusCodes.Status429TooManyRequests &&
+                httpContext.Response.StatusCode != StatusCodes.Status504GatewayTimeout)
             {
                 // 9. Post-Stream Settlement & Response Metadata
                 int actualCost = rateLimiter != null ? baseCost + (rowsEmitted * costPerRow) : 0;
@@ -665,6 +683,32 @@ public static class TableStreamEndpoints
                     SetResponseMetadata(httpContext.Response, "X-RateLimit-Remaining", settlement.RemainingTokens.ToString(CultureInfo.InvariantCulture));
                 }
             }
+            else if (rateLimiter != null)
+            {
+                await rateLimiter.SettleCostQuotaAsync(subjectId, reservedCost, baseCost, policy, CancellationToken.None).ConfigureAwait(false);
+            }
+        }
+            }, ct).ConfigureAwait(false);
+        }
+        catch (Autheris.Domain.Exceptions.ScopeConcurrencyExceededException ex) when (!httpContext.Response.HasStarted)
+        {
+            httpContext.Response.Clear();
+            await ApiProblems.WriteTooManyRequests(
+                httpContext,
+                ApiErrorCodes.ScopeConcurrencyExceeded,
+                "Too many concurrent queries are active for this client scope. Retry later.",
+                ex.RetryAfterSeconds,
+                CancellationToken.None).ConfigureAwait(false);
+        }
+        catch (TimeoutException) when (!httpContext.Response.HasStarted)
+        {
+            httpContext.Response.Clear();
+            await ApiProblems.WriteAsync(
+                httpContext,
+                StatusCodes.Status504GatewayTimeout,
+                ApiErrorCodes.GatewayTimeout,
+                "The streaming query exceeded the execution time limit.",
+                CancellationToken.None).ConfigureAwait(false);
         }
     }
 

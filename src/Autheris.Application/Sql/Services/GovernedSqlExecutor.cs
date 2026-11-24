@@ -65,6 +65,7 @@ public sealed partial class GovernedSqlExecutor
     private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
     private readonly Autheris.Application.Sql.Paging.IWebSqlPageTokenCodec _pageTokenCodec;
     private readonly IKeyVaultSecretProvider? _secrets;
+    private readonly Autheris.Application.Common.Quota.IScopeQueryExecutionGuard _scopeGuard;
 
     public GovernedSqlExecutor(
         GovernedSqlRewriter rewriter,
@@ -81,10 +82,12 @@ public sealed partial class GovernedSqlExecutor
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
         Autheris.Application.Common.Quota.IQueryCostQuota? costQuota = null,
         Autheris.Application.Sql.Paging.IWebSqlPageTokenCodec? pageTokenCodec = null,
-        Autheris.Application.Policy.WriteGrants.IWriteBudgetStore? writeBudgetStore = null)
+        Autheris.Application.Policy.WriteGrants.IWriteBudgetStore? writeBudgetStore = null,
+        Autheris.Application.Common.Quota.IScopeQueryExecutionGuard? scopeGuard = null)
     {
         _costQuota = costQuota;
         _writeBudgetStore = writeBudgetStore;
+        _scopeGuard = scopeGuard ?? Autheris.Application.Common.Quota.NullScopeQueryExecutionGuard.Instance;
         // Issue #447 no gate means deny, never pass-through.
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _rewriter = rewriter ?? throw new ArgumentNullException(nameof(rewriter));
@@ -288,6 +291,39 @@ public sealed partial class GovernedSqlExecutor
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(rowWriter);
 
+        AuditLogEntry? pendingDenyEntry = null;
+        Exception? pendingDenyException = null;
+        var executionResult = await _scopeGuard.RunAsync(user, apiKey: null, clientIp: null, async (lease, scopedCt) =>
+        {
+            var effectiveRequest = !request.PlannedTableRead && lease.MaxResultRows is > 0
+                ? request with { RowLimit = lease.ClampRowLimit(request.RowLimit ?? SqlRowLimit.For(_options.Value.WebSql)) }
+                : request;
+            var (result, denyEntry, denyException) = await ExecuteCoreScopedAsync(effectiveRequest, user, tenantId, rowWriter, scopedCt).ConfigureAwait(false);
+            pendingDenyEntry = denyEntry;
+            pendingDenyException = denyException;
+            return result ?? string.Empty;
+        }, ct).ConfigureAwait(false);
+
+        if (pendingDenyEntry is not null)
+        {
+            // Keep the non-DML deny audit inside ExecuteCoreAsync so audit architecture ratchets trace to this method.
+            await _auditWriter.RecordAsync(pendingDenyEntry, CancellationToken.None).ConfigureAwait(false);
+            System.Runtime.ExceptionServices.ExceptionDispatchInfo.Throw(pendingDenyException!);
+        }
+
+        return executionResult;
+    }
+
+    private async Task<(string? Result, AuditLogEntry? DenyEntry, Exception? DenyException)> ExecuteCoreScopedAsync(
+        GovernedSqlQueryRequest request,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        Func<DbDataReader, GovernedResultInfo, CancellationToken, Task> rowWriter,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(request);
+        ArgumentNullException.ThrowIfNull(rowWriter);
+
         string? requestedDs = !string.IsNullOrWhiteSpace(request.DataSourceName)
             ? _dataSourceResolver.ResolveAllowedDataSource(request.DataSourceName, tenantId)
             : null;
@@ -392,7 +428,7 @@ public sealed partial class GovernedSqlExecutor
 
                 var detailsJson = deniedDetails.Build();
 
-                await _auditWriter.RecordAsync(new AuditLogEntry
+                return (null, new AuditLogEntry
                 {
                     TenantId = tenantId,
                     EventType = AuditEventTypes.WebSqlQueryDenied,
@@ -401,12 +437,13 @@ public sealed partial class GovernedSqlExecutor
                     Decision = "DENY",
                     TraceId = TraceContextResolver.GetCurrentTraceId(),
                     DetailsJson = detailsJson
-                }, CancellationToken.None).ConfigureAwait(false);   // a DENY record never depends on the request token
+                }, policyEx);
             }
             throw;
         }
 
-        return await ExecuteRewrittenAsync(request, user, tenantId, rewrite, dmlContext, clientValues, rowWriter, ct).ConfigureAwait(false);
+        var result = await ExecuteRewrittenAsync(request, user, tenantId, rewrite, dmlContext, clientValues, rowWriter, ct).ConfigureAwait(false);
+        return (result, null, null);
     }
 
     internal Task<string> ExecuteRewrittenAsync(
@@ -626,6 +663,11 @@ public sealed partial class GovernedSqlExecutor
                     commandTimeout = Math.Min(commandTimeout, request.TimeoutSeconds.Value);
                 }
 
+                if (Autheris.Application.Common.Quota.ScopeQueryExecutionGuard.TryGetCurrent(out var activeScopeLease))
+                {
+                    commandTimeout = activeScopeLease.ClampTimeoutSeconds(commandTimeout);
+                }
+
                 if (dmlContext.IsDml)
                 {
                     // the session initializer gives no transaction on SQL Server and Oracle, so one is begun here. From the
@@ -690,6 +732,9 @@ public sealed partial class GovernedSqlExecutor
 
                 // the execution and the streaming of the rows run under the provider guard.
                 bool isTruncated = false;
+                using var commandCancelReg = ct.CanBeCanceled
+                    ? ct.Register(static state => { try { ((DbCommand)state!).Cancel(); } catch { } }, command)
+                    : default;
                 await _executionGuard.RunAsync(
                     connection,
                     TimeSpan.FromSeconds(commandTimeout),

@@ -54,10 +54,14 @@ public static class GraphQlCallerPrincipal
             claims.Add(new Claim("sub", effectiveUserId));
         }
 
+        claims.RemoveAll(c =>
+            string.Equals(c.Type, "client_id", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(c.Type, "azp", StringComparison.OrdinalIgnoreCase) ||
+            string.Equals(c.Type, "appid", StringComparison.OrdinalIgnoreCase));
+
         if (!string.IsNullOrWhiteSpace(sessionContext.ServicePrincipalId) &&
             !string.Equals(sessionContext.ServicePrincipalId, effectiveUserId, StringComparison.Ordinal))
         {
-            claims.RemoveAll(c => c.Type is "client_id" or "azp");
             claims.Add(new Claim("client_id", sessionContext.ServicePrincipalId));
             claims.Add(new Claim("azp", sessionContext.ServicePrincipalId));
         }

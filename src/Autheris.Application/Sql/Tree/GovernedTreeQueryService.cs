@@ -232,20 +232,13 @@ public sealed partial class GovernedTreeQueryService : IGovernedTreeQueryService
         }
     }
 
-    public Task<JsonDocument> ExecuteAsync(
-        ClaimsPrincipal? principal,
-        TreeQueryNode root,
-        IReadOnlyDictionary<string, string[]>? requestHeaders,
-        string operationId,
-        CancellationToken ct = default) => ExecuteAsync(principal, root, requestHeaders, operationId, observer: null, ct);
-
-    public async Task<JsonDocument> ExecuteAsync(
+    private async Task<JsonDocument> ExecuteScopedAsync(
         ClaimsPrincipal? principal,
         TreeQueryNode root,
         IReadOnlyDictionary<string, string[]>? requestHeaders,
         string operationId,
         ITreeExecutionObserver? observer,
-        CancellationToken ct = default)
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(root);
         ArgumentException.ThrowIfNullOrWhiteSpace(operationId);
@@ -807,7 +800,7 @@ public sealed partial class GovernedTreeQueryService : IGovernedTreeQueryService
             await using var command = connection.CreateCommand();
             command.Transaction = tx;
             command.CommandText = compiled.Sql;
-            command.CommandTimeout = Math.Max(1, connOptions.CommandTimeoutSeconds);
+            command.CommandTimeout = Math.Max(1, ClampScopeCommandTimeout(connOptions.CommandTimeoutSeconds));
             foreach (var (name, value) in compiled.Parameters)
             {
                 var parameter = command.CreateParameter();

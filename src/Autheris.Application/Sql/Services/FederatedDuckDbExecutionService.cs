@@ -39,7 +39,7 @@ using TrinoSqlEngine.Ast.Nodes;
 using Autheris.Application.Sql.Federation.Parameters;
 using Autheris.Application.Sql.ListParameters;
 
-public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionService, Autheris.Application.Products.IProductDefinerExecutor
+public sealed partial class FederatedDuckDbExecutionService : IFederatedQueryExecutionService, Autheris.Application.Products.IProductDefinerExecutor
 {
     private static readonly SqlTokenSecurityOptions AnalysisTokenOptions = Autheris.Application.Sql.Policy.ClientSqlTokenPolicy.Analysis;
 
@@ -65,6 +65,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
     private readonly ILogger<FederatedDuckDbExecutionService>? _logger;
     private readonly CompiledSqlAuditDigester _auditDigester;
     private readonly Autheris.Application.DataSources.IDataSourceTransportGate _transportGate;
+    private readonly Autheris.Application.Common.Quota.IScopeQueryExecutionGuard _scopeGuard;
 
     public FederatedDuckDbExecutionService(
         IOptions<GatewayOptions> options,
@@ -88,8 +89,10 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         CompiledSqlAuditDigester? auditDigester = null,
         Autheris.Application.DataSources.IDataSourceTransportGate? transportGate = null,
         Autheris.Application.Common.Quota.IQueryCostQuota? costQuota = null,
-        Autheris.Application.Policy.Pdp.IAccessDecisionPoint? accessDecisionPoint = null)
+        Autheris.Application.Policy.Pdp.IAccessDecisionPoint? accessDecisionPoint = null,
+        Autheris.Application.Common.Quota.IScopeQueryExecutionGuard? scopeGuard = null)
     {
+        _scopeGuard = scopeGuard ?? Autheris.Application.Common.Quota.NullScopeQueryExecutionGuard.Instance;
         _accessDecisionPoint = accessDecisionPoint ?? new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             options,
             consentResolution,
@@ -142,7 +145,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         return new Sid(sidString);
     }
 
-    public async Task ExecuteGovernedQueryAsync(
+    public Task ExecuteGovernedQueryAsync(
         GovernedSqlQueryRequest request,
         ClaimsPrincipal user,
         TenantId tenantId,
@@ -152,17 +155,21 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(rowWriter);
 
-        var (duckDbResult, plan, _) = await ExecuteFederatedInternalAsync(request, user, tenantId, ct).ConfigureAwait(false);
-
-        using var dataTable = ConvertToDataTable(duckDbResult);
-        using var reader = dataTable.CreateDataReader();
-        var columns = SqlResultColumns.Describe(reader);
-        var maskArray = duckDbResult.Columns.Select(c => IsMaskedByName(c, plan)).ToImmutableArray();
-        if (maskArray.Length != reader.FieldCount)
+        return _scopeGuard.RunAsync(user, apiKey: null, clientIp: null, async (_, scopedCt) =>
         {
-            throw new GovernedSqlException(GovernedSqlErrorCodes.CompilerInvariant, TargetSqlDialect.DuckDb);
-        }
-        await rowWriter(reader, new GovernedResultInfo(columns, maskArray), ct).ConfigureAwait(false);
+            var (duckDbResult, plan, _) = await ExecuteFederatedInternalAsync(request, user, tenantId, scopedCt).ConfigureAwait(false);
+
+            using var dataTable = ConvertToDataTable(duckDbResult);
+            using var reader = dataTable.CreateDataReader();
+            var columns = SqlResultColumns.Describe(reader);
+            var maskArray = duckDbResult.Columns.Select(c => IsMaskedByName(c, plan)).ToImmutableArray();
+            if (maskArray.Length != reader.FieldCount)
+            {
+                throw new GovernedSqlException(GovernedSqlErrorCodes.CompilerInvariant, TargetSqlDialect.DuckDb);
+            }
+            await rowWriter(reader, new GovernedResultInfo(columns, maskArray), scopedCt).ConfigureAwait(false);
+            return true;
+        }, ct);
     }
 
     public Task ExecuteGovernedQueryAsync(
@@ -172,39 +179,6 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         Func<DbDataReader, CancellationToken, Task> rowWriter,
         CancellationToken ct = default) =>
         ExecuteGovernedQueryAsync(request, user, tenantId, (reader, _, token) => rowWriter(reader, token), ct);
-
-    private static bool IsMaskedByName(string columnName, CrossSourcePlan plan)
-    {
-        bool foundMatch = false;
-        foreach (var req in plan.StagingRequests)
-        {
-            if (req.Subtree != null)
-            {
-                if (req.Subtree.ProjectedColumns.Any(c => string.Equals(c, columnName, StringComparison.OrdinalIgnoreCase)))
-                {
-                    foundMatch = true;
-                    if (req.Subtree.MaskedColumns.Contains(columnName))
-                    {
-                        return true;
-                    }
-                }
-            }
-            else
-            {
-                var matchingCol = req.Metadata.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, columnName, StringComparison.OrdinalIgnoreCase));
-                if (matchingCol != null)
-                {
-                    foundMatch = true;
-                    if (req.Decision.GetEffectiveColumnAccess(matchingCol.ColumnName, req.Metadata) == ColumnAccessLevel.Mask)
-                    {
-                        return true;
-                    }
-                }
-            }
-        }
-
-        return !foundMatch;
-    }
 
     public async Task<GovernedSqlResult> ExecuteQueryBufferedAsync(
         GovernedSqlQueryRequest request,
@@ -233,7 +207,23 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         return await BufferedAsync(request, definer.Principal, definer.Tenant, definer, ct).ConfigureAwait(false);
     }
 
-    private async Task<GovernedSqlResult> BufferedAsync(
+    private Task<GovernedSqlResult> BufferedAsync(
+        GovernedSqlQueryRequest request,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        Autheris.Application.Products.ProductDefiner? definer,
+        CancellationToken ct)
+    {
+        if (definer is not null)
+        {
+            return BufferedCoreAsync(request, user, tenantId, definer, ct);
+        }
+
+        return _scopeGuard.RunAsync(user, apiKey: null, clientIp: null, (_, scopedCt) =>
+            BufferedCoreAsync(request, user, tenantId, definer: null, scopedCt), ct);
+    }
+
+    private async Task<GovernedSqlResult> BufferedCoreAsync(
         GovernedSqlQueryRequest request,
         ClaimsPrincipal user,
         TenantId tenantId,
@@ -262,56 +252,6 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             truncated,
             InDbColumnMaskingExecuted: !_options.Value.IsColumnMaskingDisabled,
             PagingUnavailable: request.Page is not null && truncated ? "federated" : null);
-    }
-
-    public async Task ValidateAsync(
-        string rawSql,
-        ClaimsPrincipal user,
-        TenantId tenantId,
-        CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(rawSql);
-        ArgumentNullException.ThrowIfNull(user);
-
-        var crossSourceOptions = _options.Value.WebSql?.CrossSource ?? new CrossSourceOptions();
-        if (!crossSourceOptions.Enabled)
-        {
-            throw new WebSqlPolicyException("Cross-catalog queries across multiple data sources are not supported in WebSQL.");
-        }
-
-        var sqlForAnalysis = GovernedSqlExecutionService.NormalizeClientParameters(rawSql, null, out _);
-        var metadata = await _sqlEngine.AnalyzeAsync(sqlForAnalysis.AsMemory(), AnalysisTokenOptions, ct).ConfigureAwait(false);
-
-        if (metadata.StatementType is SqlStatementType.Insert or SqlStatementType.Update or SqlStatementType.Delete)
-        {
-            throw new WebSqlPolicyException("DML statements across multiple data sources or HTTP APIs are not permitted in WebSQL.");
-        }
-
-        // SqlFunctionPolicy check
-        if (metadata.FunctionCalls is { Count: > 0 })
-        {
-            var allowedFunctions = EffectiveDuckDbFunctions();
-            foreach (var functionName in metadata.FunctionCalls)
-            {
-                if (!SqlFunctionPolicy.IsFunctionAllowed(functionName, allowedFunctions, additionalDeniedFunctions: null))
-                {
-                    throw new WebSqlPolicyException($"Function '{functionName}' is not permitted in WebSQL.");
-                }
-            }
-        }
-
-        var routing = await _router.RouteAsync(metadata, requestedDataSource: null, tenantId, isDml: false, ct).ConfigureAwait(false);
-        if (routing.SourceClass == QuerySourceClass.Unsupported)
-        {
-            throw new WebSqlPolicyException(routing.RejectionReason ?? "Unsupported data source type.");
-        }
-
-        var (decisions, userSid) = await AuthorizeAllTablesAsync(metadata, routing.Tables, user, tenantId, isDml: false, ct).ConfigureAwait(false);
-
-        // Issue #447 C2: every routed source must allow the ingress transport; nothing is planned or staged otherwise.
-        await _transportGate.EnsureCatalogSourcesAsync(routing.Tables.Select(t => t.EffectiveDataSource), ct).ConfigureAwait(false);
-
-        _planner.Plan(sqlForAnalysis, metadata, routing.Tables, decisions, crossSourceOptions, user, tenantId);
     }
 
     private async Task<(OlapQueryResult Result, CrossSourcePlan Plan, bool Truncated)> ExecuteFederatedInternalAsync(
@@ -455,6 +395,10 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             int timeoutSeconds = crossSourceOptions.TimeoutSeconds > 0
                 ? crossSourceOptions.TimeoutSeconds
                 : (_options.Value.WebSql?.ExecutionTimeoutSeconds > 0 ? _options.Value.WebSql.ExecutionTimeoutSeconds : 30);
+            if (Autheris.Application.Common.Quota.ScopeQueryExecutionGuard.TryGetCurrent(out var scopeLease))
+            {
+                timeoutSeconds = scopeLease.ClampTimeoutSeconds(timeoutSeconds);
+            }
 
             using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
             timeoutCts.CancelAfter(TimeSpan.FromSeconds(timeoutSeconds));
@@ -478,7 +422,7 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             var plan = _planner.Plan(sqlForAnalysis, metadata, routing.Tables, decisions, crossSourceOptions, user, tenantId, vfPlans, statement, parameterContract);
 
             // Start Audit (fail-closed, INV-17)
-            await RecordStartAuditAsync(request, routing.Tables, userSid, tenantId, vfPlans, keySourceReads, correlationId, parameterContract, plan.Compiled.Parameters.Length, ct).ConfigureAwait(false);
+            await RecordStartAuditAsync(request, routing.Tables, userSid, tenantId, vfPlans, keySourceReads, correlationId, parameterContract, plan.Compiled.Parameters.Length, timeoutCts.Token).ConfigureAwait(false);
             keySourceReadsAudited = true;
 
             var budget = new FederationBudget(
@@ -499,6 +443,11 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             // SQLA-08: the same limit as the single-source path (explicit LIMIT, else the WebSQL default), bounded by the OLAP result cap;
             // one probe row beyond it tells a truncated result from an exact-size one.
             var rowLimit = request.RowLimit ?? SqlRowLimit.For(_options.Value.WebSql ?? new WebSqlOptions());
+            if (!request.PlannedTableRead && Autheris.Application.Common.Quota.ScopeQueryExecutionGuard.TryGetCurrent(out var activeScope))
+            {
+                maxResultRows = activeScope.ClampRows(maxResultRows);
+                rowLimit = activeScope.ClampRowLimit(rowLimit);
+            }
             int effectiveMaxRows = (int)Math.Min((long)maxResultRows, rowLimit.Effective(metadata.HasExplicitLimit ? metadata.ExplicitLimitValue : null));
             if (request.Page is { Size: > 0 } pageWindow)
             {

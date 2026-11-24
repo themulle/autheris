@@ -47,7 +47,9 @@ public static partial class WebSqlEndpoints
         switch (failure.Kind)
         {
             case SqlFailureKind.Throttled:
-                int retryAfter = (ex as GatewayThrottledException)?.RetryAfterSeconds ?? 5;
+                int retryAfter = (ex as ScopeConcurrencyExceededException)?.RetryAfterSeconds
+                    ?? (ex as GatewayThrottledException)?.RetryAfterSeconds
+                    ?? 5;
                 logger.Warning(ex, "WebSQL concurrency limit reached. TraceId={TraceId}", httpContext.TraceIdentifier);
                 await ApiProblems.WriteTooManyRequests(httpContext, failure.Code ?? ApiErrorCodes.TooManyRequests, failure.FixedMessage, retryAfter, ct);
                 break;
@@ -74,6 +76,11 @@ public static partial class WebSqlEndpoints
             case SqlFailureKind.InvalidQuery:
                 logger.Warning(ex, "WebSQL Bad Request. TraceId={TraceId}", httpContext.TraceIdentifier);
                 await ApiProblems.WriteAsync(httpContext, StatusCodes.Status400BadRequest, failure.Code ?? ApiErrorCodes.BadRequest, failure.FixedMessage, ct);
+                break;
+
+            case SqlFailureKind.Canceled:
+                logger.Warning(ex, "WebSQL execution cancelled by client. TraceId={TraceId}", httpContext.TraceIdentifier);
+                await ApiProblems.WriteAsync(httpContext, 499, ApiErrorCodes.BadRequest, "The client closed the request.", CancellationToken.None);
                 break;
 
             default:

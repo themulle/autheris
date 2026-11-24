@@ -321,7 +321,8 @@ public sealed partial class GovernedAggregationService
                 RequestHeaders: null,
                 Limit: InMemoryAggregationRowCap,
                 Offset: 0,
-                Tenant: tenantId);
+                Tenant: tenantId,
+                Items: new Dictionary<string, object?>(StringComparer.Ordinal) { ["SkipScopeRowClamp"] = true });
 
             var rawRows = await executor.ExecuteAsync(execContext, ct).ConfigureAwait(false);
 
@@ -362,6 +363,10 @@ public sealed partial class GovernedAggregationService
             int sqlLimit = Math.Min(
                 _analyticsOptions.Aggregation.MaxGroups > 0 ? _analyticsOptions.Aggregation.MaxGroups : AggregationOptions.DefaultMaxGroups,
                 AggregationOptions.UpperBoundMaxGroups);
+            if (Autheris.Application.Common.Quota.ScopeQueryExecutionGuard.TryGetCurrent(out var sqlScopeLease) && sqlScopeLease.MaxResultRows is > 0)
+            {
+                sqlLimit = sqlScopeLease.ClampRows(sqlLimit);
+            }
 
             TableFilterClause? trinoFilter = EnsureTrinoCapableFilter(query.Where, metadata);
             PlannedTableAggregate planned;

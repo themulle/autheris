@@ -115,6 +115,7 @@ public static class ApiErrorCodes
     public const string ResourceGroupQueueFull = "RESOURCE_GROUP_QUEUE_FULL";
     public const string ResourceGroupTimeout = "RESOURCE_GROUP_TIMEOUT";
     public const string RateLimitExceeded = "RATE_LIMIT_EXCEEDED";
+    public const string ScopeConcurrencyExceeded = "SCOPE_CONCURRENCY_EXCEEDED";
     public const string UnauthorizedNoSid = "UNAUTHORIZED_NO_SID";
 
     // Final fixes (no legacy bodies): table cache administration and the TOTP enrollment verification; fixed codes, never derived from input.

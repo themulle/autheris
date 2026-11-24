@@ -122,6 +122,11 @@ public static class SqlFailureClassifier
             return new SqlFailure(SqlFailureKind.TransportDenied, "Access to the data source is not allowed over this transport.", TransportNotAllowedException.Code);
         }
 
+        if (ex is ScopeConcurrencyExceededException)
+        {
+            return new SqlFailure(SqlFailureKind.Throttled, "Too many concurrent queries are active for this client scope. Retry later.", "SCOPE_CONCURRENCY_EXCEEDED");
+        }
+
         if (ex is GatewayThrottledException)
         {
             return new SqlFailure(SqlFailureKind.Throttled, GenericThrottledMessage, "TOO_MANY_REQUESTS");

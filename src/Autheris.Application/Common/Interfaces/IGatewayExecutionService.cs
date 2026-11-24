@@ -121,7 +121,8 @@ public sealed record TablePageRequest(
     TableFilterClause? Filter = null,
     bool IncludeTotalCount = false,
     IReadOnlyDictionary<string, string[]>? RequestHeaders = null,
-    bool RequireTotalCount = true);
+    bool RequireTotalCount = true,
+    bool IncludeProbeRow = false);
 
 /// <summary>
 /// Rows of the page, the access decision and (when requested) the total row count. <paramref name="Unordered"/> is true when no

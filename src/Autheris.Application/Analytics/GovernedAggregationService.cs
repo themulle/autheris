@@ -120,10 +120,34 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         _logger = logger;
     }
 
-    public async Task<AggregationResult> ExecuteAggregationAsync(
+    public Task<AggregationResult> ExecuteAggregationAsync(
         ClaimsPrincipal principal,
         AggregationQuery query,
         CancellationToken ct = default)
+    {
+        if (!Autheris.Application.Common.Quota.ScopeQueryExecutionGuard.TryGetCurrent(out var scopeLease) ||
+            !scopeLease.CancellationToken.CanBeCanceled)
+        {
+            return ExecuteAggregationCoreAsync(principal, query, ct);
+        }
+
+        return ExecuteAggregationLinkedAsync(principal, query, scopeLease.CancellationToken, ct);
+    }
+
+    private async Task<AggregationResult> ExecuteAggregationLinkedAsync(
+        ClaimsPrincipal principal,
+        AggregationQuery query,
+        CancellationToken scopeCt,
+        CancellationToken ct)
+    {
+        using var linkedCts = CancellationTokenSource.CreateLinkedTokenSource(ct, scopeCt);
+        return await ExecuteAggregationCoreAsync(principal, query, linkedCts.Token).ConfigureAwait(false);
+    }
+
+    private async Task<AggregationResult> ExecuteAggregationCoreAsync(
+        ClaimsPrincipal principal,
+        AggregationQuery query,
+        CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(query);
         if (principal == null || principal.Identity?.IsAuthenticated != true)
@@ -204,6 +228,10 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
         int maxGroups = _analyticsOptions.Aggregation.MaxGroups > 0
             ? _analyticsOptions.Aggregation.MaxGroups
             : AggregationOptions.DefaultMaxGroups;
+        if (Autheris.Application.Common.Quota.ScopeQueryExecutionGuard.TryGetCurrent(out var capLease) && capLease.MaxResultRows is > 0)
+        {
+            maxGroups = capLease.ClampRows(maxGroups);
+        }
         int requestedLimit = query.Limit.HasValue
             ? Math.Min(query.Limit.Value, maxGroups)
             : maxGroups;

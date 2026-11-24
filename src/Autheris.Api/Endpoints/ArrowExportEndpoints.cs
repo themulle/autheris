@@ -147,7 +147,6 @@ public static class ArrowExportEndpoints
             : planner.BuildFullTableSelect(tableId!.Value);
 
         // 3. Execute Governed Query (RLS + Masking + AST Security)
-        IReadOnlyList<IReadOnlyDictionary<string, object?>> rows = Array.Empty<IReadOnlyDictionary<string, object?>>();
         if (sqlExecutionService == null)
         {
             return ApiProblems.Problem(StatusCodes.Status503ServiceUnavailable, ApiErrorCodes.ServiceUnavailable, "Governed SQL execution is not available.", httpContext, "Service Unavailable");
@@ -157,16 +156,46 @@ public static class ArrowExportEndpoints
         {
             // Row limits of the Arrow transport (Gateway:RowLimits:ArrowExport, falling back to WebSql).
             var gatewayOptions = httpContext.RequestServices?.GetService<IOptions<GatewayOptions>>()?.Value;
-            var queryRequest = new GovernedSqlQueryRequest(
-                effectiveSql,
-                RowLimit: ArrowExportRowLimit(gatewayOptions),
-                Transport: SqlTransports.ArrowExport);
-            var queryResult = await sqlExecutionService.ExecuteQueryBufferedAsync(queryRequest, httpContext.User, tenant, ct).ConfigureAwait(false);
-            rows = queryResult.Rows;
+            var scopeGuard = httpContext.RequestServices?.GetService<Autheris.Application.Common.Quota.IScopeQueryExecutionGuard>()
+                ?? Autheris.Application.Common.Quota.NullScopeQueryExecutionGuard.Instance;
+            string? apiKey = httpContext.Request.Headers.TryGetValue("X-API-Key", out var ak) ? ak.ToString() : null;
+            string? clientIp = httpContext.Connection.RemoteIpAddress?.ToString();
+            var baseRowLimit = ArrowExportRowLimit(gatewayOptions);
+
+            var exported = await scopeGuard.RunAsync(httpContext.User, apiKey, clientIp, async (lease, scopedCt) =>
+            {
+                var queryRequest = new GovernedSqlQueryRequest(
+                    effectiveSql,
+                    RowLimit: lease.ClampRowLimit(baseRowLimit),
+                    Transport: SqlTransports.ArrowExport);
+                var queryResult = await sqlExecutionService.ExecuteQueryBufferedAsync(queryRequest, httpContext.User, tenant, scopedCt).ConfigureAwait(false);
+                return await arrowService.ExportToBytesAsync(queryResult.Rows, scopedCt).ConfigureAwait(false);
+            }, ct).ConfigureAwait(false);
+
+            var sanitizedName = !string.IsNullOrWhiteSpace(table)
+                ? System.Text.RegularExpressions.Regex.Replace(table, @"[^a-zA-Z0-9_\-]", "_")
+                : "export";
+            return Results.File(
+                exported,
+                contentType: IArrowExportService.ArrowStreamContentType,
+                fileDownloadName: $"{sanitizedName}.arrow");
+        }
+        catch (Autheris.Domain.Exceptions.ScopeConcurrencyExceededException ex)
+        {
+            return ApiProblems.TooManyRequests(
+                ApiErrorCodes.ScopeConcurrencyExceeded,
+                "Too many concurrent queries are active for this client scope. Retry later.",
+                httpContext,
+                ex.RetryAfterSeconds);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
             throw;
+        }
+        catch (TimeoutException)
+        {
+            var traceId = httpContext.TraceIdentifier;
+            return ApiProblems.Problem(StatusCodes.Status504GatewayTimeout, ApiErrorCodes.GatewayTimeout, "The query exceeded the execution time limit.", httpContext, "Gateway Timeout", new Dictionary<string, object?> { ["traceId"] = traceId });
         }
         catch (Exception ex)
         {
@@ -205,18 +234,6 @@ public static class ArrowExportEndpoints
                     return ApiProblems.Problem(StatusCodes.Status500InternalServerError, ApiErrorCodes.InternalError, "The export could not be completed.", httpContext, "Internal Server Error", new Dictionary<string, object?> { ["traceId"] = traceId });
             }
         }
-
-        // 4. Stream Apache Arrow IPC binary payload
-        var bytes = await arrowService.ExportToBytesAsync(rows, ct).ConfigureAwait(false);
-        var sanitizedName = !string.IsNullOrWhiteSpace(table)
-            ? System.Text.RegularExpressions.Regex.Replace(table, @"[^a-zA-Z0-9_\-]", "_")
-            : "export";
-        var fileName = $"{sanitizedName}.arrow";
-
-        return Results.File(
-            bytes,
-            contentType: IArrowExportService.ArrowStreamContentType,
-            fileDownloadName: fileName);
     }
 
     /// <summary>Gateway:RowLimits:ArrowExport (falling back to WebSql), never above Arrow:MaxExportRows.</summary>

@@ -910,24 +910,37 @@ public static class GatewayStartupValidator
 
         foreach (var (tierName, overrideLimit) in options.RateLimiting.ClientTiers.TierLimits)
         {
-            if (overrideLimit?.MaxCostPerQuery is { } cost)
-            {
-                if (cost is < 100 or > 10000)
-                {
-                    throw new ValidationException($"Invalid ClientTier configuration for '{tierName}': MaxCostPerQuery must be between 100 and 10000.");
-                }
-            }
+            ValidateTierLimitOverride("ClientTier", tierName, overrideLimit);
         }
 
         foreach (var (scopeName, overrideLimit) in options.RateLimiting.ClientTiers.ScopeLimits)
         {
-            if (overrideLimit?.MaxCostPerQuery is { } cost)
-            {
-                if (cost is < 100 or > 10000)
-                {
-                    throw new ValidationException($"Invalid ScopeLimit configuration for '{scopeName}': MaxCostPerQuery must be between 100 and 10000.");
-                }
-            }
+            ValidateTierLimitOverride("ScopeLimit", scopeName, overrideLimit);
+        }
+    }
+
+    private static void ValidateTierLimitOverride(string kind, string name, ClientTierLimitOverride? overrideLimit)
+    {
+        if (overrideLimit == null) return;
+
+        if (overrideLimit.MaxCostPerQuery is { } cost && cost is < 100 or > 10000)
+        {
+            throw new ValidationException($"Invalid {kind} configuration for '{name}': MaxCostPerQuery must be between 100 and 10000.");
+        }
+
+        if (overrideLimit.MaxConcurrentQueries is { } maxConc && maxConc is < 1 or > 10000)
+        {
+            throw new ValidationException($"Invalid {kind} configuration for '{name}': MaxConcurrentQueries must be between 1 and 10000.");
+        }
+
+        if (overrideLimit.MaxQueryDurationSeconds is { } maxDur && maxDur is < 1 or > 3600)
+        {
+            throw new ValidationException($"Invalid {kind} configuration for '{name}': MaxQueryDurationSeconds must be between 1 and 3600.");
+        }
+
+        if (overrideLimit.MaxResultRows is { } maxRows && maxRows is < 1 or > 1_000_000)
+        {
+            throw new ValidationException($"Invalid {kind} configuration for '{name}': MaxResultRows must be between 1 and 1000000.");
         }
     }
 }

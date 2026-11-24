@@ -30,6 +30,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "UNAUTHORIZED",
         "NOT_FOUND",
         "RATE_LIMIT_EXCEEDED",
+        "SCOPE_CONCURRENCY_EXCEEDED",
         "RATE_LIMIT",
         "TOO_MANY_REQUESTS",
         "QUERY_TOO_COMPLEX",
@@ -189,7 +190,8 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         ["INDIVIDUAL_GRANT_INDETERMINATE"] = "The grant policy could not be evaluated.",
         ["SYNC_FAILED"] = "The synchronization failed.",
         ["GDPR_SUBJECT_SCOPE_UNRESOLVED"] = "The report scope cannot be resolved: name the table that holds the data subject's data.",
-        ["ROW_POLICY_EXPRESSION_NOT_ALLOWED"] = "The statement uses an expression that is not permitted on a table with a row policy. Use non-raising forms such as TRY_CAST or NULLIF instead."
+        ["ROW_POLICY_EXPRESSION_NOT_ALLOWED"] = "The statement uses an expression that is not permitted on a table with a row policy. Use non-raising forms such as TRY_CAST or NULLIF instead.",
+        ["SCOPE_CONCURRENCY_EXCEEDED"] = "Too many concurrent queries are active for this client scope. Retry later."
     };
 
     internal const string MaskedCode = "MASKED";
@@ -452,6 +454,11 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
             if (ex is System.Data.Common.DbException && ex.Message.Contains("LIKE or GLOB", StringComparison.OrdinalIgnoreCase))
             {
                 return ("INVALID_QUERY", InvalidQueryMessage);
+            }
+
+            if (ex is TimeoutException)
+            {
+                return ("TIMEOUT", "The query exceeded the maximum allowed execution duration.");
             }
 
             if (typeName == "SyntaxException")
