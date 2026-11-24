@@ -171,7 +171,8 @@ public sealed partial class PermissionRequestEngine
             RequestedGranteeType = submission.GranteeType,
             RequestedGranteeRef = submission.GranteeRef.Trim(),
             BusinessJustification = normalizedJustification,
-            Status = "PENDING",
+            // an externally routed request waits for the external system (same status as every other external submission path)
+            Status = workflowMode == ConsentWorkflowMode.External ? "PENDING_EXTERNAL_APPROVAL" : "PENDING",
             RequestedAt = now,
             RequestedValidFrom = validFrom,
             RequestedValidTo = requestedValidTo,

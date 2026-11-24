@@ -189,6 +189,7 @@ public sealed class PermissionRequestEngineSubmitTests
 
         res.Request.WorkflowMode.ShouldBe(ConsentWorkflowMode.External);
         res.Request.ExternalSystemId.ShouldBe(systemId);
+        res.Request.Status.ShouldBe("PENDING_EXTERNAL_APPROVAL");
     }
 
     [Fact]
