@@ -62,7 +62,8 @@ public sealed class PermissionRequestEngineSubmitTests
         FakeTimeProvider? time = null,
         InMemoryAuditWriter? audit = null,
         Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter? router = null,
-        GatewayOptions? gatewayOptions = null)
+        GatewayOptions? gatewayOptions = null,
+        Autheris.Application.ConsentRequests.Events.IConsentEventOutbox? eventOutbox = null)
     {
         metadata ??= DefaultMetadata();
         return new PermissionRequestEngine(
@@ -82,7 +83,39 @@ public sealed class PermissionRequestEngineSubmitTests
             capabilities: new GovernanceCapabilities(domainRepository: domainRepo),
             gatewayOptions: gatewayOptions is null ? null : Microsoft.Extensions.Options.Options.Create(gatewayOptions),
             timeProvider: time ?? new FakeTimeProvider(Now),
-            workflowRouter: router);
+            workflowRouter: router,
+            eventOutbox: eventOutbox);
+    }
+
+    [Theory]
+    [InlineData(ConsentWorkflowMode.Internal)]
+    [InlineData(ConsentWorkflowMode.External)]
+    public async Task Submitted_request_appends_the_request_created_event_for_workflow_consumers(ConsentWorkflowMode mode)
+    {
+        var events = new List<Autheris.Application.ConsentRequests.Events.ConsentEventWrite>();
+        var outbox = NullFake.Create<Autheris.Application.ConsentRequests.Events.IConsentEventOutbox>((m, args) =>
+        {
+            if (m.Name == nameof(Autheris.Application.ConsentRequests.Events.IConsentEventOutbox.AppendAsync))
+            {
+                events.Add((Autheris.Application.ConsentRequests.Events.ConsentEventWrite)args![0]!);
+                return Task.FromResult(1L);
+            }
+
+            return NullFake.UseDefault;
+        });
+        var systemId = mode == ConsentWorkflowMode.External ? Guid.NewGuid() : (Guid?)null;
+        var engine = CreateEngine(
+            CapturingApprovals(),
+            router: new StubRouter(Route(mode, systemId, mode == ConsentWorkflowMode.External ? WorkflowRouteScopeKind.Domain : null)),
+            eventOutbox: outbox);
+
+        var res = await SubmitOrdersAsync(engine);
+
+        var created = events.ShouldHaveSingleItem();
+        created.EventType.ShouldBe(Autheris.Application.ConsentRequests.Events.ConsentEventTypes.RequestCreated);
+        created.SubjectId.ShouldBe(res.Request.Id.ToString("D"));
+        created.TenantId.ShouldBe(TenantA.Value);
+        created.ExternalSystemId.ShouldBe(systemId);
     }
 
     private static GatewayOptions AutoApproveOptions() =>
