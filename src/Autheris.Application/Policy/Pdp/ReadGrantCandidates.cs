@@ -40,15 +40,19 @@ public sealed class ReadGrantCandidates
     /// <summary>Every table is a candidate (consent bypass).</summary>
     public static ReadGrantCandidates All { get; } = new([], [], DateTimeOffset.MaxValue) { IsAll = true };
 
+    /// <summary>No table is a candidate.</summary>
+    public static ReadGrantCandidates Empty { get; } = new([], [], DateTimeOffset.MaxValue);
+
     private bool IsAll { get; init; }
 
-    /// <summary>Reads the active consents of <paramref name="subjects"/> in <paramref name="tenant"/> once and keeps the Allow read targets.</summary>
+    /// <summary>Reads the active consents of <paramref name="subjects"/> in <paramref name="tenant"/> once and keeps the Allow grant targets.</summary>
     public static async Task<ReadGrantCandidates> LoadAsync(
         IConsentRepository consentRepository,
         IEnumerable<Sid> subjects,
         DateTimeOffset now,
         TenantId? tenant,
-        CancellationToken ct)
+        CancellationToken ct,
+        bool includeWriteOnly = false)
     {
         ArgumentNullException.ThrowIfNull(consentRepository);
         var consents = await consentRepository.GetAllActiveConsentsForSubjectsAsync(subjects, roles: null, now, tenant, ct).ConfigureAwait(false);
@@ -64,8 +68,11 @@ public sealed class ReadGrantCandidates
                 nextChange = boundary;
             }
 
-            // Write-only consents (write rules without column rules) never grant a read.
-            if (consent.Effect != ConsentEffect.Allow || (consent.WriteRules.Count > 0 && consent.ColumnRules.Count == 0))
+            if (consent.Effect != ConsentEffect.Allow ||
+                consent.GrantKind != PermissionGrantKind.Data ||
+                (tenant is { } expectedTenant && consent.TenantId != expectedTenant) ||
+                !consent.IsActive(now) ||
+                (!includeWriteOnly && consent.WriteRules.Count > 0 && consent.ColumnRules.Count == 0))
             {
                 continue;
             }

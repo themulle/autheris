@@ -8,6 +8,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Catalog.Discovery;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Products;
 using Autheris.Application.Tenancy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -37,6 +38,8 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
     private readonly TimeSpan _interval;
     private readonly ILogger<CatalogChangeIndexerHostedService> _logger;
     private readonly IProtectionSnapshotProvider? _protectionProvider;
+    private readonly IGovernanceDomainRepository? _domainRepository;
+    private readonly IDataProductRepository? _productRepository;
     private IDisposable? _eventSubscription;
 
     public CatalogChangeIndexerHostedService(
@@ -51,7 +54,9 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
         TimeProvider? timeProvider = null,
         ILogger<CatalogChangeIndexerHostedService>? logger = null,
         TimeSpan? interval = null,
-        IProtectionSnapshotProvider? protectionProvider = null)
+        IProtectionSnapshotProvider? protectionProvider = null,
+        IGovernanceDomainRepository? domainRepository = null,
+        IDataProductRepository? productRepository = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -65,6 +70,8 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
         _interval = interval ?? DefaultInterval;
         _logger = logger ?? NullLogger<CatalogChangeIndexerHostedService>.Instance;
         _protectionProvider = protectionProvider;
+        _domainRepository = domainRepository;
+        _productRepository = productRepository;
     }
 
     public override Task StartAsync(CancellationToken cancellationToken)
@@ -153,10 +160,19 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
         var catalogOwner = TenantResolver.EffectiveDefaultOf(_gatewayOptions.Value.Tenancy);
         var sharedTables = DiscoveryTenantScope.ParseSharedTables(_gatewayOptions.Value.Catalog.SharedTables);
 
-        var activeTables = virtualFiltered
-            .Where(t => t.Table.IsActive && DiscoveryTenantScope.IsInScope(t, tenantId, catalogOwner, sharedTables, consentSet))
-            .OrderBy(static t => t.Identifier.ToString(), StringComparer.OrdinalIgnoreCase)
-            .ToList();
+        var activeTables = new List<TableMetadata>();
+        var inScopeIds = new HashSet<TableIdentifier>();
+        foreach (var table in virtualFiltered)
+        {
+            if (table.Table.IsActive && DiscoveryTenantScope.IsInScope(table, tenantId, catalogOwner, sharedTables, consentSet))
+            {
+                activeTables.Add(table);
+                inScopeIds.Add(table.Identifier);
+            }
+        }
+
+        var prefetchedProtections = await AddOwnContainerTablesAsync(tenantId, virtualFiltered, inScopeIds, activeTables, ct).ConfigureAwait(false);
+        activeTables.Sort(static (a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.Identifier.ToString(), b.Identifier.ToString()));
 
         var existingVersions = await _changeStore.GetObjectVersionsAsync(tenantId, ct).ConfigureAwait(false);
         var ownersByTable = activeTables.Count > 0
@@ -175,9 +191,11 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
             var artifacts = _artifactStore is null
                 ? null
                 : await _artifactStore.GetAsync(table.Table.Id, ct).ConfigureAwait(false);
-            var protection = _protectionProvider is null
-                ? null
-                : await _protectionProvider.GetAsync(tenantId, table.Identifier, ct).ConfigureAwait(false);
+            var protection = prefetchedProtections is not null && prefetchedProtections.TryGetValue(table.Identifier, out var preloaded)
+                ? preloaded
+                : _protectionProvider is null
+                    ? null
+                    : await _protectionProvider.GetAsync(tenantId, table.Identifier, ct).ConfigureAwait(false);
             var hash = ExternalCatalogReader.ComputeAdminRepresentationHash(table, owners, artifacts, protection);
 
             if (!existingVersions.TryGetValue(objectId, out var prev)
@@ -203,6 +221,91 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
 
         await _changeStore.ApplyVersionChangesAsync(tenantId, upserts, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
         return upserts.Count;
+    }
+
+    private async Task<IReadOnlyDictionary<TableIdentifier, EffectiveProtection>?> AddOwnContainerTablesAsync(
+        TenantId tenantId,
+        IReadOnlyList<TableMetadata> virtualFiltered,
+        HashSet<TableIdentifier> inScopeIds,
+        List<TableMetadata> activeTables,
+        CancellationToken ct)
+    {
+        if (_protectionProvider is null || (_domainRepository is null && _productRepository is null))
+        {
+            return null;
+        }
+
+        var ownContainers = new HashSet<ContainerRef>();
+        if (_domainRepository is not null)
+        {
+            var domains = await _domainRepository.ListAsync(tenantId, IGovernanceDomainRepository.MaxPageSize, 0, ct).ConfigureAwait(false);
+            foreach (var domain in domains)
+            {
+                if (domain.Tenant == tenantId && !domain.IsSystemUnassigned)
+                {
+                    ownContainers.Add(new ContainerRef(ContainerKind.Domain, domain.Id));
+                }
+            }
+        }
+
+        if (_productRepository is not null)
+        {
+            var products = await _productRepository.ListProductsAsync(tenantId, null, IGovernanceDomainRepository.MaxPageSize, ct).ConfigureAwait(false);
+            foreach (var product in products)
+            {
+                if (product.Tenant == tenantId)
+                {
+                    ownContainers.Add(new ContainerRef(ContainerKind.DataProduct, product.Id));
+                }
+            }
+        }
+
+        if (ownContainers.Count == 0)
+        {
+            return null;
+        }
+
+        var candidates = new List<TableMetadata>();
+        foreach (var table in virtualFiltered)
+        {
+            if (table.Table.IsActive &&
+                !inScopeIds.Contains(table.Identifier) &&
+                (string.IsNullOrWhiteSpace(table.OwnerTenantId) || string.Equals(table.OwnerTenantId, tenantId.Value, StringComparison.OrdinalIgnoreCase)))
+            {
+                candidates.Add(table);
+            }
+        }
+
+        if (candidates.Count == 0)
+        {
+            return null;
+        }
+
+        IReadOnlyDictionary<TableIdentifier, EffectiveProtection> resolved;
+        try
+        {
+            resolved = candidates.Count > 1
+                ? await _protectionProvider.ResolveManyAsync(tenantId, candidates, ct).ConfigureAwait(false)
+                : new Dictionary<TableIdentifier, EffectiveProtection>
+                {
+                    [candidates[0].Identifier] = await _protectionProvider.GetAsync(tenantId, candidates[0].Identifier, ct).ConfigureAwait(false)
+                };
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            _logger.LogWarning(ex, "Catalog change indexer container resolution failed ({ErrorType}); skipping unconsented container additions.", ex.GetType().Name);
+            return null;
+        }
+
+        foreach (var candidate in candidates)
+        {
+            if (resolved.TryGetValue(candidate.Identifier, out var prot) && ownContainers.Contains(prot.Container))
+            {
+                activeTables.Add(candidate);
+            }
+        }
+
+        return resolved;
     }
 
     private async Task<IReadOnlyList<TenantId>> ResolveTargetTenantsAsync(

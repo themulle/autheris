@@ -168,10 +168,11 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
 
         var list = await client.GetAsync("/api/v1/catalog/datasets");
         list.StatusCode.ShouldBe(HttpStatusCode.OK);
-        // Authorized discovery: the caller's own tenant objects are listed without access (table-level metadata only, no column), a foreign tenant's table is absent.
+        // Fail-closed discovery: ungranted tables in Unassigned (OnRequest) and foreign tenants' tables stay hidden.
         var listBody = await BodyAsync(list);
         listBody.ShouldNotContain("orders_a");
-        MaskingStatesOf(await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets/dom_b.main.invoices_b"))).ShouldBeEmpty();
+        listBody.ShouldNotContain("invoices_b");
+        (await client.GetAsync("/api/v1/catalog/datasets/dom_b.main.invoices_b")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
         (await client.GetAsync("/api/v1/catalog/datasets/dom_a.main.orders_a")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
         (await client.GetAsync("/api/v1/catalog/datasets/dom_a.main.does_not_exist")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
         (await BodyAsync(await client.GetAsync("/api/v1/catalog/search?q=orders"))).ShouldBe("[]");
@@ -274,22 +275,35 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
     private static readonly TableIdentifier HiddenT = new("dom_s", "main", "hid_t");
     private static readonly TableIdentifier UnsharedFullT = new("dom_s", "main", "unshared_full_t");
 
-    private static async Task SeedTiersAsync(WebApplicationFactory<Program> factory)
+    private static async Task SeedTiersAsync(
+        WebApplicationFactory<Program> factory,
+        TenantId? openDomainTenant = null,
+        params TableIdentifier[] openTables)
     {
         using var scope = factory.Services.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
         var admin = new Sid("S-ADMIN");
+        var idsByTable = new Dictionary<TableIdentifier, Guid>();
         foreach (var id in new[] { SummaryT, FullT, HiddenT, UnsharedFullT })
         {
+            var tableId = Guid.NewGuid();
             await repo.UpsertTableMetadataAsync(new TableMetadata
             {
-                Table = new Table { Id = Guid.NewGuid(), DisplayName = id.TableName, TableName = id.TableName, SchemaName = id.Schema, SourceType = "PostgreSql", SourceName = id.Domain, Description = "Fixture " + id.TableName },
+                Table = new Table { Id = tableId, DisplayName = id.TableName, TableName = id.TableName, SchemaName = id.Schema, SourceType = "PostgreSql", SourceName = id.Domain, Description = "Fixture " + id.TableName },
                 Identifier = id,
                 Columns = [new() { ColumnName = "id", DataType = "integer" }, new() { ColumnName = "tier_secret_col", DataType = "varchar" }]
             });
+            idsByTable[id] = (await repo.GetTableMetadataAsync(id))!.Table.Id;
         }
 
         await repo.ChangeDatasetTagsAsync(SummaryT, ["finance"], [], admin);
+
+        if (openDomainTenant is { } tenant && openTables.Length > 0)
+        {
+            var domains = scope.ServiceProvider.GetRequiredService<IGovernanceDomainRepository>();
+            await CatalogVisibilitySeeding.SeedOpenDomainAsync(
+                domains, tenant, admin, openTables.Select(t => idsByTable[t]).ToArray());
+        }
     }
 
 
@@ -299,7 +313,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         {
             if (!_fixture.TierSeeded)
             {
-                await SeedTiersAsync(_fixture.TierFactory);
+                await SeedTiersAsync(_fixture.TierFactory, new TenantId(TenantB), SummaryT, FullT, HiddenT);
                 _fixture.TierSeeded = true;
             }
 
@@ -307,7 +321,7 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         }
 
         var factory = Configure(_fixture.Root, mode, SummaryT.ToString().ToLowerInvariant(), FullT.ToString().ToLowerInvariant(), HiddenT.ToString().ToLowerInvariant());
-        await SeedTiersAsync(factory);
+        await SeedTiersAsync(factory, new TenantId("default-tenant"), SummaryT, FullT, HiddenT);
         return (factory, await ClientAsync(sid, tenant, roles, factory));
     }
 
@@ -396,6 +410,25 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
         using var single = Configure(_fixture.Root, "Single");
         await SeedTiersAsync(single);
         var client = await ClientAsync("S-T-USER", null, "Reader", single);
+
+        // Unassigned tables remain hidden in the catalog-owner tenant until assigned to an Open or granted container.
+        var before = await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets"));
+        before.ShouldNotContain("unshared_full_t");
+        before.ShouldNotContain("sum_t");
+        (await client.GetAsync("/api/v1/catalog/datasets/dom_s.main.unshared_full_t")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
+
+        using (var scope = single.Services.CreateScope())
+        {
+            var domains = scope.ServiceProvider.GetRequiredService<IGovernanceDomainRepository>();
+            var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
+            var ids = new List<Guid>();
+            foreach (var id in new[] { SummaryT, FullT, HiddenT, UnsharedFullT })
+            {
+                ids.Add((await repo.GetTableMetadataAsync(id))!.Table.Id);
+            }
+
+            await CatalogVisibilitySeeding.SeedOpenDomainAsync(domains, new TenantId("default-tenant"), new Sid("S-ADMIN"), ids.ToArray());
+        }
 
         var list = await BodyAsync(await client.GetAsync("/api/v1/catalog/datasets"));
         list.ShouldContain("unshared_full_t");
@@ -502,7 +535,8 @@ public sealed class CatalogChannelParityTests : IClassFixture<CatalogChannelPari
             }
         });
 
-        // A grant of another person puts the table into the tenant's discovery scope; the caller under test holds no grant.
+        // An Open domain exposes metadata of VaultA across channels while DeniedColumn remains absent on every channel.
+        await OpenDomainSeeder.AssignToOpenDomainAsync(_factory.Services, new TenantId(TenantA), VaultA);
         await ConsentAsync(repo, VaultA, "S-A-OTHER", TenantA, "id");
     }
 

@@ -188,8 +188,8 @@ ORDER BY seq ASC";
     public async Task<IReadOnlyList<TenantId>> ListKnownTenantIdsAsync(CancellationToken ct = default)
     {
         const string selectTenantsSql = @"SELECT tenant_id FROM TENANT_REGISTRY WHERE collided = 0
-UNION
-SELECT DISTINCT tenant_id FROM CATALOG_OBJECT_VERSIONS";
+UNION SELECT DISTINCT tenant_id FROM CATALOG_OBJECT_VERSIONS
+UNION SELECT DISTINCT tenant_id FROM GOVERNANCE_DOMAINS UNION SELECT DISTINCT tenant_id FROM DATA_PRODUCTS";
 
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
