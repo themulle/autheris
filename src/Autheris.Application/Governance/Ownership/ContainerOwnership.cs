@@ -172,7 +172,10 @@ public sealed class ContainerOwnership(
         };
     }
 
-    /// <summary>Resolves the owner of every table set-based: one catalog read, one container read per tenant. Unresolvable tables are absent.</summary>
+    /// <summary>
+    /// Resolves the owner of every table set-based: one structural catalog read (ownership needs no dataset catalog overlay), one
+    /// container read per tenant. Unresolvable tables are absent.
+    /// </summary>
     private async Task<Dictionary<TableIdentifier, Resolved>> ResolveManyAsync(IReadOnlyCollection<TableIdentifier> requested, CancellationToken ct)
     {
         var result = new Dictionary<TableIdentifier, Resolved>();
@@ -184,7 +187,7 @@ public sealed class ContainerOwnership(
 
         try
         {
-            var metas = await tables.GetTableMetadataBatchAsync(distinct, ct).ConfigureAwait(false);
+            var metas = await tables.GetStructuralTableMetadataBatchAsync(distinct, ct).ConfigureAwait(false);
             var byTenant = new Dictionary<TenantId, List<(TableIdentifier Table, Guid TableId)>>();
             for (var i = 0; i < distinct.Count && i < metas.Count; i++)
             {

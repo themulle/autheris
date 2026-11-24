@@ -14,9 +14,12 @@ using Autheris.Domain.Model;
 /// </summary>
 internal static class CatalogMetadataBatchReader
 {
-    /// <summary>One entry per requested table in request order (null = unknown or inactive).</summary>
+    /// <summary>
+    /// One entry per requested table in request order (null = unknown or inactive). <paramref name="applyOverlay"/> false returns the
+    /// structural (epoch-validated) metadata without the per-table dataset catalog overlay reads.
+    /// </summary>
     internal static async Task<IReadOnlyList<TableMetadata?>> ReadAsync(
-        GovernanceRepository repo, IReadOnlyList<TableIdentifier> tables, CancellationToken ct)
+        GovernanceRepository repo, IReadOnlyList<TableIdentifier> tables, CancellationToken ct, bool applyOverlay = true)
     {
         ArgumentNullException.ThrowIfNull(tables);
         var result = new TableMetadata?[tables.Count];
@@ -64,6 +67,11 @@ internal static class CatalogMetadataBatchReader
             }
 
             result[i] = await repo.GetTableMetadataCoreAsync(tables[i], null, ct, probeCache: false).ConfigureAwait(false);
+        }
+
+        if (!applyOverlay)
+        {
+            return result;
         }
 
         // Tier and tags are never cached: a fresh overlay is applied to every returned table on one connection.

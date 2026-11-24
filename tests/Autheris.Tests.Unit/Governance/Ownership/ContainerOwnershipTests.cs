@@ -274,4 +274,42 @@ public sealed class ContainerOwnershipTests
         domains.SingleCalls.ShouldBe(0, "no per-table container read");
         await store.Received(1).GetEffectiveGroupSidsForUserAsync(Arg.Any<TenantId>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
+
+    [Fact]
+    public async Task Batch_reads_use_the_structural_catalog_batch_without_the_overlay()
+    {
+        // Issue #1009 (4A): ownership needs only the table entity and its owner tenant; the overlay-applying batch read costs several
+        // statements per table and made the catalog page grow with its page size.
+        var metas = Substitute.For<ITableMetadataRepository>();
+        metas.GetStructuralTableMetadataBatchAsync(Arg.Any<IReadOnlyList<TableIdentifier>>(), Arg.Any<CancellationToken>())
+            .Returns(call => Task.FromResult<IReadOnlyList<TableMetadata?>>(
+                call.Arg<IReadOnlyList<TableIdentifier>>().Select(t => t == Orders ? Meta() : null).ToList()));
+        var domains = new StubDomains { Container = Assigned(OwnerGroup) };
+        var sut = new ContainerOwnership(metas, domains, GroupsOf(OwnerGroup.Value), Realms("realm-1"));
+        var unknown = new TableIdentifier("sales", "public", "unknown");
+
+        var owners = await ((IContainerOwnership)sut).GetDataOwnersForTablesAsync([Orders, unknown]);
+        var owned = await ((IContainerOwnership)sut).GetOwnedOrDelegatedTablesAsync(Member, [Orders, unknown], DateTimeOffset.UtcNow);
+
+        owners[Orders].ShouldHaveSingleItem().AdSid.ShouldBe(OwnerGroup);
+        owners[unknown].ShouldBeEmpty();
+        owned.ShouldBe([Orders]);
+        await metas.Received(2).GetStructuralTableMetadataBatchAsync(Arg.Any<IReadOnlyList<TableIdentifier>>(), Arg.Any<CancellationToken>());
+        await metas.DidNotReceiveWithAnyArgs().GetTableMetadataBatchAsync(default!, default);
+        await metas.DidNotReceiveWithAnyArgs().GetTableMetadataAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task Structural_batch_read_failure_is_not_owner()
+    {
+        var metas = Substitute.For<ITableMetadataRepository>();
+        metas.GetStructuralTableMetadataBatchAsync(Arg.Any<IReadOnlyList<TableIdentifier>>(), Arg.Any<CancellationToken>())
+            .Returns<IReadOnlyList<TableMetadata?>>(_ => throw new InvalidOperationException("catalog down"));
+        var domains = new StubDomains { Container = Assigned(OwnerGroup) };
+        var sut = new ContainerOwnership(metas, domains, GroupsOf(OwnerGroup.Value), Realms("realm-1"));
+
+        (await ((IContainerOwnership)sut).GetOwnedOrDelegatedTablesAsync(OwnerGroup, [Orders], DateTimeOffset.UtcNow)).ShouldBeEmpty();
+        (await ((IContainerOwnership)sut).GetDataOwnersForTablesAsync([Orders]))[Orders].ShouldBeEmpty();
+        domains.BatchCalls.ShouldBe(0);
+    }
 }
