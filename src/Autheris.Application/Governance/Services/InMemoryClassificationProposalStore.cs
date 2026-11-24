@@ -38,21 +38,11 @@ public sealed class InMemoryClassificationProposalStore : IClassificationProposa
     {
         IEnumerable<TableClassificationProposal> query = _proposals.Values;
 
-        if (string.Equals(reviewerRole, "DATA_OWNER", StringComparison.OrdinalIgnoreCase))
-        {
-            query = query.Where(p => string.Equals(p.Status, "PENDING_OWNER_REVIEW", StringComparison.OrdinalIgnoreCase)
-                                     || string.Equals(p.Status, "UNCLASSIFIED", StringComparison.OrdinalIgnoreCase));
-        }
-        else if (string.Equals(reviewerRole, "DATA_GOVERNANCE_REVIEWER", StringComparison.OrdinalIgnoreCase))
-        {
-            query = query.Where(p => string.Equals(p.Status, "PENDING_GOVERNANCE_REVIEW", StringComparison.OrdinalIgnoreCase));
-        }
-        else
-        {
-            // All pending (not yet finalized or rejected)
-            query = query.Where(p => !string.Equals(p.Status, "CLASSIFIED", StringComparison.OrdinalIgnoreCase)
-                                     && !string.Equals(p.Status, "REJECTED", StringComparison.OrdinalIgnoreCase));
-        }
+        // Single approval (Amendment 2): either decider (owner or Data Governance) sees every open proposal; a legacy proposal waiting
+        // for the retired second stage is open as well.
+        _ = reviewerRole;
+        query = query.Where(p => !string.Equals(p.Status, "CLASSIFIED", StringComparison.OrdinalIgnoreCase)
+                                 && !string.Equals(p.Status, "REJECTED", StringComparison.OrdinalIgnoreCase));
 
         if (ownerSid.HasValue && !string.IsNullOrWhiteSpace(ownerSid.Value.Value))
         {

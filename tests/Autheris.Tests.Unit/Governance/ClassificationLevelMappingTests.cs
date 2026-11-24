@@ -178,14 +178,13 @@ public sealed class ClassificationLevelMappingTests
             Guid.NewGuid(),
             table,
             ProposerSid.Value,
-            "PENDING_GOVERNANCE_REVIEW",
+            "PENDING_OWNER_REVIEW",
             [
                 new("email", "varchar", "L3_CONFIDENTIAL", 3, "EMAIL", "MASK", 0.95, false, Reasoning: null, ProposedProtectionClass: ProtectionClass.Confidential, ProposedMaskCategory: ClassificationScopes.PiiCode),
                 new("notes", "varchar", "L2_INTERNAL", 2, null, "NONE", 1.0, false, Reasoning: null, ProposedProtectionClass: ProtectionClass.Internal, ProposedMaskCategory: null)
             ],
             T0,
-            ProposedBySid: ProposerSid.Value,
-            Stage1ApproverSid: ProposerSid.Value);
+            ProposedBySid: ProposerSid.Value);
 
         // IT admin must be refused classification approval.
         var byIt = await sm.TransitionAsync(

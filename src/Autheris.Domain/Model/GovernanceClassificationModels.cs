@@ -32,7 +32,6 @@ public sealed record SensitivityLevelDefinition(
     string DisplayName,
     string Description,
     int Rank,
-    bool RequiresFourEyes = false,
     bool RequiresStepUpAuth = false,
     int MaxConsentTtlDays = 90,
     ProtectionClass ProtectionClass = ProtectionClass.Confidential);
@@ -69,15 +68,11 @@ public sealed record PreClassificationConfig(
     bool RequireManualReviewIfDisputed = true);
 
 /// <summary>
-/// Approval pipeline configuration (1-stage, 2-stage four-eyes, step-up MFA).
+/// Approval pipeline configuration: one decision by a Data Governance or owner member settles a proposal (single approval); a step-up
+/// MFA token is required from the given sensitivity rank on.
 /// </summary>
 public sealed record ApprovalPipelineConfig(
-    bool EnableFourEyes = true,
-    string Mode = "ConditionalDualStage", // "SingleStageDataOwnerOnly" | "SingleStageComplianceOnly" | "DualStageStrict" | "ConditionalDualStage"
-    int FourEyesThresholdRank = 3,
-    bool RequireSecondStageOnDisputed = true,
-    int RequireStepUpAuthThresholdRank = 4,
-    bool RequireFourEyesOnDowngrades = true);
+    int RequireStepUpAuthThresholdRank = 4);
 
 /// <summary>
 /// Workflow profile encapsulating resolution, classification and approval policy.
@@ -110,12 +105,11 @@ public sealed record TableClassificationProposal(
     Guid ProposalId,
     TableIdentifier TableIdentifier,
     string? DataOwnerSid,
-    string Status, // "UNCLASSIFIED", "PENDING_OWNER_REVIEW", "PENDING_GOVERNANCE_REVIEW", "CLASSIFIED", "REJECTED"
+    string Status, // "UNCLASSIFIED", "PENDING_OWNER_REVIEW", "CLASSIFIED", "REJECTED" (legacy "PENDING_GOVERNANCE_REVIEW" is still open)
     IReadOnlyList<ColumnClassificationProposal> Columns,
     DateTimeOffset CreatedAtUtc,
     string? ProposedBySid = null,
-    string? Stage1ApproverSid = null,
-    string? Stage2ApproverSid = null);
+    string? ApprovedBySid = null);
 
 /// <summary>
 /// Column-level human approval or override decision.
@@ -131,7 +125,7 @@ public sealed record ColumnClassificationDecision(
     string? EffectiveMaskCategory = null);
 
 /// <summary>
-/// Human sign-off / transition request submitted by a Data Owner or Compliance Reviewer.
+/// Human sign-off / transition request submitted by a Data Governance or owner member (single approval).
 /// </summary>
 public sealed record TableClassificationApprovalRequest(
     Guid ProposalId,
@@ -155,7 +149,6 @@ public sealed record TableClassificationApprovalResult(
     string NewStatus,
     string Message,
     bool RequiresStepUpAuth = false,
-    bool RequiresSecondStage = false,
     string? ErrorCode = null);
 
 /// <summary>

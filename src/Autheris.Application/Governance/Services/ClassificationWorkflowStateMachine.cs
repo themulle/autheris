@@ -155,9 +155,10 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
             return Fail(proposal, request, "INVALID_REVIEWER_ROLE", $"Unknown reviewer role '{request.ReviewerRole}'.");
         }
 
-        var isStage1Status = IsStatus(proposal, "UNCLASSIFIED") || IsStatus(proposal, "PENDING_OWNER_REVIEW");
-        var isStage2Status = IsStatus(proposal, "PENDING_GOVERNANCE_REVIEW");
-        if (!isStage1Status && !isStage2Status)
+        // Single approval (Amendment 2): one decision by a DG or owner member settles an open proposal. A legacy proposal still waiting
+        // for the retired second stage (PENDING_GOVERNANCE_REVIEW) is open as well.
+        var isOpenStatus = IsStatus(proposal, "UNCLASSIFIED") || IsStatus(proposal, "PENDING_OWNER_REVIEW") || IsStatus(proposal, "PENDING_GOVERNANCE_REVIEW");
+        if (!isOpenStatus)
         {
             // CLASSIFIED / REJECTED (and anything unknown) are terminal: sealed proposals cannot be re-approved or re-rejected.
             return Fail(proposal, request, "INVALID_WORKFLOW_STATE",
@@ -172,28 +173,6 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
                 NewStatus: "REJECTED",
                 Message: "Classification proposal was rejected.");
             Diagnostics.ClassificationDiagnostics.RecordTransition(request.Action, request.ReviewerRole, "REJECTED");
-        }
-        else if ((isOwnerRole && !isStage1Status) || (isGovRole && !isStage2Status))
-        {
-            // Stage 1 belongs to the Data Owner, Stage 2 only exists after Stage 1 (PENDING_GOVERNANCE_REVIEW).
-            return Fail(proposal, request, "INVALID_WORKFLOW_STATE",
-                $"Role '{request.ReviewerRole}' cannot approve a proposal in status '{proposal.Status}'.");
-        }
-        else if (isGovRole &&
-                 !string.IsNullOrWhiteSpace(proposal.DataOwnerSid) &&
-                 string.Equals(proposal.DataOwnerSid, reviewerSid, StringComparison.OrdinalIgnoreCase))
-        {
-            _logger.LogWarning("SoD Violation: Data Owner {Sid} attempted to act as Governance Reviewer on proposal {ProposalId}.",
-                LogSanitizer.Sanitize(proposal.DataOwnerSid), proposal.ProposalId);
-
-            result = new TableClassificationApprovalResult(
-                Success: false,
-                NewStatus: proposal.Status,
-                Message: "SoD Violation: Data Owner cannot act as Governance Reviewer on their own proposal.",
-                ErrorCode: "SOD_ANTI_SELF_APPROVAL_VIOLATION");
-
-            Diagnostics.ClassificationDiagnostics.RecordSodViolation(proposal.TableIdentifier.ToQualifiedName());
-            Diagnostics.ClassificationDiagnostics.RecordTransition(request.Action, request.ReviewerRole, "BLOCKED_SOD");
         }
         else if (IsRequesterDecidingOwnDowngrade(proposal, request, reviewerSid, options))
         {
@@ -216,7 +195,7 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
             }
 
             // Effective maximum rank across ALL proposal columns. Caller-supplied decisions may only raise a rank,
-            // never lower it, so they cannot slip below the step-up / four-eyes thresholds.
+            // never lower it, so they cannot slip below the step-up threshold.
             var maxEffectiveRank = 0;
             var overrideMap = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
             if (request.ColumnDecisions != null)
@@ -252,20 +231,6 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
             }
 
             var stepUpRequired = maxEffectiveRank >= pipeline.RequireStepUpAuthThresholdRank;
-            var requiresFourEyes = RequiresFourEyes(proposal, pipeline, maxEffectiveRank);
-
-            if (requiresFourEyes)
-            {
-                var distinctViolation = CheckDistinctApprovers(proposal, reviewerSid, isGovRole);
-                if (distinctViolation != null)
-                {
-                    _logger.LogWarning("Four-eyes violation on proposal {ProposalId}: {Reason}", proposal.ProposalId, LogSanitizer.Sanitize(distinctViolation));
-                    Diagnostics.ClassificationDiagnostics.RecordSodViolation(proposal.TableIdentifier.ToQualifiedName());
-                    Diagnostics.ClassificationDiagnostics.RecordTransition(request.Action, request.ReviewerRole, "BLOCKED_SOD");
-                    return Fail(proposal, request, "DISTINCT_APPROVER_REQUIRED", distinctViolation, recordTransition: false);
-                }
-            }
-
             if (stepUpRequired && string.IsNullOrWhiteSpace(request.StepUpAuthToken))
             {
                 _logger.LogWarning("Step-Up 2FA required for high sensitivity rank {Rank} on proposal {ProposalId}.",
@@ -313,11 +278,11 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
                     return result;
                 }
 
-                result = EvaluateApprovalProgression(proposal, request, pipeline, maxEffectiveRank);
+                result = Classified(request);
             }
             else
             {
-                result = EvaluateApprovalProgression(proposal, request, pipeline, maxEffectiveRank);
+                result = Classified(request);
             }
         }
 
@@ -337,12 +302,8 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
             var updatedProposal = proposal with { Status = result.NewStatus };
             if (isApprove)
             {
-                // Persist who approved each stage so the next stage can require a distinct principal.
-                updatedProposal = string.Equals(result.NewStatus, "PENDING_GOVERNANCE_REVIEW", StringComparison.Ordinal)
-                    ? updatedProposal with { Stage1ApproverSid = reviewerSid }
-                    : isGovRole
-                        ? updatedProposal with { Stage2ApproverSid = reviewerSid }
-                        : updatedProposal with { Stage1ApproverSid = reviewerSid };
+                // The single decider is recorded on the proposal.
+                updatedProposal = updatedProposal with { ApprovedBySid = reviewerSid };
             }
 
             await _proposalStore.SaveProposalAsync(updatedProposal, ct).ConfigureAwait(false);
@@ -359,85 +320,17 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
         return result;
     }
 
-    private TableClassificationApprovalResult EvaluateApprovalProgression(
-        TableClassificationProposal proposal,
-        TableClassificationApprovalRequest request,
-        ApprovalPipelineConfig pipeline,
-        int maxEffectiveRank)
+    private static TableClassificationApprovalResult Classified(TableClassificationApprovalRequest request)
     {
-        var requiresFourEyes = RequiresFourEyes(proposal, pipeline, maxEffectiveRank);
-
-        // Stage 2 only exists after Stage 1; it always seals, regardless of recomputed thresholds.
-        if (!requiresFourEyes && !IsStatus(proposal, "PENDING_GOVERNANCE_REVIEW"))
-        {
-            // 1-Stage Mode: Immediately classified
-            _logger.LogInformation("Proposal {ProposalId} approved in 1-stage mode (FourEyes disabled or threshold not reached).", proposal.ProposalId);
-            var res = new TableClassificationApprovalResult(
-                Success: true,
-                NewStatus: "CLASSIFIED",
-                Message: "Classification activated and approved.");
-            Diagnostics.ClassificationDiagnostics.RecordTransition(request.Action, request.ReviewerRole, "CLASSIFIED");
-            return res;
-        }
-
-        if (string.Equals(request.ReviewerRole, "DATA_OWNER", StringComparison.OrdinalIgnoreCase))
-        {
-            _logger.LogInformation("Proposal {ProposalId} approved by Data Owner; advancing to Compliance Reviewer.", proposal.ProposalId);
-            var res = new TableClassificationApprovalResult(
-                Success: true,
-                NewStatus: "PENDING_GOVERNANCE_REVIEW",
-                Message: "Stage 1 approved. Awaiting final Governance Compliance review.",
-                RequiresSecondStage: true);
-            Diagnostics.ClassificationDiagnostics.RecordTransition(request.Action, request.ReviewerRole, "PENDING_GOVERNANCE_REVIEW");
-            return res;
-        }
-
-        if (string.Equals(request.ReviewerRole, "DATA_GOVERNANCE_REVIEWER", StringComparison.OrdinalIgnoreCase))
-        {
-            _logger.LogInformation("Proposal {ProposalId} sealed and approved by Governance Reviewer.", proposal.ProposalId);
-            var res = new TableClassificationApprovalResult(
-                Success: true,
-                NewStatus: "CLASSIFIED",
-                Message: "Classification sealed and activated cluster-wide.");
-            Diagnostics.ClassificationDiagnostics.RecordTransition(request.Action, request.ReviewerRole, "CLASSIFIED");
-            return res;
-        }
-
-        var unknownRole = new TableClassificationApprovalResult(
-            Success: false,
-            NewStatus: proposal.Status,
-            Message: $"Unknown reviewer role '{request.ReviewerRole}'.",
-            ErrorCode: "INVALID_REVIEWER_ROLE");
-        Diagnostics.ClassificationDiagnostics.RecordTransition(request.Action, request.ReviewerRole, "INVALID_ROLE");
-        return unknownRole;
+        Diagnostics.ClassificationDiagnostics.RecordTransition(request.Action, request.ReviewerRole, "CLASSIFIED");
+        return new TableClassificationApprovalResult(
+            Success: true,
+            NewStatus: "CLASSIFIED",
+            Message: "Classification activated and approved.");
     }
 
     private static bool IsStatus(TableClassificationProposal proposal, string status) =>
         string.Equals(proposal.Status, status, StringComparison.OrdinalIgnoreCase);
-
-    private static bool RequiresFourEyes(TableClassificationProposal proposal, ApprovalPipelineConfig pipeline, int maxEffectiveRank) =>
-        pipeline.EnableFourEyes &&
-        (maxEffectiveRank >= pipeline.FourEyesThresholdRank ||
-         (pipeline.RequireSecondStageOnDisputed && HasDisputedColumns(proposal)));
-
-    private static string? CheckDistinctApprovers(TableClassificationProposal proposal, string reviewerSid, bool isStage2)
-    {
-        if (!string.IsNullOrWhiteSpace(proposal.ProposedBySid) &&
-            string.Equals(proposal.ProposedBySid, reviewerSid, StringComparison.OrdinalIgnoreCase))
-        {
-            return "Four-eyes: the approver must differ from the principal who proposed the classification.";
-        }
-
-        if (isStage2 &&
-            (string.IsNullOrWhiteSpace(proposal.Stage1ApproverSid) ||
-             string.Equals(proposal.Stage1ApproverSid, reviewerSid, StringComparison.OrdinalIgnoreCase)))
-        {
-            // Missing Stage 1 approver on a Stage 2 proposal means the record is untrustworthy: fail closed.
-            return "Four-eyes: Stage 2 must be approved by a different principal than Stage 1.";
-        }
-
-        return null;
-    }
 
     private TableClassificationApprovalResult Fail(
         TableClassificationProposal proposal,
@@ -457,19 +350,6 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
             NewStatus: proposal.Status,
             Message: message,
             ErrorCode: errorCode);
-    }
-
-    private static bool HasDisputedColumns(TableClassificationProposal proposal)
-    {
-        foreach (var col in proposal.Columns)
-        {
-            if (col.IsDisputed)
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     private static bool IsRequesterDecidingOwnDowngrade(

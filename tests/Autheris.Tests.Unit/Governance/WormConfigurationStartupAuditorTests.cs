@@ -33,7 +33,7 @@ public sealed class WormConfigurationStartupAuditorTests
 
         // A subsequent change chains to the startup hash at epoch 2 (proves startup minted epoch 1).
         var startupHash = audit.CurrentConfigHash;
-        monitor.SetCurrent(new GatewayOptions { Classification = new ClassificationOptions { FourEyesThresholdRank = 2 } });
+        monitor.SetCurrent(new GatewayOptions { Classification = new ClassificationOptions { DefaultSensitivityKey = "L3_CONFIDENTIAL" } });
         var next = await audit.AuditConfigurationSnapshotAsync("ADMIN_API_UPDATE");
         next.ShouldNotBeNull();
         next.PolicyEpoch.ShouldBe(2);

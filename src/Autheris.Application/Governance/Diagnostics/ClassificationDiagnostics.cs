@@ -7,7 +7,7 @@ using System.Diagnostics.Metrics;
 
 /// <summary>
 /// OpenTelemetry Diagnostics Provider for Data Classification, AI Pre-Classification,
-/// and Four-Eyes Governance Workflows.
+/// and single-approval Governance Workflows.
 /// </summary>
 public static class ClassificationDiagnostics
 {

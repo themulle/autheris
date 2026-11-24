@@ -198,14 +198,16 @@ public class DataClassificationWorkflowIntegrationTests : IClassFixture<DataClas
         var spoofSid = new TableClassificationTransitionPayload(null, ForgedRequest(proposal, "S-1-5-21-SOMEONE-ELSE", "DATA_OWNER"));
         (await client.PostAsJsonAsync("/api/governance/classification/transition", spoofSid)).StatusCode.ShouldBe(HttpStatusCode.BadRequest);
 
-        var spoofRole = new TableClassificationTransitionPayload(null, ForgedRequest(proposal, "S-1-5-21-ADMIN-1", "DATA_GOVERNANCE_REVIEWER"));
+        // A Data Governance member decides as DATA_GOVERNANCE_REVIEWER; claiming the owner role instead is a forgery.
+        var spoofRole = new TableClassificationTransitionPayload(null, ForgedRequest(proposal, "S-1-5-21-ADMIN-1", "DATA_OWNER"));
         (await client.PostAsJsonAsync("/api/governance/classification/transition", spoofRole)).StatusCode.ShouldBe(HttpStatusCode.BadRequest);
     }
 
     [Fact]
-    public async Task SR_H_04_Approve_WithUnsetDataOwner_IsForbidden()
+    public async Task SR_H_04_Approve_WithUnsetDataOwner_ByNonGovernanceCaller_IsForbidden()
     {
-        var client = CreateClient(new Sid("S-1-5-21-ADMIN-1"), ["GovernanceAdmin"]);
+        // Neither Data Governance nor an owner: a compliance role alone decides nothing any more (no second stage), fail closed.
+        var client = CreateClient(new Sid("S-1-5-21-COMPLIANCE-1"), ["ComplianceReviewer", "Consumer"]);
         var proposal = await SeedProposalAsync(ownerSid: null, rank: 1, status: "UNCLASSIFIED");
 
         var resp = await client.PostAsJsonAsync(
@@ -217,6 +219,26 @@ public class DataClassificationWorkflowIntegrationTests : IClassFixture<DataClas
             $"/api/governance/classification/proposals/{proposal.ProposalId}/reject",
             new ClassificationRejectionPayload("no"));
         rej.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+
+        var stored = await _factory.Services.GetRequiredService<IClassificationProposalStore>().GetProposalByIdAsync(proposal.ProposalId);
+        stored!.Status.ShouldBe("UNCLASSIFIED");
+    }
+
+    [Fact]
+    public async Task Single_approval_governance_member_decides_alone()
+    {
+        // Amendment 2: one Data Governance member decides, also a legacy proposal waiting for the retired second stage.
+        var client = CreateClient(new Sid("S-1-5-21-DG-MEMBER"), ["GovernanceAdmin"]);
+        var proposal = await SeedProposalAsync(ownerSid: "S-1-5-21-OWNER-ZED", rank: 1, status: "PENDING_GOVERNANCE_REVIEW");
+
+        var resp = await client.PostAsJsonAsync(
+            $"/api/governance/classification/proposals/{proposal.ProposalId}/approve",
+            new ClassificationApprovalPayload(null));
+        resp.StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        var stored = await _factory.Services.GetRequiredService<IClassificationProposalStore>().GetProposalByIdAsync(proposal.ProposalId);
+        stored!.Status.ShouldBe("CLASSIFIED");
+        stored.ApprovedBySid.ShouldBe("S-1-5-21-DG-MEMBER");
     }
 
     [Fact]

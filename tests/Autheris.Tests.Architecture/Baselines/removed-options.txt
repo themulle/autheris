@@ -20,6 +20,7 @@ Autheris.Domain.Options.BackstageIntegrationOptions.SystemName
 Autheris.Domain.Options.CatalogSearchOptions.Enabled
 Autheris.Domain.Options.CatalogSearchOptions.FieldWeights
 Autheris.Domain.Options.CdnOptions.PurgeMode
+Autheris.Domain.Options.ClassificationOptions.FourEyesThresholdRank
 Autheris.Domain.Options.CollibraOptions.BaseUrl
 Autheris.Domain.Options.CollibraOptions.CommunityId
 Autheris.Domain.Options.CollibraOptions.Password

@@ -36,12 +36,12 @@ public sealed class WormConfigurationAuditServiceTests
         var secondCall = await auditService.AuditConfigurationSnapshotAsync("CONFIGMAP_RELOAD", "SYSTEM");
         secondCall.ShouldBeNull();
 
-        // 3. Configuration change (e.g. four eyes threshold modified) -> Must mint epoch 2 with previous hash linked
+        // 3. Configuration change (e.g. default sensitivity modified) -> Must mint epoch 2 with previous hash linked
         var updatedOptions = new GatewayOptions
         {
             Classification = new ClassificationOptions
             {
-                FourEyesThresholdRank = 2 // Changed from 3 to 2
+                DefaultSensitivityKey = "L3_CONFIDENTIAL" // Changed from L2_INTERNAL
             }
         };
         optionsMonitor.SetCurrent(updatedOptions);
