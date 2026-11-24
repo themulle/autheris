@@ -318,9 +318,12 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
                     _protectionProvider is not null)
                 {
                     tableClasses = new Dictionary<TableIdentifier, Autheris.Domain.Security.ProtectionClass>(rows.Count);
+                    var batchProtections = await _protectionProvider.ResolveManyAsync(context.Tenant, rows, ct).ConfigureAwait(false);
                     foreach (var row in rows)
                     {
-                        var prot = await _protectionProvider.GetAsync(context.Tenant, row.Identifier, ct).ConfigureAwait(false);
+                        var prot = batchProtections.TryGetValue(row.Identifier, out var batchProtection)
+                            ? batchProtection
+                            : await _protectionProvider.GetAsync(context.Tenant, row.Identifier, ct).ConfigureAwait(false);
                         tableClasses[row.Identifier] = prot.TableClass;
                     }
                 }

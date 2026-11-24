@@ -80,13 +80,21 @@ public sealed partial class AccessDecisionPoint
         EffectiveProtection? writeProtection = null;
         if (_protectionProvider is not null)
         {
-            try
+            if (request.ProtectionPrefetch is { } protPrefetch &&
+                protPrefetch.TryGet(subject.TenantId, metadata.Identifier, _timeProvider.GetUtcNow(), out var prefetchedProt))
             {
-                writeProtection = await _protectionProvider.GetAsync(subject.TenantId, metadata.Identifier, ct).ConfigureAwait(false);
+                writeProtection = prefetchedProt;
             }
-            catch (Exception) when (!ct.IsCancellationRequested)
+            else
             {
-                return TableAccessDecision.Denied(metadata.Identifier, "Protection classification unavailable (fail-closed).");
+                try
+                {
+                    writeProtection = await _protectionProvider.GetAsync(subject.TenantId, metadata.Identifier, ct).ConfigureAwait(false);
+                }
+                catch (Exception) when (!ct.IsCancellationRequested)
+                {
+                    return TableAccessDecision.Denied(metadata.Identifier, "Protection classification unavailable (fail-closed).");
+                }
             }
         }
 

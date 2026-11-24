@@ -184,6 +184,12 @@ public sealed partial class DiscoveryService
         var trimmedClass = string.IsNullOrWhiteSpace(protectionClass) ? null : protectionClass.Trim();
         var trimmedSearch = string.IsNullOrWhiteSpace(search) ? null : search.Trim();
 
+        IReadOnlyDictionary<TableIdentifier, EffectiveProtection>? batchProtections = null;
+        if (trimmedClass is not null && _protectionProvider is not null && scoped.VisibleTables.Count > 0)
+        {
+            batchProtections = await _protectionProvider.ResolveManyAsync(caller.Tenant, scoped.VisibleTables, ct).ConfigureAwait(false);
+        }
+
         var matched = new List<TableMetadata>(scoped.VisibleTables.Count);
         foreach (var table in scoped.VisibleTables)
         {
@@ -211,7 +217,9 @@ public sealed partial class DiscoveryService
             {
                 var resolved = _protectionProvider is null
                     ? null
-                    : await _protectionProvider.GetAsync(caller.Tenant, table.Identifier, ct).ConfigureAwait(false);
+                    : batchProtections is not null && batchProtections.TryGetValue(table.Identifier, out var batchProtection)
+                        ? batchProtection
+                        : await _protectionProvider.GetAsync(caller.Tenant, table.Identifier, ct).ConfigureAwait(false);
                 var tableClass = (resolved?.TableClass ?? Autheris.Domain.Security.ProtectionClass.Confidential).ToCanonicalName();
                 if (!string.Equals(tableClass, trimmedClass, StringComparison.OrdinalIgnoreCase))
                 {

@@ -519,36 +519,39 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         AccessOperation operation,
         CancellationToken ct)
     {
-        // Only read decisions reach the table policy (writes and write execution never evaluate these rows).
-        if (_policy == null || block.Count < 2 ||
-            operation is AccessOperation.Insert or AccessOperation.Update or AccessOperation.Delete or AccessOperation.ExecuteWrite)
+        if (_policy == null || block.Count < 2 || operation == AccessOperation.ExecuteWrite)
         {
             return (null, null, null, null);
         }
 
-        var rowPrefetch = await _policy.PrefetchColumnRowsAsync(block, subject.TenantId, ct).ConfigureAwait(false);
+        var isWriteOperation = operation is AccessOperation.Insert or AccessOperation.Update or AccessOperation.Delete;
+        var rowPrefetch = isWriteOperation
+            ? null
+            : await _policy.PrefetchColumnRowsAsync(block, subject.TenantId, ct).ConfigureAwait(false);
 
-        // Consents only for subjects the preconditions of DecideAsync let through (others are denied without reading consents).
-        if (_consentRepository == null ||
-            _options.Value.IsConsentBypassed ||
-            !subject.IsAuthenticated ||
-            string.IsNullOrWhiteSpace(subject.UserSid.Value) ||
-            subject.GroupResolutionStatus != GroupResolutionStatus.Complete ||
-            string.IsNullOrWhiteSpace(subject.TenantId.Value))
+        if (!subject.IsAuthenticated || string.IsNullOrWhiteSpace(subject.TenantId.Value))
         {
             return (rowPrefetch, null, null, null);
         }
 
-        // Every subject set a decision reads with: the token's user SIDs, the user SID and the group SIDs.
-        var subjects = new HashSet<Sid>(subject.Principal?.GetAllUserSids() ?? []) { subject.UserSid };
-        subjects.UnionWith(subject.GroupSids);
-        var consentPrefetch = await Autheris.Application.Policy.ConsentBatchPrefetch.LoadAsync(
-            _consentRepository, subjects, block.Select(static o => o.Identifier).ToList(), subject.TenantId, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
+        Autheris.Application.Policy.ConsentBatchPrefetch? consentPrefetch = null;
+        if (!isWriteOperation &&
+            _consentRepository != null &&
+            !_options.Value.IsConsentBypassed &&
+            !string.IsNullOrWhiteSpace(subject.UserSid.Value) &&
+            subject.GroupResolutionStatus == GroupResolutionStatus.Complete)
+        {
+            // Every subject set a decision reads with: the token's user SIDs, the user SID and the group SIDs.
+            var subjects = new HashSet<Sid>(subject.Principal?.GetAllUserSids() ?? []) { subject.UserSid };
+            subjects.UnionWith(subject.GroupSids);
+            consentPrefetch = await Autheris.Application.Policy.ConsentBatchPrefetch.LoadAsync(
+                _consentRepository, subjects, block.Select(static o => o.Identifier).ToList(), subject.TenantId, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
+        }
 
-        // The protection gate reads the tenant policy in every decision; read it once per block. A failed read leaves it per decision,
+        // The protection gate reads the tenant policy in read decisions; read it once per block. A failed read leaves it per decision,
         // where the gate fails closed (PROTECTION_UNAVAILABLE).
         Autheris.Application.Policy.TenantPolicyPrefetch? policyPrefetch = null;
-        if (_accessPolicySettings is not null)
+        if (!isWriteOperation && _accessPolicySettings is not null)
         {
             try
             {
@@ -561,8 +564,8 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
             }
         }
 
-        // The protection gate resolves a protection snapshot per table; resolve those of the block set-based from the block's own metadata.
-        // A failure leaves them to the per-table resolution, which fails closed (PROTECTION_UNAVAILABLE).
+        // The protection gate resolves a protection snapshot per table for both read and write decisions; resolve those of the block
+        // set-based from the block's own metadata. A failure leaves them to the per-table resolution, which fails closed.
         Autheris.Application.Policy.ProtectionBatchPrefetch? protectionPrefetch = null;
         if (_protectionProvider is not null)
         {
