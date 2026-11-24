@@ -58,6 +58,21 @@ public interface IMcpDatasetCatalog
             ? DescribeDatasetAsync(principal, dataset, graphQlField, language, brief, ct)
             : Task.FromException<McpDatasetDescription>(new System.NotSupportedException("Lookup by sqlName is not supported by this dataset catalog."));
 
+    /// <summary>Issue #1068: describes a dataset with early section and relation narrowing applied before computing skipped sections.</summary>
+    async Task<McpDatasetDescription> DescribeDatasetAsync(
+        ClaimsPrincipal principal,
+        string? dataset,
+        string? graphQlField,
+        string? sqlName,
+        string? language,
+        bool brief,
+        Autheris.Application.Mcp.Services.McpDescribeNarrowing.Request? narrowing,
+        CancellationToken ct = default)
+    {
+        var description = await DescribeDatasetAsync(principal, dataset, graphQlField, sqlName, language, brief, ct).ConfigureAwait(false);
+        return narrowing is null ? description : Autheris.Application.Mcp.Services.McpDescribeNarrowing.Apply(description, narrowing);
+    }
+
     Task<EffectiveTableAccessDto> DescribeMyAccessAsync(ClaimsPrincipal principal, string dataset, CancellationToken ct = default);
 
     /// <summary>Issue #682: explains caller access by <paramref name="dataset"/> id or exact case-sensitive <paramref name="graphQlField"/>.</summary>

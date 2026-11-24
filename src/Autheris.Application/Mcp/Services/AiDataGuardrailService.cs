@@ -476,7 +476,10 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             if (isMcpAuthBypassed || isAdmin)
             {
                 // MCP-15: a null predicate still keeps the per-request cap.
-                queries = await _goldenQueryService.GetGoldenQueriesAsync(GoldenQueryReadContext.AllVisible(callerTenant), domain, tableName, cancellationToken).ConfigureAwait(false);
+                var candidateSet = await _goldenQueryService.GetCandidateQueriesAsync(callerTenant, domain, tableName, cancellationToken).ConfigureAwait(false);
+                queries = candidateSet.HasKnownCandidates && candidateSet.Queries.Count == 0
+                    ? Array.Empty<GoldenQuery>()
+                    : await _goldenQueryService.GetGoldenQueriesAsync(GoldenQueryReadContext.AllVisible(callerTenant), domain, tableName, cancellationToken).ConfigureAwait(false);
             }
             else if (_consentRepository != null)
             {
@@ -540,18 +543,27 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                 }
                 else
                 {
-                    var visibleSet = visibleTables!.Select(t => t.Identifier).ToHashSet();
-                    var seeds = visibleTables!
-                        .Where(t => (string.IsNullOrWhiteSpace(domain) || string.Equals(t.Identifier.Domain, domain, StringComparison.OrdinalIgnoreCase)) &&
-                                    (string.IsNullOrWhiteSpace(tableName) || string.Equals(t.Identifier.TableName, tableName, StringComparison.OrdinalIgnoreCase)))
-                        .Select(t => new GoldenQueryCallerView.Seed(t.Identifier.Domain, t.Identifier.TableName, t.Identifier));
-                    var view = await GoldenQueryCallerView.BuildAsync(
-                        seeds,
-                        _graphQlCatalogMap,
-                        (targets, _) => Task.FromResult<IReadOnlySet<Autheris.Domain.Common.TableIdentifier>>(targets.Where(visibleSet.Contains).ToHashSet()),
-                        (id, _, _, _, _) => Task.FromResult<IReadOnlySet<string>?>(id is { } ident && hiddenByTable.TryGetValue(ident, out var h) ? h : new HashSet<string>(StringComparer.OrdinalIgnoreCase)),
-                        cancellationToken).ConfigureAwait(false);
-                    queries = await _goldenQueryService.GetGoldenQueriesAsync(view.ToContext(callerTenant), domain, tableName, cancellationToken).ConfigureAwait(false);
+                    var candidateSet = await _goldenQueryService.GetCandidateQueriesAsync(callerTenant, domain, tableName, cancellationToken).ConfigureAwait(false);
+                    if (candidateSet.HasKnownCandidates && candidateSet.Queries.Count == 0)
+                    {
+                        queries = Array.Empty<GoldenQuery>();
+                    }
+                    else
+                    {
+                        var visibleSet = visibleTables!.Select(t => t.Identifier).ToHashSet();
+                        var seeds = visibleTables!
+                            .Where(t => (string.IsNullOrWhiteSpace(domain) || string.Equals(t.Identifier.Domain, domain, StringComparison.OrdinalIgnoreCase)) &&
+                                        (string.IsNullOrWhiteSpace(tableName) || string.Equals(t.Identifier.TableName, tableName, StringComparison.OrdinalIgnoreCase)))
+                            .Select(t => new GoldenQueryCallerView.Seed(t.Identifier.Domain, t.Identifier.TableName, t.Identifier));
+                        var view = await GoldenQueryCallerView.BuildAsync(
+                            seeds,
+                            _graphQlCatalogMap,
+                            (targets, _) => Task.FromResult<IReadOnlySet<Autheris.Domain.Common.TableIdentifier>>(targets.Where(visibleSet.Contains).ToHashSet()),
+                            (id, _, _, _, _) => Task.FromResult<IReadOnlySet<string>?>(id is { } ident && hiddenByTable.TryGetValue(ident, out var h) ? h : new HashSet<string>(StringComparer.OrdinalIgnoreCase)),
+                            candidateSet.HasKnownCandidates ? candidateSet.Queries : null,
+                            cancellationToken).ConfigureAwait(false);
+                        queries = await _goldenQueryService.GetGoldenQueriesAsync(view.ToContext(callerTenant), domain, tableName, cancellationToken).ConfigureAwait(false);
+                    }
                 }
             }
             else

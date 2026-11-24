@@ -231,185 +231,20 @@ public sealed partial class CatalogSchemaModel
         var effectiveTime = timeProvider ?? TimeProvider.System;
         long buildStartTimestamp = effectiveTime.GetTimestamp();
         long lastProgressTimestamp = buildStartTimestamp;
-        int tablesProcessed = 0;
 
         var allTables = await Autheris.Application.Catalog.CatalogTablePageReader.ReadAllAsync(
             metadataRepository, new Autheris.Application.Catalog.CatalogTableQuery(IncludeInactive: false), ct: ct).ConfigureAwait(false);
 
-        // Filter: only active, discovery-visible SQL tables whose dialect the tree compiler supports.
-        // Hidden tables are evicted from any fingerprint cache and excluded silently from the GraphQL schema.
-        var sqlTables = new List<TableMetadata>();
-        foreach (var candidate in allTables)
-        {
-            if (candidate.Table.DiscoveryHidden)
-            {
-                fingerprintCache?.Invalidate(candidate.Identifier);
-                continue;
-            }
-
-            if (!candidate.Table.IsActive || candidate.DataSourceType != DataSourceType.Sql || candidate.Table.ObjectKind == DiscoveryObjectKind.MetricView)
-            {
-                continue;
-            }
-
-            if (tableFilter != null && !tableFilter(candidate))
-            {
-                fingerprintCache?.Invalidate(candidate.Identifier);
-                continue;
-            }
-
-            sqlTables.Add(candidate);
-            tablesProcessed++;
-            MaybeLogBuildProgress(logger, effectiveTime, buildStartTimestamp, ref lastProgressTimestamp, tablesProcessed, phase);
-        }
-        var omittedTables = new List<CatalogOmittedTable>();
-        foreach (var excluded in sqlTables.Where(t =>
-                     registry.TryGetByName(t.Table.SourceType, out var provider) &&
-                     provider.Descriptor.IsExecutable &&
-                     !provider.Descriptor.SupportsTreeCompile))
-        {
-            logger?.LogInformation(
-                "GraphQL catalog schema: table '{Table}' (dialect '{Dialect}') is not exposed because the GraphQL tree compiler does not support its dialect; it stays available through OData, REST and MCP.",
-                excluded.Identifier.ToQualifiedName(), excluded.Table.SourceType);
-        }
-
-        var supportedSqlTables = new List<TableMetadata>(sqlTables.Count);
-        foreach (var t in sqlTables)
-        {
-            if (registry.TryGetByName(t.Table.SourceType, out var provider) &&
-                provider.Descriptor.IsExecutable &&
-                provider.Descriptor.SupportsTreeCompile)
-            {
-                supportedSqlTables.Add(t);
-            }
-            else
-            {
-                // BUG #157: only active SQL tables reach this point (inactive and non-SQL were dropped above).
-                omittedTables.Add(new CatalogOmittedTable(t.Identifier, CatalogTableOmissionReason.UnsupportedDialect));
-            }
-        }
-
-        var activeSqlTables = supportedSqlTables
-            .OrderBy(t => t.Identifier.Domain, StringComparer.Ordinal)
-            .ThenBy(t => t.Identifier.Schema, StringComparer.Ordinal)
-            .ThenBy(t => t.Identifier.TableName, StringComparer.Ordinal)
-            .ToList();
-
-        var usedSchemaTypeNames = new HashSet<string>(StringComparer.Ordinal)
-        {
-            "Query", "Mutation", "Subscription", "AutherisSortDirection",
-            "AutherisStringFilter", "AutherisIntFilter", "AutherisLongFilter",
-            "AutherisFloatFilter", "AutherisDecimalFilter", "AutherisBooleanFilter",
-            "AutherisDateTimeFilter"
-        };
-        foreach (var shared in AggregateTypeNames.SharedTypeNames)
-        {
-            usedSchemaTypeNames.Add(shared);
-        }
-
-        var reservedFilterKeywords = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
-        {
-            "and", "or", "not", "where", "orderBy"
-        };
-
-        var tableBuilders = new List<(TableMetadata Metadata, string TypeName, string QueryFieldName, string FilterTypeName, string OrderByTypeName, List<CatalogColumnField> Columns)>();
-
-        foreach (var meta in activeSqlTables)
-        {
-            var baseName = SanitizeGraphQlName($"{meta.Identifier.Domain}_{meta.Identifier.Schema}_{meta.Identifier.TableName}");
-            var typeName = baseName;
-            var filterTypeName = $"{typeName}_filter";
-            var orderTypeName = $"{typeName}_order_by";
-            var aggregateFieldName = $"{typeName}_aggregate";
-
-            var columns = new List<CatalogColumnField>();
-            var usedColNames = new HashSet<string>(StringComparer.Ordinal);
-
-            foreach (var col in meta.Columns ?? [])
-            {
-                if (col.DiscoveryHidden)
-                {
-                    continue;
-                }
-
-                // R-GQL-13: the tree compiler only accepts plain column names; others (e.g. "a-b") were offered in the
-                // schema under a sanitized name but could never be queried.
-                if (!SqlIdentifierGuard.IsValidIdentifier(col.ColumnName))
-                {
-                    logger?.LogInformation("GraphQL catalog schema: column '{Column}' of '{Table}' is not a plain identifier and is omitted.", col.ColumnName, meta.Identifier.ToQualifiedName());
-                    continue;
-                }
-
-                var colFieldName = SanitizeGraphQlName(col.ColumnName);
-                if (reservedFilterKeywords.Contains(colFieldName))
-                {
-                    colFieldName = $"{colFieldName}_col";
-                }
-
-                var colSuffix = 2;
-                while (!usedColNames.Add(colFieldName))
-                {
-                    colFieldName = $"{SanitizeGraphQlName(col.ColumnName)}_{colSuffix++}";
-                }
-
-                var fieldType = MapDataType(col.DataType);
-                if (meta.ColumnMaskingRules != null &&
-                    meta.ColumnMaskingRules.TryGetValue(col.ColumnName, out var maskRule) &&
-                    maskRule.IsHmac)
-                {
-                    fieldType = CatalogFieldType.String;
-                }
-                columns.Add(new CatalogColumnField(colFieldName, col.ColumnName, fieldType, col.DataType, true, col.Description));
-            }
-
-            // BUG #157: a table without queryable columns would yield field-less GraphQL types and abort schema build. It is
-            // omitted before the collision check and before any name is reserved.
-            if (columns.Count == 0)
-            {
-                omittedTables.Add(new CatalogOmittedTable(meta.Identifier, CatalogTableOmissionReason.NoQueryableColumns));
-                logger?.LogWarning(
-                    "GraphQL catalog schema: table '{Table}' has no queryable columns and is omitted from the GraphQL schema.",
-                    meta.Identifier.ToQualifiedName());
-                continue;
-            }
-
-            string? collidingName = null;
-            if (usedSchemaTypeNames.Contains(typeName)) collidingName = typeName;
-            else if (usedSchemaTypeNames.Contains(filterTypeName)) collidingName = filterTypeName;
-            else if (usedSchemaTypeNames.Contains(orderTypeName)) collidingName = orderTypeName;
-            else
-            {
-                // #112 A1-11: the typed aggregate names (and the T_aggregate root field) are reserved per table. The table list is
-                // sorted ordinally, so the omission is deterministic and independent of the caller (the schema is global).
-                var aggregateNames = AggregateTypeNames.For(typeName);
-                collidingName = aggregateNames.All().FirstOrDefault(usedSchemaTypeNames.Contains);
-            }
-
-            if (collidingName != null)
-            {
-                omittedTables.Add(new CatalogOmittedTable(meta.Identifier, CatalogTableOmissionReason.NameCollision));
-                logger?.LogError(
-                    "GraphQL catalog schema: table '{Table}' conflicts with existing schema type name '{CollidingName}'. The table is omitted from GraphQL schema generation to preserve schema stability.",
-                    meta.Identifier.ToQualifiedName(),
-                    collidingName);
-                continue;
-            }
-
-            usedSchemaTypeNames.Add(typeName);
-            usedSchemaTypeNames.Add(filterTypeName);
-            usedSchemaTypeNames.Add(orderTypeName);
-            foreach (var aggregateName in AggregateTypeNames.For(typeName).All())
-            {
-                usedSchemaTypeNames.Add(aggregateName);
-            }
-
-            var queryFieldName = typeName; // Same name for root query field and object type
-            tableBuilders.Add((meta, typeName, queryFieldName, filterTypeName, orderTypeName, columns));
-        }
-
-        var tableMapById = tableBuilders.ToDictionary(
-            t => t.Metadata.Identifier,
-            t => t);
+        var (omittedTables, tableBuilders, tableMapById, tablesProcessed) = PrepareTableBuilders(
+            allTables,
+            registry,
+            tableFilter,
+            fingerprintCache,
+            logger,
+            effectiveTime,
+            buildStartTimestamp,
+            ref lastProgressTimestamp,
+            phase);
 
         // Bulk pre-fetch all relations in one query (INC-138-4) with fallback for test doubles or legacy providers
         var allRelations = await relationRepository.GetAllRelationsAsync(ct).ConfigureAwait(false);
@@ -420,7 +255,7 @@ public sealed partial class CatalogSchemaModel
             {
                 if (!relationsByTable.TryGetValue(rel.ParentTableIdentifier, out var list))
                 {
-                    list = new List<TableRelation>();
+                    list = [];
                     relationsByTable[rel.ParentTableIdentifier] = list;
                 }
                 list.Add(rel);
@@ -442,176 +277,18 @@ public sealed partial class CatalogSchemaModel
             }
         }
 
-        // Reverse index (O(n)): child table -> (parent builder, relation), in tableBuilders order then relation order,
-        // so reverse field names, suffixes and ordering are identical to scanning every table per table.
-        var reverseByChild = new Dictionary<TableIdentifier, List<(int ParentIndex, TableRelation Relation)>>();
-        for (var parentIndex = 0; parentIndex < tableBuilders.Count; parentIndex++)
-        {
-            if (!relationsByTable.TryGetValue(tableBuilders[parentIndex].Metadata.Identifier, out var parentRelations))
-            {
-                continue;
-            }
-
-            foreach (var rel in parentRelations)
-            {
-                if (!reverseByChild.TryGetValue(rel.ChildTableIdentifier, out var revList))
-                {
-                    revList = [];
-                    reverseByChild[rel.ChildTableIdentifier] = revList;
-                }
-
-                revList.Add((parentIndex, rel));
-            }
-        }
-
-        // Map relations. A relation between tables the tree service cannot run as one statement (different data source or
-        // dialect) is not exposed: it would be advertised and then always fail. Omitted before any field name is allocated.
-        var omittedRelations = 0;
-        var invalidRelations = new HashSet<Guid>();
-        var finalTables = new List<CatalogTableType>();
-
-        foreach (var (meta, typeName, queryFieldName, filterTypeName, orderTypeName, columns) in tableBuilders)
-        {
-            var relations = new List<CatalogRelationField>();
-            var usedRelationFieldNames = new HashSet<string>(columns.Select(c => c.FieldName), StringComparer.Ordinal);
-
-            if (relationsByTable.TryGetValue(meta.Identifier, out var rawRelations))
-            {
-                foreach (var rel in rawRelations)
-                {
-                    // Target table must exist in schema and have valid join keys
-                    if (!tableMapById.TryGetValue(rel.ChildTableIdentifier, out var targetTable))
-                    {
-                        continue;
-                    }
-                    if (!HasValidKeys(rel, meta, targetTable.Metadata))
-                    {
-                        invalidRelations.Add(rel.Id);
-                        continue;
-                    }
-                    if (!RelationExecutability.IsExecutable(rel, meta, targetTable.Metadata, crossSourceEnabled))
-                    {
-                        omittedRelations++;
-                        continue;
-                    }
-
-                    var isList = rel.Cardinality == RelationCardinality.OneToMany;
-                    var relFieldName = SanitizeGraphQlName(rel.RelationName);
-                    if (usedRelationFieldNames.Contains(relFieldName) || reservedFilterKeywords.Contains(relFieldName))
-                    {
-                        relFieldName += "_rel";
-                    }
-                    var rSuffix = 2;
-                    while (!usedRelationFieldNames.Add(relFieldName))
-                    {
-                        relFieldName = $"{relFieldName}_{rSuffix++}";
-                    }
-
-                    relations.Add(new CatalogRelationField(
-                        relFieldName,
-                        rel.RelationName,
-                        rel.ChildTableIdentifier,
-                        targetTable.TypeName,
-                        isList,
-                        rel.JoinKeysParent,
-                        rel.JoinKeysChild,
-                        rel.Cardinality));
-                }
-            }
-
-            // Also check for reverse relations where this table is the child
-            // Lookup in cached relationsByTable in memory
-            reverseByChild.TryGetValue(meta.Identifier, out var reverseRelations);
-            foreach (var (parentIndex, rel) in (IEnumerable<(int ParentIndex, TableRelation Relation)>?)reverseRelations ?? [])
-            {
-                var other = tableBuilders[parentIndex];
-                {
-                    if (other.Metadata.Identifier.Equals(meta.Identifier))
-                    {
-                        continue;
-                    }
-                    if (!HasValidKeys(rel, other.Metadata, meta))
-                    {
-                        // Already recorded by the forward loop of the parent table.
-                        continue;
-                    }
-                    if (!RelationExecutability.IsExecutable(rel, other.Metadata, meta, crossSourceEnabled))
-                    {
-                        // Already counted by the forward loop of the parent table; a parent that is not in tableBuilders
-                        // (inactive or not SQL) emits no relation at all, so nothing is lost by not counting here.
-                        continue;
-                    }
-
-                    // Reverse: IsList is opposite (e.g. parent-to-child 1:N -> child-to-parent N:1 -> IsList = false; 1:1 stays 1:1)
-                    var revCardinality = rel.Cardinality switch
-                    {
-                        RelationCardinality.OneToMany => RelationCardinality.ManyToOne,
-                        RelationCardinality.ManyToOne => RelationCardinality.OneToMany,
-                        _ => RelationCardinality.OneToOne
-                    };
-                    var isList = revCardinality == RelationCardinality.OneToMany;
-                    var parentTableName = other.Metadata.Identifier.TableName;
-                    var revFieldName = SanitizeGraphQlName($"{parentTableName}_by_{rel.RelationName}");
-                    if (usedRelationFieldNames.Contains(revFieldName) || reservedFilterKeywords.Contains(revFieldName))
-                    {
-                        revFieldName += "_rel";
-                    }
-                    var revSuffix = 2;
-                    while (!usedRelationFieldNames.Add(revFieldName))
-                    {
-                        revFieldName = $"{revFieldName}_{revSuffix++}";
-                    }
-
-                    relations.Add(new CatalogRelationField(
-                        revFieldName,
-                        rel.RelationName,
-                        other.Metadata.Identifier,
-                        other.TypeName,
-                        isList,
-                        rel.JoinKeysChild,  // Parent from child's perspective
-                        rel.JoinKeysParent, // Child from child's perspective
-                        revCardinality));
-                }
-            }
-
-            finalTables.Add(new CatalogTableType(
-                meta.Identifier,
-                typeName,
-                queryFieldName,
-                filterTypeName,
-                orderTypeName,
-                meta,
-                columns,
-                relations));
-            MaybeLogBuildProgress(logger, effectiveTime, buildStartTimestamp, ref lastProgressTimestamp, finalTables.Count, phase);
-        }
-
-        if (invalidRelations.Count > 0)
-        {
-            // one summary plus at most MaxInvalidRelationDetailLines detail lines, relation id only.
-            logger?.LogWarning(
-                "GraphQL catalog schema: {Count} relation(s) with invalid or missing join key columns are not exposed.",
-                invalidRelations.Count);
-            foreach (var id in invalidRelations.Take(MaxInvalidRelationDetailLines))
-            {
-                logger?.LogWarning("GraphQL catalog schema: relation {RelationId} not exposed (invalid join keys).", id);
-            }
-        }
-
-        if (omittedRelations > 0)
-        {
-            // Counts only: the line is emitted on every real rebuild and must not carry catalog names.
-            logger?.LogInformation(
-                "GraphQL catalog schema: {Count} relation(s) between different data sources or dialects are not exposed; cross-source GraphQL relations are not delivered yet.",
-                omittedRelations);
-        }
-
-        // Deterministic order independent of repository row order; immutable array so snapshots are never mutated.
-        var omittedSnapshot = omittedTables
-            .OrderBy(o => o.Table.Domain, StringComparer.Ordinal)
-            .ThenBy(o => o.Table.Schema, StringComparer.Ordinal)
-            .ThenBy(o => o.Table.TableName, StringComparer.Ordinal)
-            .ToArray();
+        var (finalTables, omittedSnapshot) = AssembleModelData(
+            tableBuilders,
+            tableMapById,
+            relationsByTable,
+            omittedTables,
+            crossSourceEnabled,
+            logger,
+            effectiveTime,
+            buildStartTimestamp,
+            ref lastProgressTimestamp,
+            tablesProcessed,
+            phase);
 
         string? precomputedFingerprint = null;
         if (fingerprintCache is not null)
