@@ -10,6 +10,7 @@ using Autheris.Application.Governance.Grants;
 using Autheris.Application.Identity.Caching;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
+using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Identity;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -190,7 +191,7 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
         {
             _logger?.LogWarning(
                 "Bare subject form of a deprovisioned user key is ambiguous across realms of tenant {Tenant}; only the realm-qualified grants of realm {Realm} are revoked.",
-                tenantId.Value, realmId);
+                LogSanitizer.Sanitize(tenantId.Value), LogSanitizer.Sanitize(realmId));
             return [qualified];
         }
 
