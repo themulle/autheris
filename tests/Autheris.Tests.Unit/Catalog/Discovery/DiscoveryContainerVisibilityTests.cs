@@ -373,7 +373,7 @@ public sealed class DiscoveryContainerVisibilityTests
     private static DiscoveryService CreateService(
         ITableMetadataRepository tables,
         IConsentRepository consents,
-        IDataOwnershipRepository owners,
+        Autheris.Application.Governance.Ownership.IContainerOwnership owners,
         IProtectionSnapshotProvider protections,
         IContainerVisibilitySnapshotProvider containers,
         string? defaultTenantId = null,
