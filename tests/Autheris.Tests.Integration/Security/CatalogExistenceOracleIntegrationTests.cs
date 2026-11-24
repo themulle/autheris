@@ -143,7 +143,8 @@ public sealed class CatalogExistenceOracleIntegrationTests : IClassFixture<Catal
             _ = await UpsertAsync(repo, inUnassigned);
 
             var unassigned = await domains.EnsureUnassignedAsync(tenant);
-            await domains.UpsertAsync(unassigned with { Visibility = CatalogVisibilityMode.Open }, unassigned.Version, Owner);
+            await Should.ThrowAsync<InvalidOperationException>(() =>
+                domains.UpsertAsync(unassigned with { Visibility = CatalogVisibilityMode.Open }, unassigned.Version, Owner));
             await CatalogVisibilitySeeding.SeedOpenDomainAsync(domains, tenant, Owner, openId);
             await CatalogVisibilitySeeding.SeedOnRequestDomainAsync(domains, tenant, Owner, closedId);
             var grantedDomain = await CatalogVisibilitySeeding.SeedOnRequestDomainAsync(domains, tenant, Owner, grantedId);
