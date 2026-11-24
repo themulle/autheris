@@ -155,6 +155,38 @@ public sealed class ProfileAssignmentApplierTests
     }
 
     [Fact]
+    public async Task Materialized_and_extended_grants_advance_their_epochs_in_the_decision_transaction()
+    {
+        // Issue #1044: every profile grant changes decisions for its table; a pattern grant has no table and must still be
+        // signalled (an empty table key, which the store turns into a catalog version change).
+        var fx = new ProfileAssignmentTests.Fixture();
+        var applier = new ProfileAssignmentApplier(fx, fx, new GrantWriter(fx, fx.Signer, fx.Clock), assignmentStore: fx, materializer: fx.Materializer);
+        var decidedAt = fx.Clock.GetUtcNow();
+        var assignment = fx.SeedApprovedAssignment();
+
+        await ApplyInTransactionAsync(fx, applier, new ApprovedPermission(
+            assignment, new Sid("user:dg"), ApproverCapacity.Governance, false, decidedAt, decidedAt, decidedAt.AddDays(30)));
+
+        var concrete = fx.Consents.Single(c => !c.IsPatternGrant).TableIdentifier;
+        fx.EpochBumpTargets.ShouldContain(concrete);
+        fx.EpochBumpTargets.ShouldContain(t => string.IsNullOrWhiteSpace(t.TableName), "materializing a pattern grant");
+
+        var patternConsent = fx.Consents.Single(c => c.IsPatternGrant);
+        var newTable = ProfileAssignmentTests.Fixture.BuildTable("pg", "analytics", "events_v2", "LOW");
+        fx.Tables.Add(newTable);
+        fx.TableOwners[newTable.Identifier] = [ProfileAssignmentTests.OwnerC.Value];
+        fx.Clock.Advance(TimeSpan.FromHours(1));
+        await fx.Maintenance.HandlePatternNewOwnerAsync(patternConsent, newTable, [ProfileAssignmentTests.OwnerC.Value], fx.Clock.GetUtcNow());
+        var extReq = fx.Requests.Single(r => r.Id != assignment.Id);
+        fx.EpochBumpTargets.Clear();
+
+        await ApplyInTransactionAsync(fx, applier, new ApprovedPermission(
+            extReq, new Sid("user:dg"), ApproverCapacity.Governance, false, fx.Clock.GetUtcNow(), fx.Clock.GetUtcNow(), patternConsent.ValidTo));
+
+        fx.EpochBumpTargets.ShouldContain(t => string.IsNullOrWhiteSpace(t.TableName), "new approving owners widen the pattern grant");
+    }
+
+    [Fact]
     public async Task Caller_made_request_cannot_extend_a_pattern_grant_through_its_context()
     {
         var fx = new ProfileAssignmentTests.Fixture();

@@ -192,6 +192,8 @@ public sealed class ProfileAssignmentTests
         public List<GrantRecord> Records { get; } = [];
         public List<AuditLogEntry> Audits { get; } = [];
         public int EpochBumps { get; private set; }
+        public List<TableIdentifier> EpochBumpTargets { get; } = [];
+        public List<TableIdentifier> InvalidatedAfterCommit { get; } = [];
         public ProfileGrantMaterializer Materializer { get; }
         public ProfileAssignmentMaintenanceService Maintenance { get; }
         public Guid ExternalSystemId { get; } = Guid.NewGuid();
@@ -384,7 +386,7 @@ public sealed class ProfileAssignmentTests
             consent.ApprovingOwners = list;
             return Task.CompletedTask;
         }
-        public Task IncrementTableEpochInTransactionAsync(DbTransaction transaction, TableIdentifier table, CancellationToken ct = default) { EpochBumps++; return Task.CompletedTask; }
+        public Task IncrementTableEpochInTransactionAsync(DbTransaction transaction, TableIdentifier table, CancellationToken ct = default) { EpochBumps++; EpochBumpTargets.Add(table); return Task.CompletedTask; }
         public Task RecordAuditInTransactionAsync(DbTransaction transaction, AuditLogEntry entry, CancellationToken ct = default) { Audits.Add(entry); return Task.CompletedTask; }
         public Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default) { Audits.Add(entry); return Task.CompletedTask; }
         public Task RecordAuditEventAsync(AuditLogEntry entry, DbTransaction existingTx, CancellationToken ct = default) { Audits.Add(entry); return Task.CompletedTask; }
@@ -414,7 +416,7 @@ public sealed class ProfileAssignmentTests
             }
             return Task.CompletedTask;
         }
-        public Task InvalidateTablesAfterCommitAsync(IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct = default) => Task.CompletedTask;
+        public Task InvalidateTablesAfterCommitAsync(IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct = default) { InvalidatedAfterCommit.AddRange(tables); return Task.CompletedTask; }
 
         public Task<IReadOnlyList<ConsentWorkflowRoute>> GetWorkflowRoutesAsync(TenantId tenantId, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<ConsentWorkflowRoute>>(Routes.Where(r => r.TenantId == tenantId.Value).ToList());

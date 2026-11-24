@@ -178,6 +178,12 @@ public sealed class ProfileAssignmentApplier(
                 RecordType: GrantRecordType.Issued);
 
             var signed = await _grantWriter.InsertAndGrantAsync(transaction.Transaction, consent, input, ct).ConfigureAwait(false);
+            if (_assignmentStore is not null)
+            {
+                // A pattern grant has no table: the store advances the catalog version instead of a table epoch (issue #1044).
+                await _assignmentStore.IncrementTableEpochInTransactionAsync(transaction.Transaction, tableIdentifier, ct).ConfigureAwait(false);
+            }
+
             if (_extrasWriter is not null && consent.WriteRules.Count > 0)
             {
                 await _extrasWriter.PersistDataGrantExtrasAsync(transaction, consent, ct).ConfigureAwait(false);
@@ -247,6 +253,9 @@ public sealed class ProfileAssignmentApplier(
 
         var extended = await _materializer.ExtendApprovingOwnersAsync(
             transaction.Transaction, existing, req.Id, owners, approved.DecidedBy, approved.DecidedAt, ct).ConfigureAwait(false);
+
+        // New approving owners can make the pattern grant apply to more tables (issue #1044).
+        await _assignmentStore.IncrementTableEpochInTransactionAsync(transaction.Transaction, existing.TableIdentifier, ct).ConfigureAwait(false);
 
         return
         [
