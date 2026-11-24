@@ -33,7 +33,11 @@ public sealed partial class DiscoveryService
                     }
                 }
 
-                return null;
+                // The memoised scope holds the tenant scope only; without a container rule nothing else can admit the table.
+                if (_containerVisibility is null)
+                {
+                    return null;
+                }
             }
         }
 
@@ -74,7 +78,8 @@ public sealed partial class DiscoveryService
         {
             var tenantConsentList = await _consentRepository!.GetTablesWithConsentsForTenantAsync(caller.Tenant, ct).ConfigureAwait(false);
             var tenantAllowConsents = tenantConsentList as IReadOnlySet<TableIdentifier> ?? tenantConsentList.ToHashSet();
-            if (!DiscoveryTenantScope.IsInScope(match, caller.Tenant, catalogOwner, sharedTables, tenantAllowConsents))
+            if (!DiscoveryTenantScope.IsInScope(match, caller.Tenant, catalogOwner, sharedTables, tenantAllowConsents) &&
+                !await IsContainerVisibleAsync(match, caller, ct).ConfigureAwait(false))
             {
                 return null;
             }
@@ -91,6 +96,41 @@ public sealed partial class DiscoveryService
         return DiscoveryTenantScope.CanSeeHiddenObject(match, callerScope, caller.Tenant, catalogOwner, ownedTables)
             ? match
             : null;
+    }
+
+    /// <summary>
+    /// Container visibility rule (A-10): a table outside the caller's tenant scope is still visible as metadata when it is explicitly
+    /// assigned to a container of the caller's tenant that is <c>Open</c>, catalog-granted to the caller or owned by the caller. The
+    /// tenant's system <c>Unassigned</c> domain and a table owned by another tenant never widen the scope. Any failure admits nothing.
+    /// </summary>
+    private async ValueTask<bool> IsContainerVisibleAsync(TableMetadata table, CatalogCaller caller, CancellationToken ct)
+    {
+        if (_containerVisibility is null || _protectionProvider is null || caller.Principal is null ||
+            !string.IsNullOrWhiteSpace(table.OwnerTenantId))
+        {
+            return false;
+        }
+
+        try
+        {
+            var snapshot = await _containerVisibility.GetAsync(caller.Tenant, caller.Principal, ct).ConfigureAwait(false);
+            if (!snapshot.IsAvailable)
+            {
+                return false;
+            }
+
+            var container = (await _protectionProvider.GetAsync(caller.Tenant, table.Identifier, ct).ConfigureAwait(false)).Container;
+            return snapshot.Containers.TryGetValue(container, out var info)
+                && !info.IsSystemUnassigned
+                && (info.Visibility == CatalogVisibilityMode.Open
+                    || snapshot.CatalogGrantedContainers.Contains(container)
+                    || snapshot.OwnedContainers.Contains(container));
+        }
+        catch (Exception ex) when (!ct.IsCancellationRequested)
+        {
+            RecordFailure(ex, "Discovery container visibility failed closed.");
+            return false;
+        }
     }
 
     private Task<ScopedCatalog> LoadScopedCatalogAsync(

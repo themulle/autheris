@@ -64,6 +64,7 @@ public sealed partial class DiscoveryService : IDiscoveryService
     private readonly ICatalogSnapshotProvider? _snapshotProvider;
     private readonly IProtectionSnapshotProvider? _protectionProvider;
     private readonly Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? _accessPolicySettings;
+    private readonly Autheris.Application.Catalog.Visibility.IContainerVisibilitySnapshotProvider? _containerVisibility;
 
     private readonly Lock _memoLock = new();
     private readonly Dictionary<ScopeMemoKey, ScopedCatalog> _scopeMemo = [];
@@ -95,8 +96,10 @@ public sealed partial class DiscoveryService : IDiscoveryService
         Autheris.Application.Docs.Services.IDocLinkDiscoveryReader? docLinks = null,
         ICatalogSnapshotProvider? snapshotProvider = null,
         IProtectionSnapshotProvider? protectionProvider = null,
-        Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? accessPolicySettings = null)
+        Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? accessPolicySettings = null,
+        Autheris.Application.Catalog.Visibility.IContainerVisibilitySnapshotProvider? containerVisibility = null)
     {
+        _containerVisibility = containerVisibility;
         _docLinks = docLinks;
         _snapshotProvider = snapshotProvider;
         _protectionProvider = protectionProvider;

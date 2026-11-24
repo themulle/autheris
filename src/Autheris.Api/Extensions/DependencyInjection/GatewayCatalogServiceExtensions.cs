@@ -122,7 +122,8 @@ public static class GatewayCatalogServiceExtensions
                 sp.GetService<Autheris.Application.Docs.Services.IDocLinkDiscoveryReader>(),
                 sp.GetService<IGovernanceRepository>() is null ? null : sp.GetService<ICatalogSnapshotProvider>(),
                 sp.GetService<IProtectionSnapshotProvider>(),
-                sp.GetService<Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider>()));
+                sp.GetService<Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider>(),
+                sp.GetService<IGovernanceRepository>() is null ? null : sp.GetService<Autheris.Application.Catalog.Visibility.IContainerVisibilitySnapshotProvider>()));
         services.TryAddScoped<Autheris.Application.Catalog.Discovery.IDiscoveryAccessRequestService>(sp =>
             new Autheris.Application.Catalog.Discovery.DiscoveryAccessRequestService(
                 sp.GetRequiredService<Autheris.Application.Catalog.Discovery.IDiscoveryService>(),
