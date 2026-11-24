@@ -33,9 +33,6 @@ public partial class GovernanceRepository : IFunctionalRightRepository
     public Task CreateMappingAsync(FunctionalRightMapping mapping, CancellationToken ct = default) =>
         RightsAndPoliciesInstance.CreateMappingAsync(mapping, ct);
 
-    public Task ApproveMappingAsync(TenantId tenantId, string realmId, string groupOrRole, FunctionalRight functionalRight, string approvedBy, CancellationToken ct = default) =>
-        RightsAndPoliciesInstance.ApproveMappingAsync(tenantId, realmId, groupOrRole, functionalRight, approvedBy, ct);
-
     public Task DeleteMappingAsync(TenantId tenantId, string realmId, string groupOrRole, FunctionalRight functionalRight, CancellationToken ct = default) =>
         RightsAndPoliciesInstance.DeleteMappingAsync(tenantId, realmId, groupOrRole, functionalRight, ct);
 }

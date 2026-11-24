@@ -114,7 +114,6 @@ route /api/v1/profiles | governance, consent, ReBAC, FinOps or ext-authz route; 
 route /api/v1/profiles/{id} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/profiles/{id}/assignments/approve | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/tenants/{tenantId}/governance/rights/{realmId}/ | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
-route /api/v1/tenants/{tenantId}/governance/rights/{realmId}/approve | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/tenants/{tenantId}/lifecycle/deprovision | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/tenants/{tenantId}/lifecycle/locks/{realmId}/{userKey} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/webhooks/config-sync | catalog integration, lineage, schema-registry, webhook or docs route; metadata only

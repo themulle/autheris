@@ -70,18 +70,18 @@ public sealed class ProductRoleTests
     }
 
     [Fact]
-    public void DataProduct_admin_right_requires_four_eyes_mapping()
+    public void DataProduct_admin_right_is_never_conferred_by_a_mapping()
     {
         FunctionalRight.DataProductAdmin.IsPrivileged.ShouldBeTrue();
         FunctionalRight.PrivilegedValues.ShouldContain("DataProduct.Admin");
 
-        FunctionalRightMapping Mapping(string? approvedBy) => new(
-            new TenantId("tenant-a"), "realm", "product-admins", FunctionalRight.DataProductAdmin, approvedBy,
-            approvedBy is null ? null : DateTimeOffset.UnixEpoch, "standard", "alice", DateTimeOffset.UnixEpoch);
-
-        Mapping(null).IsApproved.ShouldBeFalse();
-        Mapping("alice").IsApproved.ShouldBeFalse("the creator cannot approve their own privileged mapping");
-        Mapping("bob").IsApproved.ShouldBeTrue();
+        // Single approval (Amendment 2): a saved mapping is approved, but a privileged right is a capacity no mapping confers.
+        Autheris.Application.Governance.Rights.Validators.FunctionalRightMappingValidator.ConfersCapacity(FunctionalRight.DataProductAdmin).ShouldBeTrue();
+        var mapping = new FunctionalRightMapping(
+            new TenantId("tenant-a"), "realm", "product-admins", FunctionalRight.DataProductAdmin, "alice",
+            DateTimeOffset.UnixEpoch, "standard", "alice", DateTimeOffset.UnixEpoch);
+        Should.Throw<System.Security.SecurityException>(() =>
+            Autheris.Application.Governance.Rights.Validators.FunctionalRightMappingValidator.ValidateCreation(mapping, realm: null));
     }
 
     [Fact]

@@ -11,6 +11,7 @@ using Autheris.Application.Governance.Rights;
 using Autheris.Application.Identity;
 using Autheris.Domain.Common;
 using Autheris.Domain.Governance;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Identity;
 using NSubstitute;
 using Shouldly;
@@ -60,17 +61,28 @@ public sealed class EnterpriseClaimsTransformationFunctionalRightTests
     }
 
     [Fact]
-    public async Task ClaimsTransformation_SelfApprovedPrivilegedMapping_NoClaim()
+    public async Task ClaimsTransformation_CapacityMapping_NoClaim()
     {
-        // The mapper is the authority: it filters a self-approved privileged mapping and returns nothing for it.
+        // The real mapper is the authority: a saved mapping that would confer an IT or governance capacity yields no claim (SEC-1009-30),
+        // while an operational right of the same group does.
+        var repository = Substitute.For<IFunctionalRightRepository>();
+        FunctionalRightMapping Row(FunctionalRight right) => new(new TenantId("tenant-a"), "resolver-realm", "S-1-5-21-1-2-3-1100", right,
+            ApprovedBy: "approver", ApprovedAt: DateTimeOffset.UtcNow, RecertClass: "Standard", CreatedBy: "approver", CreatedAt: DateTimeOffset.UtcNow);
+        repository.GetApprovedMappingsForGroupsAndRolesAsync(Arg.Any<TenantId>(), Arg.Any<string>(), Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+            .Returns([Row(FunctionalRight.SecurityAdmin), Row(FunctionalRight.GovernanceAdmin), Row(FunctionalRight.DataExport)]);
+        var registry = Registry();
+        var rights = await new FunctionalRightMapper(repository, registry)
+            .GetRightsForGroupsAndRolesAsync(new TenantId("tenant-a"), "resolver-realm", ["S-1-5-21-1-2-3-1100"]);
+        rights.ShouldBe([FunctionalRight.DataExport]);
+
         var mapper = Substitute.For<IFunctionalRightMapper>();
         mapper.GetRightsForGroupsAndRolesAsync(Arg.Any<TenantId>(), Arg.Any<string>(), Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlySet<FunctionalRight>>(new HashSet<FunctionalRight>()));
-        var transformation = TestIdentityPipeline.Transformation(Registry(), Resolver(), mapper);
+            .Returns(Task.FromResult(rights));
+        var transformation = TestIdentityPipeline.Transformation(registry, Resolver(), mapper);
 
         var result = await transformation.TransformAsync(Principal());
 
-        result.FindAll(RequireFunctionalRightHandler.FunctionalRightClaimType).ShouldBeEmpty();
+        result.FindAll(RequireFunctionalRightHandler.FunctionalRightClaimType).Select(c => c.Value).ShouldBe([FunctionalRight.DataExport.Value]);
     }
 
     [Fact]

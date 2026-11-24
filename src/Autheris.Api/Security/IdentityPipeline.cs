@@ -478,7 +478,7 @@ public sealed class IdentityPipeline : IIdentityPipeline
             }
         }
 
-        // PERS-09: functional-right claims come only from FunctionalRightMapper (four-eyes for privileged rights, customer-realm ceiling);
+        // PERS-09: functional-right claims come only from FunctionalRightMapper (never an IT or governance capacity, realm role bounds);
         // a mapper failure yields no functional-right claims (fail closed). The mapper receives canonical group SIDs and roles.
         if (_functionalRightMapper != null)
         {

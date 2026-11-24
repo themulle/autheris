@@ -60,10 +60,9 @@ internal sealed class RightsAndPoliciesStore(
         await using var scope = await open(false, ct).ConfigureAwait(false);
         var list = new List<FunctionalRightMapping>();
 
-        // Query in batches. PERS-09: defense in depth behind FunctionalRightMapper (the single authority): unapproved mappings and
-        // self-approved privileged mappings are never returned, and the group match is case-insensitive.
+        // Query in batches. PERS-09: defense in depth behind FunctionalRightMapper (the single authority): unapproved mappings are never
+        // returned, and the group match is case-insensitive.
         var items = new List<string>(groupsAndRoles);
-        var privileged = FunctionalRight.PrivilegedValues;
         for (int i = 0; i < items.Count; i += 50)
         {
             var chunk = items.GetRange(i, Math.Min(50, items.Count - i));
@@ -76,15 +75,7 @@ internal sealed class RightsAndPoliciesStore(
                 AddParam(cmd, pName, chunk[j].ToUpperInvariant());
             }
 
-            var privilegedNames = new List<string>();
-            for (int k = 0; k < privileged.Count; k++)
-            {
-                var pName = $"@priv{k}";
-                privilegedNames.Add(pName);
-                AddParam(cmd, pName, privileged[k]);
-            }
-
-            cmd.CommandText = $"SELECT tenant_id, realm_id, group_or_role, functional_right, approved_by, approved_at, recert_class, created_by, created_at FROM FUNCTIONAL_RIGHT_MAPPINGS WHERE tenant_id = @tenantId AND realm_id = @realmId AND UPPER(group_or_role) IN ({string.Join(",", paramNames)}) AND approved_by IS NOT NULL AND approved_at IS NOT NULL AND (functional_right NOT IN ({string.Join(",", privilegedNames)}) OR UPPER(TRIM(approved_by)) <> UPPER(TRIM(created_by)))";
+            cmd.CommandText = $"SELECT tenant_id, realm_id, group_or_role, functional_right, approved_by, approved_at, recert_class, created_by, created_at FROM FUNCTIONAL_RIGHT_MAPPINGS WHERE tenant_id = @tenantId AND realm_id = @realmId AND UPPER(group_or_role) IN ({string.Join(",", paramNames)}) AND approved_by IS NOT NULL AND approved_at IS NOT NULL";
             AddParam(cmd, "@tenantId", tenantId.Value);
             AddParam(cmd, "@realmId", realmId);
 
@@ -152,21 +143,6 @@ WHEN NOT MATCHED THEN INSERT (tenant_id, realm_id, group_or_role, functional_rig
         AddParam(cmd, "@recertClass", mapping.RecertClass);
         AddParam(cmd, "@createdBy", mapping.CreatedBy);
         AddParam(cmd, "@createdAt", DialectValueCodec.Ts(Sql, mapping.CreatedAt));
-
-        await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-    }
-
-    public async Task ApproveMappingAsync(TenantId tenantId, string realmId, string groupOrRole, FunctionalRight functionalRight, string approvedBy, CancellationToken ct = default)
-    {
-        await using var scope = await open(true, ct).ConfigureAwait(false);
-        await using var cmd = scope.Connection.CreateCommand();
-        cmd.CommandText = "UPDATE FUNCTIONAL_RIGHT_MAPPINGS SET approved_by = @approvedBy, approved_at = @approvedAt WHERE tenant_id = @tenantId AND realm_id = @realmId AND group_or_role = @groupOrRole AND functional_right = @right";
-        AddParam(cmd, "@tenantId", tenantId.Value);
-        AddParam(cmd, "@realmId", realmId);
-        AddParam(cmd, "@groupOrRole", groupOrRole);
-        AddParam(cmd, "@right", functionalRight.Value);
-        AddParam(cmd, "@approvedBy", approvedBy);
-        AddParam(cmd, "@approvedAt", DialectValueCodec.Ts(Sql, DateTimeOffset.UtcNow));
 
         await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }

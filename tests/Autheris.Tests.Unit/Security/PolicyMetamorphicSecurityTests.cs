@@ -104,11 +104,13 @@ public sealed class PolicyMetamorphicSecurityTests
         var realmRegistry = Substitute.For<IIdentityRealmRegistry>();
         var sut = new FunctionalRightMapper(repository, realmRegistry);
 
+        // The realm allows the Consumer role, so the standard mapping is within its role bounds (a mapping never exceeds them).
         var customerRealm = new IdentityRealm(
             "ext-customer", customerKind,
             new TenantBindingSpecification(TenantBindingKind.Fixed, TestTenant.Value),
             RealmGroupSource.Resolver, RealmProvisioningMode.None,
-            issuers: ["https://customer.auth.com"]);
+            issuers: ["https://customer.auth.com"],
+            allowedGatewayRoles: new HashSet<Autheris.Domain.Security.GatewayRole> { Autheris.Domain.Security.GatewayRole.Consumer });
 
         realmRegistry.GetRealm("ext-customer").Returns(customerRealm);
 
