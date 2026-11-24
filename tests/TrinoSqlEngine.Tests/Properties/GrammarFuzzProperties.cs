@@ -111,6 +111,18 @@ public class GrammarFuzzProperties(ITestOutputHelper output)
         result.ThrowIfFailed(nameof(DamagedStatements_AreRejectedWithATypedException_OrCompileSafely));
     }
 
+    [Fact]
+    public void DamagedStatement_SetOperationDegreeMismatch_IsClassifiedAsTypedRejection()
+    {
+        var ctx = new CaseCtx(TargetSqlDialect.DuckDb, false, "TNT1_acme", "POL1_eu");
+        const string sql = "select length ( t7206.tenantid ) as c0 from entitlements t7206 except select distinct coalesce ( t2511.id ) , 2885 as c0 from orders t2511 where t2511.amount >= 1256";
+
+        var (_, error) = Oracles.TryCompile(ProductionCompiler.Compile, sql, ctx, StatementPermissions.ReadOnly);
+
+        var ex = Assert.IsType<TrinoSqlEngine.Ast.Builder.SetOperationDegreeMismatchException>(error);
+        Assert.True(Oracles.IsTypedRejection(ex));
+    }
+
     [Theory]
     [InlineData(50)]
     [InlineData(150)]
