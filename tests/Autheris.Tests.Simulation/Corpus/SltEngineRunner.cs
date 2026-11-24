@@ -112,9 +112,10 @@ public sealed class SltEngineRunner(SltScenario scenario, DbConnection connectio
     }
 
     /// <summary>
-    /// Adapts a PostgreSQL-bound command for the SQLite execution harness: names positional parameters (<c>1..n</c> for <c>$1..$n</c>)
-    /// and rewrites unquoted <c>CROSS JOIN</c> to comma joins so SQLite's query planner can reorder multi-way joins instead of forcing
-    /// left-to-right Cartesian order.
+    /// Adapts a PostgreSQL-bound command for the SQLite execution harness: names positional parameters (<c>1..n</c> for <c>$1..$n</c>),
+    /// rewrites unquoted <c>CROSS JOIN</c> to comma joins so SQLite's query planner can reorder multi-way joins instead of forcing
+    /// left-to-right Cartesian order, and adds <c>LIMIT -1</c> before PostgreSQL subquery evaluation fences (<c>OFFSET 0)</c>) because
+    /// SQLite requires <c>LIMIT</c> before <c>OFFSET</c>.
     /// </summary>
     internal static void AdaptPostgreSqlForSqlite(DbCommand cmd)
     {
@@ -123,7 +124,169 @@ public sealed class SltEngineRunner(SltScenario scenario, DbConnection connectio
             cmd.Parameters[i].ParameterName = (i + 1).ToString(System.Globalization.CultureInfo.InvariantCulture);
         }
 
-        cmd.CommandText = ReplaceUnquotedCrossJoin(cmd.CommandText);
+        cmd.CommandText = RewriteOffsetZeroFenceForSqlite(ReplaceUnquotedCrossJoin(cmd.CommandText));
+    }
+
+    internal static string RewriteOffsetZeroFenceForSqlite(string sql)
+    {
+        if (!sql.Contains("OFFSET", StringComparison.OrdinalIgnoreCase))
+        {
+            return sql;
+        }
+
+        var sb = new System.Text.StringBuilder(sql.Length + 32);
+        var sawLimit = new Stack<bool>();
+        sawLimit.Push(false);
+        var inSingleQuote = false;
+        var inDoubleQuote = false;
+        var i = 0;
+        while (i < sql.Length)
+        {
+            var c = sql[i];
+            if (inSingleQuote)
+            {
+                sb.Append(c);
+                if (c == '\'' && i + 1 < sql.Length && sql[i + 1] == '\'')
+                {
+                    sb.Append('\'');
+                    i += 2;
+                    continue;
+                }
+
+                if (c == '\'')
+                {
+                    inSingleQuote = false;
+                }
+
+                i++;
+                continue;
+            }
+
+            if (inDoubleQuote)
+            {
+                sb.Append(c);
+                if (c == '"' && i + 1 < sql.Length && sql[i + 1] == '"')
+                {
+                    sb.Append('"');
+                    i += 2;
+                    continue;
+                }
+
+                if (c == '"')
+                {
+                    inDoubleQuote = false;
+                }
+
+                i++;
+                continue;
+            }
+
+            if (c == '\'')
+            {
+                inSingleQuote = true;
+                sb.Append(c);
+                i++;
+                continue;
+            }
+
+            if (c == '"')
+            {
+                inDoubleQuote = true;
+                sb.Append(c);
+                i++;
+                continue;
+            }
+
+            if (c == '(')
+            {
+                sawLimit.Push(false);
+                sb.Append(c);
+                i++;
+                continue;
+            }
+
+            if (c == ')')
+            {
+                if (sawLimit.Count > 1)
+                {
+                    sawLimit.Pop();
+                }
+
+                sb.Append(c);
+                i++;
+                continue;
+            }
+
+            if (IsIdentChar(c))
+            {
+                var start = i;
+                while (i < sql.Length && IsIdentChar(sql[i]))
+                {
+                    i++;
+                }
+
+                var word = sql.AsSpan(start, i - start);
+                if (word.Equals("SELECT", StringComparison.OrdinalIgnoreCase) ||
+                    word.Equals("UNION", StringComparison.OrdinalIgnoreCase) ||
+                    word.Equals("INTERSECT", StringComparison.OrdinalIgnoreCase) ||
+                    word.Equals("EXCEPT", StringComparison.OrdinalIgnoreCase))
+                {
+                    sawLimit.Pop();
+                    sawLimit.Push(false);
+                }
+                else if (word.Equals("LIMIT", StringComparison.OrdinalIgnoreCase))
+                {
+                    sawLimit.Pop();
+                    sawLimit.Push(true);
+                }
+                else if (word.Equals("OFFSET", StringComparison.OrdinalIgnoreCase) &&
+                         !sawLimit.Peek() &&
+                         IsOffsetZeroFenceTail(sql, i))
+                {
+                    sb.Append("LIMIT -1 ");
+                }
+
+                sb.Append(word);
+                continue;
+            }
+
+            sb.Append(c);
+            i++;
+        }
+
+        return sb.ToString();
+    }
+
+    private static bool IsOffsetZeroFenceTail(string sql, int afterOffsetIndex)
+    {
+        var pos = afterOffsetIndex;
+        if (pos >= sql.Length || !char.IsWhiteSpace(sql[pos]))
+        {
+            return false;
+        }
+
+        while (pos < sql.Length && char.IsWhiteSpace(sql[pos]))
+        {
+            pos++;
+        }
+
+        if (pos >= sql.Length || sql[pos] != '0')
+        {
+            return false;
+        }
+
+        pos++;
+        if (pos < sql.Length && (IsIdentChar(sql[pos]) || sql[pos] == '.'))
+        {
+            return false;
+        }
+
+        while (pos < sql.Length && char.IsWhiteSpace(sql[pos]))
+        {
+            pos++;
+        }
+
+        return pos < sql.Length && sql[pos] == ')';
     }
 
     internal static string ReplaceUnquotedCrossJoin(string sql)

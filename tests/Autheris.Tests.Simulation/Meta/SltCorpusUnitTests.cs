@@ -463,6 +463,19 @@ public sealed class SltCorpusUnitTests
             .ShouldBe("""SELECT 'it''s CROSS JOIN', "col""CROSS JOIN" FROM "t1" , "t2" """);
     }
 
+    [Fact]
+    public void SltEngineRunner_RewriteOffsetZeroFenceForSqlite_AddsLimitMinusOneOnlyToUnfencedSubqueryOffsets()
+    {
+        SltEngineRunner.RewriteOffsetZeroFenceForSqlite("""SELECT "t1"."a" FROM (SELECT "a" FROM "main"."t1" WHERE "a" > $1 OFFSET 0) AS "t1" """)
+            .ShouldBe("""SELECT "t1"."a" FROM (SELECT "a" FROM "main"."t1" WHERE "a" > $1 LIMIT -1 OFFSET 0) AS "t1" """);
+
+        SltEngineRunner.RewriteOffsetZeroFenceForSqlite("""SELECT "a" FROM (SELECT "a" FROM "t1" LIMIT 5 OFFSET 0) AS "s" """)
+            .ShouldBe("""SELECT "a" FROM (SELECT "a" FROM "t1" LIMIT 5 OFFSET 0) AS "s" """);
+
+        SltEngineRunner.RewriteOffsetZeroFenceForSqlite("""SELECT 'OFFSET 0)', "OFFSET 0)" FROM (SELECT "a" FROM "t1" WHERE "a" > 1 OFFSET 0) AS "t1" """)
+            .ShouldBe("""SELECT 'OFFSET 0)', "OFFSET 0)" FROM (SELECT "a" FROM "t1" WHERE "a" > 1 LIMIT -1 OFFSET 0) AS "t1" """);
+    }
+
     private sealed class HangingEngine : ISltEngine
     {
         public int Calls { get; private set; }
