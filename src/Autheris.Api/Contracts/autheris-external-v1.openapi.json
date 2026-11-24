@@ -298,6 +298,71 @@
         }
       }
     },
+    "/api/v1/consent/inbox": {
+      "get": {
+        "operationId": "listDecisionInbox",
+        "parameters": [
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } },
+          { "name": "limit", "in": "query", "schema": { "type": "integer" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Open requests the caller may decide, with the capacity they decide in",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "request": { "$ref": "#/components/schemas/ConsentRequestDto" },
+                          "capacity": { "type": "string" }
+                        }
+                      }
+                    },
+                    "nextCursor": { "type": "string", "nullable": true }
+                  }
+                }
+              }
+            }
+          },
+          "429": { "description": "Rate limited" }
+        }
+      }
+    },
+    "/api/v1/governance/containers/{kind}/{id}/grants": {
+      "get": {
+        "operationId": "listContainerGrants",
+        "parameters": [
+          { "name": "kind", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "cursor", "in": "query", "schema": { "type": "string" } },
+          { "name": "pageSize", "in": "query", "schema": { "type": "integer" } },
+          { "name": "includeInactive", "in": "query", "schema": { "type": "boolean" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Grants on the tables of the container, for its owner group members and Data Governance",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "items": { "type": "array", "items": { "$ref": "#/components/schemas/ConsentGrantDto" } },
+                    "nextCursor": { "type": "string", "nullable": true }
+                  }
+                }
+              }
+            }
+          },
+          "404": { "description": "Container not found or not visible to the caller" },
+          "429": { "description": "Rate limited" }
+        }
+      }
+    },
     "/api/v1/consent/grants/{id}": {
       "get": {
         "operationId": "getConsentGrantById",
