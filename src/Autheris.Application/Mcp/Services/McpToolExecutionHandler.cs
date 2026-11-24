@@ -26,6 +26,7 @@ using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
+using TrinoSqlEngine.Ast.Emit;
 
 /// <summary>
 /// Pipeline handler for executing MCP tools without bloating AiDataGuardrailService or GatewayMcpQueryExecutor.
@@ -205,13 +206,85 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                 return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, "Missing required argument 'query'.");
             }
 
-            var sqlResult = await _sqlExecutionService.ExecuteQueryBufferedAsync(
-                new GovernedSqlQueryRequest(query, Transport: SqlTransports.Mcp),
-                userPrincipal,
-                tenantId,
-                ct).ConfigureAwait(false);
+            int? requestedLimit = null;
+            if (root.TryGetProperty("limit", out var limitProp) && limitProp.ValueKind != JsonValueKind.Null)
+            {
+                if (limitProp.ValueKind != JsonValueKind.Number || !limitProp.TryGetInt32(out var parsedLimit) || parsedLimit < 1)
+                {
+                    return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, "'limit' must be a positive integer.");
+                }
 
-            return JsonSerializer.Serialize(sqlResult, JsonOpts);
+                requestedLimit = parsedLimit;
+            }
+
+            string? cursor = null;
+            if (root.TryGetProperty("cursor", out var cursorProp) && cursorProp.ValueKind != JsonValueKind.Null)
+            {
+                if (cursorProp.ValueKind != JsonValueKind.String)
+                {
+                    return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, "Invalid continuation cursor.");
+                }
+
+                cursor = cursorProp.GetString();
+                if (string.IsNullOrWhiteSpace(cursor) || cursor.Length > 512)
+                {
+                    return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, "Invalid continuation cursor.");
+                }
+            }
+
+            var effectiveLimit = McpRowCap.Effective(
+                requestedLimit,
+                McpRowCap.ResolveCap(_gatewayOptions?.Mcp?.MaxResultRows ?? McpRowCap.DefaultCap));
+            if (_gatewayOptions?.WebSql?.MaxAllowedRows is > 0 and var maxAllowedRows && maxAllowedRows < effectiveLimit)
+            {
+                effectiveLimit = (int)maxAllowedRows;
+            }
+
+            var pageWindow = cursor is null || requestedLimit.HasValue
+                ? new SqlPageWindow(0, effectiveLimit, 1)
+                : null;
+            var boundedRowLimit = Autheris.Application.Sql.SqlRowLimit.For(_gatewayOptions?.WebSql ?? new WebSqlOptions())
+                .CappedAt(effectiveLimit);
+
+            try
+            {
+                GovernedSqlResult sqlResult;
+                try
+                {
+                    sqlResult = await _sqlExecutionService.ExecuteQueryBufferedAsync(
+                        new GovernedSqlQueryRequest(
+                            query,
+                            RowLimit: boundedRowLimit,
+                            Transport: SqlTransports.Mcp,
+                            Page: pageWindow,
+                            NextToken: cursor),
+                        userPrincipal,
+                        tenantId,
+                        ct).ConfigureAwait(false);
+                }
+                catch (SqlPagingUnsupportedException) when (cursor is null && requestedLimit is null)
+                {
+                    sqlResult = await _sqlExecutionService.ExecuteQueryBufferedAsync(
+                        new GovernedSqlQueryRequest(query, RowLimit: boundedRowLimit, Transport: SqlTransports.Mcp),
+                        userPrincipal,
+                        tenantId,
+                        ct).ConfigureAwait(false);
+                }
+
+                return JsonSerializer.Serialize(McpSqlQueryResult.From(sqlResult), JsonOpts);
+            }
+            catch (SqlPagingTokenInvalidException)
+            {
+                return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, "Invalid or expired continuation cursor.");
+            }
+            catch (SqlPagingUnsupportedException)
+            {
+                return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, "Cursor pagination is not supported for this query.");
+            }
+            catch (UnauthorizedAccessException)
+            {
+                return CreateMcpError(sessionContext.TenantId, tool.Name, ForbiddenCode, AccessDeniedMessage);
+            }
         }
 
         if (string.Equals(tool.Name, McpDatasetTools.QueryDataset, StringComparison.OrdinalIgnoreCase))
@@ -839,5 +912,34 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
         }
 
         return principal;
+    }
+
+    private sealed record McpSqlQueryResult(
+        string OriginalSql,
+        IReadOnlyList<string> Columns,
+        IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows,
+        int RowCount,
+        long ElapsedMilliseconds,
+        bool Truncated,
+        bool HasMore,
+        string? Cursor,
+        GovernedSqlPageResponse? Page,
+        string? Next,
+        string? PagingUnavailable,
+        IReadOnlyList<WebSqlIndexHint>? IndexHints)
+    {
+        public static McpSqlQueryResult From(GovernedSqlResult result) => new(
+            OriginalSql: result.OriginalSql,
+            Columns: result.Columns,
+            Rows: result.Rows,
+            RowCount: result.RowCount,
+            ElapsedMilliseconds: result.ElapsedMilliseconds,
+            Truncated: result.Truncated,
+            HasMore: result.Next is not null || result.Truncated,
+            Cursor: result.Next,
+            Page: result.Page,
+            Next: result.Next,
+            PagingUnavailable: result.PagingUnavailable,
+            IndexHints: result.IndexHints);
     }
 }

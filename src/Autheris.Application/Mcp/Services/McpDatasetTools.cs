@@ -295,13 +295,15 @@ public static class McpDatasetTools
 
         yield return new McpToolDefinition(
             Name: QuerySql,
-            Description: "Executes a governed SQL query with row-level security, column masking, and tenant isolation under the caller's context.",
+            Description: "Executes a governed SQL query with row-level security, column masking, and tenant isolation under the caller's context. Results are capped at Mcp:MaxResultRows; pass optional 'limit' and follow the returned 'cursor' (when 'hasMore' is true) to retrieve subsequent pages of a deterministic ORDER BY query.",
             InputJsonSchema: """
             {
               "type": "object",
               "required": ["query"],
               "properties": {
-                "query": { "type": "string", "description": "SQL SELECT query to execute against the gateway." }
+                "query": { "type": "string", "description": "SQL SELECT query to execute against the gateway." },
+                "limit": { "type": "integer", "minimum": 1, "description": "Optional maximum rows per page (capped server-side to Mcp:MaxResultRows)." },
+                "cursor": { "type": "string", "description": "Optional signed continuation cursor returned by a previous query_sql call." }
               }
             }
             """,

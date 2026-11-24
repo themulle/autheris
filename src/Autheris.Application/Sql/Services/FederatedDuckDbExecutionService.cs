@@ -260,7 +260,8 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             rows.Count,
             (long)duckDbResult.ExecutionDuration.TotalMilliseconds,
             truncated,
-            InDbColumnMaskingExecuted: !_options.Value.IsColumnMaskingDisabled);
+            InDbColumnMaskingExecuted: !_options.Value.IsColumnMaskingDisabled,
+            PagingUnavailable: request.Page is not null && truncated ? "federated" : null);
     }
 
     public async Task ValidateAsync(
@@ -320,6 +321,11 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
         CancellationToken ct,
         Autheris.Application.Products.ProductDefiner? definer = null)
     {
+        if (request.NextToken is not null || request.Page is { Offset: > 0 })
+        {
+            throw new TrinoSqlEngine.Ast.Emit.SqlPagingUnsupportedException();
+        }
+
         var crossSourceOptions = _options.Value.WebSql?.CrossSource ?? new CrossSourceOptions();
         if (!crossSourceOptions.Enabled)
         {
@@ -494,6 +500,10 @@ public sealed class FederatedDuckDbExecutionService : IFederatedQueryExecutionSe
             // one probe row beyond it tells a truncated result from an exact-size one.
             var rowLimit = request.RowLimit ?? SqlRowLimit.For(_options.Value.WebSql ?? new WebSqlOptions());
             int effectiveMaxRows = (int)Math.Min((long)maxResultRows, rowLimit.Effective(metadata.HasExplicitLimit ? metadata.ExplicitLimitValue : null));
+            if (request.Page is { Size: > 0 } pageWindow)
+            {
+                effectiveMaxRows = Math.Min(effectiveMaxRows, pageWindow.Size);
+            }
 
             var duckDbResult = await _duckDbEngine.ExecuteGeneratedAsync(
                 new GeneratedOlapQuery(plan.GeneratedDuckDbSql, plan.Compiled.Parameters, Compiled: plan.Compiled, ClientValues: parameterContract.ClientValues),
