@@ -388,6 +388,15 @@ public sealed partial class DiscoveryService : IDiscoveryService
                 // (bounded) until enough verified hits exist or the index has no more candidates.
                 var window = Math.Min(MaxPageSize, Math.Max(limit * 4, 50));
                 var restrictedScores = new Dictionary<TableIdentifier, int>();
+                // A caller-visible table registered after the last index build or delta is not in the index yet. As in the listing search
+                // (FilterAndRankBySearchAsync) it is matched on its non-hidden text and follows the index hits, so search never drops a table
+                // that list_datasets returns while the index catches up. The caller-visible verification below applies to it as well.
+                var searchDomain = options.Domain?.Trim();
+                var unindexed = searchable
+                    .Where(t => !_searchEngine.ContainsTable(t.Identifier) &&
+                                (string.IsNullOrEmpty(searchDomain) || string.Equals(t.Identifier.Domain, searchDomain, StringComparison.OrdinalIgnoreCase)) &&
+                                DiscoveryVisibleTextMatcher.MatchesNonHiddenTextTerms(t, trimmed))
+                    .ToList();
                 matchedTables = [];
                 for (var attempt = 0; attempt < MaxSearchWindows; attempt++)
                 {
@@ -402,12 +411,21 @@ public sealed partial class DiscoveryService : IDiscoveryService
                         isColumnRestricted: null,
                         ct).ConfigureAwait(false);
 
-                    var candidates = new List<TableMetadata>(hits.Count);
+                    var candidates = new List<TableMetadata>(hits.Count + unindexed.Count);
+                    var seen = new HashSet<TableIdentifier>();
                     foreach (var hit in hits)
                     {
-                        if (visibleById.TryGetValue(hit.TableIdentifier, out var meta))
+                        if (visibleById.TryGetValue(hit.TableIdentifier, out var meta) && seen.Add(meta.Identifier))
                         {
                             candidates.Add(meta);
+                        }
+                    }
+
+                    foreach (var table in unindexed)
+                    {
+                        if (seen.Add(table.Identifier))
+                        {
+                            candidates.Add(table);
                         }
                     }
 

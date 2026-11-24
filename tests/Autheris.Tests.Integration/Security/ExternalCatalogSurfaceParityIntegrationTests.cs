@@ -139,15 +139,9 @@ public sealed class ExternalCatalogSurfaceParityIntegrationTests : IClassFixture
             ColumnRules = [new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear }]
         });
 
-        var ownerAssignRepo = scope.ServiceProvider.GetRequiredService<IDataOwnerAssignmentRepository>();
-        await ownerAssignRepo.ApplyTableOwnerAssignmentsAsync(new DataOwnerAssignmentRequest(
-            [
-                new TableOwnerAssignmentSpec(
-                    HiddenOwnedTable,
-                    [new DataOwnerSpec(UserSid, "parity-owner", "Parity Owner", "parity-owner@example.invalid", "PRIMARY")])
-            ],
-            Replace: true,
-            DryRun: false));
+        // Container ownership (#1009): hidden_owned_orders lives in a container whose owner group is the caller.
+        var domains = scope.ServiceProvider.GetRequiredService<IGovernanceDomainRepository>();
+        await CatalogVisibilitySeeding.SeedOnRequestDomainAsync(domains, new TenantId(TenantA), new Sid(UserSid), hiddenOwnedMeta.Table.Id);
 
         _fixture.Seeded = true;
     }

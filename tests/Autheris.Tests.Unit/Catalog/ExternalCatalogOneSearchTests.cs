@@ -320,4 +320,58 @@ public sealed class ExternalCatalogOneSearchTests
         var res = await mcp.ListDatasetsAsync(principal, search: "crane", domain: null);
         res.Datasets.Select(d => d.Id).ShouldBe(["default.main.mcp_cranes"], res.Guidance);
     }
+
+    [Theory]
+    [InlineData(null)]
+    [InlineData("sales")]
+    public async Task CatalogSearch_WhenTableIsNotIndexedYet_MatchesItLikeTheListingSearch(string? domain)
+    {
+        var tables = new FakeDiscoveryTableRepository();
+        var indexed = DiscoveryTestBuilder.MakeTable("sales", "alpha_orders", ownerTenantId: Tenant);
+        var fresh = DiscoveryTestBuilder.MakeTable("sales", "beta_orders", ownerTenantId: Tenant);
+        var freshOtherDomain = DiscoveryTestBuilder.MakeTable("hr", "gamma_orders", ownerTenantId: Tenant);
+        var freshNoMatch = DiscoveryTestBuilder.MakeTable("sales", "customers", ownerTenantId: Tenant);
+        tables.Tables.AddRange([indexed, fresh, freshOtherDomain, freshNoMatch]);
+
+        // The index was built before the fresh tables were registered: it only knows alpha_orders.
+        var staleIndex = Substitute.For<ICatalogSearchEngine>();
+        staleIndex.IsIndexReady.Returns(true);
+        staleIndex.IndexedTableCount.Returns(1);
+        staleIndex.ContainsTable(Arg.Any<TableIdentifier>()).Returns(ci => ci.Arg<TableIdentifier>().Equals(indexed.Identifier));
+        staleIndex.SearchAsync(
+                Arg.Any<CatalogSearchQuery>(),
+                Arg.Any<Func<TableIdentifier, bool>>(),
+                Arg.Any<Func<TableIdentifier, bool>?>(),
+                Arg.Any<CancellationToken>())
+            .Returns(ci => ci.ArgAt<Func<TableIdentifier, bool>>(1)(indexed.Identifier)
+                ? new List<CatalogSearchHit>
+                {
+                    new(indexed.Identifier, "sales", "Alpha", null, "en", 0.9, null, 0.9, ["orders"], [], [], "NORMAL", "GRANTED")
+                }
+                : []);
+
+        var discovery = new DiscoveryService(
+            tables,
+            FakeAccessDecisionPoint.AllowAll(),
+            new FakeDiscoveryConsentRepository(),
+            new FakeDiscoveryApprovalRepository(),
+            new FakeDiscoveryOwnershipRepository(),
+            new FakeDiscoveryArtifactStore(),
+            new FakeAuditWriter(),
+            Options.Create(new GatewayOptions { Tenancy = TenancyShape.Multi.Options() }),
+            Options.Create(new CatalogDiscoveryOptions()),
+            searchEngine: staleIndex,
+            logger: NullLogger<DiscoveryService>.Instance);
+
+        var hits = await discovery.SearchAsync(
+            "orders",
+            new DiscoverySearchOptions(Domain: domain, Limit: 10, Mode: "keyword", Surface: DiscoverySurface.Search),
+            DiscoveryTestBuilder.Caller(User()));
+
+        // Index hits come first; the not yet indexed matches follow in catalog order.
+        string[] expected = domain is null
+            ? ["sales.dbo.alpha_orders", "hr.dbo.gamma_orders", "sales.dbo.beta_orders"]
+            : ["sales.dbo.alpha_orders", "sales.dbo.beta_orders"];
+        hits.Select(h => $"{h.Domain}.{h.Schema}.{h.Name}").ShouldBe(expected);
+    }
 }
