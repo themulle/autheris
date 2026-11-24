@@ -1,7 +1,9 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Options;
 
@@ -61,6 +63,47 @@ public sealed class GatewayCoreOptionsValidator : IValidateOptions<GatewayOption
         }
     }
 
+    private static void ValidateResourceGroupScopeTiers(GatewayOptions opts, List<string> failures)
+    {
+        if (opts.ResourceGroups?.ScopeTiers is not { Count: > 0 } scopeTiers)
+        {
+            return;
+        }
+
+        foreach (var (rawKey, tier) in scopeTiers)
+        {
+            if (string.IsNullOrWhiteSpace(rawKey))
+            {
+                failures.Add("Gateway:ResourceGroups:ScopeTiers keys must not be empty.");
+                continue;
+            }
+
+            var trimmed = rawKey.Trim();
+            if (!string.Equals(rawKey, trimmed, StringComparison.Ordinal) ||
+                trimmed.Any(char.IsWhiteSpace) ||
+                trimmed.Length > 256)
+            {
+                failures.Add("Gateway:ResourceGroups:ScopeTiers keys must be non-empty single scope names without whitespace.");
+                continue;
+            }
+
+            var bare = ScopeNames.ToBareName(trimmed);
+            if (trimmed.Contains('/', StringComparison.Ordinal) ||
+                trimmed.Contains('\\', StringComparison.Ordinal) ||
+                string.IsNullOrWhiteSpace(bare) ||
+                !string.Equals(trimmed, bare, StringComparison.Ordinal))
+            {
+                failures.Add("Gateway:ResourceGroups:ScopeTiers keys must be bare scope names without URI or path prefixes.");
+                continue;
+            }
+
+            if (!Enum.IsDefined(tier))
+            {
+                failures.Add("Gateway:ResourceGroups:ScopeTiers values must be defined ResourceGroupTier members.");
+            }
+        }
+    }
+
     public ValidateOptionsResult Validate(string? name, GatewayOptions opts)
     {
         ArgumentNullException.ThrowIfNull(opts);
@@ -90,6 +133,7 @@ public sealed class GatewayCoreOptionsValidator : IValidateOptions<GatewayOption
         }
 
         ValidateDefaultTenant(opts, failures);
+        ValidateResourceGroupScopeTiers(opts, failures);
 
         var catalogCache = opts.Catalog.Cache ?? new CatalogCacheOptions();
         if (catalogCache.MetadataMaxEntries is < 1_000 or > 1_000_000)

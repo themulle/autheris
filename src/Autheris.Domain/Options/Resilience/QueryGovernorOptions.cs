@@ -1,4 +1,7 @@
+using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
+using Autheris.Domain.Model;
 
 namespace Autheris.Domain.Options;
 
@@ -32,6 +35,9 @@ public sealed class ResourceGroupsOptions
     /// 0 = use <see cref="MaxConcurrentPerTenantPercent"/>.
     /// </summary>
     [Range(0, 1000)] public int MaxConcurrentPerTenant { get; init; } = 0;
+
+    /// <summary>Optional mapping from OAuth bare scope names (for example <c>Agent.Read</c>) to workload resource group tiers; classification selects the least privileged tier between path tier and matching token scopes.</summary>
+    public Dictionary<string, ResourceGroupTier> ScopeTiers { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 }
 
 public sealed record ResourceGroupTierConfigOptions(
