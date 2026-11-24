@@ -22,6 +22,7 @@ public partial class GovernanceRepository : IIdentityStoreRepository
         });
 
     public Task<ScimUser?> GetUserAsync(TenantId tenantId, string realmId, string userKey, CancellationToken ct = default) => IdentityStoreInstance.GetUserAsync(tenantId, realmId, userKey, ct);
+    public Task<bool> UserKeyExistsInOtherRealmAsync(TenantId tenantId, string realmId, string userKey, CancellationToken ct = default) => IdentityStoreInstance.UserKeyExistsInOtherRealmAsync(tenantId, realmId, userKey, ct);
     public Task<ScimUser?> GetUserByExternalIdAsync(TenantId tenantId, string realmId, string externalId, CancellationToken ct = default) => IdentityStoreInstance.GetUserByExternalIdAsync(tenantId, realmId, externalId, ct);
     public Task<ScimUser?> GetUserByUserNameAsync(TenantId tenantId, string realmId, string userName, CancellationToken ct = default) => IdentityStoreInstance.GetUserByUserNameAsync(tenantId, realmId, userName, ct);
     public Task<ScimUser?> GetUserByObjectSidAsync(TenantId tenantId, string realmId, string objectSid, CancellationToken ct = default) => IdentityStoreInstance.GetUserByObjectSidAsync(tenantId, realmId, objectSid, ct);

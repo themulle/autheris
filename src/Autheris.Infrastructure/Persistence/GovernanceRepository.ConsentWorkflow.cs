@@ -293,10 +293,9 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
                 ConsentWorkflowSql.ReadOptionalGuid(reader, 4),
                 Convert.ToInt32(reader.GetValue(5), CultureInfo.InvariantCulture),
                 Convert.ToInt32(reader.GetValue(6), CultureInfo.InvariantCulture),
-                Convert.ToInt32(reader.GetValue(7), CultureInfo.InvariantCulture),
-                Convert.ToInt32(reader.GetValue(8), CultureInfo.InvariantCulture) == 1,
-                reader.GetString(9),
-                ConsentWorkflowSql.ReadOptionalTimestamp(reader, 10) ?? TimeProvider.System.GetUtcNow()));
+                Convert.ToInt32(reader.GetValue(7), CultureInfo.InvariantCulture) == 1,
+                reader.GetString(8),
+                ConsentWorkflowSql.ReadOptionalTimestamp(reader, 9) ?? TimeProvider.System.GetUtcNow()));
         }
 
         // Removed (data owner, data source) and unknown scope kinds are inert; only the tenant route applies here.

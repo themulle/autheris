@@ -54,6 +54,7 @@ public sealed partial class PermissionRequestEngine
         }
 
         ConsentRequest? inspectedRequest = null;
+        PermissionDecisionRecord? evaluated = null;
 
         try
         {
@@ -63,7 +64,8 @@ public sealed partial class PermissionRequestEngine
                 async (_, req) =>
                 {
                     inspectedRequest = req;
-                    return await EvaluateDecisionInTransactionAsync(command, req, validatedReason, ct).ConfigureAwait(false);
+                    evaluated = await EvaluateDecisionInTransactionAsync(command, req, validatedReason, ct).ConfigureAwait(false);
+                    return evaluated;
                 },
                 async (tx, decision, updatedReq) =>
                     await ApplyDecisionEffectAndAuditAsync(tx, command, decision, updatedReq, ct).ConfigureAwait(false),
@@ -140,6 +142,11 @@ public sealed partial class PermissionRequestEngine
                     ct).ConfigureAwait(false);
             }
 
+            if (evaluated is { SelfGrant: true, NewStatus: "APPROVED" })
+            {
+                await NotifySelfGrantAsync(finalized, command.Decider, ct).ConfigureAwait(false);
+            }
+
             return new PermissionDecisionResult(finalized, grants, grants.Count > 0 ? grants[0] : null);
         }
         catch (ConsentDecisionException ex) when (ex.StatusCode is 403 or 422 && inspectedRequest is not null)
@@ -176,7 +183,17 @@ public sealed partial class PermissionRequestEngine
         }
 
         var sod = await _sodService.CheckPermissionDecisionAsync(req.TenantId, command.Decider, req, ct).ConfigureAwait(false);
-        if (!sod.Allowed || sod.Outcome == SodDecisionOutcome.SelfGrant)
+        var selfGrant = sod.Outcome == SodDecisionOutcome.SelfGrant;
+        if (selfGrant)
+        {
+            // The decider belongs to the grantee group: only an IT administrator may complete this, under the self-grant rules.
+            if (!command.Approve || capacity.Value != ApproverCapacity.ItAdmin ||
+                req.RequestKind is not (ConsentRequestKind.Data or ConsentRequestKind.Unmask))
+            {
+                throw new ConsentDecisionException("SOD_VIOLATION", sod.Reason ?? "Separation of duties violated.", 403);
+            }
+        }
+        else if (!sod.Allowed)
         {
             throw new ConsentDecisionException("SOD_VIOLATION", sod.Reason ?? "Separation of duties violated.", 403);
         }
@@ -214,12 +231,17 @@ public sealed partial class PermissionRequestEngine
             throw new ConsentDecisionException(GrantErrorCodes.EndDateRequired, "A finite UTC end date (validTo) is required.", 422);
         }
 
+        if (selfGrant)
+        {
+            var selfRecord = await EvaluateSelfGrantRulesAsync(command.Decider, req, candidateValidTo, ct).ConfigureAwait(false);
+            return selfRecord with { Reason = validatedReason };
+        }
+
         var policy = await GetTenantPolicyAsync(req.TenantId, ct).ConfigureAwait(false);
         var protectionClass = ProtectionClass.Confidential;
         if (_protectionProvider is not null && !string.IsNullOrWhiteSpace(req.TableIdentifier.TableName))
         {
-            var effective = await _protectionProvider.GetAsync(req.TenantId, req.TableIdentifier, ct).ConfigureAwait(false);
-            protectionClass = effective.TableClass;
+            protectionClass = await ResolveMaxClassAsync(req, ct).ConfigureAwait(false);
         }
 
         var evalValidTo = req.RequestKind == ConsentRequestKind.Catalog && !command.ValidTo.HasValue && req.RequestedValidTo >= DateTimeOffset.MaxValue.AddDays(-1)
@@ -294,7 +316,7 @@ public sealed partial class PermissionRequestEngine
         }
 
         var eventType = string.Equals(decision.StepDecision, "APPROVED", StringComparison.OrdinalIgnoreCase)
-            ? AuditEventTypes.PermissionApproved
+            ? (decision.SelfGrant ? AuditEventTypes.SelfGrant : AuditEventTypes.PermissionApproved)
             : AuditEventTypes.PermissionRejected;
         var actorKind = PermissionAuditDetails.ResolveActorKind(command.Decider);
 
@@ -339,7 +361,9 @@ public sealed partial class PermissionRequestEngine
         {
             Id = Guid.NewGuid(),
             OccurredAt = _time.GetUtcNow().ToUniversalTime(),
-            EventType = AuditEventTypes.ConsentDenied,
+            EventType = errorCode.StartsWith("SELF_GRANT", StringComparison.Ordinal)
+                ? AuditEventTypes.SelfGrantDenied
+                : AuditEventTypes.ConsentDenied,
             ActorSid = command.Decider.UserSid,
             TargetTable = FormatTargetObject(req),
             Decision = "DENY",

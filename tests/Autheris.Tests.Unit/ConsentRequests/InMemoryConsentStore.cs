@@ -110,7 +110,7 @@ internal sealed class InMemoryConsentStore(
     public Task<ConsentWorkflowRoute?> ResolveWorkflowRouteAsync(TenantId tenantId, TableIdentifier table, CancellationToken ct = default)
     {
         var sys = Systems.FirstOrDefault(s => s.TenantId == tenantId && s.Enabled);
-        return Task.FromResult<ConsentWorkflowRoute?>(sys is null ? null : new ConsentWorkflowRoute(tenantId.Value, WorkflowRouteScopeKind.Tenant, "*", ConsentWorkflowMode.External, sys.Id, 90, 30, 24, false, "admin", clock.GetUtcNow()));
+        return Task.FromResult<ConsentWorkflowRoute?>(sys is null ? null : new ConsentWorkflowRoute(tenantId.Value, WorkflowRouteScopeKind.Tenant, "*", ConsentWorkflowMode.External, sys.Id, 90, 30, false, "admin", clock.GetUtcNow()));
     }
 
     public Task<ExternalWorkflowSystem?> GetExternalWorkflowSystemAsync(TenantId tenantId, Guid systemId, CancellationToken ct = default) =>

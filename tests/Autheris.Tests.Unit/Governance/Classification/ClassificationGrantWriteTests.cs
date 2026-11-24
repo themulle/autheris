@@ -558,7 +558,7 @@ public sealed class ClassificationGrantWriteTests
         };
         h.Approvals.GetConsentRequestAsync(external.Id, Arg.Any<CancellationToken>()).Returns(external);
         h.Workflow.ResolveWorkflowRouteAsync(TenantA, OrdersTable, Arg.Any<CancellationToken>()).Returns(new ConsentWorkflowRoute(
-            TenantA.Value, WorkflowRouteScopeKind.Tenant, TenantA.Value, ConsentWorkflowMode.External, systemId, 60, 30, 72, false, "admin", Now));
+            TenantA.Value, WorkflowRouteScopeKind.Tenant, TenantA.Value, ConsentWorkflowMode.External, systemId, 60, 30, false, "admin", Now));
         h.Workflow.GetExternalWorkflowSystemAsync(TenantA, systemId, Arg.Any<CancellationToken>()).Returns(
             new ExternalWorkflowSystem(systemId, TenantA.Value, "SNOW", "snow-client", "https://snow.local/hook", "sec", true, "admin", Now, null));
 

@@ -58,7 +58,7 @@ public sealed class ExternalDecisionGuardTests
     };
 
     private static ConsentWorkflowRouteResolution Route(Guid? systemId = null) =>
-        new(ConsentWorkflowMode.External, systemId ?? SystemId, 60, 30, 72, true, WorkflowRouteScopeKind.Tenant);
+        new(ConsentWorkflowMode.External, systemId ?? SystemId, 60, 30, true, WorkflowRouteScopeKind.Tenant);
 
     private static ClaimsPrincipal Caller(string clientId = ClientId) =>
         new(new ClaimsIdentity([new Claim("azp", clientId)], "OAuth"));

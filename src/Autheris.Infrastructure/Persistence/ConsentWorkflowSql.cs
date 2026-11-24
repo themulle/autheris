@@ -17,7 +17,7 @@ internal static class ConsentWorkflowSql
 {
     public const string DataGrantPredicate = " AND c.grant_kind = 'DATA'";
 
-    public const string ConsentColumns = "c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns";
+    public const string ConsentColumns = "c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_stage, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns";
     public const string RequestColumns = "r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id, r.grant_kind, r.target_columns, r.container_kind, r.container_id, r.approver_capacity, r.self_grant, r.bundle_id, r.decided_by, r.decided_at";
     public const int RequestColumnCount = 17;
 
@@ -26,7 +26,7 @@ internal static class ConsentWorkflowSql
         ConsentGrantSource grantSource,
         long grantRecordSeq,
         Guid? profileAssignmentId,
-        DateTimeOffset? expiryNoticeSentAt,
+        int expiryNoticeStage,
         PermissionGrantKind grantKind = PermissionGrantKind.Data,
         ApproverCapacity? approverCapacity = null,
         bool selfGrant = false,
@@ -35,7 +35,7 @@ internal static class ConsentWorkflowSql
         cmd.AddBound("@grantSource", grantSource.ToSqlString());
         cmd.AddBound("@grantRecordSeq", grantRecordSeq, DbType.Int64);
         cmd.AddBound("@profileAssignmentId", (object?)profileAssignmentId?.ToString() ?? DBNull.Value);
-        cmd.AddBound("@expiryNoticeSentAt", expiryNoticeSentAt.HasValue ? expiryNoticeSentAt.Value.ToUniversalTime() : DBNull.Value, DbType.DateTimeOffset);
+        cmd.AddBound("@expiryNoticeStage", expiryNoticeStage, DbType.Int32);
         cmd.AddBound("@grantKind", grantKind.ToSqlString());
         cmd.AddBound("@approverCapacity", approverCapacity.HasValue ? (object)approverCapacity.Value.ToSqlString() : DBNull.Value);
         cmd.AddBound("@selfGrant", selfGrant, DbType.Boolean);
@@ -235,7 +235,7 @@ internal static class ConsentWorkflowSql
             GrantSource = ReadGrantSource(reader, workflowStartOrdinal),
             GrantRecordSeq = ReadInt64OrZero(reader, workflowStartOrdinal + 1),
             ProfileAssignmentId = ReadOptionalGuid(reader, workflowStartOrdinal + 2),
-            ExpiryNoticeSentAt = ReadOptionalTimestamp(reader, workflowStartOrdinal + 3),
+            ExpiryNoticeStage = (int)ConsentWorkflowSql.ReadInt64OrZero(reader, workflowStartOrdinal + 3),
             GrantKind = ReadGrantKind(reader, workflowStartOrdinal + 4),
             ApproverCapacity = ReadApproverCapacity(reader, workflowStartOrdinal + 5),
             SelfGrant = ReadBooleanOrFalse(reader, workflowStartOrdinal + 6),

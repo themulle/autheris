@@ -364,12 +364,12 @@ public sealed class ProfileAssignmentTests
             if (tenantRouteExternal)
             {
                 Routes.Add(new ConsentWorkflowRoute(Tenant.Value, WorkflowRouteScopeKind.Tenant, Tenant.Value,
-                    ConsentWorkflowMode.External, ExternalSystemId, 90, 30, 72, false, "admin", FixedNow));
+                    ConsentWorkflowMode.External, ExternalSystemId, 90, 30, false, "admin", FixedNow));
             }
             else
             {
                 Routes.Add(new ConsentWorkflowRoute(Tenant.Value, WorkflowRouteScopeKind.Tenant, Tenant.Value,
-                    ConsentWorkflowMode.Internal, null, 60, 30, 72, false, "admin", FixedNow));
+                    ConsentWorkflowMode.Internal, null, 60, 30, false, "admin", FixedNow));
             }
 
             var writer = new GrantWriter(this, Signer, Clock);

@@ -33,7 +33,7 @@ public partial class GovernanceRepository
                                    c.grantee_sid, c.valid_from, c.valid_to,
                                    c.is_revoked, t.source_name, t.schema_name, t.table_name,
                                    c.tenant_id, c.renewal_count,
-                                   c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns
+                                   c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_stage, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns
                             FROM CONSENTS c
                             JOIN TABLES t ON c.table_id = t.id
                             WHERE c.is_revoked = 0 AND c.valid_to > @now AND c.valid_to <= @threshold
@@ -98,7 +98,7 @@ public partial class GovernanceRepository
 
         public const string SelectWorkflowRoutesByTenantSql =
             @"SELECT tenant_id, scope_kind, scope_ref, mode, external_system_id, max_duration_days,
-                     request_timeout_days, expiry_notice_lead_hours, require_resolvable_approver, updated_by, updated_at
+                     request_timeout_days, require_resolvable_approver, updated_by, updated_at
               FROM CONSENT_WORKFLOW_ROUTES
               WHERE tenant_id = @tenant";
 
@@ -159,7 +159,7 @@ public partial class GovernanceRepository
                                        c.grantee_sid, c.valid_from, c.valid_to,
                                        c.is_revoked, c.revoked_by_sid, c.revoked_at, c.revoke_reason,
                                        c.tenant_id,
-                                       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns
+                                       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_stage, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns
                                 FROM CONSENTS c
                                 JOIN TABLES t ON c.table_id = t.id
                                 WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
@@ -187,13 +187,9 @@ public partial class GovernanceRepository
 
     public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(
         IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default) =>
-        AllActiveCoreAsync(subjects, atTime, TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), ct);
+        AllActiveCoreAsync(subjects, atTime, TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), true, 0, ct);
 
-    private async Task<IReadOnlyList<Consent>> AllActiveCoreAsync(
-        IEnumerable<Sid> subjects,
-        DateTimeOffset? atTime,
-        TenantId tenantId,
-        CancellationToken ct)
+    private async Task<IReadOnlyList<Consent>> AllActiveCoreAsync(IEnumerable<Sid> subjects, DateTimeOffset? atTime, TenantId tenantId, bool dataOnly, int maxRows, CancellationToken ct)
     {
         var effectiveAt = atTime ?? TimeProvider.System.GetUtcNow();
         var subjectEnumerated = subjects.ToList();
@@ -211,16 +207,21 @@ public partial class GovernanceRepository
                                        c.grantee_sid, c.valid_from, c.valid_to,
                                        c.is_revoked, t.source_name, t.schema_name, t.table_name,
                                        c.tenant_id,
-                                       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns
+                                       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_stage, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns
                                 FROM CONSENTS c
                                 JOIN TABLES t ON c.table_id = t.id
-                                WHERE c.is_revoked = 0 AND c.tenant_id = @tenantId AND c.grant_kind = 'DATA'" + ConsentSubjectFilter.InListPredicate(chunk.Count);
+                                WHERE c.is_revoked = 0 AND c.tenant_id = @tenantId" + (dataOnly ? " AND c.grant_kind = 'DATA'" : string.Empty) + (maxRows > 0 ? " AND UPPER(c.effect) = 'ALLOW'" : string.Empty) + ConsentSubjectFilter.InListPredicate(chunk.Count)
+                                + (maxRows > 0 ? " ORDER BY c.id OFFSET 0 ROWS FETCH NEXT @maxRows ROWS ONLY" : string.Empty);
             for (var si = 0; si < chunk.Count; si++)
             {
                 cmd.AddBound("@s" + si, chunk[si]);
             }
 
             cmd.AddBound("@tenantId", tenantId.Value);
+            if (maxRows > 0)
+            {
+                cmd.AddBound("@maxRows", maxRows);
+            }
 
             await using var reader = await ExecuteReaderAsync(cmd, "Consent.GetAllActiveForSubjects", ct).ConfigureAwait(false);
             ConsentSqlCore.ReadAllSubjectConsentRows(reader, effectiveAt, subjectSet, seen, consents);
@@ -318,7 +319,7 @@ public partial class GovernanceRepository
             GrantSource = source.GrantSource,
             GrantRecordSeq = grantRecordSeq,
             ProfileAssignmentId = source.ProfileAssignmentId,
-            ExpiryNoticeSentAt = source.ExpiryNoticeSentAt,
+            ExpiryNoticeStage = source.ExpiryNoticeStage,
             Description = source.Description,
             ColumnRules = source.ColumnRules,
             RowFilters = source.RowFilters,

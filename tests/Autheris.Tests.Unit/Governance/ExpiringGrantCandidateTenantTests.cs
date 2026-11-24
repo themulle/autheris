@@ -48,7 +48,7 @@ public sealed class ExpiringGrantCandidateTenantTests
                  {
                      "id", "table_id", "consent_request_id", "effect", "grantee_type", "grantee_sid", "valid_from",
                      "valid_to", "is_revoked", "source_name", "schema_name", "table_name", "tenant_id", "renewal_count", "grant_source",
-                     "grant_record_seq", "profile_assignment_id", "expiry_notice_sent_at", "workflow_mode", "external_system_id"
+                     "grant_record_seq", "profile_assignment_id", "expiry_notice_stage", "workflow_mode", "external_system_id"
                  })
         {
             t.Columns.Add(name, typeof(object));

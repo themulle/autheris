@@ -147,7 +147,7 @@ internal static class ConsentSqlCore
                                    c.grantee_sid, c.valid_from, c.valid_to,
                                    c.is_revoked, t.source_name, t.schema_name, t.table_name,
                                    c.tenant_id,
-                                   c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns
+                                   c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_stage, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns
                             FROM CONSENTS c
                             JOIN TABLES t ON c.table_id = t.id
                             WHERE c.is_revoked = 0 AND c.consent_request_id = @reqId";
@@ -187,7 +187,7 @@ internal static class ConsentSqlCore
                                    c.grantee_sid, c.valid_from, c.valid_to,
                                    c.is_revoked, c.revoked_by_sid, c.revoked_at, c.revoke_reason,
                                    t.source_name, t.schema_name, t.table_name, c.tenant_id, c.renewal_count,
-                                   c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_sent_at, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns
+                                   c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_stage, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns
                             FROM CONSENTS c
                             JOIN TABLES t ON c.table_id = t.id
                             WHERE c.id = @id";

@@ -1,11 +1,15 @@
 namespace Autheris.Tests.Unit.Identity;
 
 using System;
+using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Middleware;
+using Autheris.Application.Governance.Grants;
+using Autheris.Application.Identity.Services;
 using Autheris.Domain.Common;
+using Autheris.Domain.Identity;
 using Autheris.Domain.Interfaces;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -86,5 +90,56 @@ public sealed class DeprovisioningLockTests
 
         _nextCalled.ShouldBeFalse();
         context.Response.StatusCode.ShouldBe(StatusCodes.Status503ServiceUnavailable);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Lock_survives_revoke_failure()
+    {
+        var revocation = new StubRevocation(new GrantRevocationResult(0, 0, 0, Failed: 1, Truncated: false));
+        var service = new IdentityDeprovisioningService(_identityStore, revocation);
+
+        var act = () => service.DeprovisionAndLockSubjectAsync(new TenantId("tenant-1"), "workforce-entra", "user-1", "SCIM_DEPROVISION", "SCIM_PUT");
+
+        await Should.ThrowAsync<GrantRevocationIncompleteException>(act);
+        await _identityStore.Received(1).AddLockAsync(Arg.Any<Autheris.Domain.Identity.ScimLock>(), Arg.Any<CancellationToken>());
+        await _identityStore.DidNotReceive().RemoveLockAsync(Arg.Any<TenantId>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Deprovisioning_revokes_grants_for_every_subject_form()
+    {
+        var revocation = new StubRevocation(new GrantRevocationResult(1, 0, 0, 0, false));
+        var service = new IdentityDeprovisioningService(_identityStore, revocation);
+
+        await service.DeprovisionAndLockSubjectAsync(new TenantId("tenant-1"), "workforce-entra", "user-1", "SCIM_DEPROVISION", "SCIM_PUT");
+
+        revocation.Subjects.ShouldBe([new Sid("user-1"), new Sid("workforce-entra|user-1")]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Bare_subject_form_skipped_when_user_key_exists_in_another_realm()
+    {
+        var tenant = new TenantId("tenant-1");
+        _identityStore.UserKeyExistsInOtherRealmAsync(tenant, "workforce-entra", "user-1", Arg.Any<CancellationToken>()).Returns(true);
+        var revocation = new StubRevocation(new GrantRevocationResult(1, 0, 0, 0, false));
+        var service = new IdentityDeprovisioningService(_identityStore, revocation);
+
+        await service.DeprovisionAndLockSubjectAsync(tenant, "workforce-entra", "user-1", "SCIM_DEPROVISION", "SCIM_PUT");
+
+        revocation.Subjects.ShouldBe([new Sid("workforce-entra|user-1")]);
+    }
+
+    private sealed class StubRevocation(GrantRevocationResult result) : IGrantRevocationService
+    {
+        public List<Sid> Subjects { get; } = [];
+
+        public Task<GrantRevocationResult> RevokeAllForSubjectAsync(TenantId tenant, Sid subject, string reason, CancellationToken ct = default)
+        {
+            Subjects.Add(subject);
+            return Task.FromResult(result);
+        }
     }
 }

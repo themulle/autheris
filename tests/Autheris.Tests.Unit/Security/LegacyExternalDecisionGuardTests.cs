@@ -25,7 +25,7 @@ public sealed class LegacyExternalDecisionGuardTests
         new(SystemId, tenant, "ServiceNow", clientId, "https://snow.local/cb", "secret", enabled, "admin", Now, null);
 
     private static ConsentWorkflowRoute Route(bool requireResolvable = true, Guid? systemId = null) =>
-        new(TenantA.Value, WorkflowRouteScopeKind.Tenant, TenantA.Value, ConsentWorkflowMode.External, systemId ?? SystemId, 60, 30, 72, requireResolvable, "admin", Now);
+        new(TenantA.Value, WorkflowRouteScopeKind.Tenant, TenantA.Value, ConsentWorkflowMode.External, systemId ?? SystemId, 60, 30, requireResolvable, "admin", Now);
 
     private static ConsentRequest ExternalRequest(
         GranteeType granteeType = GranteeType.User,

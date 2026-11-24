@@ -44,6 +44,17 @@ internal sealed partial class IdentityStore(
             UserSelectColumns + "FROM IDENTITY_USERS WHERE tenant_id = @tenantId AND realm_id = @realmId AND user_key = @userKey",
             tenantId, realmId, "@userKey", userKey, ct);
 
+    public async Task<bool> UserKeyExistsInOtherRealmAsync(TenantId tenantId, string realmId, string userKey, CancellationToken ct = default)
+    {
+        await using var scope = await open(false, ct).ConfigureAwait(false);
+        await using var cmd = scope.Connection.CreateCommand();
+        cmd.CommandText = "SELECT 1 FROM IDENTITY_USERS WHERE tenant_id = @tenantId AND realm_id <> @realmId AND user_key = @userKey";
+        AddParam(cmd, "@tenantId", tenantId.Value);
+        AddParam(cmd, "@realmId", realmId);
+        AddParam(cmd, "@userKey", userKey);
+        return await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false) != null;
+    }
+
     public Task<ScimUser?> GetUserByExternalIdAsync(TenantId tenantId, string realmId, string externalId, CancellationToken ct = default) =>
         QuerySingleUserAsync(
             UserSelectColumns + "FROM IDENTITY_USERS WHERE tenant_id = @tenantId AND realm_id = @realmId AND external_id = @externalId",

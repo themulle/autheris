@@ -201,6 +201,6 @@ public sealed class BackgroundServiceLockTests
 
         // Assert: the service cycled (lock attempted) yet never scanned without the lock
         await clusterState.Received().TryAcquireLockAsync(Arg.Is<string>(s => s.Contains("grant-expiry:scan")), Arg.Any<TimeSpan>(), Arg.Any<CancellationToken>());
-        await expiryStore.DidNotReceive().GetGrantsWithoutExpiryNoticeAsync(Arg.Any<DateTimeOffset>(), Arg.Any<CancellationToken>());
+        await expiryStore.DidNotReceive().GetGrantsWithPendingReminderAsync(Arg.Any<DateTimeOffset>(), Arg.Any<DateTimeOffset>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 }

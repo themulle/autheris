@@ -63,8 +63,8 @@ public sealed class ConsentWorkflowRouterTests
         var domainSystemId = Guid.NewGuid();
         var routes = new List<ConsentWorkflowRoute>
         {
-            new(Tenant.Value, WorkflowRouteScopeKind.Tenant, "*", ConsentWorkflowMode.External, Guid.NewGuid(), 90, 30, 72, true, "admin", FixedNow),
-            new(Tenant.Value, WorkflowRouteScopeKind.Domain, DomainId.ToString("D"), ConsentWorkflowMode.External, domainSystemId, 14, 7, 24, true, "admin", FixedNow)
+            new(Tenant.Value, WorkflowRouteScopeKind.Tenant, "*", ConsentWorkflowMode.External, Guid.NewGuid(), 90, 30, true, "admin", FixedNow),
+            new(Tenant.Value, WorkflowRouteScopeKind.Domain, DomainId.ToString("D"), ConsentWorkflowMode.External, domainSystemId, 14, 7, true, "admin", FixedNow)
         };
 
         var resolution = await Router(routes, DomainId).ResolveForTableAsync(Tenant, Table);
@@ -83,9 +83,9 @@ public sealed class ConsentWorkflowRouterTests
         // Routes whose scope kind was removed (data owner / data source) or is unknown never match, never auto-approve and never act as wildcard.
         var routes = new List<ConsentWorkflowRoute>
         {
-            new(Tenant.Value, WorkflowRouteScopeKind.Unknown, "owner-1", ConsentWorkflowMode.External, Guid.NewGuid(), 30, 15, 24, true, "admin", FixedNow),
-            new(Tenant.Value, (WorkflowRouteScopeKind)99, "sales_db", ConsentWorkflowMode.External, Guid.NewGuid(), 30, 15, 24, true, "admin", FixedNow),
-            new(Tenant.Value, WorkflowRouteScopeKind.Unknown, "*", ConsentWorkflowMode.External, Guid.NewGuid(), 30, 15, 24, true, "admin", FixedNow)
+            new(Tenant.Value, WorkflowRouteScopeKind.Unknown, "owner-1", ConsentWorkflowMode.External, Guid.NewGuid(), 30, 15, true, "admin", FixedNow),
+            new(Tenant.Value, (WorkflowRouteScopeKind)99, "sales_db", ConsentWorkflowMode.External, Guid.NewGuid(), 30, 15, true, "admin", FixedNow),
+            new(Tenant.Value, WorkflowRouteScopeKind.Unknown, "*", ConsentWorkflowMode.External, Guid.NewGuid(), 30, 15, true, "admin", FixedNow)
         };
 
         var resolution = await Router(routes, DomainId).ResolveForTableAsync(Tenant, Table);
@@ -111,7 +111,7 @@ public sealed class ConsentWorkflowRouterTests
     {
         var routes = new List<ConsentWorkflowRoute>
         {
-            new(Tenant.Value, WorkflowRouteScopeKind.Domain, DomainId.ToString("D"), ConsentWorkflowMode.External, Guid.NewGuid(), 14, 7, 24, true, "admin", FixedNow)
+            new(Tenant.Value, WorkflowRouteScopeKind.Domain, DomainId.ToString("D"), ConsentWorkflowMode.External, Guid.NewGuid(), 14, 7, true, "admin", FixedNow)
         };
 
         (await Router(routes, Guid.NewGuid()).ResolveForTableAsync(Tenant, Table)).Mode.ShouldBe(ConsentWorkflowMode.Internal);
@@ -137,7 +137,6 @@ public sealed class ConsentWorkflowRouterTests
         resolution.ExternalSystemId.ShouldBeNull();
         resolution.MaxDurationDays.ShouldBe(ConsentWorkflowRouter.FallbackMaxDurationDays);
         resolution.RequestTimeoutDays.ShouldBe(ConsentWorkflowRouter.FallbackRequestTimeoutDays);
-        resolution.ExpiryNoticeLeadHours.ShouldBe(ConsentWorkflowRouter.FallbackExpiryNoticeLeadHours);
         resolution.MatchedScopeKind.ShouldBeNull();
         resolution.ConflictDetected.ShouldBeFalse();
     }
@@ -147,15 +146,14 @@ public sealed class ConsentWorkflowRouterTests
     {
         var adminRepo = Substitute.For<IConsentWorkflowAdminRepository>();
         adminRepo.GetWorkflowRouteAsync(Tenant, WorkflowRouteScopeKind.Tenant, "*", Arg.Any<CancellationToken>())
-            .Returns(new ConsentWorkflowRoute(Tenant.Value, WorkflowRouteScopeKind.Tenant, "*", ConsentWorkflowMode.Internal, null, 30, 14, 48, true, "admin", FixedNow));
+            .Returns(new ConsentWorkflowRoute(Tenant.Value, WorkflowRouteScopeKind.Tenant, "*", ConsentWorkflowMode.Internal, null, 30, 14, true, "admin", FixedNow));
 
         var configRepo = Substitute.For<IConsentWorkflowConfigRepository>();
         var body = new ConsentWorkflowAdminEndpoints.UpsertWorkflowRouteRequest(
             Mode: "INTERNAL",
             ExternalSystemId: null,
             MaxDurationDays: 45,
-            RequestTimeoutDays: 14,
-            ExpiryNoticeLeadHours: 24);
+            RequestTimeoutDays: 14);
 
         var httpContext = new DefaultHttpContext
         {

@@ -30,7 +30,6 @@ public sealed class ConsentWorkflowRouter(
     /// </summary>
     public const int FallbackMaxDurationDays = int.MaxValue;
     public const int FallbackRequestTimeoutDays = 30;
-    public const int FallbackExpiryNoticeLeadHours = 72;
 
     private readonly IAuditLogRepository _auditRepository = auditRepository ?? throw new ArgumentNullException(nameof(auditRepository));
     private readonly IConsentWorkflowConfigRepository? _configRepository = configRepository;
@@ -147,7 +146,6 @@ public sealed class ConsentWorkflowRouter(
             route.Mode == ConsentWorkflowMode.External ? route.ExternalSystemId : null,
             route.MaxDurationDays > 0 ? route.MaxDurationDays : FallbackMaxDurationDays,
             route.RequestTimeoutDays > 0 ? route.RequestTimeoutDays : FallbackRequestTimeoutDays,
-            route.ExpiryNoticeLeadHours >= 0 ? route.ExpiryNoticeLeadHours : FallbackExpiryNoticeLeadHours,
             route.RequireResolvableApprover,
             route.ScopeKind);
 
@@ -157,7 +155,6 @@ public sealed class ConsentWorkflowRouter(
             null,
             FallbackMaxDurationDays,
             FallbackRequestTimeoutDays,
-            FallbackExpiryNoticeLeadHours,
             true,
             MatchedScopeKind: null);
 }

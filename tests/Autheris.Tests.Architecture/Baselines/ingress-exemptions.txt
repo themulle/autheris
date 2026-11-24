@@ -58,11 +58,13 @@ route /api/v1/consent/grant-records/{seq:long} | governance, consent, ReBAC, Fin
 route /api/v1/consent/grants | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/consent/grants/{id:guid} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/consent/grants/{id:guid}/revoke | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/grants/{id:guid}/renew | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/consent/profile-assignments/{id:guid}/revoke | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/consent/requests | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/consent/requests/{id:guid} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/consent/requests/{id:guid}/decision | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/consent/requests/{id:guid}/withdraw | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/consent/self-grants | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/consents/bulk | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/docs/apps | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/docs/apps/{appId}/bundle | catalog integration, lineage, schema-registry, webhook or docs route; metadata only

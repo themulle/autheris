@@ -62,7 +62,7 @@ public sealed class ScimSecurityTests
 
         var node1Scim = new ScimService(
             store,
-            new IdentityDeprovisioningService(store, roleResolverCache: node1Cache),
+            new IdentityDeprovisioningService(store, Autheris.Tests.Unit.TestSupport.NoOpGrantRevocation.Instance, roleResolverCache: node1Cache),
             roleCache: node1Cache,
             timeProvider: time);
 

@@ -54,7 +54,7 @@ public sealed class ExternalDecisionEngineTests
     };
 
     private static ConsentWorkflowRouteResolution DomainRoute(Guid systemId) =>
-        new(ConsentWorkflowMode.External, systemId, 60, 30, 72, true, WorkflowRouteScopeKind.Domain);
+        new(ConsentWorkflowMode.External, systemId, 60, 30, true, WorkflowRouteScopeKind.Domain);
 
     private static Harness Create(
         Dictionary<string, SecurityPrincipalContext> directory,

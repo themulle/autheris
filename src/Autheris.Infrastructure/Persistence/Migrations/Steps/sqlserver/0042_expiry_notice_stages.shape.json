@@ -1,0 +1,7 @@
+{
+  "ops": [
+    { "op": "addColumn", "table": "CONSENTS", "column": { "name": "expiry_notice_stage", "type": "INT", "family": "integer", "nullable": false } },
+    { "op": "dropColumn", "table": "CONSENTS", "name": "expiry_notice_sent_at" },
+    { "op": "dropColumn", "table": "CONSENT_WORKFLOW_ROUTES", "name": "expiry_notice_lead_hours" }
+  ]
+}

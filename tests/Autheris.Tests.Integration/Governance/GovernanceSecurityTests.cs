@@ -600,7 +600,7 @@ public class GovernanceSecurityTests : IDisposable
             req.Id, Autheris.Application.ConsentRequests.ConsentDecisionKind.Approve, Autheris.Application.ConsentRequests.ConsentDecisionChannel.External, null,
             ExternalAttribution: new ExternalDecisionAttribution(req.ExternalSystemId!.Value, req.ExternalReference!, "APPROVED", null, DateTimeOffset.UtcNow));
         var system = new ExternalWorkflowSystem(req.ExternalSystemId.Value, req.TenantId.Value, "Sys", "client-1", "https://ext.local/hook", "sec", true, "admin", DateTimeOffset.UtcNow, null);
-        var route = new ConsentWorkflowRoute(req.TenantId.Value, WorkflowRouteScopeKind.Tenant, req.TenantId.Value, ConsentWorkflowMode.External, req.ExternalSystemId, 30, 30, 72, false, "admin", DateTimeOffset.UtcNow);
+        var route = new ConsentWorkflowRoute(req.TenantId.Value, WorkflowRouteScopeKind.Tenant, req.TenantId.Value, ConsentWorkflowMode.External, req.ExternalSystemId, 30, 30, false, "admin", DateTimeOffset.UtcNow);
 
         await Should.ThrowAsync<Autheris.Application.ConsentRequests.ConsentDecisionException>(() => guard.ValidateAsync(cmd, req, route, system));
     }

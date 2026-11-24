@@ -211,7 +211,8 @@ public sealed class StepSqlLintTests
                 (38, "drop_table_sensitivity"),
                 (39, "data_product_container"),
                 (40, "discovery_artifact_provenance"),
-                (41, "permission_requests_and_grant_kinds")
+                (41, "permission_requests_and_grant_kinds"),
+                (42, "expiry_notice_stages")
             ]);
         }
     }
