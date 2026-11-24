@@ -17,7 +17,8 @@ internal static class OpenDomainSeeder
 {
     private static readonly Sid SeedActor = new("S-1-5-21-1000-1000-1000-9999");
 
-    public static async Task<Guid> AssignToOpenDomainAsync(IServiceProvider services, TenantId tenant, TableIdentifier table)
+    /// <param name="ownerGroupSid">The owner group of the domain; its members decide requests for the table as data owners.</param>
+    public static async Task<Guid> AssignToOpenDomainAsync(IServiceProvider services, TenantId tenant, TableIdentifier table, Sid? ownerGroupSid = null)
     {
         using var scope = services.CreateScope();
         var metadata = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
@@ -34,7 +35,7 @@ internal static class OpenDomainSeeder
                 "open-" + Guid.NewGuid().ToString("N")[..12],
                 null,
                 null,
-                null,
+                ownerGroupSid,
                 ProtectionClass.Internal,
                 CatalogVisibilityMode.Open,
                 IsSystemUnassigned: false,

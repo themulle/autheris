@@ -20,6 +20,7 @@ using Autheris.Application.Governance.Grants.Records;
 using Autheris.Application.Webhooks;
 using Autheris.Domain.Common;
 using Autheris.Domain.Grants;
+using Autheris.Domain.Identity;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Domain.Security;
@@ -54,10 +55,10 @@ public sealed class GrantRecordLifecycleE2ETests(GovernancePostgresFixture fixtu
         var tenant = store.TenantA;
         var requesterSid = new Sid("S-1-5-21-1000-1000-1000-2001");
         var approverSid = new Sid("S-1-5-21-1000-1000-1000-3001");
-        var owner1Sid = new Sid("S-1-5-21-1000-1000-1000-4001");
-        var owner2Sid = new Sid("S-1-5-21-1000-1000-1000-4002");
+        var ownerSid = new Sid("S-1-5-21-1000-1000-1000-4001");
+        var ownerGroupSid = new Sid("S-1-5-21-1000-1000-1000-4500");
 
-        var tableId = await SeedTableAndOwnersAsync(store, owner1Sid, owner2Sid);
+        var tableId = await SeedTableAndOwnerGroupAsync(store, ownerGroupSid);
 
         // 1. Register External Workflow System + Tenant External Route
         var externalSystemId = Guid.NewGuid();
@@ -104,11 +105,15 @@ public sealed class GrantRecordLifecycleE2ETests(GovernancePostgresFixture fixtu
 
         // 3. Approve via external decision pipeline -> Consent activated + signed ISSUED record
         var engine = store.Services.GetRequiredService<Autheris.Application.Governance.Requests.IPermissionRequestEngine>();
+        // The decider is a member of the owner group of the table's container (resolved by the identity pipeline).
         var ownerPrincipal = new ClaimsPrincipal(new ClaimsIdentity(
         [
-            new Claim(ClaimTypes.PrimarySid, owner1Sid.Value),
+            new Claim(ClaimTypes.PrimarySid, ownerSid.Value),
             new Claim("tenant_id", tenant.Value),
-            new Claim(ClaimTypes.Role, "DataOwner")
+            new Claim(ClaimTypes.Role, "DataOwner"),
+            IdentityClaimIssuers.CreateGroupSidClaim(ownerGroupSid.Value),
+            GroupResolutionClaims.CreateMarker(),
+            GroupResolutionClaims.CreateStatus(GroupResolutionStatus.Complete)
         ], "Test"));
         var approved = await engine.DecideAsync(new Autheris.Application.Governance.Requests.PermissionDecisionCommand(
             submission.RequestId,
@@ -242,9 +247,7 @@ public sealed class GrantRecordLifecycleE2ETests(GovernancePostgresFixture fixtu
 
         var now = DateTimeOffset.UtcNow;
         var grantee = new Sid("S-1-5-21-1000-1000-1000-5001");
-        var owner1Sid = new Sid("S-1-5-21-1000-1000-1000-4001");
-        var owner2Sid = new Sid("S-1-5-21-1000-1000-1000-4002");
-        var table = await SeedTableAndOwnersAsync(store, owner1Sid, owner2Sid);
+        var table = await SeedTableAndOwnerGroupAsync(store, new Sid("S-1-5-21-1000-1000-1000-4500"));
 
         // The grant is stored active but its validity ended an hour ago; no expiry sweep ever runs in this test.
         var expired = await store.Consents.CreateConsentAsync(new Consent
@@ -264,10 +267,7 @@ public sealed class GrantRecordLifecycleE2ETests(GovernancePostgresFixture fixtu
         (await store.Consents.GetActiveGrantsForSubjectsAsync(store.TenantA, [grantee], now, 100)).Should().NotContain(c => c.Id == expired.Id);
     }
 
-    private static async Task<TableIdentifier> SeedTableAndOwnersAsync(
-        GovernanceTestStore store,
-        Sid owner1Sid,
-        Sid owner2Sid)
+    private static async Task<TableIdentifier> SeedTableAndOwnerGroupAsync(GovernanceTestStore store, Sid ownerGroupSid)
     {
         var tableId = new TableIdentifier("sales", "dbo", "orders_e2e_" + Guid.NewGuid().ToString("N")[..8]);
         await store.TableMetadata.UpsertTableMetadataAsync(new TableMetadata
@@ -291,21 +291,9 @@ public sealed class GrantRecordLifecycleE2ETests(GovernancePostgresFixture fixtu
             PrimaryKeyColumns = ["id"]
         });
 
-        // the workflow under test needs a table the requester can see (an unassigned table is OnRequest)
-        await OpenDomainSeeder.AssignToOpenDomainAsync(store.Services, store.TenantA, tableId);
-
-        await store.DataOwnerAssignments.ApplyTableOwnerAssignmentsAsync(
-            new DataOwnerAssignmentRequest(
-                [
-                    new TableOwnerAssignmentSpec(
-                        tableId,
-                        [
-                            new DataOwnerSpec(owner1Sid.Value, "owner1", "Owner One", "owner1@example.com", "PRIMARY"),
-                            new DataOwnerSpec(owner2Sid.Value, "owner2", "Owner Two", "owner2@example.com", "DELEGATE")
-                        ])
-                ],
-                Replace: true,
-                DryRun: false));
+        // the workflow under test needs a table the requester can see (an unassigned table is OnRequest); ownership is the owner
+        // group of that container (#1009), not a legacy per-table owner assignment
+        await OpenDomainSeeder.AssignToOpenDomainAsync(store.Services, store.TenantA, tableId, ownerGroupSid);
 
         return tableId;
     }

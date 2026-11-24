@@ -29,7 +29,8 @@ using Xunit;
 public sealed class GrantRevokeAuthorityApiIntegrationTests : IClassFixture<GrantRevokeAuthorityApiIntegrationTests.HostFixture>
 {
     private const string Tenant = "tenant-default";
-    private const string OwnerGroup = "S-1-5-21-9101-OWNERS";
+    // Group SIDs must be canonical (numeric sub-authorities): GetGroupSids drops any other value.
+    private const string OwnerGroup = "S-1-5-21-9101-5001";
     private const string Grantee = "S-1-5-21-9101-ALICE";
 
     private readonly WebApplicationFactory<Program> _factory;
@@ -167,7 +168,7 @@ public sealed class GrantRevokeAuthorityApiIntegrationTests : IClassFixture<Gran
     public async Task Stranger_and_it_admin_cannot_revoke_a_grant_of_an_owned_container()
     {
         var seeded = await SeedAsync();
-        using var stranger = Client("S-1-5-21-9101-MALLORY", "S-1-5-21-9101-NOBODY");
+        using var stranger = Client("S-1-5-21-9101-MALLORY", "S-1-5-21-9101-5999");
         using var it = Client("S-1-5-21-9101-IT", roles: "TenantAdmin");
 
         (await RevokeAsync(stranger, $"/api/v1/consent/grants/{seeded.Grant.Id:D}/revoke")).StatusCode.ShouldBe(HttpStatusCode.Forbidden);
@@ -203,7 +204,7 @@ public sealed class GrantRevokeAuthorityApiIntegrationTests : IClassFixture<Gran
     public async Task Catalog_grant_is_revocable_by_owner_member_but_not_by_a_stranger()
     {
         var seeded = await SeedAsync();
-        using var stranger = Client("S-1-5-21-9101-MALLORY", "S-1-5-21-9101-NOBODY");
+        using var stranger = Client("S-1-5-21-9101-MALLORY", "S-1-5-21-9101-5999");
         using var owner = Client("S-1-5-21-9101-OWNER-MEMBER", OwnerGroup);
         var route = $"/api/v1/consent/catalog-grants/{seeded.CatalogGrant.Id:D}/revoke";
 
