@@ -213,7 +213,8 @@ public sealed class StepSqlLintTests
                 (40, "discovery_artifact_provenance"),
                 (41, "permission_requests_and_grant_kinds"),
                 (42, "expiry_notice_stages"),
-                (43, "single_approval_cleanup")
+                (43, "single_approval_cleanup"),
+                (44, "retire_classification_clear")
             ]);
         }
     }

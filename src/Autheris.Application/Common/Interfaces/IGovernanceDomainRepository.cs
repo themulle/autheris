@@ -28,6 +28,13 @@ public interface IGovernanceDomainRepository
     Task<ContainerDefaults> GetContainerForTableAsync(TenantId tenant, Guid tableId, CancellationToken ct = default);
 
     /// <summary>
+    /// True when an object protection row names <paramref name="category"/> as its mask category, in <paramref name="tenant"/> or, when
+    /// <paramref name="tenant"/> is <c>null</c>, in any tenant. A store without the check throws, so the caller refuses (fail closed).
+    /// </summary>
+    Task<bool> IsMaskCategoryReferencedAsync(TenantId? tenant, string category, CancellationToken ct = default) =>
+        throw new NotSupportedException("The mask category reference check is not available.");
+
+    /// <summary>
     /// <see cref="GetProtectionAsync"/> for several tables of one tenant (every requested id is present in the result). Implementations
     /// read set-based; the default reads table by table.
     /// </summary>

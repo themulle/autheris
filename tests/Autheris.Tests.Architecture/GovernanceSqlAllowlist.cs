@@ -6,8 +6,6 @@ internal static class GovernanceSqlAllowlist
     public static readonly IReadOnlyDictionary<(string File, string Member), string> Entries = new Dictionary<(string, string), string>
     {
         [("AuditSqlCore.cs", "QueryAuditLogsAsync")] = "where clauses are constant predicates over bound parameters (reviewed, shared audit core)",
-        [("GovernanceRepository.ClassificationAccess.cs", "GetConsentClassificationAccessBatchAsync")] = "constant prefix plus BindIdInClause placeholders (bounded batch)",
-        [("GovernanceRepository.ClassificationAccess.cs", "HydrateConsentClassificationAccessBatchAsync")] = "constant prefix plus BindIdInClause placeholders (bounded batch)",
         [("GovernanceRepository.Consent.cs", "ActiveForSubjectsCoreAsync")] = "appends the constant tenant predicate and the generated @sN placeholder list",
         [("GovernanceRepository.Consent.cs", "AllActiveCoreAsync")] = "appends the constant tenant predicate and the generated @sN placeholder list",
         [("GovernanceRepository.ConsentBatch.cs", "GetActiveConsentsForSubjectsBatchAsync")] = "issue #1043: appends the generated @sN placeholder list to a constant statement, values stay bound",

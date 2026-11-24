@@ -132,7 +132,7 @@ public sealed partial class DeclarativeConsentApplyService
         }
 
         // The manifest creates none of these, so an existing consent that carries them grants or restricts differently.
-        if (existing.WriteRules is { Count: > 0 } || existing.RowScope is { Count: > 0 } || existing.ClassificationAccess is { Count: > 0 })
+        if (existing.WriteRules is { Count: > 0 } || existing.RowScope is { Count: > 0 })
         {
             return false;
         }

@@ -72,11 +72,6 @@ public partial class GovernanceRepository : IClassificationRepository
                     cmd.AddBound("@description", normalized.Description);
                     cmd.AddBound("@parent_code", normalized.ParentCode);
                     cmd.AddBound("@restriction_rank", normalized.RestrictionRank);
-                    cmd.AddBound("@clear_grantable", normalized.ClearGrantable);
-                    cmd.AddBound("@separate_approval", normalized.SeparateApproval);
-                    cmd.AddBound("@approver_mode", ClassificationApproverModes.ToCode(normalized.ApproverMode));
-                    cmd.AddBound("@steward_group_sid", normalized.StewardGroupSid);
-                    cmd.AddBound("@max_clear_days", normalized.MaxClearDays);
                     cmd.AddBound("@is_active", normalized.IsActive);
                     cmd.AddBound("@version", Math.Max(1, normalized.Version));
                     cmd.AddBound("@updated_by", normalized.UpdatedBy);
@@ -102,6 +97,31 @@ public partial class GovernanceRepository : IClassificationRepository
         }
 
         return stored ?? normalized;
+    }
+
+    public async Task<bool> IsClassificationReferencedAsync(
+        string scope,
+        string code,
+        CancellationToken ct = default)
+    {
+        var validScope = ClassificationScopes.ValidateScope(scope, allowGlobal: true);
+        ValidateClassificationCodeArg(code, nameof(code));
+
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        if (ClassificationScopes.IsGlobal(validScope))
+        {
+            cmd.CommandText = ClassificationsSql.CountClassificationReferencesGlobalSql;
+        }
+        else
+        {
+            cmd.CommandText = ClassificationsSql.CountClassificationReferencesScopedSql;
+            cmd.AddBound("@scope", validScope);
+        }
+
+        cmd.AddBound("@code", code);
+        var count = await ExecuteScalarAsync(cmd, "Classifications.CountReferences", ct).ConfigureAwait(false);
+        return count is not null and not DBNull && Convert.ToInt64(count, System.Globalization.CultureInfo.InvariantCulture) > 0;
     }
 
     public async Task<IReadOnlyList<ClassificationMaskRule>> GetClassificationMaskRulesAsync(

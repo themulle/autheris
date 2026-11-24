@@ -62,19 +62,16 @@ public sealed partial class TableAccessPolicy
             return decision;
         }
 
-        var coverage = await ResolveUnmaskCoverageAsync(query, groupsComplete, ct).ConfigureAwait(false);
-        if (coverage.WholeTable)
-        {
-            return decision;
-        }
-
+        var coverage = query.Unmask is { } unmask
+            ? await unmask.GetAsync(ct).ConfigureAwait(false)
+            : await ResolveUnmaskCoverageAsync(query, groupsComplete, ct).ConfigureAwait(false);
         if (!coverage.IsEmpty)
         {
-            // In-place compaction: keep only the columns the unmask grants do not cover.
+            // In-place compaction: keep only the columns the unmask grants do not cover. CREDENTIALS is never lifted (#1009 A-3).
             var kept = 0;
             for (var i = 0; i < candidates.Count; i++)
             {
-                if (!coverage.Covers(candidates[i].Column))
+                if (!coverage.Covers(candidates[i].Column) || IsNeverUnmaskedCategory(candidates[i].Category))
                 {
                     candidates[kept++] = candidates[i];
                 }
@@ -98,6 +95,9 @@ public sealed partial class TableAccessPolicy
         var withAccess = decision with { ColumnAccess = updatedAccess };
         return await WithCategoryMaskSpecsAsync(withAccess, query, toMask, ct).ConfigureAwait(false);
     }
+
+    private static bool IsNeverUnmaskedCategory(string category) =>
+        string.Equals(category, ClassificationScopes.CredentialsCode, StringComparison.OrdinalIgnoreCase);
 
     private async ValueTask<UnmaskCoverage> ResolveUnmaskCoverageAsync(TableAccessQuery query, bool groupsComplete, CancellationToken ct)
     {

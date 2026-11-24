@@ -560,7 +560,12 @@ public static class DiscoveryAccessMapper
             defs.TryGetValue(cc.Code, out var def);
             items.Add(new DiscoveryColumnClassification(cc.Code, def?.DisplayName ?? cc.Code));
             if (ClassificationMetadata.IsPiiCode(cc.Code, defs)) pii = true;
-            if (def is { IsActive: true, SeparateApproval: true }) { sep = true; if (def.ClearGrantable) clearReq.Add(cc.Code); }
+            // #1009 A-3: a masking classification needs a separate per-object unmask grant for clear values; CREDENTIALS is never lifted.
+            if (def is { IsActive: true } && ClassificationAccessResolver.IsMaskingClassification(cc.Code))
+            {
+                sep = true;
+                if (!string.Equals(cc.Code, ClassificationScopes.CredentialsCode, StringComparison.Ordinal)) clearReq.Add(cc.Code);
+            }
         }
         return (pii, sep, items, clearReq);
     }

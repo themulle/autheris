@@ -523,10 +523,6 @@ public sealed partial class GovernedSqlExecutor
                 {
                     fields["masked_columns"] = rewrite.MaskedColumnsAudit;
                 }
-                if (rewrite.GrantClassificationsAudit is { Count: > 0 })
-                {
-                    fields["grant_classifications"] = rewrite.GrantClassificationsAudit;
-                }
                 await _auditWriter.RecordAsync(new AuditLogEntry
                 {
                     TenantId = tenantId,

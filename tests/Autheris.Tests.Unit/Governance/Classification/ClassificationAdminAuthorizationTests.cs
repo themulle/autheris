@@ -54,7 +54,7 @@ public sealed class ClassificationAdminAuthorizationTests
     }
 
     private static ClassificationDefinitionInput Definition(string name = "Custom") =>
-        new(name, null, null, 50, true, true, ApproverMode.DataOwner, null, 30);
+        new(name, null, null, 50);
 
     private static MaskRuleInput Rule(CatalogTextVisibility text = CatalogTextVisibility.Visible) =>
         new(MaskFunction.Hash, null, "kv-pii", text);
@@ -89,33 +89,72 @@ public sealed class ClassificationAdminAuthorizationTests
     }
 
     [Fact]
-    public async Task Tenant_may_change_only_approver_steward_and_max_days_of_a_built_in_code()
+    public async Task Tenant_may_not_change_rank_or_parent_of_a_built_in_code()
     {
         var (service, _) = Build();
         var pii = (await service.GetClassificationAsync(GovernanceAdmin(), "PII", ClassificationAdminScope.Global, null)).Value!;
-        ClassificationDefinitionInput Same() => new(pii.DisplayName, null, pii.ParentCode, pii.RestrictionRank, pii.ClearGrantable, pii.SeparateApproval, ApproverMode.Steward, "S-1-GRP-STEWARD", 14);
+        ClassificationDefinitionInput Same() => new("Personal data", "Tenant wording", pii.ParentCode, pii.RestrictionRank);
 
         (await service.UpsertClassificationAsync(GovernanceAdmin(), "PII", Same(), ClassificationAdminScope.Tenant, null)).IsOk.ShouldBeTrue();
         (await service.UpsertClassificationAsync(GovernanceAdmin(), "PII", Same() with { RestrictionRank = 5 }, ClassificationAdminScope.Tenant, null))
             .Status.ShouldBe(ClassificationAdminStatus.Invalid);
         (await service.UpsertClassificationAsync(GovernanceAdmin(), "PII", Same() with { ParentCode = "PUBLIC" }, ClassificationAdminScope.Tenant, null))
             .Status.ShouldBe(ClassificationAdminStatus.Invalid);
-        (await service.UpsertClassificationAsync(GovernanceAdmin(), "PII", Same() with { ClearGrantable = false }, ClassificationAdminScope.Tenant, null))
-            .Status.ShouldBe(ClassificationAdminStatus.Invalid);
-        (await service.UpsertClassificationAsync(GovernanceAdmin(), "PII", Same() with { SeparateApproval = false }, ClassificationAdminScope.Tenant, null))
-            .Status.ShouldBe(ClassificationAdminStatus.Invalid);
     }
 
     [Fact]
-    public async Task Credentials_can_never_be_made_clear_grantable_at_any_scope()
+    public async Task Retiring_a_referenced_category_is_refused_with_conflict()
     {
-        var (service, _) = Build();
-        var input = new ClassificationDefinitionInput("Credentials", null, null, 90, true, true, ApproverMode.DataOwner, null, null);
+        var (service, store) = Build();
+        (await service.UpsertClassificationAsync(ClusterAdmin(), "CUSTOM", Definition(), ClassificationAdminScope.Global, null)).IsOk.ShouldBeTrue();
+        store.ReferencedCodes.Add("CUSTOM");
 
-        (await service.UpsertClassificationAsync(ClusterAdmin(), "CREDENTIALS", input, ClassificationAdminScope.Global, null))
-            .Status.ShouldBe(ClassificationAdminStatus.Invalid);
-        (await service.UpsertClassificationAsync(GovernanceAdmin(), "CREDENTIALS", input, ClassificationAdminScope.Tenant, null))
-            .Status.ShouldBe(ClassificationAdminStatus.Invalid);
+        var refused = await service.UpsertClassificationAsync(ClusterAdmin(), "CUSTOM", Definition() with { IsActive = false }, ClassificationAdminScope.Global, null);
+
+        refused.Status.ShouldBe(ClassificationAdminStatus.Conflict);
+        refused.ErrorCode.ShouldBe(ClassificationAdminErrorCodes.InUse);
+        store.Definitions["CUSTOM"].IsActive.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Retiring_a_category_still_used_as_a_mask_category_is_refused_with_conflict()
+    {
+        var store = new TestInMemoryClassificationStore(TenantA.Value);
+        var protection = Substitute.For<IGovernanceDomainRepository>();
+        protection.IsMaskCategoryReferencedAsync(TenantA, "CUSTOM", Arg.Any<CancellationToken>()).Returns(true);
+        var service = new ClassificationAdminService(store, Substitute.For<ITableMetadataRepository>(), timeProvider: new FakeTimeProvider(Now), protectionRepository: protection);
+        (await service.UpsertClassificationAsync(GovernanceAdmin(), "CUSTOM", Definition(), ClassificationAdminScope.Tenant, null)).IsOk.ShouldBeTrue();
+
+        var refused = await service.UpsertClassificationAsync(GovernanceAdmin(), "CUSTOM", Definition() with { IsActive = false }, ClassificationAdminScope.Tenant, null);
+
+        refused.Status.ShouldBe(ClassificationAdminStatus.Conflict);
+        store.Definitions["CUSTOM"].IsActive.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Retiring_a_category_fails_closed_when_the_reference_check_fails()
+    {
+        var store = Substitute.For<IClassificationRepository>();
+        store.GetClassificationAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>()).Returns((DataClassification?)null);
+        store.IsClassificationReferencedAsync(Arg.Any<string>(), Arg.Any<string>(), Arg.Any<CancellationToken>())
+            .Returns<Task<bool>>(_ => throw new InvalidOperationException("store down"));
+        var service = new ClassificationAdminService(store, Substitute.For<ITableMetadataRepository>(), timeProvider: new FakeTimeProvider(Now));
+
+        await Should.ThrowAsync<InvalidOperationException>(() =>
+            service.UpsertClassificationAsync(ClusterAdmin(), "CUSTOM", Definition() with { IsActive = false }, ClassificationAdminScope.Global, null));
+        await store.DidNotReceiveWithAnyArgs().UpsertClassificationAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task Retiring_an_unreferenced_category_succeeds()
+    {
+        var (service, store) = Build();
+        (await service.UpsertClassificationAsync(ClusterAdmin(), "CUSTOM", Definition(), ClassificationAdminScope.Global, null)).IsOk.ShouldBeTrue();
+
+        var retired = await service.UpsertClassificationAsync(ClusterAdmin(), "CUSTOM", Definition() with { IsActive = false }, ClassificationAdminScope.Global, null);
+
+        retired.IsOk.ShouldBeTrue();
+        store.Definitions["CUSTOM"].IsActive.ShouldBeFalse();
     }
 
     [Fact]

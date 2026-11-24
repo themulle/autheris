@@ -332,36 +332,23 @@ public sealed class DeclarativeConsentApplyIdempotencyTests
         h.Repo.Active(DateTimeOffset.UtcNow).Single().RowFilters.Single().FilterGroup.ShouldBe(0);
     }
 
-    [Theory]
+    [Fact]
     [Trait("Category", "Security")]
-    [InlineData("row scope")]
-    [InlineData("classification access")]
-    public async Task ExistingConsentWithRowScopeOrClassificationAccess_IsNotTreatedAsUnchanged(string kind)
+    public async Task ExistingConsentWithRowScope_IsNotTreatedAsUnchanged()
     {
         var h = new Harness();
         var existing = Stored(StoredSingleRules());
-        if (kind == "row scope")
-        {
-            existing.RowScope = [new GrantRowScopeEntry("own_region", new Dictionary<string, JsonElement>(StringComparer.Ordinal))];
-        }
-        else
-        {
-            existing.ClassificationAccess =
-            [
-                new ConsentClassificationAccess { TenantId = Autheris.Tests.Common.TestTenants.DefaultId, ConsentId = existing.Id, Code = "PII", AccessLevel = ColumnAccessLevel.Clear },
-            ];
-        }
+        existing.RowScope = [new GrantRowScopeEntry("own_region", new Dictionary<string, JsonElement>(StringComparer.Ordinal))];
 
         await h.Repo.CreateConsentAsync(existing);
 
         var result = await h.ApplyAsync(Policy(SingleRules));
 
-        result.Unchanged.ShouldBe(0, kind);
+        result.Unchanged.ShouldBe(0);
         result.Applied.ShouldBe(1);
         result.Revoked.ShouldBe(1);
         var active = h.Repo.Active(DateTimeOffset.UtcNow).Single();
         active.RowScope.ShouldBeEmpty();
-        active.ClassificationAccess.ShouldBeEmpty();
     }
 
     [Fact]

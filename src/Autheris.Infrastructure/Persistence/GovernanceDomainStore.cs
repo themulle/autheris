@@ -38,6 +38,8 @@ public sealed class GovernanceDomainStore(
     internal const string GetProtectionSql = "SELECT column_name, protection_class, mask_category FROM OBJECT_PROTECTION WHERE tenant_id = @tenantId AND table_id = @tableId ORDER BY column_name";
     internal const string UpsertProtectionPgSql = "INSERT INTO OBJECT_PROTECTION (tenant_id, table_id, column_name, protection_class, mask_category, updated_by, updated_at) VALUES (@tenantId, @tableId, @columnName, @protectionClass, @maskCategory, @updatedBy, @updatedAt) ON CONFLICT (tenant_id, table_id, column_name) DO UPDATE SET protection_class = EXCLUDED.protection_class, mask_category = EXCLUDED.mask_category, updated_by = EXCLUDED.updated_by, updated_at = EXCLUDED.updated_at";
     internal const string UpsertProtectionSsSql = "MERGE OBJECT_PROTECTION WITH (HOLDLOCK) AS target USING (VALUES (@tenantId, @tableId, @columnName)) AS source (tenant_id, table_id, column_name) ON target.tenant_id = source.tenant_id AND target.table_id = source.table_id AND target.column_name = source.column_name WHEN MATCHED THEN UPDATE SET protection_class = @protectionClass, mask_category = @maskCategory, updated_by = @updatedBy, updated_at = @updatedAt WHEN NOT MATCHED THEN INSERT (tenant_id, table_id, column_name, protection_class, mask_category, updated_by, updated_at) VALUES (@tenantId, @tableId, @columnName, @protectionClass, @maskCategory, @updatedBy, @updatedAt);";
+    internal const string MaskCategoryReferencedSql = "SELECT COUNT(*) FROM OBJECT_PROTECTION WHERE tenant_id = @tenantId AND UPPER(mask_category) = @category";
+    internal const string MaskCategoryReferencedAnyTenantSql = "SELECT COUNT(*) FROM OBJECT_PROTECTION WHERE UPPER(mask_category) = @category";
     internal const string DeleteProtectionSql = "DELETE FROM OBJECT_PROTECTION WHERE tenant_id = @tenantId AND table_id = @tableId AND column_name = @columnName";
     internal const string ClearColumnClassSql = "UPDATE OBJECT_PROTECTION SET protection_class = NULL, updated_by = @updatedBy, updated_at = @updatedAt WHERE tenant_id = @tenantId AND table_id = @tableId AND LOWER(column_name) = LOWER(@columnName) AND mask_category IS NOT NULL";
     internal const string DeleteEmptyColumnProtectionSql = "DELETE FROM OBJECT_PROTECTION WHERE tenant_id = @tenantId AND table_id = @tableId AND LOWER(column_name) = LOWER(@columnName) AND mask_category IS NULL";
@@ -353,6 +355,25 @@ public sealed class GovernanceDomainStore(
         }, ct).ConfigureAwait(false);
 
         await NotifyChangedAsync(tenantId, epoch, tableId, now).ConfigureAwait(false);
+    }
+
+    public async Task<bool> IsMaskCategoryReferencedAsync(TenantId? tenant, string category, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(category);
+        var normalized = category.Trim().ToUpperInvariant();
+        await using var conn = await OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = tenant is { } scoped
+            ? Cmd(conn, null, MaskCategoryReferencedSql, scoped.Value, ("@category", normalized, null))
+            : conn.CreateCommand();
+        if (tenant is null)
+        {
+            // Retiring a global category: a reference in any tenant keeps it in use.
+            cmd.CommandText = MaskCategoryReferencedAnyTenantSql;
+            cmd.AddBound("@category", normalized);
+        }
+
+        var count = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return count is not null and not DBNull && Convert.ToInt64(count, CultureInfo.InvariantCulture) > 0;
     }
 
     public async Task<ContainerDefaults> GetContainerForTableAsync(TenantId tenant, Guid tableId, CancellationToken ct = default)

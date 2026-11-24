@@ -17,7 +17,8 @@ public enum ClassificationAdminStatus
     Ok,
     NotFound,
     Forbidden,
-    Invalid
+    Invalid,
+    Conflict
 }
 
 /// <summary>Result of a classification administration use case; failures carry a stable error code.</summary>
@@ -48,6 +49,7 @@ public static class ClassificationAdminErrorCodes
     public const string ColumnNotFound = "CLASSIFICATION_COLUMN_NOT_FOUND";
     public const string UnknownClassification = "CLASSIFICATION_UNKNOWN";
     public const string Invalid = "CLASSIFICATION_INVALID";
+    public const string InUse = "CLASSIFICATION_IN_USE";
 }
 
 /// <summary>Authenticated caller of a classification administration use case.</summary>
@@ -74,11 +76,6 @@ public sealed record ClassificationDefinitionInput(
     string? Description,
     string? ParentCode,
     int RestrictionRank,
-    bool ClearGrantable,
-    bool SeparateApproval,
-    ApproverMode ApproverMode,
-    string? StewardGroupSid,
-    int? MaxClearDays,
     bool IsActive = true);
 
 public sealed record MaskRuleInput(
@@ -126,7 +123,8 @@ public sealed class ClassificationAdminService(
     IClassificationRepository repository,
     ITableMetadataRepository tableMetadataRepository,
     IContainerOwnership? ownershipRepository = null,
-    TimeProvider? timeProvider = null) : IClassificationAdminService
+    TimeProvider? timeProvider = null,
+    IGovernanceDomainRepository? protectionRepository = null) : IClassificationAdminService
 {
     private const string ColumnWideOverride = "_all";
 
@@ -172,23 +170,26 @@ public sealed class ClassificationAdminService(
             return Invalid<DataClassification>("The classification code is not valid.");
         }
 
-        if (string.Equals(code, ClassificationScopes.CredentialsCode, StringComparison.Ordinal) && input.ClearGrantable)
-        {
-            return Invalid<DataClassification>("Credentials can never be granted as clear.");
-        }
-
-        // A tenant may adjust approver, steward group and max_clear_days of a built-in code, never its rank, parent or grantability.
+        // A tenant may adjust the texts and the active flag of a built-in code, never its rank or parent.
         if (resolved.Scope != ClassificationScopes.Global &&
             ClassificationAccessResolver.BuiltInCatalog(resolved.Scope!).Definitions.TryGetValue(code, out var builtIn) &&
             (builtIn.RestrictionRank != input.RestrictionRank ||
-             !string.Equals(builtIn.ParentCode, input.ParentCode, StringComparison.Ordinal) ||
-             builtIn.ClearGrantable != input.ClearGrantable ||
-             builtIn.SeparateApproval != input.SeparateApproval))
+             !string.Equals(builtIn.ParentCode, input.ParentCode, StringComparison.Ordinal)))
         {
-            return Invalid<DataClassification>("A tenant may only change approver, steward group and max clear days of a built-in classification.");
+            return Invalid<DataClassification>("A tenant may not change the rank or parent of a built-in classification.");
         }
 
         var existing = await _repository.GetClassificationAsync(resolved.Scope!, code, ct).ConfigureAwait(false);
+
+        // Retiring (deactivating) a category that a column classification or a mask category still names is refused: the columns
+        // would otherwise be denied as unknown. A failing reference check throws, so the change is refused as well (fail closed).
+        if (!input.IsActive && (existing is null || existing.IsActive) &&
+            await IsReferencedAsync(resolved.Scope!, code, ct).ConfigureAwait(false))
+        {
+            return ClassificationAdminResults.Fail<DataClassification>(
+                ClassificationAdminStatus.Conflict, ClassificationAdminErrorCodes.InUse, "The classification is still referenced by columns.");
+        }
+
         var candidate = new DataClassification
         {
             Scope = resolved.Scope!,
@@ -197,11 +198,6 @@ public sealed class ClassificationAdminService(
             Description = input.Description,
             ParentCode = input.ParentCode,
             RestrictionRank = input.RestrictionRank,
-            ClearGrantable = input.ClearGrantable,
-            SeparateApproval = input.SeparateApproval,
-            ApproverMode = input.ApproverMode,
-            StewardGroupSid = input.StewardGroupSid,
-            MaxClearDays = input.MaxClearDays,
             IsActive = input.IsActive,
             Version = (existing?.Version ?? 0) + 1,
             UpdatedBy = caller.ActorSid,
@@ -317,7 +313,7 @@ public sealed class ClassificationAdminService(
     public async Task<ClassificationAdminResult<bool>> RemoveColumnClassificationAsync(
         ClassificationAdminCaller caller, string columnId, string code, ClassificationAdminScope scope, CancellationToken ct = default)
     {
-        // Removing a classification lifts masking: it needs the same authority as granting Clear for it.
+        // Removing a classification lifts its classification mask: it needs owner or governance authority over the column.
         var auth = await AuthorizeColumnAsync<bool>(caller, columnId, scope, ct).ConfigureAwait(false);
         if (auth.Failure is { } failure)
         {
@@ -391,6 +387,18 @@ public sealed class ClassificationAdminService(
         return removed
             ? ClassificationAdminResults.Ok(true)
             : NotFound<bool>();
+    }
+
+    private async ValueTask<bool> IsReferencedAsync(string scope, string code, CancellationToken ct)
+    {
+        if (await _repository.IsClassificationReferencedAsync(scope, code, ct).ConfigureAwait(false))
+        {
+            return true;
+        }
+
+        return protectionRepository is not null &&
+               await protectionRepository.IsMaskCategoryReferencedAsync(
+                   ClassificationScopes.IsGlobal(scope) ? (TenantId?)null : new TenantId(scope), code, ct).ConfigureAwait(false);
     }
 
     private async ValueTask<bool> IsKnownActiveCodeAsync(string tenant, string code, CancellationToken ct)

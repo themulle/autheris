@@ -10,6 +10,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Policy;
 using Autheris.Application.Policy.Classification;
 using Autheris.Application.Policy.Pdp;
+using Autheris.Application.Policy.Protection;
 using Autheris.Application.Policy.RowScopes;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Catalog;
@@ -71,33 +72,9 @@ public sealed class PerCellClassificationTests
         }
     };
 
-    private static Consent ScopedGrant(
-        string regionValue,
-        DateTimeOffset? piiClearValidUntil = null,
-        bool includePiiClear = false,
-        params ConsentClassificationAccess[] extraAccess)
+    private static Consent ScopedGrant(string regionValue)
     {
         var id = Guid.NewGuid();
-        var classAccess = new List<ConsentClassificationAccess>();
-        if (includePiiClear)
-        {
-            classAccess.Add(new ConsentClassificationAccess
-            {
-                TenantId = Tenant.Value,
-                ConsentId = id,
-                Code = ClassificationScopes.PiiCode,
-                AccessLevel = ColumnAccessLevel.Clear,
-                ValidUntil = piiClearValidUntil,
-                ApprovedBySid = "owner",
-                ApprovedAt = FixedNow.AddDays(-1)
-            });
-        }
-
-        foreach (var item in extraAccess)
-        {
-            classAccess.Add(item with { ConsentId = id });
-        }
-
         return new Consent
         {
             Id = id,
@@ -118,14 +95,14 @@ public sealed class PerCellClassificationTests
                     ValueType = "string",
                     ValueJson = $"\"{regionValue}\""
                 }
-            ],
-            ClassificationAccess = classAccess
+            ]
         };
     }
 
     private static async Task<(TableAccessDecision Decision, CompiledSql Compiled)> EvaluateAndCompileAsync(
         IReadOnlyList<Consent> consents,
-        IClassificationRepository? classificationRepo = null)
+        IClassificationRepository? classificationRepo = null,
+        IUnmaskGrantResolver? unmask = null)
     {
         var meta = OrdersMetadata();
         var options = new GatewayOptions();
@@ -151,7 +128,8 @@ public sealed class PerCellClassificationTests
             maskPolicyFactory: maskFactory,
             rowScopeCompiler: compiler,
             timeProvider: time,
-            classificationResolver: resolver);
+            classificationResolver: resolver,
+            unmaskResolver: unmask);
 
         var decision = await policy.DecideAsync(
             new TableAccessQuery(UserSid, Tenant, new HashSet<Sid>(), new HashSet<string>(), meta, Claims: []),
@@ -196,35 +174,36 @@ public sealed class PerCellClassificationTests
     }
 
     [Fact]
-    public async Task Od41_OneGrantClearsPiiAndAnotherDoesNot_YieldsRowDependentSqlWithCaseWhen()
+    public async Task RowScopedGrants_WithoutUnmaskGrant_KeepClassifiedColumnMaskedInEveryRow()
     {
-        var euClear = ScopedGrant("EU", includePiiClear: true);
-        var usMask = ScopedGrant("US", includePiiClear: false);
-
-        var (decision, compiled) = await EvaluateAndCompileAsync([euClear, usMask]);
+        var (decision, compiled) = await EvaluateAndCompileAsync([ScopedGrant("EU"), ScopedGrant("US")]);
 
         decision.IsAllowed.ShouldBeTrue();
-        decision.GetColumnAccess("ssn").ShouldBe(ColumnAccessLevel.RowDependent);
+        decision.GetColumnAccess("ssn").ShouldBe(ColumnAccessLevel.Mask);
         decision.GetColumnAccess("id").ShouldBe(ColumnAccessLevel.Clear);
-        decision.ColumnMasks.ShouldNotBeNull();
         ((ColumnMaskPolicy)decision.ColumnMasks!).Specs.ContainsKey("ssn").ShouldBeTrue();
-
-        var sql = compiled.Sql;
-        sql.ShouldContain("CASE WHEN", Case.Insensitive);
         compiled.Parameters.Select(p => p.Value).ShouldContain("***");
     }
 
     [Fact]
-    public async Task Od41_ExpiredPiiApprovalOnOneGrant_SplitsSignaturesToRowDependent()
+    public async Task RowScopedGrants_WithUnmaskGrantOnTheColumn_ClearTheClassifiedColumn()
     {
-        var validGrant = ScopedGrant("EU", piiClearValidUntil: FixedNow.AddHours(1), includePiiClear: true);
-        var expiredGrant = ScopedGrant("VIP", piiClearValidUntil: FixedNow.AddSeconds(-5), includePiiClear: true);
+        var unmask = new FixedUnmaskResolver(new UnmaskCoverage(false, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "ssn" }));
 
-        var (decision, compiled) = await EvaluateAndCompileAsync([validGrant, expiredGrant]);
+        var (decision, _) = await EvaluateAndCompileAsync([ScopedGrant("EU"), ScopedGrant("US")], unmask: unmask);
 
         decision.IsAllowed.ShouldBeTrue();
-        decision.GetColumnAccess("ssn").ShouldBe(ColumnAccessLevel.RowDependent);
-        compiled.Sql.ShouldContain("CASE WHEN", Case.Insensitive);
+        decision.GetColumnAccess("ssn").ShouldBe(ColumnAccessLevel.Clear);
+    }
+
+    [Fact]
+    public async Task UnmaskGrantOnAnotherColumn_DoesNotClearTheClassifiedColumn()
+    {
+        var unmask = new FixedUnmaskResolver(new UnmaskCoverage(false, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "region" }));
+
+        var (decision, _) = await EvaluateAndCompileAsync([ScopedGrant("EU"), ScopedGrant("US")], unmask: unmask);
+
+        decision.GetColumnAccess("ssn").ShouldBe(ColumnAccessLevel.Mask);
     }
 
     [Fact]
@@ -240,8 +219,6 @@ public sealed class PerCellClassificationTests
             Code = code,
             DisplayName = code,
             RestrictionRank = rank,
-            ClearGrantable = true,
-            SeparateApproval = true,
             IsActive = true,
             UpdatedBy = "admin",
             UpdatedAt = FixedNow
@@ -281,29 +258,12 @@ public sealed class PerCellClassificationTests
             }
         };
 
-        var g1 = ScopedGrant("EU", extraAccess: new ConsentClassificationAccess
-        {
-            TenantId = Tenant.Value,
-            ConsentId = Guid.Empty,
-            Code = "TAG_STRICT",
-            AccessLevel = ColumnAccessLevel.Clear,
-            ApprovedBySid = "owner",
-            ApprovedAt = FixedNow
-        });
-
-        var g2 = ScopedGrant("US", extraAccess: new ConsentClassificationAccess
-        {
-            TenantId = Tenant.Value,
-            ConsentId = Guid.Empty,
-            Code = "TAG_LIGHT",
-            AccessLevel = ColumnAccessLevel.Clear,
-            ApprovedBySid = "owner",
-            ApprovedAt = FixedNow
-        });
+        var g1 = ScopedGrant("EU");
+        var g2 = ScopedGrant("US");
 
         var (perGrant, combined) = await resolver.ResolveForTableAsync(metaLight, [g1, g2], Tenant, null, catalog);
 
-        perGrant[g1.Id]["ssn"].WinningMaskFunction.ShouldBe(MaskFunction.Partial);
+        perGrant[g1.Id]["ssn"].WinningMaskFunction.ShouldBe(MaskFunction.Hash);
         perGrant[g2.Id]["ssn"].WinningMaskFunction.ShouldBe(MaskFunction.Hash);
         combined["ssn"].WinningMaskFunction.ShouldBe(MaskFunction.Hash);
         combined["ssn"].MaskSpec!.Kind.ShouldBe(MaskKind.Hmac);
@@ -321,5 +281,12 @@ public sealed class PerCellClassificationTests
     private sealed class FixedCatalogProvider(ITableCatalog catalog) : IGovernedCatalogProvider
     {
         public ValueTask<ITableCatalog> GetCatalogAsync(GovernedDataSource dataSource, IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct) => ValueTask.FromResult(catalog);
+    }
+
+    private sealed class FixedUnmaskResolver(UnmaskCoverage coverage) : IUnmaskGrantResolver
+    {
+        public ValueTask<UnmaskCoverage> ResolveAsync(
+            TenantId tenant, IReadOnlyCollection<Sid> subjects, bool groupsComplete, TableIdentifier table, CancellationToken ct = default) =>
+            ValueTask.FromResult(coverage);
     }
 }

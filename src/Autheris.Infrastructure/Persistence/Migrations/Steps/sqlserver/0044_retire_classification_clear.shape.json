@@ -1,0 +1,10 @@
+{
+  "ops": [
+    { "op": "dropTable", "table": "CONSENT_CLASSIFICATION_ACCESS" },
+    { "op": "dropColumn", "table": "DATA_CLASSIFICATIONS", "name": "clear_grantable" },
+    { "op": "dropColumn", "table": "DATA_CLASSIFICATIONS", "name": "separate_approval" },
+    { "op": "dropColumn", "table": "DATA_CLASSIFICATIONS", "name": "approver_mode" },
+    { "op": "dropColumn", "table": "DATA_CLASSIFICATIONS", "name": "steward_group_sid" },
+    { "op": "dropColumn", "table": "DATA_CLASSIFICATIONS", "name": "max_clear_days" }
+  ]
+}

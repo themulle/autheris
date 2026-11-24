@@ -115,9 +115,6 @@ public sealed record TableAccessDecision(
     /// <summary>Data-access audit entries for masked columns (column, classifications, maskFunction, keyRef — never key material).</summary>
     public IReadOnlyList<MaskedColumnAuditEntry> MaskedColumnsAudit { get; init; } = [];
 
-    /// <summary>Data-access audit entries for classification levels applied per grant.</summary>
-    public IReadOnlyList<GrantClassificationAuditEntry> GrantClassificationsAudit { get; init; } = [];
-
     /// <summary>Columns whose catalog text is suppressed when masked for this caller.</summary>
     public IReadOnlySet<string>? HiddenCatalogTextColumns { get; init; }
 
@@ -655,8 +652,4 @@ public sealed record MaskedColumnAuditEntry(
     [property: System.Text.Json.Serialization.JsonPropertyName("classifications")] IReadOnlyList<string> Classifications,
     [property: System.Text.Json.Serialization.JsonPropertyName("maskFunction")] string MaskFunction,
     [property: System.Text.Json.Serialization.JsonPropertyName("keyRef")] string? KeyRef = null);
-
-public sealed record GrantClassificationAuditEntry(
-    [property: System.Text.Json.Serialization.JsonPropertyName("grantId")] string GrantId,
-    [property: System.Text.Json.Serialization.JsonPropertyName("classificationLevels")] IReadOnlyDictionary<string, string> ClassificationLevels);
 

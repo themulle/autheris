@@ -88,6 +88,11 @@ public sealed partial class TableAccessPolicy
             _realmRegistry,
             timeProvider: _timeProvider);
         var callerBaseline = isInternal ? ProtectionClass.Internal : ProtectionClass.Public;
+        if (query.Unmask is null)
+        {
+            var unmaskQuery = query;
+            query = query with { Unmask = new UnmaskCoverageSource(c => ResolveUnmaskCoverageAsync(unmaskQuery, groupsComplete, c)) };
+        }
         var baselineSatisfied = !effectiveTableClass.IsStricterThan(callerBaseline);
 
         var consentDecision = await ResolveConsentAsync(query, ct).ConfigureAwait(false);

@@ -130,17 +130,12 @@ public interface IClassificationRepository
         CancellationToken ct = default)
         => Task.FromResult<TableIdentifier?>(null);
 
-    Task<IReadOnlyList<ConsentClassificationAccess>> GetConsentClassificationAccessAsync(
-        string tenantId,
-        Guid consentId,
-        CancellationToken ct = default);
-
-    Task<IReadOnlyList<ConsentClassificationAccess>> GetConsentClassificationAccessBatchAsync(
-        string tenantId,
-        IReadOnlyList<Guid> consentIds,
-        CancellationToken ct = default);
-
-    Task<ConsentClassificationAccess> UpsertConsentClassificationAccessAsync(
-        ConsentClassificationAccess entry,
+    /// <summary>
+    /// True when <paramref name="code"/> of <paramref name="scope"/> is still referenced by a column classification (for <c>*</c>:
+    /// in any tenant; for a tenant scope: global and that tenant's rows). A store failure throws; callers refuse the change (fail closed).
+    /// </summary>
+    Task<bool> IsClassificationReferencedAsync(
+        string scope,
+        string code,
         CancellationToken ct = default);
 }

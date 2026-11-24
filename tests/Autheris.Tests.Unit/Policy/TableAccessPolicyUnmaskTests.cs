@@ -160,6 +160,17 @@ public sealed class TableAccessPolicyUnmaskTests
     }
 
     [Fact]
+    public async Task Credentials_column_stays_masked_with_unmask_grant()
+    {
+        var resolver = new FakeUnmaskResolver((_, _) => new UnmaskCoverage(wholeTable: true, new HashSet<string>()));
+        var decision = await CreatePolicy(Protection(Columns(("password_hash", "CREDENTIALS"), ("email", "PII"))), resolver)
+            .DecideAsync(Query(), CancellationToken.None);
+
+        decision.GetColumnAccess("password_hash").ShouldBe(ColumnAccessLevel.Mask);
+        decision.GetColumnAccess("email").ShouldBe(ColumnAccessLevel.Clear);
+    }
+
+    [Fact]
     public async Task Unmask_without_data_access_yields_nothing()
     {
         var resolver = new FakeUnmaskResolver((_, _) => new UnmaskCoverage(wholeTable: true, new HashSet<string>()));

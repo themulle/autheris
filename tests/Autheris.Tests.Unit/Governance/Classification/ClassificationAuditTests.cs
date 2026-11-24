@@ -33,7 +33,7 @@ public sealed class ClassificationAuditTests
     private static readonly DateTimeOffset FixedNow = new(2026, 11, 15, 12, 0, 0, TimeSpan.Zero);
 
     [Fact]
-    public async Task Masked_column_audit_lists_classifications_function_keyRef_and_grant_levels_without_key_material()
+    public async Task Masked_column_audit_lists_classifications_function_and_keyRef_without_key_material()
     {
         var classRepo = new TestInMemoryClassificationStore(Tenant.Value);
         await classRepo.UpsertClassificationMaskRuleAsync(new ClassificationMaskRule
@@ -86,11 +86,6 @@ public sealed class ClassificationAuditTests
             [
                 new ConsentColumnRule { ColumnName = "email", AccessLevel = ColumnAccessLevel.Mask },
                 new ConsentColumnRule { ColumnName = "ssn", AccessLevel = ColumnAccessLevel.Clear }
-            ],
-            ClassificationAccess =
-            [
-                new ConsentClassificationAccess { TenantId = Tenant.Value, ConsentId = grantId, Code = ClassificationScopes.PiiCode, AccessLevel = ColumnAccessLevel.Mask },
-                new ConsentClassificationAccess { TenantId = Tenant.Value, ConsentId = grantId, Code = ClassificationScopes.PiiSpecialCode, AccessLevel = ColumnAccessLevel.Mask }
             ]
         };
 
@@ -124,16 +119,12 @@ public sealed class ClassificationAuditTests
         ssnEntry.Classifications.ShouldContain(ClassificationScopes.PiiCode);
         ssnEntry.Classifications.ShouldContain(ClassificationScopes.PiiSpecialCode);
 
-        var grantEntry = decision.GrantClassificationsAudit.Single(g => g.GrantId == grantId.ToString("D"));
-        grantEntry.ClassificationLevels[ClassificationScopes.PiiCode].ShouldBe("MASK");
-        grantEntry.ClassificationLevels[ClassificationScopes.PiiSpecialCode].ShouldBe("MASK");
-
         var details = GovernedQueryStages.DecisionDetails(decision, path: "websql");
         var serialized = JsonSerializer.Serialize(details);
         var redacted = AuditDetailsBuilder.RedactJson(serialized);
 
         redacted.ShouldContain("\"masked_columns\"");
-        redacted.ShouldContain("\"grant_classifications\"");
+        redacted.ShouldNotContain("\"grant_classifications\"");
         redacted.ShouldContain("\"test-hmac-key\"");
         redacted.ShouldNotContain("SECRET_CONSTANT_LITERAL");
         redacted.ShouldNotContain("keyBytes");

@@ -125,10 +125,6 @@ public static class GovernedQueryStages
         {
             details["masked_columns"] = decision.MaskedColumnsAudit;
         }
-        if (decision.IsAllowed && decision.GrantClassificationsAudit.Count > 0)
-        {
-            details["grant_classifications"] = decision.GrantClassificationsAudit;
-        }
 
         return details;
     }

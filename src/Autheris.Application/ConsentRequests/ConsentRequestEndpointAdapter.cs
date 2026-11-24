@@ -42,7 +42,7 @@ public sealed class ConsentRequestEndpointAdapter(
         var tenant = ConsentTenantResolver.Resolve(
             principal, command.ContextTenant, ClusterAdminPolicy.IsCanonicalClusterAdmin(principal));
 
-        var hasClear = command.RequestedClear is { Count: > 0 };
+        var hasClear = command.RequestedUnmaskColumns is { Count: > 0 };
         if (hasClear && command.RequestedWriteRules is { Count: > 0 })
         {
             throw new ConsentRequestException("INVALID_COLUMNS", "Clear columns cannot be requested together with write rules.");
@@ -52,8 +52,7 @@ public sealed class ConsentRequestEndpointAdapter(
         if (hasClear)
         {
             // Clear access is one Unmask request over the union of the requested columns.
-            var columns = command.RequestedClear!
-                .SelectMany(static i => i.Columns)
+            var columns = command.RequestedUnmaskColumns!
                 .Distinct(StringComparer.OrdinalIgnoreCase)
                 .ToArray();
             primary = await _engine.SubmitAsync(

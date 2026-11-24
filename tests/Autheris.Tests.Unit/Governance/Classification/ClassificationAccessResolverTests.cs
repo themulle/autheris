@@ -45,7 +45,7 @@ public sealed class ClassificationAccessResolverTests
         return new ClassificationAccessResolver(maskProvider, repo, timeProvider);
     }
 
-    private static Consent BaseGrant(Guid? id = null, params ConsentClassificationAccess[] classAccess) => new()
+    private static Consent BaseGrant(Guid? id = null) => new()
     {
         Id = id ?? Guid.NewGuid(),
         TenantId = Tenant,
@@ -54,8 +54,7 @@ public sealed class ClassificationAccessResolverTests
         GranteeSid = UserSid,
         Effect = ConsentEffect.Allow,
         ValidFrom = FixedNow.AddDays(-1),
-        ValidTo = FixedNow.AddDays(30),
-        ClassificationAccess = classAccess.ToList()
+        ValidTo = FixedNow.AddDays(30)
     };
 
     private static ColumnClassification ColClass(string code, string scope = ClassificationScopes.Global, string? colId = null) => new()
@@ -83,8 +82,6 @@ public sealed class ClassificationAccessResolverTests
                 Code = "CUSTOM_INACTIVE",
                 DisplayName = "Inactive Custom",
                 RestrictionRank = 50,
-                ClearGrantable = true,
-                SeparateApproval = true,
                 IsActive = false,
                 UpdatedBy = ApproverSid.Value,
                 UpdatedAt = FixedNow
@@ -94,22 +91,22 @@ public sealed class ClassificationAccessResolverTests
         var grant = BaseGrant();
 
         var unknown = resolver.ResolveColumnForGrant(
-            grant, [], "secret_col", "TEXT", ColumnAccessLevel.Clear,
-            [ColClass("NOT_IN_CATALOG")], [], catalog, FixedNow, Tenant, TargetSqlDialect.PostgreSql);
+            grant, "secret_col", "TEXT", ColumnAccessLevel.Clear,
+            [ColClass("NOT_IN_CATALOG")], [], catalog, Tenant, TargetSqlDialect.PostgreSql);
         unknown.AccessLevel.ShouldBe(ColumnAccessLevel.Deny);
         unknown.MaskSpec.ShouldBeNull();
         unknown.CatalogText.ShouldBe(CatalogTextVisibility.Hidden);
         unknown.ReasonCode.ShouldBe("CLASSIFICATION_UNKNOWN_OR_INACTIVE");
 
         var inactive = resolver.ResolveColumnForGrant(
-            grant, [], "secret_col", "TEXT", ColumnAccessLevel.Clear,
-            [ColClass("CUSTOM_INACTIVE")], [], catalog, FixedNow, Tenant, TargetSqlDialect.PostgreSql);
+            grant, "secret_col", "TEXT", ColumnAccessLevel.Clear,
+            [ColClass("CUSTOM_INACTIVE")], [], catalog, Tenant, TargetSqlDialect.PostgreSql);
         inactive.AccessLevel.ShouldBe(ColumnAccessLevel.Deny);
         inactive.ReasonCode.ShouldBe("CLASSIFICATION_UNKNOWN_OR_INACTIVE");
 
         var invalidFormat = resolver.ResolveColumnForGrant(
-            grant, [], "secret_col", "TEXT", ColumnAccessLevel.Clear,
-            [ColClass("lowercase_bad!")], [], catalog, FixedNow, Tenant, TargetSqlDialect.PostgreSql);
+            grant, "secret_col", "TEXT", ColumnAccessLevel.Clear,
+            [ColClass("lowercase_bad!")], [], catalog, Tenant, TargetSqlDialect.PostgreSql);
         invalidFormat.AccessLevel.ShouldBe(ColumnAccessLevel.Deny);
     }
 
@@ -125,8 +122,6 @@ public sealed class ClassificationAccessResolverTests
                 Code = "CUSTOM_GOV",
                 DisplayName = "Custom Gov",
                 RestrictionRank = 45,
-                ClearGrantable = true,
-                SeparateApproval = true,
                 IsActive = true,
                 UpdatedBy = ApproverSid.Value,
                 UpdatedAt = FixedNow
@@ -150,8 +145,8 @@ public sealed class ClassificationAccessResolverTests
 
         var grant = BaseGrant();
         var withDefault = resolver.ResolveColumnForGrant(
-            grant, [], "gov_id", "TEXT", ColumnAccessLevel.Clear,
-            [ColClass("CUSTOM_GOV", Tenant.Value)], [], withDefaultCatalog, FixedNow, Tenant, TargetSqlDialect.PostgreSql);
+            grant, "gov_id", "TEXT", ColumnAccessLevel.Clear,
+            [ColClass("CUSTOM_GOV", Tenant.Value)], [], withDefaultCatalog, Tenant, TargetSqlDialect.PostgreSql);
         withDefault.AccessLevel.ShouldBe(ColumnAccessLevel.Mask);
         withDefault.WinningMaskFunction.ShouldBe(MaskFunction.Nullify);
         withDefault.MaskSpec.ShouldNotBeNull();
@@ -162,15 +157,15 @@ public sealed class ClassificationAccessResolverTests
             defs,
             new Dictionary<string, ClassificationMaskRule>(StringComparer.Ordinal));
         var noDefault = resolver.ResolveColumnForGrant(
-            grant, [], "gov_id", "INTEGER", ColumnAccessLevel.Clear,
-            [ColClass("CUSTOM_GOV", Tenant.Value)], [], withoutDefaultCatalog, FixedNow, Tenant, TargetSqlDialect.PostgreSql);
+            grant, "gov_id", "INTEGER", ColumnAccessLevel.Clear,
+            [ColClass("CUSTOM_GOV", Tenant.Value)], [], withoutDefaultCatalog, Tenant, TargetSqlDialect.PostgreSql);
         noDefault.AccessLevel.ShouldBe(ColumnAccessLevel.Mask);
         noDefault.WinningMaskFunction.ShouldBe(MaskFunction.TypeSafeRedact);
         noDefault.MaskSpec!.Kind.ShouldBe(MaskKind.Redact);
     }
 
     [Fact]
-    public void CredentialsClassification_IsNeverClearGranted_EvenWithExplicitApproval()
+    public void CredentialsClassification_IsNeverClear_EvenWithUnmaskGrant()
     {
         var resolver = CreateResolver(timeProvider: new AdjustableClassificationTimeProvider(FixedNow));
         var catalog = ClassificationAccessResolver.BuiltInCatalog(Tenant.Value);
@@ -186,29 +181,17 @@ public sealed class ClassificationAccessResolverTests
             ValidTo = FixedNow.AddDays(30),
             ColumnRules = [new ConsentColumnRule { ColumnName = "api_token", AccessLevel = ColumnAccessLevel.Clear }]
         };
-        ConsentClassificationAccess[] access =
-        [
-            new ConsentClassificationAccess
-            {
-                TenantId = Tenant.Value,
-                ConsentId = grant.Id,
-                Code = ClassificationScopes.CredentialsCode,
-                AccessLevel = ColumnAccessLevel.Clear,
-                ApprovedBySid = ApproverSid.Value,
-                ApprovedAt = FixedNow.AddHours(-1)
-            }
-        ];
 
         var outcome = resolver.ResolveColumnForGrant(
-            grant, access, "api_token", "TEXT", ColumnAccessLevel.Clear,
-            [ColClass(ClassificationScopes.CredentialsCode)], [], catalog, FixedNow, Tenant, TargetSqlDialect.PostgreSql);
+            grant, "api_token", "TEXT", ColumnAccessLevel.Clear,
+            [ColClass(ClassificationScopes.CredentialsCode)], [], catalog, Tenant, TargetSqlDialect.PostgreSql, unmasked: true);
 
         outcome.AccessLevel.ShouldBe(ColumnAccessLevel.Mask);
         outcome.MaskSpec.ShouldNotBeNull();
     }
 
     [Fact]
-    public void HierarchyInheritance_InheritsMaskFromParent_NeverInheritsClearApproval()
+    public void HierarchyInheritance_InheritsMaskFromParent_AndOnlyAnUnmaskGrantClears()
     {
         var resolver = CreateResolver(timeProvider: new AdjustableClassificationTimeProvider(FixedNow), secretProvider: new FakeClassificationSecretProvider());
         var builtIn = ClassificationAccessResolver.BuiltInCatalog(Tenant.Value);
@@ -227,44 +210,18 @@ public sealed class ClassificationAccessResolverTests
         var catalog = builtIn with { MaskRules = rules };
 
         var grant = BaseGrant();
-        ConsentClassificationAccess[] piiClearOnly =
-        [
-            new ConsentClassificationAccess
-            {
-                TenantId = Tenant.Value,
-                ConsentId = grant.Id,
-                Code = ClassificationScopes.PiiCode,
-                AccessLevel = ColumnAccessLevel.Clear,
-                ApprovedBySid = ApproverSid.Value,
-                ApprovedAt = FixedNow
-            }
-        ];
-
         var outcome = resolver.ResolveColumnForGrant(
-            grant, piiClearOnly, "medical_note", "TEXT", ColumnAccessLevel.Clear,
-            [ColClass(ClassificationScopes.PiiSpecialCode)], [], catalog, FixedNow, Tenant, TargetSqlDialect.PostgreSql);
+            grant, "medical_note", "TEXT", ColumnAccessLevel.Clear,
+            [ColClass(ClassificationScopes.PiiSpecialCode)], [], catalog, Tenant, TargetSqlDialect.PostgreSql);
 
         outcome.AccessLevel.ShouldBe(ColumnAccessLevel.Mask);
         outcome.WinningMaskFunction.ShouldBe(MaskFunction.Hash);
         outcome.WinningClassificationCode.ShouldBe(ClassificationScopes.PiiSpecialCode);
         outcome.MaskSpec!.Kind.ShouldBe(MaskKind.Hmac);
 
-        ConsentClassificationAccess[] specialClear =
-        [
-            .. piiClearOnly,
-            new ConsentClassificationAccess
-            {
-                TenantId = Tenant.Value,
-                ConsentId = grant.Id,
-                Code = ClassificationScopes.PiiSpecialCode,
-                AccessLevel = ColumnAccessLevel.Clear,
-                ApprovedBySid = ApproverSid.Value,
-                ApprovedAt = FixedNow
-            }
-        ];
         var cleared = resolver.ResolveColumnForGrant(
-            grant, specialClear, "medical_note", "TEXT", ColumnAccessLevel.Clear,
-            [ColClass(ClassificationScopes.PiiSpecialCode)], [], catalog, FixedNow, Tenant, TargetSqlDialect.PostgreSql);
+            grant, "medical_note", "TEXT", ColumnAccessLevel.Clear,
+            [ColClass(ClassificationScopes.PiiSpecialCode)], [], catalog, Tenant, TargetSqlDialect.PostgreSql, unmasked: true);
         cleared.AccessLevel.ShouldBe(ColumnAccessLevel.Clear);
     }
 
@@ -300,8 +257,6 @@ public sealed class ClassificationAccessResolverTests
             Code = code,
             DisplayName = code,
             RestrictionRank = rank,
-            ClearGrantable = true,
-            SeparateApproval = true,
             IsActive = true,
             UpdatedBy = ApproverSid.Value,
             UpdatedAt = FixedNow
@@ -328,109 +283,89 @@ public sealed class ClassificationAccessResolverTests
 
         var grant = BaseGrant();
         var higherRankWins = resolver.ResolveColumnForGrant(
-            grant, [], "val", "TEXT", ColumnAccessLevel.Clear,
+            grant, "val", "TEXT", ColumnAccessLevel.Clear,
             [ColClass("CLASS_A", Tenant.Value), ColClass("CLASS_B", Tenant.Value)],
-            [], catalog, FixedNow, Tenant, TargetSqlDialect.PostgreSql);
+            [], catalog, Tenant, TargetSqlDialect.PostgreSql);
         higherRankWins.WinningClassificationCode.ShouldBe("CLASS_B");
 
         var equalRankTieBreak = resolver.ResolveColumnForGrant(
-            grant, [], "val", "TEXT", ColumnAccessLevel.Clear,
+            grant, "val", "TEXT", ColumnAccessLevel.Clear,
             [ColClass("CLASS_C", Tenant.Value), ColClass("CLASS_B", Tenant.Value)],
-            [], catalog, FixedNow, Tenant, TargetSqlDialect.PostgreSql);
+            [], catalog, Tenant, TargetSqlDialect.PostgreSql);
         equalRankTieBreak.WinningClassificationCode.ShouldBe("CLASS_B");
     }
 
     [Fact]
-    public void PublicClassification_DoesNotRequireSeparateApproval_AndRespectsExplicitMaskOrDeny()
+    public void PublicClassification_StaysClear_AndRespectsTheGrantColumnLevel()
     {
         var resolver = CreateResolver(timeProvider: new AdjustableClassificationTimeProvider(FixedNow));
         var catalog = ClassificationAccessResolver.BuiltInCatalog(Tenant.Value);
         var grant = BaseGrant();
 
         var defaultClear = resolver.ResolveColumnForGrant(
-            grant, [], "display_name", "TEXT", ColumnAccessLevel.Clear,
-            [ColClass(ClassificationScopes.PublicCode)], [], catalog, FixedNow, Tenant, TargetSqlDialect.PostgreSql);
+            grant, "display_name", "TEXT", ColumnAccessLevel.Clear,
+            [ColClass(ClassificationScopes.PublicCode)], [], catalog, Tenant, TargetSqlDialect.PostgreSql);
         defaultClear.AccessLevel.ShouldBe(ColumnAccessLevel.Clear);
 
-        ConsentClassificationAccess[] explicitMask =
-        [
-            new ConsentClassificationAccess
-            {
-                TenantId = Tenant.Value,
-                ConsentId = grant.Id,
-                Code = ClassificationScopes.PublicCode,
-                AccessLevel = ColumnAccessLevel.Mask,
-                ApprovedBySid = ApproverSid.Value,
-                ApprovedAt = FixedNow
-            }
-        ];
         var masked = resolver.ResolveColumnForGrant(
-            grant, explicitMask, "display_name", "TEXT", ColumnAccessLevel.Clear,
-            [ColClass(ClassificationScopes.PublicCode)], [], catalog, FixedNow, Tenant, TargetSqlDialect.PostgreSql);
+            grant, "display_name", "TEXT", ColumnAccessLevel.Mask,
+            [ColClass(ClassificationScopes.PublicCode)], [], catalog, Tenant, TargetSqlDialect.PostgreSql, unmasked: true);
         masked.AccessLevel.ShouldBe(ColumnAccessLevel.Mask);
 
-        ConsentClassificationAccess[] explicitDeny =
-        [
-            new ConsentClassificationAccess
-            {
-                TenantId = Tenant.Value,
-                ConsentId = grant.Id,
-                Code = ClassificationScopes.PublicCode,
-                AccessLevel = ColumnAccessLevel.Deny,
-                ApprovedBySid = ApproverSid.Value,
-                ApprovedAt = FixedNow
-            }
-        ];
         var denied = resolver.ResolveColumnForGrant(
-            grant, explicitDeny, "display_name", "TEXT", ColumnAccessLevel.Clear,
-            [ColClass(ClassificationScopes.PublicCode)], [], catalog, FixedNow, Tenant, TargetSqlDialect.PostgreSql);
+            grant, "display_name", "TEXT", ColumnAccessLevel.Deny,
+            [ColClass(ClassificationScopes.PublicCode)], [], catalog, Tenant, TargetSqlDialect.PostgreSql, unmasked: true);
         denied.AccessLevel.ShouldBe(ColumnAccessLevel.Deny);
     }
 
     [Fact]
-    public void ExpiredClassificationClearApproval_DegradesClearToMask()
+    public void ClassifiedColumn_IsMaskedWithoutUnmaskGrant_AndClearWithIt()
     {
         var resolver = CreateResolver(timeProvider: new AdjustableClassificationTimeProvider(FixedNow));
         var catalog = ClassificationAccessResolver.BuiltInCatalog(Tenant.Value);
         var grant = BaseGrant();
-        ConsentClassificationAccess[] expired =
-        [
-            new ConsentClassificationAccess
-            {
-                TenantId = Tenant.Value,
-                ConsentId = grant.Id,
-                Code = ClassificationScopes.PiiCode,
-                AccessLevel = ColumnAccessLevel.Clear,
-                ValidUntil = FixedNow.AddMinutes(-1),
-                ApprovedBySid = ApproverSid.Value,
-                ApprovedAt = FixedNow.AddDays(-1)
-            }
-        ];
 
-        var outcome = resolver.ResolveColumnForGrant(
-            grant, expired, "ssn", "TEXT", ColumnAccessLevel.Clear,
-            [ColClass(ClassificationScopes.PiiCode)], [], catalog, FixedNow, Tenant, TargetSqlDialect.PostgreSql);
+        var masked = resolver.ResolveColumnForGrant(
+            grant, "ssn", "TEXT", ColumnAccessLevel.Clear,
+            [ColClass(ClassificationScopes.PiiCode)], [], catalog, Tenant, TargetSqlDialect.PostgreSql);
+        masked.AccessLevel.ShouldBe(ColumnAccessLevel.Mask);
+        masked.WinningClassificationCode.ShouldBe(ClassificationScopes.PiiCode);
 
-        outcome.AccessLevel.ShouldBe(ColumnAccessLevel.Mask);
-        outcome.WinningClassificationCode.ShouldBe(ClassificationScopes.PiiCode);
+        var unmasked = resolver.ResolveColumnForGrant(
+            grant, "ssn", "TEXT", ColumnAccessLevel.Clear,
+            [ColClass(ClassificationScopes.PiiCode)], [], catalog, Tenant, TargetSqlDialect.PostgreSql, unmasked: true);
+        unmasked.AccessLevel.ShouldBe(ColumnAccessLevel.Clear);
     }
 
     [Fact]
-    public void Od40_NewActiveSeparateApprovalClassification_TightensExistingGrantToMask()
+    public void UnmaskGrant_NeverWidensAMaskedGrantColumn()
+    {
+        var resolver = CreateResolver(timeProvider: new AdjustableClassificationTimeProvider(FixedNow));
+        var catalog = ClassificationAccessResolver.BuiltInCatalog(Tenant.Value);
+
+        var outcome = resolver.ResolveColumnForGrant(
+            BaseGrant(), "ssn", "TEXT", ColumnAccessLevel.Mask,
+            [ColClass(ClassificationScopes.PiiCode)], [], catalog, Tenant, TargetSqlDialect.PostgreSql, unmasked: true);
+
+        outcome.AccessLevel.ShouldBe(ColumnAccessLevel.Mask);
+    }
+
+    [Fact]
+    public void Od40_NewMaskingClassification_TightensExistingGrantToMask()
     {
         var resolver = CreateResolver(timeProvider: new AdjustableClassificationTimeProvider(FixedNow));
         var catalog = ClassificationAccessResolver.BuiltInCatalog(Tenant.Value);
         var grant = BaseGrant();
 
         var initial = resolver.ResolveColumnForGrant(
-            grant, [], "iban", "TEXT", ColumnAccessLevel.Clear,
-            [ColClass(ClassificationScopes.PublicCode)], [], catalog, FixedNow, Tenant, TargetSqlDialect.PostgreSql);
+            grant, "iban", "TEXT", ColumnAccessLevel.Clear,
+            [ColClass(ClassificationScopes.PublicCode)], [], catalog, Tenant, TargetSqlDialect.PostgreSql);
         initial.AccessLevel.ShouldBe(ColumnAccessLevel.Clear);
 
         var tightened = resolver.ResolveColumnForGrant(
-            grant, [], "iban", "TEXT", ColumnAccessLevel.Clear,
+            grant, "iban", "TEXT", ColumnAccessLevel.Clear,
             [ColClass(ClassificationScopes.PublicCode), ColClass(ClassificationScopes.FinancialCode)],
-            [], catalog, FixedNow, Tenant, TargetSqlDialect.PostgreSql);
+            [], catalog, Tenant, TargetSqlDialect.PostgreSql);
         tightened.AccessLevel.ShouldBe(ColumnAccessLevel.Mask);
         tightened.WinningClassificationCode.ShouldBe(ClassificationScopes.FinancialCode);
     }
@@ -484,14 +419,14 @@ public sealed class ClassificationAccessResolverTests
         ];
         var grant = BaseGrant();
         var keyedTenantWins = resolver.ResolveColumnForGrant(
-            grant, [], "card", "TEXT", ColumnAccessLevel.Clear,
-            [ColClass(ClassificationScopes.PiiCode, colId: colId)], overrides, catalog, FixedNow, Tenant, TargetSqlDialect.PostgreSql);
+            grant, "card", "TEXT", ColumnAccessLevel.Clear,
+            [ColClass(ClassificationScopes.PiiCode, colId: colId)], overrides, catalog, Tenant, TargetSqlDialect.PostgreSql);
         keyedTenantWins.WinningMaskFunction.ShouldBe(MaskFunction.Nullify);
 
         ColumnMaskOverride[] piiOnlyKeyed = [Ov(Tenant.Value, ClassificationScopes.PiiCode, MaskFunction.Partial)];
         var finOutcome = resolver.ResolveColumnForGrant(
-            grant, [], "balance", "TEXT", ColumnAccessLevel.Clear,
-            [ColClass(ClassificationScopes.FinancialCode, colId: colId)], piiOnlyKeyed, catalog, FixedNow, Tenant, TargetSqlDialect.PostgreSql);
+            grant, "balance", "TEXT", ColumnAccessLevel.Clear,
+            [ColClass(ClassificationScopes.FinancialCode, colId: colId)], piiOnlyKeyed, catalog, Tenant, TargetSqlDialect.PostgreSql);
         finOutcome.WinningMaskFunction.ShouldBe(MaskFunction.TypeSafeRedact);
 
         ColumnMaskOverride[] unkeyedOnly =
@@ -500,8 +435,8 @@ public sealed class ClassificationAccessResolverTests
             Ov(Tenant.Value, null, MaskFunction.Hash, "test-hmac-key")
         ];
         var unkeyedTenantWins = resolver.ResolveColumnForGrant(
-            grant, [], "email", "TEXT", ColumnAccessLevel.Clear,
-            [ColClass(ClassificationScopes.PiiCode, colId: colId)], unkeyedOnly, catalog, FixedNow, Tenant, TargetSqlDialect.PostgreSql);
+            grant, "email", "TEXT", ColumnAccessLevel.Clear,
+            [ColClass(ClassificationScopes.PiiCode, colId: colId)], unkeyedOnly, catalog, Tenant, TargetSqlDialect.PostgreSql);
         unkeyedTenantWins.WinningMaskFunction.ShouldBe(MaskFunction.Hash);
     }
 
@@ -525,8 +460,8 @@ public sealed class ClassificationAccessResolverTests
         var catalog = builtIn with { MaskRules = rules };
 
         var outcome = resolver.ResolveColumnForGrant(
-            BaseGrant(), [], "ssn", "TEXT", ColumnAccessLevel.Clear,
-            [ColClass(ClassificationScopes.PiiCode)], [], catalog, FixedNow, Tenant, TargetSqlDialect.PostgreSql);
+            BaseGrant(), "ssn", "TEXT", ColumnAccessLevel.Clear,
+            [ColClass(ClassificationScopes.PiiCode)], [], catalog, Tenant, TargetSqlDialect.PostgreSql);
 
         outcome.AccessLevel.ShouldBe(ColumnAccessLevel.Deny);
         outcome.ReasonCode.ShouldBe("MASK_KEY_UNAVAILABLE");
@@ -534,7 +469,7 @@ public sealed class ClassificationAccessResolverTests
     }
 
     [Fact]
-    public async Task TableAccessPolicy_And_AccessDecisionPoint_EnforceClassificationAccessAndCacheTtlEndToEnd()
+    public async Task TableAccessPolicy_And_AccessDecisionPoint_EnforceClassificationMasksAndUnmaskEndToEnd()
     {
         var time = new AdjustableClassificationTimeProvider(FixedNow);
         var repo = new TestInMemoryClassificationStore(Tenant.Value);
@@ -595,41 +530,13 @@ public sealed class ClassificationAccessResolverTests
         d1.GetColumnAccess("api_key").ShouldBe(ColumnAccessLevel.Mask);
         ((ColumnMaskPolicy)d1.ColumnMasks!).Specs["ssn"].Kind.ShouldBe(MaskKind.Hmac);
 
-        await repo.UpsertConsentClassificationAccessAsync(new ConsentClassificationAccess
-        {
-            TenantId = Tenant.Value,
-            ConsentId = grant.Id,
-            Code = ClassificationScopes.PiiCode,
-            AccessLevel = ColumnAccessLevel.Clear,
-            ValidUntil = FixedNow.AddSeconds(25),
-            ApprovedBySid = ApproverSid.Value,
-            ApprovedAt = FixedNow
-        });
+        // #1009 A-3: clear values come from a per-object unmask grant, never from a classification grant; credentials stay masked.
+        var unmaskPdp = CreatePdp(resolver, consentRepo, cache, time, new WholeTableUnmask());
         await cache.ClearL1CacheAsync();
-
-        var d2 = await pdp.DecideAsync(req);
+        var d2 = await unmaskPdp.DecideAsync(req);
         d2.GetColumnAccess("ssn").ShouldBe(ColumnAccessLevel.Clear);
+        d2.GetColumnAccess("email").ShouldBe(ColumnAccessLevel.Clear);
         d2.GetColumnAccess("api_key").ShouldBe(ColumnAccessLevel.Mask);
-
-        var hydratedConsent = BaseGrant(
-            grant.Id,
-            new ConsentClassificationAccess
-            {
-                TenantId = Tenant.Value,
-                ConsentId = grant.Id,
-                Code = ClassificationScopes.PiiCode,
-                AccessLevel = ColumnAccessLevel.Clear,
-                ValidUntil = FixedNow.AddSeconds(25),
-                ApprovedBySid = ApproverSid.Value,
-                ApprovedAt = FixedNow
-            });
-        var computedTtl = ConsentResolutionService.ComputeDecisionCacheTtl(isHighlySensitive: false, [hydratedConsent], FixedNow);
-        computedTtl.ShouldBeLessThanOrEqualTo(TimeSpan.FromSeconds(25));
-
-        time.Advance(TimeSpan.FromSeconds(30));
-        await cache.ClearL1CacheAsync();
-        var d3 = await pdp.DecideAsync(req);
-        d3.GetColumnAccess("ssn").ShouldBe(ColumnAccessLevel.Mask);
     }
 
     [Fact]
@@ -659,7 +566,8 @@ public sealed class ClassificationAccessResolverTests
         ClassificationAccessResolver resolver,
         IConsentRepository consentRepo,
         IConsentCacheService cacheService,
-        TimeProvider timeProvider)
+        TimeProvider timeProvider,
+        Autheris.Application.Policy.Protection.IUnmaskGrantResolver? unmask = null)
     {
         var masks = new ColumnMaskPolicyFactory(new SqlDataMaskingProvider(Options.Create(new GatewayOptions()), timeProvider: timeProvider));
         var rows = new RowPolicyFactory(new PolicyPredicateRenderer());
@@ -672,6 +580,14 @@ public sealed class ClassificationAccessResolverTests
             cacheService: cacheService,
             mandatoryFilters: new NoOpMandatoryRowFilterResolver(),
             typedPolicies: typed,
-            timeProvider: timeProvider);
+            timeProvider: timeProvider,
+            unmaskResolver: unmask);
+    }
+
+    private sealed class WholeTableUnmask : Autheris.Application.Policy.Protection.IUnmaskGrantResolver
+    {
+        public ValueTask<Autheris.Application.Policy.Protection.UnmaskCoverage> ResolveAsync(
+            TenantId tenant, IReadOnlyCollection<Sid> subjects, bool groupsComplete, TableIdentifier table, CancellationToken ct = default) =>
+            ValueTask.FromResult(new Autheris.Application.Policy.Protection.UnmaskCoverage(wholeTable: true, new HashSet<string>()));
     }
 }

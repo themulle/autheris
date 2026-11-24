@@ -39,11 +39,10 @@ public sealed partial class RowScopeCompiler
         IReadOnlyDictionary<string, Autheris.Application.Policy.Classification.ColumnClassificationGrantOutcome>? combinedClassWinners = null;
         if (_classificationResolver is not null &&
             (metadata.ColumnClassifications.Count > 0 ||
-             contributingAllows.Any(c => c.ClassificationAccess.Count > 0) ||
              _classificationResolver.HasRepository))
         {
             (perGrantOutcomes, combinedClassWinners) = await _classificationResolver.ResolveForTableAsync(
-                metadata, contributingAllows, query.Tenant, callerScopes, ct: ct, columnRowPrefetch: query.ColumnRowPrefetch).ConfigureAwait(false);
+                metadata, contributingAllows, query.Tenant, callerScopes, columnRowPrefetch: query.ColumnRowPrefetch, unmask: query.Unmask, ct: ct).ConfigureAwait(false);
         }
 
         var (hardDenied, hardMasked) = CollectFilterlessDenyColumnCaps(

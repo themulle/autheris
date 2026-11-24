@@ -51,6 +51,7 @@ Autheris.Domain.Options.GoldenQueryOptions.Enabled
 Autheris.Domain.Options.GovernanceDbOptions.EnableOutboxProcessor
 Autheris.Domain.Options.GovernanceOptions.QueryAnalysis
 Autheris.Domain.Options.GovernanceQueryAnalysisOptions.Enabled
+Autheris.Domain.Options.GrantValidityOptions.DefaultMaxClearDays
 Autheris.Domain.Options.GraphQLAggregationOptions.Enabled
 Autheris.Domain.Options.GraphQLMetricsOptions.Enabled
 Autheris.Domain.Options.GraphQLOptions.Metrics

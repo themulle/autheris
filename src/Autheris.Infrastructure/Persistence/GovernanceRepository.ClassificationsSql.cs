@@ -11,57 +11,45 @@ public partial class GovernanceRepository
     internal static class ClassificationsSql
     {
         public const string SelectClassificationsActiveGlobalOnlySql = @"SELECT scope, code, display_name, description, parent_code, restriction_rank,
-       clear_grantable, separate_approval, approver_mode, steward_group_sid,
-       max_clear_days, is_active, version, updated_by, updated_at
+       is_active, version, updated_by, updated_at
 FROM DATA_CLASSIFICATIONS
 WHERE scope = '*' AND is_active = @active
 ORDER BY restriction_rank ASC, code ASC, scope ASC";
 
         public const string SelectClassificationsAllGlobalOnlySql = @"SELECT scope, code, display_name, description, parent_code, restriction_rank,
-       clear_grantable, separate_approval, approver_mode, steward_group_sid,
-       max_clear_days, is_active, version, updated_by, updated_at
+       is_active, version, updated_by, updated_at
 FROM DATA_CLASSIFICATIONS
 WHERE scope = '*'
 ORDER BY restriction_rank ASC, code ASC, scope ASC";
 
         public const string SelectClassificationsActiveScopedSql = @"SELECT scope, code, display_name, description, parent_code, restriction_rank,
-       clear_grantable, separate_approval, approver_mode, steward_group_sid,
-       max_clear_days, is_active, version, updated_by, updated_at
+       is_active, version, updated_by, updated_at
 FROM DATA_CLASSIFICATIONS
 WHERE (scope = '*' OR scope = @scope) AND is_active = @active
 ORDER BY restriction_rank ASC, code ASC, scope ASC";
 
         public const string SelectClassificationsAllScopedSql = @"SELECT scope, code, display_name, description, parent_code, restriction_rank,
-       clear_grantable, separate_approval, approver_mode, steward_group_sid,
-       max_clear_days, is_active, version, updated_by, updated_at
+       is_active, version, updated_by, updated_at
 FROM DATA_CLASSIFICATIONS
 WHERE scope = '*' OR scope = @scope
 ORDER BY restriction_rank ASC, code ASC, scope ASC";
 
         public const string SelectClassificationByKeySql = @"SELECT scope, code, display_name, description, parent_code, restriction_rank,
-       clear_grantable, separate_approval, approver_mode, steward_group_sid,
-       max_clear_days, is_active, version, updated_by, updated_at
+       is_active, version, updated_by, updated_at
 FROM DATA_CLASSIFICATIONS
 WHERE scope = @scope AND code = @code";
 
         public const string UpsertClassificationSqlPg = @"INSERT INTO DATA_CLASSIFICATIONS
 (scope, code, display_name, description, parent_code, restriction_rank,
- clear_grantable, separate_approval, approver_mode, steward_group_sid,
- max_clear_days, is_active, version, updated_by, updated_at)
+ is_active, version, updated_by, updated_at)
 VALUES
 (@scope, @code, @display_name, @description, @parent_code, @restriction_rank,
- @clear_grantable, @separate_approval, @approver_mode, @steward_group_sid,
- @max_clear_days, @is_active, @version, @updated_by, @updated_at)
+ @is_active, @version, @updated_by, @updated_at)
 ON CONFLICT (scope, code) DO UPDATE SET
     display_name = EXCLUDED.display_name,
     description = EXCLUDED.description,
     parent_code = EXCLUDED.parent_code,
     restriction_rank = EXCLUDED.restriction_rank,
-    clear_grantable = EXCLUDED.clear_grantable,
-    separate_approval = EXCLUDED.separate_approval,
-    approver_mode = EXCLUDED.approver_mode,
-    steward_group_sid = EXCLUDED.steward_group_sid,
-    max_clear_days = EXCLUDED.max_clear_days,
     is_active = EXCLUDED.is_active,
     version = DATA_CLASSIFICATIONS.version + 1,
     updated_by = EXCLUDED.updated_by,
@@ -75,23 +63,16 @@ WHEN MATCHED THEN UPDATE SET
     description = @description,
     parent_code = @parent_code,
     restriction_rank = @restriction_rank,
-    clear_grantable = @clear_grantable,
-    separate_approval = @separate_approval,
-    approver_mode = @approver_mode,
-    steward_group_sid = @steward_group_sid,
-    max_clear_days = @max_clear_days,
     is_active = @is_active,
     version = t.version + 1,
     updated_by = @updated_by,
     updated_at = @updated_at
 WHEN NOT MATCHED THEN INSERT
     (scope, code, display_name, description, parent_code, restriction_rank,
-     clear_grantable, separate_approval, approver_mode, steward_group_sid,
-     max_clear_days, is_active, version, updated_by, updated_at)
+     is_active, version, updated_by, updated_at)
 VALUES
     (@scope, @code, @display_name, @description, @parent_code, @restriction_rank,
-     @clear_grantable, @separate_approval, @approver_mode, @steward_group_sid,
-     @max_clear_days, @is_active, @version, @updated_by, @updated_at);";
+     @is_active, @version, @updated_by, @updated_at);";
 
         public const string SelectMaskRulesGlobalOnlySql = @"SELECT scope, code, mask_function, params_json, key_ref, catalog_text, version, updated_by, updated_at
 FROM CLASSIFICATION_MASK_RULES
@@ -227,6 +208,12 @@ WHERE scope = @scope AND table_column_id = @table_column_id AND code = @code";
         public const string DeleteColumnMaskOverrideAllSql = @"DELETE FROM COLUMN_MASK_OVERRIDES
 WHERE scope = @scope AND table_column_id = @table_column_id AND code IS NULL";
 
+        // A classification code is in use while a column classification names it. The global scope ('*') counts the rows of every
+        // tenant; a tenant scope counts the global rows and that tenant's rows. Mask categories are checked by the protection store.
+        public const string CountClassificationReferencesGlobalSql = "SELECT COUNT(*) FROM COLUMN_CLASSIFICATIONS WHERE code = @code";
+
+        public const string CountClassificationReferencesScopedSql = "SELECT COUNT(*) FROM COLUMN_CLASSIFICATIONS WHERE code = @code AND (scope = '*' OR scope = @scope)";
+
         public const string SelectTableIdentifierByColumnIdSql = @"SELECT t.source_name, t.schema_name, t.table_name
 FROM TABLE_COLUMNS c
 JOIN TABLES t ON c.table_id = t.id
@@ -287,12 +274,6 @@ WHERE c.id = @table_column_id";
 
         public static DataClassification ReadClassification(DbDataReader reader)
         {
-            var approverCode = reader.GetString(8);
-            if (!ClassificationApproverModes.TryParse(approverCode, out var approverMode))
-            {
-                throw new InvalidOperationException($"Unknown approver mode '{approverCode}'.");
-            }
-
             return new DataClassification
             {
                 Scope = reader.GetString(0),
@@ -301,15 +282,10 @@ WHERE c.id = @table_column_id";
                 Description = reader.IsDBNull(3) ? null : reader.GetString(3),
                 ParentCode = reader.IsDBNull(4) ? null : reader.GetString(4),
                 RestrictionRank = reader.GetInt16(5),
-                ClearGrantable = reader.GetBoolean(6),
-                SeparateApproval = reader.GetBoolean(7),
-                ApproverMode = approverMode,
-                StewardGroupSid = reader.IsDBNull(9) ? null : reader.GetString(9),
-                MaxClearDays = reader.IsDBNull(10) ? null : reader.GetInt32(10),
-                IsActive = reader.GetBoolean(11),
-                Version = reader.GetInt32(12),
-                UpdatedBy = reader.GetString(13),
-                UpdatedAt = reader.GetFieldValue<DateTimeOffset>(14)
+                IsActive = reader.GetBoolean(6),
+                Version = reader.GetInt32(7),
+                UpdatedBy = reader.GetString(8),
+                UpdatedAt = reader.GetFieldValue<DateTimeOffset>(9)
             };
         }
 
