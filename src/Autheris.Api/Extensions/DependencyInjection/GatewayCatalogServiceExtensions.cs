@@ -102,6 +102,20 @@ public static class GatewayCatalogServiceExtensions
             sp.GetService<Autheris.Application.Catalog.Discovery.IDiscoveryService>() is { } discovery
                 ? new Autheris.Application.Docs.Services.DocLinkCallerView(discovery, reader)
                 : null!);
+        services.TryAddSingleton<Autheris.Application.Catalog.Discovery.ITenantConsentTablesProvider>(sp =>
+        {
+            var governed = sp.GetService<IGovernanceRepository>() is not null;
+            return new Autheris.Application.Catalog.Discovery.TenantConsentTablesProvider(
+                governed ? sp.GetService<IEpochValidationService>() : null,
+                governed ? sp.GetService<Autheris.Application.Governance.Caching.GovernanceEpochProvider>() : null,
+                governed ? sp.GetService<Autheris.Application.Governance.Caching.IGovernanceChangeNotifier>() : null,
+                sp.GetService<TimeProvider>());
+        });
+        services.TryAddSingleton<Autheris.Application.Catalog.Discovery.ICatalogVisibilityEvaluator>(sp =>
+            new Autheris.Application.Catalog.Discovery.CatalogVisibilityEvaluator(
+                sp.GetRequiredService<IOptions<GatewayOptions>>(),
+                sp.GetRequiredService<Autheris.Application.Catalog.Discovery.ITenantConsentTablesProvider>(),
+                sp.GetService<TimeProvider>()));
         services.TryAddScoped<Autheris.Application.Catalog.Discovery.IDiscoveryService>(sp =>
             new Autheris.Application.Catalog.Discovery.DiscoveryService(
                 sp.GetService<ITableMetadataRepository>(),
@@ -125,7 +139,8 @@ public static class GatewayCatalogServiceExtensions
                 sp.GetService<Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider>(),
                 sp.GetService<IGovernanceRepository>() is null ? null : sp.GetService<Autheris.Application.Catalog.Visibility.IContainerVisibilitySnapshotProvider>(),
                 sp.GetService<Autheris.Application.Catalog.Discovery.CatalogAccessViewCache>(),
-                sp.GetService<Autheris.Application.Policy.Protection.IUnmaskGrantResolver>()));
+                sp.GetService<Autheris.Application.Policy.Protection.IUnmaskGrantResolver>(),
+                sp.GetService<Autheris.Application.Catalog.Discovery.ICatalogVisibilityEvaluator>()));
 
         // Issue #1044: the caller access views of the accessStatus filter, shared across requests (bounded, invalidation-keyed). The
         // invalidation signal exists only with the governance repository; without it the cache is never used.
@@ -194,7 +209,8 @@ public static class GatewayCatalogServiceExtensions
             sp.GetService<IKeyVaultSecretProvider>(),
             sp.GetService<IConfiguration>(),
             sp.GetService<IProtectionSnapshotProvider>(),
-            sp.GetService<IGovernanceRepository>() is null ? null : sp.GetService<ICatalogSnapshotProvider>()));
+            sp.GetService<IGovernanceRepository>() is null ? null : sp.GetService<ICatalogSnapshotProvider>(),
+            sp.GetService<Autheris.Application.Catalog.Discovery.ICatalogVisibilityEvaluator>()));
         services.AddHostedService<Autheris.Application.Catalog.External.CatalogChangeIndexerHostedService>();
         return services;
     }

@@ -14,6 +14,51 @@ using Autheris.Domain.Model;
 /// </summary>
 public static class DiscoveryTenantScope
 {
+    private static readonly IReadOnlySet<TableIdentifier> EmptyTableSet = new HashSet<TableIdentifier>();
+
+    public static bool NeedsTenantConsentLookup(
+        IEnumerable<TableMetadata> candidates,
+        TenantId tenant,
+        TenantId? catalogOwner,
+        IReadOnlySet<TableIdentifier> sharedTables)
+    {
+        ArgumentNullException.ThrowIfNull(candidates);
+        ArgumentNullException.ThrowIfNull(sharedTables);
+
+        foreach (var table in candidates)
+        {
+            if (table is null || !table.Table.IsActive)
+            {
+                continue;
+            }
+
+            if (SemanticVirtualTables.IsInSemanticDomain(table.Identifier) &&
+                !SemanticVirtualTables.BelongsToTenant(table, tenant))
+            {
+                continue;
+            }
+
+            if (!IsInScope(table, tenant, catalogOwner, sharedTables, EmptyTableSet))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    public static DiscoveryArtifacts? SelectPrimaryArtifact(IReadOnlyList<DiscoveryArtifacts>? artifacts)
+    {
+        if (artifacts is null || artifacts.Count == 0)
+        {
+            return null;
+        }
+
+        return artifacts.FirstOrDefault(static a => a.Provenance == ArtifactProvenance.Upload)
+            ?? artifacts.FirstOrDefault(static a => a.Provenance == ArtifactProvenance.Unknown)
+            ?? artifacts[0];
+    }
+
     public static IReadOnlyList<TableMetadata> DropForeignVirtualTables(IEnumerable<TableMetadata> tables, TenantId tenant)
     {
         ArgumentNullException.ThrowIfNull(tables);

@@ -72,13 +72,15 @@ public sealed class ExternalCatalogCursorTests
         page1.Value!.TotalCount.ShouldBe(6);
         page1.Value.Items.Select(static x => x.ObjectId).ShouldBe(["pg.dbo.t_00", "pg.dbo.t_01"]);
         page1.Value.NextCursor.ShouldNotBeNull();
-        countingArtifacts.Reads.ShouldBe(2);
+        countingArtifacts.Reads.ShouldBe(1);
+        countingArtifacts.BatchedTableIds.Count.ShouldBe(2);
 
         var page2 = await reader.ListObjectsAsync(app, new TenantId("tenant-a"), new ExternalCatalogListQuery(PageSize: 2, Cursor: page1.Value.NextCursor));
         page2.IsSuccess.ShouldBeTrue();
         page2.Value!.TotalCount.ShouldBe(6);
         page2.Value.Items.Select(static x => x.ObjectId).ShouldBe(["pg.dbo.t_02", "pg.dbo.t_03"]);
-        countingArtifacts.Reads.ShouldBe(4);
+        countingArtifacts.Reads.ShouldBe(2);
+        countingArtifacts.BatchedTableIds.Count.ShouldBe(4);
     }
 
     [Fact]
@@ -102,6 +104,7 @@ public sealed class ExternalCatalogCursorTests
     private sealed class CountingArtifactStore(IDiscoveryArtifactStore inner) : IDiscoveryArtifactStore
     {
         public int Reads { get; private set; }
+        public List<Guid> BatchedTableIds { get; } = [];
         public System.Threading.Tasks.Task<DiscoveryArtifacts?> GetAsync(Guid tableId, System.Threading.CancellationToken ct = default)
         {
             Reads++;
@@ -119,6 +122,7 @@ public sealed class ExternalCatalogCursorTests
             System.Threading.CancellationToken ct = default)
         {
             Reads++;
+            BatchedTableIds.AddRange(tableIds);
             return inner.GetAllForTablesAsync(tableIds, ct);
         }
 

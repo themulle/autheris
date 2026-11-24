@@ -43,7 +43,8 @@ public sealed partial class ExternalCatalogReader(
     IKeyVaultSecretProvider? secretProvider = null,
     IConfiguration? configuration = null,
     IProtectionSnapshotProvider? protectionProvider = null,
-    ICatalogSnapshotProvider? snapshotProvider = null)
+    ICatalogSnapshotProvider? snapshotProvider = null,
+    ICatalogVisibilityEvaluator? visibilityEvaluator = null)
 {
     public const int DefaultPageSize = 50;
     public const int MaxPageSize = 200;
@@ -69,6 +70,10 @@ public sealed partial class ExternalCatalogReader(
         configuration);
     private readonly int _descriptionMaxLength = (textOptions?.Value ?? new GovernanceTextOptions()).ConsentDescriptionMaxLength;
     private readonly IProtectionSnapshotProvider? _protectionProvider = protectionProvider;
+    private readonly ICatalogVisibilityEvaluator _visibilityEvaluator =
+        visibilityEvaluator ?? new CatalogVisibilityEvaluator(
+            gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions)),
+            timeProvider: timeProvider);
 
     private const string InvalidCursorMessage = "The cursor is invalid.";
 
@@ -273,8 +278,18 @@ public sealed partial class ExternalCatalogReader(
                 new ExternalCatalogChangesResponseDto([], feed.NextSince));
         }
 
-        var (allTables, _, visibility) = await LoadContextAsync(user, tenantId, ct).ConfigureAwait(false);
+        var allTables = await LoadActiveTablesAsync(ct).ConfigureAwait(false);
         var byObjectId = allTables.ToDictionary(static t => t.Identifier.ToString(), StringComparer.OrdinalIgnoreCase);
+        var referencedTables = new List<TableMetadata>(feed.Changes.Count);
+        foreach (var ch in feed.Changes)
+        {
+            if (byObjectId.TryGetValue(ch.ObjectId, out var referenced))
+            {
+                referencedTables.Add(referenced);
+            }
+        }
+
+        var visibility = await ResolveCallerVisibilityAsync(user, tenantId, referencedTables, ct).ConfigureAwait(false);
 
         var items = new List<ExternalCatalogChangeDto>(feed.Changes.Count);
         foreach (var ch in feed.Changes)
@@ -342,31 +357,29 @@ public sealed partial class ExternalCatalogReader(
         return Convert.ToHexString(hashBytes).ToLowerInvariant();
     }
 
-    private async Task<(IReadOnlyList<TableMetadata> AllTables, IReadOnlyDictionary<string, CatalogObjectVersionRow> Versions, CallerVisibility Visibility)>
-        LoadContextAsync(ClaimsPrincipal user, TenantId tenantId, CancellationToken ct)
-    {
-        var allTables = await CatalogTablePageReader.ReadAllAsync(
-            _metadataRepository,
-            new CatalogTableQuery(IncludeInactive: false),
-            static t => t.Table.IsActive,
-            ct: ct).ConfigureAwait(false);
-        var versions = await _changeStore.GetObjectVersionsAsync(tenantId, ct).ConfigureAwait(false);
-        var visibility = await ResolveCallerVisibilityAsync(user, tenantId, allTables, ct).ConfigureAwait(false);
-        return (allTables, versions, visibility);
-    }
+    private Task<IReadOnlyList<TableMetadata>> LoadActiveTablesAsync(CancellationToken ct) =>
+        _visibilityEvaluator.LoadActiveTablesAsync(_metadataRepository, snapshotProvider, ct: ct);
 
     /// <summary>
     /// Issue #1050: the context of one object. With the catalog snapshot the id is resolved in O(1) (by identifier or table id, active
     /// tables only, as the full read) and the caller's hidden-object visibility is resolved for that table only; an unknown id returns
-    /// before any further read. Without a snapshot it falls back to the full catalog read.
+    /// before any further read. Without a snapshot it falls back to the explicit metadata fallback.
     /// </summary>
     private async Task<(TableMetadata? Table, IReadOnlyDictionary<string, CatalogObjectVersionRow> Versions, CallerVisibility Visibility)>
         LoadSingleContextAsync(ClaimsPrincipal user, TenantId tenantId, string rawId, CancellationToken ct)
     {
         if (snapshotProvider is null)
         {
-            var (allTables, allVersions, allVisibility) = await LoadContextAsync(user, tenantId, ct).ConfigureAwait(false);
-            return (FindMatchingTable(allTables, rawId), allVersions, allVisibility);
+            var allTables = await LoadActiveTablesAsync(ct).ConfigureAwait(false);
+            var matched = FindMatchingTable(allTables, rawId);
+            if (matched is null)
+            {
+                return (null, new Dictionary<string, CatalogObjectVersionRow>(), new CallerVisibility(false, false, new HashSet<TableIdentifier>()));
+            }
+
+            var allVersions = await _changeStore.GetObjectVersionsAsync(tenantId, ct).ConfigureAwait(false);
+            var singleVisibility = await ResolveCallerVisibilityAsync(user, tenantId, [matched], ct).ConfigureAwait(false);
+            return (matched, allVersions, singleVisibility);
         }
 
         var snapshot = await snapshotProvider.GetSnapshotAsync(ct).ConfigureAwait(false);
@@ -418,33 +431,10 @@ public sealed partial class ExternalCatalogReader(
             return new CallerVisibility(true, allowed, new HashSet<TableIdentifier>());
         }
 
-        // User token (interactive or delegated): delegated scopes never unlock hidden objects on their own;
-        // only tenant GovernanceAdmin / ClusterAdmin (validated via CallerScopeResolver) or data owner / delegate applies.
-        var catalogOwner = TenantResolver.EffectiveDefaultOf(_gatewayOptions.Tenancy);
-        var callerScope = CallerScopeResolver.Resolve(user, catalogOwner);
-        bool allHiddenAllowed = callerScope is CallerScope.Global or CallerScope.Tenant
-            || (callerScope == CallerScope.CatalogOwner && CallerScopeResolver.IsOwner(tenantId, catalogOwner));
-
-        var ownedHidden = new HashSet<TableIdentifier>();
-        var sid = user.GetUserSid();
-        if (!allHiddenAllowed && sid.HasValue)
-        {
-            var hiddenIds = allTables
-                .Where(static t => t.Table.IsActive && t.Table.DiscoveryHidden)
-                .Select(static t => t.Identifier)
-                .ToList();
-            if (hiddenIds.Count > 0)
-            {
-                var owned = await _ownershipRepository.GetOwnedOrDelegatedTablesAsync(
-                    sid.Value, hiddenIds, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
-                foreach (var id in owned)
-                {
-                    ownedHidden.Add(id);
-                }
-            }
-        }
-
-        return new CallerVisibility(false, allHiddenAllowed, ownedHidden);
+        // User token (interactive or delegated): delegate hidden-object rules to the shared catalog visibility evaluator.
+        var userVisibility = await _visibilityEvaluator.EvaluateUserHiddenVisibilityAsync(
+            user, tenantId, allTables, includeHiddenColumns: false, _ownershipRepository, ct).ConfigureAwait(false);
+        return new CallerVisibility(false, userVisibility.AllHiddenAllowed, userVisibility.OwnedHiddenTables);
     }
 
     private static bool HasAppEffectiveTag(TableMetadata table, string tag)
@@ -744,49 +734,14 @@ public sealed partial class ExternalCatalogReader(
         return list;
     }
 
-    private async Task<IReadOnlyList<TableMetadata>> FilterInScopeTablesAsync(
+    private Task<IReadOnlyList<TableMetadata>> FilterInScopeTablesAsync(
         IReadOnlyList<TableMetadata> allTables,
         TenantId tenantId,
-        CancellationToken ct)
-    {
-        var virtualFiltered = DiscoveryTenantScope.DropForeignVirtualTables(allTables, tenantId);
-        var consentTables = await _consentRepository.GetTablesWithConsentsForTenantAsync(tenantId, ct).ConfigureAwait(false);
-        var consentSet = consentTables as IReadOnlySet<TableIdentifier> ?? consentTables.ToHashSet();
-        var catalogOwner = TenantResolver.EffectiveDefaultOf(_gatewayOptions.Tenancy);
-        var sharedTables = DiscoveryTenantScope.ParseSharedTables(_gatewayOptions.Catalog.SharedTables);
+        CancellationToken ct) =>
+        _visibilityEvaluator.FilterInScopeAsync(allTables, tenantId, _consentRepository, ct).AsTask();
 
-        return virtualFiltered
-            .Where(t => t.Table.IsActive && DiscoveryTenantScope.IsInScope(t, tenantId, catalogOwner, sharedTables, consentSet))
-            .ToList();
-    }
-
-    private async Task<bool> IsTableInTenantScopeAsync(TableMetadata table, TenantId tenantId, CancellationToken ct)
-    {
-        if (!table.Table.IsActive)
-        {
-            return false;
-        }
-
-        var virtualFiltered = DiscoveryTenantScope.DropForeignVirtualTables([table], tenantId);
-        if (virtualFiltered.Count == 0)
-        {
-            return false;
-        }
-
-        var catalogOwner = TenantResolver.EffectiveDefaultOf(_gatewayOptions.Tenancy);
-        var sharedTables = DiscoveryTenantScope.ParseSharedTables(_gatewayOptions.Catalog.SharedTables);
-
-        // Issue #1050: the tenant's consented tables (one read over all of them) are only needed when the table is not in scope otherwise,
-        // as in DiscoveryService.FindSingleScopedTableAsync.
-        if (DiscoveryTenantScope.IsInScope(table, tenantId, catalogOwner, sharedTables, new HashSet<TableIdentifier>()))
-        {
-            return true;
-        }
-
-        var consentTables = await _consentRepository.GetTablesWithConsentsForTenantAsync(tenantId, ct).ConfigureAwait(false);
-        var consentSet = consentTables as IReadOnlySet<TableIdentifier> ?? consentTables.ToHashSet();
-        return DiscoveryTenantScope.IsInScope(table, tenantId, catalogOwner, sharedTables, consentSet);
-    }
+    private Task<bool> IsTableInTenantScopeAsync(TableMetadata table, TenantId tenantId, CancellationToken ct) =>
+        _visibilityEvaluator.IsInScopeAsync(table, tenantId, _consentRepository, ct).AsTask();
 
     private static TableMetadata? FindMatchingTable(IReadOnlyList<TableMetadata> allTables, string rawId)
     {

@@ -67,13 +67,23 @@ public sealed partial class DiscoveryService
                 startIndex = 0;
                 if (!string.IsNullOrEmpty(query.AfterKey))
                 {
-                    var foundIdx = candidates.FindIndex(t => string.Equals(t.Identifier.ToString(), query.AfterKey, StringComparison.OrdinalIgnoreCase));
+                    var afterSpan = query.AfterKey.AsSpan();
+                    var foundIdx = -1;
+                    for (var i = 0; i < candidates.Count; i++)
+                    {
+                        if (EqualsTableKey(candidates[i].Identifier, afterSpan))
+                        {
+                            foundIdx = i;
+                            break;
+                        }
+                    }
+
                     startIndex = foundIdx >= 0 ? foundIdx + 1 : candidates.Count;
                 }
             }
             else
             {
-                candidates.Sort(static (a, b) => CompareTableKeys(a.Identifier.ToString(), b.Identifier.ToString()));
+                candidates.Sort(static (a, b) => CompareTableKeys(a.Identifier, b.Identifier));
                 startIndex = string.IsNullOrEmpty(query.AfterKey)
                     ? 0
                     : FindFirstIndexAfter(candidates, query.AfterKey);
@@ -150,21 +160,97 @@ public sealed partial class DiscoveryService
         return cmp != 0 ? cmp : StringComparer.Ordinal.Compare(a, b);
     }
 
+    internal static int CompareTableKeys(TableIdentifier a, TableIdentifier b)
+    {
+        var cmp = CompareKeyCore(a, true, b, default, StringComparison.OrdinalIgnoreCase);
+        return cmp != 0 ? cmp : CompareKeyCore(a, true, b, default, StringComparison.Ordinal);
+    }
+
+    internal static int CompareTableKey(TableIdentifier a, ReadOnlySpan<char> key)
+    {
+        var cmp = CompareKeyCore(a, false, default, key, StringComparison.OrdinalIgnoreCase);
+        return cmp != 0 ? cmp : CompareKeyCore(a, false, default, key, StringComparison.Ordinal);
+    }
+
+    internal static bool EqualsTableKey(TableIdentifier id, ReadOnlySpan<char> key)
+    {
+        var d = id.Domain.Length;
+        var s = id.Schema.Length;
+        return key.Length == d + 1 + s + 1 + id.TableName.Length
+            && key[..d].Equals(id.Domain, StringComparison.OrdinalIgnoreCase)
+            && key[d] == '.'
+            && key.Slice(d + 1, s).Equals(id.Schema, StringComparison.OrdinalIgnoreCase)
+            && key[d + 1 + s] == '.'
+            && key[(d + 2 + s)..].Equals(id.TableName, StringComparison.OrdinalIgnoreCase);
+    }
+
+    private static int CompareKeyCore(
+        TableIdentifier a,
+        bool rightIsIdentifier,
+        TableIdentifier b,
+        ReadOnlySpan<char> rightSpan,
+        StringComparison comparison)
+    {
+        int segA = 0, offA = 0, segB = 0, offB = 0;
+        var bLimit = rightIsIdentifier ? 4 : 0;
+        while (true)
+        {
+            var spanA = AdvanceSegment(a, ref segA, ref offA);
+            var spanB = rightIsIdentifier
+                ? AdvanceSegment(b, ref segB, ref offB)
+                : (segB == 0 && offB < rightSpan.Length ? rightSpan : AdvanceSingle(ref segB));
+
+            if (segA > 4 || segB > bLimit)
+            {
+                return segA > 4 && segB > bLimit ? 0 : segA > 4 ? -1 : 1;
+            }
+
+            var sliceA = spanA[offA..];
+            var sliceB = spanB[offB..];
+            var len = Math.Min(sliceA.Length, sliceB.Length);
+            var cmp = sliceA[..len].CompareTo(sliceB[..len], comparison);
+            if (cmp != 0)
+            {
+                return cmp;
+            }
+
+            offA += len;
+            offB += len;
+        }
+    }
+
+    private static ReadOnlySpan<char> AdvanceSingle(ref int seg)
+    {
+        seg = 1;
+        return ReadOnlySpan<char>.Empty;
+    }
+
+    private static ReadOnlySpan<char> AdvanceSegment(TableIdentifier id, ref int seg, ref int off)
+    {
+        while (seg <= 4)
+        {
+            ReadOnlySpan<char> span = seg switch { 0 => id.Domain, 1 => ".", 2 => id.Schema, 3 => ".", _ => id.TableName };
+            if (off < span.Length)
+            {
+                return span;
+            }
+
+            seg++;
+            off = 0;
+        }
+
+        return ReadOnlySpan<char>.Empty;
+    }
+
     internal static int FindFirstIndexAfter(List<TableMetadata> sorted, string afterKey)
     {
-        var lo = 0;
-        var hi = sorted.Count;
+        var afterSpan = afterKey.AsSpan();
+        int lo = 0, hi = sorted.Count;
         while (lo < hi)
         {
             var mid = lo + ((hi - lo) >> 1);
-            if (CompareTableKeys(sorted[mid].Identifier.ToString(), afterKey) <= 0)
-            {
-                lo = mid + 1;
-            }
-            else
-            {
-                hi = mid;
-            }
+            if (CompareTableKey(sorted[mid].Identifier, afterSpan) <= 0) lo = mid + 1;
+            else hi = mid;
         }
 
         return lo;

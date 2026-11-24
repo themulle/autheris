@@ -607,10 +607,10 @@ internal sealed class InMemoryExternalConsentRepository : IConsentRepository, IC
         return Task.FromResult(new ConsentPage(filtered, null));
     }
 
-    public Task<IReadOnlySet<TableIdentifier>> GetTablesWithConsentsForTenantAsync(TenantId tenantId, CancellationToken ct = default)
+    public Task<IReadOnlyList<TableIdentifier>> GetTablesWithConsentsForTenantAsync(TenantId tenantId, CancellationToken ct = default)
     {
-        var set = Consents.Where(c => c.TenantId == tenantId && !c.IsRevoked).Select(c => c.TableIdentifier).ToHashSet();
-        return Task.FromResult<IReadOnlySet<TableIdentifier>>(set);
+        var list = Consents.Where(c => c.TenantId == tenantId && !c.IsRevoked).Select(c => c.TableIdentifier).Distinct().ToList();
+        return Task.FromResult<IReadOnlyList<TableIdentifier>>(list);
     }
 
     public Task<Consent> CreateConsentAsync(Consent consent, CancellationToken ct = default) => throw new NotSupportedException();

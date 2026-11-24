@@ -71,11 +71,7 @@ public sealed partial class ExternalCatalogReader
                     "The q filter applies to user callers only.");
             }
 
-            var allTables = await CatalogTablePageReader.ReadAllAsync(
-                _metadataRepository,
-                new CatalogTableQuery(IncludeInactive: false),
-                static t => t.Table.IsActive,
-                ct: ct).ConfigureAwait(false);
+            var allTables = await LoadActiveTablesAsync(ct).ConfigureAwait(false);
             var visibility = await ResolveCallerVisibilityAsync(user, tenantId, allTables, ct).ConfigureAwait(false);
             var inScope = await FilterInScopeTablesAsync(allTables, tenantId, ct).ConfigureAwait(false);
             var visible = inScope
