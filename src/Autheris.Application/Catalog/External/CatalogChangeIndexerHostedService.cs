@@ -40,6 +40,7 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
     private readonly IProtectionSnapshotProvider? _protectionProvider;
     private readonly IGovernanceDomainRepository? _domainRepository;
     private readonly IDataProductRepository? _productRepository;
+    private readonly ICatalogVisibilityEvaluator _visibilityEvaluator;
     private IDisposable? _eventSubscription;
 
     public CatalogChangeIndexerHostedService(
@@ -56,7 +57,8 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
         TimeSpan? interval = null,
         IProtectionSnapshotProvider? protectionProvider = null,
         IGovernanceDomainRepository? domainRepository = null,
-        IDataProductRepository? productRepository = null)
+        IDataProductRepository? productRepository = null,
+        ICatalogVisibilityEvaluator? visibilityEvaluator = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -72,6 +74,7 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
         _protectionProvider = protectionProvider;
         _domainRepository = domainRepository;
         _productRepository = productRepository;
+        _visibilityEvaluator = visibilityEvaluator ?? new CatalogVisibilityEvaluator(gatewayOptions, timeProvider: _timeProvider);
     }
 
     public override Task StartAsync(CancellationToken cancellationToken)
@@ -155,29 +158,35 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
             static t => t.Table.IsActive,
             ct: ct).ConfigureAwait(false);
         var virtualFiltered = DiscoveryTenantScope.DropForeignVirtualTables(allTables, tenantId);
-        var consentTables = await _consentRepository.GetTablesWithConsentsForTenantAsync(tenantId, ct).ConfigureAwait(false);
-        var consentSet = consentTables as IReadOnlySet<TableIdentifier> ?? consentTables.ToHashSet();
-        var catalogOwner = TenantResolver.EffectiveDefaultOf(_gatewayOptions.Value.Tenancy);
-        var sharedTables = DiscoveryTenantScope.ParseSharedTables(_gatewayOptions.Value.Catalog.SharedTables);
-
-        var activeTables = new List<TableMetadata>();
-        var inScopeIds = new HashSet<TableIdentifier>();
-        foreach (var table in virtualFiltered)
+        var inScope = await _visibilityEvaluator.FilterInScopeAsync(virtualFiltered, tenantId, _consentRepository, ct).ConfigureAwait(false);
+        var activeTables = new List<TableMetadata>(inScope);
+        var inScopeIds = new HashSet<TableIdentifier>(inScope.Count);
+        foreach (var table in inScope)
         {
-            if (table.Table.IsActive && DiscoveryTenantScope.IsInScope(table, tenantId, catalogOwner, sharedTables, consentSet))
-            {
-                activeTables.Add(table);
-                inScopeIds.Add(table.Identifier);
-            }
+            inScopeIds.Add(table.Identifier);
         }
 
         var prefetchedProtections = await AddOwnContainerTablesAsync(tenantId, virtualFiltered, inScopeIds, activeTables, ct).ConfigureAwait(false);
-        activeTables.Sort(static (a, b) => StringComparer.OrdinalIgnoreCase.Compare(a.Identifier.ToString(), b.Identifier.ToString()));
+        activeTables.Sort(static (a, b) => DiscoveryService.CompareTableKeys(a.Identifier, b.Identifier));
 
         var existingVersions = await _changeStore.GetObjectVersionsAsync(tenantId, ct).ConfigureAwait(false);
         var ownersByTable = activeTables.Count > 0
             ? await _ownershipRepository.GetDataOwnersForTablesAsync(activeTables.Select(static t => t.Identifier).ToList(), ct).ConfigureAwait(false)
             : new Dictionary<TableIdentifier, IReadOnlyList<DataOwner>>();
+        var artifactsByTable = _artifactStore is not null && activeTables.Count > 0
+            ? await _artifactStore.GetAllForTablesAsync(activeTables.Select(static t => t.Table.Id).ToList(), ct).ConfigureAwait(false)
+            : null;
+        IReadOnlyDictionary<TableIdentifier, EffectiveProtection>? batchProtections = null;
+        if (_protectionProvider is not null && activeTables.Count > 0)
+        {
+            var missing = prefetchedProtections is null
+                ? activeTables
+                : activeTables.Where(t => !prefetchedProtections.ContainsKey(t.Identifier)).ToList();
+            if (missing.Count > 0)
+            {
+                batchProtections = await _protectionProvider.ResolveManyAsync(tenantId, missing, ct).ConfigureAwait(false);
+            }
+        }
 
         var upserts = new List<CatalogVersionUpsert>();
         var activeObjectIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -188,14 +197,16 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
             activeObjectIds.Add(objectId);
 
             var owners = ownersByTable.TryGetValue(table.Identifier, out var list) ? list : Array.Empty<DataOwner>();
-            var artifacts = _artifactStore is null
-                ? null
-                : await _artifactStore.GetAsync(table.Table.Id, ct).ConfigureAwait(false);
+            var artifacts = artifactsByTable is not null && artifactsByTable.TryGetValue(table.Table.Id, out var tableArtifacts)
+                ? DiscoveryTenantScope.SelectPrimaryArtifact(tableArtifacts)
+                : null;
             var protection = prefetchedProtections is not null && prefetchedProtections.TryGetValue(table.Identifier, out var preloaded)
                 ? preloaded
-                : _protectionProvider is null
-                    ? null
-                    : await _protectionProvider.GetAsync(tenantId, table.Identifier, ct).ConfigureAwait(false);
+                : batchProtections is not null && batchProtections.TryGetValue(table.Identifier, out var batchResolved)
+                    ? batchResolved
+                    : _protectionProvider is null
+                        ? null
+                        : await _protectionProvider.GetAsync(tenantId, table.Identifier, ct).ConfigureAwait(false);
             var hash = ExternalCatalogReader.ComputeAdminRepresentationHash(table, owners, artifacts, protection);
 
             if (!existingVersions.TryGetValue(objectId, out var prev)

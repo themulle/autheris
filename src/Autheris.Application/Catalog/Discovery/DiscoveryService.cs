@@ -65,6 +65,7 @@ public sealed partial class DiscoveryService : IDiscoveryService
     private readonly IProtectionSnapshotProvider? _protectionProvider;
     private readonly Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? _accessPolicySettings;
     private readonly CatalogAccessViewCache? _accessViewCache;
+    private readonly ICatalogVisibilityEvaluator _visibilityEvaluator;
 
     // Issue #1044: set for the rest of this (scoped) service once the page guard found a stale cached view.
     private bool _viewCacheBypassed;
@@ -102,7 +103,8 @@ public sealed partial class DiscoveryService : IDiscoveryService
         Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? accessPolicySettings = null,
         Autheris.Application.Catalog.Visibility.IContainerVisibilitySnapshotProvider? containerVisibility = null,
         CatalogAccessViewCache? accessViewCache = null,
-        Autheris.Application.Policy.Protection.IUnmaskGrantResolver? unmaskResolver = null)
+        Autheris.Application.Policy.Protection.IUnmaskGrantResolver? unmaskResolver = null,
+        ICatalogVisibilityEvaluator? visibilityEvaluator = null)
     {
         _containerVisibility = containerVisibility;
         _accessViewCache = accessViewCache;
@@ -127,6 +129,7 @@ public sealed partial class DiscoveryService : IDiscoveryService
         _logger = logger ?? NullLogger<DiscoveryService>.Instance;
         _classificationRepository = classificationRepository;
         _procedureCatalog = procedureCatalog;
+        _visibilityEvaluator = visibilityEvaluator ?? new CatalogVisibilityEvaluator(gatewayOptions, timeProvider: _timeProvider);
     }
 
     public async ValueTask<DiscoveryPage> ListAsync(

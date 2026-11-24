@@ -1,0 +1,46 @@
+# Allow-list of production call sites permitted to perform whole-catalog table scans
+# (CatalogTablePageReader.ReadAllAsync, ListTablesPageAsync, ITableMetadataRepository.GetAllTablesAsync).
+# Format: FullDeclaringType::LogicalMethodName | Rationale
+Autheris.Api.Configuration.Validation.DataSourceTransportConfigurationReporter::ReportUnprofiledCatalogSourcesAsync | Startup validation reporter inspecting unprofiled active catalog sources.
+Autheris.Api.Endpoints.GovernanceEndpoints::ApproveProfileAssignmentAsync | Governance admin access preview resolving matched table identifiers.
+Autheris.Api.Endpoints.GovernanceEndpoints::CreateBulkConsentAsync | Governance admin bulk-consent endpoint resolving matched table identifiers.
+Autheris.Api.Endpoints.ODataEndpoints::HandleFlatEntitySetRequestAsync | Legacy flat-table OData entity set fallback when paged lookup is unavailable.
+Autheris.Api.Extensions.DependencyInjection.DeniedTablesStartupReporter::ExecuteAsync | Startup diagnostic reporter scanning denied tables at boot.
+Autheris.Application.Catalog.CatalogSnapshotProvider::RefreshAsync | Snapshot builder populating and refreshing the in-process catalog snapshot.
+Autheris.Application.Catalog.Discovery.CatalogVisibilityEvaluator::ReadAllTablesFallbackAsync | Explicit fallback used only when no ICatalogSnapshotProvider is registered in the host.
+Autheris.Application.Catalog.External.CatalogChangeIndexerHostedService::IndexOnceAsync | Background catalog change indexer sweep across active tables.
+Autheris.Application.Catalog.External.CatalogChangeIndexerHostedService::IndexTenantAsync | Explicit fallback when IndexTenantAsync is invoked directly without preloaded tables.
+Autheris.Application.Catalog.Search.CatalogSearchWarmupService::RebuildSafeAsync | Background search index warmup indexing catalog metadata.
+Autheris.Application.Catalog.Services.CatalogVisibilityService::GetVisibleAsync | Explicit fallback when no ICatalogSnapshotProvider is injected.
+Autheris.Application.Common.Interfaces.ITableMetadataRepository::GetActiveTableIdentifierByIdAsync | Interface default single-id lookup fallback.
+Autheris.Application.Common.Interfaces.ITableMetadataRepository::GetTablesAsync | Interface default batch lookup fallback.
+Autheris.Application.Common.Interfaces.ITableMetadataRepository::QueryTablesAsync | Interface default keyset query fallback.
+Autheris.Application.DataSources.Connectors.Adapters.LegacyDataSourceExecutorAdapter/LegacyConnectorMetadata::ListSchemasAsync | Legacy connector adapter schema enumeration fallback.
+Autheris.Application.DataSources.Connectors.Adapters.LegacyDataSourceExecutorAdapter/LegacyConnectorMetadata::ListTablesAsync | Legacy connector adapter table enumeration fallback.
+Autheris.Application.Federation.Services.CatalogFederatedMaskingCatalog::GetClassificationsAsync | Federation masking catalog builder reading active classifications.
+Autheris.Application.Governance.Analysis.QueryAnalysisService::AnalyzeQueriesAsync | Governance admin query analysis resolving referenced catalog tables.
+Autheris.Application.Governance.Domains.GovernanceDomainService::AssignTablesAsync | Governance domain administration resolving unassigned tables.
+Autheris.Application.Governance.Domains.GovernanceDomainService::ValidateDelegatedDomainUpdateAsync | Governance domain update validating delegated tables.
+Autheris.Application.Mcp.Services.AiDataGuardrailService::ExecuteToolWithGuardrailAsync | Guardrail evaluation explicit fallback when no snapshot provider is wired.
+Autheris.Application.Mcp.Services.McpDatasetCatalog::VisibleSetAsync | MCP dataset catalog explicit fallback when no snapshot provider is wired.
+Autheris.Application.Mcp.Services.SemanticMcpCompiler::GetSemanticResourcesAsync | Semantic MCP compiler enumerating active semantic resources.
+Autheris.Application.Mcp.Services.SemanticMcpCompiler::ListSemanticResourceUrisAsync | Semantic MCP compiler listing exposed semantic URIs.
+Autheris.Application.Mcp.Services.SemanticMcpCompiler::ReadSemanticResourceAsync | Semantic MCP compiler reading semantic resource definitions.
+Autheris.Application.OData.ODataHandler::GetAuthorizedTablesCoreAsync | OData handler building Edm model metadata over authorized tables.
+Autheris.Application.OData.Services.DynamicOpenApiGenerator::GetOpenApiTablesAsync | Dynamic OpenAPI document generator enumerating exposed tables.
+Autheris.Application.Olap.OlapStagingService::ResolveUniqueUnqualifiedTableAsync | OLAP staging job resolving unqualified target table names.
+Autheris.Application.Policy.Pdp.EffectiveAccessService::FindVisiblePatternTablesAsync | Governance effective-access report scanning tables matching pattern grants.
+Autheris.Application.Policy.Pdp.GrantEffectPreviewService::EvaluateNonBlockingAsync | Governance grant-effect preview simulator evaluating table matches.
+Autheris.Application.Policy.Pdp.GrantEffectPreviewService::PreviewBatchAsync | Governance grant-effect preview simulator evaluating batch matches.
+Autheris.Application.Policy.RowScopes.PatternCoverageMonitor::RunOnceAsync | Pattern coverage monitor evaluating table coverage on periodic tick.
+Autheris.Application.Sql.Services.TrinoMetadataQueryHandler::BuildEntriesAsync | Trino metadata schema/table catalog response fallback.
+Autheris.Application.Sql.Services.TrinoMetadataQueryHandler::TryExecuteAsync | Trino metadata query handler JDBC catalog response fallback.
+Autheris.Application.VirtualFilters.EffectiveFilterInspector::InspectAsync | Virtual filter inspector enumerating tables covered by filters.
+Autheris.Application.VirtualFilters.VirtualFilterAdministrationService::ValidateDefinitionAsync | Virtual filter admin validation checking filter table targets.
+Autheris.Extensions.Lakehouse.Services.IcebergRestCatalogFederationService::VisibleLakehouseTablesAsync | Iceberg REST catalog federation listing lakehouse tables in scope.
+Autheris.GraphQL.Catalog.CatalogSchemaModel::BuildAsync | GraphQL dynamic schema builder enumerating active catalog tables.
+Autheris.GraphQL.Subscriptions.Subscription::EvaluateWildcardSubscriptionAccessAsync | GraphQL CDC subscription setup evaluating wildcard topic visibility.
+Autheris.Infrastructure.Connectors.SqlConnector/SqlConnectorMetadata::ListSchemasAsync | Connector schema discovery enumerating database schemas.
+Autheris.Infrastructure.Connectors.SqlConnector/SqlConnectorMetadata::ListTablesAsync | Connector table discovery enumerating database tables.
+Autheris.Modules.Dbt.DbtExposurePublisher::GenerateExposuresYamlAsync | dbt exposure generator publishing catalog-backed exposure metadata.
+Autheris.Modules.Dbt.DbtMetadataIngestionService::IngestGovernanceStreamAsync | dbt ingestion matching incoming governance stream against existing catalog tables.

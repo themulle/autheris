@@ -27,11 +27,7 @@ public sealed partial class ExternalCatalogReader
         string cursorBinding,
         CancellationToken ct)
     {
-        var allTables = await CatalogTablePageReader.ReadAllAsync(
-            _metadataRepository,
-            new CatalogTableQuery(IncludeInactive: false),
-            static t => t.Table.IsActive,
-            ct: ct).ConfigureAwait(false);
+        var allTables = await LoadActiveTablesAsync(ct).ConfigureAwait(false);
         var visibility = await ResolveCallerVisibilityAsync(user, tenantId, allTables, ct).ConfigureAwait(false);
         var inScope = await FilterInScopeTablesAsync(allTables, tenantId, ct).ConfigureAwait(false);
 
@@ -43,7 +39,7 @@ public sealed partial class ExternalCatalogReader
 
         var protectionsByTable = await ResolveProtectionsAsync(tenantId, inScope, ct).ConfigureAwait(false);
         var candidates = FilterAppCandidates(inScope, visibility, query, kindFilter, versions, protectionsByTable);
-        candidates.Sort(static (a, b) => DiscoveryService.CompareTableKeys(a.Identifier.ToString(), b.Identifier.ToString()));
+        candidates.Sort(static (a, b) => DiscoveryService.CompareTableKeys(a.Identifier, b.Identifier));
 
         var startIndex = string.IsNullOrEmpty(afterKey) ? 0 : DiscoveryService.FindFirstIndexAfter(candidates, afterKey);
         var ownerFilter = string.IsNullOrWhiteSpace(query.Owner) ? null : query.Owner.Trim();
@@ -130,12 +126,15 @@ public sealed partial class ExternalCatalogReader
         if (pageTables.Count > 0)
         {
             versions ??= await _changeStore.GetObjectVersionsAsync(tenantId, ct).ConfigureAwait(false);
+            var artifactsByTable = _artifactStore is null
+                ? null
+                : await _artifactStore.GetAllForTablesAsync(pageTables.Select(static t => t.Table.Id).ToList(), ct).ConfigureAwait(false);
             foreach (var table in pageTables)
             {
                 var owners = ownersByTable.TryGetValue(table.Identifier, out var list) ? list : Array.Empty<DataOwner>();
-                var artifacts = _artifactStore is null
-                    ? null
-                    : await _artifactStore.GetAsync(table.Table.Id, ct).ConfigureAwait(false);
+                var artifacts = artifactsByTable is not null && artifactsByTable.TryGetValue(table.Table.Id, out var tableArtifacts)
+                    ? DiscoveryTenantScope.SelectPrimaryArtifact(tableArtifacts)
+                    : null;
                 versions.TryGetValue(table.Identifier.ToString(), out var ver);
                 dtos.Add(MapAppObject(
                     table,
@@ -275,31 +274,9 @@ public sealed partial class ExternalCatalogReader
         IReadOnlyList<TableMetadata> pageTables,
         CancellationToken ct)
     {
-        var catalogOwner = TenantResolver.EffectiveDefaultOf(_gatewayOptions.Tenancy);
-        var callerScope = CallerScopeResolver.Resolve(user, catalogOwner);
-        bool allHiddenAllowed = callerScope is CallerScope.Global or CallerScope.Tenant
-            || (callerScope == CallerScope.CatalogOwner && CallerScopeResolver.IsOwner(tenantId, catalogOwner));
-
-        var ownedHidden = new HashSet<TableIdentifier>();
-        var sid = user.GetUserSid();
-        if (!allHiddenAllowed && sid.HasValue)
-        {
-            var hiddenIds = pageTables
-                .Where(static t => t.Table.DiscoveryHidden || t.Columns.Any(static c => c.DiscoveryHidden))
-                .Select(static t => t.Identifier)
-                .ToList();
-            if (hiddenIds.Count > 0)
-            {
-                var owned = await _ownershipRepository.GetOwnedOrDelegatedTablesAsync(
-                    sid.Value, hiddenIds, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
-                foreach (var id in owned)
-                {
-                    ownedHidden.Add(id);
-                }
-            }
-        }
-
-        return new CallerVisibility(false, allHiddenAllowed, ownedHidden);
+        var userVisibility = await _visibilityEvaluator.EvaluateUserHiddenVisibilityAsync(
+            user, tenantId, pageTables, includeHiddenColumns: true, _ownershipRepository, ct).ConfigureAwait(false);
+        return new CallerVisibility(false, userVisibility.AllHiddenAllowed, userVisibility.OwnedHiddenTables);
     }
 
     private async Task<Dictionary<TableIdentifier, EffectiveProtection>> ResolveProtectionsAsync(

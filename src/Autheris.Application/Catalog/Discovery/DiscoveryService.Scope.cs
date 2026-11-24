@@ -83,7 +83,7 @@ public sealed partial class DiscoveryService
 
         if (_containerVisibility is null)
         {
-            return await FindSingleLegacyAsync(match, caller, sid, ct).ConfigureAwait(false);
+            return await FindSingleLegacyAsync(match, caller, ct).ConfigureAwait(false);
         }
 
         var scoped = await ScopeCandidatesWithContainersAsync([match], caller, sid, ct).ConfigureAwait(false);
@@ -93,34 +93,16 @@ public sealed partial class DiscoveryService
     private async Task<TableMetadata?> FindSingleLegacyAsync(
         TableMetadata match,
         CatalogCaller caller,
-        Sid sid,
         CancellationToken ct)
     {
-        var catalogOwner = TenantResolver.EffectiveDefaultOf(_gatewayOptions.Tenancy);
-        var sharedTables = DiscoveryTenantScope.ParseSharedTables(_gatewayOptions.Catalog.SharedTables);
-        if (!DiscoveryTenantScope.IsInScope(match, caller.Tenant, catalogOwner, sharedTables, EmptyTableSet))
+        if (!await _visibilityEvaluator.IsInScopeAsync(match, caller.Tenant, _consentRepository, ct).ConfigureAwait(false))
         {
-            var tenantConsentList = _consentRepository is null
-                ? []
-                : await _consentRepository.GetTablesWithConsentsForTenantAsync(caller.Tenant, ct).ConfigureAwait(false);
-            var tenantAllowConsents = tenantConsentList as IReadOnlySet<TableIdentifier> ?? tenantConsentList.ToHashSet();
-            if (!DiscoveryTenantScope.IsInScope(match, caller.Tenant, catalogOwner, sharedTables, tenantAllowConsents))
-            {
-                return null;
-            }
+            return null;
         }
 
-        var callerScope = CallerScopeResolver.Resolve(caller.Principal!, catalogOwner);
-        IReadOnlySet<TableIdentifier> ownedTables = EmptyTableSet;
-        if (match.Table.DiscoveryHidden && _ownershipRepository is not null)
-        {
-            ownedTables = await _ownershipRepository.GetOwnedOrDelegatedTablesAsync(
-                sid, [match.Identifier], _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
-        }
-
-        return DiscoveryTenantScope.CanSeeHiddenObject(match, callerScope, caller.Tenant, catalogOwner, ownedTables)
-            ? match
-            : null;
+        var visibility = await _visibilityEvaluator.EvaluateUserHiddenVisibilityAsync(
+            caller.Principal!, caller.Tenant, [match], includeHiddenColumns: false, _ownershipRepository, ct).ConfigureAwait(false);
+        return visibility.CanViewHiddenTable(match) ? match : null;
     }
 
     private Task<ScopedCatalog> LoadScopedCatalogAsync(
@@ -148,30 +130,19 @@ public sealed partial class DiscoveryService
 
         var isUnfilteredQuery = string.IsNullOrWhiteSpace(domainFilter) && string.IsNullOrWhiteSpace(schemaFilter);
 
-        IReadOnlyList<TableMetadata> allTables;
-        if (_snapshotProvider is not null)
-        {
-            var snapshot = await _snapshotProvider.GetSnapshotAsync(ct).ConfigureAwait(false);
-            allTables = snapshot.Tables;
-        }
-        else
-        {
-            var tableQuery = isUnfilteredQuery
-                ? new CatalogTableQuery(IncludeInactive: false)
-                : new CatalogTableQuery(
-                    DataSource: string.IsNullOrWhiteSpace(domainFilter) ? null : domainFilter.Trim(),
-                    Schema: string.IsNullOrWhiteSpace(schemaFilter) ? null : schemaFilter.Trim(),
-                    IncludeInactive: false);
-            allTables = await CatalogTablePageReader.ReadAllAsync(
-                _metadataRepository!, tableQuery, ct: ct).ConfigureAwait(false);
-        }
+        var allTables = await _visibilityEvaluator.LoadActiveTablesAsync(
+            _metadataRepository!,
+            _snapshotProvider,
+            _snapshotProvider is null ? domainFilter : null,
+            _snapshotProvider is null ? schemaFilter : null,
+            ct).ConfigureAwait(false);
 
         var virtualFiltered = DiscoveryTenantScope.DropForeignVirtualTables(allTables, caller.Tenant);
 
         ScopedCatalog result;
         if (_containerVisibility is null)
         {
-            result = await LoadScopedLegacyAsync(virtualFiltered, caller, sid, ct).ConfigureAwait(false);
+            result = await LoadScopedLegacyAsync(virtualFiltered, caller, ct).ConfigureAwait(false);
         }
         else
         {
@@ -193,49 +164,23 @@ public sealed partial class DiscoveryService
     private async Task<ScopedCatalog> LoadScopedLegacyAsync(
         IReadOnlyList<TableMetadata> virtualFiltered,
         CatalogCaller caller,
-        Sid sid,
         CancellationToken ct)
     {
-        var tenantConsentList = _consentRepository is null
-            ? []
-            : await _consentRepository.GetTablesWithConsentsForTenantAsync(caller.Tenant, ct).ConfigureAwait(false);
-        var tenantAllowConsents = tenantConsentList as IReadOnlySet<TableIdentifier> ?? tenantConsentList.ToHashSet();
-        var catalogOwner = TenantResolver.EffectiveDefaultOf(_gatewayOptions.Tenancy);
-        var sharedTables = DiscoveryTenantScope.ParseSharedTables(_gatewayOptions.Catalog.SharedTables);
-
-        var inScope = new List<TableMetadata>(virtualFiltered.Count);
-        foreach (var table in virtualFiltered)
-        {
-            if (table.Table.IsActive &&
-                DiscoveryTenantScope.IsInScope(table, caller.Tenant, catalogOwner, sharedTables, tenantAllowConsents))
-            {
-                inScope.Add(table);
-            }
-        }
-
-        var callerScope = CallerScopeResolver.Resolve(caller.Principal!, catalogOwner);
-        var hiddenIds = inScope
-            .Where(static t => t.Table.DiscoveryHidden)
-            .Select(static t => t.Identifier)
-            .ToList();
-
-        IReadOnlySet<TableIdentifier> ownedTables = new HashSet<TableIdentifier>();
-        if (hiddenIds.Count > 0 && _ownershipRepository is not null)
-        {
-            ownedTables = await _ownershipRepository.GetOwnedOrDelegatedTablesAsync(
-                sid, hiddenIds, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
-        }
+        var inScope = await _visibilityEvaluator.FilterInScopeAsync(
+            virtualFiltered, caller.Tenant, _consentRepository, ct).ConfigureAwait(false);
+        var visibility = await _visibilityEvaluator.EvaluateUserHiddenVisibilityAsync(
+            caller.Principal!, caller.Tenant, inScope, includeHiddenColumns: false, _ownershipRepository, ct).ConfigureAwait(false);
 
         var visible = new List<TableMetadata>(inScope.Count);
         foreach (var table in inScope)
         {
-            if (DiscoveryTenantScope.CanSeeHiddenObject(table, callerScope, caller.Tenant, catalogOwner, ownedTables))
+            if (visibility.CanViewHiddenTable(table))
             {
                 visible.Add(table);
             }
         }
 
-        return new ScopedCatalog(visible, ownedTables);
+        return new ScopedCatalog(visible, visibility.OwnedHiddenTables);
     }
 
     private Task<ScopedCatalog> ScopeCandidatesWithContainersAsync(
@@ -291,12 +236,13 @@ public sealed partial class DiscoveryService
 
         if (remaining.Count > 0)
         {
-            IReadOnlySet<TableIdentifier> tenantAllowConsents = EmptyTableSet;
-            if (_consentRepository is not null)
-            {
-                var list = await _consentRepository.GetTablesWithConsentsForTenantAsync(caller.Tenant, ct).ConfigureAwait(false);
-                tenantAllowConsents = list as IReadOnlySet<TableIdentifier> ?? list.ToHashSet();
-            }
+            var needsConsentLookup = _consentRepository is not null &&
+                remaining.Any(t =>
+                    DiscoveryTenantScope.CanSeeHiddenObject(t, callerScope, caller.Tenant, catalogOwner, EmptyTableSet) &&
+                    !DiscoveryTenantScope.IsInScope(t, caller.Tenant, catalogOwner, sharedTables, EmptyTableSet));
+            var tenantAllowConsents = needsConsentLookup
+                ? await _visibilityEvaluator.GetTenantConsentTablesAsync(_consentRepository, caller.Tenant, ct).ConfigureAwait(false)
+                : EmptyTableSet;
 
             var containerCandidates = new List<TableMetadata>();
             foreach (var table in remaining)
