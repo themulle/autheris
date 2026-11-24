@@ -3,9 +3,11 @@ namespace Autheris.Api.Middleware;
 using Autheris.Api.Errors;
 using Autheris.Api.Security;
 using System;
+using System.Diagnostics;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Autheris.Application.Runtime.ResourceGroups;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
@@ -78,6 +80,7 @@ public sealed class ResourceGroupMiddleware
 
         // Classify workload tier
         var tier = ClassifyWorkloadTier(context, _options);
+        RecordResolvedTierTelemetry(context, tier);
 
         var leaseResult = await _resourceGroupManager.TryAcquireLeaseAsync(tier, tenantId, context.RequestAborted).ConfigureAwait(false);
 
@@ -201,13 +204,16 @@ public sealed class ResourceGroupMiddleware
     }
 
     /// <summary>
-    /// Resolves the tier from the path (<c>/mcp</c> agents, <c>/odata</c> bulk, else interactive). A client-chosen
-    /// <c>X-Workload-Tier</c> header is only honoured when it does not raise the caller above that resolved tier
-    /// (security review: anti-noisy-neighbor); ClusterAdmin / GovernanceAdmin may request any tier.
+    /// Resolves the tier from the least privileged of the path tier (<c>/mcp</c> agents, <c>/odata</c> bulk, else interactive)
+    /// and any mapped token scope tier (<c>Gateway:ResourceGroups:ScopeTiers</c>). A client-chosen <c>X-Workload-Tier</c> header
+    /// is only honoured when it does not raise the caller above that resolved tier (anti-noisy-neighbor);
+    /// ClusterAdmin / GovernanceAdmin may request any tier.
     /// </summary>
     internal static ResourceGroupTier ClassifyWorkloadTier(HttpContext context, GatewayOptions? options = null)
     {
-        var resolved = ResolvePathTier(context, options);
+        var pathTier = ResolvePathTier(context, options);
+        var scopeTier = ResolveScopeTier(context.User, options);
+        var resolved = scopeTier is { } s && PrivilegeRank(s) > PrivilegeRank(pathTier) ? s : pathTier;
 
         if (!context.Request.Headers.TryGetValue("X-Workload-Tier", out var headerVal) ||
             ParseRequestedTier(headerVal.ToString()) is not { } requested)
@@ -228,6 +234,81 @@ public sealed class ResourceGroupMiddleware
 
         // A more privileged tier than the resolved one is ignored.
         return resolved;
+    }
+
+    private static void RecordResolvedTierTelemetry(HttpContext context, ResourceGroupTier tier)
+    {
+        var tierName = tier.ToString();
+        context.Features.Get<AuditContext>()?.AdditionalDetails["resourceGroupTier"] = tierName;
+        Activity.Current?.SetTag("autheris.resource_group.tier", tierName);
+    }
+
+    private static ResourceGroupTier? ResolveScopeTier(ClaimsPrincipal? principal, GatewayOptions? options)
+    {
+        var scopeTiers = options?.ResourceGroups?.ScopeTiers;
+        if (scopeTiers is not { Count: > 0 } || principal is null)
+        {
+            return null;
+        }
+
+        // Read OIDC/Entra scope claims directly rather than TokenAccessScope.GetTokenScopes so
+        // RealmTokenScopePolicy stays its sole production caller (enforced by architecture test).
+        var hasScopes = false;
+        ResourceGroupTier? leastPrivileged = null;
+        foreach (var claim in principal.Claims)
+        {
+            if (!string.Equals(claim.Type, "scp", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(claim.Type, "http://schemas.microsoft.com/identity/claims/scope", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(claim.Type, "scope", StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            foreach (var rawScope in claim.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                hasScopes = true;
+                var bareScope = ScopeNames.ToBareName(rawScope.Trim());
+                if (bareScope.Length == 0)
+                {
+                    continue;
+                }
+
+                if (!TryGetMappedTier(scopeTiers, bareScope, out var mapped) || !Enum.IsDefined(mapped))
+                {
+                    continue;
+                }
+
+                if (leastPrivileged is null || PrivilegeRank(mapped) > PrivilegeRank(leastPrivileged.Value))
+                {
+                    leastPrivileged = mapped;
+                }
+            }
+        }
+
+        return hasScopes ? leastPrivileged : null;
+    }
+
+    private static bool TryGetMappedTier(
+        IReadOnlyDictionary<string, ResourceGroupTier> scopeTiers,
+        string bareScope,
+        out ResourceGroupTier tier)
+    {
+        if (scopeTiers.TryGetValue(bareScope, out tier))
+        {
+            return true;
+        }
+
+        foreach (var (configuredScope, configuredTier) in scopeTiers)
+        {
+            if (string.Equals(ScopeNames.ToBareName(configuredScope.Trim()), bareScope, StringComparison.OrdinalIgnoreCase))
+            {
+                tier = configuredTier;
+                return true;
+            }
+        }
+
+        tier = default;
+        return false;
     }
 
     private static ResourceGroupTier ResolvePathTier(HttpContext context, GatewayOptions? options)
