@@ -44,7 +44,7 @@ public static class McpToolGroups
         Add(McpToolGroup.Catalog,
             McpDatasetTools.ListDatasets, McpDatasetTools.DescribeDataset, McpDatasetTools.SearchCatalog,
             McpDatasetTools.FindRelevantTables, McpDatasetTools.GetTableSchema,
-            McpDatasetTools.ListDatasources, McpDatasetTools.GetDataLineage, "query_data_catalog",
+            McpDatasetTools.ListDatasources, McpDatasetTools.ListContainers, McpDatasetTools.GetDataLineage, "query_data_catalog",
             McpSemanticTools.ListMetrics, McpSemanticTools.DescribeMetric, "get_golden_queries");
 
         Add(McpToolGroup.Query,

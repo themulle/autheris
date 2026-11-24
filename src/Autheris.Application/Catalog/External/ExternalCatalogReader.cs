@@ -221,7 +221,8 @@ public sealed partial class ExternalCatalogReader(
             return ExternalCatalogResult.Fail<ExternalCatalogObjectDto>(404, "OBJECT_NOT_FOUND", "Catalog object was not found.");
         }
 
-        if (!await IsTableInTenantScopeAsync(matchedTable, tenantId, ct).ConfigureAwait(false))
+        // A user caller is scoped by the discovery read below (tenant scope plus the container visibility rule), an app caller here.
+        if (visibility.IsServicePrincipal && !await IsTableInTenantScopeAsync(matchedTable, tenantId, ct).ConfigureAwait(false))
         {
             return ExternalCatalogResult.Fail<ExternalCatalogObjectDto>(404, "OBJECT_NOT_FOUND", "Catalog object was not found.");
         }

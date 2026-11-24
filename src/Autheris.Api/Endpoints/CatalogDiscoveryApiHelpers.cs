@@ -95,29 +95,6 @@ internal static class CatalogDiscoveryApiHelpers
         }
     }
 
-    public static async Task<IResult> ListDomainsAsync(
-        ICatalogDiscoveryService discoveryService,
-        HttpContext httpContext,
-        Func<HttpContext, string?, RequestContext> createContext,
-        CancellationToken ct)
-    {
-        try
-        {
-            var context = createContext(httpContext, null);
-            var facets = await discoveryService.ListFacetsAsync(context, ct).ConfigureAwait(false);
-            var domains = facets.Domains
-                .Select(static d => new { domain = d.Domain, tableCount = d.Count })
-                .OrderByDescending(static d => d.tableCount)
-                .ThenBy(static d => d.domain, StringComparer.OrdinalIgnoreCase)
-                .ToList();
-            return Results.Ok(new { totalTables = facets.TotalCount, totalDomains = domains.Count, domains });
-        }
-        catch (DiscoveryStatusException ex)
-        {
-            return MapException(ex, httpContext);
-        }
-    }
-
     public static async Task<IResult> SearchAsync(
         string? q,
         string? domain,

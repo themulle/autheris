@@ -116,7 +116,7 @@ public sealed partial class CatalogDiscoveryService
     /// <see cref="CatalogVisibility.ComputeAccessStatus"/>. Without the tier model a visible row is either a consent row
     /// (<see cref="CatalogView.Granted"/>) or an administrator row, so it is always readable (<c>GRANTED</c>).
     /// </summary>
-    private static string LegacyAccessStatusOf(TableMetadata row) =>
+    internal static string LegacyAccessStatusOf(TableMetadata row) =>
         row.CatalogView is CatalogView.Granted or CatalogView.Unmarked
             ? Autheris.Application.Catalog.Discovery.CatalogAccessStatus.Granted
             : Autheris.Application.Catalog.Discovery.CatalogAccessStatus.None;

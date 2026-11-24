@@ -79,13 +79,13 @@ public sealed class AccessPolicyOptions
     public int MaxPendingRequestsPerRequester { get; init; } = 100;
 
     /// <summary>
-    /// Maximum number of table identifiers accepted per domain table-assignment call (default 1000).
+    /// Maximum number of table identifiers accepted per domain table-assignment call, and the bound on catalog rows evaluated by the container visibility rule per listing and on data grants read into a visibility snapshot (default 1000).
     /// </summary>
     [Range(1, 10000)]
     public int MaxTablesPerAssignment { get; init; } = 1000;
 
     /// <summary>
-    /// Maximum page size permitted by governance listing endpoints (default 500).
+    /// Maximum page size permitted by governance listing endpoints, and the bound on containers read into a catalog visibility snapshot (default 500).
     /// </summary>
     [Range(1, 5000)]
     public int MaxPageSize { get; init; } = 500;

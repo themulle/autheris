@@ -11,7 +11,8 @@ namespace Autheris.Application.Catalog.Search;
 
 /// <summary>
 /// Cache key for visible table sets under multi-epoch governance invalidation.
-/// Includes tenant, groups, roles and scopes to prevent cross-principal cache collisions.
+/// Includes tenant, groups, roles and scopes to prevent cross-principal cache collisions, and the governance grant epoch so a grant,
+/// revoke or container visibility change never serves a stale visible set.
 /// </summary>
 public readonly record struct CatalogVisibilityCacheKey(
     string SubjectSid,
@@ -22,14 +23,16 @@ public readonly record struct CatalogVisibilityCacheKey(
     string? TenantId = null,
     string? Groups = null,
     string? Roles = null,
-    string? Scopes = null)
+    string? Scopes = null,
+    long GrantEpoch = 0)
 {
     public static CatalogVisibilityCacheKey From(
         ClaimsPrincipal principal,
         string? domainFilter,
         long structureVersion,
         long contentVersion,
-        long policyEpoch)
+        long policyEpoch,
+        long grantEpoch = 0)
     {
         ArgumentNullException.ThrowIfNull(principal);
         var sid = principal.GetUserSid()?.Value ?? principal.Identity?.Name ?? "anonymous";
@@ -47,7 +50,8 @@ public readonly record struct CatalogVisibilityCacheKey(
             tenant,
             groups,
             roles,
-            scopes);
+            scopes,
+            grantEpoch);
     }
 }
 

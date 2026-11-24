@@ -33,6 +33,8 @@
 /api/v1/catalog/changes|GET|no side effect: reads incremental catalog change feed
 /api/v1/catalog/datasets/{*datasetId}|GET|no side effect: reads catalog dataset metadata
 /api/v1/catalog/datasets/{dataset}/sample-rows|GET|no side effect: reads governed sample rows for dataset
+/api/v1/catalog/containers/{kind}/{id:guid}|GET|no side effect: reads one container tile with the caller access state
+/api/v1/catalog/containers|GET|no side effect: lists container tiles with the caller access state
 /api/v1/catalog/datasets/{id}/catalog-settings|GET|no side effect: reads dataset catalog settings
 /api/v1/catalog/datasets/{id}/samples|GET|no side effect: reads uploaded non-sensitive discovery sample rows
 /api/v1/catalog/datasets|GET|no side effect: lists catalog datasets

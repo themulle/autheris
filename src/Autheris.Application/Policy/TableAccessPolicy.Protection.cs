@@ -81,6 +81,7 @@ public sealed partial class TableAccessPolicy
         }
 
         var callerContext = BuildSecurityPrincipalContext(query, _timeProvider);
+        var groupsComplete = callerContext.GroupResolutionStatus == GroupResolutionStatus.Complete;
         var isInternal = InternalAudienceResolver.IsInternal(
             callerContext,
             tenantPolicy.Internal,
@@ -117,13 +118,13 @@ public sealed partial class TableAccessPolicy
             }
 
             baselineDecision = await ApplyClassificationAccessAsync(baselineDecision, query, ct).ConfigureAwait(false);
-            return ApplyProtectionMasks(baselineDecision, query.Metadata, protection);
+            return await ApplyProtectionMasksAsync(baselineDecision, query, protection, groupsComplete, ct).ConfigureAwait(false);
         }
 
         if (consentDecision.IsAllowed)
         {
             var grantedDecision = await ApplyClassificationAccessAsync(consentDecision, query, ct).ConfigureAwait(false);
-            grantedDecision = ApplyProtectionMasks(grantedDecision, query.Metadata, protection);
+            grantedDecision = await ApplyProtectionMasksAsync(grantedDecision, query, protection, groupsComplete, ct).ConfigureAwait(false);
             return grantedDecision with
             {
                 Reasons =
@@ -292,46 +293,5 @@ public sealed partial class TableAccessPolicy
             Claims = query.Claims ?? principal?.Claims,
             Principal = principal
         };
-    }
-
-    private static TableAccessDecision ApplyProtectionMasks(
-        TableAccessDecision decision,
-        TableMetadata metadata,
-        EffectiveProtection protection)
-    {
-        if (!decision.IsAllowed)
-        {
-            return decision;
-        }
-
-        Dictionary<string, ColumnAccessLevel>? updatedAccess = null;
-        foreach (var col in metadata.Columns)
-        {
-            if (string.IsNullOrWhiteSpace(col.ColumnName))
-            {
-                continue;
-            }
-
-            var effectiveCategory = protection.Columns.TryGetValue(col.ColumnName, out var colProt)
-                ? colProt.EffectiveMaskCategory
-                : protection.TableMaskCategory;
-            if (string.IsNullOrWhiteSpace(effectiveCategory))
-            {
-                continue;
-            }
-
-            var currentLevel = decision.GetEffectiveColumnAccess(col.ColumnName, metadata);
-            if (currentLevel is ColumnAccessLevel.Deny or ColumnAccessLevel.RowDependent or ColumnAccessLevel.Mask)
-            {
-                continue;
-            }
-
-            updatedAccess ??= new Dictionary<string, ColumnAccessLevel>(decision.ColumnAccess, StringComparer.OrdinalIgnoreCase);
-            updatedAccess[col.ColumnName] = ColumnAccessLevel.Mask;
-        }
-
-        return updatedAccess is null
-            ? decision
-            : decision with { ColumnAccess = updatedAccess };
     }
 }

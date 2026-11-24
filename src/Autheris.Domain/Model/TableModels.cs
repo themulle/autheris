@@ -23,7 +23,10 @@ public enum GranteeType
 public enum CatalogView
 {
     Unmarked = 0,
-    Granted = 1
+    Granted = 1,
+
+    /// <summary>Listed through the container visibility rule only (Open container, catalog grant or ownership): metadata, no data access.</summary>
+    ContainerVisible = 2
 }
 
 /// <summary>

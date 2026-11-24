@@ -9,6 +9,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Catalog;
 using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.Visibility;
+using Autheris.Application.Policy.Protection;
 using Autheris.Application.DataSources;
 using Autheris.Application.Governance.Contracts;
 using Autheris.Application.Common.Interfaces;
@@ -44,6 +46,9 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
     private readonly IDataSourceOptionsResolver? _transportResolver;
     private readonly ICatalogSnapshotProvider? _snapshotProvider;
     private readonly IProtectionSnapshotProvider? _protectionProvider;
+    private readonly IContainerVisibilitySnapshotProvider? _containerVisibility;
+    private readonly IUnmaskGrantResolver? _unmaskResolver;
+    private const int DefaultMaxVisibilityCandidates = 1000;
     private readonly Lock _memoLock = new();
     private readonly Dictionary<MemoKey, CatalogVisibleSet> _memo = [];
 
@@ -56,8 +61,12 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         IIngressTransportContext? ingress = null,
         IDataSourceOptionsResolver? transportResolver = null,
         ICatalogSnapshotProvider? snapshotProvider = null,
-        IProtectionSnapshotProvider? protectionProvider = null)
+        IProtectionSnapshotProvider? protectionProvider = null,
+        IContainerVisibilitySnapshotProvider? containerVisibility = null,
+        IUnmaskGrantResolver? unmaskResolver = null)
     {
+        _containerVisibility = containerVisibility;
+        _unmaskResolver = unmaskResolver;
         _ingress = ingress;
         _transportResolver = transportResolver;
         _snapshotProvider = snapshotProvider;
@@ -331,6 +340,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
                 engineOutput = await CatalogVisibility.VisibleTablesAsync(
                     rows, context.Principal, context.Tenant, _consentRepository, contract, context.CatalogOwner, context.SharedTables,
                     tableClasses, ct).ConfigureAwait(false);
+                engineOutput = await AddContainerVisibleAsync(context, rows, engineOutput, contract, ct).ConfigureAwait(false);
             }
 
             // F-C11 / a row that does not exist for this caller class never reaches the evaluator or the memo.
@@ -355,6 +365,137 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
             return null;
         }
     }
+
+    /// <summary>
+    /// Container visibility rule: besides the consent path, a table is visible when its container is <c>Open</c>, the caller holds a
+    /// catalog grant on the container, an unmask grant on the table, or is an owner-group member (Data Governance and IT see everything
+    /// through their own caller scope). All column definitions are listed; the rows carry no data access. An object that is not
+    /// provably visible stays absent, exactly like a missing one. Any failure adds nothing (fail-closed).
+    /// </summary>
+    private async Task<IReadOnlyList<TableMetadata>> AddContainerVisibleAsync(
+        Context context,
+        IReadOnlyList<TableMetadata> rows,
+        IReadOnlyList<TableMetadata> engineOutput,
+        SchemaContractDefinition? contract,
+        CancellationToken ct)
+    {
+        if (_containerVisibility is null || _protectionProvider is null || context.Scope != CallerScope.Subject || rows.Count == 0)
+        {
+            return engineOutput;
+        }
+
+        var snapshot = await _containerVisibility.GetAsync(context.Tenant, context.Principal, ct).ConfigureAwait(false);
+        if (!CanAddAnything(snapshot))
+        {
+            return engineOutput;
+        }
+
+        var already = new HashSet<TableIdentifier>(engineOutput.Count);
+        foreach (var table in engineOutput)
+        {
+            already.Add(table.Identifier);
+        }
+
+        var candidates = CatalogVisibility.DropForeignVirtualTables(rows.Where(r => !already.Contains(r.Identifier)).ToList(), context.Tenant);
+        var maxCandidates = Math.Max(0, _options?.Governance.AccessPolicy.MaxTablesPerAssignment ?? DefaultMaxVisibilityCandidates);
+        if (candidates.Count > maxCandidates)
+        {
+            // Bounded evaluation: rows beyond the bound are not added (fail-closed).
+            _logger.LogWarning(
+                "Catalog container visibility evaluated only the first {Bound} of {Count} candidate tables; the rest stay hidden.",
+                maxCandidates,
+                candidates.Count);
+            candidates = [.. candidates.Take(maxCandidates)];
+        }
+
+        var extras = new List<TableMetadata>();
+        var subjects = BuildSubjects(context);
+        var classes = new Dictionary<TableIdentifier, Autheris.Domain.Security.ProtectionClass>();
+        foreach (var row in candidates)
+        {
+            EffectiveProtection protection;
+            try
+            {
+                protection = await _protectionProvider.GetAsync(context.Tenant, row.Identifier, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (!ct.IsCancellationRequested)
+            {
+                LogFailure(ex);
+                continue;
+            }
+
+            var visible = snapshot.IsTableVisible(protection.Container, row.Identifier)
+                || await HasUnmaskGrantAsync(context, subjects, snapshot, protection, row, ct).ConfigureAwait(false);
+            if (!visible)
+            {
+                continue;
+            }
+
+            classes[row.Identifier] = protection.TableClass;
+            extras.Add(row with { CatalogView = CatalogView.ContainerVisible });
+        }
+
+        if (extras.Count == 0)
+        {
+            return engineOutput;
+        }
+
+        var allowed = CatalogVisibility.FilterByContract(extras, contract, classes);
+        return allowed.Count == 0 ? engineOutput : [.. engineOutput, .. allowed];
+    }
+
+    /// <summary>
+    /// False when no row can become visible through the container rule, so no per-row protection lookup is needed: nothing is
+    /// open, granted or owned, there are no data grants, the caller sees everything through another scope, and no unmask check applies.
+    /// </summary>
+    private bool CanAddAnything(ContainerVisibilitySnapshot snapshot)
+    {
+        if (snapshot.SeesEverything || (_unmaskResolver is not null && snapshot.GroupsComplete))
+        {
+            return true;
+        }
+
+        if (!snapshot.IsAvailable)
+        {
+            return false;
+        }
+
+        if (snapshot.CatalogGrantedContainers.Count > 0 || snapshot.OwnedContainers.Count > 0 || snapshot.DataGrantedTables.Count > 0)
+        {
+            return true;
+        }
+
+        foreach (var info in snapshot.Containers.Values)
+        {
+            if (info.Visibility == CatalogVisibilityMode.Open)
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private async ValueTask<bool> HasUnmaskGrantAsync(
+        Context context, List<Sid> subjects, ContainerVisibilitySnapshot snapshot, EffectiveProtection protection, TableMetadata row, CancellationToken ct)
+    {
+        if (_unmaskResolver is null || !snapshot.GroupsComplete)
+        {
+            return false;
+        }
+
+        // An unmask grant can only exist on a table that has a mask category.
+        if (string.IsNullOrWhiteSpace(protection.TableMaskCategory)
+            && !protection.Columns.Values.Any(static c => !string.IsNullOrWhiteSpace(c.EffectiveMaskCategory)))
+        {
+            return false;
+        }
+
+        var coverage = await _unmaskResolver.ResolveAsync(context.Tenant, subjects, snapshot.GroupsComplete, row.Identifier, ct).ConfigureAwait(false);
+        return !coverage.IsEmpty;
+    }
+
+    private static List<Sid> BuildSubjects(Context context) => new(context.Principal.GetGroupSids()) { context.Sid };
 
     private bool TryGetMemo(MemoKey key, out CatalogVisibleSet set)
     {

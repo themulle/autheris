@@ -98,7 +98,8 @@ internal sealed class FakeConsentRepository : IConsentRepository, IConsentDescri
         IsRevoked = revoked, RevokeReason = revokeReason ?? c.RevokeReason, RenewalCount = c.RenewalCount + renewalCountDelta,
         GrantSource = c.GrantSource, GrantRecordSeq = c.GrantRecordSeq, ProfileAssignmentId = c.ProfileAssignmentId, ExpiryNoticeSentAt = c.ExpiryNoticeSentAt,
         ColumnRules = c.ColumnRules, RowFilters = c.RowFilters, Description = c.Description,
-        ObjectPattern = c.ObjectPattern, DataSource = c.DataSource, ColumnSetMode = c.ColumnSetMode
+        ObjectPattern = c.ObjectPattern, DataSource = c.DataSource, ColumnSetMode = c.ColumnSetMode,
+        GrantKind = c.GrantKind, TargetColumns = c.TargetColumns
     };
 
     public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default)
@@ -108,6 +109,26 @@ internal sealed class FakeConsentRepository : IConsentRepository, IConsentDescri
         IReadOnlyList<Consent> r = _consents.Where(c => c.IsActive(atTime)
             && (c.TableIdentifier.Equals(table) || (c.IsPatternGrant && string.Equals(c.DataSource, table.Domain, StringComparison.OrdinalIgnoreCase)))
             && c.GranteeSid is { } g && set.Contains(g.Value) && (tenantId is null || c.TenantId == tenantId.Value)).ToList();
+        return Task.FromResult(r);
+    }
+
+    public void Remove(Guid id) => _consents.RemoveAll(c => c.Id == id);
+
+    public int UnmaskReadCount { get; private set; }
+    public Exception? UnmaskReadFailure { get; set; }
+
+    public Task<IReadOnlyList<Consent>> GetActiveUnmaskGrantsForSubjectsAsync(IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId tenantId, CancellationToken ct = default)
+    {
+        UnmaskReadCount++;
+        if (UnmaskReadFailure is { } failure)
+        {
+            return Task.FromException<IReadOnlyList<Consent>>(failure);
+        }
+
+        var set = subjects.Select(s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        IReadOnlyList<Consent> r = _consents.Where(c => c.GrantKind == PermissionGrantKind.Unmask && c.IsActive(atTime)
+            && c.TableIdentifier.Equals(table) && c.TenantId == tenantId
+            && c.GranteeSid is { } g && set.Contains(g.Value)).ToList();
         return Task.FromResult(r);
     }
 
