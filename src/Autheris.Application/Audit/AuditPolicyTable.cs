@@ -191,6 +191,11 @@ public static class AuditPolicyTable
         [AuditEventTypes.NotificationChannelChanged] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.WebhookDeliveryFailed] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.MigrationGrantsPurged] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ManifestProposalSubmitted] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ManifestProposalConfirmed] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ManifestProposalRejected] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ManifestProposalExpired] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.ManifestProposalStale] = AuditFailurePolicy.FailClosed,
     };
 
     public static IReadOnlyDictionary<string, AuditFailurePolicy> All => Table;

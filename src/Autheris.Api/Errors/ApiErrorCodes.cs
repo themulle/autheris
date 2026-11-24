@@ -70,6 +70,8 @@ public static class ApiErrorCodes
     public const string ResourceLocked = "RESOURCE_LOCKED";
     public const string GrantRecordUnavailable = "GRANT_RECORD_UNAVAILABLE";
     public const string VirtualFilterInvalid = "VIRTUAL_FILTER_INVALID";
+    public const string ManifestProposalStale = "MANIFEST_PROPOSAL_STALE";
+    public const string ManifestProposalClosed = "MANIFEST_PROPOSAL_CLOSED";
 
     // O-5b step 2: codes of the migrated bare error bodies. Registered here once so no later work package touches this file.
     public const string ProcedureRejected = "PROCEDURE_REJECTED";
