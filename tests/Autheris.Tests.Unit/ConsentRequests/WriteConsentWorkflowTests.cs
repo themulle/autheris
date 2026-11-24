@@ -1,3 +1,4 @@
+using Autheris.Application.Governance.Ownership;
 using Autheris.Tests.Unit.TestSupport;
 using System;
 using System.Collections;
@@ -118,12 +119,12 @@ public sealed class WriteConsentWorkflowTests
         return new ConsentRequestService(metadataRepo, approvalsRepo, policyDependencyIndex: policyDeps);
     }
 
-    private static (IConsentApprovalRepository Approval, IDataOwnershipRepository Ownership, IConsentRepository Consents, ITableMetadataRepository Metadata)
+    private static (IConsentApprovalRepository Approval, IContainerOwnership Ownership, IConsentRepository Consents, ITableMetadataRepository Metadata)
         CreateApprovalRepos(TableMetadata meta, ConsentRequest req)
     {
         var approval = Substitute.For<IConsentApprovalRepository>();
         approval.GetConsentRequestAsync(req.Id, Arg.Any<CancellationToken>()).Returns(req);
-        var ownership = Substitute.For<IDataOwnershipRepository>();
+        var ownership = Substitute.For<IContainerOwnership>();
         ownership.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>()).Returns(true);
         var consents = Substitute.For<IConsentRepository>();
         var metadata = Substitute.For<ITableMetadataRepository>();

@@ -1,5 +1,6 @@
 namespace Autheris.Application.Governance.Analysis;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -33,7 +34,7 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
 {
     private readonly ITableMetadataRepository _metadataRepository;
     private readonly IConsentRepository _consentRepository;
-    private readonly IDataOwnershipRepository? _dataOwnershipRepository;
+    private readonly IContainerOwnership? _dataOwnershipRepository;
     private readonly IGrantValidityPolicy _grantValidityPolicy;
     private readonly IConsentMaterializationGuard? _materializationGuard;
     private readonly IOptions<GatewayOptions>? _gatewayOptions;
@@ -45,7 +46,7 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
     public BundledConsentRequestService(
         ITableMetadataRepository metadataRepository,
         IConsentRepository consentRepository,
-        IDataOwnershipRepository? dataOwnershipRepository = null,
+        IContainerOwnership? dataOwnershipRepository = null,
         IConsentMaterializationGuard? materializationGuard = null,
         IGrantValidityPolicy? grantValidityPolicy = null,
         IOptions<GatewayOptions>? gatewayOptions = null,

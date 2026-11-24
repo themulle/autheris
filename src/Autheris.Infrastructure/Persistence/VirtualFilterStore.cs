@@ -25,7 +25,8 @@ internal static class VirtualFilterStore
         FilterApprovalStatus? Status = null, string? CreatedBy = null, string? ApprovedBy = null, DateTimeOffset? ApprovedAt = null,
         FilterDto? Draft = null, bool PendingDeletion = false, string? DeletionRequestedBy = null,
         List<ParameterDto>? Parameters = null, RowPolicyEvaluationMode? EvaluationMode = null, TimeSpan? KeySetMaxAge = null,
-        int? KeySetMaxKeys = null);
+        int? KeySetMaxKeys = null, List<RefContainerDto>? ReferencedContainers = null);
+    private sealed record RefContainerDto(string Table, string Container);
     private sealed record BindingDto(
         string Filter, string? Target, FilterObjectKinds ObjectKinds, string? TimeColumn, Dictionary<string, string>? ColumnMap,
         VirtualFilterExecutionStrategy? Strategy = null, PushdownParameterFormat? PushdownFormat = null,
@@ -76,7 +77,11 @@ internal static class VirtualFilterStore
 
     public static Task<long> GetGenerationAsync(DbConnection connection, CancellationToken ct) => ReadGenerationAsync(connection, null, ct);
 
-    public static async Task ApplyAsync(DbConnection connection, VirtualFilterChangeSet changes, CancellationToken ct)
+    /// <summary>
+    /// Writes <paramref name="changes"/> inside <paramref name="tx"/>; the caller writes the audit entries of the change in the same
+    /// transaction and commits, or rolls back on any failure (including a generation conflict).
+    /// </summary>
+    public static async Task ApplyAsync(DbConnection connection, DbTransaction tx, VirtualFilterChangeSet changes, CancellationToken ct)
     {
         if (changes.IsEmpty)
         {
@@ -85,7 +90,6 @@ internal static class VirtualFilterStore
 
         var sqlServer = connection is Microsoft.Data.SqlClient.SqlConnection
             || Autheris.Infrastructure.Persistence.Dialects.SqlServerGovernanceDialect.Unwrap(connection) is Microsoft.Data.SqlClient.SqlConnection;
-        await using var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
 
         // PERS-13: compare-and-set of the generation first; it also takes the write lock before any definition is touched.
         if (changes.ExpectedGeneration is { } expectedGeneration)
@@ -95,7 +99,6 @@ internal static class VirtualFilterStore
                 [("@expected", expectedGeneration)]);
             if (await cas.ExecuteNonQueryAsync(ct).ConfigureAwait(false) != 1)
             {
-                await tx.RollbackAsync(ct).ConfigureAwait(false);
                 throw new VirtualFilterConflictException("The virtual filter configuration changed since it was read; reload it and repeat the change.");
             }
         }
@@ -194,8 +197,6 @@ internal static class VirtualFilterStore
         {
             await ExecuteAsync(connection, tx, "UPDATE VIRTUAL_FILTER_GENERATION SET generation = generation + 1 WHERE id = 1;", [], ct).ConfigureAwait(false);
         }
-
-        await tx.CommitAsync(ct).ConfigureAwait(false);
     }
 
     private static async Task ExecuteAsync(DbConnection connection, DbTransaction tx, string sql, (string Name, object? Value)[] parameters, CancellationToken ct)
@@ -256,7 +257,8 @@ internal static class VirtualFilterStore
         filter.Parameters.Count == 0 ? null : filter.Parameters.Select(p => new ParameterDto(p.Name, p.Type, p.IsList, p.MaxValues)).ToList(),
         filter.EvaluationMode == RowPolicyEvaluationMode.Live ? null : filter.EvaluationMode,
         filter.KeySetMaxAge,
-        filter.KeySetMaxKeys);
+        filter.KeySetMaxKeys,
+        filter.ReferencedContainers.Count == 0 ? null : filter.ReferencedContainers.Select(r => new RefContainerDto(r.Table, r.Container)).ToList());
 
     private static ProfileDto ProfileToDto(VirtualFilterAccessProfile profile) => new(
         profile.GranteeType,
@@ -309,7 +311,8 @@ internal static class VirtualFilterStore
         Parameters = (dto.Parameters ?? []).Select(p => new RowPolicyParameter(p.Name, p.Type, p.IsList, p.MaxValues)).ToList(),
         EvaluationMode = dto.EvaluationMode ?? RowPolicyEvaluationMode.Live,
         KeySetMaxAge = dto.KeySetMaxAge,
-        KeySetMaxKeys = dto.KeySetMaxKeys
+        KeySetMaxKeys = dto.KeySetMaxKeys,
+        ReferencedContainers = (dto.ReferencedContainers ?? []).Select(r => new ReferencedTableContainer(r.Table, r.Container)).ToList()
     };
 
     private static VirtualFilterAccessProfile DtoToProfile(ProfileDto dto, Guid id, TenantId tenantId, string name) => new()

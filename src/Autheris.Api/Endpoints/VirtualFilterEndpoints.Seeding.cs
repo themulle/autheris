@@ -92,12 +92,7 @@ public static partial class VirtualFilterEndpoints
             .Max();
 
         string syncStatus;
-        if (filters.Any(f => f.Status == FilterApprovalStatus.PendingApproval) ||
-            profiles.Any(p => p.Status == FilterApprovalStatus.PendingApproval))
-        {
-            syncStatus = "PendingApproval";
-        }
-        else if (managedFilters.Any(f => f.Status != FilterApprovalStatus.Active) ||
+        if (managedFilters.Any(f => f.Status != FilterApprovalStatus.Active) ||
                  managedProfiles.Any(p => p.Status != FilterApprovalStatus.Active))
         {
             syncStatus = "DriftDetected";
@@ -119,8 +114,7 @@ public static partial class VirtualFilterEndpoints
             profileCount = profiles.Count,
             managedFilterCount = managedFilters.Count,
             managedProfileCount = managedProfiles.Count,
-            maxRemovals = opt.MaxRemovals,
-            requireApproval = opt.RequireApproval
+            maxRemovals = opt.MaxRemovals
         });
     }
 

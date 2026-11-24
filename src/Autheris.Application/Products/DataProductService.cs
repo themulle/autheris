@@ -1,5 +1,6 @@
 namespace Autheris.Application.Products;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -44,7 +45,7 @@ public sealed partial class DataProductService(
     ProductAuthorityService authority,
     IProductCatalogColumns catalog,
     ISqlEngine sqlEngine,
-    IDataOwnershipRepository ownership,
+    IContainerOwnership ownership,
     IAuditWriter audit,
     IConsentEventOutbox? outbox = null,
     TimeProvider? timeProvider = null,
@@ -64,7 +65,7 @@ public sealed partial class DataProductService(
     private readonly ProductAuthorityService _authority = authority ?? throw new ArgumentNullException(nameof(authority));
     private readonly IProductCatalogColumns _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
     private readonly ISqlEngine _sqlEngine = sqlEngine ?? throw new ArgumentNullException(nameof(sqlEngine));
-    private readonly IDataOwnershipRepository _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
+    private readonly IContainerOwnership _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
     private readonly IAuditWriter _audit = audit ?? throw new ArgumentNullException(nameof(audit));
     private readonly IConsentEventOutbox? _outbox = outbox;
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Governance;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
@@ -20,7 +21,7 @@ using Xunit;
 public sealed class TableConsumersDualTierSecurityTests
 {
     private readonly IConsentRepository _consentRepo = new InMemoryConsentRepository();
-    private readonly IDataOwnershipRepository _ownershipRepo = Substitute.For<IDataOwnershipRepository>();
+    private readonly IContainerOwnership _ownershipRepo = Substitute.For<IContainerOwnership>();
     private readonly ILineageGraphStore _graphStore = Substitute.For<ILineageGraphStore>();
     private readonly IAuditLogRepository _auditRepo = Substitute.For<IAuditLogRepository>();
     private readonly ITableMetadataRepository _tableMetadataRepo = new InMemoryTableMetadataRepository();

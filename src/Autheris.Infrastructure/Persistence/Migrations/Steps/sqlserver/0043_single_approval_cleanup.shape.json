@@ -1,0 +1,11 @@
+{
+  "ops": [
+    { "op": "dropColumn", "table": "CALLER_ATTRIBUTES", "name": "draft_definition_json" },
+    { "op": "dropColumn", "table": "CALLER_ATTRIBUTES", "name": "draft_definition_hash" },
+    { "op": "dropColumn", "table": "CALLER_ATTRIBUTES", "name": "draft_created_by" },
+    { "op": "dropColumn", "table": "CALLER_ATTRIBUTES", "name": "pending_deletion" },
+    { "op": "dropColumn", "table": "CALLER_ATTRIBUTES", "name": "deletion_requested_by" },
+    { "op": "dropColumn", "table": "CALLER_ATTRIBUTE_SERVICE_SETS", "name": "draft_values_json" },
+    { "op": "dropColumn", "table": "CALLER_ATTRIBUTE_SERVICE_SETS", "name": "draft_created_by" }
+  ]
+}

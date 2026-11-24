@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.DependencyInjection;
 
+using Autheris.Application.Governance.Ownership;
 using Autheris.Tests.Common;
 using System.Reflection;
 using Autheris.Api.Extensions;
@@ -95,7 +96,7 @@ public sealed class CatalogVisibilityCompositionTests
         services.AddSingleton(Wp0.Tables(table));
         services.AddSingleton(Wp0.Consents(Wp0.Allow(table.Identifier, "S-USER", Wp0.TenantA, "id")));
         services.AddSingleton(Substitute.For<IConsentApprovalRepository>());
-        services.AddSingleton(Substitute.For<IDataOwnershipRepository>());
+        services.AddSingleton(Substitute.For<IContainerOwnership>());
         services.AddSingleton(accessor);
         services.AddSingleton<IOptions<GatewayOptions>>(Options.Create(options));
         services.AddSingleton<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>(sp =>

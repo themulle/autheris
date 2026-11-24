@@ -106,19 +106,15 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
     public void CallerAttributeAdminEndpoints_AttachExpectedNamedPolicies_AndNoBareRequireAuthorization()
     {
         var endpoints = MapAndGetEndpoints(b => b.MapCallerAttributeAdminEndpoints());
-        endpoints.Count.ShouldBe(10);
+        endpoints.Count.ShouldBe(6);
         AssertAllProtectedRoutesHaveNamedPolicy(endpoints);
 
         const string prefix = "/api/v1/governance/caller-attributes";
         AssertProtectedRoutePolicy(endpoints, "GET", $"{prefix}/", GatewayPolicies.CallerAttributeRead);
         AssertProtectedRoutePolicy(endpoints, "GET", $"{prefix}/service-sets", GatewayPolicies.CallerAttributeRead);
-        AssertProtectedRoutePolicy(endpoints, "PUT", $"{prefix}/{{name}}", GatewayPolicies.GovernanceAdmin);
-        AssertProtectedRoutePolicy(endpoints, "DELETE", $"{prefix}/{{name}}", GatewayPolicies.GovernanceAdmin);
-        AssertProtectedRoutePolicy(endpoints, "PUT", $"{prefix}/service-sets", GatewayPolicies.GovernanceAdmin);
-        AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/{{name}}/approve", GatewayPolicies.CallerAttributeApprove);
-        AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/{{name}}/reject", GatewayPolicies.CallerAttributeApprove);
-        AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/service-sets/approve", GatewayPolicies.CallerAttributeApprove);
-        AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/service-sets/reject", GatewayPolicies.CallerAttributeApprove);
+        AssertProtectedRoutePolicy(endpoints, "PUT", $"{prefix}/{{name}}", GatewayPolicies.CallerAttributeApprove);
+        AssertProtectedRoutePolicy(endpoints, "DELETE", $"{prefix}/{{name}}", GatewayPolicies.CallerAttributeApprove);
+        AssertProtectedRoutePolicy(endpoints, "PUT", $"{prefix}/service-sets", GatewayPolicies.CallerAttributeApprove);
         AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/simulate", GatewayPolicies.CallerAttributeSimulate);
     }
 
@@ -126,7 +122,7 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
     public void VirtualFilterEndpoints_AttachExpectedNamedPolicies_AndNoBareRequireAuthorization()
     {
         var endpoints = MapAndGetEndpoints(b => b.MapVirtualFilterEndpoints());
-        endpoints.Count.ShouldBe(14);
+        endpoints.Count.ShouldBe(12);
         AssertAllProtectedRoutesHaveNamedPolicy(endpoints);
 
         const string prefix = "/api/v1/governance";
@@ -134,11 +130,9 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
         AssertProtectedRoutePolicy(endpoints, "GET", $"{prefix}/config-sync/status", GatewayPolicies.VirtualFilterRead);
         AssertProtectedRoutePolicy(endpoints, "GET", $"{prefix}/virtual-filters/sync/status", GatewayPolicies.VirtualFilterRead);
         AssertProtectedRoutePolicy(endpoints, "PUT", $"{prefix}/virtual-filters/{{name}}", GatewayPolicies.VirtualFilterWrite);
-        AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/virtual-filters/{{name}}/approve", GatewayPolicies.VirtualFilterApprove);
         AssertProtectedRoutePolicy(endpoints, "DELETE", $"{prefix}/virtual-filters/{{name}}", GatewayPolicies.FilterAdmin);
-        AssertProtectedRoutePolicy(endpoints, "PUT", $"{prefix}/access-profiles/{{name}}", GatewayPolicies.FilterAdmin);
-        AssertProtectedRoutePolicy(endpoints, "DELETE", $"{prefix}/access-profiles/{{name}}", GatewayPolicies.FilterAdmin);
-        AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/access-profiles/{{name}}/approve", GatewayPolicies.GovernanceAdmin);
+        AssertProtectedRoutePolicy(endpoints, "PUT", $"{prefix}/access-profiles/{{name}}", GatewayPolicies.GovernanceAdmin);
+        AssertProtectedRoutePolicy(endpoints, "DELETE", $"{prefix}/access-profiles/{{name}}", GatewayPolicies.GovernanceAdmin);
         AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/virtual-filters/sync/plan", GatewayPolicies.VirtualFilterSyncPlan);
         AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/virtual-filters/sync/apply", GatewayPolicies.VirtualFilterSyncApply);
         AssertProtectedRoutePolicy(endpoints, "GET", $"{prefix}/effective-filters", GatewayPolicies.EffectiveFilterInspect);

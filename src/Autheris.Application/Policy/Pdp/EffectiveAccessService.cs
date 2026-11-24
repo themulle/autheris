@@ -1,5 +1,6 @@
 namespace Autheris.Application.Policy.Pdp;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -28,7 +29,7 @@ public sealed class EffectiveAccessService(
     IAccessDecisionPoint decisionPoint,
     ITableMetadataRepository tables,
     ICatalogVisibilityService visibility,
-    IDataOwnershipRepository owners,
+    IContainerOwnership owners,
     IConsentRepository consents,
     IExplainSubjectResolver subjectResolver,
     IAuditWriter audit,
@@ -45,7 +46,7 @@ public sealed class EffectiveAccessService(
     private readonly IAccessDecisionPoint _decisionPoint = decisionPoint ?? throw new ArgumentNullException(nameof(decisionPoint));
     private readonly ITableMetadataRepository _tables = tables ?? throw new ArgumentNullException(nameof(tables));
     private readonly ICatalogVisibilityService _visibility = visibility ?? throw new ArgumentNullException(nameof(visibility));
-    private readonly IDataOwnershipRepository _owners = owners ?? throw new ArgumentNullException(nameof(owners));
+    private readonly IContainerOwnership _owners = owners ?? throw new ArgumentNullException(nameof(owners));
     private readonly IConsentRepository _consents = consents ?? throw new ArgumentNullException(nameof(consents));
     private readonly IExplainSubjectResolver _subjectResolver = subjectResolver ?? throw new ArgumentNullException(nameof(subjectResolver));
     private readonly IAuditWriter _audit = audit ?? throw new ArgumentNullException(nameof(audit));

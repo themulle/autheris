@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Lineage;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
@@ -19,7 +20,7 @@ using Xunit;
 public class LineageTraversalTests
 {
     private readonly IConsentRepository _consentRepo = Substitute.For<IConsentRepository>();
-    private readonly IDataOwnershipRepository _ownershipRepo = Substitute.For<IDataOwnershipRepository>();
+    private readonly IContainerOwnership _ownershipRepo = Substitute.For<IContainerOwnership>();
     private readonly LineageGraphStore _graphStore = new();
     private readonly LineageImpactAnalyzerService _sut;
 

@@ -138,7 +138,7 @@ public sealed class RowPolicyMigrationTests
         {
             Id = Guid.NewGuid(),
             Name = "pending_region",
-            Status = FilterApprovalStatus.PendingApproval
+            Status = FilterApprovalStatus.Rejected
         };
 
         var snapshot = new VirtualFilterSnapshot(1, [activePolicy, pendingPolicy], []);

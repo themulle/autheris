@@ -1,3 +1,4 @@
+using Autheris.Application.Governance.Ownership;
 using System.Data.Common;
 using Autheris.Application.Catalog;
 using Autheris.Application.Common.Interfaces;
@@ -250,7 +251,7 @@ public sealed class DynamicCoverageTests
         var services = new ServiceCollection();
         services.AddSingleton<IConsentRepository>(consents);
         services.AddSingleton<ITableMetadataRepository>(catalog);
-        services.AddSingleton<IDataOwnershipRepository>(owners);
+        services.AddSingleton<IContainerOwnership>(owners);
         services.AddSingleton<IConsentApprovalRepository>(approvals);
         services.AddSingleton<IAuditLogRepository>(audit);
         using var provider = services.BuildServiceProvider();
@@ -275,7 +276,7 @@ public sealed class DynamicCoverageTests
     private static TableAccessPolicy CreatePolicy(
         IConsentRepository consentRepo,
         ICatalogVersionProvider catalogVersionProvider,
-        IDataOwnershipRepository ownershipRepo,
+        IContainerOwnership ownershipRepo,
         out IConsentCacheService cache)
     {
         var memory = new MemoryCache(new MemoryCacheOptions());
@@ -378,7 +379,7 @@ public sealed class DynamicCoverageTests
         public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, ConsentRevocationAuthority authority, IReadOnlyList<AuditLogEntry>? auditEntries = null, CancellationToken ct = default) => Task.CompletedTask;
     }
 
-    private sealed class FakeOwnershipRepo : IDataOwnershipRepository
+    private sealed class FakeOwnershipRepo : IContainerOwnership
     {
         private readonly Dictionary<TableIdentifier, List<DataOwner>> _owners = [];
 

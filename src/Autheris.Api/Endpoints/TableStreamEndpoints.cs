@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Application.Governance.Ownership;
 using Autheris.Domain.Options.DataSources;
 using System;
 using System.Buffers;
@@ -816,7 +817,7 @@ public static class TableStreamEndpoints
             return true;
         }
 
-        var ownership = httpContext.RequestServices?.GetService<IDataOwnershipRepository>();
+        var ownership = httpContext.RequestServices?.GetService<IContainerOwnership>();
         if (ownership is not null)
         {
             try

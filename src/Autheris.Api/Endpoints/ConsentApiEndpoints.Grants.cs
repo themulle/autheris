@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Linq;
 using System.Threading;
@@ -303,7 +304,7 @@ public static partial class ConsentApiEndpoints
         IConsentWorkflowConfigRepository workflowConfigRepo,
         [FromServices] IProfileAssignmentStore assignmentStore,
         [FromServices] IProfileAssignmentRequestService profileAssignmentService,
-        IDataOwnershipRepository ownershipRepo,
+        IContainerOwnership ownershipRepo,
         IIdempotencyStore? idempotencyStore = null,
         IRateLimiterService? rateLimiter = null,
         IOptions<GovernanceOptions>? governanceOptions = null,
@@ -383,20 +384,13 @@ public static partial class ConsentApiEndpoints
             bool isApprover = false;
             if (!isAdmin && !isSelf)
             {
-                foreach (var g in grants)
+                isApprover = grants.Any(g => g.IsPatternGrant && g.ApprovingOwners.Any(o => string.Equals(o, actorSid.Value, StringComparison.OrdinalIgnoreCase)));
+                var tables = grants.Select(static g => g.TableIdentifier).Where(static t => !string.IsNullOrWhiteSpace(t.TableName)).Distinct().ToList();
+                if (!isApprover && tables.Count > 0)
                 {
-                    if (!string.IsNullOrWhiteSpace(g.TableIdentifier.TableName) &&
-                        await ownershipRepo.IsAuthorizedApproverForTableAsync(g.TableIdentifier, actorSid, ct).ConfigureAwait(false))
-                    {
-                        isApprover = true;
-                        break;
-                    }
-
-                    if (g.IsPatternGrant && g.ApprovingOwners.Any(o => string.Equals(o, actorSid.Value, StringComparison.OrdinalIgnoreCase)))
-                    {
-                        isApprover = true;
-                        break;
-                    }
+                    // One set-based ownership resolution for all grants of the assignment (no per-grant owner lookup).
+                    var owned = await ownershipRepo.GetOwnedOrDelegatedTablesAsync(actorSid, tables, (timeProvider ?? TimeProvider.System).GetUtcNow(), ct).ConfigureAwait(false);
+                    isApprover = owned.Count > 0;
                 }
             }
 

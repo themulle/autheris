@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -43,7 +44,7 @@ public static partial class GovernanceEndpoints
         }
 
         var sid = EndpointSecurity.GetSecurityContext(context)?.UserSid.Value ?? user.GetUserSid()?.Value;
-        var ownershipRepository = context.RequestServices.GetService(typeof(IDataOwnershipRepository)) as IDataOwnershipRepository;
+        var ownershipRepository = context.RequestServices.GetService(typeof(IContainerOwnership)) as IContainerOwnership;
         if (string.IsNullOrWhiteSpace(sid) || ownershipRepository == null)
         {
             return false;

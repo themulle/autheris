@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Governance;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Security.Claims;
@@ -25,7 +26,7 @@ public sealed class DatasetCatalogPrivacyEditTests
     private static readonly TableIdentifier Orders = new("sales", "dbo", "orders");
 
     private readonly ITableMetadataRepository _tables = Substitute.For<ITableMetadataRepository>();
-    private readonly IDataOwnershipRepository _owners = Substitute.For<IDataOwnershipRepository>();
+    private readonly IContainerOwnership _owners = Substitute.For<IContainerOwnership>();
     private readonly IAuditWriter _audit = Substitute.For<IAuditWriter>();
     private DatasetCatalogSettings _state = new([], MinGroupSize: null, NonPersonal: null);
 

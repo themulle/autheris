@@ -1,5 +1,6 @@
 namespace Autheris.Application.Mcp.Services;
 
+using Autheris.Application.Governance.Ownership;
 using Autheris.Application.Catalog;
 using Autheris.Application.Tenancy;
 using System;
@@ -42,7 +43,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     private readonly IOptions<GatewayOptions>? options;
     private readonly IGraphQlCatalogMap? graphQlMap;
     private readonly Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService? explanationService;
-    private readonly IDataOwnershipRepository? dataOwnershipRepository;
+    private readonly IContainerOwnership? dataOwnershipRepository;
     private readonly IConsentApprovalRepository? approvalRepository;
     private readonly IAuditLogRepository? auditLogRepository;
     private readonly Autheris.Application.Governance.Interfaces.ISchemaSunsettingService? sunsettingService;
@@ -68,7 +69,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         IOptions<GatewayOptions>? options = null,
         IGraphQlCatalogMap? graphQlMap = null,
         Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService? explanationService = null,
-        IDataOwnershipRepository? dataOwnershipRepository = null,
+        IContainerOwnership? dataOwnershipRepository = null,
         IConsentApprovalRepository? approvalRepository = null,
         Autheris.Application.Governance.Interfaces.ISchemaSunsettingService? sunsettingService = null,
         Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null,
@@ -114,7 +115,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         IOptions<GatewayOptions>? options = null,
         IGraphQlCatalogMap? graphQlMap = null,
         Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService? explanationService = null,
-        IDataOwnershipRepository? dataOwnershipRepository = null,
+        IContainerOwnership? dataOwnershipRepository = null,
         IConsentApprovalRepository? approvalRepository = null,
         Autheris.Application.Governance.Interfaces.ISchemaSunsettingService? sunsettingService = null,
         Autheris.Domain.Interfaces.IConsentResolutionService? consentResolution = null,

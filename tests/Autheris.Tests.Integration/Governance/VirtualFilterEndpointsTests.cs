@@ -47,10 +47,16 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
 
     private static HttpContext Context(string tenant, object? body, params string[] roles)
     {
-        var context = new DefaultHttpContext
+        var services = new ServiceCollection().AddLogging().AddAuditWriterOver(Substitute.For<IAuditLogRepository>());
+        if (roles.Contains("GovernanceAdmin"))
         {
-            RequestServices = new ServiceCollection().AddLogging().AddAuditWriterOver(Substitute.For<IAuditLogRepository>()).BuildServiceProvider()
-        };
+            // The tenant-bound Data Governance capacity of a GovernanceAdmin caller (decision D5: access profiles are DG only).
+            var capabilities = Substitute.For<IGovernanceCapabilities>();
+            capabilities.IsGovernance(Arg.Any<System.Security.Claims.ClaimsPrincipal?>(), new TenantId(tenant)).Returns(true);
+            services.AddSingleton(capabilities);
+        }
+
+        var context = new DefaultHttpContext { RequestServices = services.BuildServiceProvider() };
         context.Items[SecurityPrincipalContext.ItemKey] = new SecurityPrincipalContext
         {
             UserSid = new Sid("S-1-5-21-CALLER"),
@@ -59,7 +65,8 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
             // ClusterAdmin and GovernanceAdmin are global roles; tenant-scoped roles never satisfy them.
             TenantRoles = new HashSet<string>(roles.Where(r => r is not ("ClusterAdmin" or "GovernanceAdmin"))),
             ClusterRoles = new HashSet<string>(roles.Where(r => r is "ClusterAdmin" or "GovernanceAdmin")),
-            AuthenticationScheme = "Test"
+            AuthenticationScheme = "Test",
+            GroupResolutionStatus = Autheris.Domain.Identity.GroupResolutionStatus.Complete
         };
         context.Response.Body = new MemoryStream();
         if (body != null)
@@ -113,12 +120,35 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
     }
 
     [Fact]
-    public async Task PutFilterAndProfile_AsFilterAdmin_AreStoredInTheCallersTenant()
+    [Trait("Category", "Security")]
+    public async Task PutAndDeleteProfile_AsFilterAdminWithoutDataGovernance_Return403()
     {
         var putFilter = Context(Tenant, DavidFilterBody(), "FilterAdmin");
         (await StatusAsync(await VirtualFilterEndpoints.PutFilterAsync("nicht_ausgelieferte_krane", putFilter, _service), putFilter)).ShouldBe(StatusCodes.Status200OK);
 
         var putProfile = Context(Tenant, DavidProfileBody(), "FilterAdmin");
+        (await StatusAsync(await VirtualFilterEndpoints.PutProfileAsync("david", putProfile, _service), putProfile)).ShouldBe(StatusCodes.Status403Forbidden);
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+
+        var dgPut = Context(Tenant, DavidProfileBody(), "GovernanceAdmin");
+        (await StatusAsync(await VirtualFilterEndpoints.PutProfileAsync("david", dgPut, _service), dgPut)).ShouldBe(StatusCodes.Status200OK);
+
+        var deleteProfile = Context(Tenant, null, "FilterAdmin", "ClusterAdmin");
+        (await StatusAsync(await VirtualFilterEndpoints.DeleteProfileAsync("david", deleteProfile, _service), deleteProfile)).ShouldBe(StatusCodes.Status403Forbidden);
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldHaveSingleItem();
+
+        var dgDelete = Context(Tenant, null, "GovernanceAdmin");
+        (await StatusAsync(await VirtualFilterEndpoints.DeleteProfileAsync("david", dgDelete, _service), dgDelete)).ShouldBe(StatusCodes.Status204NoContent);
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task PutFilterAsFilterAdmin_AndProfileAsDataGovernance_AreStoredInTheCallersTenant()
+    {
+        var putFilter = Context(Tenant, DavidFilterBody(), "FilterAdmin");
+        (await StatusAsync(await VirtualFilterEndpoints.PutFilterAsync("nicht_ausgelieferte_krane", putFilter, _service), putFilter)).ShouldBe(StatusCodes.Status200OK);
+
+        var putProfile = Context(Tenant, DavidProfileBody(), "GovernanceAdmin");
         (await StatusAsync(await VirtualFilterEndpoints.PutProfileAsync("david", putProfile, _service), putProfile)).ShouldBe(StatusCodes.Status200OK);
 
         var snapshot = await _repository.LoadSnapshotAsync();
@@ -150,7 +180,7 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
     [Fact]
     public async Task InvalidInput_Returns400_WithGovernedCode_NotTheExceptionText()
     {
-        var context = Context(Tenant, DavidProfileBody(), "FilterAdmin");   // binds an unknown filter
+        var context = Context(Tenant, DavidProfileBody(), "GovernanceAdmin");   // binds an unknown filter
 
         var status = await StatusAsync(await VirtualFilterEndpoints.PutProfileAsync("david", context, _service), context);
 
@@ -195,26 +225,6 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
         context.Response.Body.Position = 0;
         using var doc = await JsonDocument.ParseAsync(context.Response.Body);
         doc.RootElement.GetProperty("filters").GetArrayLength().ShouldBe(1);
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task List_ExposesPendingHash_TheValueApprovalCompares()
-    {
-        var approvalOptions = Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } });
-        var approvalService = new VirtualFilterAdministrationService(_repository, Substitute.For<IAuditLogRepository>(), approvalOptions);
-        var createContext = Context(Tenant, DavidFilterBody(), "FilterAdmin");
-        await StatusAsync(await VirtualFilterEndpoints.PutFilterAsync("filter_pending_hash", createContext, approvalService), createContext);
-        var stored = (await _repository.LoadSnapshotAsync()).Filters.Single();
-
-        var context = Context(Tenant, null, "GovernanceAdmin");
-        await StatusAsync(await VirtualFilterEndpoints.ListAsync(context, approvalService), context);
-
-        context.Response.Body.Position = 0;
-        using var doc = await JsonDocument.ParseAsync(context.Response.Body);
-        var view = doc.RootElement.GetProperty("filters")[0];
-        view.GetProperty("pending_hash").GetString().ShouldBe(VirtualFilterAdministrationService.PendingHash(stored));
-        view.GetProperty("pending_hash").GetString().ShouldNotBeNullOrWhiteSpace();
     }
 
     private static object SyncBody(string commit) => new
@@ -285,6 +295,7 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
     [Fact]
     public async Task ConfigSyncStatus_ReturnsMetadataAndCounts()
     {
+        // SR15-47: dynamic status reporting of filter states (single approval since #1009: a save is active, so the status is InSync).
         await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), new VirtualFilterActor(new Sid("S-1-5-21-A"), false));
         var context = Context(Tenant, null, "GovernanceAdmin");
 
@@ -297,7 +308,7 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
         doc.RootElement.GetProperty("status").GetString().ShouldBe("InSync");
         doc.RootElement.GetProperty("filterCount").GetInt32().ShouldBe(1);
         doc.RootElement.GetProperty("profileCount").GetInt32().ShouldBe(0);
-        doc.RootElement.GetProperty("requireApproval").GetBoolean().ShouldBeFalse();
+        doc.RootElement.TryGetProperty("requireApproval", out _).ShouldBeFalse();
     }
 
     [Fact]
@@ -310,86 +321,16 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
     }
 
     [Fact]
-    public async Task PutFilter_WithRequireApproval_SavesPendingAndRequiresDistinctApprover()
+    public async Task PutFilter_ByFilterAdmin_ActivatesOnSave()
     {
-        var approvalOptions = Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } });
-        var approvalService = new VirtualFilterAdministrationService(_repository, Substitute.For<IAuditLogRepository>(), approvalOptions);
-
-        // FilterAdmin creates filter -> saved as PendingApproval (HTTP 200)
         var createContext = Context(Tenant, DavidFilterBody(), "FilterAdmin");
-        var putResult = await VirtualFilterEndpoints.PutFilterAsync("filter_test", createContext, approvalService);
-        var putStatus = await StatusAsync(putResult, createContext);
-        putStatus.ShouldBe(StatusCodes.Status200OK);
+        (await StatusAsync(await VirtualFilterEndpoints.PutFilterAsync("filter_test", createContext, _service), createContext)).ShouldBe(StatusCodes.Status200OK);
 
-        // VF-05: every approval carries the reviewed (pending) hash.
-        var pendingHash = VirtualFilterAdministrationService.PendingHash((await _repository.LoadSnapshotAsync()).Filters.Single());
-
-        // Creator attempts to approve -> HTTP 400 (Four-eyes principle violation)
-        var selfApproveContext = Context(Tenant, null, "GovernanceAdmin"); // UserSid is "S-1-5-21-CALLER" by default in Context()
-        selfApproveContext.Request.QueryString = new QueryString($"?hash={pendingHash}");
-        var selfApproveResult = await VirtualFilterEndpoints.ApproveFilterAsync("filter_test", selfApproveContext, approvalService);
-        var selfApproveStatus = await StatusAsync(selfApproveResult, selfApproveContext);
-        selfApproveStatus.ShouldBe(StatusCodes.Status400BadRequest);
-
-        // Non-admin attempts to approve -> HTTP 403 Forbidden
-        var unauthorizedContext = Context(Tenant, null, "Consumer");
-        var unauthResult = await VirtualFilterEndpoints.ApproveFilterAsync("filter_test", unauthorizedContext, approvalService);
-        var unauthStatus = await StatusAsync(unauthResult, unauthorizedContext);
-        unauthStatus.ShouldBe(StatusCodes.Status403Forbidden);
-
-        // Distinct GovernanceAdmin approves -> HTTP 200 OK
-        var supervisorContext = Context(Tenant, null, "GovernanceAdmin");
-        var supervisorSec = (SecurityPrincipalContext)supervisorContext.Items[SecurityPrincipalContext.ItemKey]!;
-        supervisorContext.Items[SecurityPrincipalContext.ItemKey] = supervisorSec with { UserSid = new Sid("S-1-5-21-SUPERVISOR") };
-        supervisorContext.Request.QueryString = new QueryString($"?hash={pendingHash}");
-        var approveResult = await VirtualFilterEndpoints.ApproveFilterAsync("filter_test", supervisorContext, approvalService);
-        var approveStatus = await StatusAsync(approveResult, supervisorContext);
-        approveStatus.ShouldBe(StatusCodes.Status200OK);
-
-        var snapshot = await _repository.LoadSnapshotAsync();
-        var stored = snapshot.Filters.ShouldHaveSingleItem();
-        stored.Status.ShouldBe(FilterApprovalStatus.Active);
-        stored.ApprovedBy.ShouldBe(new Sid("S-1-5-21-SUPERVISOR"));
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task Endpoint_ApproveWithoutHash_Returns400()
-    {
-        var approvalOptions = Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } });
-        var approvalService = new VirtualFilterAdministrationService(_repository, Substitute.For<IAuditLogRepository>(), approvalOptions);
-        var createContext = Context(Tenant, DavidFilterBody(), "FilterAdmin");
-        (await StatusAsync(await VirtualFilterEndpoints.PutFilterAsync("filter_nohash", createContext, approvalService), createContext)).ShouldBe(StatusCodes.Status200OK);
-
-        var approve = Context(Tenant, null, "GovernanceAdmin");
-        var sec = (SecurityPrincipalContext)approve.Items[SecurityPrincipalContext.ItemKey]!;
-        approve.Items[SecurityPrincipalContext.ItemKey] = sec with { UserSid = new Sid("S-1-5-21-SUPERVISOR") };
-
-        var status = await StatusAsync(await VirtualFilterEndpoints.ApproveFilterAsync("filter_nohash", approve, approvalService), approve);
-
-        status.ShouldBe(StatusCodes.Status400BadRequest);
-        approve.Response.Body.Position = 0;
-        new StreamReader(approve.Response.Body).ReadToEnd().ShouldContain("The expected hash is required.");
-        (await _repository.LoadSnapshotAsync()).Filters.Single().Status.ShouldBe(FilterApprovalStatus.PendingApproval);
-    }
-
-    [Fact]
-    public async Task ConfigSyncStatus_WithPendingApproval_ReturnsPendingApprovalStatus()
-    {
-        // SR15-47: Dynamic status reporting based on filter states
-        var approvalOptions = Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } });
-        var approvalService = new VirtualFilterAdministrationService(_repository, Substitute.For<IAuditLogRepository>(), approvalOptions);
-
-        var createContext = Context(Tenant, DavidFilterBody(), "FilterAdmin");
-        await VirtualFilterEndpoints.PutFilterAsync("filter_pending", createContext, approvalService);
-
-        var context = Context(Tenant, null, "GovernanceAdmin");
-        var result = await VirtualFilterEndpoints.ConfigSyncStatusAsync(context, approvalService);
-        await StatusAsync(result, context);
-
-        context.Response.Body.Position = 0;
-        using var doc = await JsonDocument.ParseAsync(context.Response.Body);
-        doc.RootElement.GetProperty("status").GetString().ShouldBe("PendingApproval");
+        createContext.Response.Body.Position = 0;
+        using var doc = await JsonDocument.ParseAsync(createContext.Response.Body);
+        doc.RootElement.GetProperty("status").GetString().ShouldBe("Active");
+        doc.RootElement.TryGetProperty("pending_hash", out _).ShouldBeFalse();
+        (await _repository.LoadSnapshotAsync()).Filters.ShouldHaveSingleItem().Status.ShouldBe(FilterApprovalStatus.Active);
     }
 
     [Fact]
@@ -459,7 +400,7 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
 
     private async Task<(int Status, string Body)> PutBindingAsync(object binding, Action<IServiceCollection>? configure = null)
     {
-        var context = Context(Tenant, BindingProfile(binding), "FilterAdmin");
+        var context = Context(Tenant, BindingProfile(binding), "GovernanceAdmin");
         var status = await StatusAsync(await VirtualFilterEndpoints.PutProfileAsync("david", context, ServiceWith(configure)), context);
         context.Response.Body.Position = 0;
         return (status, await new StreamReader(context.Response.Body).ReadToEndAsync());
@@ -669,7 +610,7 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
             uncovered = value,
             bindings = new[] { new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id" } }
         };
-        var context = Context(Tenant, body, "FilterAdmin");
+        var context = Context(Tenant, body, "GovernanceAdmin");
 
         (await StatusAsync(await VirtualFilterEndpoints.PutProfileAsync("david", context, ServiceWith(null)), context)).ShouldBe(StatusCodes.Status200OK);
         (await _repository.LoadSnapshotAsync()).Profiles.ShouldHaveSingleItem().Uncovered.ShouldBe(expected);
@@ -689,7 +630,7 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
             uncovered = value,
             bindings = new[] { new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id" } }
         };
-        var context = Context(Tenant, body, "FilterAdmin");
+        var context = Context(Tenant, body, "GovernanceAdmin");
 
         (await StatusAsync(await VirtualFilterEndpoints.PutProfileAsync("david", context, ServiceWith(null)), context)).ShouldBe(StatusCodes.Status400BadRequest);
         context.Response.Body.Position = 0;

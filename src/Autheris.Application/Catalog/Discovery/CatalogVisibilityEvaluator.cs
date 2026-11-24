@@ -37,7 +37,7 @@ public interface ICatalogVisibilityEvaluator
         TableMetadata table, TenantId tenantId, IConsentRepository? consentRepository, CancellationToken ct = default);
     ValueTask<UserHiddenVisibility> EvaluateUserHiddenVisibilityAsync(
         ClaimsPrincipal user, TenantId tenantId, IReadOnlyList<TableMetadata> candidates, bool includeHiddenColumns,
-        IDataOwnershipRepository? ownershipRepository, CancellationToken ct = default);
+        Autheris.Application.Governance.Ownership.IContainerOwnership? ownershipRepository, CancellationToken ct = default);
     Task<IReadOnlyList<TableMetadata>> LoadActiveTablesAsync(
         ITableMetadataRepository metadataRepository, ICatalogSnapshotProvider? snapshotProvider,
         string? domainFilter = null, string? schemaFilter = null, CancellationToken ct = default);
@@ -107,7 +107,7 @@ public sealed class CatalogVisibilityEvaluator : ICatalogVisibilityEvaluator
 
     public async ValueTask<UserHiddenVisibility> EvaluateUserHiddenVisibilityAsync(
         ClaimsPrincipal user, TenantId tenantId, IReadOnlyList<TableMetadata> candidates, bool includeHiddenColumns,
-        IDataOwnershipRepository? ownershipRepository, CancellationToken ct = default)
+        Autheris.Application.Governance.Ownership.IContainerOwnership? ownershipRepository, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(user);
         ArgumentNullException.ThrowIfNull(candidates);

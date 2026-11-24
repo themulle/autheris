@@ -98,7 +98,7 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
 
             // 10 SecuritySwitchReport (reports, never throws on its own)
             Dev("SecuritySwitchReport_WebSqlBypassFlag", ("Insecure:danger_bypass_websql_governance", "true")),
-            Prod("SecuritySwitchReport_WarnFlagsAndVirtualFilters", ("Insecure:warn_allow_all_cors_origins", "true"), ("AllowInsecureWarnFlagsInProduction", "true"), ("VirtualFilters:RequireApproval", "false")),
+            Prod("SecuritySwitchReport_WarnFlagsAndVirtualFilters", ("Insecure:warn_allow_all_cors_origins", "true"), ("AllowInsecureWarnFlagsInProduction", "true")),
 
             // 11 OperationalInvariants
             Prod("OperationalInvariants_QuickstartInProduction", ("Dev:Preset", "Quickstart")),
@@ -176,7 +176,7 @@ public sealed class GatewayStartupValidatorGoldenTests : IDisposable
         Dev("Warnings_DevelopmentCatalogDiscoveryDeprecated", ("Catalog:AllowAuthenticatedCatalogDiscovery", "true")),
         Dev("Warnings_DevelopmentDbtMappedDatabaseWithoutWebSqlMapping", ("Dbt:DatabaseMappings:sales", "pgdata"), ("WebSql:AllowedDataSources:0", "sales"), ("DataSources:Connections:pgdata:Provider", "PostgreSql"), ("DataSources:Connections:pgdata:ConnectionString", "Host=p;Database=p"), ("DataSources:Connections:pgdata:DefaultSchema", "public")),
         Prod("Warnings_ProductionDefault"),
-        Prod("Warnings_ProductionWarnFlags", ("Insecure:warn_allow_all_cors_origins", "true"), ("AllowInsecureWarnFlagsInProduction", "true"), ("VirtualFilters:RequireApproval", "false")),
+        Prod("Warnings_ProductionWarnFlags", ("Insecure:warn_allow_all_cors_origins", "true"), ("AllowInsecureWarnFlagsInProduction", "true")),
         Prod("Warnings_ProductionTenantCollisionLoggedCritical", ("Authentication:ForwardAuth:AllowedTenantIds:0", "Acme"), ("Authentication:ForwardAuth:AllowedTenantIds:1", "ACME")),
     ];
 

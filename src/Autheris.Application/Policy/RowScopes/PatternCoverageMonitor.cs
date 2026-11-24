@@ -1,3 +1,4 @@
+using Autheris.Application.Governance.Ownership;
 using System.Text.Json;
 using Autheris.Application.Catalog;
 using Autheris.Application.Common.Interfaces;
@@ -112,7 +113,7 @@ public sealed class PatternCoverageMonitor : BackgroundService
             }
 
             var catalogRepo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
-            var ownershipRepo = scope.ServiceProvider.GetRequiredService<IDataOwnershipRepository>();
+            var ownershipRepo = scope.ServiceProvider.GetRequiredService<IContainerOwnership>();
             var approvalRepo = scope.ServiceProvider.GetService<IConsentApprovalRepository>();
             var auditRepo = scope.ServiceProvider.GetService<IAuditLogRepository>();
             var profileAssignmentService = scope.ServiceProvider.GetService<IProfileAssignmentRequestService>();

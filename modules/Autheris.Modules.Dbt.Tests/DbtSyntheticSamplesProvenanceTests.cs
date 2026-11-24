@@ -1,5 +1,6 @@
 namespace Autheris.Modules.Dbt.Tests;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -346,7 +347,7 @@ public sealed class DbtSyntheticSamplesProvenanceTests
         public Task<AccessPolicyUpdateResult> UpdateAsync(TenantId tenant, TenantAccessPolicyUpdate update, int expectedVersion, Sid actor, CancellationToken ct = default) => throw new NotImplementedException();
     }
 
-    private sealed class AllowOwnershipRepo : IDataOwnershipRepository
+    private sealed class AllowOwnershipRepo : IContainerOwnership
     {
         public Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<DataOwner>>([]);
         public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default) => Task.FromResult(false);

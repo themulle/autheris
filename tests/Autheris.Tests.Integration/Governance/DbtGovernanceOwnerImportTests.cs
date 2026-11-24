@@ -147,9 +147,9 @@ public sealed class DbtGovernanceOwnerImportTests : IDisposable
     }
 
     [Fact]
-    public async Task Import_FlagOn_AssignsOwner_DescribeDatasetShowsDataOwner()
+    public async Task Import_FlagOn_AssignsOwner_DescribeDatasetShowsTheContainerOwnerNotTheImportedOwner()
     {
-        // Issue acceptance: an imported owner appears in describe_dataset.
+        // W3-12a: owner meta is stored but ownership is read from containers only.
         var result = await Import(Service(), Payload(_table, OwnerObj("S-1-5-21-5004", "Grace Hopper", "grace@corp.example")));
 
         result.Success.ShouldBeTrue();
@@ -158,14 +158,35 @@ public sealed class DbtGovernanceOwnerImportTests : IDisposable
         var gatewayOptions = new GatewayOptions();
         var catalogTables = Wp0.Tables(Wp0.Table(_table.Domain, _table.TableName, "Visible", ["id"]));
         var consents = Wp0.Consents(Wp0.Allow(_table, "S-USER", Wp0.TenantA, "id"));
+
+        // The real container ownership is wired: the table belongs to a container whose owner group is the only owner.
+        var stored = (await _repo.GetTableMetadataAsync(_table)).ShouldNotBeNull();
+        var ownerTables = new Autheris.Tests.Common.Fakes.InMemoryTableMetadataRepository(stored with { OwnerTenantId = Wp0.TenantA.Value });
+        var domains = new SingleContainerDomains(new ContainerDefaults(
+            new ContainerRef(ContainerKind.Domain, Guid.NewGuid()), new Sid(ContainerOwnerGroup), Autheris.Domain.Security.ProtectionClass.Internal, CatalogVisibilityMode.OnRequest));
+        var ownership = new Autheris.Application.Governance.Ownership.ContainerOwnership(ownerTables, domains);
+        var description = await DescribeAsync(catalogTables, consents, gatewayOptions, ownership);
+
+        description.DataOwner.ShouldBe(ContainerOwnerGroup);
+        description.DataOwner!.ShouldNotContain("Grace Hopper");
+        description.DataOwner!.ShouldNotContain("S-1-5-21-5004");
+
+        // Without a container owner group the imported legacy owner does not surface either: the table simply has no owner.
+        var unassigned = new Autheris.Application.Governance.Ownership.ContainerOwnership(ownerTables, new SingleContainerDomains(ContainerDefaults.Unassigned));
+        (await DescribeAsync(catalogTables, consents, gatewayOptions, unassigned)).DataOwner.ShouldBeNull();
+    }
+
+    private const string ContainerOwnerGroup = "S-1-5-21-CONTAINER-OWNERS";
+
+    private Task<McpDatasetDescription> DescribeAsync(
+        ITableMetadataRepository catalogTables, IConsentRepository consents, GatewayOptions gatewayOptions,
+        Autheris.Application.Governance.Ownership.IContainerOwnership ownership)
+    {
         var mcp = new Autheris.Application.Mcp.Services.McpDatasetCatalog(
             catalogTables, consents, Substitute.For<Autheris.Application.Common.Interfaces.IGatewayExecutionService>(), Substitute.For<IAuditLogRepository>(),
-            options: Options.Create(gatewayOptions), dataOwnershipRepository: _repo,
+            options: Options.Create(gatewayOptions), dataOwnershipRepository: ownership,
             visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(catalogTables, consents, gatewayOptions, null));
-        var description = await mcp.DescribeDatasetAsync(Wp0.User("S-USER", "tenant-a"), $"{_table.Domain}.{_table.Schema}.{_table.TableName}");
-
-        description.DataOwner.ShouldNotBeNull();
-        description.DataOwner.ShouldContain("Grace Hopper");
+        return mcp.DescribeDatasetAsync(Wp0.User("S-USER", "tenant-a"), $"{_table.Domain}.{_table.Schema}.{_table.TableName}");
     }
 
     [Fact]
@@ -423,5 +444,26 @@ public sealed class DbtGovernanceOwnerImportTests : IDisposable
         await writer.DidNotReceiveWithAnyArgs().ApplyTableOwnerAssignmentsAsync(default!, default);
         OwnerAssignments().ShouldBe(0);
         Count("SELECT COUNT(*) FROM DATA_OWNERS").ShouldBe(0);
+    }
+
+    /// <summary>Every table of the tenant belongs to one container.</summary>
+    private sealed class SingleContainerDomains(ContainerDefaults container) : IGovernanceDomainRepository
+    {
+        public Task<ContainerDefaults> GetContainerForTableAsync(TenantId tenant, Guid tableId, CancellationToken ct = default) => Task.FromResult(container);
+
+        public Task<IReadOnlyDictionary<Guid, ContainerDefaults>> GetContainersForTablesAsync(TenantId tenant, IReadOnlyCollection<Guid> tableIds, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyDictionary<Guid, ContainerDefaults>>(tableIds.ToDictionary(id => id, _ => container));
+
+        public Task<GovernanceDomain?> GetAsync(TenantId tenant, Guid domainId, CancellationToken ct = default) => Task.FromResult<GovernanceDomain?>(null);
+        public Task<IReadOnlyList<GovernanceDomain>> ListAsync(TenantId tenant, int limit = 100, int offset = 0, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<GovernanceDomainUpsertResult> UpsertAsync(GovernanceDomain domain, int expectedVersion, Sid actor, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<bool> DeleteAsync(TenantId tenant, Guid domainId, int expectedVersion, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<GovernanceDomain> EnsureUnassignedAsync(TenantId tenant, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task AssignTablesAsync(TenantId tenant, Guid domainId, IReadOnlyList<Guid> tableIds, Sid actor, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<(ObjectProtection? Table, IReadOnlyDictionary<string, ObjectProtection> Columns)> GetProtectionAsync(TenantId tenant, Guid tableId, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+        public Task SetProtectionAsync(TenantId tenant, Guid tableId, string column, ObjectProtection protection, Sid actor, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task SetTableProtectionAsync(TenantId tenant, Guid tableId, ObjectProtection protection, IReadOnlyList<string>? clearColumns, Sid actor, CancellationToken ct = default) =>
+            throw new NotSupportedException();
     }
 }

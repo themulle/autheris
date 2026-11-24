@@ -1,3 +1,4 @@
+using Autheris.Application.Governance.Ownership;
 using Autheris.Domain.Security;
 using System.Security.Claims;
 using Autheris.Api.Endpoints;
@@ -166,7 +167,7 @@ public sealed class PagingTests : IDisposable
 
     // ---- endpoints -------------------------------------------------------------------------------------------------------------
 
-    private static DefaultHttpContext Ctx(string role, string tenant = "t1", IDataOwnershipRepository? owners = null)
+    private static DefaultHttpContext Ctx(string role, string tenant = "t1", IContainerOwnership? owners = null)
     {
         var services = new ServiceCollection();
         if (owners != null) services.AddSingleton(owners);
@@ -232,7 +233,7 @@ public sealed class PagingTests : IDisposable
     public async Task SEC_SC_16_AuditPage_NonPrivilegedCaller_IsForbidden_AndDataOwnerNeedsAnOwnedTable()
     {
         var repo = Substitute.For<IAuditLogRepository>();
-        var owners = Substitute.For<IDataOwnershipRepository>();
+        var owners = Substitute.For<IContainerOwnership>();
         owners.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>()).Returns(false);
 
         StatusOf(await GovernanceEndpoints.ListAuditPageAsync(Ctx("Consumer"), repo, null, null, null, null, null, null)).ShouldBe(403);

@@ -1,5 +1,6 @@
 namespace Autheris.Api.Extensions.DependencyInjection;
 
+using Autheris.Application.Governance.Ownership;
 using Autheris.Application.Catalog;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Localization;
@@ -122,7 +123,7 @@ public static class GatewayCatalogServiceExtensions
                 sp.GetService<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>(),
                 sp.GetService<IConsentRepository>(),
                 sp.GetService<IConsentApprovalRepository>(),
-                sp.GetService<IDataOwnershipRepository>(),
+                sp.GetService<IContainerOwnership>(),
                 sp.GetService<Autheris.Application.Catalog.Discovery.IDiscoveryArtifactStore>(),
                 sp.GetService<Autheris.Application.Audit.IAuditWriter>(),
                 sp.GetRequiredService<IOptions<GatewayOptions>>(),
@@ -199,7 +200,7 @@ public static class GatewayCatalogServiceExtensions
             sp.GetRequiredService<ITableMetadataRepository>(),
             sp.GetRequiredService<Autheris.Application.Catalog.Discovery.IDiscoveryService>(),
             sp.GetRequiredService<IConsentRepository>(),
-            sp.GetRequiredService<IDataOwnershipRepository>(),
+            sp.GetRequiredService<IContainerOwnership>(),
             sp.GetRequiredService<Autheris.Application.ConsentRequests.IConsentWorkflowConfigRepository>(),
             sp.GetRequiredService<Autheris.Application.Catalog.External.ICatalogChangeStore>(),
             sp.GetRequiredService<IOptions<GatewayOptions>>(),

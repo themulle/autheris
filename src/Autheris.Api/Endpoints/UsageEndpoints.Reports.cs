@@ -1,5 +1,6 @@
 namespace Autheris.Api.Endpoints;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Security.Claims;
@@ -368,7 +369,7 @@ public static partial class UsageEndpoints
                 return ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, "Usage report for this table requires UsageAdmin or table ownership.", httpContext);
             }
 
-            var ownershipRepo = httpContext.RequestServices?.GetService<IDataOwnershipRepository>();
+            var ownershipRepo = httpContext.RequestServices?.GetService<IContainerOwnership>();
             if (ownershipRepo is null
                 || !await ownershipRepo.IsAuthorizedApproverForTableAsync(parsedTable, secContext.UserSid, ct).ConfigureAwait(false))
             {
@@ -547,7 +548,7 @@ public static partial class UsageEndpoints
             return false;
         }
 
-        var ownershipRepo = httpContext.RequestServices?.GetService<IDataOwnershipRepository>();
+        var ownershipRepo = httpContext.RequestServices?.GetService<IContainerOwnership>();
         if (ownershipRepo is not null
             && await ownershipRepo.IsAuthorizedApproverForTableAsync(consent.TableIdentifier, secContext.UserSid, ct).ConfigureAwait(false))
         {

@@ -5,20 +5,11 @@ using System.Text;
 using System.Text.RegularExpressions;
 using Autheris.Domain.Common;
 
-/// <summary>Approval status for virtual filters and access profiles when RequireApproval is active.</summary>
+/// <summary>Status of a virtual filter or access profile; a save by a writer with the capacity activates it.</summary>
 public enum FilterApprovalStatus
 {
     Active = 0,
-    PendingApproval = 1,
     Rejected = 2
-}
-
-/// <summary>Why a virtual filter requires four-eyes approval instead of activating immediately.</summary>
-public enum VirtualFilterApprovalReason
-{
-    None = 0,
-    RequireApprovalOption = 1,
-    SqlDefinitionNeedsOwnerApproval = 2
 }
 
 /// <summary>What an object in a profile's scope that no binding covers means for the grantee.</summary>
@@ -95,6 +86,9 @@ public enum RowPolicyEvaluationMode
 /// A named, reusable virtual filter without reference to a protected table. It yields key values (and optionally a
 /// validity window) the protected object must match. It never grants access.
 /// </summary>
+/// <summary>A table referenced by a SQL virtual filter and the container key it was in when the filter was saved.</summary>
+public sealed record ReferencedTableContainer(string Table, string Container);
+
 public sealed record VirtualFilter
 {
     public Guid Id { get; init; } = Guid.NewGuid();
@@ -148,6 +142,12 @@ public sealed record VirtualFilter
     public bool PendingDeletion { get; init; } = false;
     public Sid? DeletionRequestedBy { get; init; }
     public VirtualFilter? Draft { get; init; }
+
+    /// <summary>
+    /// Tables a SQL definition references with the governance container (and its owner group) each was in when the filter was saved.
+    /// The filter is only enforced while every table is still in the recorded container; otherwise it is inactive until re-saved.
+    /// </summary>
+    public IReadOnlyList<ReferencedTableContainer> ReferencedContainers { get; init; } = [];
 
     /// <summary>Hash stored with the row (set by the repository); differs from <see cref="ComputeDefinitionHash"/> after a write outside Autheris.</summary>
     public string? StoredDefinitionHash { get; init; }

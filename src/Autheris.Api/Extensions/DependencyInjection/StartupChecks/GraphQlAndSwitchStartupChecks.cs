@@ -136,11 +136,6 @@ internal static class GraphQlAndSwitchStartupChecks
         }
 
         GatewayStartupValidator.ReportTenancyAndCatalogSettings(options, logger);
-
-        if (!context.IsDevelopment && !options.VirtualFilters.RequireApproval)
-        {
-            Console.WriteLine("[Autheris] WARNING: VirtualFilters.RequireApproval is false outside Development. Four-eyes principle is recommended for production.");
-        }
     }
 
     internal static void OperationalInvariants(StartupCheckContext context)

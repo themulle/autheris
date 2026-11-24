@@ -27,7 +27,9 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
     private static readonly VirtualFilterActor Admin = new(
         new Sid("S-1-5-21-ADMIN"),
         IsSync: false,
-        Roles: new System.Collections.Generic.HashSet<string>([nameof(Autheris.Domain.Security.GatewayRole.GovernanceAdmin)], StringComparer.OrdinalIgnoreCase));
+        Roles: new System.Collections.Generic.HashSet<string>([nameof(Autheris.Domain.Security.GatewayRole.GovernanceAdmin)], StringComparer.OrdinalIgnoreCase),
+        Groups: [],
+        IsDataGovernance: true);
     private static readonly VirtualFilterActor Sync = new(new Sid("S-1-5-21-TALOS"), IsSync: true);
 
     private readonly PostgreSqlGovernanceRepository _repository = GovernanceTestDatabase.CreateRepository(
@@ -51,8 +53,12 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
 
     public void Dispose() => _repository.Dispose();
 
-    private Task AuditedAsync(string eventType) =>
-        _audit.Received().RecordAuditEventAsync(Arg.Is<AuditLogEntry>(e => e.EventType == eventType && e.TenantId == Tenant), Arg.Any<CancellationToken>());
+    /// <summary>The store wrote the entry in the transaction of the change (never through the separate audit repository).</summary>
+    private async Task AuditedAsync(string eventType)
+    {
+        (await _repository.GetAuditLogEntriesAsync(500, Tenant)).ShouldContain(e => e.EventType == eventType);
+        await _audit.DidNotReceive().RecordAuditEventAsync(Arg.Is<AuditLogEntry>(e => e.EventType == eventType), Arg.Any<CancellationToken>());
+    }
 
     [Fact]
     public async Task CreateFilterAndProfile_AreStoredAndAudited()
@@ -76,11 +82,51 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
 
         await _service.SaveFilterAsync(changed, Admin);
 
-        await _audit.Received().RecordAuditEventAsync(
-            Arg.Is<AuditLogEntry>(e => e.EventType == "VIRTUAL_FILTER_UPDATED" &&
-                                       e.DetailsJson.Contains(original.ComputeDefinitionHash()) &&
-                                       e.DetailsJson.Contains(changed.ComputeDefinitionHash())),
-            Arg.Any<CancellationToken>());
+        (await _repository.GetAuditLogEntriesAsync(500, Tenant)).ShouldContain(e =>
+            e.EventType == "VIRTUAL_FILTER_UPDATED" &&
+            e.DetailsJson.Contains(original.ComputeDefinitionHash()) &&
+            e.DetailsJson.Contains(changed.ComputeDefinitionHash()));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Deletes_are_audited_in_the_transaction_of_the_write()
+    {
+        await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("only_filter"), Admin);
+
+        await _service.DeleteFilterAsync(Tenant, "only_filter", Admin);
+
+        (await _repository.LoadSnapshotAsync()).Filters.ShouldBeEmpty();
+        await AuditedAsync("VIRTUAL_FILTER_DELETED");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task A_conflicting_change_leaves_no_audit_entry()
+    {
+        await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("conflict_filter"), Admin);
+        var stale = await _repository.LoadSnapshotAsync();
+        await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter("bump"), Admin);
+        var entry = new AuditLogEntry
+        {
+            TenantId = Tenant,
+            EventType = "VIRTUAL_FILTER_DELETED_STALE",
+            ActorSid = Admin.Sid,
+            TargetTable = "virtual_filter:conflict_filter",
+            Decision = "ALLOW",
+            TraceId = string.Empty,
+            DetailsJson = "{}"
+        };
+
+        await Should.ThrowAsync<VirtualFilterConflictException>(() => _repository.ApplyAsync(new VirtualFilterChangeSet
+        {
+            DeleteFilters = [(Tenant, "conflict_filter")],
+            AuditEntries = [entry],
+            ExpectedGeneration = stale.Generation
+        }));
+
+        (await _repository.LoadSnapshotAsync()).Filters.ShouldContain(f => f.Name == "conflict_filter");
+        (await _repository.GetAuditLogEntriesAsync(500, Tenant)).ShouldNotContain(e => e.EventType == "VIRTUAL_FILTER_DELETED_STALE");
     }
 
     [Fact]
@@ -372,38 +418,15 @@ public sealed class VirtualFilterAdministrationServiceTests : IDisposable
     }
 
     [Fact]
-    public async Task SaveFilter_WithRequireApproval_RequiresDistinctApprover()
+    public async Task SaveFilter_ByWriterWithCapacity_ActivatesOnSave()
     {
-        var serviceWithApproval = new VirtualFilterAdministrationService(_repository, _audit,
-            Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } }));
-
         var creatorActor = new VirtualFilterActor(new Sid("S-1-5-21-CREATOR"), IsSync: false);
-        var approverActor = new VirtualFilterActor(new Sid("S-1-5-21-APPROVER"), IsSync: false);
 
-        var filter = Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter();
-        var saved = await serviceWithApproval.SaveFilterAsync(filter, creatorActor);
-        saved.Status.ShouldBe(FilterApprovalStatus.PendingApproval);
-        saved.ApprovedBy.ShouldBeNull();
+        var saved = await _service.SaveFilterAsync(Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter(), creatorActor);
 
-        // Self-approval must fail (four-eyes principle)
-        await Should.ThrowAsync<InvalidOperationException>(() =>
-            serviceWithApproval.ApproveFilterAsync(filter.TenantId, filter.Name, creatorActor, VirtualFilterAdministrationService.PendingHash(saved)));
-
-        // Distinct approver succeeds
-        var approved = await serviceWithApproval.ApproveFilterAsync(filter.TenantId, filter.Name, approverActor, VirtualFilterAdministrationService.PendingHash(saved));
-        approved.Status.ShouldBe(FilterApprovalStatus.Active);
-        approved.ApprovedBy.ShouldBe(approverActor.Sid);
-    }
-
-    [Fact]
-    public async Task SaveFilter_WithRequireApproval_SyncActor_BypassesLocalApproval()
-    {
-        var serviceWithApproval = new VirtualFilterAdministrationService(_repository, _audit,
-            Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } }));
-
-        var result = await serviceWithApproval.ApplySyncAsync(Desired("c1", Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidFilter()), Sync);
-        result.ShouldNotBeNull();
-        (await _repository.LoadSnapshotAsync()).Filters.ShouldHaveSingleItem();
+        saved.Status.ShouldBe(FilterApprovalStatus.Active);
+        saved.Draft.ShouldBeNull();
+        saved.ApprovedBy.ShouldBe(creatorActor.Sid);
     }
 
     [Fact]

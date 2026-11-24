@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -44,10 +45,10 @@ public sealed class ProfileAssignmentApprovalOwnerTests
         Table = new Table { Id = Guid.NewGuid(), SourceName = db, SchemaName = schema, TableName = table }
     };
 
-    private static (DefaultHttpContext Context, IDataOwnershipRepository Owners, ITableMetadataRepository Tables, IAccessProfileRepository Profiles)
+    private static (DefaultHttpContext Context, IContainerOwnership Owners, ITableMetadataRepository Tables, IAccessProfileRepository Profiles)
         Setup(AccessProfile profile)
     {
-        var owners = Substitute.For<IDataOwnershipRepository>();
+        var owners = Substitute.For<IContainerOwnership>();
         var tables = Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(
             Substitute.For<ITableMetadataRepository>());
         var profiles = Substitute.For<IAccessProfileRepository>();

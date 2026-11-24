@@ -101,8 +101,8 @@ public sealed class CallerAttributeAdminEndpointTests : IDisposable
     [InlineData("Consumer")]
     [InlineData("ClusterAdmin")]
     [InlineData("FilterAdmin")]
-    [InlineData("CallerAttributeApprover")]
     [InlineData("SecurityAuditor")]
+    [InlineData("ItAdmin")]
     public async Task Put_WithoutGovernanceAdmin_Returns403_AndStoresNothing(string role)
     {
         var context = Context("alice", ClaimsBody(), roles: role);
@@ -111,24 +111,22 @@ public sealed class CallerAttributeAdminEndpointTests : IDisposable
     }
 
     [Fact]
-    public async Task FourEyes_Flow_ThroughTheApi()
+    [Trait("Category", "Security")]
+    public async Task It_admin_refused()
+    {
+        var context = Context("alice", ClaimsBody(), roles: "ItAdmin");
+        (await Run(await CallerAttributeAdminEndpoints.PutDefinitionAsync("cost_center", context, _service), context)).Status.ShouldBe(StatusCodes.Status403Forbidden);
+        (await _store.LoadCallerAttributeSnapshotAsync()).Attributes.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task SingleApproval_Flow_ThroughTheApi_AppliesAtOnce()
     {
         var put = Context("alice", ClaimsBody(), roles: "GovernanceAdmin");
         var (status, body) = await Run(await CallerAttributeAdminEndpoints.PutDefinitionAsync("cost_center", put, _service), put);
-        status.ShouldBe(StatusCodes.Status202Accepted);
-        var hash = HashOf(body);
 
-        var self = Context("alice", query: $"?hash={hash}", roles: "GovernanceAdmin");
-        (await Run(await CallerAttributeAdminEndpoints.ApproveDefinitionAsync("cost_center", self, _service), self)).Status.ShouldBe(StatusCodes.Status409Conflict);
-
-        var stale = Context("bob", query: "?hash=stale", roles: "GovernanceAdmin");
-        (await Run(await CallerAttributeAdminEndpoints.ApproveDefinitionAsync("cost_center", stale, _service), stale)).Status.ShouldBe(StatusCodes.Status409Conflict);
-
-        var missing = Context("bob", roles: "GovernanceAdmin");
-        (await Run(await CallerAttributeAdminEndpoints.ApproveDefinitionAsync("cost_center", missing, _service), missing)).Status.ShouldBe(StatusCodes.Status400BadRequest);
-
-        var ok = Context("bob", query: $"?hash={hash}", roles: "GovernanceAdmin");
-        (await Run(await CallerAttributeAdminEndpoints.ApproveDefinitionAsync("cost_center", ok, _service), ok)).Status.ShouldBe(StatusCodes.Status200OK);
+        status.ShouldBe(StatusCodes.Status200OK);
+        JsonDocument.Parse(body).RootElement.GetProperty("status").GetString().ShouldBe("Active");
         (await _registry.GetAsync(default)).TryGetDefinition(new TenantId(Tenant), "cost_center", out _).ShouldBeTrue();
     }
 
@@ -158,7 +156,7 @@ public sealed class CallerAttributeAdminEndpointTests : IDisposable
         var bareCluster = Context("alice", ClaimsBody(tenant: "tenant_b"), roles: "ClusterAdmin");
         (await Run(await CallerAttributeAdminEndpoints.PutDefinitionAsync("cost_center", bareCluster, _service), bareCluster)).Status.ShouldBe(StatusCodes.Status403Forbidden);
         var cluster = Context("alice", ClaimsBody(tenant: "tenant_b"), roles: ["ClusterAdmin", "GovernanceAdmin"]);
-        (await Run(await CallerAttributeAdminEndpoints.PutDefinitionAsync("cost_center", cluster, _service), cluster)).Status.ShouldBe(StatusCodes.Status202Accepted);
+        (await Run(await CallerAttributeAdminEndpoints.PutDefinitionAsync("cost_center", cluster, _service), cluster)).Status.ShouldBe(StatusCodes.Status200OK);
     }
 
     [Fact]
@@ -183,25 +181,20 @@ public sealed class CallerAttributeAdminEndpointTests : IDisposable
     [Fact]
     public async Task ServiceSet_Flow_ThroughTheApi_NeedsAnActiveAttribute_AndNeverReturnsValues()
     {
-        var early = Context("alice", new { application_id = "app-1", attribute = "cost_center", values = new[] { "secret-1" } }, roles: "GovernanceAdmin");
+        var early = Context("alice", new { application_id = "app-1", attribute = "cost_center", values = new[] { "secret-1" } }, roles: ["GovernanceAdmin", "CallerAttributeApprover"]);
         (await Run(await CallerAttributeAdminEndpoints.PutServiceSetAsync(early, _service), early)).Status.ShouldBe(StatusCodes.Status400BadRequest);
 
         var put = Context("alice", ClaimsBody(), roles: "GovernanceAdmin");
-        var hash = HashOf((await Run(await CallerAttributeAdminEndpoints.PutDefinitionAsync("cost_center", put, _service), put)).Body);
-        var approve = Context("bob", query: $"?hash={hash}", roles: "GovernanceAdmin");
-        await Run(await CallerAttributeAdminEndpoints.ApproveDefinitionAsync("cost_center", approve, _service), approve);
+        await Run(await CallerAttributeAdminEndpoints.PutDefinitionAsync("cost_center", put, _service), put);
 
-        var putSet = Context("alice", new { application_id = "app-1", attribute = "cost_center", values = new[] { "secret-1" } }, roles: "GovernanceAdmin");
-        var (status, body) = await Run(await CallerAttributeAdminEndpoints.PutServiceSetAsync(putSet, _service), putSet);
-        status.ShouldBe(StatusCodes.Status202Accepted);
-        var setHash = HashOf(body);
+        // a service set needs the approver role
+        var noRole = Context("alice", new { application_id = "app-1", attribute = "cost_center", values = new[] { "secret-1" } }, roles: "GovernanceAdmin");
+        (await Run(await CallerAttributeAdminEndpoints.PutServiceSetAsync(noRole, _service), noRole)).Status.ShouldBe(StatusCodes.Status403Forbidden);
 
-        // a service set needs the separate approver role
-        var noRole = Context("bob", new { application_id = "app-1", attribute = "cost_center", hash = setHash }, roles: "GovernanceAdmin");
-        (await Run(await CallerAttributeAdminEndpoints.ApproveServiceSetAsync(noRole, _service), noRole)).Status.ShouldBe(StatusCodes.Status403Forbidden);
-
-        var approver = Context("bob", new { application_id = "app-1", attribute = "cost_center", hash = setHash }, roles: ["GovernanceAdmin", "CallerAttributeApprover"]);
-        (await Run(await CallerAttributeAdminEndpoints.ApproveServiceSetAsync(approver, _service), approver)).Status.ShouldBe(StatusCodes.Status200OK);
+        var approver = Context("bob", new { application_id = "app-1", attribute = "cost_center", values = new[] { "secret-1" } }, roles: ["GovernanceAdmin", "CallerAttributeApprover"]);
+        var (status, body) = await Run(await CallerAttributeAdminEndpoints.PutServiceSetAsync(approver, _service), approver);
+        status.ShouldBe(StatusCodes.Status200OK);
+        body.ShouldNotContain("secret-1");
 
         var list = Context("auditor", roles: "SecurityAuditor");
         var (listStatus, listBody) = await Run(await CallerAttributeAdminEndpoints.ListServiceSetsAsync(list, _service), list);
@@ -211,24 +204,18 @@ public sealed class CallerAttributeAdminEndpointTests : IDisposable
     }
 
     [Fact]
-    public async Task Delete_And_Reject_RequireGovernanceAdmin_AndAreFourEyes()
+    public async Task Delete_RequiresGovernanceAdminOrApprover_AndAppliesAtOnce()
     {
         var put = Context("alice", ClaimsBody(), roles: "GovernanceAdmin");
-        var hash = HashOf((await Run(await CallerAttributeAdminEndpoints.PutDefinitionAsync("cost_center", put, _service), put)).Body);
-        var approve = Context("bob", query: $"?hash={hash}", roles: "GovernanceAdmin");
-        await Run(await CallerAttributeAdminEndpoints.ApproveDefinitionAsync("cost_center", approve, _service), approve);
+        await Run(await CallerAttributeAdminEndpoints.PutDefinitionAsync("cost_center", put, _service), put);
 
         var denied = Context("carol", roles: "Consumer");
         (await Run(await CallerAttributeAdminEndpoints.DeleteDefinitionAsync("cost_center", denied, _service), denied)).Status.ShouldBe(StatusCodes.Status403Forbidden);
+        (await _registry.GetAsync(default)).TryGetDefinition(new TenantId(Tenant), "cost_center", out _).ShouldBeTrue();
 
         var del = Context("carol", roles: "GovernanceAdmin");
-        (await Run(await CallerAttributeAdminEndpoints.DeleteDefinitionAsync("cost_center", del, _service), del)).Status.ShouldBe(StatusCodes.Status202Accepted);
-        var selfApprove = Context("carol", query: $"?hash={hash}", roles: "GovernanceAdmin");
-        (await Run(await CallerAttributeAdminEndpoints.ApproveDefinitionAsync("cost_center", selfApprove, _service), selfApprove)).Status.ShouldBe(StatusCodes.Status409Conflict);
-
-        var reject = Context("bob", roles: "GovernanceAdmin");
-        (await Run(await CallerAttributeAdminEndpoints.RejectDefinitionAsync("cost_center", reject, _service), reject)).Status.ShouldBe(StatusCodes.Status200OK);
-        (await _registry.GetAsync(default)).TryGetDefinition(new TenantId(Tenant), "cost_center", out _).ShouldBeTrue();   // still active
+        (await Run(await CallerAttributeAdminEndpoints.DeleteDefinitionAsync("cost_center", del, _service), del)).Status.ShouldBe(StatusCodes.Status200OK);
+        (await _registry.GetAsync(default)).TryGetDefinition(new TenantId(Tenant), "cost_center", out _).ShouldBeFalse();
     }
 
     // ---- simulation ------------------------------------------------------------------------------------------------------------------

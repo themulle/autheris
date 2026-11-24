@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.GraphQL;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Security.Claims;
@@ -21,7 +22,7 @@ public sealed class TableConsumersSecurityTests
 {
     private readonly ILineageImpactAnalyzerService _lineageService = Substitute.For<ILineageImpactAnalyzerService>();
     private readonly IConsentRepository _consentRepo = Substitute.For<IConsentRepository>();
-    private readonly IDataOwnershipRepository _ownershipRepo = Substitute.For<IDataOwnershipRepository>();
+    private readonly IContainerOwnership _ownershipRepo = Substitute.For<IContainerOwnership>();
     private readonly Query _query = new();
 
     private static IHttpContextAccessor CreateAccessor(

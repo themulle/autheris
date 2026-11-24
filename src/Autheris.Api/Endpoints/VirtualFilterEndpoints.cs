@@ -26,8 +26,8 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Virtual filters (docs/plans/2026-10-08-umsetzungsplan-virtuelle-filter.md, phase 2): administration API.
-/// FilterAdmin maintains filters and access profiles, FilterSync applies the state of the file repository (Talos),
-/// GovernanceAdmin and SecurityAuditor read. Callers stay within their tenant; only ClusterAdmin acts across tenants.
+/// FilterAdmin maintains filters, Data Governance (GovernanceAdmin) alone maintains access profiles (declarative grants, decision D5),
+/// FilterSync applies the state of the file repository (Talos), GovernanceAdmin and SecurityAuditor read. Callers stay within their tenant; only ClusterAdmin acts across tenants.
 /// </summary>
 public static partial class VirtualFilterEndpoints
 {
@@ -44,19 +44,14 @@ public static partial class VirtualFilterEndpoints
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         group.MapPut("/virtual-filters/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => PutFilterAsync(name, context, service))
             .RequireAuthorization(GatewayPolicies.VirtualFilterWrite);
-        group.MapPost("/virtual-filters/{name}/approve", (string name, HttpContext context, VirtualFilterAdministrationService service) => ApproveFilterAsync(name, context, service))
-            .RequireAuthorization(GatewayPolicies.VirtualFilterApprove)
-            .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
         group.MapDelete("/virtual-filters/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => DeleteFilterAsync(name, context, service))
             .RequireAuthorization(GatewayPolicies.FilterAdmin)
             .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRevoked);
+        // Access profiles are declarative grants (decision D5): Data Governance only, FilterAdmin alone is not enough.
         group.MapPut("/access-profiles/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => PutProfileAsync(name, context, service))
-            .RequireAuthorization(GatewayPolicies.FilterAdmin);
-        group.MapPost("/access-profiles/{name}/approve", (string name, HttpContext context, VirtualFilterAdministrationService service) => ApproveProfileAsync(name, context, service))
-            .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
-            .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
+            .RequireAuthorization(GatewayPolicies.GovernanceAdmin);
         group.MapDelete("/access-profiles/{name}", (string name, HttpContext context, VirtualFilterAdministrationService service) => DeleteProfileAsync(name, context, service))
-            .RequireAuthorization(GatewayPolicies.FilterAdmin)
+            .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
             .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentRevoked);
         group.MapPost("/virtual-filters/sync/plan", (HttpContext context, VirtualFilterAdministrationService service) => PlanSyncAsync(context, service))
             .RequireAuthorization(GatewayPolicies.VirtualFilterSyncPlan);
@@ -183,8 +178,22 @@ public static partial class VirtualFilterEndpoints
             roles.Add(nameof(GatewayRole.GovernanceAdmin));
         }
 
-        var actor = new VirtualFilterActor(security.UserSid, IsSync: false, context.User?.GetUserIdentifiers(), roles);
+        // Groups feed the self-widening check; unknown when the group resolution is degraded (the service then refuses what it cannot verify).
+        var groups = security.GroupResolutionStatus == Autheris.Domain.Identity.GroupResolutionStatus.Complete
+            ? security.GroupSids.Select(g => g.Value).ToArray()
+            : null;
+        var actor = new VirtualFilterActor(security.UserSid, IsSync: false, context.User?.GetUserIdentifiers(), roles, groups);
         return await MapErrorsAsync(() => action(security, actor), context).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// The tenant-bound Data Governance capacity of the caller for <paramref name="tenant"/>; false when it cannot be established (no
+    /// capability service, unauthenticated, invalid tenant claim or a role that is not valid for the tenant).
+    /// </summary>
+    private static bool IsDataGovernance(HttpContext context, SecurityPrincipalContext security, TenantId tenant)
+    {
+        var capabilities = context.RequestServices.GetService<IGovernanceCapabilities>();
+        return capabilities is not null && !security.TenantClaimInvalid && capabilities.IsGovernance(context.User, tenant);
     }
 
     private static async Task<IResult> AuditDeniedAsync(HttpContext context, SecurityPrincipalContext security, GatewayRole requiredRole)
@@ -212,6 +221,13 @@ public static partial class VirtualFilterEndpoints
         catch (UnauthorizedAccessException)
         {
             return Forbidden();
+        }
+        catch (Autheris.Application.Governance.SingleApproval.SingleApprovalRefusedException ex)
+        {
+            // A refused single approval is the caller's limit (self-widening), never a server fault; the detail is fixed per code.
+            return ex.Code == "AuditFailed"
+                ? Problem(context, ex, StatusCodes.Status503ServiceUnavailable, ApiErrorCodes.ServiceUnavailable, "The change could not be audited and was not applied.")
+                : Problem(context, ex, StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied, "The change would grant or widen access for the writer and was refused.");
         }
         catch (ManagedResourceLockedException ex)
         {

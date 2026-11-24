@@ -1,5 +1,6 @@
 namespace Autheris.Application.Policy;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -108,7 +109,7 @@ public sealed partial class TableAccessPolicy
     private readonly Autheris.Application.Audit.IAuditWriter? _auditWriter;
     private readonly Autheris.Application.Policy.RowScopes.RowScopeCompiler? _rowScopeCompiler;
     private readonly Autheris.Application.Catalog.ICatalogVersionProvider? _catalogVersionProvider;
-    private readonly IDataOwnershipRepository? _ownershipRepository;
+    private readonly IContainerOwnership? _ownershipRepository;
     private readonly Autheris.Application.Policy.Classification.ClassificationAccessResolver? _classificationResolver;
     private readonly IProtectionSnapshotProvider? _protectionProvider;
     private readonly Autheris.Application.Policy.Protection.IUnmaskGrantResolver? _unmaskResolver;
@@ -138,7 +139,7 @@ public sealed partial class TableAccessPolicy
         Autheris.Application.Audit.IAuditWriter? auditWriter = null,
         Autheris.Application.Policy.RowScopes.RowScopeCompiler? rowScopeCompiler = null,
         Autheris.Application.Catalog.ICatalogVersionProvider? catalogVersionProvider = null,
-        IDataOwnershipRepository? ownershipRepository = null,
+        IContainerOwnership? ownershipRepository = null,
         TimeProvider? timeProvider = null,
         Autheris.Application.Policy.Classification.ClassificationAccessResolver? classificationResolver = null,
         IProtectionSnapshotProvider? protectionProvider = null,

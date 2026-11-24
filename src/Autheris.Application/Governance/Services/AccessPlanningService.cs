@@ -1,5 +1,6 @@
 namespace Autheris.Application.Governance.Services;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Buffers.Text;
 using System.Collections.Generic;
@@ -56,7 +57,7 @@ public class AccessPlanningService : IAccessPlanningService
     private readonly ITotpSecretStore? _totpSecretStore;
     private readonly IKeyVaultSecretProvider? _secretProvider;
     private readonly IPolicyEpochRepository? _policyEpochRepo;
-    private readonly IDataOwnershipRepository? _dataOwnershipRepo;
+    private readonly IContainerOwnership? _dataOwnershipRepo;
     private readonly ILogger<AccessPlanningService> _logger;
     private readonly IGatewayEventBus? _eventBus;
     private readonly AccessPlanOptions _planOptions;
@@ -159,7 +160,7 @@ public class AccessPlanningService : IAccessPlanningService
         ITotpSecretStore? totpSecretStore = null,
         IKeyVaultSecretProvider? secretProvider = null,
         IPolicyEpochRepository? policyEpochRepository = null,
-        IDataOwnershipRepository? dataOwnershipRepository = null,
+        IContainerOwnership? dataOwnershipRepository = null,
         IOptions<GatewayOptions>? options = null,
         ILogger<AccessPlanningService>? logger = null,
         IGatewayEventBus? eventBus = null,

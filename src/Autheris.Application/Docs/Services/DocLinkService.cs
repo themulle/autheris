@@ -1,5 +1,6 @@
 namespace Autheris.Application.Docs.Services;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -45,7 +46,7 @@ public interface IDocLinkService
 public sealed class DocLinkService : IDocLinkService
 {
     private readonly ITableMetadataRepository _metadata;
-    private readonly IDataOwnershipRepository _owners;
+    private readonly IContainerOwnership _owners;
     private readonly IDocLinkRepository _links;
     private readonly IDocumentRepository _documents;
     private readonly IAuditWriter _audit;
@@ -55,7 +56,7 @@ public sealed class DocLinkService : IDocLinkService
 
     public DocLinkService(
         ITableMetadataRepository metadata,
-        IDataOwnershipRepository owners,
+        IContainerOwnership owners,
         IDocLinkRepository links,
         IDocumentRepository documents,
         IAuditWriter audit,

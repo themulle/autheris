@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Application.Governance.Ownership;
 using Autheris.Tests.Common;
 using Autheris.Tests.Common.Fakes;
 using System;
@@ -149,7 +150,7 @@ public sealed class AccessPlanBindingAndBoundsTests
     [Fact]
     public async Task ResolvePrincipal_NonDevelopment_DoesNotReturnDemoDirectory()
     {
-        var ownership = Substitute.For<IDataOwnershipRepository>();
+        var ownership = Substitute.For<IContainerOwnership>();
         IHostEnvironment prod = new TestHostEnvironment("Production");
         var service = new AccessPlanningService(
             global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(_audit), dataOwnershipRepository: ownership, hostEnvironment: prod, timeProvider: _time);

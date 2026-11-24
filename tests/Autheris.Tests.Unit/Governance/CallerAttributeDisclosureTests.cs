@@ -1,3 +1,4 @@
+using Autheris.Application.Governance.Ownership;
 using Autheris.Tests.Unit.TestSupport;
 using System;
 using System.Collections.Generic;
@@ -37,7 +38,7 @@ public sealed class CallerAttributeDisclosureTests
         var resolution = Substitute.For<IConsentResolutionService>();
         resolution.ResolveAccess(Arg.Any<Sid>(), Arg.Any<IReadOnlySet<Sid>>(), Arg.Any<IReadOnlySet<string>>(), Arg.Any<TableIdentifier>(),
             Arg.Any<IReadOnlyList<Consent>>(), Arg.Any<DatabaseDialect>(), Arg.Any<IReadOnlySet<Sid>?>(), Arg.Any<IReadOnlySet<string>?>()).Returns(decision);
-        var ownership = Substitute.For<IDataOwnershipRepository>();
+        var ownership = Substitute.For<IContainerOwnership>();
         ownership.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>()).Returns(owner);
         return new EffectiveAccessExplanationService(tableRepo, consentRepo, resolution, ownership,
             Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Tenancy = new Autheris.Domain.Options.TenancyOptions { DefaultTenantId = "default-tenant" } }));

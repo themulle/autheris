@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Governance.Classification;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -115,7 +116,7 @@ public sealed class ClassificationGrantWriteTests
         var metadata = Substitute.For<ITableMetadataRepository>();
         metadata.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>()).Returns(Table());
 
-        var ownership = Substitute.For<IDataOwnershipRepository>();
+        var ownership = Substitute.For<IContainerOwnership>();
         ownership.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>())
             .Returns(call => call.ArgAt<Sid>(1) == Owner1 || call.ArgAt<Sid>(1) == Owner2 || call.ArgAt<Sid>(1) == OwnerSteward);
 

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Governance.Classification;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Linq;
 using System.Threading;
@@ -37,7 +38,7 @@ public sealed class ClassificationAdminAuthorizationTests
         var store = new TestInMemoryClassificationStore(TenantA.Value);
         store.ColumnTables[ColumnId] = Customers;
 
-        var ownership = Substitute.For<IDataOwnershipRepository>();
+        var ownership = Substitute.For<IContainerOwnership>();
         ownership.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>())
             .Returns(call => call.ArgAt<Sid>(1).Value == "S-1-OWNER");
 

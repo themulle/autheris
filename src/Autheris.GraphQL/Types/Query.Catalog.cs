@@ -1,3 +1,4 @@
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -127,8 +128,9 @@ public sealed partial class Query
         IHttpContextAccessor httpContextAccessor,
         IOptions<GatewayOptions>? options = null,
         Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? visibilityService = null,
+        IContainerOwnership? containerOwnership = null,
         CancellationToken ct = default)
-        => GetCatalogAsync(domain: null, first: null, after: null, search: null, tag: null, metadataRepository: repository, consentRepository: repository, approvalRepository: repository, dataOwnershipRepository: repository, httpContextAccessor: httpContextAccessor, options: options, visibilityService: visibilityService, language: null, languageNegotiator: null, localizationOptions: null, ct: ct);
+        => GetCatalogAsync(domain: null, first: null, after: null, search: null, tag: null, metadataRepository: repository, consentRepository: repository, approvalRepository: repository, dataOwnershipRepository: containerOwnership, httpContextAccessor: httpContextAccessor, options: options, visibilityService: visibilityService, language: null, languageNegotiator: null, localizationOptions: null, ct: ct);
 
     [GraphQLIgnore]
     public Task<IReadOnlyList<TableMetadataDto>> GetCatalogAsync(
@@ -153,7 +155,7 @@ public sealed partial class Query
         [Service] ITableMetadataRepository metadataRepository = default!,
         [Service] IConsentRepository consentRepository = default!,
         [Service] IConsentApprovalRepository? approvalRepository = null,
-        [Service] IDataOwnershipRepository? dataOwnershipRepository = null,
+        [Service] IContainerOwnership? dataOwnershipRepository = null,
         [Service] IHttpContextAccessor httpContextAccessor = default!,
         [Service] IOptions<GatewayOptions>? options = null,
         [Service] Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? visibilityService = null,
@@ -682,7 +684,7 @@ public sealed partial class Query
         [Service] ILineageImpactAnalyzerService lineageService = null!,
         [Service] IHttpContextAccessor httpContextAccessor = null!,
         [Service] IConsentRepository? consentRepository = null,
-        [Service] IDataOwnershipRepository? ownershipRepository = null,
+        [Service] IContainerOwnership? ownershipRepository = null,
         HotChocolate.Resolvers.IResolverContext? resolverContext = null,
         CancellationToken ct = default)
     {

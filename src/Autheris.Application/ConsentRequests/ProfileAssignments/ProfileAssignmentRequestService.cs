@@ -1,5 +1,6 @@
 namespace Autheris.Application.ConsentRequests.ProfileAssignments;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -29,7 +30,7 @@ public sealed partial class ProfileAssignmentRequestService(
     IAccessProfileRepository profileRepository,
     ITableMetadataRepository metadataRepository,
     IConsentApprovalRepository approvalRepository,
-    IDataOwnershipRepository ownershipRepository,
+    IContainerOwnership ownershipRepository,
     IProfileAssignmentStore store,
     IProfileGrantMaterializer materializer,
     IGrantPolicy grantPolicy,
@@ -46,7 +47,7 @@ public sealed partial class ProfileAssignmentRequestService(
     private readonly IAccessProfileRepository _profileRepository = profileRepository ?? throw new ArgumentNullException(nameof(profileRepository));
     private readonly ITableMetadataRepository _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
     private readonly IConsentApprovalRepository _approvalRepository = approvalRepository ?? throw new ArgumentNullException(nameof(approvalRepository));
-    private readonly IDataOwnershipRepository _ownershipRepository = ownershipRepository ?? throw new ArgumentNullException(nameof(ownershipRepository));
+    private readonly IContainerOwnership _ownershipRepository = ownershipRepository ?? throw new ArgumentNullException(nameof(ownershipRepository));
     private readonly IProfileAssignmentStore _store = store ?? throw new ArgumentNullException(nameof(store));
     private readonly IProfileGrantMaterializer _materializer = materializer ?? throw new ArgumentNullException(nameof(materializer));
     private readonly IGrantPolicy _grantPolicy = grantPolicy ?? throw new ArgumentNullException(nameof(grantPolicy));
@@ -713,13 +714,16 @@ public sealed partial class ProfileAssignmentRequestService(
     {
         var rows = new List<ProfileAssignmentItemRow>();
         var seen = new HashSet<(int ItemNo, string OwnerSid)>();
+        var matchedByItem = items.Select(item => (Item: item, Tables: ProfileGrantMaterializer.MatchTablesForItem(item, tenantTables))).ToList();
+        // One set-based owner read for every matched table instead of one per table.
+        var ownersByTable = await _ownershipRepository.GetDataOwnersForTablesAsync(
+            matchedByItem.SelectMany(m => m.Tables).Select(t => t.Identifier).Distinct().ToList(), ct).ConfigureAwait(false);
 
-        foreach (var item in items)
+        foreach (var (item, matched) in matchedByItem)
         {
-            var matched = ProfileGrantMaterializer.MatchTablesForItem(item, tenantTables);
             foreach (var table in matched)
             {
-                var directOwners = await _ownershipRepository.GetDataOwnersForTableAsync(table.Identifier, ct).ConfigureAwait(false);
+                var directOwners = ownersByTable.TryGetValue(table.Identifier, out var known) ? known : [];
                 var activeDirectSids = directOwners
                     .Where(o => o.IsActive && !string.IsNullOrWhiteSpace(o.AdSid.Value))
                     .Select(o => o.AdSid.Value)
@@ -808,13 +812,15 @@ public sealed partial class ProfileAssignmentRequestService(
 
     private async Task<bool> IsAuthorizedForAnyMatchedTableAsync(ProfileAssignmentRequestContext snapshot, IReadOnlyList<TableMetadata> tenantTables, Sid actorSid, CancellationToken ct)
     {
-        foreach (var table in snapshot.Items.SelectMany(i => ProfileGrantMaterializer.MatchTablesForItem(i, tenantTables)).DistinctBy(t => t.Identifier))
+        var tables = snapshot.Items.SelectMany(i => ProfileGrantMaterializer.MatchTablesForItem(i, tenantTables)).Select(t => t.Identifier).Distinct().ToList();
+        if (tables.Count == 0)
         {
-            if (await _ownershipRepository.IsAuthorizedApproverForTableAsync(table.Identifier, actorSid, ct).ConfigureAwait(false))
-                return true;
+            return false;
         }
 
-        return false;
+        // One set-based ownership resolution for every matched table.
+        var owned = await _ownershipRepository.GetOwnedOrDelegatedTablesAsync(actorSid, tables, _time.GetUtcNow(), ct).ConfigureAwait(false);
+        return owned.Count > 0;
     }
 
     private static int CountDistinctApprovers(ConsentRequest req, IReadOnlyList<string> combinedApprovers) =>

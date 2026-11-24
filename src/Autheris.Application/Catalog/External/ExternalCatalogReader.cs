@@ -1,5 +1,6 @@
 namespace Autheris.Application.Catalog.External;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -33,7 +34,7 @@ public sealed partial class ExternalCatalogReader(
     ITableMetadataRepository metadataRepository,
     IDiscoveryService discoveryService,
     IConsentRepository consentRepository,
-    IDataOwnershipRepository ownershipRepository,
+    IContainerOwnership ownershipRepository,
     IConsentWorkflowConfigRepository workflowConfigRepository,
     ICatalogChangeStore changeStore,
     IOptions<GatewayOptions> gatewayOptions,
@@ -58,7 +59,7 @@ public sealed partial class ExternalCatalogReader(
     private readonly ITableMetadataRepository _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
     private readonly IDiscoveryService _discoveryService = discoveryService ?? throw new ArgumentNullException(nameof(discoveryService));
     private readonly IConsentRepository _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
-    private readonly IDataOwnershipRepository _ownershipRepository = ownershipRepository ?? throw new ArgumentNullException(nameof(ownershipRepository));
+    private readonly IContainerOwnership _ownershipRepository = ownershipRepository ?? throw new ArgumentNullException(nameof(ownershipRepository));
     private readonly IConsentWorkflowConfigRepository _workflowConfigRepository = workflowConfigRepository ?? throw new ArgumentNullException(nameof(workflowConfigRepository));
     private readonly ICatalogChangeStore _changeStore = changeStore ?? throw new ArgumentNullException(nameof(changeStore));
     private readonly GatewayOptions _gatewayOptions = gatewayOptions?.Value ?? throw new ArgumentNullException(nameof(gatewayOptions));

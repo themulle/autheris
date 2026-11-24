@@ -137,6 +137,12 @@ public sealed class NullMandatoryRowFilterResolver : IMandatoryRowFilterResolver
     public ValueTask<bool> HasActiveProfilesAsync(TenantId tenant, CancellationToken ct = default) => ValueTask.FromResult(false);
 }
 
+/// <summary>Marker recorded for a referenced table that is in no valid container.</summary>
+public static class ReferencedContainerKeys
+{
+    public const string Unassigned = "unassigned";
+}
+
 /// <summary>Columns a filter needs on the protected object.</summary>
 public static class VirtualFilterColumns
 {
@@ -194,6 +200,9 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
     private readonly Autheris.Application.State.Caching.BoundedCache<string, ObjectPattern> _patterns = new(10_000, comparer: StringComparer.Ordinal);
     private readonly ITableMetadataRepository? _catalog;
     private readonly SqlDataSourceOptions? _dataSources;
+    private readonly Autheris.Application.Governance.Ownership.IContainerOwnership? _ownership;
+    // verdict per SQL filter (true = a referenced table left its recorded container); cleared together with the memo.
+    private readonly ConcurrentDictionary<Guid, bool> _staleFilters = new();
     private long _memoGeneration = -1;
     private long _memoClearedAtTick = Environment.TickCount64;
 
@@ -214,8 +223,10 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
         IVirtualFilterSnapshotProvider snapshots,
         IVirtualFilterPredicateBuilder predicates,
         ITableMetadataRepository? catalog = null,
-        Microsoft.Extensions.Options.IOptions<GatewayOptions>? options = null)
+        Microsoft.Extensions.Options.IOptions<GatewayOptions>? options = null,
+        Autheris.Application.Governance.Ownership.IContainerOwnership? ownership = null)
     {
+        _ownership = ownership;
         _snapshots = snapshots ?? throw new ArgumentNullException(nameof(snapshots));
         _predicates = predicates ?? throw new ArgumentNullException(nameof(predicates));
         _catalog = catalog;
@@ -247,6 +258,7 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
         {
             Interlocked.Exchange(ref _memoClearedAtTick, nowTick);
             _memo.Clear();
+            _staleFilters.Clear();
             TargetPatternMatcher.ClearCache();
         }
 
@@ -255,6 +267,8 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
         {
             return cached;
         }
+
+        snapshot = await WithoutStaleSqlFiltersAsync(snapshot, query.Tenant, ct).ConfigureAwait(false);
 
         VirtualFilterTenantContext? tenantContext;
         try
@@ -270,6 +284,70 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
         var outcome = Resolve(snapshot, query, trace: null, tenantContext);
         _memo[key] = outcome;
         return outcome;
+    }
+
+    /// <summary>
+    /// A SQL filter is only enforced while every table it references is still in the governance container recorded when it was saved. A
+    /// filter whose referenced table moved (or whose owner group changed, or that recorded nothing) is dropped from the snapshot, so a
+    /// profile binding it denies (fail closed) until the filter is saved again. Without ownership data (tests) nothing is checked.
+    /// </summary>
+    private async ValueTask<VirtualFilterSnapshot> WithoutStaleSqlFiltersAsync(VirtualFilterSnapshot snapshot, TenantId tenant, CancellationToken ct)
+    {
+        if (_ownership is null)
+        {
+            return snapshot;
+        }
+
+        List<VirtualFilter>? kept = null;
+        for (var i = 0; i < snapshot.Filters.Count; i++)
+        {
+            var filter = snapshot.Filters[i];
+            var stale = filter.Sql != null && filter.TenantId == tenant && await IsStaleAsync(filter, ct).ConfigureAwait(false);
+            if (stale && kept is null)
+            {
+                kept = [.. snapshot.Filters.Take(i)];
+            }
+
+            if (!stale)
+            {
+                kept?.Add(filter);
+            }
+        }
+
+        return kept is null ? snapshot : snapshot with { Filters = kept };
+    }
+
+    private async ValueTask<bool> IsStaleAsync(VirtualFilter filter, CancellationToken ct)
+    {
+        if (_staleFilters.TryGetValue(filter.Id, out var known))
+        {
+            return known;
+        }
+
+        bool stale;
+        try
+        {
+            var recorded = filter.ReferencedContainers.ToDictionary(r => r.Table, r => r.Container, StringComparer.OrdinalIgnoreCase);
+            var referenced = SqlFilterCompiler.ReferencedTables(filter);
+            stale = referenced.Count == 0 || recorded.Count == 0;
+            foreach (var table in referenced)
+            {
+                if (stale)
+                {
+                    break;
+                }
+
+                var current = await _ownership!.GetContainerKeyForTableAsync(table, ct).ConfigureAwait(false) ?? ReferencedContainerKeys.Unassigned;
+                stale = !recorded.TryGetValue(table.ToString(), out var was) || !string.Equals(was, current, StringComparison.Ordinal);
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            stale = true;   // cannot be checked: fail closed
+        }
+
+        _staleFilters[filter.Id] = stale;
+        return stale;
     }
 
     /// <summary>

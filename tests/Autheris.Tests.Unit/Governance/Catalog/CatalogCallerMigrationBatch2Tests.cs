@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Governance.Catalog;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -135,7 +136,7 @@ public sealed class CatalogCallerMigrationBatch2Tests
         public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, ConsentRevocationAuthority authority, IReadOnlyList<AuditLogEntry>? auditEntries = null, CancellationToken ct = default) => Task.CompletedTask;
     }
 
-    private sealed class StubOwnershipRepo : IDataOwnershipRepository
+    private sealed class StubOwnershipRepo : IContainerOwnership
     {
         public Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) =>
@@ -357,7 +358,7 @@ public sealed class CatalogCallerMigrationBatch2Tests
         var services = new ServiceCollection();
         services.AddSingleton<IConsentRepository>(new StubConsentRepository([grant]));
         services.AddSingleton<ITableMetadataRepository>(repo);
-        services.AddSingleton<IDataOwnershipRepository>(new StubOwnershipRepo());
+        services.AddSingleton<IContainerOwnership>(new StubOwnershipRepo());
         services.AddSingleton<IConsentApprovalRepository>(approvals);
         services.AddSingleton<IAuditLogRepository>(NullAuditLogRepository.Instance);
         using var sp = services.BuildServiceProvider();

@@ -93,6 +93,7 @@ Autheris.Domain.Options.RebacOptions.OpenFgaStoreId
 Autheris.Domain.Options.ResourceGroupsOptions.Enabled
 Autheris.Domain.Options.SqlEndpointsOptions.MaxQueryTimeoutSeconds
 Autheris.Domain.Options.TableCache.TableCacheTargetOptions.CronExpression
+Autheris.Domain.Options.VirtualFilterOptions.RequireApproval
 Autheris.Domain.Options.WebSqlCostOptions.Enabled
 Autheris.Domain.Options.WebSqlPagingOptions.Enabled
 Autheris.Domain.Options.WebhooksOptions.Enabled

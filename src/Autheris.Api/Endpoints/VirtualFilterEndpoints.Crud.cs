@@ -52,31 +52,6 @@ public static partial class VirtualFilterEndpoints
             return Results.Ok(FilterView(saved));
         });
 
-    internal static Task<IResult> ApproveFilterAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
-        ExecuteAsync(context, requiredRole: null, async (security, actor) =>
-        {
-            if (!security.HasRole(GatewayRole.GovernanceAdmin))
-            {
-                return await AuditDeniedAsync(context, security, GatewayRole.GovernanceAdmin).ConfigureAwait(false);
-            }
-
-            var tenant = ResolveTenant(security, context.Request.Query["tenant"]);
-            if (tenant == null)
-            {
-                return Forbidden();
-            }
-
-            // VF-05: no hash, no approval; a mismatch stays a 409.
-            var expectedHash = context.Request.Query["hash"].FirstOrDefault() ?? context.Request.Query["expected_hash"].FirstOrDefault();
-            if (string.IsNullOrWhiteSpace(expectedHash))
-            {
-                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The expected hash is required.");
-            }
-
-            var approved = await service.ApproveFilterAsync(tenant.Value, name, actor, expectedHash, context.RequestAborted).ConfigureAwait(false);
-            return Results.Ok(FilterView(approved));
-        });
-
     internal static Task<IResult> DeleteFilterAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
         ExecuteAsync(context, GatewayRole.FilterAdmin, async (security, actor) =>
         {
@@ -85,7 +60,7 @@ public static partial class VirtualFilterEndpoints
         });
 
     internal static Task<IResult> PutProfileAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
-        ExecuteAsync(context, GatewayRole.FilterAdmin, async (security, actor) =>
+        ExecuteAsync(context, GatewayRole.GovernanceAdmin, async (security, actor) =>
         {
             var body = await ReadAsync<ProfileBody>(context).ConfigureAwait(false);
             var tenant = ResolveTenant(security, body.Tenant);
@@ -94,35 +69,26 @@ public static partial class VirtualFilterEndpoints
                 return Forbidden();
             }
 
+            // Declarative grant (D5): Data Governance of the target tenant only, checked here and again in the service.
+            if (!IsDataGovernance(context, security, tenant.Value))
+            {
+                return await AuditDeniedAsync(context, security, GatewayRole.GovernanceAdmin).ConfigureAwait(false);
+            }
+
             var model = body.ToModel(name, tenant.Value);
-            var saved = await service.SaveProfileAsync(model, actor, body.ExplicitKeyBudgets(model), context.RequestAborted).ConfigureAwait(false);
+            var saved = await service.SaveProfileAsync(model, actor with { IsDataGovernance = true }, body.ExplicitKeyBudgets(model), context.RequestAborted).ConfigureAwait(false);
             return Results.Ok(ProfileView(saved));
         });
 
-    internal static Task<IResult> ApproveProfileAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
+    internal static Task<IResult> DeleteProfileAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
         ExecuteAsync(context, GatewayRole.GovernanceAdmin, async (security, actor) =>
         {
-            var tenant = ResolveTenant(security, context.Request.Query["tenant"]);
-            if (tenant == null)
+            if (!IsDataGovernance(context, security, security.TenantId))
             {
-                return Forbidden();
+                return await AuditDeniedAsync(context, security, GatewayRole.GovernanceAdmin).ConfigureAwait(false);
             }
 
-            // VF-05: no hash, no approval; a mismatch stays a 409.
-            var expectedHash = context.Request.Query["hash"].FirstOrDefault() ?? context.Request.Query["expected_hash"].FirstOrDefault();
-            if (string.IsNullOrWhiteSpace(expectedHash))
-            {
-                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The expected hash is required.");
-            }
-
-            var approved = await service.ApproveProfileAsync(tenant.Value, name, actor, expectedHash, context.RequestAborted).ConfigureAwait(false);
-            return Results.Ok(ProfileView(approved));
-        });
-
-    internal static Task<IResult> DeleteProfileAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
-        ExecuteAsync(context, GatewayRole.FilterAdmin, async (security, actor) =>
-        {
-            await service.DeleteProfileAsync(security.TenantId, name, actor, context.RequestAborted).ConfigureAwait(false);
+            await service.DeleteProfileAsync(security.TenantId, name, actor with { IsDataGovernance = true }, context.RequestAborted).ConfigureAwait(false);
             return Results.NoContent();
         });
 
@@ -148,11 +114,6 @@ public static partial class VirtualFilterEndpoints
         managed_by = f.ManagedBy,
         definition_hash = f.ComputeDefinitionHash(),
         status = f.Status.ToString(),
-        approval_reason = VirtualFilterAdministrationService.FormatApprovalReason(VirtualFilterAdministrationService.PendingApprovalReason(f)),
-        pending_deletion = f.PendingDeletion,
-        has_draft = f.Draft != null,
-        draft_hash = f.Draft?.ComputeDefinitionHash(),
-        pending_hash = VirtualFilterAdministrationService.PendingHash(f),
         created_by = f.CreatedBy?.Value,
         approved_by = f.ApprovedBy?.Value,
         approved_at = f.ApprovedAt,
@@ -182,10 +143,6 @@ public static partial class VirtualFilterEndpoints
         managed_by = p.ManagedBy,
         definition_hash = p.ComputeDefinitionHash(),
         status = p.Status.ToString(),
-        pending_deletion = p.PendingDeletion,
-        has_draft = p.Draft != null,
-        draft_hash = p.Draft?.ComputeDefinitionHash(),
-        pending_hash = VirtualFilterAdministrationService.PendingHash(p),
         created_by = p.CreatedBy?.Value,
         approved_by = p.ApprovedBy?.Value,
         approved_at = p.ApprovedAt,

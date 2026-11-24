@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.GraphQL;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -67,7 +68,7 @@ public sealed class LineageCallerContextTests
     public async Task ForwardAuthClusterAdmin_RevocationImpactForeignTenantConsent_Denied()
     {
         var consentRepo = Substitute.For<IConsentRepository>();
-        var ownershipRepo = Substitute.For<IDataOwnershipRepository>();
+        var ownershipRepo = Substitute.For<IContainerOwnership>();
         var graphStore = new LineageGraphStore();
         var sut = new LineageImpactAnalyzerService(consentRepo, ownershipRepo, graphStore, NullLogger<LineageImpactAnalyzerService>.Instance);
 
@@ -99,7 +100,7 @@ public sealed class LineageCallerContextTests
     public async Task CanonicalClusterAdmin_ForeignTenant_Allowed()
     {
         var consentRepo = Substitute.For<IConsentRepository>();
-        var ownershipRepo = Substitute.For<IDataOwnershipRepository>();
+        var ownershipRepo = Substitute.For<IContainerOwnership>();
         var graphStore = new LineageGraphStore();
         ownershipRepo.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>())
             .Returns(true);
@@ -134,7 +135,7 @@ public sealed class LineageCallerContextTests
     public async Task ForwardAuthClusterAdmin_TableConsumers_OwnerEmailsHidden()
     {
         var consentRepo = Substitute.For<IConsentRepository>();
-        var ownershipRepo = Substitute.For<IDataOwnershipRepository>();
+        var ownershipRepo = Substitute.For<IContainerOwnership>();
         var graphStore = new LineageGraphStore();
         var sut = new LineageImpactAnalyzerService(consentRepo, ownershipRepo, graphStore, NullLogger<LineageImpactAnalyzerService>.Instance);
 

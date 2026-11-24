@@ -15,7 +15,9 @@ public sealed class GovernanceRepositoryLocBudgetTests
     // #1009 W8-02 scoped audit read with owner scoping and bound cursors in AuditSqlCore (+18 LOC).
     // #1009 W7-03 deprovisioning revokes all grant kinds; kind-complete read + tenant-scoped by-id revoke, including the
     // GovernanceRepository.ConsentSystemRevocation partial (+149 LOC).
-    public const int MaxAllowedLoc = 16_034;
+    // #1009 4A structural (overlay-free) catalog batch read for container ownership, so a catalog page does not read the dataset
+    // catalog overlay once per table (+10 LOC).
+    public const int MaxAllowedLoc = 16_040;
 
     [Fact]
     [Trait("Category", "Architecture")]

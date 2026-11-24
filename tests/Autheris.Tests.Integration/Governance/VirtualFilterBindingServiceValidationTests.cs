@@ -32,8 +32,9 @@ public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
     private static readonly VirtualFilterActor DbtActor = new(new Sid("S-1-5-21-DBT-SYNC"), IsSync: true);
 
     // The direct dbt governance import runs as the calling user in the caller's tenant (the tenant of DavidProfile / DavidFilter).
+    // Access profiles are declarative grants: only a Data Governance caller may activate one (decision D5).
     private static readonly DbtGovernanceImportCaller ImportCaller =
-        new(new VirtualFilterActor(new Sid("S-1-5-21-LWE-GOVADMIN"), IsSync: false), Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile().TenantId);
+        new(new VirtualFilterActor(new Sid("S-1-5-21-LWE-GOVADMIN"), IsSync: false, IsDataGovernance: true), Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile().TenantId);
 
     private readonly PostgreSqlGovernanceRepository _repository = GovernanceTestDatabase.CreateRepository(
         Substitute.For<IEpochValidationService>(),
@@ -155,7 +156,7 @@ public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
         var approvalService = new VirtualFilterAdministrationService(
             _repository,
             Substitute.For<IAuditLogRepository>(),
-            Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = true } }),
+            Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions() }),
             catalog: catalog);
         var dbt = new DbtMetadataIngestionService(
             Substitute.For<IDbtProposalRepository>(),
@@ -176,12 +177,12 @@ public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
         using var stream = new MemoryStream(Encoding.UTF8.GetBytes(json));
         var result = await dbt.IngestGovernanceStreamAsync(stream, ImportCaller);
 
-        // No payload tenant: the caller's request tenant. Not the sync actor: the profile waits for a distinct approver.
+        // No payload tenant: the caller's request tenant. Not the sync actor: the save of the import caller activates the profile.
         result.Success.ShouldBeTrue();
         result.Warnings.ShouldBeEmpty();
         var profile = (await _repository.LoadSnapshotAsync()).Profiles.ShouldHaveSingleItem();
         profile.TenantId.ShouldBe(ImportCaller.Tenant);
-        profile.Status.ShouldBe(FilterApprovalStatus.PendingApproval);
+        profile.Status.ShouldBe(FilterApprovalStatus.Active);
         profile.CreatedBy.ShouldBe(ImportCaller.Actor.Sid);
     }
 }

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Policy.RowScopes;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -728,7 +729,7 @@ public sealed class EffectiveAccessReportTests
         public Task<CatalogVersion> FlushCatalogVersionAsync(CancellationToken ct = default) => Task.FromResult(new CatalogVersion(1, 0));
     }
 
-    private sealed class FakeOwnershipRepo : IDataOwnershipRepository
+    private sealed class FakeOwnershipRepo : IContainerOwnership
     {
         private readonly Dictionary<TableIdentifier, List<DataOwner>> _owners = [];
         public void SetOwners(TableIdentifier table, params Sid[] sids) =>

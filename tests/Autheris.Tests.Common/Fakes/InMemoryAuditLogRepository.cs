@@ -23,9 +23,13 @@ public sealed class InMemoryAuditLogRepository : IAuditLogRepository
         get { lock (_gate) { return _entries.ToArray(); } }
     }
 
+    /// <summary>When set, every append fails with this exception (to test fail-closed callers).</summary>
+    public Exception? FailWith { get; set; }
+
     public Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(entry);
+        if (FailWith is { } failure) { return Task.FromException(failure); }
         lock (_gate) { _entries.Add(entry); }
         return Task.CompletedTask;
     }

@@ -1,5 +1,6 @@
 namespace Autheris.Modules.Dbt;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
@@ -44,7 +45,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
     private readonly Autheris.Application.Governance.IDataOwnerIdentityVerifier? _ownerIdentityVerifier;
     private readonly Autheris.Application.Audit.IAuditWriter? _auditWriter;
     private readonly Autheris.Application.Governance.Notifications.IGovernanceNotificationDispatcher? _notifications;
-    private readonly IDataOwnershipRepository? _ownershipRepo;
+    private readonly IContainerOwnership? _ownershipRepo;
     private readonly ILogger<DbtMetadataIngestionService> _logger;
     private readonly Autheris.Application.Catalog.ICatalogWriteScopeFactory? _catalogWriteScopes;
 

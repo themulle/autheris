@@ -41,6 +41,9 @@ public partial class GovernanceRepository
     public Task<IReadOnlyList<TableMetadata?>> GetTableMetadataBatchAsync(IReadOnlyList<TableIdentifier> tables, CancellationToken ct = default)
         => CatalogMetadataBatchReader.ReadAsync(this, tables, ct);
 
+    public Task<IReadOnlyList<TableMetadata?>> GetStructuralTableMetadataBatchAsync(IReadOnlyList<TableIdentifier> tables, CancellationToken ct = default)
+        => CatalogMetadataBatchReader.ReadAsync(this, tables, ct, applyOverlay: false);
+
     internal async Task<TableMetadata?> GetTableMetadataCoreAsync(
         TableIdentifier table,
         IReadOnlyDictionary<Guid, CatalogKeyDefinitionStore.TableKeyRows>? prefetchedKeys,

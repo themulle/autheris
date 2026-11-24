@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Policy;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -226,7 +227,7 @@ public sealed class PdpPreconditionAndExplainTests
         var visibility = Substitute.For<ICatalogVisibilityService>();
         visibility.FindVisibleAsync(Arg.Any<CatalogCaller>(), TableId, Arg.Any<CancellationToken>())
             .Returns(new CatalogVisibleRow(visibleMeta, CatalogOutputShape.Full));
-        var owners = Substitute.For<IDataOwnershipRepository>();
+        var owners = Substitute.For<IContainerOwnership>();
         var audit = Substitute.For<IAuditWriter>();
 
         var service = new AccessExplanationService(pdp, tableRepo, visibility, owners, consentRepo, new DegradedExplainSubjectResolver(), audit);
@@ -300,7 +301,7 @@ public sealed class PdpPreconditionAndExplainTests
         var visibility = Substitute.For<ICatalogVisibilityService>();
         visibility.FindVisibleAsync(Arg.Any<CatalogCaller>(), TableId, Arg.Any<CancellationToken>())
             .Returns(new CatalogVisibleRow(fullMeta, CatalogOutputShape.Full));
-        var owners = Substitute.For<IDataOwnershipRepository>();
+        var owners = Substitute.For<IContainerOwnership>();
         var audit = Substitute.For<IAuditWriter>();
 
         var service = new AccessExplanationService(pdp, tableRepo, visibility, owners, consentRepo, new DegradedExplainSubjectResolver(), audit);

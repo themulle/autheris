@@ -18,14 +18,14 @@ using Xunit;
 public sealed partial class VirtualFilterEndpointsTests
 {
     [Fact]
-    public async Task PutSqlFilter_RequireApprovalFalse_ReturnsPendingWithReason()
+    public async Task PutSqlFilter_ByGovernanceAdmin_ActivatesOnSave()
     {
         var catalog = Substitute.For<ITableMetadataRepository>();
         catalog.StubTables([
             VirtualFilterTestData.Table("conf", "client", "client_id", "crane_serial_number"),
             VirtualFilterTestData.Table("md", "crane", "serial_number", "is_delivered")
         ]);
-        var options = Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions { RequireApproval = false } });
+        var options = Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions() });
         var service = new VirtualFilterAdministrationService(_repository, Substitute.For<IAuditLogRepository>(), options, catalog: catalog);
 
         var sqlBody = new
@@ -40,8 +40,8 @@ public sealed partial class VirtualFilterEndpointsTests
         putContext.Response.Body.Position = 0;
         using (var putDoc = await JsonDocument.ParseAsync(putContext.Response.Body))
         {
-            putDoc.RootElement.GetProperty("status").GetString().ShouldBe("PendingApproval");
-            putDoc.RootElement.GetProperty("approval_reason").GetString().ShouldBe("sql_definition_needs_owner_approval");
+            putDoc.RootElement.GetProperty("status").GetString().ShouldBe("Active");
+            putDoc.RootElement.TryGetProperty("approval_reason", out _).ShouldBeFalse();
         }
 
         var listContext = Context(Tenant, null, "GovernanceAdmin");
@@ -50,7 +50,6 @@ public sealed partial class VirtualFilterEndpointsTests
         listContext.Response.Body.Position = 0;
         using var listDoc = await JsonDocument.ParseAsync(listContext.Response.Body);
         var listed = listDoc.RootElement.GetProperty("filters").EnumerateArray().Single(f => f.GetProperty("name").GetString() == "active_cranes_sql");
-        listed.GetProperty("status").GetString().ShouldBe("PendingApproval");
-        listed.GetProperty("approval_reason").GetString().ShouldBe("sql_definition_needs_owner_approval");
+        listed.GetProperty("status").GetString().ShouldBe("Active");
     }
 }

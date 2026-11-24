@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
+using Autheris.Application.Governance.SingleApproval;
 using Autheris.Application.Identity.Attributes;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -21,10 +22,10 @@ using Microsoft.AspNetCore.Routing;
 using Microsoft.Extensions.DependencyInjection;
 
 /// <summary>
-/// Caller attributes (129 A-7, A-11): administration API under<c>/api/v1/governance/caller-attributes</c>. GovernanceAdmin
-/// submits, requests deletion and reads; GovernanceAdmin or CallerAttributeApprover approves by hash (an attribute-table or service-set change
-/// needs the approver role, BC-129-03); the simulation needs GovernanceAdmin or FilterAdmin, and revealing values the CallerAttributeInspector
-/// role. Every response omits attribute values; callers stay within their tenant, only ClusterAdmin acts across tenants.
+/// Caller attributes (129 A-7, A-11): administration API under<c>/api/v1/governance/caller-attributes</c>. A write
+/// (save or delete) takes effect at once and returns the applied state; GovernanceAdmin or CallerAttributeApprover writes (an attribute-table
+/// or service-set change needs the approver role, BC-129-03); the simulation needs GovernanceAdmin or FilterAdmin, and revealing values the
+/// CallerAttributeInspector role. Every response omits attribute values; callers stay within their tenant, only ClusterAdmin acts across tenants.
 /// </summary>
 public static class CallerAttributeAdminEndpoints
 {
@@ -40,23 +41,13 @@ public static class CallerAttributeAdminEndpoints
             .RequireAuthorization(GatewayPolicies.CallerAttributeRead)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         group.MapPut("/{name}", (string name, HttpContext context, CallerAttributeAdministrationService service) => PutDefinitionAsync(name, context, service))
-            .RequireAuthorization(GatewayPolicies.GovernanceAdmin);
+            .RequireAuthorization(GatewayPolicies.CallerAttributeApprove);
         group.MapDelete("/{name}", (string name, HttpContext context, CallerAttributeAdministrationService service) => DeleteDefinitionAsync(name, context, service))
-            .RequireAuthorization(GatewayPolicies.GovernanceAdmin);
-        group.MapPost("/{name}/approve", (string name, HttpContext context, CallerAttributeAdministrationService service) => ApproveDefinitionAsync(name, context, service))
-            .RequireAuthorization(GatewayPolicies.CallerAttributeApprove)
-            .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
-        group.MapPost("/{name}/reject", (string name, HttpContext context, CallerAttributeAdministrationService service) => RejectDefinitionAsync(name, context, service))
             .RequireAuthorization(GatewayPolicies.CallerAttributeApprove);
         group.MapGet("/service-sets", (HttpContext context, CallerAttributeAdministrationService service) => ListServiceSetsAsync(context, service))
             .RequireAuthorization(GatewayPolicies.CallerAttributeRead)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
         group.MapPut("/service-sets", (HttpContext context, CallerAttributeAdministrationService service) => PutServiceSetAsync(context, service))
-            .RequireAuthorization(GatewayPolicies.GovernanceAdmin);
-        group.MapPost("/service-sets/approve", (HttpContext context, CallerAttributeAdministrationService service) => ApproveServiceSetAsync(context, service))
-            .RequireAuthorization(GatewayPolicies.CallerAttributeApprove)
-            .WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
-        group.MapPost("/service-sets/reject", (HttpContext context, CallerAttributeAdministrationService service) => RejectServiceSetAsync(context, service))
             .RequireAuthorization(GatewayPolicies.CallerAttributeApprove);
         group.MapPost("/simulate", (HttpContext context, CallerAttributeSimulationService simulation) => SimulateAsync(context, simulation))
             .RequireAuthorization(GatewayPolicies.CallerAttributeSimulate)
@@ -91,16 +82,13 @@ public static class CallerAttributeAdminEndpoints
                 ttl_seconds = a.Definition.TtlSeconds,
                 provider = new { kind = a.Definition.Provider.Kind, config = a.Definition.Provider.Config },
                 created_by = a.CreatedBy,
-                approved_by = a.ApprovedBy,
-                draft_hash = a.DraftHash,
-                draft_created_by = a.DraftCreatedBy,
-                pending_deletion = a.PendingDeletion
+                approved_by = a.ApprovedBy
             })
         });
     }
 
     internal static Task<IResult> PutDefinitionAsync(string name, HttpContext context, CallerAttributeAdministrationService service) =>
-        ExecuteAsync(context, [GatewayRole.GovernanceAdmin], async (security, actor) =>
+        ExecuteAsync(context, [GatewayRole.GovernanceAdmin, GatewayRole.CallerAttributeApprover], async (security, actor) =>
         {
             var body = await ReadAsync<DefinitionBody>(context).ConfigureAwait(false);
             var tenant = ResolveTenant(security, body.Tenant);
@@ -110,43 +98,11 @@ public static class CallerAttributeAdminEndpoints
             }
 
             var definition = body.ToModel(name, tenant.Value);
-            await service.SubmitDefinitionAsync(definition, actor, context.RequestAborted).ConfigureAwait(false);
-            return Results.Json(new { name, status = "PendingApproval", hash = definition.ComputeDefinitionHash() }, statusCode: StatusCodes.Status202Accepted);
+            await service.SaveDefinitionAsync(definition, actor, context.RequestAborted).ConfigureAwait(false);
+            return Results.Ok(new { name, status = "Active", hash = definition.ComputeDefinitionHash() });
         });
 
     internal static Task<IResult> DeleteDefinitionAsync(string name, HttpContext context, CallerAttributeAdministrationService service) =>
-        ExecuteAsync(context, [GatewayRole.GovernanceAdmin], async (security, actor) =>
-        {
-            var tenant = ResolveTenant(security, context.Request.Query["tenant"]);
-            if (tenant == null)
-            {
-                return Forbidden();
-            }
-
-            await service.RequestDeletionAsync(tenant.Value, name, actor, context.RequestAborted).ConfigureAwait(false);
-            return Results.Json(new { name, status = "DeletionPending" }, statusCode: StatusCodes.Status202Accepted);
-        });
-
-    internal static Task<IResult> ApproveDefinitionAsync(string name, HttpContext context, CallerAttributeAdministrationService service) =>
-        ExecuteAsync(context, [GatewayRole.GovernanceAdmin, GatewayRole.CallerAttributeApprover], async (security, actor) =>
-        {
-            var tenant = ResolveTenant(security, context.Request.Query["tenant"]);
-            var hash = context.Request.Query["hash"].FirstOrDefault();
-            if (tenant == null)
-            {
-                return Forbidden();
-            }
-
-            if (string.IsNullOrWhiteSpace(hash))
-            {
-                throw new ArgumentException("The hash of the reviewed definition is required.");
-            }
-
-            await service.ApproveDefinitionAsync(tenant.Value, name, hash, actor, context.RequestAborted).ConfigureAwait(false);
-            return Results.Ok(new { name, status = "Applied" });
-        });
-
-    internal static Task<IResult> RejectDefinitionAsync(string name, HttpContext context, CallerAttributeAdministrationService service) =>
         ExecuteAsync(context, [GatewayRole.GovernanceAdmin, GatewayRole.CallerAttributeApprover], async (security, actor) =>
         {
             var tenant = ResolveTenant(security, context.Request.Query["tenant"]);
@@ -155,8 +111,8 @@ public static class CallerAttributeAdminEndpoints
                 return Forbidden();
             }
 
-            await service.RejectDefinitionAsync(tenant.Value, name, actor, context.RequestAborted).ConfigureAwait(false);
-            return Results.Ok(new { name, status = "Rejected" });
+            await service.DeleteDefinitionAsync(tenant.Value, name, actor, context.RequestAborted).ConfigureAwait(false);
+            return Results.Ok(new { name, status = "Deleted" });
         });
 
     // ---- service sets ----------------------------------------------------------------------------------------------------------------
@@ -181,8 +137,6 @@ public static class CallerAttributeAdminEndpoints
                 status = s.Set.Status.ToString(),
                 hash = s.Set.ComputeValuesHash(),
                 value_count = s.Set.Values.Count,
-                pending = s.DraftValues != null,
-                pending_count = s.DraftValues?.Count,
                 created_by = s.CreatedBy,
                 approved_by = s.ApprovedBy
             })
@@ -190,21 +144,6 @@ public static class CallerAttributeAdminEndpoints
     }
 
     internal static Task<IResult> PutServiceSetAsync(HttpContext context, CallerAttributeAdministrationService service) =>
-        ExecuteAsync(context, [GatewayRole.GovernanceAdmin], async (security, actor) =>
-        {
-            var body = await ReadAsync<ServiceSetBody>(context).ConfigureAwait(false);
-            var tenant = ResolveTenant(security, body.Tenant);
-            if (tenant == null)
-            {
-                return Forbidden();
-            }
-
-            await service.SubmitServiceSetAsync(tenant.Value, body.ApplicationId ?? string.Empty, body.Attribute ?? string.Empty, body.Values ?? [], actor, context.RequestAborted).ConfigureAwait(false);
-            var preview = new ServiceAttributeSet(Guid.Empty, tenant.Value, CallerAttributeNameRules.CanonicalApplicationId(body.ApplicationId ?? string.Empty), body.Attribute ?? string.Empty, body.Values ?? [], FilterApprovalStatus.PendingApproval);
-            return Results.Json(new { status = "PendingApproval", hash = preview.ComputeValuesHash() }, statusCode: StatusCodes.Status202Accepted);
-        });
-
-    internal static Task<IResult> ApproveServiceSetAsync(HttpContext context, CallerAttributeAdministrationService service) =>
         ExecuteAsync(context, [GatewayRole.GovernanceAdmin, GatewayRole.CallerAttributeApprover], async (security, actor) =>
         {
             var body = await ReadAsync<ServiceSetBody>(context).ConfigureAwait(false);
@@ -214,27 +153,9 @@ public static class CallerAttributeAdminEndpoints
                 return Forbidden();
             }
 
-            if (string.IsNullOrWhiteSpace(body.Hash))
-            {
-                throw new ArgumentException("The hash of the reviewed set is required.");
-            }
-
-            await service.ApproveServiceSetAsync(tenant.Value, body.ApplicationId ?? string.Empty, body.Attribute ?? string.Empty, body.Hash, actor, context.RequestAborted).ConfigureAwait(false);
-            return Results.Ok(new { status = "Applied" });
-        });
-
-    internal static Task<IResult> RejectServiceSetAsync(HttpContext context, CallerAttributeAdministrationService service) =>
-        ExecuteAsync(context, [GatewayRole.GovernanceAdmin, GatewayRole.CallerAttributeApprover], async (security, actor) =>
-        {
-            var body = await ReadAsync<ServiceSetBody>(context).ConfigureAwait(false);
-            var tenant = ResolveTenant(security, body.Tenant);
-            if (tenant == null)
-            {
-                return Forbidden();
-            }
-
-            await service.RejectServiceSetAsync(tenant.Value, body.ApplicationId ?? string.Empty, body.Attribute ?? string.Empty, actor, context.RequestAborted).ConfigureAwait(false);
-            return Results.Ok(new { status = "Rejected" });
+            await service.SaveServiceSetAsync(tenant.Value, body.ApplicationId ?? string.Empty, body.Attribute ?? string.Empty, body.Values ?? [], actor, context.RequestAborted).ConfigureAwait(false);
+            var applied = new ServiceAttributeSet(Guid.Empty, tenant.Value, CallerAttributeNameRules.CanonicalApplicationId(body.ApplicationId ?? string.Empty), body.Attribute ?? string.Empty, body.Values ?? [], FilterApprovalStatus.Active);
+            return Results.Ok(new { status = "Active", hash = applied.ComputeValuesHash() });
         });
 
     // ---- simulation ------------------------------------------------------------------------------------------------------------------
@@ -329,7 +250,19 @@ public static class CallerAttributeAdminEndpoints
             return Forbidden();
         }
 
-        var actor = new CallerAttributeActor(security.UserSid.Value, security.HasRole(GatewayRole.CallerAttributeApprover));
+        if (string.IsNullOrWhiteSpace(security.UserSid.Value))
+        {
+            return Forbidden();
+        }
+
+        // Every identifier form of the caller (subject key, UPN, mail, object id) and the caller's groups feed the self-widening check.
+        var identifiers = context.User.GetUserIdentifiers();
+        identifiers.Add(security.UserSid.Value);
+        var actor = new CallerAttributeActor(
+            security.UserSid.Value,
+            security.HasRole(GatewayRole.CallerAttributeApprover),
+            identifiers,
+            security.GroupSids.Select(g => g.Value).ToArray());
         try
         {
             return await action(security, actor).ConfigureAwait(false);
@@ -339,10 +272,14 @@ public static class CallerAttributeAdminEndpoints
             int status = ex.Code switch
             {
                 nameof(CallerAttributeChangeResult.NotFound) => StatusCodes.Status404NotFound,
-                nameof(CallerAttributeChangeResult.HashMismatch) or nameof(CallerAttributeChangeResult.SameSubject) or nameof(CallerAttributeChangeResult.NothingPending) => StatusCodes.Status409Conflict,
-                "ApproverRoleRequired" => StatusCodes.Status403Forbidden,
+                "ApproverRoleRequired" or "SelfWidening" => StatusCodes.Status403Forbidden,
                 _ => StatusCodes.Status400BadRequest
             };
+            return SafeErrorResults.Problem(status, "CALLER_ATTRIBUTE_" + ex.Code.ToUpperInvariant(), "The caller attribute change was refused.", context);
+        }
+        catch (SingleApprovalRefusedException ex)
+        {
+            int status = ex.Code == "AuditFailed" ? StatusCodes.Status503ServiceUnavailable : StatusCodes.Status403Forbidden;
             return SafeErrorResults.Problem(status, "CALLER_ATTRIBUTE_" + ex.Code.ToUpperInvariant(), "The caller attribute change was refused.", context);
         }
         catch (Exception ex) when (ex is ArgumentException or JsonException or FormatException)
@@ -407,7 +344,7 @@ public static class CallerAttributeAdminEndpoints
                 MaxValues ?? (cardinality == CallerAttributeCardinality.Scalar ? 1 : CallerAttributeDefinition.DefaultMaxValues),
                 TtlSeconds ?? CallerAttributeDefinition.DefaultTtlSeconds,
                 new CallerAttributeProviderBinding(Provider.Kind, new Dictionary<string, string>(Provider.Config ?? [], StringComparer.Ordinal)),
-                Description, FilterApprovalStatus.PendingApproval);
+                Description, FilterApprovalStatus.Active);
         }
     }
 
@@ -428,7 +365,6 @@ public static class CallerAttributeAdminEndpoints
 
         [JsonPropertyName("values")] public List<string>? Values { get; set; }
 
-        [JsonPropertyName("hash")] public string? Hash { get; set; }
     }
 
     private sealed class SimulationBody

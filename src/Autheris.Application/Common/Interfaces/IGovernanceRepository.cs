@@ -34,6 +34,13 @@ public interface ITableMetadataRepository : Autheris.Application.Catalog.ICatalo
     }
 
     /// <summary>
+    /// <see cref="GetTableMetadataBatchAsync"/> without the dataset catalog overlay (see <see cref="GetStructuralTableMetadataAsync"/>), so
+    /// structural batch readers such as container ownership do not read the overlay per table. Default: <see cref="GetTableMetadataBatchAsync"/>.
+    /// </summary>
+    Task<IReadOnlyList<TableMetadata?>> GetStructuralTableMetadataBatchAsync(IReadOnlyList<TableIdentifier> tables, CancellationToken ct = default) =>
+        GetTableMetadataBatchAsync(tables, ct);
+
+    /// <summary>
     /// Returns identifiers of tables whose persisted <c>POLICY_EPOCHS.change_version</c> is strictly greater than <paramref name="sinceVersion"/>.
     /// </summary>
     Task<IReadOnlyList<TableIdentifier>> GetTablesChangedSinceAsync(long sinceVersion, CancellationToken ct = default)

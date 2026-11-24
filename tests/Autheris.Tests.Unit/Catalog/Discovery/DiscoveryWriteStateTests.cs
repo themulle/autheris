@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Discovery;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Collections.Immutable;
@@ -328,7 +329,7 @@ public sealed class DiscoveryWriteStateTests
         IReadOnlyList<TableMetadata> tables,
         IConsentRepository consents,
         IConsentApprovalRepository? approvals = null,
-        IDataOwnershipRepository? ownership = null,
+        IContainerOwnership? ownership = null,
         IAccessDecisionPoint? pdp = null)
     {
         return new DiscoveryService(
@@ -497,7 +498,7 @@ public sealed class DiscoveryWriteStateTests
         public Task DeleteConsentRequestAsync(Guid requestId, CancellationToken ct = default) => Task.CompletedTask;
     }
 
-    private sealed class InMemoryOwnershipRepo : IDataOwnershipRepository
+    private sealed class InMemoryOwnershipRepo : IContainerOwnership
     {
         public Dictionary<TableIdentifier, List<DataOwner>> OwnersByTable { get; } = [];
 

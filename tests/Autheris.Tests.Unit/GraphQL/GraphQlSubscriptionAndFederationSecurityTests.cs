@@ -1,3 +1,4 @@
+using Autheris.Application.Governance.Ownership;
 using Autheris.Tests.Unit.TestSupport;
 namespace Autheris.Tests.Unit.GraphQL;
 
@@ -284,7 +285,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
 
     private static LineageImpactAnalyzerService CreateLineageService(
         IConsentRepository consentRepo,
-        IDataOwnershipRepository ownershipRepo,
+        IContainerOwnership ownershipRepo,
         IAuditLogRepository auditRepo,
         LineageGraphStore graphStore)
     {

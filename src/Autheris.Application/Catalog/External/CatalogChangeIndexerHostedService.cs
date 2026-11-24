@@ -1,5 +1,6 @@
 namespace Autheris.Application.Catalog.External;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -28,7 +29,7 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
 
     private readonly ITableMetadataRepository _metadataRepository;
     private readonly IConsentRepository _consentRepository;
-    private readonly IDataOwnershipRepository _ownershipRepository;
+    private readonly IContainerOwnership _ownershipRepository;
     private readonly ICatalogChangeStore _changeStore;
     private readonly IOptions<GatewayOptions> _gatewayOptions;
     private readonly IDiscoveryArtifactStore? _artifactStore;
@@ -46,7 +47,7 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
     public CatalogChangeIndexerHostedService(
         ITableMetadataRepository metadataRepository,
         IConsentRepository consentRepository,
-        IDataOwnershipRepository ownershipRepository,
+        IContainerOwnership ownershipRepository,
         ICatalogChangeStore changeStore,
         IOptions<GatewayOptions> gatewayOptions,
         IDiscoveryArtifactStore? artifactStore = null,

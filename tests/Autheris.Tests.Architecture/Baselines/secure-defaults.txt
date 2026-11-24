@@ -80,7 +80,6 @@ Gateway:Plugins:Auth:Enabled=True
 Gateway:Plugins:RequireIntegrityManifest=False
 Gateway:RateLimiting:PreAuthIpRateLimit:ExemptAuthenticatedRequests=True
 Gateway:Totp:EncryptSecretsAtRest=False
-Gateway:VirtualFilters:RequireApproval=False
 Gateway:WebSql:AllowDml=False
 Gateway:WebSql:AllowRecursiveCte=False
 Gateway:WebSql:CrossSource:AllowNonEquiJoins=False

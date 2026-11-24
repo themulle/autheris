@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -23,7 +24,7 @@ using Xunit;
 [Trait("Category", "Security")]
 public class SecurityReviewG3EndpointAuthzTests
 {
-    private static DefaultHttpContext Ctx(string? tenant, string[] roles, IDataOwnershipRepository? repo = null)
+    private static DefaultHttpContext Ctx(string? tenant, string[] roles, IContainerOwnership? repo = null)
     {
         var claims = roles.Select(r => new Claim(ClaimTypes.Role, r)).ToList();
         if (!string.IsNullOrEmpty(tenant))
@@ -62,12 +63,12 @@ public class SecurityReviewG3EndpointAuthzTests
         (await GovernanceEndpoints.IsAuthorizedForSimulationAsync(Ctx("t", ["Auditor"]), null)).ShouldBeFalse();
         (await GovernanceEndpoints.IsAuthorizedForSimulationAsync(Ctx("t", ["Reader"]), "t.dbo.x")).ShouldBeFalse();
 
-        var repo = Substitute.For<IDataOwnershipRepository>();
+        var repo = Substitute.For<IContainerOwnership>();
         repo.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>()).Returns(true);
         (await GovernanceEndpoints.IsAuthorizedForSimulationAsync(Ctx("t", ["Consumer"], repo), null)).ShouldBeFalse();
         (await GovernanceEndpoints.IsAuthorizedForSimulationAsync(Ctx("t", ["Consumer"], repo), "t.dbo.x")).ShouldBeTrue();
 
-        var denyRepo = Substitute.For<IDataOwnershipRepository>();
+        var denyRepo = Substitute.For<IContainerOwnership>();
         denyRepo.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>()).Returns(false);
         (await GovernanceEndpoints.IsAuthorizedForSimulationAsync(Ctx("t", ["Consumer"], denyRepo), "t.dbo.x")).ShouldBeFalse();
     }

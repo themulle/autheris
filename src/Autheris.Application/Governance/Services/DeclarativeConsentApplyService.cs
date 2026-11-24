@@ -1,5 +1,6 @@
 namespace Autheris.Application.Governance.Services;
 
+using Autheris.Application.Governance.Ownership;
 using Autheris.Domain.Identity;
 using System;
 using System.Collections.Concurrent;
@@ -33,7 +34,7 @@ public sealed partial class DeclarativeConsentApplyService(
     IDatasetCatalogAdminService? datasetCatalog = null,
     IOptions<GovernanceTextOptions>? textOptions = null,
     IGatewayRoleEvaluator? roleEvaluator = null,
-    IDataOwnershipRepository? dataOwnershipRepository = null,
+    IContainerOwnership? dataOwnershipRepository = null,
     IGrantValidityPolicy? grantValidityPolicy = null) : IDeclarativeConsentApplyService, IDeclarativeManifestPlanner
 {
     public const int MaxDeclarativePruneCount = 10_000;
@@ -58,8 +59,8 @@ public sealed partial class DeclarativeConsentApplyService(
     private readonly IGrantPolicy _grantPolicy = grantPolicy ?? new GrantPolicy(validityPolicy: grantValidityPolicy);
     private readonly IGrantValidityPolicy _grantValidityPolicy = grantValidityPolicy ?? GrantValidityPolicy.CreateDefault();
     private readonly IGatewayRoleEvaluator _roleEvaluator = roleEvaluator ?? new GatewayRoleEvaluator();
-    private readonly IDataOwnershipRepository? _dataOwnershipRepository =
-        dataOwnershipRepository ?? (metadataRepository as IDataOwnershipRepository) ?? (consentRepository as IDataOwnershipRepository);
+    private readonly IContainerOwnership? _dataOwnershipRepository =
+        dataOwnershipRepository ?? (metadataRepository as IContainerOwnership) ?? (consentRepository as IContainerOwnership);
 
     private readonly int _descriptionMaxLength = (textOptions?.Value ?? new GovernanceTextOptions()).ConsentDescriptionMaxLength;
 

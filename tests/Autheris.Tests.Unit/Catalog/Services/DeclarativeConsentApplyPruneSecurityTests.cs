@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog.Services;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -236,7 +237,7 @@ public sealed class DeclarativeConsentApplyPruneSecurityTests
         };
     }
 
-    private sealed class StubOwnershipRepository(Func<TableIdentifier, Sid, bool> isApprover) : IDataOwnershipRepository
+    private sealed class StubOwnershipRepository(Func<TableIdentifier, Sid, bool> isApprover) : IContainerOwnership
     {
         public Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default) => throw new NotImplementedException();
         public Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<DataOwner>>([]);
@@ -314,7 +315,7 @@ public sealed class DeclarativeConsentApplyPruneSecurityTests
 
     private static DeclarativeConsentApplyService CreateService(
         InMemoryPruneConsentRepository repo,
-        IDataOwnershipRepository? ownership = null,
+        IContainerOwnership? ownership = null,
         IGatewayRoleEvaluator? roles = null) =>
         new(new StubTableMetadataRepository(), repo, new NullAuditLogRepository(), dataOwnershipRepository: ownership, roleEvaluator: roles);
 

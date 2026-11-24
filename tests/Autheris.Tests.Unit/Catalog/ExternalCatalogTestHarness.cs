@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Catalog;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.IO;
@@ -148,7 +149,7 @@ internal sealed class ExternalCatalogTestHarness : IAsyncDisposable
         services.AddSingleton<IAccessDecisionPoint>(pdp);
         services.AddSingleton<IConsentRepository>(consents);
         services.AddSingleton<IConsentApprovalRepository>(approvals);
-        services.AddSingleton<IDataOwnershipRepository>(owners);
+        services.AddSingleton<IContainerOwnership>(owners);
         services.AddSingleton<IDiscoveryArtifactStore>(artifacts);
         services.AddSingleton<IConsentWorkflowConfigRepository>(workflowRepo);
         services.AddSingleton<ICatalogChangeStore>(changeStore);
@@ -639,7 +640,7 @@ internal sealed class InMemoryExternalApprovalRepository : IConsentApprovalRepos
     public Task DeleteConsentRequestAsync(Guid requestId, CancellationToken ct = default) => throw new NotSupportedException();
 }
 
-internal sealed class PerUserOwnershipRepository : IDataOwnershipRepository
+internal sealed class PerUserOwnershipRepository : IContainerOwnership
 {
     private readonly Dictionary<TableIdentifier, List<DataOwner>> _owners = [];
     private readonly Dictionary<string, HashSet<TableIdentifier>> _ownedBySid = new(StringComparer.OrdinalIgnoreCase);

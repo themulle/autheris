@@ -1,6 +1,7 @@
 namespace Autheris.Application.VirtualFilters;
 
 using System;
+using Autheris.Application.Governance.SingleApproval;
 using System.Collections.Generic;
 using System.Linq;
 using System.Text.Json;
@@ -123,58 +124,20 @@ public sealed partial class VirtualFilterAdministrationService
         var existing = FindProfile(snapshot, profile.TenantId, profile.Name);
         EnsureWritable(existing?.ManagedBy, profile.ManagedBy, actor, $"access profile '{profile.Name}'");
 
-        if (_options.RequireApproval && !actor.IsSync)
+        EnsureDataGovernance(actor);
+        if (!actor.IsSync && profile.Uncovered != UncoveredPolicy.Deny && profile.GranteeSid is { } grantee)
         {
-            if (existing != null && existing.Status == FilterApprovalStatus.Active)
+            if (actor.Groups is null && profile.GranteeType == GranteeType.Group)
             {
-                // Last-Known-Good: Active profile stays active, changes go to Draft
-                var draft = profile with
-                {
-                    Id = Guid.NewGuid(),
-                    Status = FilterApprovalStatus.PendingApproval,
-                    CreatedBy = actor.Sid,
-                    ApprovedBy = null,
-                    ApprovedAt = null,
-                    UpdatedBy = CombineUpdatedBy(existing.Draft?.UpdatedBy, actor),
-                    UpdatedAt = DateTimeOffset.UtcNow,
-                    Draft = null,
-                    PendingDeletion = false,
-                    DeletionRequestedBy = null
-                };
-
-                var toStore = existing with
-                {
-                    Draft = draft,
-                    UpdatedBy = CombineUpdatedBy(existing.UpdatedBy, actor),
-                    UpdatedAt = DateTimeOffset.UtcNow
-                };
-
-                await ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [toStore] }, snapshot.Generation, ct).ConfigureAwait(false);
-                await AuditAsync(profile.TenantId, actor, "ACCESS_PROFILE_PENDING_APPROVAL",
-                    $"access_profile:{profile.Name}", new { name = profile.Name, status = "DraftPendingApproval", before = existing.ComputeDefinitionHash(), draft = draft.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
-                return toStore;
+                // The writer's groups are unknown (degraded resolution): whether the grantee group is one of them cannot be verified.
+                throw new SingleApprovalRefusedException("SelfWideningUnverifiable", "The writer's groups could not be resolved; the change cannot be verified.");
             }
 
-            // Brand new profile (or existing was PendingApproval)
-            var pending = profile with
-            {
-                Id = existing?.Id ?? profile.Id,
-                Status = FilterApprovalStatus.PendingApproval,
-                CreatedBy = existing?.CreatedBy ?? actor.Sid,
-                ApprovedBy = null,
-                ApprovedAt = null,
-                UpdatedBy = CombineUpdatedBy(existing?.UpdatedBy, actor),
-                UpdatedAt = DateTimeOffset.UtcNow,
-                Draft = null,
-                PendingDeletion = false,
-                DeletionRequestedBy = null
-            };
-
-            await ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [pending] }, snapshot.Generation, ct).ConfigureAwait(false);
-            var action = existing == null ? "ACCESS_PROFILE_CREATED" : "ACCESS_PROFILE_UPDATED";
-            await AuditAsync(profile.TenantId, actor, "ACCESS_PROFILE_PENDING_APPROVAL",
-                $"access_profile:{profile.Name}", new { name = profile.Name, status = pending.Status.ToString(), before = existing?.ComputeDefinitionHash(), after = profile.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
-            return pending;
+            // An access profile only narrows rows: leaving uncovered objects to the consents is no narrowing for the writer's own identity
+            // or for a group the writer belongs to.
+            SelfWideningGuard.EnsureDoesNotWidenOwnAccess(
+                new SingleApprovalWriter(actor.Sid.Value, actor.Identifiers ?? [], actor.Groups ?? []),
+                [grantee.Value]);
         }
 
         var direct = profile with
@@ -191,109 +154,37 @@ public sealed partial class VirtualFilterAdministrationService
             DeletionRequestedBy = null
         };
 
-        await ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [direct] }, snapshot.Generation, ct).ConfigureAwait(false);
         var evt = existing == null ? "ACCESS_PROFILE_CREATED" : "ACCESS_PROFILE_UPDATED";
-        await AuditAsync(profile.TenantId, actor, evt,
-            $"access_profile:{profile.Name}", new { name = profile.Name, status = direct.Status.ToString(), before = existing?.ComputeDefinitionHash(), after = profile.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
+        // Fail closed: the audit entry (hashes only) is written in the transaction of the change; a failing audit rolls the change back.
+        var audit = AuditEntry(profile.TenantId, actor, evt,
+            $"access_profile:{profile.Name}", new { name = profile.Name, status = direct.Status.ToString(), before = existing?.ComputeDefinitionHash(), after = profile.ComputeDefinitionHash() });
+        await ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [direct], AuditEntries = [audit] }, snapshot.Generation, ct).ConfigureAwait(false);
         return direct;
-    }
-
-    /// <summary>VF-05: the hash an approval compares (see <see cref="PendingHash(VirtualFilter)"/>).</summary>
-    public static string PendingHash(VirtualFilterAccessProfile profile) =>
-        profile.PendingDeletion
-            ? profile.ComputeDefinitionHash()
-            : (profile.Draft?.ComputeDefinitionHash() ?? profile.ComputeDefinitionHash());
-
-    /// <summary>VF-05: approval is bound to the reviewed definition; there is no hash-less approval.</summary>
-    public async Task<VirtualFilterAccessProfile> ApproveProfileAsync(TenantId tenantId, string name, VirtualFilterActor actor, string expectedHash, CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(actor);
-        ArgumentException.ThrowIfNullOrWhiteSpace(expectedHash);
-        var snapshot = await _repository.LoadSnapshotAsync(ct).ConfigureAwait(false);
-        var existing = FindProfile(snapshot, tenantId, name) ?? throw new KeyNotFoundException($"The access profile '{name}' does not exist.");
-        EnsureWritable(existing.ManagedBy, null, actor, $"access profile '{name}'");
-
-        bool hasPending = existing.Status == FilterApprovalStatus.PendingApproval ||
-                          existing.Draft != null ||
-                          existing.PendingDeletion;
-        if (!hasPending)
-        {
-            throw new InvalidOperationException($"The access profile '{name}' has no pending changes to approve.");
-        }
-
-        var contributors = GetContributorIdentifiers(existing);
-        if (actor.MatchesAny(contributors))
-        {
-            throw new InvalidOperationException("Four-eyes principle violation: Creator or editor cannot approve their own profile.");
-        }
-
-        string pendingHash = PendingHash(existing);
-
-        if (!string.Equals(expectedHash, pendingHash, StringComparison.Ordinal))
-        {
-            throw new VirtualFilterConflictException($"Hash mismatch for access profile '{name}': expected '{expectedHash}' but pending definition hash is '{pendingHash}'.");
-        }
-
-        if (existing.PendingDeletion)
-        {
-            await ApplyAsync(new VirtualFilterChangeSet { DeleteProfiles = [(tenantId, name)] }, snapshot.Generation, ct).ConfigureAwait(false);
-            await AuditAsync(tenantId, actor, "ACCESS_PROFILE_DELETED", $"access_profile:{name}", new { name, before = existing.ComputeDefinitionHash(), approved_by = actor.Sid.Value }, ct).ConfigureAwait(false);
-            return existing with { Status = FilterApprovalStatus.Rejected, PendingDeletion = false };
-        }
-
-        if (existing.Draft != null)
-        {
-            var promoted = existing.Draft with
-            {
-                Id = existing.Id,
-                Status = FilterApprovalStatus.Active,
-                ApprovedBy = actor.Sid,
-                ApprovedAt = DateTimeOffset.UtcNow,
-                Draft = null,
-                PendingDeletion = false,
-                DeletionRequestedBy = null
-            };
-            await ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [promoted] }, snapshot.Generation, ct).ConfigureAwait(false);
-            await AuditAsync(tenantId, actor, "ACCESS_PROFILE_APPROVED", $"access_profile:{name}", new { name, approved_by = actor.Sid.Value }, ct).ConfigureAwait(false);
-            return promoted;
-        }
-
-        var approved = existing with
-        {
-            Status = FilterApprovalStatus.Active,
-            ApprovedBy = actor.Sid,
-            ApprovedAt = DateTimeOffset.UtcNow
-        };
-
-        await ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [approved] }, snapshot.Generation, ct).ConfigureAwait(false);
-        await AuditAsync(tenantId, actor, "ACCESS_PROFILE_APPROVED",
-            $"access_profile:{name}", new { name, approved_by = actor.Sid.Value }, ct).ConfigureAwait(false);
-        return approved;
     }
 
     public async Task DeleteProfileAsync(TenantId tenantId, string name, VirtualFilterActor actor, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(actor);
+        EnsureDataGovernance(actor);
         var snapshot = await _repository.LoadSnapshotAsync(ct).ConfigureAwait(false);
         var existing = FindProfile(snapshot, tenantId, name) ?? throw new KeyNotFoundException($"The access profile '{name}' does not exist.");
         EnsureWritable(existing.ManagedBy, null, actor, $"access profile '{name}'");
 
-        if (_options.RequireApproval && existing.Status == FilterApprovalStatus.Active)
-        {
-            var pendingDeletion = existing with
-            {
-                PendingDeletion = true,
-                DeletionRequestedBy = actor.Sid,
-                UpdatedBy = actor.Sid.Value,
-                UpdatedAt = DateTimeOffset.UtcNow
-            };
-            await ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [pendingDeletion] }, snapshot.Generation, ct).ConfigureAwait(false);
-            await AuditAsync(tenantId, actor, "ACCESS_PROFILE_PENDING_DELETION", $"access_profile:{name}", new { name }, ct).ConfigureAwait(false);
-            return;
-        }
+        // The delete and its audit entry commit in one transaction (never a delete without an entry, never an entry without the delete).
+        var audit = AuditEntry(tenantId, actor, "ACCESS_PROFILE_DELETED", $"access_profile:{name}", new { name, before = existing.ComputeDefinitionHash() });
+        await ApplyAsync(new VirtualFilterChangeSet { DeleteProfiles = [(tenantId, name)], AuditEntries = [audit] }, snapshot.Generation, ct).ConfigureAwait(false);
+    }
 
-        await ApplyAsync(new VirtualFilterChangeSet { DeleteProfiles = [(tenantId, name)] }, snapshot.Generation, ct).ConfigureAwait(false);
-        await AuditAsync(tenantId, actor, "ACCESS_PROFILE_DELETED", $"access_profile:{name}", new { name, before = existing.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
+    /// <summary>
+    /// An access profile is a declarative grant (decision D5): only Data Governance activates, changes or deletes one; the file
+    /// repository sync is the only other writer. FilterAdmin, IT and everyone else are refused before anything is read or written.
+    /// </summary>
+    private static void EnsureDataGovernance(VirtualFilterActor actor)
+    {
+        if (!actor.IsSync && !actor.IsDataGovernance)
+        {
+            throw new UnauthorizedAccessException("Access profiles are declarative grants; only Data Governance may change them.");
+        }
     }
 
     private static VirtualFilter? FindFilter(VirtualFilterSnapshot snapshot, TenantId tenantId, string name) =>
@@ -378,72 +269,15 @@ public sealed partial class VirtualFilterAdministrationService
         }
     }
 
-    private static string CombineUpdatedBy(string? existingUpdatedBy, VirtualFilterActor actor)
+    /// <summary>The audit entry of a change; the store writes it in the transaction of the change.</summary>
+    private static AuditLogEntry AuditEntry(TenantId tenantId, VirtualFilterActor actor, string eventType, string target, object details) => new()
     {
-        var actorIds = actor.FormatAllIdentifiers();
-        if (string.IsNullOrWhiteSpace(existingUpdatedBy)) return actorIds;
-
-        var parts = existingUpdatedBy.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
-            .Concat(actorIds.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            .Distinct(StringComparer.OrdinalIgnoreCase);
-
-        return string.Join(";", parts);
-    }
-
-    private static HashSet<string> GetContributorIdentifiers(VirtualFilter filter)
-    {
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        AddToContributors(set, filter.CreatedBy, filter.UpdatedBy);
-        AddToContributors(set, filter.DeletionRequestedBy, null);
-
-        if (filter.Draft != null)
-        {
-            AddToContributors(set, filter.Draft.CreatedBy, filter.Draft.UpdatedBy);
-            AddToContributors(set, filter.Draft.DeletionRequestedBy, null);
-        }
-
-        return set;
-    }
-
-    private static HashSet<string> GetContributorIdentifiers(VirtualFilterAccessProfile profile)
-    {
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        AddToContributors(set, profile.CreatedBy, profile.UpdatedBy);
-        AddToContributors(set, profile.DeletionRequestedBy, null);
-
-        if (profile.Draft != null)
-        {
-            AddToContributors(set, profile.Draft.CreatedBy, profile.Draft.UpdatedBy);
-            AddToContributors(set, profile.Draft.DeletionRequestedBy, null);
-        }
-
-        return set;
-    }
-
-    private static void AddToContributors(HashSet<string> set, Sid? sid, string? updatedBy)
-    {
-        if (sid != null && !string.IsNullOrWhiteSpace(sid.Value.Value))
-        {
-            set.Add(sid.Value.Value);
-        }
-        if (!string.IsNullOrWhiteSpace(updatedBy))
-        {
-            foreach (var part in updatedBy.Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-            {
-                set.Add(part);
-            }
-        }
-    }
-
-    private Task AuditAsync(TenantId tenantId, VirtualFilterActor actor, string eventType, string target, object details, CancellationToken ct) =>
-        _audit.RecordAuditEventAsync(new AuditLogEntry
-        {
-            TenantId = tenantId,
-            EventType = eventType,
-            ActorSid = actor.Sid,
-            TargetTable = target,
-            Decision = "ALLOW",
-            TraceId = System.Diagnostics.Activity.Current?.TraceId.ToString() ?? string.Empty,
-            DetailsJson = JsonSerializer.Serialize(details)
-        }, ct);
+        TenantId = tenantId,
+        EventType = eventType,
+        ActorSid = actor.Sid,
+        TargetTable = target,
+        Decision = "ALLOW",
+        TraceId = System.Diagnostics.Activity.Current?.TraceId.ToString() ?? string.Empty,
+        DetailsJson = JsonSerializer.Serialize(details)
+    };
 }

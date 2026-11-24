@@ -90,12 +90,15 @@ public sealed partial class AdvisoryRegressionTests
             case "case_06":
             {
                 var repository = Substitute.For<ICallerAttributeRepository>();
-                repository.ApproveServiceSetAsync(default!, default!, default!, default!, default!, default, default).ReturnsForAnyArgs(CallerAttributeChangeResult.Applied);
+                repository.SaveServiceSetAsync(default, default!, default!, default!, default!, default, default).ReturnsForAnyArgs(CallerAttributeChangeResult.Applied);
+                repository.LoadCallerAttributeSnapshotAsync(default).ReturnsForAnyArgs(CallerAttributeStoreSnapshot.Empty);
+                var registry = Substitute.For<ICallerAttributeRegistry>();
+                registry.GetAsync(default).ReturnsForAnyArgs(new CallerAttributeSnapshot(1, [ClaimsDefinition()], []));
                 var invalidator = Substitute.For<ICallerAttributeCacheInvalidator>();
                 var service = new CallerAttributeAdministrationService(
-                    repository, Substitute.For<ICallerAttributeRegistry>(), Substitute.For<Autheris.Application.Common.Interfaces.IAuditLogRepository>(),
+                    repository, registry, Substitute.For<Autheris.Application.Common.Interfaces.IAuditLogRepository>(),
                     Microsoft.Extensions.Options.Options.Create(new GatewayOptions { CallerAttributes = Options() }), TimeProvider.System, [], invalidator);
-                await service.ApproveServiceSetAsync(Tenant, "app-1", "cost_center", "hash", new CallerAttributeActor("oid-bob", HoldsApproverRole: true));
+                await service.SaveServiceSetAsync(Tenant, "app-1", "cost_center", ["a"], new CallerAttributeActor("oid-bob", true, [], []));
                 invalidator.Received(1).InvalidateAttribute(Tenant, "cost_center");
                 break;
             }

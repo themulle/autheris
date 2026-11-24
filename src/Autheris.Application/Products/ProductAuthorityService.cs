@@ -1,5 +1,6 @@
 namespace Autheris.Application.Products;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -66,14 +67,14 @@ public sealed record ProductAuthorityDecision(bool Allowed, ProductCreatorAuthor
 /// membership or direct ownership), <c>DataProductAdmin</c> / Data Governance, or Git sync. Base owners approve nothing; they are only notified.
 /// </summary>
 public sealed class ProductAuthorityService(
-    IDataOwnershipRepository ownership,
+    IContainerOwnership ownership,
     IDataProductRepository products,
     TimeProvider? timeProvider = null,
     IGovernanceCapabilities? capabilities = null,
     IGovernanceDomainRepository? domains = null,
     ITableMetadataRepository? tables = null)
 {
-    private readonly IDataOwnershipRepository _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
+    private readonly IContainerOwnership _ownership = ownership ?? throw new ArgumentNullException(nameof(ownership));
     private readonly IDataProductRepository _products = products ?? throw new ArgumentNullException(nameof(products));
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private readonly IGovernanceCapabilities? _capabilities = capabilities;

@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Api;
 
+using Autheris.Application.Governance.Ownership;
 using Autheris.Tests.Unit.Catalog;
 
 using System;
@@ -151,7 +152,7 @@ public sealed class GovernanceWriteAuthorizationTests
             _ => NullFake.UseDefault
         });
         return new DatasetCatalogAdminService(
-            tables, NullFake.Create<IDataOwnershipRepository>(), NullFake.Create<IAuditWriter>(),
+            tables, NullFake.Create<IContainerOwnership>(), NullFake.Create<IAuditWriter>(),
             new StaticOptions(new GatewayOptions { Catalog = new DataCatalogOptions { MaxTagsPerDataset = 32 } }),
             capabilities: caps);
     }

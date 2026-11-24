@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Security;
 
+using Autheris.Application.Governance.Ownership;
 using System;
 using Autheris.Tests.Common.Fakes;
 using System.Collections.Generic;
@@ -312,7 +313,7 @@ public sealed class Batch5SecurityTestsA
         var callerSid = new Sid("S-1-5-21-ANALYST");
         var foreignSubjectSid = new Sid("S-1-5-21-OTHER-USER");
 
-        var ownershipRepo = Substitute.For<IDataOwnershipRepository>();
+        var ownershipRepo = Substitute.For<IContainerOwnership>();
         ownershipRepo.IsAuthorizedApproverForTableAsync(table, callerSid, Arg.Any<CancellationToken>())
             .Returns(false);
 
@@ -369,7 +370,7 @@ public sealed class Batch5SecurityTestsA
         auditRepo.QueryAuditLogsAsync(Arg.Any<string?>(), Arg.Any<Sid?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<int>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
             .Returns(auditLogs);
 
-        var ownershipRepo = Substitute.For<IDataOwnershipRepository>();
+        var ownershipRepo = Substitute.For<IContainerOwnership>();
         ownershipRepo.IsAuthorizedApproverForTableAsync(table, callerSid, Arg.Any<CancellationToken>())
             .Returns(false); // Not owner
 
