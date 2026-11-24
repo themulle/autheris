@@ -12,6 +12,8 @@ using Autheris.Tests.Common.Hosting;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Autheris.Domain.Options;
 using Shouldly;
 using Xunit;
 using Autheris.Tests.Integration.Governance;
@@ -91,6 +93,11 @@ public class InsecureGettingStartedIntegrationTests : IClassFixture<InsecureGett
                 Columns = [new TableColumn { TableId = table.Id, ColumnName = "name", DataType = "VARCHAR" }]
             });
         }
+
+        // #1009: an unassigned table is OnRequest and cannot be requested without a catalog grant; auto-approval is shown on an Open domain.
+        var tenant = autoApproveFactory.Services.GetRequiredService<IOptions<GatewayOptions>>().Value.Tenancy.DefaultTenantId;
+        tenant.ShouldNotBeNullOrWhiteSpace();
+        await OpenDomainSeeder.AssignToOpenDomainAsync(autoApproveFactory.Services, new TenantId(tenant!), tableId);
 
         var mutation = @"
             mutation {

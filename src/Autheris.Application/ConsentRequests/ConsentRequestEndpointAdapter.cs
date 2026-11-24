@@ -71,7 +71,9 @@ public sealed class ConsentRequestEndpointAdapter(
         {
             RequestId = primary.Request.Id,
             Status = primary.Request.Status,
-            Message = "Access request submitted."
+            Message = primary.AutoApproved
+                ? "[INSECURE GETTING STARTED] Consent request auto-approved."
+                : "Access request submitted."
         };
     }
 

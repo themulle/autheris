@@ -262,6 +262,9 @@ public sealed class GrantRecordLifecycleE2ETests(GovernancePostgresFixture fixtu
             PrimaryKeyColumns = ["id"]
         });
 
+        // the workflow under test needs a table the requester can see (an unassigned table is OnRequest)
+        await OpenDomainSeeder.AssignToOpenDomainAsync(store.Services, store.TenantA, tableId);
+
         await store.DataOwnerAssignments.ApplyTableOwnerAssignmentsAsync(
             new DataOwnerAssignmentRequest(
                 [

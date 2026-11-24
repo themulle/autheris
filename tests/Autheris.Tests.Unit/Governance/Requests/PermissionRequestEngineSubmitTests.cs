@@ -61,7 +61,8 @@ public sealed class PermissionRequestEngineSubmitTests
         IGovernanceDomainRepository? domainRepo = null,
         FakeTimeProvider? time = null,
         InMemoryAuditWriter? audit = null,
-        Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter? router = null)
+        Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter? router = null,
+        GatewayOptions? gatewayOptions = null)
     {
         metadata ??= DefaultMetadata();
         return new PermissionRequestEngine(
@@ -79,8 +80,87 @@ public sealed class PermissionRequestEngineSubmitTests
             accessPolicyProvider: policyProvider,
             catalogVisibilityRepository: catalogRepo,
             capabilities: new GovernanceCapabilities(domainRepository: domainRepo),
+            gatewayOptions: gatewayOptions is null ? null : Microsoft.Extensions.Options.Options.Create(gatewayOptions),
             timeProvider: time ?? new FakeTimeProvider(Now),
             workflowRouter: router);
+    }
+
+    private static GatewayOptions AutoApproveOptions() =>
+        new() { Insecure = new InsecureGettingStartedOptions { warn_auto_approve_access_requests = true } };
+
+    /// <summary>Approval fake: captures created requests and records insecure auto-approve activations.</summary>
+    private static IConsentApprovalRepository AutoApproveApprovals(List<Guid> activated, Dictionary<Guid, ConsentRequest> created) =>
+        NullFake.Create<IConsentApprovalRepository>((m, args) =>
+        {
+            switch (m.Name)
+            {
+                case nameof(IConsentApprovalRepository.CreateConsentRequestAsync):
+                    var req = (ConsentRequest)args![0]!;
+                    created[req.Id] = req;
+                    return Task.FromResult(req);
+                case nameof(IConsentApprovalRepository.ActivateConsentForAutoApproveAsync):
+                    activated.Add((Guid)args![0]!);
+                    created[(Guid)args[0]!].Status = "APPROVED";
+                    return Task.CompletedTask;
+                case nameof(IConsentApprovalRepository.GetConsentRequestAsync):
+                    return Task.FromResult(created.TryGetValue((Guid)args![0]!, out var found) ? found : null);
+                default:
+                    return NullFake.UseDefault;
+            }
+        });
+
+    [Fact]
+    public async Task Insecure_auto_approve_activates_an_internal_data_request_and_audits_the_approval()
+    {
+        var activated = new List<Guid>();
+        var created = new Dictionary<Guid, ConsentRequest>();
+        var audit = new InMemoryAuditWriter();
+        var engine = CreateEngine(
+            AutoApproveApprovals(activated, created),
+            audit: audit,
+            router: new StubRouter(Route(ConsentWorkflowMode.Internal, null, null)),
+            gatewayOptions: AutoApproveOptions());
+
+        var res = await SubmitOrdersAsync(engine);
+
+        activated.ShouldBe([res.Request.Id]);
+        res.Request.Status.ShouldBe("APPROVED");
+        res.AutoApproved.ShouldBeTrue();
+        audit.Entries.ShouldContain(e => e.EventType == Autheris.Domain.Audit.AuditEventTypes.PermissionApproved && e.Decision == "APPROVED");
+    }
+
+    [Fact]
+    public async Task Auto_approve_never_applies_to_an_external_route()
+    {
+        var activated = new List<Guid>();
+        var created = new Dictionary<Guid, ConsentRequest>();
+        var engine = CreateEngine(
+            AutoApproveApprovals(activated, created),
+            router: new StubRouter(Route(ConsentWorkflowMode.External, Guid.NewGuid(), WorkflowRouteScopeKind.Domain)),
+            gatewayOptions: AutoApproveOptions());
+
+        var res = await SubmitOrdersAsync(engine);
+
+        activated.ShouldBeEmpty();
+        res.AutoApproved.ShouldBeFalse();
+        res.Request.Status.ShouldNotBe("APPROVED");
+    }
+
+    [Fact]
+    public async Task Without_the_insecure_switch_a_request_stays_pending()
+    {
+        var activated = new List<Guid>();
+        var created = new Dictionary<Guid, ConsentRequest>();
+        var engine = CreateEngine(
+            AutoApproveApprovals(activated, created),
+            router: new StubRouter(Route(ConsentWorkflowMode.Internal, null, null)),
+            gatewayOptions: new GatewayOptions());
+
+        var res = await SubmitOrdersAsync(engine);
+
+        activated.ShouldBeEmpty();
+        res.AutoApproved.ShouldBeFalse();
+        res.Request.Status.ShouldBe("PENDING");
     }
 
     private static Autheris.Application.ConsentRequests.Routing.ConsentWorkflowRouteResolution Route(ConsentWorkflowMode mode, Guid? systemId, WorkflowRouteScopeKind? scope) =>

@@ -178,6 +178,10 @@ public class WalkingSkeletonIntegrationTests : IClassFixture<WalkingSkeletonInte
         var requesterSid = new Sid("S-1-5-21-AUDITOR-99");
         var approverSid = new Sid("S-1-5-21-DATAOWNER-APPROVER");
 
+        // #1009: an unassigned table is OnRequest and cannot be requested without a catalog grant; the lifecycle uses a table of an Open domain.
+        await OpenDomainSeeder.AssignToOpenDomainAsync(
+            _factory.Services, Autheris.Tests.Common.TestTenants.Default, new TableIdentifier("sales", "dbo", "sales_table_1"));
+
         var client = CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", requesterSid.Value);
 
