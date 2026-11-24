@@ -150,6 +150,14 @@ public sealed class CatalogExistenceOracleIntegrationTests : IClassFixture<Catal
             var grantedDomain = await CatalogVisibilitySeeding.SeedOnRequestDomainAsync(domains, tenant, Owner, grantedId);
             await CatalogVisibilitySeeding.SeedCatalogGrantAsync(
                 grants, tenant, new ContainerRef(ContainerKind.Domain, grantedDomain.Id), new Sid(Caller), Owner);
+
+            var searchEngine = scope.ServiceProvider.GetRequiredService<ICatalogSearchEngine>();
+            var indexedTables = new List<TableMetadata>();
+            foreach (var id in new[] { InOpen, InClosed, InGranted, inUnassigned })
+            {
+                indexedTables.Add((await repo.GetTableMetadataAsync(id))!);
+            }
+            await searchEngine.RebuildIndexAsync(indexedTables);
         }
 
         var client = factory.CreateClient();
@@ -187,11 +195,10 @@ public sealed class CatalogExistenceOracleIntegrationTests : IClassFixture<Catal
             facetsDoc.RootElement.GetProperty("totalCount").GetInt32().ShouldBe(2);
         }
 
-        var searchClosed = await (await client.GetAsync("/api/v1/catalog/search?q=in_")).Content.ReadAsStringAsync();
-        searchClosed.ShouldContain("in_open");
-        searchClosed.ShouldContain("in_granted");
-        searchClosed.ShouldNotContain("in_closed");
-        searchClosed.ShouldNotContain("in_unassigned");
+        (await (await client.GetAsync("/api/v1/catalog/search?q=in_open")).Content.ReadAsStringAsync()).ShouldContain("in_open");
+        (await (await client.GetAsync("/api/v1/catalog/search?q=in_granted")).Content.ReadAsStringAsync()).ShouldContain("in_granted");
+        (await (await client.GetAsync("/api/v1/catalog/search?q=in_closed")).Content.ReadAsStringAsync()).ShouldNotContain("in_closed");
+        (await (await client.GetAsync("/api/v1/catalog/search?q=in_unassigned")).Content.ReadAsStringAsync()).ShouldNotContain("in_unassigned");
     }
 
     /// <summary>The comparable part of a problem body: everything except per-request values (trace id, instance).</summary>
@@ -232,6 +239,14 @@ public sealed class CatalogExistenceOracleIntegrationTests : IClassFixture<Catal
             var grantedDomain = await CatalogVisibilitySeeding.SeedOnRequestDomainAsync(domains, tenant, Owner, grantedId);
             await CatalogVisibilitySeeding.SeedCatalogGrantAsync(
                 grants, tenant, new ContainerRef(ContainerKind.Domain, grantedDomain.Id), new Sid(Caller), Owner);
+
+            var searchEngine = scope.ServiceProvider.GetRequiredService<ICatalogSearchEngine>();
+            var indexedTables = new List<TableMetadata>();
+            foreach (var id in new[] { InOpen, InClosed, InGranted })
+            {
+                indexedTables.Add((await repo.GetTableMetadataAsync(id))!);
+            }
+            await searchEngine.RebuildIndexAsync(indexedTables);
 
             _fixture.Seeded = true;
         }
