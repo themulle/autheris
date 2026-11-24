@@ -59,6 +59,7 @@ public partial class GovernanceRepository
 
     internal async Task PublishCatalogChangedEventAsync(CatalogVersion version, CancellationToken ct)
     {
+        _epochValidationService?.InvalidateAllTables(); // issue #1044: before the (asynchronous) event reaches this replica's caches
         var timestamp = TimeProvider.System.GetUtcNow();
         if (_eventBus is { } eventBus)
         {

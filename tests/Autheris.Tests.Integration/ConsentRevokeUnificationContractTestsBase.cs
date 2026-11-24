@@ -291,6 +291,38 @@ public abstract class ConsentRevokeUnificationContractTestsBase : IAsyncLifetime
     [Theory]
     [InlineData("RevokeConsentAsync")]
     [InlineData("ReplaceConsentsAsync")]
+    public async Task Revoke_Pattern_Grant_Advances_The_Catalog_Version(string entry)
+    {
+        // A pattern grant has no table epoch: creating it advances the catalog version (part of every cached decision's key), so
+        // revoking it must as well, otherwise decisions cached from the pattern grant stay valid until their TTL.
+        if (!Available)
+        {
+            return;
+        }
+
+        var pattern = await Repo.CreateConsentAsync(new Consent
+        {
+            TableId = Guid.Empty, ObjectPattern = $"{_table.Domain}.{_table.Schema}.*", DataSource = _table.Domain,
+            ColumnSetMode = ColumnSetMode.AllNonHidden, WorkflowMode = ConsentWorkflowMode.External, TenantId = TenantA,
+            GranteeType = GranteeType.User, GranteeSid = new Sid("S-1-5-21-Alice"), Effect = ConsentEffect.Allow,
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(30), CreatedBySid = Admin
+        });
+        await ScalarAsync(
+            "INSERT INTO CONSENT_APPROVING_OWNERS (tenant_id, consent_id, owner_sid, owner_sid_norm) VALUES (@t, @cid, @sid, @norm)",
+            ("@t", TenantA.Value), ("@cid", pattern.Id.ToString("D")), ("@sid", Admin.Value), ("@norm", Admin.Value.ToUpperInvariant()));
+        var before = await Repo.GetCatalogVersionAsync();
+
+        await InvokeAsync(entry, pattern.Id, Admin);
+
+        (await IsRevokedAsync(pattern.Id)).ShouldBeTrue();
+        var after = await Repo.GetCatalogVersionAsync();
+        after.ContentVersion.ShouldBeGreaterThan(before.ContentVersion);
+    }
+
+    [Trait("Category", "Security")]
+    [Theory]
+    [InlineData("RevokeConsentAsync")]
+    [InlineData("ReplaceConsentsAsync")]
     public async Task Revoke_Unauthorized_Approver_Leaves_No_State_Change_All_Dialects(string entry)
     {
         // DEF-T-08.

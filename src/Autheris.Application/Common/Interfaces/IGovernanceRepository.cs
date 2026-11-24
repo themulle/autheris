@@ -198,6 +198,14 @@ public interface ITableMetadataRepository : Autheris.Application.Catalog.ICatalo
     Task<IReadOnlyList<DiscoveryArtifacts>> GetAllDiscoveryArtifactsAsync(Guid tableId, CancellationToken ct = default)
         => throw new NotSupportedException($"{GetType().Name} does not implement discovery artifacts.");
 
+    /// <summary>Gets all discovery artifact rows (across provenances) for a set of tables, keyed by table id.</summary>
+    async Task<IReadOnlyDictionary<Guid, IReadOnlyList<DiscoveryArtifacts>>> GetAllDiscoveryArtifactsBatchAsync(IReadOnlyCollection<Guid> tableIds, CancellationToken ct = default)
+    {
+        var map = new Dictionary<Guid, IReadOnlyList<DiscoveryArtifacts>>(tableIds?.Count ?? throw new ArgumentNullException(nameof(tableIds)));
+        foreach (var id in tableIds) if (!map.ContainsKey(id)) map[id] = await GetAllDiscoveryArtifactsAsync(id, ct).ConfigureAwait(false);
+        return map;
+    }
+
     /// <summary>Upserts discovery artifacts for a table.</summary>
     Task<bool> UpsertDiscoveryArtifactsAsync(DiscoveryArtifacts artifacts, Sid actor, CancellationToken ct = default)
         => throw new NotSupportedException($"{GetType().Name} does not implement discovery artifacts.");

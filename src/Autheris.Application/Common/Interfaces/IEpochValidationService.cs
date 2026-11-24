@@ -26,6 +26,27 @@ public interface IEpochValidationService
     }
 
     Task InvalidateEpochAsync(TableIdentifier table, CancellationToken ct = default);
+
+    /// <summary>
+    /// Issue #1044: the generation of this process's policy invalidation log (see <see cref="Autheris.Application.Policy.Services.PolicyInvalidationLog"/>),
+    /// or null when no trustworthy signal exists: the implementation does not keep the log, or Redis is configured and disconnected,
+    /// in its reconnect grace period, or a local epoch bump is not confirmed yet. A cache keyed on it must not be read or written while null.
+    /// </summary>
+    long? InvalidationGeneration => null;
+
+    /// <summary>Issue #1044: the lower-case table keys invalidated after <paramref name="generation"/>, or null when that cannot be proven (rebuild).</summary>
+    IReadOnlySet<string>? GetInvalidatedSince(long generation) => null;
+
+    /// <summary>
+    /// Issue #1044: the number of table invalidations announced cluster-wide (0 on a single node), or null when it cannot be read. A
+    /// replica whose log grew by fewer entries than this count since a cached value was loaded has missed an announcement.
+    /// </summary>
+    ValueTask<long?> GetClusterInvalidationSequenceAsync(CancellationToken ct = default) => ValueTask.FromResult<long?>(null);
+
+    /// <summary>Issue #1044: records an invalidation that may affect every table (a catalog version change on this replica), before it returns.</summary>
+    void InvalidateAllTables()
+    {
+    }
     Task<long> GetCurrentEpochAsync(TableIdentifier table, CancellationToken ct = default);
     Task<IReadOnlyDictionary<TableIdentifier, long>> GetCurrentEpochsAsync(IEnumerable<TableIdentifier> tables, CancellationToken ct = default);
     /// <summary>

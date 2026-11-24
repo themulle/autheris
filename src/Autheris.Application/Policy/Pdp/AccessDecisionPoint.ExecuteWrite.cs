@@ -62,7 +62,7 @@ public sealed partial class AccessDecisionPoint
             };
         }
 
-        var matching = await LoadMatchingWriteConsentsAsync(principal, subject, table, _timeProvider.GetUtcNow(), request.SupplementalConsents, ct).ConfigureAwait(false);
+        var matching = await LoadMatchingWriteConsentsAsync(principal, subject, table, _timeProvider.GetUtcNow(), request.SupplementalConsents, prefetch: null, ct).ConfigureAwait(false);
         if (matching.HasUnconditionalDeny)
         {
             return TableAccessDecision.Denied(table, "Access denied: explicit DENY consent on the product.") with

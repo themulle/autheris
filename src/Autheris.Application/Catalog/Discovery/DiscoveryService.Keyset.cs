@@ -32,6 +32,11 @@ public sealed partial class DiscoveryService
             return new DiscoveryKeysetPage([], query.CountTotal ? 0 : null, null);
         }
 
+        return await ListKeysetCoreAsync(query, caller, sid, ct).ConfigureAwait(false);
+    }
+
+    private async ValueTask<DiscoveryKeysetPage> ListKeysetCoreAsync(DiscoveryKeysetQuery query, CatalogCaller caller, Sid sid, CancellationToken ct)
+    {
         try
         {
             var scopeKey = BuildScopeMemoKey(sid, caller);
@@ -108,6 +113,11 @@ public sealed partial class DiscoveryService
                 (pageItems, hasMore) = await FillWindowWithPostFilterAsync(
                     caller, sid, scopeKey, candidates, startIndex, first, query.Language, searchText, query.ProjectedPredicate, ct).ConfigureAwait(false);
                 totalCount = null;
+            }
+
+            if (query.Access is { } listedAccess && ContradictsCachedView(scopeKey, listedAccess, pageItems.Select(static i => i.Object)))
+            {
+                return await ListKeysetCoreAsync(query, caller, sid, ct).ConfigureAwait(false);
             }
 
             var nextKey = hasMore && pageItems.Count > 0

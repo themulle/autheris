@@ -6,6 +6,22 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [1.10.6] - 2026-11-23
+
+### Fixed
+- Catalog discovery with an access filter no longer costs time in proportion to the caller's grants after the first request. The caller's access view (which tables are granted) is cached across requests per tenant, user, channel and claim set, and keyed on the policy invalidation log, the catalog version and the virtual-filter generation. A revoke, a new grant, a deny, a classification or a catalog change on this replica takes effect before the next request; only the invalidated tables are decided again. With Redis, a cluster-wide invalidation count detects an announcement this replica missed, and the view is rebuilt. The view selects only which objects are in the filtered set (list, facets, search); every listed object and every data request is still decided per request, and a listed object whose own decision contradicts the view drops it. Views are bounded in memory (`Gateway:Catalog:Discovery:AccessViewCache`, default 64 MB, 300 s) and end at the earliest consent expiry or scheduled deny. They are not used while the invalidation signal is degraded, group resolution is degraded, or authorization plugin hooks are active (#1044).
+- The access filter decides only whether a table is allowed. The column classification stage is skipped unless it can turn the allow into a deny. The caller's consents are read once per filter run instead of once per block of 500 tables. The Discover, Insert, Update and Delete decisions of a catalog page share one consent read, and the page's artifacts and column classifications are read in one statement each (#1047).
+- `GET /api/v1/catalog/objects/{id}` resolves the object from the catalog snapshot instead of reading the whole catalog, and checks hidden-object ownership for that object only. An unknown id is answered at once. The row-scope descriptions of granted objects read the consents of the listed objects only (#1050).
+- Measured on PostgreSQL with 10,000 granted tables (22 columns each), warm requests:
+  - facets with `accessStatus=granted`: 5.5 s → 0.06–0.1 s;
+  - 50-item list: 7 s → 0.25–0.3 s;
+  - search: 7.2 s → 0.2 s;
+  - a single object: 0.16–0.2 s; an unknown id: 0.02 s.
+  The statement count per request no longer depends on the number of granted tables (8 for facets, 36 for a 50-item page).
+
+### Security
+- Every change to a pattern consent (including those of profile assignments) re-evaluates cached access decisions consistently.
+
 ## [1.10.5] - 2026-11-23
 
 ### Fixed

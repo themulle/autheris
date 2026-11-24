@@ -64,6 +64,10 @@ public sealed partial class DiscoveryService : IDiscoveryService
     private readonly ICatalogSnapshotProvider? _snapshotProvider;
     private readonly IProtectionSnapshotProvider? _protectionProvider;
     private readonly Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? _accessPolicySettings;
+    private readonly CatalogAccessViewCache? _accessViewCache;
+
+    // Issue #1044: set for the rest of this (scoped) service once the page guard found a stale cached view.
+    private bool _viewCacheBypassed;
 
     private readonly Lock _memoLock = new();
     private readonly Dictionary<ScopeMemoKey, ScopedCatalog> _scopeMemo = [];
@@ -96,9 +100,11 @@ public sealed partial class DiscoveryService : IDiscoveryService
         ICatalogSnapshotProvider? snapshotProvider = null,
         IProtectionSnapshotProvider? protectionProvider = null,
         Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? accessPolicySettings = null,
-        Autheris.Application.Catalog.Visibility.IContainerVisibilitySnapshotProvider? containerVisibility = null)
+        Autheris.Application.Catalog.Visibility.IContainerVisibilitySnapshotProvider? containerVisibility = null,
+        CatalogAccessViewCache? accessViewCache = null)
     {
         _containerVisibility = containerVisibility;
+        _accessViewCache = accessViewCache;
         _docLinks = docLinks;
         _snapshotProvider = snapshotProvider;
         _protectionProvider = protectionProvider;
@@ -139,6 +145,11 @@ public sealed partial class DiscoveryService : IDiscoveryService
             return new DiscoveryPage([], 0, false);
         }
 
+        return await ListCoreAsync(query, caller, sid, ct).ConfigureAwait(false);
+    }
+
+    private async ValueTask<DiscoveryPage> ListCoreAsync(DiscoveryQuery query, CatalogCaller caller, Sid sid, CancellationToken ct)
+    {
         try
         {
             var scopeKey = BuildScopeMemoKey(sid, caller);
@@ -207,6 +218,11 @@ public sealed partial class DiscoveryService : IDiscoveryService
 
             var tableObjects = await ResolveObjectsBatchAsync(
                 caller, sid, scopeKey, pageTables, query.Language, ct).ConfigureAwait(false);
+            if (query.Access is { } listedAccess && ContradictsCachedView(scopeKey, listedAccess, tableObjects))
+            {
+                return await ListCoreAsync(query, caller, sid, ct).ConfigureAwait(false);
+            }
+
             var procObjects = await ResolveProceduresBatchAsync(
                 caller, sid, scopeKey, pageProcedures, ct).ConfigureAwait(false);
 
@@ -327,6 +343,11 @@ public sealed partial class DiscoveryService : IDiscoveryService
             return [];
         }
 
+        return await SearchCoreAsync(text, options, caller, sid, ct).ConfigureAwait(false);
+    }
+
+    private async ValueTask<IReadOnlyList<DiscoveryObject>> SearchCoreAsync(string? text, DiscoverySearchOptions options, CatalogCaller caller, Sid sid, CancellationToken ct)
+    {
         try
         {
             var scopeKey = BuildScopeMemoKey(sid, caller);
@@ -461,6 +482,11 @@ public sealed partial class DiscoveryService : IDiscoveryService
 
             var tableObjects = await ResolveObjectsBatchAsync(
                 caller, sid, scopeKey, matchedTables, options.Language, ct).ConfigureAwait(false);
+            if (options.Access is { } listedAccess && ContradictsCachedView(scopeKey, listedAccess, tableObjects))
+            {
+                return await SearchCoreAsync(text, options, caller, sid, ct).ConfigureAwait(false);
+            }
+
             var procObjects = await ResolveProceduresBatchAsync(
                 caller, sid, scopeKey, matchedProcedures, ct).ConfigureAwait(false);
 
@@ -551,162 +577,6 @@ public sealed partial class DiscoveryService : IDiscoveryService
             .ListVisibleAsync(principal, caller.Tenant, ct)
             .ConfigureAwait(false);
         return DiscoveryProcedureResolver.FilterEligible(visibleProcedures, visibleTables, caller.Tenant);
-    }
-
-    private async Task<IReadOnlyList<DiscoveryObject>> ResolveObjectsBatchAsync(
-        CatalogCaller caller,
-        Sid sid,
-        ScopeMemoKey scopeKey,
-        IReadOnlyList<TableMetadata> tables,
-        string? language,
-        CancellationToken ct)
-    {
-        if (tables.Count == 0)
-        {
-            return [];
-        }
-
-        var langKey = string.IsNullOrWhiteSpace(language) ? string.Empty : language.Trim().ToLowerInvariant();
-        var results = new DiscoveryObject?[tables.Count];
-        var uncached = new List<(int Index, TableMetadata Table)>(tables.Count);
-
-        lock (_memoLock)
-        {
-            for (var i = 0; i < tables.Count; i++)
-            {
-                var objKey = new ObjectMemoKey(scopeKey, DiscoveryObjectKind.Table, tables[i].Identifier, langKey);
-                if (_objectMemo.TryGetValue(objKey, out var cached))
-                {
-                    results[i] = cached;
-                }
-                else
-                {
-                    uncached.Add((i, tables[i]));
-                }
-            }
-        }
-
-        if (uncached.Count == 0)
-        {
-            return results.Where(static r => r is not null).Select(static r => r!).ToList();
-        }
-
-        var uncachedTables = uncached.Select(static x => x.Table).ToList();
-        var uncachedIds = uncachedTables.Select(static t => t.Identifier).ToList();
-
-        var ownersTask = _ownershipRepository is null
-            ? Task.FromResult<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<DataOwner>>>(new Dictionary<TableIdentifier, IReadOnlyList<DataOwner>>())
-            : _ownershipRepository.GetDataOwnersForTablesAsync(uncachedIds, ct);
-
-        var subject = SecurityPrincipalContext.FromPrincipal(caller.Principal!, caller.Tenant);
-        var decisionsTask = _decisionPoint!.DecideManyAsync(
-            subject, uncachedTables, AccessOperation.Discover, AccessTransport.Discovery, ct).AsTask();
-
-        var pendingTask = LoadPendingRequestTablesAsync(sid, caller.Tenant, ct);
-        var expiredTask = LoadRecentlyExpiredTablesAsync(sid, caller.Tenant, ct);
-
-        await Task.WhenAll(ownersTask, decisionsTask, pendingTask, expiredTask).ConfigureAwait(false);
-
-        var ownersByTable = await ownersTask.ConfigureAwait(false);
-        var decisions = await decisionsTask.ConfigureAwait(false);
-        var pendingTables = await pendingTask.ConfigureAwait(false);
-        var expiredTables = await expiredTask.ConfigureAwait(false);
-
-        if (decisions.Count != uncachedTables.Count)
-        {
-            throw new InvalidOperationException("AccessDecisionPoint returned mismatched decision count.");
-        }
-
-        // Evaluate write capabilities sequentially on the shared scoped repositories via the canonical PDP path (zero data reads).
-        var insertDecisions = await _decisionPoint.DecideManyAsync(
-            subject, uncachedTables, AccessOperation.Insert, AccessTransport.Discovery, ct).ConfigureAwait(false);
-        var updateDecisions = await _decisionPoint.DecideManyAsync(
-            subject, uncachedTables, AccessOperation.Update, AccessTransport.Discovery, ct).ConfigureAwait(false);
-        var deleteDecisions = await _decisionPoint.DecideManyAsync(
-            subject, uncachedTables, AccessOperation.Delete, AccessTransport.Discovery, ct).ConfigureAwait(false);
-
-        if (insertDecisions.Count != uncachedTables.Count ||
-            updateDecisions.Count != uncachedTables.Count ||
-            deleteDecisions.Count != uncachedTables.Count)
-        {
-            throw new InvalidOperationException("AccessDecisionPoint returned mismatched write decision count.");
-        }
-
-        var defs = _classificationRepository is null
-            ? ClassificationAccessResolver.BuiltInCatalog(caller.Tenant.Value).Definitions
-            : ClassificationHierarchyValidator.ResolveEffective(await _classificationRepository.GetClassificationsAsync(caller.Tenant.Value, includeInactive: true, ct).ConfigureAwait(false), caller.Tenant.Value);
-
-        var docLinks = await LoadDocumentLinksAsync(caller.Tenant.Value, uncachedTables, ct).ConfigureAwait(false);
-
-        TenantAccessPolicy? tenantPolicy = null;
-        if (_accessPolicySettings is not null)
-        {
-            tenantPolicy = await _accessPolicySettings.GetEffectiveAsync(caller.Tenant, ct).ConfigureAwait(false);
-        }
-
-        // Protection snapshots of the page, resolved set-based; a table the batch does not answer is resolved per table below.
-        var batchProtections = _protectionProvider is null
-            ? null
-            : await _protectionProvider.ResolveManyAsync(caller.Tenant, uncachedTables, ct).ConfigureAwait(false);
-
-        for (var i = 0; i < uncached.Count; i++)
-        {
-            var (targetIdx, table) = uncached[i];
-            var decision = decisions[i];
-            var owners = ownersByTable.TryGetValue(table.Identifier, out var list) ? list : Array.Empty<DataOwner>();
-            var isPending = !decision.IsAllowed && pendingTables.Contains(table.Identifier);
-            var isExpired = !decision.IsAllowed && !isPending && expiredTables.Contains(table.Identifier);
-            var allArtifacts = _artifactStore is null ? [] : await _artifactStore.GetAllAsync(table.Table.Id, ct).ConfigureAwait(false);
-            var artifacts = allArtifacts.FirstOrDefault(a => a.Provenance == ArtifactProvenance.Upload)
-                ?? allArtifacts.FirstOrDefault(a => a.Provenance != ArtifactProvenance.Import);
-            var importArtifact = allArtifacts.FirstOrDefault(a => a.Provenance == ArtifactProvenance.Import && !string.IsNullOrWhiteSpace(a.SamplesJson));
-            var importSamplesAvailable = importArtifact is not null
-                && (tenantPolicy?.ServeImportSamples ?? true)
-                && !(tenantPolicy?.QuarantineSuspectedPiiSamples == true && CatalogPiiDetector.JsonHasSuspectedPii(importArtifact.SamplesJson));
-            Dictionary<string, IReadOnlyList<ColumnClassification>>? repoColClasses = null;
-            if (_classificationRepository is not null && !table.Table.DiscoveryHidden)
-            {
-                // Issue #1043: one read for the table's columns instead of one per column.
-                var unclassified = table.Columns.Where(c => !c.DiscoveryHidden && !table.ColumnClassifications.ContainsKey(c.ColumnName)).ToList();
-                if (unclassified.Count > 0)
-                {
-                    var byColumnId = await _classificationRepository.GetColumnClassificationsBatchAsync(
-                        unclassified.Select(static c => c.Id.ToString()).ToList(), caller.Tenant.Value, ct).ConfigureAwait(false);
-                    foreach (var col in unclassified)
-                    {
-                        if (byColumnId.TryGetValue(col.Id.ToString(), out var rows) && rows.Count > 0)
-                        {
-                            (repoColClasses ??= new(StringComparer.OrdinalIgnoreCase))[col.ColumnName] = rows;
-                        }
-                    }
-                }
-            }
-
-            var protection = _protectionProvider is null
-                ? null
-                : batchProtections is not null && batchProtections.TryGetValue(table.Identifier, out var batchProtection)
-                    ? batchProtection
-                    : await _protectionProvider.GetAsync(caller.Tenant, table.Identifier, ct).ConfigureAwait(false);
-            var mapped = DiscoveryAccessMapper.Map(
-                table, decision, owners, isPending, isExpired, artifacts, language,
-                isHidden: table.Table.DiscoveryHidden, insertDecisions[i], updateDecisions[i], deleteDecisions[i], defs, repoColClasses, caller.Tenant.Value,
-                hideMaskedTextForRestrictedScopes: _discoveryOptions.Discovery?.HideMaskedColumnCatalogTextForRestrictedScopes == true,
-                effectiveProtection: protection,
-                importSamplesAvailable: importSamplesAvailable);
-
-            if (docLinks.TryGetValue(table.Identifier, out var linkView))
-            {
-                mapped = linkView.ApplyTo(mapped);
-            }
-
-            results[targetIdx] = mapped;
-            lock (_memoLock)
-            {
-                _objectMemo[new ObjectMemoKey(scopeKey, DiscoveryObjectKind.Table, table.Identifier, langKey)] = mapped;
-            }
-        }
-
-        return results.Where(static r => r is not null).Select(static r => r!).ToList();
     }
 
     private async Task<IReadOnlyList<DiscoveryObject>> ResolveProceduresBatchAsync(

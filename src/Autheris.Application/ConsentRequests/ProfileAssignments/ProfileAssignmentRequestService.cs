@@ -428,6 +428,10 @@ public sealed partial class ProfileAssignmentRequestService(
                                     var extended = await _materializer.ExtendApprovingOwnersAsync(
                                         tx.Transaction, existingConsent, req.Id, approvedOwners, actorSid, now, ct).ConfigureAwait(false);
                                     materialized = [extended];
+
+                                    // New approving owners can make the pattern grant apply to more tables (issue #1044).
+                                    await _store.IncrementTableEpochInTransactionAsync(tx.Transaction, existingConsent.TableIdentifier, ct).ConfigureAwait(false);
+                                    invalidatedTables.Add(existingConsent.TableIdentifier);
                                 }
 
                                 if (!string.IsNullOrWhiteSpace(req.TableIdentifier.TableName))
@@ -442,7 +446,7 @@ public sealed partial class ProfileAssignmentRequestService(
                                     tx.Transaction, req, snapshot, updatedItems, tenantTables, actorSid, [], approvedValidTo, now,
                                     command.Description, command.WriteRules, approvedItemNos: null, command.ApprovedClearColumns, ct)
                                     .ConfigureAwait(false);
-                                invalidatedTables.AddRange(materialized.Where(c => !c.IsPatternGrant).Select(c => c.TableIdentifier).Distinct());
+                                invalidatedTables.AddRange(materialized.Select(c => c.TableIdentifier).Distinct());
                             }
                         }
                         else if (_grantWriter is not null)

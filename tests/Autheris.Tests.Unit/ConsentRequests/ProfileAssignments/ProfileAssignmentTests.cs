@@ -183,6 +183,32 @@ public sealed class ProfileAssignmentTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task PatternGrants_OfAProfileAssignment_SignalAnInvalidation_OnMaterializeAndRevoke()
+    {
+        // Issue #1044: a pattern grant has no table; the store must still be told (an empty table key, which it turns into a catalog
+        // version change), in the transaction and after the commit, so cached decisions and access views see the grant and its revoke.
+        var fx = new Fixture();
+        var sub = await fx.Service.SubmitAsync(new ProfileAssignmentSubmission(
+            fx.ProfileId, Requester, fx.UserPrincipal(Requester), Tenant));
+        await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
+            sub.RequestId, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerA), ContextTenantId: Tenant));
+        await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
+            sub.RequestId, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerB), ContextTenantId: Tenant));
+
+        fx.Consents.ShouldContain(c => c.IsPatternGrant);
+        fx.EpochBumpTargets.ShouldContain(t => string.IsNullOrWhiteSpace(t.TableName), "materializing a pattern grant");
+        fx.InvalidatedAfterCommit.ShouldContain(t => string.IsNullOrWhiteSpace(t.TableName), "after the materializing commit");
+
+        fx.EpochBumpTargets.Clear();
+        fx.InvalidatedAfterCommit.Clear();
+        await fx.Service.RevokeAssignmentAsync(Tenant, sub.RequestId, OwnerA, "Project completed");
+
+        fx.EpochBumpTargets.ShouldContain(t => string.IsNullOrWhiteSpace(t.TableName), "revoking a pattern grant");
+        fx.InvalidatedAfterCommit.ShouldContain(t => string.IsNullOrWhiteSpace(t.TableName), "after the revoking commit");
+    }
+
+    [Fact]
     public async Task ProfileEditAfterMaterialization_DoesNotMutateMaterializedGrants()
     {
         var fx = new Fixture();
@@ -310,6 +336,8 @@ public sealed class ProfileAssignmentTests
         public List<GrantRecord> Records { get; } = [];
         public List<AuditLogEntry> Audits { get; } = [];
         public int EpochBumps { get; private set; }
+        public List<TableIdentifier> EpochBumpTargets { get; } = [];
+        public List<TableIdentifier> InvalidatedAfterCommit { get; } = [];
         public ProfileGrantMaterializer Materializer { get; }
         public ProfileAssignmentRequestService Service { get; }
         public ConsentDecisionPipeline Pipeline { get; }
@@ -484,7 +512,7 @@ public sealed class ProfileAssignmentTests
             consent.ApprovingOwners = list;
             return Task.CompletedTask;
         }
-        public Task IncrementTableEpochInTransactionAsync(DbTransaction transaction, TableIdentifier table, CancellationToken ct = default) { EpochBumps++; return Task.CompletedTask; }
+        public Task IncrementTableEpochInTransactionAsync(DbTransaction transaction, TableIdentifier table, CancellationToken ct = default) { EpochBumps++; EpochBumpTargets.Add(table); return Task.CompletedTask; }
         public Task RecordAuditInTransactionAsync(DbTransaction transaction, AuditLogEntry entry, CancellationToken ct = default) { Audits.Add(entry); return Task.CompletedTask; }
         public Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default) { Audits.Add(entry); return Task.CompletedTask; }
         public Task RecordAuditEventAsync(AuditLogEntry entry, DbTransaction existingTx, CancellationToken ct = default) { Audits.Add(entry); return Task.CompletedTask; }
@@ -514,7 +542,7 @@ public sealed class ProfileAssignmentTests
             }
             return Task.CompletedTask;
         }
-        public Task InvalidateTablesAfterCommitAsync(IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct = default) => Task.CompletedTask;
+        public Task InvalidateTablesAfterCommitAsync(IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct = default) { InvalidatedAfterCommit.AddRange(tables); return Task.CompletedTask; }
 
         public Task<IReadOnlyList<ConsentWorkflowRoute>> GetWorkflowRoutesAsync(TenantId tenantId, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<ConsentWorkflowRoute>>(Routes.Where(r => r.TenantId == tenantId.Value).ToList());

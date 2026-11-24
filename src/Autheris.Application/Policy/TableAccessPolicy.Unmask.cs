@@ -26,7 +26,7 @@ public sealed partial class TableAccessPolicy
         bool groupsComplete,
         CancellationToken ct)
     {
-        if (!decision.IsAllowed)
+        if (!decision.IsAllowed || (query.AllowOnly && !AuthorizationHooksActive))
         {
             return decision;
         }
