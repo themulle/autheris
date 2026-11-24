@@ -1,4 +1,6 @@
+using System.Collections.Concurrent;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Governance.Caching;
 using Autheris.Application.Governance.Policy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -18,35 +20,6 @@ public sealed class AccessPolicySettingsProviderTests
     private static readonly TenantId TenantA = new("tenant-a");
     private static readonly Sid GovActor = new("S-1-5-21-1001-2002-3003-10");
     private static readonly DateTimeOffset T0 = new(2026, 11, 22, 10, 0, 0, TimeSpan.Zero);
-
-    private sealed class FakePolicyRepo : IAccessPolicySettingsRepository
-    {
-        public StoredTenantAccessPolicy? Stored { get; set; }
-        public int UpsertCalls { get; private set; }
-
-        public Task<StoredTenantAccessPolicy?> GetAsync(TenantId tenant, CancellationToken ct = default) =>
-            Task.FromResult(Stored is not null && Stored.Tenant == tenant ? Stored : null);
-
-        public Task<AccessPolicyWriteResult> UpsertAsync(TenantId tenant, TenantAccessPolicyUpdate settings, int expectedVersion, Sid actor, CancellationToken ct = default)
-        {
-            UpsertCalls++;
-            Stored = new StoredTenantAccessPolicy(tenant, settings, expectedVersion + 1, actor.Value, T0);
-            return Task.FromResult(new AccessPolicyWriteResult(
-                expectedVersion == 0 ? AccessPolicyWriteStatus.Created : AccessPolicyWriteStatus.Updated,
-                Stored));
-        }
-
-        public Task<bool> DeleteIfVersionAsync(TenantId tenant, int expectedVersion, CancellationToken ct = default)
-        {
-            if (Stored is not null && Stored.Tenant == tenant && Stored.Version == expectedVersion)
-            {
-                Stored = null;
-                return Task.FromResult(true);
-            }
-
-            return Task.FromResult(false);
-        }
-    }
 
     private static (AccessPolicySettingsProvider Provider, FakePolicyRepo Repo, InMemoryAuditWriter Audit) Build(
         AccessPolicyOptions? deployment = null)
@@ -207,5 +180,184 @@ public sealed class AccessPolicySettingsProviderTests
         policy.MaxTablesPerAssignment.ShouldBe(1000);
         policy.MaxPageSize.ShouldBe(500);
         policy.Internal.RequireMemberIndicator.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task Cached_policy_reuses_epoch_entry_and_invalidates_on_update_epoch_and_notification()
+    {
+        var time = new FakeTimeProvider(T0);
+        var repo = new FakePolicyRepo();
+        var audit = new InMemoryAuditWriter();
+        var epochStore = new FakeEpochStore();
+        var notifier = new LocalNotifier();
+        using var epochProvider = new GovernanceEpochProvider(
+            epochStore,
+            Options.Create(new GovernanceCacheSettings { EpochPollSeconds = 60 }),
+            notifier,
+            time);
+        using var provider = new AccessPolicySettingsProvider(
+            repo,
+            Options.Create(new AccessPolicyOptions()),
+            audit,
+            time,
+            urlProtector: null,
+            epochProvider,
+            Options.Create(new GovernanceCacheSettings { MaxTtlSeconds = 300, EpochPollSeconds = 60 }),
+            notifier);
+
+        var first = await provider.GetEffectiveAsync(TenantA);
+        var second = await provider.GetEffectiveAsync(TenantA);
+        repo.GetCalls.ShouldBe(1);
+        second.ShouldBeSameAs(first);
+
+        // Tenant isolation: tenant B gets its own entry and does not reuse tenant A's policy.
+        var tenantB = new TenantId("tenant-b");
+        repo.ByTenant[tenantB] = new StoredTenantAccessPolicy(tenantB, new TenantAccessPolicyUpdate(MaxPageSize: 123), 1, GovActor.Value, T0);
+        var bPolicy = await provider.GetEffectiveAsync(tenantB);
+        bPolicy.MaxPageSize.ShouldBe(123);
+        repo.GetCalls.ShouldBe(2);
+
+        // UpdateAsync invalidates tenant A synchronously without affecting tenant B.
+        var updated = await provider.UpdateAsync(TenantA, new TenantAccessPolicyUpdate(MaxPageSize: 77), 0, GovActor);
+        updated.Status.ShouldBe(AccessPolicyUpdateStatus.Updated);
+        var callsBeforeReadA = repo.GetCalls;
+        var afterUpdate = await provider.GetEffectiveAsync(TenantA);
+        afterUpdate.MaxPageSize.ShouldBe(77);
+        repo.GetCalls.ShouldBe(callsBeforeReadA + 1);
+
+        var callsBeforeCachedB = repo.GetCalls;
+        (await provider.GetEffectiveAsync(tenantB)).MaxPageSize.ShouldBe(123);
+        repo.GetCalls.ShouldBe(callsBeforeCachedB);
+
+        // Remote change notification invalidates tenant A immediately.
+        repo.ByTenant[TenantA] = new StoredTenantAccessPolicy(TenantA, new TenantAccessPolicyUpdate(MaxPageSize: 88), 2, GovActor.Value, T0);
+        await notifier.NotifyAsync(new GovernanceChangeEvent(TenantA.Value, 2, null, T0));
+        (await provider.GetEffectiveAsync(TenantA)).MaxPageSize.ShouldBe(88);
+
+        // TTL expiry reloads cleanly.
+        repo.ByTenant[TenantA] = new StoredTenantAccessPolicy(TenantA, new TenantAccessPolicyUpdate(MaxPageSize: 99), 3, GovActor.Value, T0);
+        time.Advance(TimeSpan.FromSeconds(301));
+        (await provider.GetEffectiveAsync(TenantA)).MaxPageSize.ShouldBe(99);
+    }
+
+    [Fact]
+    public async Task Repository_failure_is_not_cached_and_propagates_fail_closed()
+    {
+        var time = new FakeTimeProvider(T0);
+        var repo = new FakePolicyRepo { Failure = new InvalidOperationException("db down") };
+        var audit = new InMemoryAuditWriter();
+        var epochStore = new FakeEpochStore();
+        var notifier = new LocalNotifier();
+        using var epochProvider = new GovernanceEpochProvider(
+            epochStore,
+            Options.Create(new GovernanceCacheSettings { EpochPollSeconds = 60 }),
+            notifier,
+            time);
+        using var provider = new AccessPolicySettingsProvider(
+            repo,
+            Options.Create(new AccessPolicyOptions()),
+            audit,
+            time,
+            urlProtector: null,
+            epochProvider,
+            Options.Create(new GovernanceCacheSettings { MaxTtlSeconds = 300, EpochPollSeconds = 60 }),
+            notifier);
+
+        await Should.ThrowAsync<InvalidOperationException>(() => provider.GetEffectiveAsync(TenantA));
+
+        repo.Failure = null;
+        var recovered = await provider.GetEffectiveAsync(TenantA);
+        recovered.MaxPageSize.ShouldBe(500);
+        repo.GetCalls.ShouldBe(2);
+    }
+
+    private sealed class FakePolicyRepo : IAccessPolicySettingsRepository
+    {
+        public Dictionary<TenantId, StoredTenantAccessPolicy> ByTenant { get; } = [];
+        public StoredTenantAccessPolicy? Stored
+        {
+            get => ByTenant.Values.FirstOrDefault();
+            set
+            {
+                ByTenant.Clear();
+                if (value is not null)
+                {
+                    ByTenant[value.Tenant] = value;
+                }
+            }
+        }
+
+        public int GetCalls { get; private set; }
+        public int UpsertCalls { get; private set; }
+        public Exception? Failure { get; set; }
+
+        public Task<StoredTenantAccessPolicy?> GetAsync(TenantId tenant, CancellationToken ct = default)
+        {
+            GetCalls++;
+            if (Failure is not null)
+            {
+                return Task.FromException<StoredTenantAccessPolicy?>(Failure);
+            }
+
+            return Task.FromResult(ByTenant.GetValueOrDefault(tenant));
+        }
+
+        public Task<AccessPolicyWriteResult> UpsertAsync(TenantId tenant, TenantAccessPolicyUpdate settings, int expectedVersion, Sid actor, CancellationToken ct = default)
+        {
+            UpsertCalls++;
+            var stored = new StoredTenantAccessPolicy(tenant, settings, expectedVersion + 1, actor.Value, T0);
+            ByTenant[tenant] = stored;
+            return Task.FromResult(new AccessPolicyWriteResult(
+                expectedVersion == 0 ? AccessPolicyWriteStatus.Created : AccessPolicyWriteStatus.Updated,
+                stored));
+        }
+
+        public Task<bool> DeleteIfVersionAsync(TenantId tenant, int expectedVersion, CancellationToken ct = default)
+        {
+            if (ByTenant.TryGetValue(tenant, out var existing) && existing.Version == expectedVersion)
+            {
+                ByTenant.Remove(tenant);
+                return Task.FromResult(true);
+            }
+
+            return Task.FromResult(false);
+        }
+    }
+
+    private sealed class FakeEpochStore : IGovernanceEpochStore
+    {
+        private readonly ConcurrentDictionary<string, long> _epochs = new(StringComparer.Ordinal);
+
+        public Task<long> GetEpochAsync(TenantId tenant, CancellationToken ct = default) =>
+            Task.FromResult(_epochs.GetValueOrDefault(tenant.Value, 1));
+
+        public Task<long> BumpEpochAsync(TenantId tenant, CancellationToken ct = default) =>
+            Task.FromResult(_epochs.AddOrUpdate(tenant.Value, 2, static (_, v) => v + 1));
+    }
+
+    private sealed class LocalNotifier : IGovernanceChangeNotifier
+    {
+        private readonly List<Action<GovernanceChangeEvent>> _handlers = [];
+
+        public Task NotifyAsync(GovernanceChangeEvent change, CancellationToken ct = default)
+        {
+            foreach (var h in _handlers.ToArray())
+            {
+                h(change);
+            }
+
+            return Task.CompletedTask;
+        }
+
+        public IDisposable Subscribe(Action<GovernanceChangeEvent> handler)
+        {
+            _handlers.Add(handler);
+            return new Sub(() => _handlers.Remove(handler));
+        }
+
+        private sealed class Sub(Action onDispose) : IDisposable
+        {
+            public void Dispose() => onDispose();
+        }
     }
 }

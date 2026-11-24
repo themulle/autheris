@@ -754,15 +754,28 @@ public sealed partial class DiscoveryService : IDiscoveryService
         if (_protectionProvider is not null)
         {
             classesByTable = new Dictionary<TableIdentifier, ProtectionClass>();
+            var distinctTables = new List<TableMetadata>();
+            var distinctIds = new HashSet<TableIdentifier>();
             foreach (var item in uncached)
             {
                 foreach (var gt in item.Item.GovernedTables)
                 {
-                    if (!classesByTable.ContainsKey(gt.Identifier))
+                    if (distinctIds.Add(gt.Identifier))
                     {
-                        var prot = await _protectionProvider.GetAsync(caller.Tenant, gt.Identifier, ct).ConfigureAwait(false);
-                        classesByTable[gt.Identifier] = prot.TableClass;
+                        distinctTables.Add(gt);
                     }
+                }
+            }
+
+            if (distinctTables.Count > 0)
+            {
+                var batchProtections = await _protectionProvider.ResolveManyAsync(caller.Tenant, distinctTables, ct).ConfigureAwait(false);
+                foreach (var gt in distinctTables)
+                {
+                    var prot = batchProtections.TryGetValue(gt.Identifier, out var batchProtection)
+                        ? batchProtection
+                        : await _protectionProvider.GetAsync(caller.Tenant, gt.Identifier, ct).ConfigureAwait(false);
+                    classesByTable[gt.Identifier] = prot.TableClass;
                 }
             }
         }

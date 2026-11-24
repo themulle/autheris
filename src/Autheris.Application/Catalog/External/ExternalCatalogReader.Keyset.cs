@@ -237,11 +237,15 @@ public sealed partial class ExternalCatalogReader
         if (keysetPage.Items.Count > 0)
         {
             versions ??= await _changeStore.GetObjectVersionsAsync(tenantId, ct).ConfigureAwait(false);
+            var pageTablesList = keysetPage.Items.Select(static i => i.Table).ToList();
             var pageVisibility = await ResolveUserPageVisibilityAsync(
                 user,
                 tenantId,
-                keysetPage.Items.Select(static i => i.Table).ToList(),
+                pageTablesList,
                 ct).ConfigureAwait(false);
+            var batchProtections = _protectionProvider is null
+                ? null
+                : await _protectionProvider.ResolveManyAsync(tenantId, pageTablesList, ct).ConfigureAwait(false);
 
             foreach (var item in keysetPage.Items)
             {
@@ -249,7 +253,9 @@ public sealed partial class ExternalCatalogReader
                 versions.TryGetValue(item.Table.Identifier.ToString(), out var ver);
                 var protection = _protectionProvider is null
                     ? null
-                    : await _protectionProvider.GetAsync(tenantId, item.Table.Identifier, ct).ConfigureAwait(false);
+                    : batchProtections is not null && batchProtections.TryGetValue(item.Table.Identifier, out var batchProtection)
+                        ? batchProtection
+                        : await _protectionProvider.GetAsync(tenantId, item.Table.Identifier, ct).ConfigureAwait(false);
                 dtos.Add(MapUserObject(item.Object, item.Table, ver?.Seq, CanViewHiddenColumns(item.Table, pageVisibility), protection));
             }
 
@@ -307,9 +313,12 @@ public sealed partial class ExternalCatalogReader
             return result;
         }
 
+        var batchProtections = await _protectionProvider.ResolveManyAsync(tenantId, tables, ct).ConfigureAwait(false);
         foreach (var table in tables)
         {
-            result[table.Identifier] = await _protectionProvider.GetAsync(tenantId, table.Identifier, ct).ConfigureAwait(false);
+            result[table.Identifier] = batchProtections.TryGetValue(table.Identifier, out var batchProtection)
+                ? batchProtection
+                : await _protectionProvider.GetAsync(tenantId, table.Identifier, ct).ConfigureAwait(false);
         }
 
         return result;

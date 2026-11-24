@@ -1,9 +1,12 @@
+using System.Collections.Concurrent;
 using System.Diagnostics;
 using System.Globalization;
 using System.Text.Json;
 using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Governance.Caching;
 using Autheris.Application.Governance.Notifications;
+using Autheris.Application.State.Caching;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -14,24 +17,162 @@ using Microsoft.Extensions.Options;
 namespace Autheris.Application.Governance.Policy;
 
 /// <summary>Resolves effective tenant access policy clamped by deployment ceilings and records audited updates.</summary>
-public sealed class AccessPolicySettingsProvider(
-    IAccessPolicySettingsRepository repository,
-    IOptions<AccessPolicyOptions> deploymentOptions,
-    IAuditWriter auditWriter,
-    TimeProvider? timeProvider = null,
-    INotificationWebhookUrlProtector? urlProtector = null) : IAccessPolicySettingsProvider
+public sealed class AccessPolicySettingsProvider : IAccessPolicySettingsProvider, IGovernanceCacheInvalidator, IDisposable
 {
-    private readonly IAccessPolicySettingsRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
-    private readonly AccessPolicyOptions _deployment = (deploymentOptions ?? throw new ArgumentNullException(nameof(deploymentOptions))).Value
-        ?? throw new ArgumentNullException(nameof(deploymentOptions));
-    private readonly IAuditWriter _auditWriter = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
-    private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
-    private readonly INotificationWebhookUrlProtector? _urlProtector = urlProtector;
+    private const int CacheCapacity = 256;
+
+    private readonly record struct CacheKey(string TenantId, long GovernanceEpoch);
+
+    private readonly IAccessPolicySettingsRepository _repository;
+    private readonly AccessPolicyOptions _deployment;
+    private readonly IAuditWriter _auditWriter;
+    private readonly TimeProvider _time;
+    private readonly INotificationWebhookUrlProtector? _urlProtector;
+    private readonly GovernanceEpochProvider? _epochProvider;
+    private readonly BoundedCache<CacheKey, TenantAccessPolicy>? _cache;
+    private readonly ConcurrentDictionary<string, long> _tenantGenerations = new(StringComparer.Ordinal);
+    private readonly IDisposable? _changeSubscription;
+    private readonly IDisposable? _epochSubscription;
+    private long _globalGeneration;
+    private int _disposed;
+
+    public AccessPolicySettingsProvider(
+        IAccessPolicySettingsRepository repository,
+        IOptions<AccessPolicyOptions> deploymentOptions,
+        IAuditWriter auditWriter,
+        TimeProvider? timeProvider = null,
+        INotificationWebhookUrlProtector? urlProtector = null,
+        GovernanceEpochProvider? epochProvider = null,
+        IOptions<GovernanceCacheSettings>? cacheSettings = null,
+        IGovernanceChangeNotifier? changeNotifier = null)
+    {
+        _repository = repository ?? throw new ArgumentNullException(nameof(repository));
+        _deployment = (deploymentOptions ?? throw new ArgumentNullException(nameof(deploymentOptions))).Value
+            ?? throw new ArgumentNullException(nameof(deploymentOptions));
+        _auditWriter = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
+        _time = timeProvider ?? TimeProvider.System;
+        _urlProtector = urlProtector;
+        _epochProvider = epochProvider;
+
+        if (_epochProvider is not null)
+        {
+            var settings = cacheSettings?.Value ?? new GovernanceCacheSettings();
+            ArgumentOutOfRangeException.ThrowIfLessThan(settings.MaxTtlSeconds, 1);
+            ArgumentOutOfRangeException.ThrowIfGreaterThan(settings.MaxTtlSeconds, 300);
+
+            _cache = new BoundedCache<CacheKey, TenantAccessPolicy>(
+                CacheCapacity,
+                TimeSpan.FromSeconds(settings.MaxTtlSeconds),
+                _time);
+            _changeSubscription = changeNotifier?.Subscribe(OnChange);
+            _epochSubscription = _epochProvider.OnTenantEpochAdvanced(tenantId =>
+            {
+                if (string.IsNullOrEmpty(tenantId))
+                {
+                    InvalidateAll();
+                }
+                else
+                {
+                    InvalidateTenant(tenantId);
+                }
+            });
+        }
+    }
 
     public async Task<TenantAccessPolicy> GetEffectiveAsync(TenantId tenant, CancellationToken ct = default)
     {
-        var stored = await _repository.GetAsync(tenant, ct).ConfigureAwait(false);
-        return ClampToDeployment(tenant, stored?.Settings, stored?.Version ?? 0, stored?.UpdatedBy, stored?.UpdatedAt);
+        if (_cache is null || _epochProvider is null || string.IsNullOrWhiteSpace(tenant.Value) || !TenantId.TryParse(tenant.Value, out _))
+        {
+            var stored = await _repository.GetAsync(tenant, ct).ConfigureAwait(false);
+            return ClampToDeployment(tenant, stored?.Settings, stored?.Version ?? 0, stored?.UpdatedBy, stored?.UpdatedAt);
+        }
+
+        var tenantKey = tenant.Value;
+        for (var attempt = 0; attempt < 2; attempt++)
+        {
+            var startGlobalGen = Volatile.Read(ref _globalGeneration);
+            var startTenantGen = _tenantGenerations.GetValueOrDefault(tenantKey);
+            var governanceEpoch = await _epochProvider.GetEpochAsync(tenant, ct).ConfigureAwait(false);
+            var key = new CacheKey(tenantKey, governanceEpoch);
+
+            if (_cache.TryGet(key, out var cached) && IsSameGeneration(tenantKey, startGlobalGen, startTenantGen))
+            {
+                return cached;
+            }
+
+            var stored = await _repository.GetAsync(tenant, ct).ConfigureAwait(false);
+            var effective = ClampToDeployment(tenant, stored?.Settings, stored?.Version ?? 0, stored?.UpdatedBy, stored?.UpdatedAt);
+
+            _cache.Set(key, effective);
+            if (IsSameGeneration(tenantKey, startGlobalGen, startTenantGen))
+            {
+                return effective;
+            }
+
+            _cache.TryRemove(key);
+            if (attempt == 1)
+            {
+                return effective;
+            }
+        }
+
+        throw new InvalidOperationException("Access policy resolution could not stabilize.");
+    }
+
+    public void InvalidateTenant(string tenantId)
+    {
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            InvalidateAll();
+            return;
+        }
+
+        _tenantGenerations.AddOrUpdate(tenantId, 1, static (_, g) => g + 1);
+        if (_cache is null)
+        {
+            return;
+        }
+
+        foreach (var key in _cache.Keys)
+        {
+            if (string.Equals(key.TenantId, tenantId, StringComparison.Ordinal))
+            {
+                _cache.TryRemove(key);
+            }
+        }
+    }
+
+    public void InvalidateAll()
+    {
+        Interlocked.Increment(ref _globalGeneration);
+        _cache?.Clear();
+    }
+
+    private bool IsSameGeneration(string tenantKey, long startGlobalGen, long startTenantGen) =>
+        Volatile.Read(ref _globalGeneration) == startGlobalGen
+        && _tenantGenerations.GetValueOrDefault(tenantKey) == startTenantGen;
+
+    private void OnChange(GovernanceChangeEvent change)
+    {
+        if (change.IsFullInvalidation)
+        {
+            InvalidateAll();
+        }
+        else
+        {
+            InvalidateTenant(change.TenantId);
+        }
+    }
+
+    public void Dispose()
+    {
+        if (Interlocked.Exchange(ref _disposed, 1) != 0)
+        {
+            return;
+        }
+
+        _changeSubscription?.Dispose();
+        _epochSubscription?.Dispose();
     }
 
     public async Task<AccessPolicyUpdateResult> UpdateAsync(
@@ -68,6 +209,8 @@ public sealed class AccessPolicySettingsProvider(
                 ErrorMessage: "Tenant access policy version does not match If-Match.");
         }
 
+        InvalidateTenant(tenant.Value);
+
         var afterEffective = ClampToDeployment(
             tenant,
             writeResult.Stored.Settings,
@@ -91,6 +234,7 @@ public sealed class AccessPolicySettingsProvider(
                 try
                 {
                     await _repository.UpsertAsync(tenant, beforeStored.Settings, writeResult.Stored.Version, actor, CancellationToken.None).ConfigureAwait(false);
+                    InvalidateTenant(tenant.Value);
                 }
                 catch
                 {
@@ -102,6 +246,7 @@ public sealed class AccessPolicySettingsProvider(
                 try
                 {
                     await _repository.DeleteIfVersionAsync(tenant, writeResult.Stored.Version, CancellationToken.None).ConfigureAwait(false);
+                    InvalidateTenant(tenant.Value);
                 }
                 catch
                 {
