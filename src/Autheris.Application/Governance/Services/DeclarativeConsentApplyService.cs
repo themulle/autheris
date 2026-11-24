@@ -347,23 +347,12 @@ public sealed partial class DeclarativeConsentApplyService(
                     hasClearColumnRule ? MaskingPolicyMode.Unmasked : MaskingPolicyMode.Default,
                     Requester: actorSid.Value,
                     Justification: description,
-                    Effect: effect));
+                    Effect: effect,
+                    // Single approval (Amendment 2, D5): declarative grants are Data Governance only, so the apply of the manifest is the
+                    // one approval of an individual grant, bounded by the governance capacity limits.
+                    Capacity: individual ? ApproverCapacity.Governance : null));
                 GrantPolicyViolationException.ThrowIfDenied(decision);
                 policyEvaluatedGrants++;
-
-                // The manifest activates the consent immediately and carries no approvals, so an Allow on a sensitive table or with a
-                // Clear column rule (or any class the policy marks as four-eyes) is refused here (also in dry-run) and must use the consent
-                // request/approval workflow. Sensitivity and Clear are checked directly because the policy classifies every service
-                // principal as GrantClass.ServicePrincipal, which carries no four-eyes flag. The manifest never sets a privileged right.
-                if (individual && effect == ConsentEffect.Allow &&
-                    (sensitivity == GrantSensitivity.Sensitive || hasClearColumnRule || decision.RequiresFourEyes))
-                {
-                    throw new GrantPolicyViolationException(GrantDecision.Deny(
-                        GrantErrorCodes.FourEyesRequired,
-                        "A declarative manifest cannot activate a sensitive or unmasked individual grant: it requires independent four-eyes approval. Use the consent request/approval workflow.",
-                        decision.Class,
-                        decision.MaxValidTo));
-                }
             }
 
             var existingConsents = await consentRepository.GetActiveConsentsForSubjectsAsync(new[] { granteeSid!.Value }, tableId, now, tenantId, ct).ConfigureAwait(false);

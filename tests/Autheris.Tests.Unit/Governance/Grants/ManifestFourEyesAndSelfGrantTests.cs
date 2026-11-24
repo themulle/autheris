@@ -14,8 +14,8 @@ using Xunit;
 namespace Autheris.Tests.Unit.Governance.Grants;
 
 /// <summary>
-/// SR-M-10: the declarative manifest activates consents immediately and carries no approvals, so it never creates a grant that needs
-/// four-eyes, and it never grants the actor access (any identifier form, or a group/role the actor holds).
+/// SR-M-10: the declarative manifest activates consents immediately; its apply by Data Governance is the single approval (Amendment 2),
+/// and it never grants the actor access (any identifier form, or a group/role the actor holds).
 /// </summary>
 public sealed class ManifestFourEyesAndSelfGrantTests
 {
@@ -53,63 +53,29 @@ public sealed class ManifestFourEyesAndSelfGrantTests
             .ApplyManifestAsync(caller ?? Caller(), new DeclarativeConsentManifest("1", [policy]), dryRun, callerContext);
 
     [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task SR_M_10_SensitiveIndividualManifestGrant_RequiresFourEyes_AndNothingIsWritten(bool dryRun)
+    [InlineData("User", "S-1-5-21-ALICE", true, null)]
+    [InlineData("User", "S-1-5-21-ALICE", false, "id")]
+    [InlineData("ServicePrincipal", "00000000-0000-0000-0000-00000000a11c", true, null)]
+    [InlineData("ServicePrincipal", "00000000-0000-0000-0000-00000000a11c", false, "id")]
+    public async Task Single_approval_sensitive_or_unmasked_individual_manifest_grant_is_applied(string type, string granteeRef, bool sensitive, string? clearColumn)
     {
+        // Amendment 2: no four-eyes anywhere. The apply of a Data Governance member is the one approval (D5), so a sensitive or unmasked
+        // individual grant takes effect; the class maxima still apply.
         var repo = new FakeConsentRepository();
 
-        var ex = await Should.ThrowAsync<GrantPolicyViolationException>(() =>
-            ApplyAsync(repo, Policy("User", "S-1-5-21-ALICE"), dryRun: dryRun, sensitive: true));
+        var result = await ApplyAsync(repo, Policy(type, granteeRef, clearColumn: clearColumn), sensitive: sensitive);
 
-        ex.ErrorCode.ShouldBe(GrantErrorCodes.FourEyesRequired);
-        ex.Decision.Class.ShouldBe(GrantClass.DataOwner);
-        repo.ReplaceCalls.ShouldBe(0);
-        repo.Active(DateTimeOffset.UtcNow).ShouldBeEmpty();
+        result.Applied.ShouldBe(1);
+        repo.Active(DateTimeOffset.UtcNow).ShouldHaveSingleItem();
     }
 
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task SR_M_10_ClearColumnRule_OnAnIndividualManifestGrant_IsUnmasked_AndRequiresFourEyes(bool dryRun)
+    [Fact]
+    public async Task Single_approval_sensitive_individual_manifest_grant_dry_run_writes_nothing()
     {
         var repo = new FakeConsentRepository();
 
-        var ex = await Should.ThrowAsync<GrantPolicyViolationException>(() =>
-            ApplyAsync(repo, Policy("User", "S-1-5-21-ALICE", clearColumn: "id"), dryRun: dryRun));
+        await ApplyAsync(repo, Policy("User", "S-1-5-21-ALICE"), dryRun: true, sensitive: true);
 
-        ex.ErrorCode.ShouldBe(GrantErrorCodes.FourEyesRequired);
-        ex.Decision.Class.ShouldBe(GrantClass.DataOwner);
-        repo.ReplaceCalls.ShouldBe(0);
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task SR_M_10_SensitiveServicePrincipalManifestGrant_RequiresFourEyes_AndNothingIsWritten(bool dryRun)
-    {
-        var repo = new FakeConsentRepository();
-
-        var ex = await Should.ThrowAsync<GrantPolicyViolationException>(() =>
-            ApplyAsync(repo, Policy("ServicePrincipal", "00000000-0000-0000-0000-00000000a11c"), dryRun: dryRun, sensitive: true));
-
-        ex.ErrorCode.ShouldBe(GrantErrorCodes.FourEyesRequired);
-        ex.Decision.Class.ShouldBe(GrantClass.DataOwner);
-        repo.ReplaceCalls.ShouldBe(0);
-        repo.Active(DateTimeOffset.UtcNow).ShouldBeEmpty();
-    }
-
-    [Theory]
-    [InlineData(false)]
-    [InlineData(true)]
-    public async Task SR_M_10_ClearColumnRule_OnAServicePrincipalManifestGrant_RequiresFourEyes(bool dryRun)
-    {
-        var repo = new FakeConsentRepository();
-
-        var ex = await Should.ThrowAsync<GrantPolicyViolationException>(() =>
-            ApplyAsync(repo, Policy("ServicePrincipal", "00000000-0000-0000-0000-00000000a11c", clearColumn: "id"), dryRun: dryRun));
-
-        ex.ErrorCode.ShouldBe(GrantErrorCodes.FourEyesRequired);
         repo.ReplaceCalls.ShouldBe(0);
         repo.Active(DateTimeOffset.UtcNow).ShouldBeEmpty();
     }

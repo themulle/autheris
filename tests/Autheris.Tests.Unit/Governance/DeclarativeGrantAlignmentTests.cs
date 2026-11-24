@@ -181,13 +181,17 @@ public sealed class DeclarativeGrantAlignmentTests
     {
         var repo = new FakeConsentRepository();
 
-        // An individual grant on a sensitive object needs an approval and is refused; a named group grant is applied under the declarative maxima.
-        await Should.ThrowAsync<GrantPolicyViolationException>(() =>
-            Sut(repo, sensitive: true).ApplyManifestAsync(Caller(), Manifest(Policy("User", "S-1-5-21-ALICE"))));
-        repo.Active(DateTimeOffset.UtcNow).ShouldBeEmpty();
+        // Single approval (Amendment 2): the Data Governance apply is the one approval of an individual grant on a sensitive object, and a
+        // named group grant is applied under the declarative maxima; an individual grant beyond the class maximum is still refused.
+        var individual = await Sut(repo, sensitive: true).ApplyManifestAsync(Caller(), Manifest(Policy("User", "S-1-5-21-ALICE")));
+        individual.Applied.ShouldBe(1);
 
         var result = await Sut(repo, sensitive: true).ApplyManifestAsync(Caller(), Manifest(Policy("Group", "S-1-5-21-GROUP-A")));
         result.Applied.ShouldBe(1);
+
+        var tooLong = await Should.ThrowAsync<GrantPolicyViolationException>(() =>
+            Sut(repo, sensitive: true).ApplyManifestAsync(Caller(), Manifest(Policy("User", "S-1-5-21-BOB", validUntil: DateTimeOffset.UtcNow.AddYears(50)))));
+        tooLong.ErrorCode.ShouldBeOneOf(GrantErrorCodes.ExceedsMaximum, GrantErrorCodes.ExceedsApproverLimit);
     }
 
     [Theory]
