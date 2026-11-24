@@ -49,9 +49,7 @@ public static partial class ConsentApiEndpoints
         MapConsentGrantEndpoints(group);
         MapSelfGrantEndpoints(group);
 
-        app.MapGet("/api/v1/governance/containers/{kind}/{id:guid}/grants", GetContainerGrantsAsync)
-            .RequireAuthorization(GatewayPolicies.AuthenticatedCaller)
-            .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+        MapDecisionEndpoints(app, group);
 
         return app;
     }

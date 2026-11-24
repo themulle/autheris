@@ -30,13 +30,13 @@ src/Autheris.Api/Endpoints/CatalogApiEndpoints.cs|/search
 src/Autheris.Api/Endpoints/ChangeDetectionEndpoints.cs|/api/v1/data/{domain}/{schema}/{table}/change-token
 src/Autheris.Api/Endpoints/ClassificationAdminEndpoints.cs|ClassificationRoute
 src/Autheris.Api/Endpoints/ClassificationAdminEndpoints.cs|ClassificationRoute + "/mask-rule"
+src/Autheris.Api/Endpoints/ConsentApiEndpoints.Decisions.cs|/api/v1/governance/containers/{kind}/{id:guid}/grants
+src/Autheris.Api/Endpoints/ConsentApiEndpoints.Decisions.cs|/inbox
 src/Autheris.Api/Endpoints/ConsentApiEndpoints.Grants.cs|/grant-records/keys
 src/Autheris.Api/Endpoints/ConsentApiEndpoints.Grants.cs|/grant-records/proof
 src/Autheris.Api/Endpoints/ConsentApiEndpoints.Grants.cs|/grant-records/{seq:long}
 src/Autheris.Api/Endpoints/ConsentApiEndpoints.Grants.cs|/grants
-src/Autheris.Api/Endpoints/ConsentApiEndpoints.Grants.cs|/inbox
 src/Autheris.Api/Endpoints/ConsentApiEndpoints.Grants.cs|/grants/{id:guid}
-src/Autheris.Api/Endpoints/ConsentApiEndpoints.cs|/api/v1/governance/containers/{kind}/{id:guid}/grants
 src/Autheris.Api/Endpoints/ConsentApiEndpoints.Requests.cs|/events
 src/Autheris.Api/Endpoints/ConsentApiEndpoints.Requests.cs|/requests
 src/Autheris.Api/Endpoints/ConsentApiEndpoints.Requests.cs|/requests/{id:guid}

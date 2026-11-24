@@ -18,7 +18,7 @@ using Xunit;
 namespace Autheris.Tests.Unit.Governance.Requests;
 
 [Trait("Category", "Security")]
-public sealed class GrantRevokeAuthorityTests
+public sealed partial class GrantRevokeAuthorityTests
 {
     private static readonly TenantId TenantA = new("tenant-a");
     private static readonly TenantId TenantB = new("tenant-b");

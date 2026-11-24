@@ -19,7 +19,8 @@ using Xunit;
 
 namespace Autheris.Tests.Unit.Governance.Requests;
 
-public sealed class PermissionInboxServiceTests
+[Trait("Category", "Security")]
+public sealed partial class PermissionInboxServiceTests
 {
     private static readonly TenantId TenantA = new("tenant-a");
     private static readonly Guid SalesDomain = Guid.NewGuid();
@@ -54,7 +55,7 @@ public sealed class PermissionInboxServiceTests
         };
     }
 
-    private static ConsentRequest Pending(TableIdentifier table, string requester = "user:bob") => new()
+    private static ConsentRequest Pending(TableIdentifier table, string requester = "user:bob", DateTimeOffset? updatedAt = null) => new()
     {
         Id = Guid.NewGuid(),
         TableId = Guid.NewGuid(),
@@ -65,6 +66,7 @@ public sealed class PermissionInboxServiceTests
         BusinessJustification = "Need data access for quarterly reporting.",
         Status = "PENDING",
         RequestedAt = DateTimeOffset.UnixEpoch,
+        UpdatedAt = updatedAt,
         RequestedValidFrom = DateTimeOffset.UnixEpoch,
         RequestedValidTo = DateTimeOffset.UnixEpoch.AddDays(30),
         TenantId = TenantA,
@@ -75,71 +77,138 @@ public sealed class PermissionInboxServiceTests
 
     private static (PermissionInboxService Service, List<ConsentPageQuery> GrantQueries) Create(
         IReadOnlyList<ConsentRequest> pending,
-        IReadOnlyList<Guid>? domainTables = null,
         bool protectionThrows = false)
     {
-        var domainRepo = NullFake.Create<IGovernanceDomainRepository>((m, args) =>
+        var fx = new InboxFixture(pending, protectionThrows);
+        return (fx.Service, fx.GrantQueries);
+    }
+
+    /// <summary>
+    /// Fakes that page like the repository (newest first by updated_at, then id) and count every lookup.
+    /// </summary>
+    private sealed class InboxFixture
+    {
+        public InboxFixture(
+            IReadOnlyList<ConsentRequest> pending,
+            bool protectionThrows = false,
+            IReadOnlyList<CatalogVisibilityGrant>? catalogGrants = null,
+            IReadOnlyList<Consent>? patternGrants = null,
+            IReadOnlyList<TableIdentifier>? domainTables = null)
         {
-            if (m.Name == nameof(IGovernanceDomainRepository.GetAsync))
+            var ordered = pending
+                .OrderByDescending(static r => (r.UpdatedAt ?? r.RequestedAt).ToUniversalTime())
+                .ThenByDescending(static r => r.Id)
+                .ToList();
+
+            var domainRepo = NullFake.Create<IGovernanceDomainRepository>((m, args) =>
             {
-                var id = (Guid)args![1]!;
-                var owner = id == HrDomain ? HrOwners : SalesOwners;
-                return Task.FromResult<GovernanceDomain?>(new GovernanceDomain(id, TenantA, "Domain", null, null, owner, ProtectionClass.Confidential, CatalogVisibilityMode.Open, false, 1, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch));
-            }
+                if (m.Name == nameof(IGovernanceDomainRepository.GetAsync))
+                {
+                    DomainLookups++;
+                    var id = (Guid)args![1]!;
+                    var owner = id == HrDomain ? HrOwners : SalesOwners;
+                    return Task.FromResult<GovernanceDomain?>(new GovernanceDomain(id, TenantA, "Domain", null, null, owner, ProtectionClass.Confidential, CatalogVisibilityMode.Open, false, 1, DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch));
+                }
 
-            if (m.Name == nameof(IGovernanceDomainRepository.ListDomainTableIdsAsync))
+                if (m.Name == nameof(IGovernanceDomainRepository.ListDomainTablesAsync))
+                {
+                    return Task.FromResult<IReadOnlyList<TableIdentifier>>(domainTables ?? []);
+                }
+
+                return NullFake.UseDefault;
+            });
+
+            var protection = new StubProtectionProvider(table =>
             {
-                return Task.FromResult<IReadOnlyList<Guid>>(domainTables ?? []);
-            }
+                ProtectionLookups++;
+                if (protectionThrows)
+                {
+                    throw new InvalidOperationException("snapshot unavailable");
+                }
 
-            return NullFake.UseDefault;
-        });
+                var hr = table.Equals(PayrollTable);
+                return new EffectiveProtection(
+                    new ContainerRef(ContainerKind.Domain, hr ? HrDomain : SalesDomain),
+                    hr ? HrOwners : SalesOwners,
+                    ProtectionClass.Confidential,
+                    ProtectionClass.Confidential,
+                    null,
+                    new Dictionary<string, ColumnProtection>(),
+                    CatalogVisibilityMode.Open);
+            });
 
-        var protection = new StubProtectionProvider(table =>
-        {
-            if (protectionThrows)
+            var approvals = NullFake.Create<IConsentApprovalRepository>((m, args) =>
             {
-                throw new InvalidOperationException("snapshot unavailable");
-            }
+                if (m.Name != nameof(IConsentApprovalRepository.QueryTenantConsentRequestsAsync))
+                {
+                    return NullFake.UseDefault;
+                }
 
-            var hr = table.Equals(PayrollTable);
-            return new EffectiveProtection(
-                new ContainerRef(ContainerKind.Domain, hr ? HrDomain : SalesDomain),
-                hr ? HrOwners : SalesOwners,
-                ProtectionClass.Confidential,
-                ProtectionClass.Confidential,
-                null,
-                new Dictionary<string, ColumnProtection>(),
-                CatalogVisibilityMode.Open);
-        });
+                RequestPageQueries++;
+                var query = (ConsentRequestPageQuery)args![0]!;
+                IEnumerable<ConsentRequest> rows = ordered;
+                if (ConsentRequestCursor.TryDecode(query.Cursor, out var at, out var afterId))
+                {
+                    rows = rows.Where(r =>
+                    {
+                        var ts = (r.UpdatedAt ?? r.RequestedAt).ToUniversalTime();
+                        return ts < at || (ts == at && r.Id.CompareTo(afterId) < 0);
+                    });
+                }
 
-        var approvals = NullFake.Create<IConsentApprovalRepository>((m, _) =>
-            m.Name == nameof(IConsentApprovalRepository.QueryTenantConsentRequestsAsync)
-                ? Task.FromResult(new ConsentRequestPage(pending, null))
-                : NullFake.UseDefault);
+                var window = rows.Take(query.Limit + 1).ToList();
+                string? next = null;
+                if (window.Count > query.Limit)
+                {
+                    window.RemoveAt(window.Count - 1);
+                    next = ConsentRequestCursor.For(window[^1]);
+                }
 
-        var grantQueries = new List<ConsentPageQuery>();
-        var consents = NullFake.Create<IConsentRepository>((m, args) =>
-        {
-            if (m.Name == nameof(IConsentRepository.GetConsentPageAsync))
+                return Task.FromResult(new ConsentRequestPage(window, next));
+            });
+
+            var consents = NullFake.Create<IConsentRepository>((m, args) =>
             {
-                grantQueries.Add((ConsentPageQuery)args![0]!);
-                return Task.FromResult(new ConsentPage([], null));
-            }
+                if (m.Name == nameof(IConsentRepository.GetConsentPageAsync))
+                {
+                    GrantQueries.Add((ConsentPageQuery)args![0]!);
+                    return Task.FromResult(new ConsentPage([], null));
+                }
 
-            return NullFake.UseDefault;
-        });
+                if (m.Name == nameof(IConsentRepository.GetPatternConsentsWithPendingDeniesAsync))
+                {
+                    return Task.FromResult<IReadOnlyList<Consent>>(patternGrants ?? []);
+                }
 
-        var caps = new GovernanceCapabilities(domainRepository: domainRepo);
-        var service = new PermissionInboxService(
-            approvals,
-            consents,
-            new ApproverResolver(domainRepo, protectionSnapshotProvider: protection),
-            new ApproverEligibility(caps),
-            new SeparationOfDutiesService(),
-            caps,
-            domainRepo);
-        return (service, grantQueries);
+                return NullFake.UseDefault;
+            });
+
+            var catalog = NullFake.Create<ICatalogVisibilityGrantRepository>((m, _) =>
+                m.Name == nameof(ICatalogVisibilityGrantRepository.ListByContainerAsync)
+                    ? Task.FromResult<IReadOnlyList<CatalogVisibilityGrant>>(catalogGrants ?? [])
+                    : NullFake.UseDefault);
+
+            var caps = new GovernanceCapabilities(domainRepository: domainRepo);
+            Service = new PermissionInboxService(
+                approvals,
+                consents,
+                new ApproverResolver(domainRepo, protectionSnapshotProvider: protection),
+                new ApproverEligibility(caps),
+                new SeparationOfDutiesService(),
+                caps,
+                domainRepo,
+                catalogGrants: catalog);
+        }
+
+        public PermissionInboxService Service { get; }
+
+        public List<ConsentPageQuery> GrantQueries { get; } = [];
+
+        public int RequestPageQueries { get; private set; }
+
+        public int ProtectionLookups { get; private set; }
+
+        public int DomainLookups { get; private set; }
     }
 
     [Fact]
@@ -205,8 +274,7 @@ public sealed class PermissionInboxServiceTests
     [Fact]
     public async Task Owner_member_and_governance_see_the_container_grants_others_get_nothing()
     {
-        var tableIds = new[] { Guid.NewGuid(), Guid.NewGuid() };
-        var (service, queries) = Create([], tableIds);
+        var (service, queries) = Create([]);
         var container = new ContainerRef(ContainerKind.Domain, SalesDomain);
 
         (await service.GetContainerGrantsAsync(ContextFor("user:owner", groups: [SalesOwners]), TenantA, container, null, 50, false)).ShouldNotBeNull();
@@ -216,14 +284,14 @@ public sealed class PermissionInboxServiceTests
         (await service.GetContainerGrantsAsync(ContextFor("user:owner", groups: [SalesOwners]), TenantA, new ContainerRef(ContainerKind.DataProduct, SalesDomain), null, 50, false)).ShouldBeNull();
 
         queries.Count.ShouldBe(2);
-        queries[0].TableIds.ShouldNotBeNull().ShouldBe(tableIds);
+        queries[0].DomainId.ShouldBe(SalesDomain);
         queries[0].GrantKind.ShouldBeNull();
     }
 
     [Fact]
     public async Task Container_grant_page_size_is_capped()
     {
-        var (service, queries) = Create([], [Guid.NewGuid()]);
+        var (service, queries) = Create([]);
 
         await service.GetContainerGrantsAsync(
             ContextFor("user:dg", "GovernanceAdmin"), TenantA, new ContainerRef(ContainerKind.Domain, SalesDomain), null, int.MaxValue, false);

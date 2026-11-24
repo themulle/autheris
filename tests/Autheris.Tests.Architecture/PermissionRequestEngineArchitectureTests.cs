@@ -52,4 +52,39 @@ public sealed class PermissionRequestEngineArchitectureTests
 
         violations.ShouldBeEmpty(string.Join(Environment.NewLine, violations));
     }
+
+    private static readonly Regex VerifiedRevocationCall = new(@"\bForVerifiedRevocation\s*\(", RegexOptions.CultureInvariant, TimeSpan.FromSeconds(2));
+
+    // The factory mints tenant-admin revocation authority; only the grant revoke authority may call it after its checks.
+    private static readonly string[] VerifiedRevocationMinters =
+    [
+        "src/Autheris.Application/Governance/Requests/GrantRevokeAuthority.cs",
+        "src/Autheris.Domain/Security/ConsentRevocationAuthority.cs"
+    ];
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Only_grant_revoke_authority_mints_verified_revocation_authority()
+    {
+        var violations = new List<string>();
+        foreach (var file in RepositoryScan.ProductionFiles)
+        {
+            var path = file.RelativePath.Replace('\\', '/');
+            var code = string.Join('\n', RepositoryScan.CodeLines(file.Text));
+            if (VerifiedRevocationCall.IsMatch(code) && !VerifiedRevocationMinters.Any(w => path.EndsWith(w, StringComparison.Ordinal)))
+            {
+                violations.Add($"{path}: mints ConsentRevocationAuthority.ForVerifiedRevocation outside GrantRevokeAuthority");
+            }
+        }
+
+        violations.ShouldBeEmpty(string.Join(Environment.NewLine, violations));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Verified_revocation_ratchet_detects_a_new_caller()
+    {
+        VerifiedRevocationCall.IsMatch("var a = ConsentRevocationAuthority.ForVerifiedRevocation(tenant, \"x\");").ShouldBeTrue();
+        VerifiedRevocationCall.IsMatch("var a = ConsentRevocationAuthority.FromPrincipal(user);").ShouldBeFalse();
+    }
 }

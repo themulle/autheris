@@ -37,10 +37,6 @@ public static partial class ConsentApiEndpoints
             .RequireAuthorization(GatewayPolicies.ConsentRead)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 
-        group.MapGet("/inbox", GetInboxAsync)
-            .RequireAuthorization(GatewayPolicies.AuthenticatedCaller)
-            .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
-
         group.MapGet("/grants/{id:guid}", GetGrantByIdAsync)
             .RequireAuthorization(GatewayPolicies.ConsentRead)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
@@ -190,7 +186,7 @@ public static partial class ConsentApiEndpoints
             return limited;
         }
 
-        var (tenantId, userSid, clientId, isServicePrincipal, isClusterAdmin, _) = ResolveCaller(context);
+        var (tenantId, userSid, clientId, isServicePrincipal, _, _) = ResolveCaller(context);
         ExternalWorkflowSystem? callerSystem = null;
         if (isServicePrincipal)
         {
@@ -222,8 +218,10 @@ public static partial class ConsentApiEndpoints
             return replayResult!;
         }
 
+        // A grant is revoked within the caller's resolved tenant only (ClusterAdmin included): a grant of another tenant is
+        // indistinguishable from a missing one and is never loaded into the revoke authority check.
         var consent = await consentRepo.GetConsentByIdAsync(id, ct).ConfigureAwait(false);
-        if (consent is null || (!isClusterAdmin && consent.TenantId != tenantId))
+        if (consent is null || consent.TenantId != tenantId)
         {
             return ApiProblems.NotFound(ConsentDecisionErrorCodes.GrantNotFound, $"Consent grant '{id}' was not found.", context);
         }
@@ -285,10 +283,10 @@ public static partial class ConsentApiEndpoints
             }
 
             var callerContext = context.GetSecurityContext() ?? SecurityPrincipalContext.FromPrincipal(context.User);
-            var capacity = revokeAuthority is null
+            var verified = revokeAuthority is null
                 ? null
-                : await revokeAuthority.EvaluateAsync(callerContext, consent, ct).ConfigureAwait(false);
-            if (capacity is null)
+                : await revokeAuthority.AuthorizeAsync(callerContext, consent, ct).ConfigureAwait(false);
+            if (verified is null)
             {
                 await RecordRevokeDeniedAsync(auditWriter, consent, userSid.Value, ct).ConfigureAwait(false);
                 return ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, ConsentRevocationForbiddenException.FixedMessage, context);
@@ -296,7 +294,8 @@ public static partial class ConsentApiEndpoints
 
             try
             {
-                await consentRepo.RevokeConsentAsync(id, userSid.Value, reason, ConsentRevocationAuthority.ForVerifiedRevocation(consent.TenantId), ct).ConfigureAwait(false);
+                // The verified authority carries the capacity, which the repository records in CONSENT_REVOKED.
+                await consentRepo.RevokeConsentAsync(id, userSid.Value, reason, verified.Authority, ct).ConfigureAwait(false);
             }
             catch (ConsentRevocationForbiddenException)
             {
@@ -427,92 +426,6 @@ public static partial class ConsentApiEndpoints
         var responsePayload = new { profileAssignmentId = id, revokedGrantCount = revokedCount, status = "REVOKED", revokedAt = now };
         await StoreIdempotentResponseAsync(idempotencyStore, scopedKey, bodyHash, StatusCodes.Status200OK, responsePayload, null, ct).ConfigureAwait(false);
         return Results.Ok(responsePayload);
-    }
-
-    internal static async Task<IResult> GetInboxAsync(
-        HttpContext context,
-        [FromServices] PermissionInboxService inbox,
-        IRateLimiterService? rateLimiter = null,
-        IOptions<GovernanceOptions>? governanceOptions = null,
-        string? cursor = null,
-        int limit = 50,
-        CancellationToken ct = default)
-    {
-        if (await EnforceRateLimitAsync(context, rateLimiter, governanceOptions, ConsentApiRateLimitBucket.Reads, ct).ConfigureAwait(false) is { } limited)
-        {
-            return limited;
-        }
-
-        var (tenantId, userSid, _, isServicePrincipal, _, _) = ResolveCaller(context);
-        if (isServicePrincipal || !userSid.HasValue)
-        {
-            // Decisions are made by people; an application identity has no inbox.
-            return Results.Ok(new { items = Array.Empty<object>(), nextCursor = (string?)null });
-        }
-
-        var caller = context.GetSecurityContext() ?? SecurityPrincipalContext.FromPrincipal(context.User);
-        var page = await inbox.GetInboxAsync(caller, tenantId, cursor, limit, ct).ConfigureAwait(false);
-        return Results.Ok(new
-        {
-            items = page.Items.Select(static i => new { request = ToRequestDto(i.Request), capacity = i.Capacity.ToString() }).ToArray(),
-            nextCursor = page.NextCursor
-        });
-    }
-
-    internal static async Task<IResult> GetContainerGrantsAsync(
-        string kind,
-        Guid id,
-        HttpContext context,
-        [FromServices] PermissionInboxService inbox,
-        IRateLimiterService? rateLimiter = null,
-        IOptions<GovernanceOptions>? governanceOptions = null,
-        string? cursor = null,
-        int? pageSize = null,
-        bool? includeInactive = null,
-        CancellationToken ct = default)
-    {
-        if (await EnforceRateLimitAsync(context, rateLimiter, governanceOptions, ConsentApiRateLimitBucket.Reads, ct).ConfigureAwait(false) is { } limited)
-        {
-            return limited;
-        }
-
-        Guid? after = null;
-        if (cursor is not null)
-        {
-            if (!PageCursor.TryDecode(cursor, out var raw) || !Guid.TryParse(raw, out var afterId))
-            {
-                return ApiProblems.BadRequest(ApiErrorCodes.InvalidCursor, "The cursor is malformed.", context);
-            }
-
-            after = afterId;
-        }
-
-        var (tenantId, userSid, _, isServicePrincipal, _, _) = ResolveCaller(context);
-        var notFound = ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "Container was not found.", context);
-        if (isServicePrincipal || !userSid.HasValue || !ConsentWorkflowSqlMapping.TryParseContainerKind(kind.Replace('-', '_'), out var containerKind))
-        {
-            return notFound;
-        }
-
-        var caller = context.GetSecurityContext() ?? SecurityPrincipalContext.FromPrincipal(context.User);
-        var page = await inbox.GetContainerGrantsAsync(
-            caller,
-            tenantId,
-            new ContainerRef(containerKind, id),
-            after,
-            pageSize ?? ConsentPageQuery.DefaultPageSize,
-            includeInactive == true,
-            ct).ConfigureAwait(false);
-        if (page is null)
-        {
-            return notFound;
-        }
-
-        return Results.Ok(new
-        {
-            items = page.Items.Select(ToGrantDto).ToArray(),
-            nextCursor = page.NextCursor is { } next ? PageCursor.Encode(next) : null
-        });
     }
 
     private static async Task RecordRevokeDeniedAsync(IAuditWriter? auditWriter, Consent consent, Sid actor, CancellationToken ct)

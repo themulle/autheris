@@ -2,13 +2,14 @@ namespace Autheris.Application.Governance.Requests;
 
 using System;
 using System.Collections.Generic;
-using System.Linq;
+using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Paging;
 using Autheris.Domain.Common;
+using Autheris.Domain.Identity;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 
@@ -18,14 +19,11 @@ public sealed record PermissionInboxItem(ConsentRequest Request, ApproverCapacit
 /// <summary>One page of the decision inbox.</summary>
 public sealed record PermissionInboxPage(IReadOnlyList<PermissionInboxItem> Items, string? NextCursor);
 
-/// <summary>One page of the grants of a container.</summary>
-public sealed record ContainerGrantsPage(IReadOnlyList<Consent> Items, string? NextCursor);
-
 /// <summary>
 /// Read side for deciders: the requests a caller is eligible to decide and the grant overview of a container.
 /// A request or container the caller may not see is indistinguishable from a missing one.
 /// </summary>
-public sealed class PermissionInboxService(
+public sealed partial class PermissionInboxService(
     IConsentApprovalRepository approvals,
     IConsentRepository consents,
     ApproverResolver approverResolver,
@@ -33,7 +31,8 @@ public sealed class PermissionInboxService(
     ISeparationOfDutiesService sod,
     IGovernanceCapabilities capabilities,
     IGovernanceDomainRepository? domains = null,
-    TimeProvider? timeProvider = null)
+    TimeProvider? timeProvider = null,
+    ICatalogVisibilityGrantRepository? catalogGrants = null)
 {
     /// <summary>Default and maximum page size of the inbox and the grant overview.</summary>
     public const int MaxPageSize = ConsentPageQuery.MaxPageSize;
@@ -51,9 +50,15 @@ public sealed class PermissionInboxService(
     private readonly ISeparationOfDutiesService _sod = sod ?? throw new ArgumentNullException(nameof(sod));
     private readonly IGovernanceCapabilities _capabilities = capabilities ?? throw new ArgumentNullException(nameof(capabilities));
     private readonly IGovernanceDomainRepository? _domains = domains;
+    private readonly ICatalogVisibilityGrantRepository? _catalogGrants = catalogGrants;
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
 
-    /// <summary>Requests of <paramref name="tenant"/> the caller is eligible to decide, oldest first.</summary>
+    /// <summary>
+    /// Requests of <paramref name="tenant"/> the caller is eligible to decide, newest first (by last update, then id), the
+    /// order of the request page query. <paramref name="cursor"/> resumes strictly after the last request evaluated for
+    /// the previous page, so no request is skipped when a repository page is cut.
+    /// </summary>
+    /// <exception cref="ArgumentException">The cursor is malformed.</exception>
     public async Task<PermissionInboxPage> GetInboxAsync(
         SecurityPrincipalContext caller,
         TenantId tenant,
@@ -62,121 +67,114 @@ public sealed class PermissionInboxService(
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(caller);
+        if (cursor is not null && !ConsentRequestCursor.TryDecode(cursor, out _, out _))
+        {
+            throw new ArgumentException("The inbox cursor is malformed.", nameof(cursor));
+        }
+
         var size = Math.Clamp(limit, 1, MaxPageSize);
         if (!caller.IsAuthenticated || caller.TenantClaimInvalid || string.IsNullOrWhiteSpace(tenant.Value) || TenantId.IsReserved(tenant))
         {
             return new PermissionInboxPage([], null);
         }
 
+        // Bounded scan cost: a caller that can never be an approver neither pays for nor causes a scan.
+        if (!MayHoldAnyDeciderCapacity(caller, tenant))
+        {
+            return new PermissionInboxPage([], null);
+        }
+
+        var evaluation = new InboxEvaluation(caller, tenant, _capabilities);
         var items = new List<PermissionInboxItem>(size);
         var next = cursor;
-        string? lastScannedCursor = cursor;
-        var exhausted = false;
+        var resume = cursor;
+        var hasMore = false;
 
-        for (var scanned = 0; scanned < MaxScanPages && items.Count < size; scanned++)
+        for (var scanned = 0; ; scanned++)
         {
             var page = await _approvals.QueryTenantConsentRequestsAsync(
                 new ConsentRequestPageQuery(tenant, PendingStatus, Cursor: next, Limit: RepositoryPageSize),
                 ct).ConfigureAwait(false);
 
-            foreach (var request in page.Items)
+            var index = 0;
+            for (; index < page.Items.Count && items.Count < size; index++)
             {
-                if (items.Count >= size)
-                {
-                    break;
-                }
-
-                var capacity = await EvaluateAsync(caller, request, ct).ConfigureAwait(false);
+                var request = page.Items[index];
+                var capacity = await EvaluateAsync(evaluation, request, ct).ConfigureAwait(false);
                 if (capacity is { } held)
                 {
                     items.Add(new PermissionInboxItem(request, held));
                 }
+
+                // The cursor always points at the last evaluated row, so rows after it are never skipped.
+                resume = ConsentRequestCursor.For(request);
             }
 
-            lastScannedCursor = page.NextCursor;
+            if (index < page.Items.Count)
+            {
+                hasMore = true;
+                break;
+            }
+
             if (page.NextCursor is null || page.Items.Count == 0)
             {
-                exhausted = true;
                 break;
             }
 
             next = page.NextCursor;
+            if (items.Count >= size || scanned + 1 >= MaxScanPages)
+            {
+                hasMore = true;
+                break;
+            }
         }
 
-        return new PermissionInboxPage(items, exhausted ? null : lastScannedCursor);
+        return new PermissionInboxPage(items, hasMore ? resume : null);
     }
 
-    /// <summary>
-    /// Grants (including self-grants) of a container for owner group members and Data Governance;
-    /// <see langword="null"/> when the container is not visible to the caller.
-    /// </summary>
-    public async Task<ContainerGrantsPage?> GetContainerGrantsAsync(
-        SecurityPrincipalContext caller,
-        TenantId tenant,
-        ContainerRef container,
-        Guid? afterId,
-        int pageSize,
-        bool includeInactive,
-        CancellationToken ct = default)
+    private bool MayHoldAnyDeciderCapacity(SecurityPrincipalContext caller, TenantId tenant)
     {
-        ArgumentNullException.ThrowIfNull(caller);
-        if (!caller.IsAuthenticated || caller.TenantClaimInvalid || string.IsNullOrWhiteSpace(tenant.Value) ||
-            TenantId.IsReserved(tenant) || _domains is null || container.Kind != ContainerKind.Domain)
+        if (IsDegraded(caller))
         {
-            return null;
+            // ApproverEligibility denies every capacity under degraded resolution.
+            return false;
         }
 
-        var allowed = _capabilities.IsGovernance(caller.Principal, tenant) ||
-                      await _capabilities.IsOwnerMemberAsync(caller, container, ct).ConfigureAwait(false);
-        if (!allowed)
-        {
-            return null;
-        }
-
-        var domain = await _domains.GetAsync(tenant, container.Id, ct).ConfigureAwait(false);
-        if (domain is null)
-        {
-            return null;
-        }
-
-        var tableIds = await _domains.ListDomainTableIdsAsync(tenant, container.Id, ConsentPageQuery.MaxTableIds, ct).ConfigureAwait(false);
-        if (tableIds.Count == 0)
-        {
-            return new ContainerGrantsPage([], null);
-        }
-
-        var page = await _consents.GetConsentPageAsync(
-            new ConsentPageQuery(
-                tenant,
-                IncludeInactive: includeInactive,
-                AfterId: afterId,
-                PageSize: Math.Clamp(pageSize, 1, MaxPageSize),
-                GrantKind: null,
-                TableIds: tableIds.Take(ConsentPageQuery.MaxTableIds).ToArray()),
-            ct).ConfigureAwait(false);
-
-        return new ContainerGrantsPage(page.Items, page.NextAfterId?.ToString("D"));
+        return caller.GroupSids is { Count: > 0 } ||
+               _capabilities.IsGovernance(caller.Principal, tenant) ||
+               _capabilities.IsItAdmin(caller.Principal, tenant);
     }
 
-    private async Task<ApproverCapacity?> EvaluateAsync(SecurityPrincipalContext caller, ConsentRequest request, CancellationToken ct)
+    private static bool IsDegraded(SecurityPrincipalContext caller) =>
+        caller.GroupResolutionStatus != GroupResolutionStatus.Complete ||
+        GroupResolutionClaims.HasAnyDegradedClaim(caller.Claims) ||
+        SeparationOfDutiesService.IsDegradedGroupOrRoleResolution(caller.Principal);
+
+    /// <summary>The decision target exactly as the engine derives it when the request is decided.</summary>
+    private static PermissionTarget TargetOf(ConsentRequest request) =>
+        request.RequestKind switch
+        {
+            ConsentRequestKind.Catalog when request.ContainerKind.HasValue && request.ContainerId.HasValue =>
+                PermissionTarget.ForContainer(request.ContainerKind.Value, request.ContainerId.Value),
+            ConsentRequestKind.ProfileAssignment when request.ProfileId.HasValue =>
+                PermissionTarget.ForProfile(request.ProfileId.Value),
+            _ => PermissionTarget.ForTable(request.TableIdentifier, request.TargetColumns)
+        };
+
+    private async Task<ApproverCapacity?> EvaluateAsync(InboxEvaluation evaluation, ConsentRequest request, CancellationToken ct)
     {
         try
         {
-            var target = request.ContainerKind is { } kind && request.ContainerId is { } id
-                ? PermissionTarget.ForContainer(kind, id)
-                : request.ProfileId is { } profileId && request.RequestKind == ConsentRequestKind.ProfileAssignment
-                    ? PermissionTarget.ForProfile(profileId)
-                    : PermissionTarget.ForTable(request.TableIdentifier, request.TargetColumns);
-
             var set = await _approverResolver.ResolveAsync(
-                request.TenantId, request.RequestKind, target, request.RequesterSid, request.RequestedGranteeRef, ct).ConfigureAwait(false);
-            var capacity = await _approverEligibility.EvaluateAsync(caller, set, ct).ConfigureAwait(false);
+                request.TenantId, request.RequestKind, TargetOf(request), request.RequesterSid, request.RequestedGranteeRef,
+                evaluation.Resolutions, ct).ConfigureAwait(false);
+            var capacity = await evaluation.Eligibility.EvaluateAsync(evaluation.Caller, set, ct).ConfigureAwait(false);
             if (!capacity.HasValue)
             {
                 return null;
             }
 
-            var verdict = await _sod.CheckPermissionDecisionAsync(request.TenantId, caller, request, ct).ConfigureAwait(false);
+            var verdict = await _sod.CheckPermissionDecisionAsync(request.TenantId, evaluation.Caller, request, ct).ConfigureAwait(false);
             if (verdict.Allowed)
             {
                 return capacity;
@@ -193,5 +191,42 @@ public sealed class PermissionInboxService(
             // A request whose approvers cannot be resolved is never listed as decidable.
             return null;
         }
+    }
+
+    /// <summary>Per-call state: one caller, one tenant, memoized container and owner-membership lookups.</summary>
+    private sealed class InboxEvaluation(SecurityPrincipalContext caller, TenantId tenant, IGovernanceCapabilities capabilities)
+    {
+        public SecurityPrincipalContext Caller { get; } = caller;
+
+        public ApproverResolutionCache Resolutions { get; } = new(tenant);
+
+        public ApproverEligibility Eligibility { get; } = new(new OwnerMembershipMemo(capabilities));
+    }
+
+    /// <summary>Caches owner-group membership per container for the single caller of one inbox call.</summary>
+    private sealed class OwnerMembershipMemo(IGovernanceCapabilities inner) : IGovernanceCapabilities
+    {
+        private readonly Dictionary<ContainerRef, bool> _membership = [];
+
+        public bool IsGovernance(ClaimsPrincipal? principal, TenantId tenant) => inner.IsGovernance(principal, tenant);
+
+        public bool IsItAdmin(ClaimsPrincipal? principal, TenantId tenant) => inner.IsItAdmin(principal, tenant);
+
+        public async ValueTask<bool> IsOwnerMemberAsync(SecurityPrincipalContext principal, ContainerRef container, CancellationToken ct)
+        {
+            if (_membership.TryGetValue(container, out var known))
+            {
+                return known;
+            }
+
+            var member = await inner.IsOwnerMemberAsync(principal, container, ct).ConfigureAwait(false);
+            _membership[container] = member;
+            return member;
+        }
+
+        public ValueTask<bool> CanClassifyAsync(SecurityPrincipalContext principal, ContainerRef container, TenantId objectTenant, CancellationToken ct) =>
+            inner.CanClassifyAsync(principal, container, objectTenant, ct);
+
+        public bool CanEditPolicy(ClaimsPrincipal? principal, TenantId objectTenant) => inner.CanEditPolicy(principal, objectTenant);
     }
 }

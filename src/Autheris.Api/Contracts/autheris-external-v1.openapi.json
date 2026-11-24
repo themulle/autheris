@@ -307,7 +307,7 @@
         ],
         "responses": {
           "200": {
-            "description": "Open requests the caller may decide, with the capacity they decide in",
+            "description": "Open requests the caller may decide, newest first, with the capacity they decide in",
             "content": {
               "application/json": {
                 "schema": {
@@ -329,6 +329,7 @@
               }
             }
           },
+          "400": { "description": "Malformed cursor (INVALID_CURSOR)" },
           "429": { "description": "Rate limited" }
         }
       }
@@ -345,19 +346,24 @@
         ],
         "responses": {
           "200": {
-            "description": "Grants on the tables of the container, for its owner group members and Data Governance",
+            "description": "Grants on the tables of the container, for its owner group members and Data Governance. The first page also carries the pattern grants matching the container's tables and the catalog grants of the container as separate sections; a truncated flag marks a section cut at its bound.",
             "content": {
               "application/json": {
                 "schema": {
                   "type": "object",
                   "properties": {
                     "items": { "type": "array", "items": { "$ref": "#/components/schemas/ConsentGrantDto" } },
-                    "nextCursor": { "type": "string", "nullable": true }
+                    "nextCursor": { "type": "string", "nullable": true },
+                    "patternGrants": { "type": "array", "nullable": true, "items": { "$ref": "#/components/schemas/ConsentGrantDto" } },
+                    "patternGrantsTruncated": { "type": "boolean" },
+                    "catalogGrants": { "type": "array", "nullable": true, "items": { "$ref": "#/components/schemas/CatalogGrantDto" } },
+                    "catalogGrantsTruncated": { "type": "boolean" }
                   }
                 }
               }
             }
           },
+          "400": { "description": "Malformed cursor (INVALID_CURSOR)" },
           "404": { "description": "Container not found or not visible to the caller" },
           "429": { "description": "Rate limited" }
         }
@@ -396,6 +402,30 @@
           "404": { "description": "Not Found" },
           "409": { "description": "Already ended" },
           "422": { "description": "Idempotency conflict" },
+          "429": { "description": "Rate limited" }
+        }
+      }
+    },
+    "/api/v1/consent/catalog-grants/{id}/revoke": {
+      "post": {
+        "operationId": "revokeCatalogGrant",
+        "summary": "Revoke a catalog visibility grant (owner group member, Data Governance or IT)",
+        "parameters": [
+          { "name": "id", "in": "path", "required": true, "schema": { "type": "string", "format": "uuid" } },
+          { "name": "Idempotency-Key", "in": "header", "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": false,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/RevokeConsentGrantBody" } } }
+        },
+        "responses": {
+          "200": { "description": "Catalog grant revoked" },
+          "400": { "description": "Bad Request" },
+          "403": { "description": "Forbidden" },
+          "404": { "description": "Not Found" },
+          "409": { "description": "Already ended" },
+          "422": { "description": "Idempotency conflict" },
+          "428": { "description": "Idempotency-Key header required" },
           "429": { "description": "Rate limited" }
         }
       }
@@ -801,6 +831,22 @@
           "approvers": { "type": "array", "items": { "type": "object" }, "nullable": true },
           "nonce": { "type": "string", "nullable": true },
           "signature": { "type": "string", "nullable": true }
+        }
+      },
+      "CatalogGrantDto": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "containerKind": { "type": "string" },
+          "containerId": { "type": "string", "format": "uuid" },
+          "granteeType": { "type": "string" },
+          "grantee": { "type": "string" },
+          "validFrom": { "type": "string", "format": "date-time" },
+          "validTo": { "type": "string", "format": "date-time", "nullable": true },
+          "grantedBy": { "type": "string" },
+          "capacity": { "type": "string" },
+          "isRevoked": { "type": "boolean" },
+          "revokedAt": { "type": "string", "format": "date-time", "nullable": true }
         }
       },
       "RevokeConsentGrantBody": {

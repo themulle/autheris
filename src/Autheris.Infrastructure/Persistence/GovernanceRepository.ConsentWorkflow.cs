@@ -323,51 +323,13 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
         return new ConsentRequestPage(items, nextCursor);
     }
 
-    private static string EncodeConsentRequestCursor(DateTimeOffset updatedAt, Guid id)
-    {
-        var raw = string.Concat(updatedAt.ToString("O", CultureInfo.InvariantCulture), "|", id.ToString("D"));
-        return Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(raw))
-            .TrimEnd('=')
-            .Replace('+', '-')
-            .Replace('/', '_');
-    }
+    private static string EncodeConsentRequestCursor(DateTimeOffset updatedAt, Guid id) =>
+        Autheris.Application.Governance.Paging.ConsentRequestCursor.Encode(updatedAt, id);
 
-    private static (DateTimeOffset? UpdatedAt, Guid? Id) DecodeConsentRequestCursor(string? cursor)
-    {
-        if (string.IsNullOrWhiteSpace(cursor))
-        {
-            return (null, null);
-        }
-
-        try
-        {
-            var padded = cursor.Trim().Replace('-', '+').Replace('_', '/');
-            var mod = padded.Length % 4;
-            if (mod > 0)
-            {
-                padded = padded + new string('=', 4 - mod);
-            }
-
-            var text = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(padded));
-            var sep = text.IndexOf('|', StringComparison.Ordinal);
-            if (sep <= 0)
-            {
-                return (null, null);
-            }
-
-            if (DateTimeOffset.TryParse(text.AsSpan(0, sep), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var ts)
-                && Guid.TryParse(text.AsSpan(sep + 1), out var id))
-            {
-                return (ts.ToUniversalTime(), id);
-            }
-        }
-        catch (FormatException)
-        {
-            // Invalid cursor degrades cleanly to null (start from newest).
-        }
-
-        return (null, null);
-    }
+    private static (DateTimeOffset? UpdatedAt, Guid? Id) DecodeConsentRequestCursor(string? cursor) =>
+        Autheris.Application.Governance.Paging.ConsentRequestCursor.TryDecode(cursor, out var ts, out var id)
+            ? (ts, id)
+            : (null, null);
 
     private static ExternalWorkflowSystem ReadExternalWorkflowSystem(DbDataReader reader) =>
         new(

@@ -416,7 +416,8 @@ public partial class GovernanceRepository
             DetailsJson = System.Text.Json.JsonSerializer.Serialize(new
             {
                 ConsentId = consentId,
-                Reason = reason
+                Reason = reason,
+                Capacity = effectiveAuthority.DescribeCapacity(isAdminForTenant, found.IsGranteeSelf)
             })
         }, tx, ct).ConfigureAwait(false);
 

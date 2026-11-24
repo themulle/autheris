@@ -64,4 +64,8 @@ public interface IGovernanceDomainRepository
     /// <summary>Table ids explicitly assigned to <paramref name="domainId"/>, ordered by id and bounded by <paramref name="limit"/> (clamped to <see cref="MaxPageSize"/> * 10).</summary>
     Task<IReadOnlyList<Guid>> ListDomainTableIdsAsync(TenantId tenant, Guid domainId, int limit, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<Guid>>([]);
+
+    /// <summary>Identifiers of the tables explicitly assigned to <paramref name="domainId"/>, ordered by table id and bounded like <see cref="ListDomainTableIdsAsync"/>.</summary>
+    Task<IReadOnlyList<TableIdentifier>> ListDomainTablesAsync(TenantId tenant, Guid domainId, int limit, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<TableIdentifier>>([]);
 }

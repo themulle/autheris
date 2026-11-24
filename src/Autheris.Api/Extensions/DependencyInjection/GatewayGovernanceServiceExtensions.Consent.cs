@@ -131,7 +131,8 @@ public static partial class GatewayGovernanceServiceExtensions
                 sp.GetRequiredService<Autheris.Application.Governance.ConsentRequests.ISeparationOfDutiesService>(),
                 sp.GetRequiredService<Autheris.Application.Common.Interfaces.IGovernanceCapabilities>(),
                 sp.GetService<Autheris.Application.Common.Interfaces.IGovernanceDomainRepository>(),
-                sp.GetService<TimeProvider>()));
+                sp.GetService<TimeProvider>(),
+                sp.GetService<Autheris.Application.Common.Interfaces.ICatalogVisibilityGrantRepository>()));
         services.AddSingleton<Autheris.Application.Governance.Grants.IGrantRevocationService>(sp => new Autheris.Application.Governance.Grants.GrantRevocationService(
             sp.GetRequiredService<Autheris.Application.Common.Interfaces.IConsentRepository>(),
             sp.GetRequiredService<Autheris.Application.Common.Interfaces.IConsentApprovalRepository>(),
