@@ -7,7 +7,7 @@
 # an offline signature verification against the release public key embedded in the host. Any other value fails the build.
 ARG FLAVOR=core
 
-FROM mcr.microsoft.com/dotnet/aspnet:11.0.0-resolute@sha256:bc0d6653979efba491ab3d6f589d691f96c309c3c3ef81325efa6978e7b7f242 AS dotnet-base
+FROM mcr.microsoft.com/dotnet/aspnet:11.0.0-resolute@sha256:ca396ece3f2a2e62c7a03f1d7d710b8bc7e8c9dea5597d091178d9f5bfca13f0 AS dotnet-base
 
 # core: nothing but a flavor marker is added to /app.
 FROM dotnet-base AS modules-core
