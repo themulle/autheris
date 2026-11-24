@@ -43,6 +43,16 @@ public static class McpDescribeNarrowing
         string? RelationTerm)
     {
         public bool IsEmpty => Include is null && Columns is null && ColumnOffset == 0 && ColumnLimit is null && RelationTerm is null;
+        public bool WantsColumns => Include is null || Include.Contains(SectionColumns);
+        public bool WantsExamples => Include is null || Include.Contains(SectionExamples);
+        public bool WantsGraphQl => Include is null || Include.Contains(SectionGraphQl);
+        public bool WantsRelations => Include is null || (Include.Contains(SectionGraphQl) && Include.Contains(SectionRelations));
+        public bool WantsLongDescription => Include?.Contains(SectionLongDescription) == true;
+
+        public bool MatchesRelation(string field, string targetDatasetId) =>
+            RelationTerm is not { } term
+            || field.Contains(term, StringComparison.OrdinalIgnoreCase)
+            || targetDatasetId.Contains(term, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>
@@ -214,7 +224,7 @@ public static class McpDescribeNarrowing
 
                 foreach (var item in doc.RootElement.EnumerateArray())
                 {
-                    if (item.ValueKind != JsonValueKind.String || item.GetString() is not { Length: > 0 } s)
+                    if (item.ValueKind != JsonValueKind.String || item.GetString() is not { } s || string.IsNullOrWhiteSpace(s))
                     {
                         return false;
                     }

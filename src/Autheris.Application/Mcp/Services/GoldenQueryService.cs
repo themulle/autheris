@@ -113,6 +113,21 @@ public sealed class GoldenQueryService : IGoldenQueryService
         return ValueTask.FromResult<IReadOnlyList<GoldenQuery>>(results);
     }
 
+    public async ValueTask<GoldenQueryCandidateSet> GetCandidateQueriesAsync(
+        TenantId? tenant,
+        string? domain,
+        string? tableName,
+        CancellationToken ct = default)
+    {
+        if (!_enabled)
+        {
+            return GoldenQueryCandidateSet.Known([]);
+        }
+
+        var candidates = await LoadMergedCandidatesAsync(tenant, domain, tableName, ct).ConfigureAwait(false);
+        return GoldenQueryCandidateSet.Known(candidates);
+    }
+
     public async ValueTask<IReadOnlyList<GoldenQuery>> GetGoldenQueriesAsync(
         GoldenQueryReadContext context,
         string? domain,
@@ -125,7 +140,22 @@ public sealed class GoldenQueryService : IGoldenQueryService
             return [];
         }
 
-        var snapshot = await LoadStoreSnapshotAsync(context.Tenant, ct).ConfigureAwait(false);
+        var candidates = await LoadMergedCandidatesAsync(context.Tenant, domain, tableName, ct).ConfigureAwait(false);
+
+        // Caller visibility first, cap second: hidden entries cannot crowd out visible ones.
+        return candidates
+            .Where(q => IsVisibleToCaller(context, q))
+            .Take(_maxResults)
+            .ToList();
+    }
+
+    private async ValueTask<IReadOnlyList<GoldenQuery>> LoadMergedCandidatesAsync(
+        TenantId? tenant,
+        string? domain,
+        string? tableName,
+        CancellationToken ct)
+    {
+        var snapshot = await LoadStoreSnapshotAsync(tenant, ct).ConfigureAwait(false);
         var merged = new Dictionary<string, GoldenQuery>(StringComparer.OrdinalIgnoreCase);
         foreach (var stored in snapshot.Entries)
         {
@@ -152,15 +182,11 @@ public sealed class GoldenQueryService : IGoldenQueryService
             query = query.Where(q => string.Equals(q.TableName, tableName, StringComparison.OrdinalIgnoreCase));
         }
 
-        // Caller visibility first, cap second: hidden entries cannot crowd out visible ones.
-        var results = query
+        return query
             .OrderBy(q => q.Domain, StringComparer.OrdinalIgnoreCase)
             .ThenBy(q => q.TableName, StringComparer.OrdinalIgnoreCase)
             .ThenBy(q => q.Id, StringComparer.Ordinal)
-            .Where(q => IsVisibleToCaller(context, q))
-            .Take(_maxResults)
             .ToList();
-        return results;
     }
 
     private static bool IsVisibleToCaller(GoldenQueryReadContext context, GoldenQuery query)

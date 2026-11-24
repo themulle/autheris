@@ -123,6 +123,148 @@ public sealed class GoldenQueryCallerViewTests
         served.Select(q => q.Id).ShouldBe(["k0"]);
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task BuildAsync_WithCandidateQueries_DiamondPathDifferentDepths_ResolvesDeepSelection()
+    {
+        var invoices = new TableIdentifier("warehouse", "dbo", "invoices");
+        var tables = new Dictionary<TableIdentifier, GraphQlTableMapping>
+        {
+            [Orders] = Mapping(Orders, "warehouse_dbo_orders", ["id"], [
+                new GraphQlRelationMapping("customer", Customers, false),
+                new GraphQlRelationMapping("invoice", invoices, false)
+            ]),
+            [invoices] = Mapping(invoices, "warehouse_dbo_invoices", ["id"], [new GraphQlRelationMapping("customer", Customers, false)]),
+            [Customers] = Mapping(Customers, "warehouse_dbo_customers", ["name"], [new GraphQlRelationMapping("account", Accounts, false)]),
+            [Accounts] = Mapping(Accounts, "warehouse_dbo_accounts", ["number"], [])
+        };
+        var map = new DictGraphQlMap(tables);
+        var visibleCalls = new List<IReadOnlyList<TableIdentifier>>();
+        IReadOnlyCollection<GoldenQuery> candidates =
+        [
+            new GoldenQuery("q1", "warehouse", "orders", "Shallow", "Shallow query", "{ orders { customer { name } } }", null) { FromStore = true },
+            new GoldenQuery("q2", "warehouse", "orders", "Deep", "Deep query", "{ orders { invoice { customer { account { number } } } } }", null) { FromStore = true }
+        ];
+
+        var view = await GoldenQueryCallerView.BuildAsync(
+            [new GoldenQueryCallerView.Seed(Orders.Domain, Orders.TableName, Orders)],
+            map,
+            (targets, _) =>
+            {
+                visibleCalls.Add(targets);
+                return Task.FromResult<IReadOnlySet<TableIdentifier>>(targets.ToHashSet());
+            },
+            (_, _, _, _, _) => Task.FromResult<IReadOnlySet<string>?>(new HashSet<string>(StringComparer.OrdinalIgnoreCase)),
+            candidates,
+            CancellationToken.None);
+
+        var ctx = view.ToContext(Tenant);
+        candidates.All(q => ctx.IsDatasetVisible!(q.Domain, q.TableName)).ShouldBeTrue();
+        ctx.ReferencedDatasets!(candidates.First()).ShouldNotBeNull();
+        ctx.ReferencedDatasets!(candidates.Last())!.ShouldContain(("warehouse", "accounts"));
+        visibleCalls.SelectMany(x => x).ToHashSet().SetEquals([Customers, invoices, Accounts]).ShouldBeTrue();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task BuildAsync_WithCandidateQueries_HiddenTargetOrHiddenColumnOrAlias_StillDropsFailClosed()
+    {
+        var map = new DictGraphQlMap(new Dictionary<TableIdentifier, GraphQlTableMapping>
+        {
+            [Orders] = MappingOf(Orders)!,
+            [Customers] = MappingOf(Customers)!,
+            [Accounts] = MappingOf(Accounts)!
+        });
+
+        async Task<IReadOnlyList<GoldenQuery>> EvalAsync(string queryText, TableIdentifier[] visibleTables, Dictionary<TableIdentifier, string[]>? hidden = null, bool fromStore = true)
+        {
+            var entry = new GoldenQuery("q-1", Orders.Domain, Orders.TableName, "Test", "Test query", queryText, null) { FromStore = fromStore };
+            var visibleSet = visibleTables.ToHashSet();
+            var view = await GoldenQueryCallerView.BuildAsync(
+                [new GoldenQueryCallerView.Seed(Orders.Domain, Orders.TableName, Orders)],
+                map,
+                (targets, _) => Task.FromResult<IReadOnlySet<TableIdentifier>>(targets.Where(visibleSet.Contains).ToHashSet()),
+                (id, _, _, _, _) => Task.FromResult<IReadOnlySet<string>?>(
+                    id is { } ident && hidden is not null && hidden.TryGetValue(ident, out var cols)
+                        ? cols.ToHashSet(StringComparer.OrdinalIgnoreCase)
+                        : new HashSet<string>(StringComparer.OrdinalIgnoreCase)),
+                [entry],
+                CancellationToken.None);
+
+            var ctx = view.ToContext(Tenant);
+            var repo = new InMemoryGoldenRepo([new GoldenQueryStoreRecord("1", "t", Orders.Domain, Orders.Schema, Orders.TableName, GoldenQuerySource.Dbt, "q-1", "Test", null, queryText, null, new string('a', 64), DateTimeOffset.UtcNow)]);
+            var svc = new GoldenQueryService(Options.Create(new GatewayOptions()), NullLogger<GoldenQueryService>.Instance, new NoDemoSwitch(), repo);
+            return await svc.GetGoldenQueriesAsync(ctx, Orders.Domain, Orders.TableName, CancellationToken.None);
+        }
+
+        (await EvalAsync("{ orders { customer { account { number } } } }", [Orders, Customers])).ShouldBeEmpty();
+        (await EvalAsync("{ orders { customer { secAlias: secret } } }", [Orders, Customers], new() { [Customers] = ["secret"] })).ShouldBeEmpty();
+        (await EvalAsync("{ orders { ...F } } fragment F on Order { id }", [Orders, Customers])).ShouldBeEmpty();
+        (await EvalAsync("{ orders { broken ", [Orders, Customers])).ShouldBeEmpty();
+        (await EvalAsync("{ orders { customer { name } } }", [Orders, Customers, Accounts])).Count.ShouldBe(1);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task BuildAsync_DenseHubBeyond256Relations_ReferencedRelationAtIndex300_IsServed()
+    {
+        var relations = new List<GraphQlRelationMapping>(300);
+        var maps = new Dictionary<TableIdentifier, GraphQlTableMapping>();
+        for (var i = 0; i < 300; i++)
+        {
+            var relTarget = new TableIdentifier("warehouse", "dbo", $"rel_{i}");
+            relations.Add(new GraphQlRelationMapping($"rel_{i}", relTarget, false));
+            maps[relTarget] = Mapping(relTarget, $"warehouse_dbo_rel_{i}", ["id"], []);
+        }
+
+        maps[Orders] = Mapping(Orders, "warehouse_dbo_orders", ["id"], relations);
+        var map = new DictGraphQlMap(maps);
+        var requestedTargets = new List<TableIdentifier>();
+        var candidate = new GoldenQuery("q-290", Orders.Domain, Orders.TableName, "Target290", "Hub relation test", "{ orders { rel_290 { id } } }", null) { FromStore = true };
+
+        var view = await GoldenQueryCallerView.BuildAsync(
+            [new GoldenQueryCallerView.Seed(Orders.Domain, Orders.TableName, Orders)],
+            map,
+            (targets, _) =>
+            {
+                requestedTargets.AddRange(targets);
+                return Task.FromResult<IReadOnlySet<TableIdentifier>>(targets.ToHashSet());
+            },
+            (_, _, _, _, _) => Task.FromResult<IReadOnlySet<string>?>(new HashSet<string>(StringComparer.OrdinalIgnoreCase)),
+            [candidate],
+            CancellationToken.None);
+
+        var expectedTarget = new TableIdentifier("warehouse", "dbo", "rel_290");
+        requestedTargets.ShouldBe([expectedTarget]);
+        var ctx = view.ToContext(Tenant);
+        ctx.ReferencedDatasets!(candidate).ShouldBe([("warehouse", "rel_290")]);
+    }
+
+    private sealed class DictGraphQlMap(IReadOnlyDictionary<TableIdentifier, GraphQlTableMapping> map) : IGraphQlCatalogMap
+    {
+        public Task<GraphQlTableMapping?> GetTableAsync(TableIdentifier table, CancellationToken ct = default) =>
+            Task.FromResult(map.TryGetValue(table, out var entry) ? entry : null);
+        public Task<string?> GetRootFieldAsync(TableIdentifier table, CancellationToken ct = default) =>
+            Task.FromResult(map.TryGetValue(table, out var entry) ? entry.QueryField : null);
+        public Task<TableIdentifier?> ResolveRootFieldAsync(string field, CancellationToken ct = default) =>
+            Task.FromResult<TableIdentifier?>(null);
+        public Task<IReadOnlyList<TableIdentifier>?> ResolveDocumentTablesAsync(string document, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<TableIdentifier>?>(null);
+    }
+
+    private sealed class InMemoryGoldenRepo(IReadOnlyList<GoldenQueryStoreRecord> rows) : IGoldenQueryRepository
+    {
+        public Task ReplaceForTableAsync(TenantId tenant, string tableId, GoldenQuerySource source, IReadOnlyList<GoldenQueryStoreEntry> entries, CancellationToken ct = default) =>
+            Task.CompletedTask;
+        public Task<IReadOnlyList<GoldenQueryStoreRecord>> GetForTenantAsync(TenantId tenant, CancellationToken ct = default) =>
+            Task.FromResult(rows);
+    }
+
+    private sealed class NoDemoSwitch : IDemoDataSwitch
+    {
+        public bool Enabled => false;
+    }
+
     private static async Task<IReadOnlyList<GoldenQuery>> Serve(
         string query,
         TableIdentifier[]? visible = null,

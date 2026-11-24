@@ -2,6 +2,7 @@ namespace Autheris.Application.Mcp.Services;
 
 using System;
 using System.Collections.Generic;
+using System.Diagnostics;
 using System.Linq;
 using System.Security.Claims;
 using System.Threading;
@@ -294,8 +295,10 @@ public sealed partial class McpDatasetCatalog
         string dataset,
         string? language,
         bool brief,
+        McpDescribeNarrowing.Request? narrowing,
         CancellationToken ct)
     {
+        var totalStart = Stopwatch.GetTimestamp();
         if (!TryParseDatasetId(dataset, out var id))
         {
             throw new ArgumentException("The dataset id must have the form 'domain.schema.table'.", nameof(dataset));
@@ -327,7 +330,7 @@ public sealed partial class McpDatasetCatalog
 
         if (obj.Columns.Count == 0)
         {
-            return new McpDatasetDescription(
+            var summaryDesc = new McpDatasetDescription(
                 datasetId,
                 displayName,
                 obj.Domain,
@@ -356,14 +359,18 @@ public sealed partial class McpDatasetCatalog
                 Applications = linked.Applications,
                 DocumentsTruncated = linked.Truncated
             };
+            LogDescribeTiming(brief, examplesMs: 0, graphQlMs: 0, totalStart, relationCount: 0, exampleCount: 0);
+            return narrowing is null ? summaryDesc : McpDescribeNarrowing.Apply(summaryDesc, narrowing);
         }
 
-        var graphQl = brief || graphQlMap == null ? null : await graphQlMap.GetTableAsync(id, ct).ConfigureAwait(false);
+        var skipGraphQlMap = brief || (narrowing is not null && !narrowing.WantsColumns && !narrowing.WantsGraphQl && !narrowing.WantsExamples);
+        var graphQl = skipGraphQlMap || graphQlMap == null ? null : await graphQlMap.GetTableAsync(id, ct).ConfigureAwait(false);
         var graphQlColumns = (graphQl?.Columns ?? []).ToDictionary(c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
 
         // #805/#807: keys, indexes and required filters as projected for this caller by the discovery core.
         var shape = obj.QueryShape ?? DiscoveryQueryShape.Empty;
         var primaryKeys = new HashSet<string>(shape.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
+        var includeLongDesc = narrowing is null || narrowing.WantsLongDescription;
 
         var columns = DiscoveryColumnVisibility.VisibleColumns(obj)
             .Select(c =>
@@ -398,7 +405,7 @@ public sealed partial class McpDatasetCatalog
                     Access: access,
                     DisplayName: obj.HiddenTextColumns.Contains(c.Name) ? null : DiscoveryTextSanitizer.SanitizeText(c.DisplayName, DiscoveryTextSanitizer.MaxDisplayNameRunes),
                     Classifications: c.Classifications, ClearRequestable: c.ClearRequestable,
-                    LongDescription: obj.HiddenTextColumns.Contains(c.Name) ? null : c.LongDescription,
+                    LongDescription: obj.HiddenTextColumns.Contains(c.Name) || !includeLongDesc ? null : c.LongDescription,
                     Role: c.Role?.ToWireName(),
                     SqlName: c.Name)
                 {
@@ -412,15 +419,25 @@ public sealed partial class McpDatasetCatalog
             .Select(static c => c.Name)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
 
-        IReadOnlyList<McpDatasetExample> examples = brief
-            ? []
-            : await LoadExamplesAsync(principal, id, graphQl, graphQlColumns, ExampleHiddenColumns(hiddenCols, graphQl, obj), ct).ConfigureAwait(false);
+        long examplesMs = 0;
+        IReadOnlyList<McpDatasetExample> examples = [];
+        if (!brief && (narrowing is null || narrowing.WantsExamples))
+        {
+            var examplesStart = Stopwatch.GetTimestamp();
+            examples = await LoadExamplesAsync(principal, id, graphQl, graphQlColumns, ExampleHiddenColumns(hiddenCols, graphQl, obj), ct).ConfigureAwait(false);
+            examplesMs = (long)Stopwatch.GetElapsedTime(examplesStart).TotalMilliseconds;
+        }
 
-        var graphQlAccess = brief || graphQl == null
-            ? null
-            : await GraphQlAccessAsync(principal, graphQl, columns, ct, hiddenCols).ConfigureAwait(false);
+        long graphQlMs = 0;
+        McpGraphQlAccess? graphQlAccess = null;
+        if (!brief && graphQl is not null && (narrowing is null || narrowing.WantsGraphQl))
+        {
+            var graphQlStart = Stopwatch.GetTimestamp();
+            graphQlAccess = await GraphQlAccessAsync(principal, graphQl, columns, ct, hiddenCols, narrowing).ConfigureAwait(false);
+            graphQlMs = (long)Stopwatch.GetElapsedTime(graphQlStart).TotalMilliseconds;
+        }
 
-        return new McpDatasetDescription(
+        var fullResult = new McpDatasetDescription(
             datasetId,
             displayName,
             obj.Domain,
@@ -452,6 +469,9 @@ public sealed partial class McpDatasetCatalog
             Applications = linked.Applications,
             DocumentsTruncated = linked.Truncated
         };
+
+        LogDescribeTiming(brief, examplesMs, graphQlMs, totalStart, graphQlAccess?.Relations.Count ?? 0, examples.Count);
+        return narrowing is null ? fullResult : McpDescribeNarrowing.Apply(fullResult, narrowing);
     }
 
     private static string MapDiscoveryAccessStatus(DiscoveryAccessState state) => CatalogAccessStatus.Of(state);

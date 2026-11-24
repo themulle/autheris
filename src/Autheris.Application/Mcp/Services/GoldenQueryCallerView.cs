@@ -3,6 +3,7 @@ namespace Autheris.Application.Mcp.Services;
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Runtime.CompilerServices;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Mcp.Interfaces;
@@ -26,25 +27,61 @@ public sealed class GoldenQueryCallerView
     private readonly HashSet<(string, string)> _visible;
     private readonly Dictionary<(string, string), GraphQlTableMapping> _mappings;
     private readonly Dictionary<(string, string), IReadOnlySet<string>> _hidden;
+    private readonly IReadOnlyDictionary<string, DocumentNode>? _parsedDocuments;
 
     private GoldenQueryCallerView(
         HashSet<(string, string)> visible,
         Dictionary<(string, string), GraphQlTableMapping> mappings,
-        Dictionary<(string, string), IReadOnlySet<string>> hidden)
+        Dictionary<(string, string), IReadOnlySet<string>> hidden,
+        IReadOnlyDictionary<string, DocumentNode>? parsedDocuments = null)
     {
         _visible = visible;
         _mappings = mappings;
         _hidden = hidden;
+        _parsedDocuments = parsedDocuments;
     }
 
     /// <summary>A dataset to start from; <paramref name="Mapping"/> is optional and loaded through the catalog map when null.</summary>
     public readonly record struct Seed(string Domain, string Table, TableIdentifier? Id = null, GraphQlTableMapping? Mapping = null);
 
+    /// <summary>Number of datasets resolved into this caller view (diagnostics only).</summary>
+    internal int ResolvedDatasetCount => _visible.Count;
+
     /// <param name="seeds">Datasets that are visible to the caller and may own golden queries.</param>
     /// <param name="map">GraphQL catalog map; without it no relation can be resolved and only the owning dataset is checked.</param>
     /// <param name="filterVisible">The subset of relation targets that is visible to the caller.</param>
     /// <param name="hiddenColumnsOf">Column names of a dataset that the caller must not see; <c>null</c> marks the dataset unusable (not visible).</param>
-    public static async Task<GoldenQueryCallerView> BuildAsync(
+    /// <param name="ct">Cancellation token.</param>
+    public static Task<GoldenQueryCallerView> BuildAsync(
+        IEnumerable<Seed> seeds,
+        IGraphQlCatalogMap? map,
+        Func<IReadOnlyList<TableIdentifier>, CancellationToken, Task<IReadOnlySet<TableIdentifier>>> filterVisible,
+        Func<TableIdentifier?, string, string, GraphQlTableMapping?, CancellationToken, Task<IReadOnlySet<string>?>> hiddenColumnsOf,
+        CancellationToken ct) =>
+        BuildAsync(seeds, map, filterVisible, hiddenColumnsOf, candidateQueries: null, ct);
+
+    /// <summary>
+    /// Builds a caller view scoped to relation paths referenced by <paramref name="candidateQueries"/> when non-null, avoiding
+    /// blind graph walks over unrelated relations in densely connected schemas while keeping full closure verification fail-closed.
+    /// </summary>
+    public static Task<GoldenQueryCallerView> BuildAsync(
+        IEnumerable<Seed> seeds,
+        IGraphQlCatalogMap? map,
+        Func<IReadOnlyList<TableIdentifier>, CancellationToken, Task<IReadOnlySet<TableIdentifier>>> filterVisible,
+        Func<TableIdentifier?, string, string, GraphQlTableMapping?, CancellationToken, Task<IReadOnlySet<string>?>> hiddenColumnsOf,
+        IReadOnlyCollection<GoldenQuery>? candidateQueries,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(seeds);
+        ArgumentNullException.ThrowIfNull(filterVisible);
+        ArgumentNullException.ThrowIfNull(hiddenColumnsOf);
+
+        return candidateQueries is null
+            ? BuildUnscopedAsync(seeds, map, filterVisible, hiddenColumnsOf, ct)
+            : BuildForCandidatesAsync(seeds, map, filterVisible, hiddenColumnsOf, candidateQueries, ct);
+    }
+
+    private static async Task<GoldenQueryCallerView> BuildUnscopedAsync(
         IEnumerable<Seed> seeds,
         IGraphQlCatalogMap? map,
         Func<IReadOnlyList<TableIdentifier>, CancellationToken, Task<IReadOnlySet<TableIdentifier>>> filterVisible,
@@ -69,27 +106,12 @@ public sealed class GoldenQueryCallerView
                 }
 
                 var key = Key(seed.Domain, seed.Table);
-                var mapping = seed.Mapping;
-                if (mapping is null && map is not null && seed.Id is { } id)
-                {
-                    mapping = await map.GetTableAsync(id, ct).ConfigureAwait(false);
-                }
-
-                var hiddenColumns = await hiddenColumnsOf(seed.Id, seed.Domain, seed.Table, mapping, ct).ConfigureAwait(false);
-                if (hiddenColumns is null)
-                {
-                    continue;
-                }
-
-                visible.Add(key);
-                var byColumn = mapping?.Columns.ToDictionary(c => c.ColumnName, c => c, StringComparer.OrdinalIgnoreCase);
-                hidden[key] = GoldenQueryService.BuildHiddenIdentifierSet(hiddenColumns, byColumn);
+                var mapping = await ResolveSeedAsync(seed, key, map, hiddenColumnsOf, visible, mappings, hidden, ct).ConfigureAwait(false);
                 if (mapping is null)
                 {
                     continue;
                 }
 
-                mappings[key] = mapping;
                 foreach (var relation in mapping.Relations)
                 {
                     if (seen.Add(Key(relation.Target.Domain, relation.Target.TableName)))
@@ -111,6 +133,263 @@ public sealed class GoldenQueryCallerView
         return new GoldenQueryCallerView(visible, mappings, hidden);
     }
 
+    private static async Task<GoldenQueryCallerView> BuildForCandidatesAsync(
+        IEnumerable<Seed> seeds,
+        IGraphQlCatalogMap? map,
+        Func<IReadOnlyList<TableIdentifier>, CancellationToken, Task<IReadOnlySet<TableIdentifier>>> filterVisible,
+        Func<TableIdentifier?, string, string, GraphQlTableMapping?, CancellationToken, Task<IReadOnlySet<string>?>> hiddenColumnsOf,
+        IReadOnlyCollection<GoldenQuery> candidateQueries,
+        CancellationToken ct)
+    {
+        if (candidateQueries.Count == 0)
+        {
+            return new GoldenQueryCallerView([], [], []);
+        }
+
+        var queriesByOwner = new Dictionary<(string, string), List<GoldenQuery>>();
+        var parsedDocuments = new Dictionary<string, DocumentNode>(StringComparer.Ordinal);
+        foreach (var q in candidateQueries)
+        {
+            var ownerKey = Key(q.Domain, q.TableName);
+            if (!queriesByOwner.TryGetValue(ownerKey, out var list))
+            {
+                list = [];
+                queriesByOwner[ownerKey] = list;
+            }
+
+            list.Add(q);
+            if (!string.IsNullOrWhiteSpace(q.QueryText) && !parsedDocuments.ContainsKey(q.QueryText))
+            {
+                try
+                {
+                    parsedDocuments[q.QueryText] = Utf8GraphQLParser.Parse(q.QueryText);
+                }
+                catch (Exception ex) when (ex is SyntaxException or ArgumentException or InvalidOperationException)
+                {
+                    // Non-parseable queries are handled identically by Referenced(GoldenQuery).
+                }
+            }
+        }
+
+        var seedList = seeds.Where(s => queriesByOwner.ContainsKey(Key(s.Domain, s.Table))).ToList();
+        if (seedList.Count == 0)
+        {
+            return new GoldenQueryCallerView([], [], [], parsedDocuments);
+        }
+
+        var visible = new HashSet<(string, string)>();
+        var mappings = new Dictionary<(string, string), GraphQlTableMapping>();
+        var hidden = new Dictionary<(string, string), IReadOnlySet<string>>();
+
+        var pendingWork = new Queue<((string Domain, string Table) DatasetKey, SelectionSetNode Set, int Depth)>();
+        var deferredWork = new Dictionary<(string, string), List<(SelectionSetNode Set, int Depth)>>();
+        var expandedSelections = new HashSet<((string Domain, string Table) Key, SelectionSetNode Set)>(SelectionWorkComparer.Instance);
+        var attemptedTargets = new HashSet<(string, string)>(seedList.Select(s => Key(s.Domain, s.Table)));
+
+        foreach (var seed in seedList)
+        {
+            if (visible.Count >= MaxDatasets)
+            {
+                break;
+            }
+
+            var ownerKey = Key(seed.Domain, seed.Table);
+            var mapping = await ResolveSeedAsync(seed, ownerKey, map, hiddenColumnsOf, visible, mappings, hidden, ct).ConfigureAwait(false);
+            if (mapping is null || !queriesByOwner.TryGetValue(ownerKey, out var ownerQueries))
+            {
+                continue;
+            }
+
+            EnqueueOwnerRootSelections(ownerQueries, parsedDocuments, ownerKey, mapping, seed.Table, pendingWork);
+        }
+
+        while (pendingWork.Count > 0)
+        {
+            var nextTargets = new List<TableIdentifier>();
+            var queuedTargetKeys = new HashSet<(string, string)>();
+
+            while (pendingWork.Count > 0)
+            {
+                var (datasetKey, set, depth) = pendingWork.Dequeue();
+                if (depth > MaxDepth || !mappings.TryGetValue(datasetKey, out var dsMap))
+                {
+                    continue;
+                }
+
+                if (!expandedSelections.Add((datasetKey, set)))
+                {
+                    continue;
+                }
+
+                var relations = dsMap.Relations;
+                if (relations.Count == 0)
+                {
+                    continue;
+                }
+
+                foreach (var selection in set.Selections)
+                {
+                    if (selection is not FieldNode field)
+                    {
+                        continue;
+                    }
+
+                    var name = field.Name.Value;
+                    if (string.Equals(name, "__typename", StringComparison.Ordinal))
+                    {
+                        continue;
+                    }
+
+                    if (dsMap.Columns.Any(c =>
+                            string.Equals(c.Field, name, StringComparison.OrdinalIgnoreCase) ||
+                            string.Equals(c.ColumnName, name, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        continue;
+                    }
+
+                    var relation = relations.FirstOrDefault(r => string.Equals(r.Field, name, StringComparison.OrdinalIgnoreCase));
+                    if (relation is null)
+                    {
+                        continue;
+                    }
+
+                    var targetKey = Key(relation.Target.Domain, relation.Target.TableName);
+                    if (attemptedTargets.Add(targetKey) && queuedTargetKeys.Add(targetKey))
+                    {
+                        nextTargets.Add(relation.Target);
+                    }
+
+                    if (field.SelectionSet is not null && depth + 1 <= MaxDepth)
+                    {
+                        if (mappings.ContainsKey(targetKey))
+                        {
+                            pendingWork.Enqueue((targetKey, field.SelectionSet, depth + 1));
+                        }
+                        else if (visible.Count < MaxDatasets)
+                        {
+                            if (!deferredWork.TryGetValue(targetKey, out var deferredList))
+                            {
+                                deferredList = [];
+                                deferredWork[targetKey] = deferredList;
+                            }
+
+                            deferredList.Add((field.SelectionSet, depth + 1));
+                        }
+                    }
+                }
+            }
+
+            if (nextTargets.Count == 0 || visible.Count >= MaxDatasets)
+            {
+                break;
+            }
+
+            var visibleTargets = await filterVisible(nextTargets, ct).ConfigureAwait(false);
+            foreach (var target in nextTargets)
+            {
+                if (!visibleTargets.Contains(target))
+                {
+                    continue;
+                }
+
+                if (visible.Count >= MaxDatasets)
+                {
+                    break;
+                }
+
+                var targetKey = Key(target.Domain, target.TableName);
+                var resolvedMapping = await ResolveSeedAsync(
+                    new Seed(target.Domain, target.TableName, target),
+                    targetKey,
+                    map,
+                    hiddenColumnsOf,
+                    visible,
+                    mappings,
+                    hidden,
+                    ct).ConfigureAwait(false);
+
+                if (resolvedMapping is not null && deferredWork.Remove(targetKey, out var readySelections))
+                {
+                    foreach (var (childSet, childDepth) in readySelections)
+                    {
+                        pendingWork.Enqueue((targetKey, childSet, childDepth));
+                    }
+                }
+            }
+        }
+
+        return new GoldenQueryCallerView(visible, mappings, hidden, parsedDocuments);
+    }
+
+    private static async Task<GraphQlTableMapping?> ResolveSeedAsync(
+        Seed seed,
+        (string, string) key,
+        IGraphQlCatalogMap? map,
+        Func<TableIdentifier?, string, string, GraphQlTableMapping?, CancellationToken, Task<IReadOnlySet<string>?>> hiddenColumnsOf,
+        HashSet<(string, string)> visible,
+        Dictionary<(string, string), GraphQlTableMapping> mappings,
+        Dictionary<(string, string), IReadOnlySet<string>> hidden,
+        CancellationToken ct)
+    {
+        var mapping = seed.Mapping;
+        if (mapping is null && map is not null && seed.Id is { } id)
+        {
+            mapping = await map.GetTableAsync(id, ct).ConfigureAwait(false);
+        }
+
+        var hiddenColumns = await hiddenColumnsOf(seed.Id, seed.Domain, seed.Table, mapping, ct).ConfigureAwait(false);
+        if (hiddenColumns is null)
+        {
+            return null;
+        }
+
+        visible.Add(key);
+        var byColumn = mapping?.Columns.ToDictionary(c => c.ColumnName, c => c, StringComparer.OrdinalIgnoreCase);
+        hidden[key] = GoldenQueryService.BuildHiddenIdentifierSet(hiddenColumns, byColumn);
+        if (mapping is not null)
+        {
+            mappings[key] = mapping;
+        }
+
+        return mapping;
+    }
+
+    private static void EnqueueOwnerRootSelections(
+        List<GoldenQuery> ownerQueries,
+        Dictionary<string, DocumentNode> parsedDocuments,
+        (string, string) ownerKey,
+        GraphQlTableMapping ownerMapping,
+        string ownerTableName,
+        Queue<((string Domain, string Table) DatasetKey, SelectionSetNode Set, int Depth)> pendingWork)
+    {
+        foreach (var query in ownerQueries)
+        {
+            if (!parsedDocuments.TryGetValue(query.QueryText, out var document))
+            {
+                continue;
+            }
+
+            foreach (var definition in document.Definitions)
+            {
+                if (definition is not OperationDefinitionNode { Operation: OperationType.Query } operation)
+                {
+                    continue;
+                }
+
+                foreach (var selection in operation.SelectionSet.Selections)
+                {
+                    if (selection is FieldNode { SelectionSet: { } rootSet } root &&
+                        (string.Equals(root.Name.Value, ownerMapping.QueryField, StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(root.Name.Value, query.TableName, StringComparison.OrdinalIgnoreCase) ||
+                         string.Equals(root.Name.Value, ownerTableName, StringComparison.OrdinalIgnoreCase)))
+                    {
+                        pendingWork.Enqueue((ownerKey, rootSet, 1));
+                    }
+                }
+            }
+        }
+    }
+
     /// <summary>The read context for <paramref name="tenant"/>; a <c>null</c> tenant reads no stored entries.</summary>
     public GoldenQueryReadContext ToContext(TenantId? tenant) => new(
         tenant,
@@ -126,15 +405,22 @@ public sealed class GoldenQueryCallerView
     {
         var ownerKey = Key(query.Domain, query.TableName);
 
-        DocumentNode document;
-        try
+        DocumentNode? document;
+        if (_parsedDocuments is not null && _parsedDocuments.TryGetValue(query.QueryText, out var cachedDocument))
         {
-            document = Utf8GraphQLParser.Parse(query.QueryText);
+            document = cachedDocument;
         }
-        catch (Exception ex) when (ex is SyntaxException or ArgumentException or InvalidOperationException)
+        else
         {
-            // Configured entries may be administrator-authored SQL or non-GraphQL text; stored entries fail closed.
-            return query.FromStore ? null : [];
+            try
+            {
+                document = Utf8GraphQLParser.Parse(query.QueryText);
+            }
+            catch (Exception ex) when (ex is SyntaxException or ArgumentException or InvalidOperationException)
+            {
+                // Configured entries may be administrator-authored SQL or non-GraphQL text; stored entries fail closed.
+                return query.FromStore ? null : [];
+            }
         }
 
         if (!_mappings.TryGetValue(ownerKey, out var owner))
@@ -277,4 +563,20 @@ public sealed class GoldenQueryCallerView
     }
 
     private static (string, string) Key(string domain, string table) => (domain.ToLowerInvariant(), table.ToLowerInvariant());
+
+    private sealed class SelectionWorkComparer : IEqualityComparer<((string Domain, string Table) Key, SelectionSetNode Set)>
+    {
+        public static SelectionWorkComparer Instance { get; } = new();
+
+        public bool Equals(((string Domain, string Table) Key, SelectionSetNode Set) x, ((string Domain, string Table) Key, SelectionSetNode Set) y) =>
+            string.Equals(x.Key.Domain, y.Key.Domain, StringComparison.Ordinal) &&
+            string.Equals(x.Key.Table, y.Key.Table, StringComparison.Ordinal) &&
+            ReferenceEquals(x.Set, y.Set);
+
+        public int GetHashCode(((string Domain, string Table) Key, SelectionSetNode Set) obj) =>
+            HashCode.Combine(
+                StringComparer.Ordinal.GetHashCode(obj.Key.Domain),
+                StringComparer.Ordinal.GetHashCode(obj.Key.Table),
+                RuntimeHelpers.GetHashCode(obj.Set));
+    }
 }
