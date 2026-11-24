@@ -101,10 +101,12 @@ public sealed partial class DiscoveryService : IDiscoveryService
         IProtectionSnapshotProvider? protectionProvider = null,
         Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? accessPolicySettings = null,
         Autheris.Application.Catalog.Visibility.IContainerVisibilitySnapshotProvider? containerVisibility = null,
-        CatalogAccessViewCache? accessViewCache = null)
+        CatalogAccessViewCache? accessViewCache = null,
+        Autheris.Application.Policy.Protection.IUnmaskGrantResolver? unmaskResolver = null)
     {
         _containerVisibility = containerVisibility;
         _accessViewCache = accessViewCache;
+        _unmaskResolver = unmaskResolver;
         _docLinks = docLinks;
         _snapshotProvider = snapshotProvider;
         _protectionProvider = protectionProvider;

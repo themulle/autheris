@@ -79,6 +79,8 @@ public sealed class ExternalCatalogRowScopeDescriptionIntegrationTests : IClassF
         await GrantAsync(repo, meta!.Table.Id, TenantA, GranteeType.User, "S-A-USER", "Your own user grant text.");
         await GrantAsync(repo, meta.Table.Id, TenantA, GranteeType.Group, GroupSid, "Group grant text.");
         await GrantAsync(repo, meta.Table.Id, TenantA, GranteeType.User, "S-A-GROUPONLY-OTHER", "Someone else's text.");
+        await Autheris.Tests.Integration.Governance.OpenDomainSeeder.AssignToOpenDomainAsync(
+            _fixture.Factory.Services, new TenantId(TenantA), Orders);
         _fixture.Seeded = true;
     }
 

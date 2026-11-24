@@ -80,6 +80,127 @@ public sealed class CatalogExistenceOracleIntegrationTests : IClassFixture<Catal
         response.StatusCode.ShouldBe(HttpStatusCode.NotFound);
     }
 
+    [Fact]
+    public async Task Listings_facets_search_and_single_reads_agree_in_non_owner_tenant()
+    {
+        await SeedAsync();
+        var client = Client();
+
+        var objectsResp = await client.GetAsync("/api/v1/catalog/objects?pageSize=100");
+        objectsResp.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var objectsBody = await objectsResp.Content.ReadAsStringAsync();
+        objectsBody.ShouldContain("in_open");
+        objectsBody.ShouldContain("in_granted");
+        objectsBody.ShouldNotContain("in_closed");
+
+        var datasetsResp = await client.GetAsync("/api/v1/catalog/datasets");
+        datasetsResp.StatusCode.ShouldBe(HttpStatusCode.OK);
+        var datasetsBody = await datasetsResp.Content.ReadAsStringAsync();
+        datasetsBody.ShouldContain("in_open");
+        datasetsBody.ShouldContain("in_granted");
+        datasetsBody.ShouldNotContain("in_closed");
+
+        var facetsResp = await client.GetAsync("/api/v1/catalog/objects/facets");
+        facetsResp.StatusCode.ShouldBe(HttpStatusCode.OK);
+        using (var facetsDoc = JsonDocument.Parse(await facetsResp.Content.ReadAsStringAsync()))
+        {
+            facetsDoc.RootElement.GetProperty("totalCount").GetInt32().ShouldBe(2);
+        }
+
+        var searchClosed = await client.GetAsync("/api/v1/catalog/search?q=in_closed");
+        searchClosed.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await searchClosed.Content.ReadAsStringAsync()).ShouldNotContain("in_closed");
+
+        var searchOpen = await client.GetAsync("/api/v1/catalog/search?q=in_open");
+        searchOpen.StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await searchOpen.Content.ReadAsStringAsync()).ShouldContain("in_open");
+    }
+
+    [Fact]
+    public async Task Owner_tenant_listings_and_single_reads_hide_on_request_and_open_unassigned_while_exposing_open_and_granted()
+    {
+        using var root = new WebApplicationFactory<Program>();
+        using var factory = root.WithWebHostBuilder(b =>
+        {
+            b.UseSetting("Gateway:Tenancy:DefaultTenantId", TenantA);
+            b.UseSetting("Gateway:Authentication:EnableTestAuthHandler", "true");
+            b.UseSetting("Gateway:RateLimiting:PreAuthIpRateLimit:PermitLimit", "1000");
+            b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
+            b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("CatalogExistenceOracleOwnerTenant"));
+        });
+
+        var inUnassigned = new TableIdentifier("dom_oracle", "main", "in_unassigned");
+        using (var scope = factory.Services.CreateScope())
+        {
+            var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
+            var domains = scope.ServiceProvider.GetRequiredService<IGovernanceDomainRepository>();
+            var grants = scope.ServiceProvider.GetRequiredService<ICatalogVisibilityGrantRepository>();
+            var tenant = new TenantId(TenantA);
+
+            var openId = await UpsertAsync(repo, InOpen);
+            var closedId = await UpsertAsync(repo, InClosed);
+            var grantedId = await UpsertAsync(repo, InGranted);
+            _ = await UpsertAsync(repo, inUnassigned);
+
+            var unassigned = await domains.EnsureUnassignedAsync(tenant);
+            await Should.ThrowAsync<InvalidOperationException>(() =>
+                domains.UpsertAsync(unassigned with { Visibility = CatalogVisibilityMode.Open }, unassigned.Version, Owner));
+            await CatalogVisibilitySeeding.SeedOpenDomainAsync(domains, tenant, Owner, openId);
+            await CatalogVisibilitySeeding.SeedOnRequestDomainAsync(domains, tenant, Owner, closedId);
+            var grantedDomain = await CatalogVisibilitySeeding.SeedOnRequestDomainAsync(domains, tenant, Owner, grantedId);
+            await CatalogVisibilitySeeding.SeedCatalogGrantAsync(
+                grants, tenant, new ContainerRef(ContainerKind.Domain, grantedDomain.Id), new Sid(Caller), Owner);
+
+            var searchEngine = scope.ServiceProvider.GetRequiredService<ICatalogSearchEngine>();
+            var indexedTables = new List<TableMetadata>();
+            foreach (var id in new[] { InOpen, InClosed, InGranted, inUnassigned })
+            {
+                indexedTables.Add((await repo.GetTableMetadataAsync(id))!);
+            }
+            await searchEngine.RebuildIndexAsync(indexedTables);
+        }
+
+        var client = factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", Caller);
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "Reader");
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", TenantA);
+        client.DefaultRequestHeaders.Add("X-Test-Scope", "Autheris.Catalog.Read");
+
+        var missingBody = await (await client.GetAsync($"/api/v1/catalog/objects/{Missing}")).Content.ReadAsStringAsync();
+        foreach (var hidden in new[] { InClosed, inUnassigned })
+        {
+            var resp = await client.GetAsync($"/api/v1/catalog/objects/{hidden}");
+            resp.StatusCode.ShouldBe(HttpStatusCode.NotFound);
+            Shape(await resp.Content.ReadAsStringAsync()).ShouldBe(Shape(missingBody));
+            (await client.GetAsync($"/api/v1/catalog/datasets/{hidden}")).StatusCode.ShouldBe(HttpStatusCode.NotFound);
+        }
+
+        (await client.GetAsync($"/api/v1/catalog/objects/{InOpen}")).StatusCode.ShouldBe(HttpStatusCode.OK);
+        (await client.GetAsync($"/api/v1/catalog/objects/{InGranted}")).StatusCode.ShouldBe(HttpStatusCode.OK);
+
+        var objectsBody = await (await client.GetAsync("/api/v1/catalog/objects?pageSize=100")).Content.ReadAsStringAsync();
+        objectsBody.ShouldContain("in_open");
+        objectsBody.ShouldContain("in_granted");
+        objectsBody.ShouldNotContain("in_closed");
+        objectsBody.ShouldNotContain("in_unassigned");
+
+        var datasetsBody = await (await client.GetAsync("/api/v1/catalog/datasets")).Content.ReadAsStringAsync();
+        datasetsBody.ShouldContain("in_open");
+        datasetsBody.ShouldContain("in_granted");
+        datasetsBody.ShouldNotContain("in_closed");
+        datasetsBody.ShouldNotContain("in_unassigned");
+
+        using (var facetsDoc = JsonDocument.Parse(await (await client.GetAsync("/api/v1/catalog/objects/facets")).Content.ReadAsStringAsync()))
+        {
+            facetsDoc.RootElement.GetProperty("totalCount").GetInt32().ShouldBe(2);
+        }
+
+        (await (await client.GetAsync("/api/v1/catalog/search?q=in_open")).Content.ReadAsStringAsync()).ShouldContain("in_open");
+        (await (await client.GetAsync("/api/v1/catalog/search?q=in_granted")).Content.ReadAsStringAsync()).ShouldContain("in_granted");
+        (await (await client.GetAsync("/api/v1/catalog/search?q=in_closed")).Content.ReadAsStringAsync()).ShouldNotContain("in_closed");
+        (await (await client.GetAsync("/api/v1/catalog/search?q=in_unassigned")).Content.ReadAsStringAsync()).ShouldNotContain("in_unassigned");
+    }
+
     /// <summary>The comparable part of a problem body: everything except per-request values (trace id, instance).</summary>
     private static string Shape(string body)
     {
@@ -118,6 +239,14 @@ public sealed class CatalogExistenceOracleIntegrationTests : IClassFixture<Catal
             var grantedDomain = await CatalogVisibilitySeeding.SeedOnRequestDomainAsync(domains, tenant, Owner, grantedId);
             await CatalogVisibilitySeeding.SeedCatalogGrantAsync(
                 grants, tenant, new ContainerRef(ContainerKind.Domain, grantedDomain.Id), new Sid(Caller), Owner);
+
+            var searchEngine = scope.ServiceProvider.GetRequiredService<ICatalogSearchEngine>();
+            var indexedTables = new List<TableMetadata>();
+            foreach (var id in new[] { InOpen, InClosed, InGranted })
+            {
+                indexedTables.Add((await repo.GetTableMetadataAsync(id))!);
+            }
+            await searchEngine.RebuildIndexAsync(indexedTables);
 
             _fixture.Seeded = true;
         }

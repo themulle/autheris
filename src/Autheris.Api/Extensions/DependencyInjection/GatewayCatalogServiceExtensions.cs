@@ -124,7 +124,8 @@ public static class GatewayCatalogServiceExtensions
                 sp.GetService<IProtectionSnapshotProvider>(),
                 sp.GetService<Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider>(),
                 sp.GetService<IGovernanceRepository>() is null ? null : sp.GetService<Autheris.Application.Catalog.Visibility.IContainerVisibilitySnapshotProvider>(),
-                sp.GetService<Autheris.Application.Catalog.Discovery.CatalogAccessViewCache>()));
+                sp.GetService<Autheris.Application.Catalog.Discovery.CatalogAccessViewCache>(),
+                sp.GetService<Autheris.Application.Policy.Protection.IUnmaskGrantResolver>()));
 
         // Issue #1044: the caller access views of the accessStatus filter, shared across requests (bounded, invalidation-keyed). The
         // invalidation signal exists only with the governance repository; without it the cache is never used.
