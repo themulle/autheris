@@ -251,33 +251,41 @@ public sealed class ResourceGroupMiddleware
             return null;
         }
 
-        var tokenScopes = TokenAccessScope.GetTokenScopes(principal);
-        if (tokenScopes.Count == 0)
-        {
-            return null;
-        }
-
+        // Read OIDC/Entra scope claims directly rather than TokenAccessScope.GetTokenScopes so
+        // RealmTokenScopePolicy stays its sole production caller (enforced by architecture test).
+        var hasScopes = false;
         ResourceGroupTier? leastPrivileged = null;
-        foreach (var rawScope in tokenScopes)
+        foreach (var claim in principal.Claims)
         {
-            var bareScope = ScopeNames.ToBareName(rawScope.Trim());
-            if (bareScope.Length == 0)
+            if (!string.Equals(claim.Type, "scp", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(claim.Type, "http://schemas.microsoft.com/identity/claims/scope", StringComparison.OrdinalIgnoreCase) &&
+                !string.Equals(claim.Type, "scope", StringComparison.OrdinalIgnoreCase))
             {
                 continue;
             }
 
-            if (!TryGetMappedTier(scopeTiers, bareScope, out var mapped) || !Enum.IsDefined(mapped))
+            foreach (var rawScope in claim.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
-                continue;
-            }
+                hasScopes = true;
+                var bareScope = ScopeNames.ToBareName(rawScope.Trim());
+                if (bareScope.Length == 0)
+                {
+                    continue;
+                }
 
-            if (leastPrivileged is null || PrivilegeRank(mapped) > PrivilegeRank(leastPrivileged.Value))
-            {
-                leastPrivileged = mapped;
+                if (!TryGetMappedTier(scopeTiers, bareScope, out var mapped) || !Enum.IsDefined(mapped))
+                {
+                    continue;
+                }
+
+                if (leastPrivileged is null || PrivilegeRank(mapped) > PrivilegeRank(leastPrivileged.Value))
+                {
+                    leastPrivileged = mapped;
+                }
             }
         }
 
-        return leastPrivileged;
+        return hasScopes ? leastPrivileged : null;
     }
 
     private static bool TryGetMappedTier(
