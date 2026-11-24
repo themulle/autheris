@@ -371,6 +371,9 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
     /// catalog grant on the container, an unmask grant on the table, or is an owner-group member (Data Governance and IT see everything
     /// through their own caller scope). All column definitions are listed; the rows carry no data access. An object that is not
     /// provably visible stays absent, exactly like a missing one. Any failure adds nothing (fail-closed).
+    /// Issue #1066: like the discovery single read, the rule only admits a table explicitly assigned to a container of the caller's own
+    /// tenant. The system <c>Unassigned</c> domain (even when <c>Open</c>), a table owned by another tenant and an unavailable snapshot
+    /// never widen visibility, whatever the caller's capacity or grants.
     /// </summary>
     private async Task<IReadOnlyList<TableMetadata>> AddContainerVisibleAsync(
         Context context,
@@ -396,7 +399,8 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
             already.Add(table.Identifier);
         }
 
-        var candidates = CatalogVisibility.DropForeignVirtualTables(rows.Where(r => !already.Contains(r.Identifier)).ToList(), context.Tenant);
+        var candidates = CatalogVisibility.DropForeignVirtualTables(
+            rows.Where(r => !already.Contains(r.Identifier) && !IsOwnedByAnotherTenant(r, context.Tenant)).ToList(), context.Tenant);
         var maxCandidates = Math.Max(0, _options?.Governance.AccessPolicy.MaxTablesPerAssignment ?? DefaultMaxVisibilityCandidates);
         if (candidates.Count > maxCandidates)
         {
@@ -421,6 +425,11 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
             catch (Exception ex) when (!ct.IsCancellationRequested)
             {
                 LogFailure(ex);
+                continue;
+            }
+
+            if (!IsAssignedToOwnContainer(snapshot, protection.Container))
+            {
                 continue;
             }
 
@@ -450,14 +459,15 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
     /// </summary>
     private bool CanAddAnything(ContainerVisibilitySnapshot snapshot)
     {
-        if (snapshot.SeesEverything || (_unmaskResolver is not null && snapshot.GroupsComplete))
-        {
-            return true;
-        }
-
+        // An unavailable snapshot lists no container of the tenant, so no row can be proven to sit in one (fail-closed).
         if (!snapshot.IsAvailable)
         {
             return false;
+        }
+
+        if (snapshot.SeesEverything || (_unmaskResolver is not null && snapshot.GroupsComplete))
+        {
+            return true;
         }
 
         if (snapshot.CatalogGrantedContainers.Count > 0 || snapshot.OwnedContainers.Count > 0 || snapshot.DataGrantedTables.Count > 0)
@@ -467,7 +477,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
 
         foreach (var info in snapshot.Containers.Values)
         {
-            if (info.Visibility == CatalogVisibilityMode.Open)
+            if (info.Visibility == CatalogVisibilityMode.Open && !info.IsSystemUnassigned)
             {
                 return true;
             }
@@ -475,6 +485,20 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
 
         return false;
     }
+
+    /// <summary>
+    /// Issue #1066: true only when <paramref name="container"/> is one of the caller tenant's own containers in an available snapshot and
+    /// not the tenant's system <c>Unassigned</c> domain. A table without an explicit assignment never becomes visible through this rule.
+    /// </summary>
+    private static bool IsAssignedToOwnContainer(ContainerVisibilitySnapshot snapshot, ContainerRef container) =>
+        snapshot.IsAvailable
+        && snapshot.Containers.TryGetValue(container, out var info)
+        && !info.IsSystemUnassigned;
+
+    /// <summary>A table owned by another tenant is outside the caller's tenant scope; a container of the caller never re-admits it.</summary>
+    private static bool IsOwnedByAnotherTenant(TableMetadata table, TenantId tenant) =>
+        !string.IsNullOrWhiteSpace(table.OwnerTenantId)
+        && !string.Equals(table.OwnerTenantId, tenant.Value, StringComparison.OrdinalIgnoreCase);
 
     private async ValueTask<bool> HasUnmaskGrantAsync(
         Context context, List<Sid> subjects, ContainerVisibilitySnapshot snapshot, EffectiveProtection protection, TableMetadata row, CancellationToken ct)
