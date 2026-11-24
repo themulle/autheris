@@ -31,7 +31,11 @@ public sealed class VirtualFilterSingleApprovalTests
     private static readonly Sid FullOwnerDelegate = new("S-1-5-21-OWNER-ALL");
 
     private static readonly VirtualFilterActor GovAuthorActor =
-        new(GovAuthor, IsSync: false, Roles: new HashSet<string>([nameof(GatewayRole.GovernanceAdmin)], StringComparer.OrdinalIgnoreCase));
+        new(GovAuthor, IsSync: false, Roles: new HashSet<string>([nameof(GatewayRole.GovernanceAdmin)], StringComparer.OrdinalIgnoreCase),
+            Groups: ["S-1-5-21-GOV-GROUP"], IsDataGovernance: true);
+
+    private static readonly VirtualFilterActor FilterAdminActor =
+        new(new Sid("S-1-5-21-FILTERADMIN"), IsSync: false, Roles: new HashSet<string>([nameof(GatewayRole.FilterAdmin)], StringComparer.OrdinalIgnoreCase), Groups: []);
 
     private static readonly VirtualFilterActor PartialOwnerActor =
         new(PartialOwner, IsSync: false, Roles: new HashSet<string>([nameof(GatewayRole.Consumer)], StringComparer.OrdinalIgnoreCase));
@@ -75,6 +79,7 @@ public sealed class VirtualFilterSingleApprovalTests
             OrdersTable()
         ]);
         var opts = Options.Create(new GatewayOptions { VirtualFilters = new VirtualFilterOptions() });
+        repo.AuditSink = audit ?? NullAuditLogRepository.Instance;
         return new VirtualFilterAdministrationService(repo, audit ?? NullAuditLogRepository.Instance, opts, catalog: catalog, ownership: owners);
     }
 
@@ -96,12 +101,17 @@ public sealed class VirtualFilterSingleApprovalTests
             ownership: ownership);
     }
 
-    private static HttpContext HttpCtx(Sid sid, string role, object? body = null)
+    private static HttpContext HttpCtx(Sid sid, string role, object? body = null, IGovernanceCapabilities? capabilities = null)
     {
-        var services = new ServiceCollection()
+        var collection = new ServiceCollection()
             .AddLogging()
-            .AddAuditWriterOver(NullAuditLogRepository.Instance)
-            .BuildServiceProvider();
+            .AddAuditWriterOver(NullAuditLogRepository.Instance);
+        if (capabilities is not null)
+        {
+            collection.AddSingleton(capabilities);
+        }
+
+        var services = collection.BuildServiceProvider();
         var ctx = new DefaultHttpContext { RequestServices = services };
         ctx.Items[SecurityPrincipalContext.ItemKey] = new SecurityPrincipalContext
         {
@@ -110,7 +120,8 @@ public sealed class VirtualFilterSingleApprovalTests
             GroupSids = new HashSet<Sid>(),
             TenantRoles = role is "ClusterAdmin" or "GovernanceAdmin" ? new HashSet<string>() : new HashSet<string>([role]),
             ClusterRoles = role is "ClusterAdmin" or "GovernanceAdmin" ? new HashSet<string>([role]) : new HashSet<string>(),
-            AuthenticationScheme = "Test"
+            AuthenticationScheme = "Test",
+            GroupResolutionStatus = Autheris.Domain.Identity.GroupResolutionStatus.Complete
         };
         ctx.Response.Body = new MemoryStream();
         if (body != null)
@@ -385,19 +396,178 @@ public sealed class VirtualFilterSingleApprovalTests
         other.Status.ShouldBe(FilterApprovalStatus.Active);
     }
 
+    private static VirtualFilterAccessProfile Profile(string name, GranteeType type, Sid grantee, UncoveredPolicy uncovered = UncoveredPolicy.Skip) => new()
+    {
+        TenantId = Tenant,
+        Name = name,
+        GranteeType = type,
+        GranteeSid = grantee,
+        Scope = "lwetem_prod.*.*",
+        Uncovered = uncovered,
+        Bindings = [new FilterBinding { FilterName = "active_cranes_sql" }]
+    };
+
+    private static IGovernanceCapabilities DataGovernanceOfTenant()
+    {
+        var governance = NSubstitute.Substitute.For<IGovernanceCapabilities>();
+        NSubstitute.SubstituteExtensions.Returns(governance.IsGovernance(NSubstitute.Arg.Any<System.Security.Claims.ClaimsPrincipal?>(), Tenant), true);
+        return governance;
+    }
+
+    private static object ProfileBody(string granteeSid, string uncovered = "deny") => new
+    {
+        grantee = new { type = "user", sid = granteeSid },
+        scope = "lwetem_prod.*.*",
+        uncovered,
+        bindings = new[] { new { filter = "active_cranes_sql" } }
+    };
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task FilterAdmin_without_data_governance_cannot_activate_or_delete_an_access_profile()
+    {
+        var repo = new InMemoryFilterRepo();
+        var service = CreateService(repo, new InMemoryOwnershipRepo());
+        await service.SaveFilterAsync(SqlPolicy("from conf.client client where client.client_id = target.client_id"), GovAuthorActor);
+        var profile = Profile("declarative", GranteeType.User, new Sid("S-1-5-21-OTHER"), UncoveredPolicy.Deny);
+
+        await Should.ThrowAsync<UnauthorizedAccessException>(() => service.SaveProfileAsync(profile, FilterAdminActor));
+        (await repo.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+
+        // A GovernanceAdmin role alone (without the tenant-bound capacity established by the caller) is not enough either.
+        var roleOnly = GovAuthorActor with { IsDataGovernance = false };
+        await Should.ThrowAsync<UnauthorizedAccessException>(() => service.SaveProfileAsync(profile, roleOnly));
+
+        await service.SaveProfileAsync(profile, GovAuthorActor);
+        await Should.ThrowAsync<UnauthorizedAccessException>(() => service.DeleteProfileAsync(Tenant, "declarative", FilterAdminActor));
+        (await repo.LoadSnapshotAsync()).Profiles.ShouldHaveSingleItem();
+
+        await service.DeleteProfileAsync(Tenant, "declarative", GovAuthorActor);
+        (await repo.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Access_profile_endpoints_need_data_governance_and_fail_closed_without_the_capability_service()
+    {
+        var repo = new InMemoryFilterRepo();
+        var service = CreateService(repo, new InMemoryOwnershipRepo());
+        await service.SaveFilterAsync(SqlPolicy("from conf.client client where client.client_id = target.client_id"), GovAuthorActor);
+        var governance = DataGovernanceOfTenant();
+        var body = ProfileBody("S-1-5-21-OTHER");
+
+        // FilterAdmin (and IT) never reach the profile write.
+        foreach (var role in new[] { "FilterAdmin", "ClusterAdmin" })
+        {
+            var put = HttpCtx(new Sid("S-1-5-21-CALLER"), role, body, governance);
+            await (await VirtualFilterEndpoints.PutProfileAsync("declarative", put, service)).ExecuteAsync(put);
+            put.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden, role);
+        }
+
+        // GovernanceAdmin role without an established Data Governance capacity: refused (no capability service registered).
+        var noCapability = HttpCtx(GovAuthor, "GovernanceAdmin", body);
+        await (await VirtualFilterEndpoints.PutProfileAsync("declarative", noCapability, service)).ExecuteAsync(noCapability);
+        noCapability.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+        (await repo.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+
+        var dg = HttpCtx(GovAuthor, "GovernanceAdmin", body, governance);
+        await (await VirtualFilterEndpoints.PutProfileAsync("declarative", dg, service)).ExecuteAsync(dg);
+        dg.Response.StatusCode.ShouldBe(StatusCodes.Status200OK);
+
+        var filterAdminDelete = HttpCtx(new Sid("S-1-5-21-CALLER"), "FilterAdmin", capabilities: governance);
+        await (await VirtualFilterEndpoints.DeleteProfileAsync("declarative", filterAdminDelete, service)).ExecuteAsync(filterAdminDelete);
+        filterAdminDelete.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+        (await repo.LoadSnapshotAsync()).Profiles.ShouldHaveSingleItem();
+
+        var dgDelete = HttpCtx(GovAuthor, "GovernanceAdmin", capabilities: governance);
+        await (await VirtualFilterEndpoints.DeleteProfileAsync("declarative", dgDelete, service)).ExecuteAsync(dgDelete);
+        dgDelete.Response.StatusCode.ShouldBe(StatusCodes.Status204NoContent);
+        (await repo.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Self_widening_refusal_is_a_403_problem_not_a_server_error()
+    {
+        var repo = new InMemoryFilterRepo();
+        var service = CreateService(repo, new InMemoryOwnershipRepo());
+        await service.SaveFilterAsync(SqlPolicy("from conf.client client where client.client_id = target.client_id"), GovAuthorActor);
+
+        var ctx = HttpCtx(GovAuthor, "GovernanceAdmin", ProfileBody(GovAuthor.Value, uncovered: "skip"), DataGovernanceOfTenant());
+        await (await VirtualFilterEndpoints.PutProfileAsync("own_profile", ctx, service)).ExecuteAsync(ctx);
+
+        ctx.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+        (await repo.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Self_widening_guard_covers_the_writers_groups_and_refuses_when_they_are_unknown()
+    {
+        var repo = new InMemoryFilterRepo();
+        var service = CreateService(repo, new InMemoryOwnershipRepo());
+        await service.SaveFilterAsync(SqlPolicy("from conf.client client where client.client_id = target.client_id"), GovAuthorActor);
+        var ownGroup = Profile("own_group", GranteeType.Group, new Sid("S-1-5-21-GOV-GROUP"));
+
+        (await Should.ThrowAsync<Autheris.Application.Governance.SingleApproval.SingleApprovalRefusedException>(() => service.SaveProfileAsync(ownGroup, GovAuthorActor)))
+            .Code.ShouldBe("SelfWidening");
+
+        var unknownGroups = GovAuthorActor with { Groups = null };
+        (await Should.ThrowAsync<Autheris.Application.Governance.SingleApproval.SingleApprovalRefusedException>(
+            () => service.SaveProfileAsync(Profile("other_group", GranteeType.Group, new Sid("S-1-5-21-OTHER-GROUP")), unknownGroups)))
+            .Code.ShouldBe("SelfWideningUnverifiable");
+        (await repo.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+
+        // Another group with known writer groups is fine.
+        await service.SaveProfileAsync(Profile("other_group", GranteeType.Group, new Sid("S-1-5-21-OTHER-GROUP")), GovAuthorActor);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Deletes_are_audited_in_the_unit_of_the_write()
+    {
+        var repo = new InMemoryFilterRepo();
+        var audit = new Autheris.Tests.Common.Fakes.InMemoryAuditLogRepository();
+        var service = CreateService(repo, new InMemoryOwnershipRepo(), audit);
+        await service.SaveFilterAsync(SqlPolicy("from conf.client client where client.client_id = target.client_id"), GovAuthorActor);
+        await service.SaveProfileAsync(Profile("declarative", GranteeType.User, new Sid("S-1-5-21-OTHER"), UncoveredPolicy.Deny), GovAuthorActor);
+
+        // A failing audit leaves the profile in place.
+        audit.FailWith = new InvalidOperationException("audit down");
+        await Should.ThrowAsync<InvalidOperationException>(() => service.DeleteProfileAsync(Tenant, "declarative", GovAuthorActor));
+        (await repo.LoadSnapshotAsync()).Profiles.ShouldHaveSingleItem();
+
+        audit.FailWith = null;
+        await service.DeleteProfileAsync(Tenant, "declarative", GovAuthorActor);
+        await service.DeleteFilterAsync(Tenant, "active_cranes_sql", GovAuthorActor);
+
+        (await repo.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+        (await repo.LoadSnapshotAsync()).Filters.ShouldBeEmpty();
+        audit.Entries.Select(e => e.EventType).ShouldBe(["VIRTUAL_FILTER_CREATED", "ACCESS_PROFILE_CREATED", "ACCESS_PROFILE_DELETED", "VIRTUAL_FILTER_DELETED"]);
+    }
+
+    /// <summary>Models the store transaction: the writes and the audit entries of a change set commit together or not at all.</summary>
     private sealed class InMemoryFilterRepo : IVirtualFilterRepository
     {
         private readonly List<VirtualFilter> _filters = [];
         private readonly List<VirtualFilterAccessProfile> _profiles = [];
         private long _generation = 1;
 
+        public IAuditLogRepository AuditSink { get; set; } = NullAuditLogRepository.Instance;
+
         public Task<VirtualFilterSnapshot> LoadSnapshotAsync(CancellationToken ct = default) =>
             Task.FromResult(new VirtualFilterSnapshot(_generation, _filters.ToList(), _profiles.ToList()));
 
         public Task<long> GetGenerationAsync(CancellationToken ct = default) => Task.FromResult(_generation);
 
-        public Task ApplyAsync(VirtualFilterChangeSet changes, CancellationToken ct = default)
+        public async Task ApplyAsync(VirtualFilterChangeSet changes, CancellationToken ct = default)
         {
+            // Audit inside the "transaction": a failing entry throws before anything is committed.
+            foreach (var entry in changes.AuditEntries)
+            {
+                await AuditSink.RecordAuditEventAsync(entry, ct);
+            }
+
             foreach (var f in changes.SaveFilters)
             {
                 _filters.RemoveAll(x => x.TenantId == f.TenantId && x.Name == f.Name);
@@ -408,8 +578,15 @@ public sealed class VirtualFilterSingleApprovalTests
                 _profiles.RemoveAll(x => x.TenantId == p.TenantId && x.Name == p.Name);
                 _profiles.Add(p);
             }
+            foreach (var (tenant, name) in changes.DeleteProfiles)
+            {
+                _profiles.RemoveAll(x => x.TenantId == tenant && x.Name == name);
+            }
+            foreach (var (tenant, name) in changes.DeleteFilters)
+            {
+                _filters.RemoveAll(x => x.TenantId == tenant && x.Name == name);
+            }
             _generation++;
-            return Task.CompletedTask;
         }
     }
 

@@ -124,11 +124,19 @@ public sealed partial class VirtualFilterAdministrationService
         var existing = FindProfile(snapshot, profile.TenantId, profile.Name);
         EnsureWritable(existing?.ManagedBy, profile.ManagedBy, actor, $"access profile '{profile.Name}'");
 
+        EnsureDataGovernance(actor);
         if (!actor.IsSync && profile.Uncovered != UncoveredPolicy.Deny && profile.GranteeSid is { } grantee)
         {
-            // An access profile only narrows rows: leaving uncovered objects to the consents is no narrowing for the writer's own identity.
+            if (actor.Groups is null && profile.GranteeType == GranteeType.Group)
+            {
+                // The writer's groups are unknown (degraded resolution): whether the grantee group is one of them cannot be verified.
+                throw new SingleApprovalRefusedException("SelfWideningUnverifiable", "The writer's groups could not be resolved; the change cannot be verified.");
+            }
+
+            // An access profile only narrows rows: leaving uncovered objects to the consents is no narrowing for the writer's own identity
+            // or for a group the writer belongs to.
             SelfWideningGuard.EnsureDoesNotWidenOwnAccess(
-                new SingleApprovalWriter(actor.Sid.Value, actor.Identifiers ?? [], []),
+                new SingleApprovalWriter(actor.Sid.Value, actor.Identifiers ?? [], actor.Groups ?? []),
                 [grantee.Value]);
         }
 
@@ -147,22 +155,36 @@ public sealed partial class VirtualFilterAdministrationService
         };
 
         var evt = existing == null ? "ACCESS_PROFILE_CREATED" : "ACCESS_PROFILE_UPDATED";
-        // Fail closed: the change is audited (hashes only) before it takes effect; a failing audit denies it.
-        await AuditAsync(profile.TenantId, actor, evt,
-            $"access_profile:{profile.Name}", new { name = profile.Name, status = direct.Status.ToString(), before = existing?.ComputeDefinitionHash(), after = profile.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
-        await ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [direct] }, snapshot.Generation, ct).ConfigureAwait(false);
+        // Fail closed: the audit entry (hashes only) is written in the transaction of the change; a failing audit rolls the change back.
+        var audit = AuditEntry(profile.TenantId, actor, evt,
+            $"access_profile:{profile.Name}", new { name = profile.Name, status = direct.Status.ToString(), before = existing?.ComputeDefinitionHash(), after = profile.ComputeDefinitionHash() });
+        await ApplyAsync(new VirtualFilterChangeSet { SaveProfiles = [direct], AuditEntries = [audit] }, snapshot.Generation, ct).ConfigureAwait(false);
         return direct;
     }
 
     public async Task DeleteProfileAsync(TenantId tenantId, string name, VirtualFilterActor actor, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(actor);
+        EnsureDataGovernance(actor);
         var snapshot = await _repository.LoadSnapshotAsync(ct).ConfigureAwait(false);
         var existing = FindProfile(snapshot, tenantId, name) ?? throw new KeyNotFoundException($"The access profile '{name}' does not exist.");
         EnsureWritable(existing.ManagedBy, null, actor, $"access profile '{name}'");
 
-        await ApplyAsync(new VirtualFilterChangeSet { DeleteProfiles = [(tenantId, name)] }, snapshot.Generation, ct).ConfigureAwait(false);
-        await AuditAsync(tenantId, actor, "ACCESS_PROFILE_DELETED", $"access_profile:{name}", new { name, before = existing.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
+        // The delete and its audit entry commit in one transaction (never a delete without an entry, never an entry without the delete).
+        var audit = AuditEntry(tenantId, actor, "ACCESS_PROFILE_DELETED", $"access_profile:{name}", new { name, before = existing.ComputeDefinitionHash() });
+        await ApplyAsync(new VirtualFilterChangeSet { DeleteProfiles = [(tenantId, name)], AuditEntries = [audit] }, snapshot.Generation, ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// An access profile is a declarative grant (decision D5): only Data Governance activates, changes or deletes one; the file
+    /// repository sync is the only other writer. FilterAdmin, IT and everyone else are refused before anything is read or written.
+    /// </summary>
+    private static void EnsureDataGovernance(VirtualFilterActor actor)
+    {
+        if (!actor.IsSync && !actor.IsDataGovernance)
+        {
+            throw new UnauthorizedAccessException("Access profiles are declarative grants; only Data Governance may change them.");
+        }
     }
 
     private static VirtualFilter? FindFilter(VirtualFilterSnapshot snapshot, TenantId tenantId, string name) =>
@@ -247,15 +269,15 @@ public sealed partial class VirtualFilterAdministrationService
         }
     }
 
-    private Task AuditAsync(TenantId tenantId, VirtualFilterActor actor, string eventType, string target, object details, CancellationToken ct) =>
-        _audit.RecordAuditEventAsync(new AuditLogEntry
-        {
-            TenantId = tenantId,
-            EventType = eventType,
-            ActorSid = actor.Sid,
-            TargetTable = target,
-            Decision = "ALLOW",
-            TraceId = System.Diagnostics.Activity.Current?.TraceId.ToString() ?? string.Empty,
-            DetailsJson = JsonSerializer.Serialize(details)
-        }, ct);
+    /// <summary>The audit entry of a change; the store writes it in the transaction of the change.</summary>
+    private static AuditLogEntry AuditEntry(TenantId tenantId, VirtualFilterActor actor, string eventType, string target, object details) => new()
+    {
+        TenantId = tenantId,
+        EventType = eventType,
+        ActorSid = actor.Sid,
+        TargetTable = target,
+        Decision = "ALLOW",
+        TraceId = System.Diagnostics.Activity.Current?.TraceId.ToString() ?? string.Empty,
+        DetailsJson = JsonSerializer.Serialize(details)
+    };
 }

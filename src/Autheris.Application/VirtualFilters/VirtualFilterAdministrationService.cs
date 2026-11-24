@@ -8,12 +8,19 @@ using System.Threading;
 using System.Threading.Tasks;
 using Microsoft.Extensions.Options;
 
-/// <summary>Who changes virtual filters; <see cref="IsSync"/> is the file repository sync (the only writer of managed rows).</summary>
+/// <summary>
+/// Who changes virtual filters; <see cref="IsSync"/> is the file repository sync (the only writer of managed rows). <see cref="Groups"/>
+/// are the writer's resolved group SIDs (null = unknown or degraded, which refuses a change the self-widening check cannot verify).
+/// <see cref="IsDataGovernance"/> is the tenant-bound Data Governance capacity of the writer, the only capacity that may activate or
+/// delete an access profile (a declarative grant, decision D5).
+/// </summary>
 public sealed record VirtualFilterActor(
     Sid Sid,
     bool IsSync,
     IReadOnlyCollection<string>? Identifiers = null,
-    IReadOnlySet<string>? Roles = null)
+    IReadOnlySet<string>? Roles = null,
+    IReadOnlyCollection<string>? Groups = null,
+    bool IsDataGovernance = false)
 {
     public string FormatAllIdentifiers()
     {
@@ -100,14 +107,13 @@ public sealed record VirtualFilterSyncPlan(
 }
 
 /// <summary>
-/// Virtual filters: the rules for changing filters and access profiles. Every change is validated, audited and applied
-/// in one transaction (which increments the generation). Rows managed by the file repository (Talos) only change
+/// Virtual filters: the rules for changing filters and access profiles. Every change is validated, then applied together with its
+/// audit entry in one transaction (which increments the generation). Rows managed by the file repository (Talos) only change
 /// through <see cref="ApplySyncAsync"/>.
 /// </summary>
 public sealed partial class VirtualFilterAdministrationService
 {
     private readonly IVirtualFilterRepository _repository;
-    private readonly IAuditLogRepository _audit;
     private readonly VirtualFilterOptions _options;
     private readonly VirtualFilterFederationOptions _federation;
     private readonly IVirtualFilterSnapshotProvider? _snapshots;
@@ -133,7 +139,8 @@ public sealed partial class VirtualFilterAdministrationService
         _catalog = catalog;
         _dataSources = options?.Value?.DataSources;
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
-        _audit = audit ?? throw new ArgumentNullException(nameof(audit));
+        // Audit entries are written by the repository in the transaction of each change (VirtualFilterChangeSet.AuditEntries).
+        ArgumentNullException.ThrowIfNull(audit);
         _options = options?.Value?.VirtualFilters ?? new VirtualFilterOptions();
         _federation = _options.Federation ?? new VirtualFilterFederationOptions();
         _snapshots = snapshots;
@@ -212,10 +219,10 @@ public sealed partial class VirtualFilterAdministrationService
         };
 
         var evt = existing == null ? "VIRTUAL_FILTER_CREATED" : "VIRTUAL_FILTER_UPDATED";
-        // Fail closed: the change is audited (hashes only) before it takes effect; a failing audit denies it.
-        await AuditAsync(filter.TenantId, actor, evt,
-            $"virtual_filter:{filter.Name}", new { name = filter.Name, status = direct.Status.ToString(), before = existing?.ComputeDefinitionHash(), after = filter.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
-        await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [direct] }, snapshot.Generation, ct).ConfigureAwait(false);
+        // Fail closed: the audit entry (hashes only) is written in the transaction of the change; a failing audit rolls the change back.
+        var audit = AuditEntry(filter.TenantId, actor, evt,
+            $"virtual_filter:{filter.Name}", new { name = filter.Name, status = direct.Status.ToString(), before = existing?.ComputeDefinitionHash(), after = filter.ComputeDefinitionHash() });
+        await ApplyAsync(new VirtualFilterChangeSet { SaveFilters = [direct], AuditEntries = [audit] }, snapshot.Generation, ct).ConfigureAwait(false);
         return direct;
     }
 
@@ -289,7 +296,8 @@ public sealed partial class VirtualFilterAdministrationService
             throw new VirtualFilterConflictException($"The virtual filter '{name}' is superseded by another filter.");
         }
 
-        await ApplyAsync(new VirtualFilterChangeSet { DeleteFilters = [(tenantId, name)] }, snapshot.Generation, ct).ConfigureAwait(false);
-        await AuditAsync(tenantId, actor, "VIRTUAL_FILTER_DELETED", $"virtual_filter:{name}", new { name, before = existing.ComputeDefinitionHash() }, ct).ConfigureAwait(false);
+        // The delete and its audit entry commit in one transaction (never a delete without an entry, never an entry without the delete).
+        var audit = AuditEntry(tenantId, actor, "VIRTUAL_FILTER_DELETED", $"virtual_filter:{name}", new { name, before = existing.ComputeDefinitionHash() });
+        await ApplyAsync(new VirtualFilterChangeSet { DeleteFilters = [(tenantId, name)], AuditEntries = [audit] }, snapshot.Generation, ct).ConfigureAwait(false);
     }
 }

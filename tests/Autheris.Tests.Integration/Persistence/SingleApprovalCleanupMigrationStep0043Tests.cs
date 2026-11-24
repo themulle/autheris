@@ -97,6 +97,33 @@ public sealed class SingleApprovalCleanupMigrationStep0043Tests
     [Theory]
     [InlineData("postgresql")]
     [InlineData("sqlserver")]
+    public async Task Only_the_top_level_profile_status_decides(string engine)
+    {
+        await using var db = await OpenPreStepAsync(engine);
+        if (db is null) return;
+        var p = engine == "postgresql" ? "" : "dbo.";
+
+        // An active profile whose nested draft is pending or rejected is a live grant restriction and must survive; only a profile
+        // whose own (top-level) status is pending or rejected is discarded. A legacy row without status is active.
+        await ExecAsync(db.Connection, $$$"""
+            INSERT INTO {{{p}}}VIRTUAL_FILTER_ACCESS_PROFILES (id, tenant_id, name, definition_json) VALUES
+            ('p1', 't', 'active_with_pending_draft', '{"GranteeType":1,"Bindings":[],"Status":0,"Draft":{"GranteeType":1,"Bindings":[],"Status":1}}'),
+            ('p2', 't', 'active_with_rejected_draft', '{"GranteeType":1,"Bindings":[],"Status":0,"Draft":{"GranteeType":1,"Bindings":[],"Status":2}}'),
+            ('p3', 't', 'legacy_without_status', '{"GranteeType":1,"Bindings":[],"Status":null}'),
+            ('p4', 't', 'pending_with_draft', '{"GranteeType":1,"Bindings":[],"Status":1,"Draft":{"GranteeType":1,"Bindings":[],"Status":0}}'),
+            ('p5', 't', 'rejected', '{"GranteeType":1,"Bindings":[],"Status":2,"Draft":null}'),
+            ('p6', 't', 'status_text_in_binding', '{"GranteeType":1,"Bindings":[{"Filter":"x\"Status\":1"}],"Status":0}');
+            """);
+
+        await RunStepAsync(db);
+
+        var survivors = await StringsAsync(db.Connection, $"SELECT name FROM {p}VIRTUAL_FILTER_ACCESS_PROFILES ORDER BY name");
+        survivors.ShouldBe(["active_with_pending_draft", "active_with_rejected_draft", "legacy_without_status", "status_text_in_binding"]);
+    }
+
+    [Theory]
+    [InlineData("postgresql")]
+    [InlineData("sqlserver")]
     public async Task Draft_and_pending_deletion_columns_are_dropped(string engine)
     {
         await using var db = await OpenPreStepAsync(engine);
@@ -176,6 +203,20 @@ public sealed class SingleApprovalCleanupMigrationStep0043Tests
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = sql;
         return Convert.ToInt64(await cmd.ExecuteScalarAsync());
+    }
+
+    private static async Task<string[]> StringsAsync(DbConnection conn, string sql)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = sql;
+        await using var reader = await cmd.ExecuteReaderAsync();
+        var list = new System.Collections.Generic.List<string>();
+        while (await reader.ReadAsync())
+        {
+            list.Add(reader.GetString(0));
+        }
+
+        return [.. list];
     }
 
     private static async Task<string?> ScalarStringAsync(DbConnection conn, string sql)

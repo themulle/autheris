@@ -131,8 +131,8 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
         AssertProtectedRoutePolicy(endpoints, "GET", $"{prefix}/virtual-filters/sync/status", GatewayPolicies.VirtualFilterRead);
         AssertProtectedRoutePolicy(endpoints, "PUT", $"{prefix}/virtual-filters/{{name}}", GatewayPolicies.VirtualFilterWrite);
         AssertProtectedRoutePolicy(endpoints, "DELETE", $"{prefix}/virtual-filters/{{name}}", GatewayPolicies.FilterAdmin);
-        AssertProtectedRoutePolicy(endpoints, "PUT", $"{prefix}/access-profiles/{{name}}", GatewayPolicies.FilterAdmin);
-        AssertProtectedRoutePolicy(endpoints, "DELETE", $"{prefix}/access-profiles/{{name}}", GatewayPolicies.FilterAdmin);
+        AssertProtectedRoutePolicy(endpoints, "PUT", $"{prefix}/access-profiles/{{name}}", GatewayPolicies.GovernanceAdmin);
+        AssertProtectedRoutePolicy(endpoints, "DELETE", $"{prefix}/access-profiles/{{name}}", GatewayPolicies.GovernanceAdmin);
         AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/virtual-filters/sync/plan", GatewayPolicies.VirtualFilterSyncPlan);
         AssertProtectedRoutePolicy(endpoints, "POST", $"{prefix}/virtual-filters/sync/apply", GatewayPolicies.VirtualFilterSyncApply);
         AssertProtectedRoutePolicy(endpoints, "GET", $"{prefix}/effective-filters", GatewayPolicies.EffectiveFilterInspect);

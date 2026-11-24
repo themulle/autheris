@@ -1,18 +1,13 @@
-using System;
 using System.Collections.Generic;
-using System.Threading;
-using System.Threading.Tasks;
 using Autheris.Application.Governance.SingleApproval;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
-using Autheris.Domain.Security;
-using Autheris.Tests.Common.Fakes;
 using Shouldly;
 using Xunit;
 
 namespace Autheris.Tests.Unit.Governance.SingleApproval;
 
-/// <summary>Compensating controls of the single approval: no self-widening, no capacity or out-of-realm roles, fail-closed audit.</summary>
+/// <summary>Compensating controls of the single approval: no self-widening, fail-closed audit.</summary>
 [Trait("Category", "Security")]
 public sealed class SelfWideningGuardTests
 {
@@ -44,55 +39,14 @@ public sealed class SelfWideningGuardTests
     }
 
     [Fact]
-    public void Role_outside_realm_allowlist_is_refused()
+    public void Audit_entry_records_hashes_only()
     {
-        IReadOnlySet<GatewayRole> allowed = new HashSet<GatewayRole> { GatewayRole.Consumer };
+        var written = SelfWideningGuard.AuditEntry(Writer, new SingleApprovalChange(new TenantId("t"), AuditEventTypes.CallerAttributeDefinitionApplied, "caller_attribute:x", "h1", "h2"));
 
-        Should.Throw<SingleApprovalRefusedException>(() => SelfWideningGuard.EnsureRoleMayBeConferred("FilterAdmin", allowed))
-            .Code.ShouldBe("RoleOutsideRealm");
-        Should.Throw<SingleApprovalRefusedException>(() => SelfWideningGuard.EnsureRoleMayBeConferred("NoSuchRole", allowed))
-            .Code.ShouldBe("RoleOutsideRealm");
-        Should.NotThrow(() => SelfWideningGuard.EnsureRoleMayBeConferred("Consumer", allowed));
-    }
-
-    [Theory]
-    [InlineData("GovernanceAdmin")]
-    [InlineData("ClusterAdmin")]
-    [InlineData("TenantAdmin")]
-    [InlineData("CallerAttributeApprover")]
-    [InlineData("ItAdmin")]
-    public void It_and_governance_capacity_is_never_conferred_even_when_the_realm_allows_it(string role)
-    {
-        IReadOnlySet<GatewayRole> allowed = new HashSet<GatewayRole>
-        {
-            GatewayRole.GovernanceAdmin, GatewayRole.ClusterAdmin, GatewayRole.TenantAdmin, GatewayRole.CallerAttributeApprover
-        };
-
-        Should.Throw<SingleApprovalRefusedException>(() => SelfWideningGuard.EnsureRoleMayBeConferred(role, allowed))
-            .Code.ShouldBe("CapacityRoleNotMappable");
-    }
-
-    [Fact]
-    public async Task Audit_records_hashes_only()
-    {
-        var audit = new InMemoryAuditLogRepository();
-        var guard = new SelfWideningGuard(audit);
-
-        await guard.RecordAsync(Writer, new SingleApprovalChange(new TenantId("t"), AuditEventTypes.CallerAttributeDefinitionApplied, "caller_attribute:x", "h1", "h2"));
-
-        var written = audit.Entries.ShouldHaveSingleItem();
         written.DetailsJson.ShouldContain("h1");
         written.DetailsJson.ShouldContain("h2");
         written.ActorSid.Value.ShouldBe("oid-alice");
-    }
-
-    [Fact]
-    public async Task Audit_failure_denies_the_change()
-    {
-        var guard = new SelfWideningGuard(new InMemoryAuditLogRepository { FailWith = new InvalidOperationException("db down") });
-
-        var ex = await Should.ThrowAsync<SingleApprovalRefusedException>(() =>
-            guard.RecordAsync(Writer, new SingleApprovalChange(new TenantId("t"), AuditEventTypes.CallerAttributeDefinitionApplied, "caller_attribute:x", null, "h2")));
-        ex.Code.ShouldBe("AuditFailed");
+        written.Decision.ShouldBe("ALLOW");
+        written.TenantId.ShouldBe(new TenantId("t"));
     }
 }

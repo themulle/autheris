@@ -361,7 +361,7 @@ public sealed class FederatedVirtualFilterWebApiFixture : IAsyncLifetime
         if (validate)
         {
             var admin = scope.ServiceProvider.GetRequiredService<VirtualFilterAdministrationService>();
-            await admin.SaveProfileAsync(profile, new VirtualFilterActor(new Sid("S-1-5-21-FILTER-ADMIN"), IsSync: false));
+            await admin.SaveProfileAsync(profile, new VirtualFilterActor(new Sid("S-1-5-21-DATA-GOVERNANCE"), IsSync: false, Groups: [], IsDataGovernance: true));
         }
         else
         {

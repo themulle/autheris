@@ -15,15 +15,32 @@ using Microsoft.Extensions.Options;
 
 /// <summary>
 /// Who changes the registry: the immutable subject key (never a UPN), whether the actor holds the approver role (BC-129-03), and the
-/// actor's own identifiers and groups (a change never grants or widens access for them).
+/// actor's own identifiers and groups (a change never grants or widens access for them). The identifiers and groups are required: the
+/// self-widening check is only as complete as they are, so a caller that cannot name them cannot write.
 /// </summary>
-public sealed record CallerAttributeActor(
-    string SubjectKey,
-    bool HoldsApproverRole,
-    IReadOnlyCollection<string>? OwnIdentifiers = null,
-    IReadOnlyCollection<string>? OwnGroups = null)
+public sealed record CallerAttributeActor
 {
-    internal SingleApprovalWriter ToWriter() => new(SubjectKey, OwnIdentifiers ?? [], OwnGroups ?? []);
+    public CallerAttributeActor(string subjectKey, bool holdsApproverRole, IReadOnlyCollection<string> ownIdentifiers, IReadOnlyCollection<string> ownGroups)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(subjectKey);
+        ArgumentNullException.ThrowIfNull(ownIdentifiers);
+        ArgumentNullException.ThrowIfNull(ownGroups);
+        SubjectKey = subjectKey;
+        HoldsApproverRole = holdsApproverRole;
+        // The subject key is always one of the actor's own identifiers.
+        OwnIdentifiers = ownIdentifiers.Where(i => !string.IsNullOrWhiteSpace(i)).Append(subjectKey).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+        OwnGroups = ownGroups.Where(g => !string.IsNullOrWhiteSpace(g)).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
+    public string SubjectKey { get; }
+
+    public bool HoldsApproverRole { get; init; }
+
+    public IReadOnlyCollection<string> OwnIdentifiers { get; }
+
+    public IReadOnlyCollection<string> OwnGroups { get; }
+
+    internal SingleApprovalWriter ToWriter() => new(SubjectKey, OwnIdentifiers, OwnGroups);
 }
 
 /// <summary>A refused registry change; <see cref="Code"/> is stable, the message never contains a value.</summary>
@@ -48,19 +65,17 @@ public interface ICallerAttributeDefinitionValidator
 
 /// <summary>
 /// The rules for changing the registry and the service sets (129 A-7): validated, single approval (a save takes effect at once when the
-/// writer holds the capacity and does not widen their own access), audited fail closed with before/after hashes only, visible to
-/// enforcement on this instance at once.
+/// writer holds the capacity and does not widen their own access), audited with before/after hashes only in the transaction of the
+/// write (an audit failure rolls the write back, a failed write leaves no entry), visible to enforcement on this instance at once.
 /// </summary>
 public sealed class CallerAttributeAdministrationService
 {
     private readonly ICallerAttributeRepository _repository;
     private readonly ICallerAttributeRegistry _registry;
-    private readonly IAuditLogRepository _audit;
     private readonly CallerAttributeOptions _options;
     private readonly TimeProvider _time;
     private readonly ICallerAttributeCacheInvalidator? _invalidator;
     private readonly Dictionary<string, ICallerAttributeDefinitionValidator> _validators;
-    private readonly SelfWideningGuard _guard;
 
     public CallerAttributeAdministrationService(
         ICallerAttributeRepository repository,
@@ -74,11 +89,11 @@ public sealed class CallerAttributeAdministrationService
         _invalidator = invalidator;
         _repository = repository ?? throw new ArgumentNullException(nameof(repository));
         _registry = registry ?? throw new ArgumentNullException(nameof(registry));
-        _audit = audit ?? throw new ArgumentNullException(nameof(audit));
+        // The audit entry of a change is written by the repository in the transaction of the write (never before or after it).
+        ArgumentNullException.ThrowIfNull(audit);
         _options = options?.Value?.CallerAttributes ?? new CallerAttributeOptions();
         _time = time ?? TimeProvider.System;
         _validators = (validators ?? []).ToDictionary(v => v.Kind, StringComparer.Ordinal);
-        _guard = new SelfWideningGuard(_audit);
     }
 
     public Task<CallerAttributeStoreSnapshot> GetSnapshotAsync(CancellationToken ct = default) => _repository.LoadCallerAttributeSnapshotAsync(ct);
@@ -98,10 +113,10 @@ public sealed class CallerAttributeAdministrationService
         RequireApproverRole(definition.Provider.Kind, actor);
         var before = (await _repository.LoadCallerAttributeSnapshotAsync(ct).ConfigureAwait(false)).Attributes
             .FirstOrDefault(a => a.Definition.Tenant == definition.Tenant && string.Equals(a.Definition.Name, definition.Name, StringComparison.Ordinal));
-        await _guard.RecordAsync(actor.ToWriter(), new SingleApprovalChange(definition.Tenant, AuditEventTypes.CallerAttributeDefinitionApplied,
-            $"caller_attribute:{definition.Name}", before?.DefinitionHash, definition.ComputeDefinitionHash()), ct).ConfigureAwait(false);
+        var audit = SelfWideningGuard.AuditEntry(actor.ToWriter(), new SingleApprovalChange(definition.Tenant, AuditEventTypes.CallerAttributeDefinitionApplied,
+            $"caller_attribute:{definition.Name}", before?.DefinitionHash, definition.ComputeDefinitionHash()));
 
-        EnsureApplied(await _repository.SaveDefinitionAsync(definition, actor.SubjectKey, _time.GetUtcNow(), ct).ConfigureAwait(false));
+        EnsureApplied(await _repository.SaveDefinitionAsync(definition, actor.SubjectKey, _time.GetUtcNow(), audit, ct).ConfigureAwait(false));
         _registry.Invalidate();
         _invalidator?.InvalidateAttribute(definition.Tenant, definition.Name);
     }
@@ -114,10 +129,10 @@ public sealed class CallerAttributeAdministrationService
             .FirstOrDefault(a => a.Definition.Tenant == tenant && string.Equals(a.Definition.Name, name, StringComparison.Ordinal))
             ?? throw new CallerAttributeAdminException(CallerAttributeChangeResult.NotFound.ToString(), "The caller attribute does not exist.");
         RequireApproverRole(before.Definition.Provider.Kind, actor);
-        await _guard.RecordAsync(actor.ToWriter(), new SingleApprovalChange(tenant, AuditEventTypes.CallerAttributeDefinitionDeleted,
-            $"caller_attribute:{name}", before.DefinitionHash, null), ct).ConfigureAwait(false);
+        var audit = SelfWideningGuard.AuditEntry(actor.ToWriter(), new SingleApprovalChange(tenant, AuditEventTypes.CallerAttributeDefinitionDeleted,
+            $"caller_attribute:{name}", before.DefinitionHash, null));
 
-        EnsureApplied(await _repository.DeleteDefinitionAsync(tenant, name, ct).ConfigureAwait(false));
+        EnsureApplied(await _repository.DeleteDefinitionAsync(tenant, name, audit, ct).ConfigureAwait(false));
         _registry.Invalidate();
         _invalidator?.InvalidateAttribute(tenant, name);
     }
@@ -159,10 +174,10 @@ public sealed class CallerAttributeAdministrationService
         var before = (await _repository.LoadCallerAttributeSnapshotAsync(ct).ConfigureAwait(false)).ServiceSets
             .FirstOrDefault(x => x.Set.Tenant == tenant && string.Equals(x.Set.ApplicationId, app, StringComparison.Ordinal) && string.Equals(x.Set.AttributeName, attributeName, StringComparison.Ordinal));
         var after = new ServiceAttributeSet(Guid.Empty, tenant, app, attributeName, values, FilterApprovalStatus.Active);
-        await _guard.RecordAsync(actor.ToWriter(), new SingleApprovalChange(tenant, AuditEventTypes.CallerAttributeServiceSetChanged,
-            $"caller_attribute:{attributeName}", before?.Set.ComputeValuesHash(), after.ComputeValuesHash()), ct).ConfigureAwait(false);
+        var audit = SelfWideningGuard.AuditEntry(actor.ToWriter(), new SingleApprovalChange(tenant, AuditEventTypes.CallerAttributeServiceSetChanged,
+            $"caller_attribute:{attributeName}", before?.Set.ComputeValuesHash(), after.ComputeValuesHash()));
 
-        EnsureApplied(await _repository.SaveServiceSetAsync(tenant, applicationId, attributeName, values, actor.SubjectKey, _time.GetUtcNow(), ct).ConfigureAwait(false));
+        EnsureApplied(await _repository.SaveServiceSetAsync(tenant, applicationId, attributeName, values, actor.SubjectKey, _time.GetUtcNow(), audit, ct).ConfigureAwait(false));
         _registry.Invalidate();
         _invalidator?.InvalidateAttribute(tenant, attributeName);
     }

@@ -77,7 +77,11 @@ internal static class VirtualFilterStore
 
     public static Task<long> GetGenerationAsync(DbConnection connection, CancellationToken ct) => ReadGenerationAsync(connection, null, ct);
 
-    public static async Task ApplyAsync(DbConnection connection, VirtualFilterChangeSet changes, CancellationToken ct)
+    /// <summary>
+    /// Writes <paramref name="changes"/> inside <paramref name="tx"/>; the caller writes the audit entries of the change in the same
+    /// transaction and commits, or rolls back on any failure (including a generation conflict).
+    /// </summary>
+    public static async Task ApplyAsync(DbConnection connection, DbTransaction tx, VirtualFilterChangeSet changes, CancellationToken ct)
     {
         if (changes.IsEmpty)
         {
@@ -86,7 +90,6 @@ internal static class VirtualFilterStore
 
         var sqlServer = connection is Microsoft.Data.SqlClient.SqlConnection
             || Autheris.Infrastructure.Persistence.Dialects.SqlServerGovernanceDialect.Unwrap(connection) is Microsoft.Data.SqlClient.SqlConnection;
-        await using var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
 
         // PERS-13: compare-and-set of the generation first; it also takes the write lock before any definition is touched.
         if (changes.ExpectedGeneration is { } expectedGeneration)
@@ -96,7 +99,6 @@ internal static class VirtualFilterStore
                 [("@expected", expectedGeneration)]);
             if (await cas.ExecuteNonQueryAsync(ct).ConfigureAwait(false) != 1)
             {
-                await tx.RollbackAsync(ct).ConfigureAwait(false);
                 throw new VirtualFilterConflictException("The virtual filter configuration changed since it was read; reload it and repeat the change.");
             }
         }
@@ -195,8 +197,6 @@ internal static class VirtualFilterStore
         {
             await ExecuteAsync(connection, tx, "UPDATE VIRTUAL_FILTER_GENERATION SET generation = generation + 1 WHERE id = 1;", [], ct).ConfigureAwait(false);
         }
-
-        await tx.CommitAsync(ct).ConfigureAwait(false);
     }
 
     private static async Task ExecuteAsync(DbConnection connection, DbTransaction tx, string sql, (string Name, object? Value)[] parameters, CancellationToken ct)

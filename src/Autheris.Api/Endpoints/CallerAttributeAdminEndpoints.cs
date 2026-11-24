@@ -250,10 +250,18 @@ public static class CallerAttributeAdminEndpoints
             return Forbidden();
         }
 
+        if (string.IsNullOrWhiteSpace(security.UserSid.Value))
+        {
+            return Forbidden();
+        }
+
+        // Every identifier form of the caller (subject key, UPN, mail, object id) and the caller's groups feed the self-widening check.
+        var identifiers = context.User.GetUserIdentifiers();
+        identifiers.Add(security.UserSid.Value);
         var actor = new CallerAttributeActor(
             security.UserSid.Value,
             security.HasRole(GatewayRole.CallerAttributeApprover),
-            [security.UserSid.Value],
+            identifiers,
             security.GroupSids.Select(g => g.Value).ToArray());
         try
         {

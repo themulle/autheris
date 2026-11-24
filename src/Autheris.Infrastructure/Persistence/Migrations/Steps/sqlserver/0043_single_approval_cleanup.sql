@@ -18,7 +18,10 @@ DELETE FROM dbo.VIRTUAL_FILTERS WHERE status <> N'Active';
 
 -- batch
 
-DELETE FROM dbo.VIRTUAL_FILTER_ACCESS_PROFILES WHERE definition_json LIKE N'%"Status":1%' OR definition_json LIKE N'%"Status":2%';
+-- Only the top-level status of a profile counts (1 = pending approval, 2 = rejected): an active profile with a pending nested draft
+-- stays. A value that is not valid JSON is never treated as pending.
+DELETE FROM dbo.VIRTUAL_FILTER_ACCESS_PROFILES
+WHERE (CASE WHEN ISJSON(definition_json) = 1 THEN JSON_VALUE(definition_json, N'$.Status') END) IN (N'1', N'2');
 
 -- batch
 

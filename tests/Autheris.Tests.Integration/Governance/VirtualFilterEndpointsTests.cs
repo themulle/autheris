@@ -47,10 +47,16 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
 
     private static HttpContext Context(string tenant, object? body, params string[] roles)
     {
-        var context = new DefaultHttpContext
+        var services = new ServiceCollection().AddLogging().AddAuditWriterOver(Substitute.For<IAuditLogRepository>());
+        if (roles.Contains("GovernanceAdmin"))
         {
-            RequestServices = new ServiceCollection().AddLogging().AddAuditWriterOver(Substitute.For<IAuditLogRepository>()).BuildServiceProvider()
-        };
+            // The tenant-bound Data Governance capacity of a GovernanceAdmin caller (decision D5: access profiles are DG only).
+            var capabilities = Substitute.For<IGovernanceCapabilities>();
+            capabilities.IsGovernance(Arg.Any<System.Security.Claims.ClaimsPrincipal?>(), new TenantId(tenant)).Returns(true);
+            services.AddSingleton(capabilities);
+        }
+
+        var context = new DefaultHttpContext { RequestServices = services.BuildServiceProvider() };
         context.Items[SecurityPrincipalContext.ItemKey] = new SecurityPrincipalContext
         {
             UserSid = new Sid("S-1-5-21-CALLER"),
@@ -59,7 +65,8 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
             // ClusterAdmin and GovernanceAdmin are global roles; tenant-scoped roles never satisfy them.
             TenantRoles = new HashSet<string>(roles.Where(r => r is not ("ClusterAdmin" or "GovernanceAdmin"))),
             ClusterRoles = new HashSet<string>(roles.Where(r => r is "ClusterAdmin" or "GovernanceAdmin")),
-            AuthenticationScheme = "Test"
+            AuthenticationScheme = "Test",
+            GroupResolutionStatus = Autheris.Domain.Identity.GroupResolutionStatus.Complete
         };
         context.Response.Body = new MemoryStream();
         if (body != null)
@@ -113,12 +120,35 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
     }
 
     [Fact]
-    public async Task PutFilterAndProfile_AsFilterAdmin_AreStoredInTheCallersTenant()
+    [Trait("Category", "Security")]
+    public async Task PutAndDeleteProfile_AsFilterAdminWithoutDataGovernance_Return403()
     {
         var putFilter = Context(Tenant, DavidFilterBody(), "FilterAdmin");
         (await StatusAsync(await VirtualFilterEndpoints.PutFilterAsync("nicht_ausgelieferte_krane", putFilter, _service), putFilter)).ShouldBe(StatusCodes.Status200OK);
 
         var putProfile = Context(Tenant, DavidProfileBody(), "FilterAdmin");
+        (await StatusAsync(await VirtualFilterEndpoints.PutProfileAsync("david", putProfile, _service), putProfile)).ShouldBe(StatusCodes.Status403Forbidden);
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+
+        var dgPut = Context(Tenant, DavidProfileBody(), "GovernanceAdmin");
+        (await StatusAsync(await VirtualFilterEndpoints.PutProfileAsync("david", dgPut, _service), dgPut)).ShouldBe(StatusCodes.Status200OK);
+
+        var deleteProfile = Context(Tenant, null, "FilterAdmin", "ClusterAdmin");
+        (await StatusAsync(await VirtualFilterEndpoints.DeleteProfileAsync("david", deleteProfile, _service), deleteProfile)).ShouldBe(StatusCodes.Status403Forbidden);
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldHaveSingleItem();
+
+        var dgDelete = Context(Tenant, null, "GovernanceAdmin");
+        (await StatusAsync(await VirtualFilterEndpoints.DeleteProfileAsync("david", dgDelete, _service), dgDelete)).ShouldBe(StatusCodes.Status204NoContent);
+        (await _repository.LoadSnapshotAsync()).Profiles.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task PutFilterAsFilterAdmin_AndProfileAsDataGovernance_AreStoredInTheCallersTenant()
+    {
+        var putFilter = Context(Tenant, DavidFilterBody(), "FilterAdmin");
+        (await StatusAsync(await VirtualFilterEndpoints.PutFilterAsync("nicht_ausgelieferte_krane", putFilter, _service), putFilter)).ShouldBe(StatusCodes.Status200OK);
+
+        var putProfile = Context(Tenant, DavidProfileBody(), "GovernanceAdmin");
         (await StatusAsync(await VirtualFilterEndpoints.PutProfileAsync("david", putProfile, _service), putProfile)).ShouldBe(StatusCodes.Status200OK);
 
         var snapshot = await _repository.LoadSnapshotAsync();
@@ -150,7 +180,7 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
     [Fact]
     public async Task InvalidInput_Returns400_WithGovernedCode_NotTheExceptionText()
     {
-        var context = Context(Tenant, DavidProfileBody(), "FilterAdmin");   // binds an unknown filter
+        var context = Context(Tenant, DavidProfileBody(), "GovernanceAdmin");   // binds an unknown filter
 
         var status = await StatusAsync(await VirtualFilterEndpoints.PutProfileAsync("david", context, _service), context);
 
@@ -369,7 +399,7 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
 
     private async Task<(int Status, string Body)> PutBindingAsync(object binding, Action<IServiceCollection>? configure = null)
     {
-        var context = Context(Tenant, BindingProfile(binding), "FilterAdmin");
+        var context = Context(Tenant, BindingProfile(binding), "GovernanceAdmin");
         var status = await StatusAsync(await VirtualFilterEndpoints.PutProfileAsync("david", context, ServiceWith(configure)), context);
         context.Response.Body.Position = 0;
         return (status, await new StreamReader(context.Response.Body).ReadToEndAsync());
@@ -579,7 +609,7 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
             uncovered = value,
             bindings = new[] { new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id" } }
         };
-        var context = Context(Tenant, body, "FilterAdmin");
+        var context = Context(Tenant, body, "GovernanceAdmin");
 
         (await StatusAsync(await VirtualFilterEndpoints.PutProfileAsync("david", context, ServiceWith(null)), context)).ShouldBe(StatusCodes.Status200OK);
         (await _repository.LoadSnapshotAsync()).Profiles.ShouldHaveSingleItem().Uncovered.ShouldBe(expected);
@@ -599,7 +629,7 @@ public sealed partial class VirtualFilterEndpointsTests : IDisposable
             uncovered = value,
             bindings = new[] { new { filter = "nicht_ausgelieferte_krane", target = "web_crm.*.*.id" } }
         };
-        var context = Context(Tenant, body, "FilterAdmin");
+        var context = Context(Tenant, body, "GovernanceAdmin");
 
         (await StatusAsync(await VirtualFilterEndpoints.PutProfileAsync("david", context, ServiceWith(null)), context)).ShouldBe(StatusCodes.Status400BadRequest);
         context.Response.Body.Position = 0;

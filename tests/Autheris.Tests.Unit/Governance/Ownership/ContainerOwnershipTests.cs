@@ -2,18 +2,19 @@ namespace Autheris.Tests.Unit.Governance.Ownership;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Security;
 using Autheris.Application.Governance.Ownership;
-using Autheris.Application.Tenancy;
+using Autheris.Application.Identity;
+using Autheris.Domain.Identity;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Tests.Common.Fakes;
-using Microsoft.Extensions.Logging.Abstractions;
 using NSubstitute;
 using Shouldly;
 using Xunit;
@@ -32,10 +33,28 @@ public sealed class ContainerOwnershipTests
         public bool Throw { get; set; }
         public TenantId? SeenTenant { get; private set; }
 
+        public int SingleCalls { get; private set; }
+        public int BatchCalls { get; private set; }
+
         public Task<ContainerDefaults> GetContainerForTableAsync(TenantId tenant, Guid tableId, CancellationToken ct = default)
         {
+            SingleCalls++;
             SeenTenant = tenant;
             return Throw ? throw new InvalidOperationException("store down") : Task.FromResult(Container);
+        }
+
+        public Task<IReadOnlyDictionary<Guid, ContainerDefaults>> GetContainersForTablesAsync(
+            TenantId tenant, IReadOnlyCollection<Guid> tableIds, CancellationToken ct = default)
+        {
+            BatchCalls++;
+            SeenTenant = tenant;
+            if (Throw)
+            {
+                throw new InvalidOperationException("store down");
+            }
+
+            IReadOnlyDictionary<Guid, ContainerDefaults> result = tableIds.ToDictionary(id => id, _ => Container);
+            return Task.FromResult(result);
         }
 
         public Task<GovernanceDomain?> GetAsync(TenantId tenant, Guid domainId, CancellationToken ct = default) =>
@@ -77,8 +96,15 @@ public sealed class ContainerOwnershipTests
         return store;
     }
 
-    private static ContainerOwnership Create(StubDomains domains, TableMetadata? meta, IScimGroupStore? groups = null, ITenantResolver? resolver = null) =>
-        new(meta is null ? new InMemoryTableMetadataRepository() : new InMemoryTableMetadataRepository(meta), domains, groups, null, resolver);
+    private static IIdentityRealmRegistry Realms(params string[] realmIds)
+    {
+        var registry = Substitute.For<IIdentityRealmRegistry>();
+        registry.GetAllRealms().Returns(realmIds.Select(id => new IdentityRealm(id, IdentityRealmKind.EntraWorkforce, TenantBindingSpecification.Fixed(Tenant))).ToList());
+        return registry;
+    }
+
+    private static ContainerOwnership Create(StubDomains domains, TableMetadata? meta, IScimGroupStore? groups = null, IIdentityRealmRegistry? realms = null) =>
+        new(meta is null ? new InMemoryTableMetadataRepository() : new InMemoryTableMetadataRepository(meta), domains, groups, realms ?? Realms("realm-1"));
 
     [Fact]
     public async Task Unassigned_table_has_no_owner()
@@ -185,14 +211,67 @@ public sealed class ContainerOwnershipTests
         domains.SeenTenant.ShouldBe(new TenantId("tenant-b"));
     }
 
-    [Fact]
-    public async Task Tenant_falls_back_to_default_tenant_and_without_tenant_nothing_is_owned()
+    [Theory]
+    [InlineData(null)]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("bad tenant/../x")]
+    [InlineData("_reserved")]
+    public async Task Table_without_a_valid_owner_tenant_has_no_owner_and_never_falls_back(string? ownerTenant)
     {
         var domains = new StubDomains { Container = Assigned(OwnerGroup) };
-        var withDefault = new TenantResolver(() => new TenancyOptions { DefaultTenantId = "tenant-d" }, null, NullLogger<TenantResolver>.Instance);
+        var sut = Create(domains, Meta(ownerTenant: ownerTenant), GroupsOf(OwnerGroup.Value));
 
-        (await Create(domains, Meta(ownerTenant: null), GroupsOf(OwnerGroup.Value), withDefault).IsAuthorizedApproverForTableAsync(Orders, Member)).ShouldBeTrue();
-        domains.SeenTenant.ShouldBe(new TenantId("tenant-d"));
-        (await Create(domains, Meta(ownerTenant: null), GroupsOf(OwnerGroup.Value)).IsAuthorizedApproverForTableAsync(Orders, Member)).ShouldBeFalse();
+        (await sut.IsAuthorizedApproverForTableAsync(Orders, Member)).ShouldBeFalse();
+        (await sut.IsAuthorizedApproverForTableAsync(Orders, OwnerGroup)).ShouldBeFalse();
+        (await sut.GetDataOwnersForTableAsync(Orders)).ShouldBeEmpty();
+        domains.SeenTenant.ShouldBeNull("no container is read for a table without a valid owner tenant");
+    }
+
+    [Fact]
+    public async Task Unqualified_identifier_resolves_groups_only_in_the_single_configured_realm()
+    {
+        var domains = new StubDomains { Container = Assigned(OwnerGroup) };
+        var store = GroupsOf(OwnerGroup.Value);
+
+        (await Create(domains, Meta(), store, Realms("realm-1")).IsAuthorizedApproverForTableAsync(Orders, Member)).ShouldBeTrue();
+        await store.Received().GetEffectiveGroupSidsForUserAsync(Tenant, "realm-1", Member.Value, Arg.Any<int>(), Arg.Any<CancellationToken>());
+
+        // Several realms (or none): an unqualified identifier is ambiguous and is never a member; no default realm is assumed.
+        var ambiguous = GroupsOf(OwnerGroup.Value);
+        (await Create(domains, Meta(), ambiguous, Realms("realm-1", "realm-2")).IsAuthorizedApproverForTableAsync(Orders, Member)).ShouldBeFalse();
+        (await Create(domains, Meta(), ambiguous, Realms()).IsAuthorizedApproverForTableAsync(Orders, Member)).ShouldBeFalse();
+        await ambiguous.DidNotReceiveWithAnyArgs().GetEffectiveGroupSidsForUserAsync(default, default!, default!, default, default);
+
+        // A realm-qualified identifier names its realm.
+        var qualified = GroupsOf(OwnerGroup.Value);
+        (await Create(domains, Meta(), qualified, Realms("realm-1", "realm-2")).IsAuthorizedApproverForTableAsync(Orders, new Sid("realm-2|" + Member.Value))).ShouldBeTrue();
+        await qualified.Received().GetEffectiveGroupSidsForUserAsync(Tenant, "realm-2", Member.Value, Arg.Any<int>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Batch_reads_resolve_tables_containers_and_groups_once()
+    {
+        var other = new TableIdentifier("sales", "public", "returns");
+        var third = new TableIdentifier("sales", "public", "unknown");
+        var metas = new InMemoryTableMetadataRepository(Meta(), new TableMetadata
+        {
+            Identifier = other,
+            OwnerTenantId = "tenant-a",
+            Table = new Table { TableName = "returns", SchemaName = "public", IsActive = true }
+        });
+        var domains = new StubDomains { Container = Assigned(OwnerGroup) };
+        var store = GroupsOf(OwnerGroup.Value);
+        var sut = new ContainerOwnership(metas, domains, store, Realms("realm-1"));
+
+        var owned = await ((IContainerOwnership)sut).GetOwnedOrDelegatedTablesAsync(Member, [Orders, other, third], DateTimeOffset.UtcNow);
+        var owners = await ((IContainerOwnership)sut).GetDataOwnersForTablesAsync([Orders, other, third]);
+
+        owned.ShouldBe([Orders, other], ignoreOrder: true);
+        owners[Orders].ShouldHaveSingleItem().AdSid.ShouldBe(OwnerGroup);
+        owners[third].ShouldBeEmpty();
+        domains.BatchCalls.ShouldBe(2, "one set-based container read per batch call");
+        domains.SingleCalls.ShouldBe(0, "no per-table container read");
+        await store.Received(1).GetEffectiveGroupSidsForUserAsync(Arg.Any<TenantId>(), Arg.Any<string>(), Arg.Any<string>(), Arg.Any<int>(), Arg.Any<CancellationToken>());
     }
 }

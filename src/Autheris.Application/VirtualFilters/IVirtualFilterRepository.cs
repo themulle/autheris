@@ -26,6 +26,12 @@ public sealed record VirtualFilterChangeSet
     /// </summary>
     public long? ExpectedGeneration { get; init; }
 
+    /// <summary>
+    /// Audit entries of the change. The store writes them inside the transaction of the change, after the writes and before the commit:
+    /// a failing audit rolls the change back and a failing write leaves no entry.
+    /// </summary>
+    public IReadOnlyList<AuditLogEntry> AuditEntries { get; init; } = [];
+
     public bool IsEmpty => SaveFilters.Count + SaveProfiles.Count + DeleteProfiles.Count + DeleteFilters.Count == 0;
 }
 

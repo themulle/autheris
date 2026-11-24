@@ -10,7 +10,11 @@ DELETE FROM FUNCTIONAL_RIGHT_MAPPINGS WHERE approved_by IS NULL;
 
 DELETE FROM VIRTUAL_FILTERS WHERE status <> 'Active';
 
-DELETE FROM VIRTUAL_FILTER_ACCESS_PROFILES WHERE definition_json LIKE '%"Status":1%' OR definition_json LIKE '%"Status":2%';
+-- Only the top-level status of a profile counts (1 = pending approval, 2 = rejected): an active profile with a pending nested draft
+-- stays. The definition is read as json (never jsonb, so an escape in another field never raises a value-echoing cast error); a value
+-- that is not a JSON object is never treated as pending.
+DELETE FROM VIRTUAL_FILTER_ACCESS_PROFILES
+WHERE (CASE WHEN definition_json IS JSON OBJECT THEN definition_json::json ->> 'Status' END) IN ('1', '2');
 
 ALTER TABLE CALLER_ATTRIBUTES DROP COLUMN IF EXISTS draft_definition_json;
 ALTER TABLE CALLER_ATTRIBUTES DROP COLUMN IF EXISTS draft_definition_hash;

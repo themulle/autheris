@@ -22,23 +22,26 @@ using Xunit;
 public sealed class CallerAttributeAdministrationServiceTests : IDisposable
 {
     private static readonly TenantId Tenant = new("tenant_a");
-    private static readonly CallerAttributeActor Alice = new("oid-alice", HoldsApproverRole: false);
-    private static readonly CallerAttributeActor Bob = new("oid-bob", HoldsApproverRole: true);
+    private static readonly CallerAttributeActor Alice = new("oid-alice", false, [], []);
+    private static readonly CallerAttributeActor Bob = new("oid-bob", true, [], []);
 
     private readonly PostgreSqlGovernanceRepository _store = GovernanceTestDatabase.CreateRepository(
         Substitute.For<IEpochValidationService>(),
         Options.Create(new GatewayOptions()));
 
     private readonly IAuditLogRepository _audit = Substitute.For<IAuditLogRepository>();
-    private readonly List<AuditLogEntry> _entries = [];
     private readonly FakeTimeProvider _time = new(new DateTimeOffset(2026, 10, 17, 8, 0, 0, TimeSpan.Zero));
 
     public CallerAttributeAdministrationServiceTests()
     {
-        _audit.RecordAuditEventAsync(Arg.Do<AuditLogEntry>(_entries.Add), Arg.Any<System.Threading.CancellationToken>()).Returns(Task.CompletedTask);
+        _audit.RecordAuditEventAsync(Arg.Any<AuditLogEntry>(), Arg.Any<System.Threading.CancellationToken>()).Returns(Task.CompletedTask);
     }
 
     public void Dispose() => _store.Dispose();
+
+    /// <summary>The caller attribute audit entries the store wrote in the transactions of the writes, oldest first.</summary>
+    private async Task<List<AuditLogEntry>> EntriesAsync() =>
+        (await _store.GetAuditLogEntriesAsync(500, Tenant)).Where(e => e.EventType.StartsWith("CALLER_ATTRIBUTE", StringComparison.Ordinal)).Reverse().ToList();
 
     private (CallerAttributeAdministrationService Service, CallerAttributeRegistry Registry) Create(bool enabled = true, bool separateRole = true)
     {
@@ -93,7 +96,7 @@ public sealed class CallerAttributeAdministrationServiceTests : IDisposable
 
         await service.SaveDefinitionAsync(def, Alice);
 
-        var entry = _entries.ShouldHaveSingleItem();
+        var entry = (await EntriesAsync()).ShouldHaveSingleItem();
         entry.EventType.ShouldBe(AuditEventTypes.CallerAttributeDefinitionApplied);
         entry.DetailsJson.ShouldContain(def.ComputeDefinitionHash());
         entry.DetailsJson.ShouldNotContain("department");   // provider configuration is not audited in clear
@@ -110,8 +113,9 @@ public sealed class CallerAttributeAdministrationServiceTests : IDisposable
 
         await service.SaveDefinitionAsync(changed, Alice);
 
-        _entries.Last().DetailsJson.ShouldContain(def.ComputeDefinitionHash());
-        _entries.Last().DetailsJson.ShouldContain(changed.ComputeDefinitionHash());
+        var last = (await EntriesAsync()).Last();
+        last.DetailsJson.ShouldContain(def.ComputeDefinitionHash());
+        last.DetailsJson.ShouldContain(changed.ComputeDefinitionHash());
         (await registry.GetAsync(default)).Definitions.Single().Description.ShouldBe("v2");
     }
 
@@ -143,7 +147,8 @@ public sealed class CallerAttributeAdministrationServiceTests : IDisposable
         await service.DeleteDefinitionAsync(Tenant, def.Name, Alice);
 
         (await registry.GetAsync(default)).Definitions.ShouldBeEmpty();
-        _entries.Last().EventType.ShouldBe(AuditEventTypes.CallerAttributeDefinitionDeleted);
+        (await EntriesAsync()).Last().EventType.ShouldBe(AuditEventTypes.CallerAttributeDefinitionDeleted);
+        await _audit.DidNotReceiveWithAnyArgs().RecordAuditEventAsync(default!, default);
     }
 
     [Fact]
@@ -159,8 +164,9 @@ public sealed class CallerAttributeAdministrationServiceTests : IDisposable
         await service.SaveServiceSetAsync(Tenant, app, "cost_center", ["secret-4711"], Bob);
         (await registry.GetAsync(default)).TryGetServiceSet(Tenant, app.ToUpperInvariant(), "cost_center", out var values).ShouldBeTrue();
         values.ShouldBe(["secret-4711"]);
-        _entries.Last().EventType.ShouldBe(AuditEventTypes.CallerAttributeServiceSetChanged);
-        _entries.Last().DetailsJson.ShouldNotContain("secret-4711");   // values never audited
+        var setEntry = (await EntriesAsync()).Last();
+        setEntry.EventType.ShouldBe(AuditEventTypes.CallerAttributeServiceSetChanged);
+        setEntry.DetailsJson.ShouldNotContain("secret-4711");   // values never audited
     }
 
     [Fact]
@@ -168,7 +174,7 @@ public sealed class CallerAttributeAdministrationServiceTests : IDisposable
     {
         var (service, _) = Create();
         await service.SaveDefinitionAsync(Claims(), Alice);
-        var self = Bob with { OwnIdentifiers = ["app-self"] };
+        var self = new CallerAttributeActor("oid-bob", true, ["app-self"], []);
 
         var ex = await Should.ThrowAsync<CallerAttributeAdminException>(() => service.SaveServiceSetAsync(Tenant, "app-self", "cost_center", ["1"], self));
         ex.Code.ShouldBe("SelfWidening");

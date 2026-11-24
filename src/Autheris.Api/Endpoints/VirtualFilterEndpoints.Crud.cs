@@ -60,7 +60,7 @@ public static partial class VirtualFilterEndpoints
         });
 
     internal static Task<IResult> PutProfileAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
-        ExecuteAsync(context, GatewayRole.FilterAdmin, async (security, actor) =>
+        ExecuteAsync(context, GatewayRole.GovernanceAdmin, async (security, actor) =>
         {
             var body = await ReadAsync<ProfileBody>(context).ConfigureAwait(false);
             var tenant = ResolveTenant(security, body.Tenant);
@@ -69,15 +69,26 @@ public static partial class VirtualFilterEndpoints
                 return Forbidden();
             }
 
+            // Declarative grant (D5): Data Governance of the target tenant only, checked here and again in the service.
+            if (!IsDataGovernance(context, security, tenant.Value))
+            {
+                return await AuditDeniedAsync(context, security, GatewayRole.GovernanceAdmin).ConfigureAwait(false);
+            }
+
             var model = body.ToModel(name, tenant.Value);
-            var saved = await service.SaveProfileAsync(model, actor, body.ExplicitKeyBudgets(model), context.RequestAborted).ConfigureAwait(false);
+            var saved = await service.SaveProfileAsync(model, actor with { IsDataGovernance = true }, body.ExplicitKeyBudgets(model), context.RequestAborted).ConfigureAwait(false);
             return Results.Ok(ProfileView(saved));
         });
 
     internal static Task<IResult> DeleteProfileAsync(string name, HttpContext context, VirtualFilterAdministrationService service) =>
-        ExecuteAsync(context, GatewayRole.FilterAdmin, async (security, actor) =>
+        ExecuteAsync(context, GatewayRole.GovernanceAdmin, async (security, actor) =>
         {
-            await service.DeleteProfileAsync(security.TenantId, name, actor, context.RequestAborted).ConfigureAwait(false);
+            if (!IsDataGovernance(context, security, security.TenantId))
+            {
+                return await AuditDeniedAsync(context, security, GatewayRole.GovernanceAdmin).ConfigureAwait(false);
+            }
+
+            await service.DeleteProfileAsync(security.TenantId, name, actor with { IsDataGovernance = true }, context.RequestAborted).ConfigureAwait(false);
             return Results.NoContent();
         });
 

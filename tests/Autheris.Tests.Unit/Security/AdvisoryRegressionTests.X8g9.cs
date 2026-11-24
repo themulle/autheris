@@ -98,7 +98,7 @@ public sealed partial class AdvisoryRegressionTests
                 var service = new CallerAttributeAdministrationService(
                     repository, registry, Substitute.For<Autheris.Application.Common.Interfaces.IAuditLogRepository>(),
                     Microsoft.Extensions.Options.Options.Create(new GatewayOptions { CallerAttributes = Options() }), TimeProvider.System, [], invalidator);
-                await service.SaveServiceSetAsync(Tenant, "app-1", "cost_center", ["a"], new CallerAttributeActor("oid-bob", HoldsApproverRole: true));
+                await service.SaveServiceSetAsync(Tenant, "app-1", "cost_center", ["a"], new CallerAttributeActor("oid-bob", true, [], []));
                 invalidator.Received(1).InvalidateAttribute(Tenant, "cost_center");
                 break;
             }

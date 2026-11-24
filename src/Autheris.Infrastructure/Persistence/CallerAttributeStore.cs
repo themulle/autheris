@@ -76,9 +76,9 @@ internal static class CallerAttributeStore
 
     public static Task<long> GetGenerationAsync(DbConnection connection, CancellationToken ct) => ReadGenerationAsync(connection, null, ct);
 
-    public static async Task<CallerAttributeChangeResult> SaveDefinitionAsync(DbConnection connection, CallerAttributeDefinition def, string actor, DateTimeOffset at, CancellationToken ct)
+    /// <summary>Writes inside <paramref name="tx"/>; the caller commits (together with its audit entry) or rolls back.</summary>
+    public static async Task<CallerAttributeChangeResult> SaveDefinitionAsync(DbConnection connection, DbTransaction tx, CallerAttributeDefinition def, string actor, DateTimeOffset at, CancellationToken ct)
     {
-        await using var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
         var exists = await ExistsAsync(connection, tx, "SELECT 1 FROM CALLER_ATTRIBUTES WHERE tenant_id = @tenant AND name = @name;", [("@tenant", def.Tenant.Value), ("@name", def.Name)], ct).ConfigureAwait(false);
         var json = ToJson(def);
         var hash = def.ComputeDefinitionHash();
@@ -100,13 +100,12 @@ internal static class CallerAttributeStore
         }
 
         await BumpAsync(connection, tx, ct).ConfigureAwait(false);
-        await tx.CommitAsync(ct).ConfigureAwait(false);
         return CallerAttributeChangeResult.Applied;
     }
 
-    public static async Task<CallerAttributeChangeResult> DeleteDefinitionAsync(DbConnection connection, TenantId tenant, string name, CancellationToken ct)
+    /// <summary>Writes inside <paramref name="tx"/>; the caller commits (together with its audit entry) or rolls back.</summary>
+    public static async Task<CallerAttributeChangeResult> DeleteDefinitionAsync(DbConnection connection, DbTransaction tx, TenantId tenant, string name, CancellationToken ct)
     {
-        await using var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
         var affected = await ExecuteAsync(connection, tx, "DELETE FROM CALLER_ATTRIBUTES WHERE tenant_id = @tenant AND name = @name;",
             [("@tenant", tenant.Value), ("@name", name)], ct).ConfigureAwait(false);
         if (affected == 0)
@@ -115,17 +114,16 @@ internal static class CallerAttributeStore
         }
 
         await BumpAsync(connection, tx, ct).ConfigureAwait(false);
-        await tx.CommitAsync(ct).ConfigureAwait(false);
         return CallerAttributeChangeResult.Applied;
     }
 
     // ---- service sets --------------------------------------------------------------------------------------------------------
 
+    /// <summary>Writes inside <paramref name="tx"/>; the caller commits (together with its audit entry) or rolls back.</summary>
     public static async Task<CallerAttributeChangeResult> SaveServiceSetAsync(
-        DbConnection connection, TenantId tenant, string applicationId, string attributeName, IReadOnlyList<string> values, string actor, DateTimeOffset at, CancellationToken ct)
+        DbConnection connection, DbTransaction tx, TenantId tenant, string applicationId, string attributeName, IReadOnlyList<string> values, string actor, DateTimeOffset at, CancellationToken ct)
     {
         var app = CallerAttributeNameRules.CanonicalApplicationId(applicationId);
-        await using var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
         var exists = await ExistsAsync(connection, tx,
             "SELECT 1 FROM CALLER_ATTRIBUTE_SERVICE_SETS WHERE tenant_id = @tenant AND application_id = @app AND attribute_name = @name;",
             [("@tenant", tenant.Value), ("@app", app), ("@name", attributeName)], ct).ConfigureAwait(false);
@@ -149,7 +147,6 @@ internal static class CallerAttributeStore
         }
 
         await BumpAsync(connection, tx, ct).ConfigureAwait(false);
-        await tx.CommitAsync(ct).ConfigureAwait(false);
         return CallerAttributeChangeResult.Applied;
     }
 
