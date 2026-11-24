@@ -455,9 +455,8 @@ public sealed class CatalogVisibilityGrantStore(
         }
     }
 
-    private static string RequireTenant(TenantId tenant)
-    {
-        var valid = TenantScope.RequireTenant(tenant, GovernanceTable.CatalogVisibilityGrants.ToSqlName());
-        return StoredTenant.RequireWritable(valid);
-    }
+    private static string RequireTenant(TenantId tenant) =>
+        TenantId.TryParse(TenantScope.RequireTenant(tenant, GovernanceTable.CatalogVisibilityGrants.ToSqlName()).Value, out var valid)
+            ? valid.Value
+            : throw new ArgumentException("A valid non-reserved TenantId is required.", nameof(tenant));
 }
