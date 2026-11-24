@@ -9,6 +9,23 @@ using Autheris.Domain.Model;
 namespace Autheris.Application.Common.Interfaces;
 
 /// <summary>
+/// Revokes a single catalog visibility grant and records its audit entry in the same transaction: the entry is written only
+/// when the revoke applied, and a failed audit write rolls the revoke back (fail closed both ways).
+/// </summary>
+public interface ICatalogGrantRevocationWriter
+{
+    /// <summary>Returns <see langword="false"/> when no active grant was revoked; nothing is then audited.</summary>
+    Task<bool> RevokeWithAuditAsync(
+        TenantId tenantId,
+        Guid grantId,
+        Sid revokedBySid,
+        string reason,
+        DateTimeOffset revokedAt,
+        AuditLogEntry audit,
+        CancellationToken ct = default);
+}
+
+/// <summary>
 /// Tenant- and container-scoped repository for catalog visibility grants stored in <c>catalog_visibility_grants</c>.
 /// Catalog grants expose metadata only and never authorize data access.
 /// </summary>

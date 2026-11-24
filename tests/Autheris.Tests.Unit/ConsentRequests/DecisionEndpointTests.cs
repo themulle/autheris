@@ -243,14 +243,48 @@ public sealed class DecisionEndpointTests
         var (ctx, _) = Caller("user:owner", groups: [OwnerGroup]);
 
         var (status, _) = await ExecuteAsync(ctx, await ConsentApiEndpoints.RevokeCatalogGrantAsync(
-            catalog.Grant.Id, new RevokeConsentGrantBody("visibility no longer needed"), ctx, catalog.Proxy, Authority().Authority, audit));
+            catalog.Grant.Id, new RevokeConsentGrantBody("visibility no longer needed"), ctx, catalog.Proxy, Authority().Authority, audit, catalog.Writer));
 
         status.ShouldBe(StatusCodes.Status200OK);
         catalog.Revoked.ShouldHaveSingleItem().ShouldBe(catalog.Grant.Id);
-        var entry = audit.Entries.ShouldHaveSingleItem();
+
+        // The success entry travels with the revoke into one transaction; nothing is written outside it.
+        audit.Entries.ShouldBeEmpty();
+        var entry = catalog.CommittedAudit.ShouldHaveSingleItem();
         entry.EventType.ShouldBe(AuditEventTypes.ConsentRevoked);
+        entry.TenantId.ShouldBe(TenantA);
         entry.DetailsJson.ShouldNotBeNull().ShouldContain("\"Capacity\":\"ContainerOwner\"");
         entry.DetailsJson.ShouldContain("CATALOG");
+    }
+
+    [Fact]
+    public async Task Catalog_grant_revoke_with_a_failing_audit_write_is_not_applied()
+    {
+        var catalog = new CatalogGrantStore(CatalogGrant(TenantA)) { FailAudit = true };
+        var audit = new InMemoryAuditWriter();
+        var (ctx, _) = Caller("user:owner", groups: [OwnerGroup]);
+
+        await Should.ThrowAsync<InvalidOperationException>(async () => await ConsentApiEndpoints.RevokeCatalogGrantAsync(
+            catalog.Grant.Id, new RevokeConsentGrantBody("visibility no longer needed"), ctx, catalog.Proxy, Authority().Authority, audit, catalog.Writer));
+
+        catalog.Revoked.ShouldBeEmpty();
+        catalog.CommittedAudit.ShouldBeEmpty();
+        audit.Entries.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Catalog_grant_revoke_that_does_not_apply_writes_no_audit_entry()
+    {
+        var catalog = new CatalogGrantStore(CatalogGrant(TenantA)) { RevokeApplies = false };
+        var audit = new InMemoryAuditWriter();
+        var (ctx, _) = Caller("user:owner", groups: [OwnerGroup]);
+
+        var (status, _) = await ExecuteAsync(ctx, await ConsentApiEndpoints.RevokeCatalogGrantAsync(
+            catalog.Grant.Id, new RevokeConsentGrantBody("visibility no longer needed"), ctx, catalog.Proxy, Authority().Authority, audit, catalog.Writer));
+
+        status.ShouldBe(StatusCodes.Status409Conflict);
+        catalog.CommittedAudit.ShouldBeEmpty();
+        audit.Entries.ShouldBeEmpty();
     }
 
     [Fact]
@@ -261,7 +295,7 @@ public sealed class DecisionEndpointTests
         var (ctx, _) = Caller("user:mallory");
 
         var (status, _) = await ExecuteAsync(ctx, await ConsentApiEndpoints.RevokeCatalogGrantAsync(
-            catalog.Grant.Id, new RevokeConsentGrantBody("trying to hide a grant"), ctx, catalog.Proxy, Authority().Authority, audit));
+            catalog.Grant.Id, new RevokeConsentGrantBody("trying to hide a grant"), ctx, catalog.Proxy, Authority().Authority, audit, catalog.Writer));
 
         status.ShouldBe(StatusCodes.Status403Forbidden);
         catalog.Revoked.ShouldBeEmpty();
@@ -276,14 +310,14 @@ public sealed class DecisionEndpointTests
         var foreign = new CatalogGrantStore(CatalogGrant(TenantB));
         var (dgCtx, _) = Caller("user:dg", "GovernanceAdmin");
         var (status, _) = await ExecuteAsync(dgCtx, await ConsentApiEndpoints.RevokeCatalogGrantAsync(
-            foreign.Grant.Id, new RevokeConsentGrantBody("cross tenant attempt"), dgCtx, foreign.Proxy, Authority().Authority, new InMemoryAuditWriter()));
+            foreign.Grant.Id, new RevokeConsentGrantBody("cross tenant attempt"), dgCtx, foreign.Proxy, Authority().Authority, new InMemoryAuditWriter(), foreign.Writer));
         status.ShouldBe(StatusCodes.Status404NotFound);
         foreign.Revoked.ShouldBeEmpty();
 
         var local = new CatalogGrantStore(CatalogGrant(TenantA));
         var (appCtx, _) = Caller("app:client-1", app: true);
         var (appStatus, _) = await ExecuteAsync(appCtx, await ConsentApiEndpoints.RevokeCatalogGrantAsync(
-            local.Grant.Id, new RevokeConsentGrantBody("application attempt"), appCtx, local.Proxy, Authority().Authority, new InMemoryAuditWriter()));
+            local.Grant.Id, new RevokeConsentGrantBody("application attempt"), appCtx, local.Proxy, Authority().Authority, new InMemoryAuditWriter(), local.Writer));
         appStatus.ShouldBe(StatusCodes.Status404NotFound);
         local.Revoked.ShouldBeEmpty();
     }
@@ -348,15 +382,40 @@ public sealed class DecisionEndpointTests
                     return Task.FromResult<CatalogVisibilityGrant?>(tenant == grant.TenantId && (Guid)args[1]! == grant.Id ? grant : null);
                 }
 
-                if (m.Name == nameof(ICatalogVisibilityGrantRepository.RevokeAsync))
-                {
-                    Revoked.Add((Guid)args![1]!);
-                    return Task.FromResult(true);
-                }
-
                 return NullFake.UseDefault;
             });
+
+            // Models the transactional contract: the entry commits only with an applied revoke, a failed entry undoes it.
+            Writer = NullFake.Create<ICatalogGrantRevocationWriter>((m, args) =>
+            {
+                if (m.Name != nameof(ICatalogGrantRevocationWriter.RevokeWithAuditAsync))
+                {
+                    return NullFake.UseDefault;
+                }
+
+                if (!RevokeApplies)
+                {
+                    return Task.FromResult(false);
+                }
+
+                if (FailAudit)
+                {
+                    return Task.FromException<bool>(new InvalidOperationException("audit write failed"));
+                }
+
+                Revoked.Add((Guid)args![1]!);
+                CommittedAudit.Add((AuditLogEntry)args[5]!);
+                return Task.FromResult(true);
+            });
         }
+
+        public ICatalogGrantRevocationWriter Writer { get; }
+
+        public bool RevokeApplies { get; init; } = true;
+
+        public bool FailAudit { get; init; }
+
+        public List<AuditLogEntry> CommittedAudit { get; } = [];
 
         public CatalogVisibilityGrant Grant { get; }
 

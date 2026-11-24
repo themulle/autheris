@@ -211,10 +211,71 @@ public sealed class GrantRevokeAuthorityApiIntegrationTests : IClassFixture<Gran
         var response = await RevokeAsync(owner, route);
         response.StatusCode.ShouldBe(HttpStatusCode.OK, await response.Content.ReadAsStringAsync());
 
+        (await ReloadCatalogGrantAsync(seeded.CatalogGrant.Id)).ShouldNotBeNull().IsRevoked.ShouldBeTrue();
+
+        // The success entry is read back from the audit table, committed with the revoke.
+        var entries = await AuditOfAsync(CatalogTarget(seeded));
+        entries.ShouldContain(e => e.EventType == AuditEventTypes.ConsentRevoked &&
+                                   e.DetailsJson!.Contains(seeded.CatalogGrant.Id.ToString("D"), StringComparison.OrdinalIgnoreCase) &&
+                                   e.DetailsJson.Contains("\"Capacity\":\"ContainerOwner\"", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Failed_catalog_revoke_audit_write_leaves_the_grant_active()
+    {
+        var seeded = await SeedAsync();
+        var target = "audit-failure:" + Guid.NewGuid().ToString("N");
         using var scope = _factory.Services.CreateScope();
-        var stored = await scope.ServiceProvider.GetRequiredService<ICatalogVisibilityGrantRepository>()
-            .GetByIdAsync(new TenantId(Tenant), seeded.CatalogGrant.Id);
-        stored.ShouldNotBeNull().IsRevoked.ShouldBeTrue();
+        var writer = scope.ServiceProvider.GetRequiredService<ICatalogGrantRevocationWriter>();
+
+        // PostgreSQL rejects a NUL character in text: the audit insert fails inside the revoke transaction.
+        var broken = RevokedEntry(target, seeded.CatalogGrant.Id, traceId: "trace\0broken");
+        await Should.ThrowAsync<Exception>(() => writer.RevokeWithAuditAsync(
+            new TenantId(Tenant), seeded.CatalogGrant.Id, new Sid("S-1-5-21-9101-OWNER-MEMBER"), "access no longer needed", DateTimeOffset.UtcNow, broken));
+
+        (await ReloadCatalogGrantAsync(seeded.CatalogGrant.Id)).ShouldNotBeNull().IsRevoked.ShouldBeFalse();
+        (await AuditOfAsync(target)).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Catalog_revoke_that_does_not_apply_writes_no_audit_entry()
+    {
+        var target = "not-applied:" + Guid.NewGuid().ToString("N");
+        using var scope = _factory.Services.CreateScope();
+        var writer = scope.ServiceProvider.GetRequiredService<ICatalogGrantRevocationWriter>();
+        var missing = Guid.NewGuid();
+
+        var revoked = await writer.RevokeWithAuditAsync(
+            new TenantId(Tenant), missing, new Sid("S-1-5-21-9101-OWNER-MEMBER"), "access no longer needed", DateTimeOffset.UtcNow, RevokedEntry(target, missing));
+
+        revoked.ShouldBeFalse();
+        (await AuditOfAsync(target)).ShouldBeEmpty();
+    }
+
+    private static string CatalogTarget(Seeded seeded) => $"{ContainerKind.Domain.ToSqlString()}:{seeded.DomainId:D}";
+
+    private static AuditLogEntry RevokedEntry(string target, Guid grantId, string? traceId = null) => new()
+    {
+        TenantId = new TenantId(Tenant),
+        EventType = AuditEventTypes.ConsentRevoked,
+        ActorSid = new Sid("S-1-5-21-9101-OWNER-MEMBER"),
+        TargetTable = target,
+        Decision = "REVOKED",
+        TraceId = traceId ?? Guid.NewGuid().ToString("N"),
+        DetailsJson = "{\"CatalogGrantId\":\"" + grantId.ToString("D") + "\",\"GrantKind\":\"CATALOG\"}"
+    };
+
+    private async Task<CatalogVisibilityGrant?> ReloadCatalogGrantAsync(Guid id)
+    {
+        using var scope = _factory.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<ICatalogVisibilityGrantRepository>().GetByIdAsync(new TenantId(Tenant), id);
+    }
+
+    private async Task<IReadOnlyList<AuditLogEntry>> AuditOfAsync(string target)
+    {
+        using var scope = _factory.Services.CreateScope();
+        return await scope.ServiceProvider.GetRequiredService<IAuditLogRepository>()
+            .QueryAuditLogsAsync(targetTable: target, tenantId: new TenantId(Tenant));
     }
 
     [Fact]

@@ -145,6 +145,7 @@ public static partial class ConsentApiEndpoints
         [FromServices] ICatalogVisibilityGrantRepository catalogGrants,
         [FromServices] GrantRevokeAuthority revokeAuthority,
         [FromServices] IAuditWriter auditWriter,
+        [FromServices] ICatalogGrantRevocationWriter revocationWriter,
         IIdempotencyStore? idempotencyStore = null,
         IRateLimiterService? rateLimiter = null,
         IOptions<GovernanceOptions>? governanceOptions = null,
@@ -216,31 +217,31 @@ public static partial class ConsentApiEndpoints
             return ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, ConsentRevocationForbiddenException.FixedMessage, context);
         }
 
-        var revoked = await catalogGrants.RevokeAsync(grant.TenantId, grant.Id, userSid.Value, reason, now, null, ct).ConfigureAwait(false);
+        // The success audit entry is written in the transaction of the revoke: no entry without the revoke, no revoke
+        // without the entry (a failed audit write rolls the revoke back and surfaces as an error).
+        var audit = new AuditLogEntry
+        {
+            TenantId = grant.TenantId,
+            OccurredAt = now,
+            EventType = AuditEventTypes.ConsentRevoked,
+            ActorSid = userSid.Value,
+            TargetTable = target,
+            Decision = "REVOKED",
+            TraceId = Guid.NewGuid().ToString("N"),
+            DetailsJson = JsonSerializer.Serialize(new
+            {
+                CatalogGrantId = grant.Id,
+                GrantKind = "CATALOG",
+                Grantee = grant.GranteeSid.Value,
+                Reason = reason,
+                Capacity = verified.ToString()
+            })
+        };
+        var revoked = await revocationWriter.RevokeWithAuditAsync(grant.TenantId, grant.Id, userSid.Value, reason, now, audit, ct).ConfigureAwait(false);
         if (!revoked)
         {
             return ApiProblems.Conflict(ApiErrorCodes.GrantAlreadyEnded, $"Catalog grant '{id}' has already expired or been revoked.", context);
         }
-
-        await auditWriter.RecordRequiredAsync(
-            new AuditLogEntry
-            {
-                TenantId = grant.TenantId,
-                EventType = AuditEventTypes.ConsentRevoked,
-                ActorSid = userSid.Value,
-                TargetTable = target,
-                Decision = "REVOKED",
-                TraceId = Guid.NewGuid().ToString("N"),
-                DetailsJson = JsonSerializer.Serialize(new
-                {
-                    CatalogGrantId = grant.Id,
-                    GrantKind = "CATALOG",
-                    Grantee = grant.GranteeSid.Value,
-                    Reason = reason,
-                    Capacity = verified.ToString()
-                })
-            },
-            ct).ConfigureAwait(false);
 
         var responsePayload = new { grantId = id, status = "REVOKED", revokedAt = now };
         await StoreIdempotentResponseAsync(idempotencyStore, scopedKey, bodyHash, StatusCodes.Status200OK, responsePayload, null, ct).ConfigureAwait(false);

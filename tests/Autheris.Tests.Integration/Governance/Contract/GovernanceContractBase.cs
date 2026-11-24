@@ -120,6 +120,7 @@ public sealed class GovernanceTestStore : IAsyncDisposable
     public IGovernanceDomainRepository GovernanceDomains => Services.GetRequiredService<IGovernanceDomainRepository>();
     public IAccessPolicySettingsRepository AccessPolicySettings => Services.GetRequiredService<IAccessPolicySettingsRepository>();
     public ICatalogVisibilityGrantRepository CatalogVisibilityGrants => Services.GetRequiredService<ICatalogVisibilityGrantRepository>();
+    public ICatalogGrantRevocationWriter CatalogGrantRevocations => Services.GetRequiredService<ICatalogGrantRevocationWriter>();
 
     /// <summary>
     /// Builds a real PDP over the store's governance services (the API-level PDP registration lives in the gateway
