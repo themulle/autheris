@@ -32,8 +32,9 @@ public sealed class VirtualFilterBindingServiceValidationTests : IDisposable
     private static readonly VirtualFilterActor DbtActor = new(new Sid("S-1-5-21-DBT-SYNC"), IsSync: true);
 
     // The direct dbt governance import runs as the calling user in the caller's tenant (the tenant of DavidProfile / DavidFilter).
+    // Access profiles are declarative grants: only a Data Governance caller may activate one (decision D5).
     private static readonly DbtGovernanceImportCaller ImportCaller =
-        new(new VirtualFilterActor(new Sid("S-1-5-21-LWE-GOVADMIN"), IsSync: false), Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile().TenantId);
+        new(new VirtualFilterActor(new Sid("S-1-5-21-LWE-GOVADMIN"), IsSync: false, IsDataGovernance: true), Autheris.Tests.Unit.VirtualFilters.VirtualFilterTestData.DavidProfile().TenantId);
 
     private readonly PostgreSqlGovernanceRepository _repository = GovernanceTestDatabase.CreateRepository(
         Substitute.For<IEpochValidationService>(),

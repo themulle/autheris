@@ -22,7 +22,10 @@ using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
-/// <summary>Single approval of virtual filters and access profiles: a save activates, SQL filters follow the owner-group rule, no self-widening.</summary>
+/// <summary>
+/// Single approval of virtual filters and access profiles: a save activates, SQL filters follow the owner-group rule, no self-widening.
+/// SR15-06: replaces the former four-eyes approval; only Data Governance (or the file sync) changes an access profile.
+/// </summary>
 public sealed class VirtualFilterSingleApprovalTests
 {
     private static readonly TenantId Tenant = new("tenant_lwe");
