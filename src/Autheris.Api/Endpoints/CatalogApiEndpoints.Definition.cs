@@ -9,12 +9,15 @@ using Autheris.Api.Errors;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
 using Autheris.Application.Catalog.Services;
+using Autheris.Application.Sql.Services;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Options;
 
 public static partial class CatalogApiEndpoints
 {
@@ -29,6 +32,7 @@ public static partial class CatalogApiEndpoints
         CatalogDatasetDefinitionRequest? request,
         [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Common.Interfaces.ITableMetadataRepository metadataRepository,
         [Microsoft.AspNetCore.Mvc.FromServices] Autheris.Application.Audit.IAuditWriter auditWriter,
+        [Microsoft.AspNetCore.Mvc.FromServices] IOptions<GatewayOptions> gatewayOptions,
         HttpContext httpContext,
         CancellationToken ct)
     {
@@ -69,6 +73,19 @@ public static partial class CatalogApiEndpoints
         {
             return ApiProblems.BadRequest(ApiErrorCodes.CatalogReservedSourceName, "The dataset references a reserved system schema, catalog or dictionary view name.", httpContext);
         }
+
+        var connectionOptions = SqlDataSourceResolver.ResolveConnectionOptions(gatewayOptions.Value, tableId.Domain);
+        if (connectionOptions == null)
+        {
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The specified dataSource is not configured.", httpContext);
+        }
+
+        if (!DataSourceProvider.TryResolveDialect(connectionOptions.Provider, out var dialect))
+        {
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The configured dataSource provider does not map to a supported SQL dialect.", httpContext);
+        }
+
+        var resolvedSourceType = dialect.ToString();
 
         if (request.Columns == null || request.Columns.Count == 0)
         {
@@ -171,6 +188,11 @@ public static partial class CatalogApiEndpoints
         TableMetadata metadata;
         if (existing != null)
         {
+            if (existing.Table.DataSourceType != DataSourceType.Sql)
+            {
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "The existing dataset is not a SQL dataset.", httpContext);
+            }
+
             var existingColsByName = existing.Columns.ToDictionary(c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
             var columns = request.Columns.Select(c => new TableColumn
             {
@@ -185,6 +207,7 @@ public static partial class CatalogApiEndpoints
 
             metadata = existing with
             {
+                Table = existing.Table with { SourceType = resolvedSourceType },
                 Columns = columns,
                 TenantColumnName = request.TenantColumn ?? existing.TenantColumnName,
                 PrimaryKeyColumns = pkCols,
@@ -217,7 +240,7 @@ public static partial class CatalogApiEndpoints
                     SourceName = tableId.Domain,
                     SchemaName = tableId.Schema,
                     TableName = tableId.TableName,
-                    SourceType = request.DataSource,
+                    SourceType = resolvedSourceType,
                     DisplayName = tableId.TableName,
                     IsActive = true,
                     DataSourceType = DataSourceType.Sql
