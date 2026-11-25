@@ -54,5 +54,6 @@ public sealed record McpSessionContext(
     bool IsReadOnly = false,
     IReadOnlyDictionary<string, string>? AdditionalClaims = null,
     DateTimeOffset? GroupsExpireAt = null,
-    bool GroupsDegraded = false
+    bool GroupsDegraded = false,
+    bool IsAppOnly = false
 );

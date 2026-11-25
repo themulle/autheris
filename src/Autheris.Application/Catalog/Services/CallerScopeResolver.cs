@@ -75,7 +75,7 @@ public static class CallerScopeResolver
             return CallerScope.None;
         }
 
-        if (!user.GetUserRoles().Contains(GovernanceAdminRole))
+        if (!Autheris.Application.Security.GatewayRoleEvaluator.HasTenantBoundRole(user, GovernanceAdminRole, tenant.Value))
         {
             return CallerScope.Subject;
         }
@@ -104,7 +104,31 @@ public static class CallerScopeResolver
     public static bool IsAdminView(CallerScope scope) => scope is CallerScope.Global or CallerScope.CatalogOwner or CallerScope.Tenant;
 
     /// <summary>True when the principal holds the GovernanceAdmin role (used for the diagnostic of administrators without a resolvable tenant).</summary>
-    public static bool HoldsGovernanceAdminRole(ClaimsPrincipal? user) => user?.GetUserRoles().Contains(GovernanceAdminRole) == true;
+    public static bool HoldsGovernanceAdminRole(ClaimsPrincipal? user)
+    {
+        if (user is null)
+        {
+            return false;
+        }
+
+        var claim = TenantClaimReader.Read(user);
+        if (claim.Kind == ClaimTenantKind.Valid)
+        {
+            return Autheris.Application.Security.GatewayRoleEvaluator.HasTenantBoundRole(user, GovernanceAdminRole, claim.Tenant.Value);
+        }
+
+        foreach (var raw in user.GetUserRoles())
+        {
+            if (GatewayRoleExtensions.TryParseGatewayRoleValue(raw, out var roleTenant, out var parsed) &&
+                parsed == GatewayRole.GovernanceAdmin &&
+                roleTenant != "*")
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 
     /// <summary>True when the principal carries an invalid, reserved or conflicting tenant claim (resolution outcome Invalid).</summary>
     public static bool HasInvalidTenantClaim(ClaimsPrincipal? user) =>

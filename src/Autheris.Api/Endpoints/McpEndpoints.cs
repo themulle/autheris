@@ -128,6 +128,11 @@ public static class McpEndpoints
     /// of the current request.
     /// </summary>
     private static bool IsAppOnlyIdentity(ClaimsPrincipal principal, string userSid) =>
+        Autheris.Application.Catalog.External.AppOnlyPrincipal.Is(principal) ||
+        principal.HasClaim(c =>
+            string.Equals(c.Type, "autheris:subject_kind", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(c.Issuer, IdentityClaimIssuers.Pipeline, StringComparison.Ordinal) &&
+            string.Equals(c.Value, "sp", StringComparison.OrdinalIgnoreCase)) ||
         string.Equals(principal.FindFirst("idtyp")?.Value, "app", StringComparison.OrdinalIgnoreCase) ||
         new[] { "client_id", "appid", "azp" }.Any(t =>
             string.Equals(principal.FindFirst(t)?.Value, userSid, StringComparison.OrdinalIgnoreCase));
@@ -152,6 +157,7 @@ public static class McpEndpoints
         var principalId = (isAuthenticated
                 ? principal.FindFirst("client_id")?.Value
                   ?? principal.FindFirst("appid")?.Value
+                  ?? principal.FindFirst("azp")?.Value
                   ?? principal.FindFirst(ClaimTypes.NameIdentifier)?.Value
                   ?? principal.FindFirst("sub")?.Value
                   ?? principal.FindFirst("oid")?.Value

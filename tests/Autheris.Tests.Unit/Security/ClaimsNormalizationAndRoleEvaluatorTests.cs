@@ -219,11 +219,18 @@ public class ClaimsNormalizationAndRoleEvaluatorTests
             AuthenticationScheme = "Bearer"
         };
 
-        // Colon-prefixed roles must never satisfy global administrative roles
+        // Colon-prefixed ClusterAdmin never satisfies ClusterAdmin; matching tenant-prefixed GovernanceAdmin is allowed.
         secContext.IsClusterAdmin.ShouldBeFalse();
         secContext.HasRole(GatewayRole.ClusterAdmin).ShouldBeFalse();
-        secContext.HasRole(GatewayRole.GovernanceAdmin).ShouldBeFalse();
-        secContext.HasAnyRole(GatewayRole.ClusterAdmin, GatewayRole.GovernanceAdmin).ShouldBeFalse();
+        secContext.HasRole(GatewayRole.GovernanceAdmin).ShouldBeTrue();
+        secContext.HasAnyRole(GatewayRole.ClusterAdmin).ShouldBeFalse();
+        secContext.HasAnyRole(GatewayRole.ClusterAdmin, GatewayRole.GovernanceAdmin).ShouldBeTrue();
+
+        var foreignOrWildcard = secContext with
+        {
+            TenantRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "tenant-2:GovernanceAdmin", "*:GovernanceAdmin" }
+        };
+        foreignOrWildcard.HasRole(GatewayRole.GovernanceAdmin).ShouldBeFalse();
     }
     [Fact]
     public void API7_InvalidTenantClaim_DoesNotThrowDuringNormalization()

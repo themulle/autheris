@@ -93,7 +93,7 @@ public class GatewayRoleParsingTests
     public void GetEffectiveRoles_WellFormedValues_StillResolve()
     {
         var user = new ClaimsPrincipal(new ClaimsIdentity(
-            [new Claim(ClaimTypes.Role, "ClusterAdmin"), new Claim(ClaimTypes.Role, "tenant-1:SchemaPublisher"), new Claim(ClaimTypes.Role, "*:Consumer")],
+            [new Claim(ClaimTypes.Role, "ClusterAdmin"), new Claim(ClaimTypes.Role, "tenant-1:SchemaPublisher"), new Claim(ClaimTypes.Role, "tenant-2:Consumer"), new Claim(ClaimTypes.Role, "*:Consumer")],
             "Test"));
 
         var global = _evaluator.GetEffectiveRoles(user);
@@ -102,6 +102,9 @@ public class GatewayRoleParsingTests
         _evaluator.GetEffectiveRoles(user, "tenant-1").ShouldContain(GatewayRole.SchemaPublisher);
         _evaluator.GetEffectiveRoles(user, "tenant-2").ShouldContain(GatewayRole.Consumer);
         _evaluator.GetEffectiveRoles(user, "tenant-2").ShouldNotContain(GatewayRole.SchemaPublisher);
+
+        var wildcardOnly = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Role, "*:Consumer")], "Test"));
+        _evaluator.GetEffectiveRoles(wildcardOnly, "tenant-2").ShouldBeEmpty();
     }
 
     [Theory]

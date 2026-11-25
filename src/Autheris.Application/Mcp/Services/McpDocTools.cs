@@ -65,14 +65,18 @@ public static partial class McpDocTools
         return DocAccessPolicy.ResolveReader(caller);
     }
 
-    private static DocCaller BuildCaller(McpSessionContext sessionContext) =>
-        new(
+    private static DocCaller BuildCaller(McpSessionContext sessionContext)
+    {
+        var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext);
+        return new DocCaller(
             IsCanonicalClusterAdmin: IsClusterAdmin(sessionContext),
-            IsGovernanceAdmin: (sessionContext.Roles ?? []).Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase),
+            IsGovernanceAdmin: Autheris.Application.Security.GatewayRoleEvaluator.HasTenantBoundRole(
+                principal, nameof(GatewayRole.GovernanceAdmin), sessionContext.TenantId),
             TenantId: sessionContext.TenantId,
             AuthorSid: !string.IsNullOrWhiteSpace(sessionContext.UserSid) ? sessionContext.UserSid : sessionContext.ServicePrincipalId,
             HasSession: true,
             IsReadOnlySession: sessionContext.IsReadOnly);
+    }
 
     private static bool IsClusterAdmin(McpSessionContext sessionContext) =>
         (sessionContext.Roles ?? []).Any(Autheris.Domain.Security.ClusterAdminPolicy.IsClusterAdminRole);
@@ -566,15 +570,14 @@ public static partial class McpDocTools
                 return McpToolError.Serialize("FORBIDDEN", "Cannot deposit documentation in a read-only MCP session.");
             }
 
-            var roles = sessionContext.Roles ?? [];
-            bool isAdmin = IsClusterAdmin(sessionContext) ||
-                           roles.Contains("GovernanceAdmin", StringComparer.OrdinalIgnoreCase);
+            var preCaller = BuildCaller(sessionContext);
+            bool isAdmin = preCaller.IsCanonicalClusterAdmin || preCaller.IsGovernanceAdmin;
             if (!isAdmin)
             {
                 return McpToolError.Serialize("FORBIDDEN", "Depositing documentation requires ClusterAdmin or GovernanceAdmin role.");
             }
 
-            if (!IsClusterAdmin(sessionContext) && string.IsNullOrWhiteSpace(sessionContext.TenantId))
+            if (!preCaller.IsCanonicalClusterAdmin && string.IsNullOrWhiteSpace(sessionContext.TenantId))
             {
                 return McpToolError.Serialize("FORBIDDEN", "Depositing documentation requires a tenant-bound session.");
             }

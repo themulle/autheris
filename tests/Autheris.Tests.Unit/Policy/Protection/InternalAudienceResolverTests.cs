@@ -205,4 +205,32 @@ public sealed class InternalAudienceResolverTests
             groups: [EmpGroupSid]);
         InternalAudienceResolver.IsInternal(expired, DefaultPolicy(), realm: WorkforceRealm()).ShouldBeFalse();
     }
+
+    [Fact]
+    public void Mcp_application_identity_kind_classified_as_service_principal_without_idtyp()
+    {
+        var untrustedClaims = BaseWorkforceClaims()
+            .Append(new Claim(Autheris.Application.Mcp.Services.McpProtocolHandler.IdentityKindClaimType,
+                Autheris.Application.Mcp.Services.McpProtocolHandler.ApplicationIdentityKind))
+            .Append(new Claim("azp", "untrusted-sp-client"));
+
+        var untrustedSubject = BuildSubject(untrustedClaims);
+        InternalAudienceResolver.IsInternal(
+                untrustedSubject,
+                DefaultPolicy(requireMemberIndicator: false, trustedSpClients: [TrustedAppId]),
+                realm: WorkforceRealm(null))
+            .ShouldBeFalse();
+
+        var trustedClaims = BaseWorkforceClaims()
+            .Append(new Claim(Autheris.Application.Mcp.Services.McpProtocolHandler.IdentityKindClaimType,
+                Autheris.Application.Mcp.Services.McpProtocolHandler.ApplicationIdentityKind))
+            .Append(new Claim("azp", TrustedAppId));
+
+        var trustedSubject = BuildSubject(trustedClaims);
+        InternalAudienceResolver.IsInternal(
+                trustedSubject,
+                DefaultPolicy(requireMemberIndicator: false, trustedSpClients: [TrustedAppId]),
+                realm: WorkforceRealm(TrustedAppId))
+            .ShouldBeTrue();
+    }
 }

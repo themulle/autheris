@@ -108,7 +108,7 @@ public sealed class GatewayMcpQueryExecutorPrincipalTests
         capturedGdprCaller.ShouldBe(curatedContext);
         capturedGdprCaller.UserSid.ShouldNotBe(new Sid("S-1-5-21-AMBIENT-HTTP"));
 
-        // 2. Tenant-prefixed admin roles never confer global GovernanceAdmin or ClusterAdmin flags.
+        // 2. Tenant-prefixed ClusterAdmin never confers ClusterAdmin; tenant-prefixed GovernanceAdmin applies to its own tenant only.
         var prefixedSession = new McpSessionContext(
             "sess-prefixed",
             "agent-client-2",
@@ -121,7 +121,13 @@ public sealed class GatewayMcpQueryExecutorPrincipalTests
         var prefixedPrincipal = GraphQlCallerPrincipal.BuildMcpSessionPrincipal(prefixedSession);
         var prefixedContext = GraphQlCallerPrincipal.ResolveCallerSecurityContext(prefixedPrincipal, new TenantId("tenant-a"));
         prefixedContext.IsClusterAdmin.ShouldBeFalse();
-        prefixedContext.IsGovernanceAdmin.ShouldBeFalse();
+        prefixedContext.IsGovernanceAdmin.ShouldBeTrue();
+
+        var crossTenantPrefixedSession = prefixedSession with { Roles = ["tenant-b:GovernanceAdmin"] };
+        var crossTenantPrincipal = GraphQlCallerPrincipal.BuildMcpSessionPrincipal(crossTenantPrefixedSession);
+        var crossTenantContext = GraphQlCallerPrincipal.ResolveCallerSecurityContext(crossTenantPrincipal, new TenantId("tenant-a"));
+        crossTenantContext.IsClusterAdmin.ShouldBeFalse();
+        crossTenantContext.IsGovernanceAdmin.ShouldBeFalse();
 
         // 3. App-only session keeps zero group SIDs even if session.GroupSids is populated, and query_graphql uses the shared helper.
         var appSession = new McpSessionContext(

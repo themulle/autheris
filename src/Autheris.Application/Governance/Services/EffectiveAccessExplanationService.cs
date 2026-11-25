@@ -68,7 +68,7 @@ public sealed class EffectiveAccessExplanationService(
         var metadata = await metadataRepository.GetTableMetadataAsync(table, ct).ConfigureAwait(false);
         var tenantId = principal.GetTenantId();
         var roles = principal.GetUserRoles();
-        var isAdmin = IsGovernanceAdmin(principal, roles);
+        var isAdmin = IsGovernanceAdmin(principal, tenantId);
 
         if (metadata == null)
         {
@@ -244,8 +244,9 @@ public sealed class EffectiveAccessExplanationService(
         TableNotFoundMessage,
         null);
 
-    private static bool IsGovernanceAdmin(ClaimsPrincipal principal, IReadOnlySet<string> roles) =>
-        roles.Contains("GovernanceAdmin") || ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+    private static bool IsGovernanceAdmin(ClaimsPrincipal principal, TenantId tenantId) =>
+        Autheris.Application.Security.GatewayRoleEvaluator.HasTenantBoundRole(principal, nameof(GatewayRole.GovernanceAdmin), tenantId.Value) ||
+        ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
 
     /// <summary>Data owner or active delegate of the table (fail-closed: errors mean no).</summary>
     private async Task<bool> IsOwnerOrDelegateAsync(Sid userSid, TableIdentifier table, CancellationToken ct)

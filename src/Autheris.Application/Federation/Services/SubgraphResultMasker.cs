@@ -158,6 +158,12 @@ public sealed class SubgraphResultMasker : ISubgraphResultMasker
     public bool IsAdmin(ClaimsPrincipal? principal)
     {
         if (principal == null) return false;
+        if (_roleEvaluator is Autheris.Application.Security.GatewayRoleEvaluator concrete)
+        {
+            return concrete.HasRole(principal, Autheris.Domain.Security.GatewayRole.ClusterAdmin) ||
+                   concrete.HasGovernanceAdminRole(principal);
+        }
+
         return _roleEvaluator.HasAnyRole(principal, AdminRoles);
     }
 

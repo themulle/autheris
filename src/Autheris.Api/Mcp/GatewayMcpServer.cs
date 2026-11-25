@@ -482,7 +482,8 @@ public static class GatewayMcpServer
             caller.IsReadOnly,
             caller.AdditionalClaims,
             caller.GroupsExpireAt,
-            caller.GroupsDegraded);
+            caller.GroupsDegraded,
+            IsAppOnly: string.IsNullOrWhiteSpace(caller.UserSid));
     }
 
     /// <summary>Low (JSON injection): only well-formed object schemas are passed on; anything else becomes an empty object schema.</summary>

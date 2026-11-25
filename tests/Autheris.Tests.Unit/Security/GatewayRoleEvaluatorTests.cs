@@ -156,4 +156,69 @@ public sealed class GatewayRoleEvaluatorTests
         GatewayPolicies.HasRole(processed, GatewayRole.GovernanceAdmin, "other-tenant").ShouldBeFalse();
     }
 #endif
+
+    [Fact]
+    public void GetEffectiveRoles_And_HasExactRole_RejectWildcards_AndValidateTenantClaims()
+    {
+        var evaluator = new GatewayRoleEvaluator();
+
+        // Wildcard *:Role must never satisfy GetEffectiveRoles, HasRole, or HasExactRole.
+        var wildcard = MakePrincipal(tenantId: "tenant-a", roles: ["*:Consumer", "*:SchemaPublisher", "*:TenantAdmin"]);
+        evaluator.GetEffectiveRoles(wildcard, "tenant-a").ShouldBeEmpty();
+        evaluator.HasRole(wildcard, GatewayRole.Consumer, "tenant-a").ShouldBeFalse();
+        evaluator.HasExactRole(wildcard, nameof(GatewayRole.Consumer), "tenant-a").ShouldBeFalse();
+        evaluator.HasExactRole(wildcard, nameof(GatewayRole.TenantAdmin), "tenant-a").ShouldBeFalse();
+
+        // Invalid tenant claim fails closed in GetEffectiveRoles and HasExactRole, even with ClusterAdmin or matching prefix.
+        var invalidClaim = MakePrincipal(tenantId: "evil<script>tenant", roles: ["ClusterAdmin", "tenant-a:Consumer", "Consumer"]);
+        evaluator.GetEffectiveRoles(invalidClaim, "tenant-a").ShouldBeEmpty();
+        evaluator.HasRole(invalidClaim, GatewayRole.ClusterAdmin).ShouldBeFalse();
+        evaluator.HasExactRole(invalidClaim, nameof(GatewayRole.ClusterAdmin)).ShouldBeFalse();
+        evaluator.HasExactRole(invalidClaim, nameof(GatewayRole.Consumer), "tenant-a").ShouldBeFalse();
+
+        // Cross-tenant tenant_id claim fails closed for non-ClusterAdmin roles in GetEffectiveRoles and HasExactRole.
+        var crossTenant = MakePrincipal(tenantId: "tenant-a", roles: ["Consumer", "tenant-b:Consumer", "tenant-b:TenantAdmin"]);
+        evaluator.GetEffectiveRoles(crossTenant, "tenant-b").ShouldBeEmpty();
+        evaluator.HasRole(crossTenant, GatewayRole.Consumer, "tenant-b").ShouldBeFalse();
+        evaluator.HasExactRole(crossTenant, nameof(GatewayRole.Consumer), "tenant-b").ShouldBeFalse();
+        evaluator.HasExactRole(crossTenant, nameof(GatewayRole.TenantAdmin), "tenant-b").ShouldBeFalse();
+        evaluator.GetEffectiveRoles(crossTenant, "tenant-a").ShouldBe([GatewayRole.Consumer]);
+
+        // Canonical ClusterAdmin remains cross-tenant for global ClusterAdmin, never for foreign tenant-scoped product roles.
+        var clusterCrossTenant = MakePrincipal(tenantId: "tenant-a", roles: ["ClusterAdmin", "tenant-b:DataProductAdmin"]);
+        evaluator.GetEffectiveRoles(clusterCrossTenant, "tenant-b").ShouldBe([GatewayRole.ClusterAdmin]);
+        evaluator.HasRole(clusterCrossTenant, GatewayRole.Consumer, "tenant-b").ShouldBeTrue();
+        evaluator.HasExactRole(clusterCrossTenant, nameof(GatewayRole.DataProductAdmin), "tenant-b").ShouldBeFalse();
+    }
+
+    [Fact]
+    public void SecurityPrincipalContext_HasRole_SupportsTenantPrefixedGovernanceAdmin_WhileKeepingClusterAdminGlobalOnly()
+    {
+        var matching = new SecurityPrincipalContext
+        {
+            UserSid = new Sid("S-1-5-21-GOV"),
+            ResolvedTenant = new TenantId("tenant-a"),
+            GroupSids = new HashSet<Sid>(),
+            TenantRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "tenant-a:GovernanceAdmin" },
+            ClusterRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase),
+            AuthenticationScheme = "Bearer"
+        };
+
+        matching.HasRole(GatewayRole.GovernanceAdmin).ShouldBeTrue();
+        matching.HasRole(GatewayRole.SecurityAuditor).ShouldBeTrue();
+        matching.HasRole(GatewayRole.SchemaPublisher).ShouldBeTrue();
+        matching.HasRole(GatewayRole.Consumer).ShouldBeTrue();
+        matching.HasRole(GatewayRole.ClusterAdmin).ShouldBeFalse();
+        matching.HasRole(GatewayRole.TenantAdmin).ShouldBeFalse();
+
+        var crossTenant = matching with
+        {
+            TenantRoles = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "tenant-b:GovernanceAdmin", "*:GovernanceAdmin", "tenant-a:ClusterAdmin" }
+        };
+        crossTenant.HasRole(GatewayRole.GovernanceAdmin).ShouldBeFalse();
+        crossTenant.HasRole(GatewayRole.ClusterAdmin).ShouldBeFalse();
+
+        var noTenant = matching with { ResolvedTenant = null };
+        noTenant.HasRole(GatewayRole.GovernanceAdmin).ShouldBeFalse();
+    }
 }

@@ -43,7 +43,9 @@ public static class McpProtocolHandler
     public static bool IsAllowedAdditionalClaimType(string? claimType) =>
         !string.IsNullOrWhiteSpace(claimType) &&
         !RoleAndGroupClaimTypes.Contains(claimType) &&
-        !string.Equals(claimType, IdentityKindClaimType, StringComparison.Ordinal) &&
+        !string.Equals(claimType, IdentityKindClaimType, StringComparison.OrdinalIgnoreCase) &&
+        !string.Equals(claimType, "idtyp", StringComparison.OrdinalIgnoreCase) &&
+        !string.Equals(claimType, "autheris:subject_kind", StringComparison.OrdinalIgnoreCase) &&
         !string.Equals(claimType, Autheris.Domain.Security.TokenAccessScope.ClaimType, StringComparison.Ordinal) &&
         !string.Equals(claimType, "client_id", StringComparison.OrdinalIgnoreCase) &&
         !string.Equals(claimType, "azp", StringComparison.OrdinalIgnoreCase) &&
@@ -58,7 +60,7 @@ public static class McpProtocolHandler
     {
         if (session == null) return null;
         var identity = new System.Security.Claims.ClaimsIdentity("MCP");
-        var isAppOnly = string.IsNullOrWhiteSpace(session.UserSid);
+        var isAppOnly = session.IsAppOnly || string.IsNullOrWhiteSpace(session.UserSid);
         var sid = !isAppOnly ? session.UserSid : session.ServicePrincipalId;
         if (!string.IsNullOrWhiteSpace(sid))
         {
@@ -68,14 +70,15 @@ public static class McpProtocolHandler
         if (isAppOnly)
         {
             identity.AddClaim(new System.Security.Claims.Claim(IdentityKindClaimType, ApplicationIdentityKind));
+            identity.AddClaim(new System.Security.Claims.Claim("idtyp", "app"));
         }
         if (!string.IsNullOrWhiteSpace(session.TenantId))
         {
             identity.AddClaim(new System.Security.Claims.Claim("tenant_id", session.TenantId));
         }
-        var hasDistinctClientId = !string.IsNullOrWhiteSpace(session.ServicePrincipalId)
-            && !string.Equals(session.ServicePrincipalId, sid, StringComparison.Ordinal);
-        if (hasDistinctClientId)
+        var emitClientId = !string.IsNullOrWhiteSpace(session.ServicePrincipalId)
+            && (isAppOnly || !string.Equals(session.ServicePrincipalId, sid, StringComparison.Ordinal));
+        if (emitClientId)
         {
             identity.AddClaim(new System.Security.Claims.Claim("client_id", session.ServicePrincipalId!));
             identity.AddClaim(new System.Security.Claims.Claim("azp", session.ServicePrincipalId!));

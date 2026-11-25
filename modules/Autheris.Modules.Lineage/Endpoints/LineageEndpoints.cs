@@ -41,11 +41,6 @@ internal static class LineageEndpoints
         HttpContext context,
         CancellationToken ct)
     {
-        if (!RoleEvaluator.HasRole(context.User, GatewayRole.GovernanceAdmin))
-        {
-            return Results.StatusCode(StatusCodes.Status403Forbidden);
-        }
-
         TenantId tenantId;
         try
         {
@@ -60,6 +55,14 @@ internal static class LineageEndpoints
             return Results.StatusCode(StatusCodes.Status401Unauthorized);
         }
         catch (ArgumentException)
+        {
+            return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        var hasRole = RoleEvaluator is GatewayRoleEvaluator gre
+            ? gre.HasRole(context.User, GatewayRole.ClusterAdmin) || gre.HasGovernanceAdminRole(context.User, tenantId.Value)
+            : RoleEvaluator.HasRole(context.User, GatewayRole.GovernanceAdmin, tenantId.Value);
+        if (!hasRole)
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);
         }
