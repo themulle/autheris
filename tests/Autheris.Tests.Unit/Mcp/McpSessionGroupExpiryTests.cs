@@ -92,7 +92,7 @@ public sealed class McpSessionGroupExpiryTests
         var consentRepo = new InMemoryConsentRepository(consent);
         var pdp = new AccessDecisionPoint(
             options,
-            new ConsentResolutionService(),
+            new ConsentResolutionService(timeProvider: time),
             consentRepo,
             new InMemoryConsentCacheService(),
             mandatoryFilters: NullMandatoryRowFilterResolver.Instance,

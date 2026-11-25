@@ -32,8 +32,8 @@ public sealed class ExternalCatalogAccessStatusFilterTests
                 GranteeType = GranteeType.User,
                 GranteeSid = new Sid(UserSid),
                 TenantId = new TenantId("tenant-a"),
-                ValidFrom = DateTimeOffset.UtcNow.AddYears(-1),
-                ValidTo = DateTimeOffset.UtcNow.AddYears(1)
+                ValidFrom = ExternalCatalogTestHarness.FixedNow.AddYears(-1),
+                ValidTo = ExternalCatalogTestHarness.FixedNow.AddYears(1)
             });
         }
 

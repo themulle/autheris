@@ -541,8 +541,8 @@ public sealed class EffectiveAccessReportTests
         var auditWriter = new FakeAuditWriter();
         var snapshotProvider = new FakeSnapshotProvider(snapshot);
 
-        var rowScopeCompiler = new RowScopeCompiler(snapshotProvider, catalog: tableRepo);
-        var resolution = new ConsentResolutionService();
+        var rowScopeCompiler = new RowScopeCompiler(snapshotProvider, catalog: tableRepo, timeProvider: time);
+        var resolution = new ConsentResolutionService(timeProvider: time);
         var pdp = new AccessDecisionPoint(
             Options.Create(new GatewayOptions()),
             resolution,

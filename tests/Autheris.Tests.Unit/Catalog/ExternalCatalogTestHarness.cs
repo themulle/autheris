@@ -139,6 +139,7 @@ internal sealed class ExternalCatalogTestHarness : IAsyncDisposable
             Options.Create(gatewayOptions),
             Options.Create(effectiveDiscoveryOptions),
             rateLimiter: rateLimiter,
+            timeProvider: clock,
             logger: NullLogger<DiscoveryService>.Instance);
 
         var services = new ServiceCollection();

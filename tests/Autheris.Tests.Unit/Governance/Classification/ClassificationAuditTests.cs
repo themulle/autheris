@@ -96,7 +96,7 @@ public sealed class ClassificationAuditTests
         var rowFactory = new RowPolicyFactory(new PolicyPredicateRenderer());
         var policy = new TableAccessPolicy(
             new TestInMemoryConsentRepository([consent], filterWindow: false),
-            new ConsentResolutionService(logger: NullLogger<ConsentResolutionService>.Instance),
+            new ConsentResolutionService(logger: NullLogger<ConsentResolutionService>.Instance, timeProvider: time),
             new TestNoOpConsentCache(),
             options,
             new NoOpMandatoryRowFilterResolver(),
