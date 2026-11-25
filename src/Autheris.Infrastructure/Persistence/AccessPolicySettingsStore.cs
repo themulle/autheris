@@ -14,7 +14,8 @@ namespace Autheris.Infrastructure.Persistence;
 public sealed class AccessPolicySettingsStore(
     IGovernanceSqlDialect dialect,
     TimeProvider? timeProvider = null,
-    IGovernanceChangeNotifier? changeNotifier = null) : IAccessPolicySettingsRepository
+    IGovernanceChangeNotifier? changeNotifier = null,
+    IGovernanceWriteInvalidator? writeInvalidator = null) : IAccessPolicySettingsRepository
 {
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -53,7 +54,7 @@ public sealed class AccessPolicySettingsStore(
 
     private readonly IGovernanceSqlDialect _dialect = dialect ?? throw new ArgumentNullException(nameof(dialect));
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
-    private readonly IGovernanceChangeNotifier? _changeNotifier = changeNotifier;
+    private readonly IGovernanceWriteInvalidator _writeInvalidator = writeInvalidator ?? new GovernanceWriteInvalidator(changeNotifier: changeNotifier, timeProvider: timeProvider);
     private bool IsSqlServer => _dialect is SqlServerGovernanceDialect;
 
     public async Task<StoredTenantAccessPolicy?> GetAsync(TenantId tenant, CancellationToken ct = default)
@@ -122,9 +123,9 @@ public sealed class AccessPolicySettingsStore(
                 return (false, (Result: new AccessPolicyWriteResult(AccessPolicyWriteStatus.Conflict), Epoch: 0L));
             }, ct).ConfigureAwait(false);
 
-            if (outcome.Result.Succeeded && _changeNotifier is not null)
+            if (outcome.Result.Succeeded)
             {
-                await _changeNotifier.NotifyAsync(new GovernanceChangeEvent(tenantId, outcome.Epoch, null, now), CancellationToken.None).ConfigureAwait(false);
+                await _writeInvalidator.InvalidateWideAsync(tenant, governanceEpoch: outcome.Epoch, occurredAtUtc: now, ct: CancellationToken.None).ConfigureAwait(false);
             }
 
             return outcome.Result;
@@ -153,9 +154,9 @@ public sealed class AccessPolicySettingsStore(
             return (false, (Deleted: false, Epoch: 0L));
         }, ct).ConfigureAwait(false);
 
-        if (outcome.Deleted && _changeNotifier is not null)
+        if (outcome.Deleted)
         {
-            await _changeNotifier.NotifyAsync(new GovernanceChangeEvent(tenantId, outcome.Epoch, null, now), CancellationToken.None).ConfigureAwait(false);
+            await _writeInvalidator.InvalidateWideAsync(tenant, governanceEpoch: outcome.Epoch, occurredAtUtc: now, ct: CancellationToken.None).ConfigureAwait(false);
         }
 
         return outcome.Deleted;

@@ -76,8 +76,7 @@ internal static class ProductCatalogOwnerOperations
             throw;
         }
 
-        await repo.InvalidateTableEpochAsync(catalogObject, ct).ConfigureAwait(false);
-        await repo.PublishCatalogChangedEventAsync(version, ct).ConfigureAwait(false);
+        await repo.WriteInvalidator.InvalidateTablesAsync(tenant, [catalogObject], version, repo.InvalidateTableMetadata, ct).ConfigureAwait(false);
     }
 
     private static async Task<string?> FindTableAsync(GovernanceRepository repo, DbConnection conn, DbTransaction tx, TableIdentifier table, CancellationToken ct)

@@ -95,7 +95,8 @@ public static partial class GatewayGovernanceServiceExtensions
                 sp.GetRequiredService<Autheris.Application.Governance.Protection.ProtectionSnapshotProvider>(),
                 sp.GetService<TimeProvider>(),
                 sp.GetService<Autheris.Application.Products.IDataProductRepository>(),
-                sp.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>()));
+                sp.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>(),
+                sp.GetService<Autheris.Application.Governance.Caching.IGovernanceWriteInvalidator>()));
     }
 
     private static void AddGovernanceProtectionCaching(IServiceCollection services)
@@ -106,6 +107,13 @@ public static partial class GatewayGovernanceServiceExtensions
             .ValidateOnStart();
         services.AddSingleton<Autheris.Application.Governance.Caching.IGovernanceChangeNotifier, RedisGovernanceChangeChannel>();
         services.AddSingleton<Autheris.Application.Governance.Caching.GovernanceEpochProvider>();
+        services.AddSingleton<Autheris.Application.Governance.Caching.IGovernanceWriteInvalidator>(sp =>
+            new Autheris.Application.Governance.Caching.GovernanceWriteInvalidator(
+                sp.GetService<IEpochValidationService>(),
+                sp.GetService<Autheris.Application.Governance.Caching.IGovernanceChangeNotifier>(),
+                null,
+                sp.GetService<IEventBus>(),
+                sp.GetService<TimeProvider>()));
         services.AddSingleton<Autheris.Application.Governance.Caching.IGovernanceCacheInvalidator>(sp =>
             sp.GetRequiredService<Autheris.Application.Governance.Caching.GovernanceEpochProvider>());
         services.AddSingleton<Autheris.Application.Governance.Protection.ProtectionSnapshotProvider>(sp =>
@@ -315,7 +323,8 @@ public static partial class GatewayGovernanceServiceExtensions
             new CatalogVisibilityGrantStore(
                 sp.GetRequiredService<IGovernanceSqlDialect>(),
                 sp.GetService<TimeProvider>(),
-                sp.GetService<Autheris.Application.Governance.Caching.IGovernanceChangeNotifier>()));
+                sp.GetService<Autheris.Application.Governance.Caching.IGovernanceChangeNotifier>(),
+                sp.GetService<Autheris.Application.Governance.Caching.IGovernanceWriteInvalidator>()));
         services.AddSingleton<ICatalogVisibilityGrantRepository>(sp => sp.GetRequiredService<CatalogVisibilityGrantStore>());
         services.AddSingleton<ICatalogGrantRevocationWriter>(sp => new CatalogGrantRevocationWriter(
             sp.GetRequiredService<TRepository>() as GovernanceRepository
@@ -325,7 +334,8 @@ public static partial class GatewayGovernanceServiceExtensions
             new AccessPolicySettingsStore(
                 sp.GetRequiredService<IGovernanceSqlDialect>(),
                 sp.GetService<TimeProvider>(),
-                sp.GetService<Autheris.Application.Governance.Caching.IGovernanceChangeNotifier>()));
+                sp.GetService<Autheris.Application.Governance.Caching.IGovernanceChangeNotifier>(),
+                sp.GetService<Autheris.Application.Governance.Caching.IGovernanceWriteInvalidator>()));
         services.AddSingleton<IAccessPolicySettingsRepository>(sp => sp.GetRequiredService<AccessPolicySettingsStore>());
         services.AddSingleton<MigrationPurgeStore>(sp =>
             new MigrationPurgeStore(

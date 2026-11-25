@@ -15,7 +15,8 @@ namespace Autheris.Infrastructure.Persistence;
 public sealed class GovernanceDomainStore(
     IGovernanceSqlDialect dialect,
     TimeProvider? timeProvider = null,
-    IGovernanceChangeNotifier? changeNotifier = null) : IGovernanceDomainRepository, IGovernanceEpochStore
+    IGovernanceChangeNotifier? changeNotifier = null,
+    IGovernanceWriteInvalidator? writeInvalidator = null) : IGovernanceDomainRepository, IGovernanceEpochStore
 {
     private const string UnassignedName = "Unassigned";
     private const string UnassignedCreatedBy = "system:governance-domain-store";
@@ -68,7 +69,7 @@ public sealed class GovernanceDomainStore(
 
     private readonly IGovernanceSqlDialect _dialect = dialect ?? throw new ArgumentNullException(nameof(dialect));
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
-    private readonly IGovernanceChangeNotifier? _changeNotifier = changeNotifier;
+    private readonly IGovernanceWriteInvalidator _writeInvalidator = writeInvalidator ?? new GovernanceWriteInvalidator(changeNotifier: changeNotifier, timeProvider: timeProvider);
     private bool IsSqlServer => _dialect is SqlServerGovernanceDialect;
 
     public async Task<IReadOnlyList<GovernanceDomain>> ListAsync(TenantId tenant, int limit = 100, int offset = 0, CancellationToken ct = default)
@@ -550,9 +551,12 @@ public sealed class GovernanceDomainStore(
     }
 
     private Task NotifyChangedAsync(string tenantId, long epoch, Guid? tableId, DateTimeOffset occurredAtUtc) =>
-        _changeNotifier is null
-            ? Task.CompletedTask
-            : _changeNotifier.NotifyAsync(new GovernanceChangeEvent(tenantId, epoch, tableId, occurredAtUtc), CancellationToken.None);
+        _writeInvalidator.InvalidateWideAsync(
+            TenantId.TryParse(tenantId, out var parsed) ? parsed : (TenantId?)null,
+            governanceEpoch: epoch,
+            tableId: tableId,
+            occurredAtUtc: occurredAtUtc,
+            ct: CancellationToken.None);
 
     private async Task<DbConnection> OpenAsync(CancellationToken ct)
     {

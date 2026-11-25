@@ -19,7 +19,8 @@ public partial class GovernanceRepository : IAccessProfileRepository
         {
             var connection = await OpenConnectionAsync(ct).ConfigureAwait(false);
             return new AccessProfileStoreScope(connection, connection.DisposeAsync);
-        });
+        },
+        writeInvalidator: _writeInvalidator);
 
     public Task<IReadOnlyList<AccessProfile>> GetProfilesForSubjectAsync(TenantId tenantId, string subject, CancellationToken ct = default)
     {

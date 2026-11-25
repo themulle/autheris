@@ -148,7 +148,7 @@ VALUES
 
         if (newVersion.HasValue)
         {
-            await PublishCatalogChangedEventAsync(newVersion.Value, ct).ConfigureAwait(false);
+            await _writeInvalidator.InvalidateWideAsync(TryScopeTenant(normalized.TenantId), newVersion.Value, ct: ct).ConfigureAwait(false);
             await FlushScopePendingAsync(ct).ConfigureAwait(false);
         }
 

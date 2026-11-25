@@ -58,7 +58,8 @@ public static partial class GatewayGovernanceServiceExtensions
             sp.GetService<IProductCatalogStore>(),
             sp.GetService<ViewDowngradeGuard>(),
             sp.GetService<Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider>(),
-            sp.GetService<Autheris.Application.Governance.Caching.IGovernanceCacheInvalidator>()));
+            null,
+            sp.GetService<Autheris.Application.Governance.Caching.IGovernanceWriteInvalidator>()));
         services.AddSingleton(sp => new ProductSyncService(
             sp.GetRequiredService<DataProductService>(),
             sp.GetRequiredService<IDataProductRepository>(),

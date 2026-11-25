@@ -97,7 +97,7 @@ public partial class GovernanceRepository : IClassificationRepository
 
         if (newVersion.HasValue)
         {
-            await PublishCatalogChangedEventAsync(newVersion.Value, ct).ConfigureAwait(false);
+            await _writeInvalidator.InvalidateWideAsync(TryScopeTenant(normalized.Scope), newVersion.Value, ct: ct).ConfigureAwait(false);
             await FlushScopePendingAsync(ct).ConfigureAwait(false);
         }
 
@@ -186,7 +186,7 @@ public partial class GovernanceRepository : IClassificationRepository
             }
         }
 
-        await PublishCatalogChangedEventAsync(newVersion.Value, ct).ConfigureAwait(false);
+        await _writeInvalidator.InvalidateWideAsync(TryScopeTenant(normalized.Scope), newVersion.Value, ct: ct).ConfigureAwait(false);
         await FlushScopePendingAsync(ct).ConfigureAwait(false);
         return stored ?? normalized;
     }
@@ -238,7 +238,7 @@ public partial class GovernanceRepository : IClassificationRepository
             }
         }
 
-        await PublishAndFlushTableMutationAsync(newVersion, table, ct).ConfigureAwait(false);
+        await PublishAndFlushTableMutationAsync(newVersion, table, validScope, ct).ConfigureAwait(false);
     }
 
     public async Task<bool> RemoveColumnClassificationAsync(
@@ -285,7 +285,7 @@ public partial class GovernanceRepository : IClassificationRepository
 
         if (affected > 0 && newVersion.HasValue)
         {
-            await PublishAndFlushTableMutationAsync(newVersion.Value, table, ct).ConfigureAwait(false);
+            await PublishAndFlushTableMutationAsync(newVersion.Value, table, validScope, ct).ConfigureAwait(false);
         }
 
         return affected > 0;
@@ -400,7 +400,7 @@ public partial class GovernanceRepository : IClassificationRepository
             }
         }
 
-        await PublishAndFlushTableMutationAsync(newVersion, table, ct).ConfigureAwait(false);
+        await PublishAndFlushTableMutationAsync(newVersion, table, validScope, ct).ConfigureAwait(false);
         return normalized with { Id = persistedId };
     }
 
@@ -457,7 +457,7 @@ public partial class GovernanceRepository : IClassificationRepository
 
         if (affected > 0 && newVersion.HasValue)
         {
-            await PublishAndFlushTableMutationAsync(newVersion.Value, table, ct).ConfigureAwait(false);
+            await PublishAndFlushTableMutationAsync(newVersion.Value, table, validScope, ct).ConfigureAwait(false);
         }
 
         return affected > 0;
@@ -480,17 +480,20 @@ public partial class GovernanceRepository : IClassificationRepository
         return (table, version);
     }
 
+    internal static Autheris.Domain.Common.TenantId? TryScopeTenant(string scope) =>
+        !ClassificationScopes.IsGlobal(scope) && Autheris.Domain.Common.TenantId.TryParse(scope, out var t) ? t : (Autheris.Domain.Common.TenantId?)null;
+
     private async Task PublishAndFlushTableMutationAsync(
         CatalogVersion version,
         TableIdentifier? table,
+        string scope,
         CancellationToken ct)
     {
-        await PublishCatalogChangedEventAsync(version, ct).ConfigureAwait(false);
+        var tenant = TryScopeTenant(scope);
+        await (table.HasValue
+            ? _writeInvalidator.InvalidateTablesAsync(tenant, [table.Value], version, InvalidateTableMetadata, ct)
+            : _writeInvalidator.InvalidateWideAsync(tenant, version, ct: ct)).ConfigureAwait(false);
         await FlushScopePendingAsync(ct).ConfigureAwait(false);
-        if (table.HasValue)
-        {
-            await InvalidateTableEpochAsync(table.Value, ct).ConfigureAwait(false);
-        }
     }
 
     private async Task<IReadOnlyList<DataClassification>> ReadClassificationsInternalAsync(

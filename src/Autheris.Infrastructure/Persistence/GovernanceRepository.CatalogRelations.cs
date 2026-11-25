@@ -153,6 +153,7 @@ public partial class GovernanceRepository
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        CatalogVersion newVersion;
         try
         {
             await using var cmd = conn.CreateCommand();
@@ -166,17 +167,18 @@ public partial class GovernanceRepository
             cmd.AddBound("@reason", delegation.Reason);
             await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
 
-            var newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 0, 1, ct).ConfigureAwait(false);
+            newVersion = await BumpCatalogVersionInternalAsync(conn, tx, 0, 1, ct).ConfigureAwait(false);
             await tx.CommitAsync(ct).ConfigureAwait(false);
-            await PublishCatalogChangedEventAsync(newVersion, ct).ConfigureAwait(false);
-            await FlushScopePendingAsync(ct).ConfigureAwait(false);
-            return delegation;
         }
         catch
         {
             await tx.RollbackAsync(ct).ConfigureAwait(false);
             throw;
         }
+
+        await _writeInvalidator.InvalidateWideAsync(null, newVersion, ct: ct).ConfigureAwait(false);
+        await FlushScopePendingAsync(ct).ConfigureAwait(false);
+        return delegation;
     }
 
     public async Task<bool> SetRelationCrossDataSourceOptInAsync(Guid relationId, bool allowCrossDataSource, CancellationToken ct = default)

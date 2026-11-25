@@ -146,11 +146,11 @@ public sealed partial class PermissionRequestEngine
         }
 
         var finalized = cas.Request;
-        _cacheInvalidator?.InvalidateTenant(finalized.TenantId.Value);
-        if (_policyEpochRepository is not null && !string.IsNullOrWhiteSpace(finalized.TableIdentifier.TableName))
-        {
-            await _policyEpochRepository.IncrementTableEpochAsync(finalized.TableIdentifier, ct).ConfigureAwait(false);
-        }
+        await InvalidateCommittedDecisionAsync(
+            finalized.TenantId,
+            finalized.TableIdentifier,
+            finalized.RequestKind == ConsentRequestKind.ProfileAssignment,
+            ct).ConfigureAwait(false);
 
         var grants = cas.CreatedGrants ?? [];
         return new PermissionDecisionResult(finalized, grants, grants.Count > 0 ? grants[0] : null);

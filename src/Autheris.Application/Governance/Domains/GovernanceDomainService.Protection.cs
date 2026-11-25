@@ -75,7 +75,7 @@ public sealed partial class GovernanceDomainService
             tableChange,
             ct).ConfigureAwait(false);
 
-        _cacheInvalidator?.InvalidateTenant(tenant.Value);
+        await _writeInvalidator.InvalidateWideAsync(tenant, ct: ct).ConfigureAwait(false);
         return Ok(new ProtectionWriteOutcome(meta.Identifier.ToString(), meta.Table.Id, null, afterEffective, LooserThanContainer: tableChange.IsLooserThanContainer));
     }
 
@@ -151,7 +151,7 @@ public sealed partial class GovernanceDomainService
             coveringGrants,
             ct).ConfigureAwait(false);
 
-        _cacheInvalidator?.InvalidateTenant(tenant.Value);
+        await _writeInvalidator.InvalidateWideAsync(tenant, ct: ct).ConfigureAwait(false);
         return Ok(new ProtectionWriteOutcome(meta.Identifier.ToString(), meta.Table.Id, canonicalColumn, afterEffective, coveringGrants));
     }
 

@@ -21,7 +21,8 @@ namespace Autheris.Infrastructure.Persistence;
 public sealed class CatalogVisibilityGrantStore(
     IGovernanceSqlDialect dialect,
     TimeProvider? timeProvider = null,
-    IGovernanceChangeNotifier? changeNotifier = null) : ICatalogVisibilityGrantRepository
+    IGovernanceChangeNotifier? changeNotifier = null,
+    IGovernanceWriteInvalidator? writeInvalidator = null) : ICatalogVisibilityGrantRepository
 {
     private const int SubjectBatchSize = 100;
 
@@ -72,7 +73,7 @@ public sealed class CatalogVisibilityGrantStore(
 
     private readonly IGovernanceSqlDialect _dialect = dialect ?? throw new ArgumentNullException(nameof(dialect));
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
-    private readonly IGovernanceChangeNotifier? _changeNotifier = changeNotifier;
+    private readonly IGovernanceWriteInvalidator _writeInvalidator = writeInvalidator ?? new GovernanceWriteInvalidator(changeNotifier: changeNotifier, timeProvider: timeProvider);
     private bool IsSqlServer => _dialect is SqlServerGovernanceDialect;
 
     public async Task<CatalogVisibilityGrant> CreateAsync(
@@ -136,9 +137,9 @@ public sealed class CatalogVisibilityGrantStore(
             return await BumpEpochInTxAsync(conn, tx, tenantIdStr, createdAt, ct).ConfigureAwait(false);
         }, ct).ConfigureAwait(false);
 
-        if (transaction is null && _changeNotifier is not null)
+        if (transaction is null)
         {
-            await _changeNotifier.NotifyAsync(new GovernanceChangeEvent(tenantIdStr, epoch, null, createdAt), ct).ConfigureAwait(false);
+            await _writeInvalidator.InvalidateWideAsync(new TenantId(tenantIdStr), governanceEpoch: epoch, occurredAtUtc: createdAt, ct: ct).ConfigureAwait(false);
         }
 
         return persisted;
@@ -173,9 +174,9 @@ public sealed class CatalogVisibilityGrantStore(
             (conn, tx) => RevokeCoreAsync(conn, tx, tenantIdStr, grantId, revokedBySid, reason, now, ct),
             ct).ConfigureAwait(false);
 
-        if (revoked && transaction is null && _changeNotifier is not null)
+        if (revoked && transaction is null)
         {
-            await _changeNotifier.NotifyAsync(new GovernanceChangeEvent(tenantIdStr, epoch, null, now), ct).ConfigureAwait(false);
+            await _writeInvalidator.InvalidateWideAsync(tenantId, governanceEpoch: epoch, occurredAtUtc: now, ct: ct).ConfigureAwait(false);
         }
 
         return revoked;
@@ -201,13 +202,8 @@ public sealed class CatalogVisibilityGrantStore(
     }
 
     /// <summary>Publishes the governance change of a committed revocation.</summary>
-    internal async Task NotifyRevokedAsync(TenantId tenantId, long epoch, DateTimeOffset revokedAt, CancellationToken ct)
-    {
-        if (_changeNotifier is not null)
-        {
-            await _changeNotifier.NotifyAsync(new GovernanceChangeEvent(RequireTenant(tenantId), epoch, null, revokedAt.ToUniversalTime()), ct).ConfigureAwait(false);
-        }
-    }
+    internal Task NotifyRevokedAsync(TenantId tenantId, long epoch, DateTimeOffset revokedAt, CancellationToken ct) =>
+        _writeInvalidator.InvalidateWideAsync(tenantId, governanceEpoch: epoch, occurredAtUtc: revokedAt.ToUniversalTime(), ct: ct);
 
     private async Task<(bool Revoked, long Epoch)> RevokeCoreAsync(
         DbConnection conn, DbTransaction tx, string tenantIdStr, Guid grantId, Sid revokedBySid, string reason, DateTimeOffset now, CancellationToken ct)
@@ -270,9 +266,9 @@ public sealed class CatalogVisibilityGrantStore(
             return (count, bumped);
         }, ct).ConfigureAwait(false);
 
-        if (totalRevoked > 0 && transaction is null && _changeNotifier is not null)
+        if (totalRevoked > 0 && transaction is null)
         {
-            await _changeNotifier.NotifyAsync(new GovernanceChangeEvent(tenantIdStr, epoch, null, now), ct).ConfigureAwait(false);
+            await _writeInvalidator.InvalidateWideAsync(tenantId, governanceEpoch: epoch, occurredAtUtc: now, ct: ct).ConfigureAwait(false);
         }
 
         return totalRevoked;

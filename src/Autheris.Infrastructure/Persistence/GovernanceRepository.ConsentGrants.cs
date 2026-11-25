@@ -200,13 +200,14 @@ public partial class GovernanceRepository
             throw;
         }
 
-        await (patternVersion is { } version ? PublishCatalogChangedEventAsync(version, ct) : Task.CompletedTask).ConfigureAwait(false);
-        foreach (var table in tables.Values)
-        {
-            _metadataInvalidator?.Invoke(table.ToString().ToLowerInvariant());
-            await InvalidateTableEpochAsync(table, ct).ConfigureAwait(false);
-        }
+        var notifyTenant = create.Count > 0 && create.All(c => c.TenantId == create[0].TenantId) ? create[0].TenantId : (TenantId?)null;
+        if (patternVersion is { } version)
+            await _writeInvalidator.InvalidateWideAsync(notifyTenant, version, ct: ct).ConfigureAwait(false);
+        if (tables.Count > 0)
+            await _writeInvalidator.InvalidateTablesAsync(notifyTenant, tables.Values, metadataInvalidator: InvalidateMetadataAndTestHook, ct: ct).ConfigureAwait(false);
     }
+
+    private void InvalidateMetadataAndTestHook(string key) { _metadataInvalidator?.Invoke(key); InvalidateTableMetadata(key); }
 
     private Task<bool> UpdateConsentDescriptionInTransactionAsync(DbConnection conn, DbTransaction tx, ConsentDescriptionUpdate update, CancellationToken ct) =>
         ConsentGrantSqlCore.UpdateDescriptionAsync(conn, tx, update, TimeProvider.System, ct);
@@ -274,8 +275,10 @@ public partial class GovernanceRepository
             throw;
         }
 
-        await (patternVersion is { } version ? PublishCatalogChangedEventAsync(version, ct)
-            : revoked is { } committed ? InvalidateTableEpochAsync(committed, ct) : Task.CompletedTask).ConfigureAwait(false);
+        if (patternVersion is { } version)
+            await _writeInvalidator.InvalidateWideAsync(null, version, ct: ct).ConfigureAwait(false);
+        else if (revoked is { } committed)
+            await _writeInvalidator.InvalidateTablesAsync(null, [committed], metadataInvalidator: InvalidateTableMetadata, ct: ct).ConfigureAwait(false);
     }
 
     /// <summary>

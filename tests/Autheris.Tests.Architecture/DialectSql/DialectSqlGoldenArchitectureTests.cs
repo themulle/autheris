@@ -269,8 +269,9 @@ public sealed class DialectSqlGoldenArchitectureTests
         }
 
         var instructions = Instructions(dialect, "ReplaceConsentsCoreAsync").ToList();
-        // The unified repository's InvalidateTableEpochAsync evicts the cached table metadata first and then invalidates the epoch.
-        instructions.Any(i => i.Operand is MethodReference { Name: "InvalidateTableEpochAsync" or "InvalidateEpochAsync" }).ShouldBeTrue();
+        // The unified repository routes table epoch invalidation through IGovernanceWriteInvalidator and evicts cached table metadata.
+        instructions.Any(i => i.Operand is MethodReference { Name: "InvalidateTablesAsync" or "InvalidateTableEpochAsync" or "InvalidateEpochAsync" }).ShouldBeTrue();
+        instructions.Any(i => i.Operand is MethodReference { Name: "InvalidateMetadataAndTestHook" or "InvalidateTableMetadata" or "InvalidateTableEpochAsync" }).ShouldBeTrue();
     }
 
     [Trait("Category", "Security")]

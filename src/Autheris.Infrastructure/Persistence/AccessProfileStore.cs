@@ -4,6 +4,7 @@ using System.Data.Common;
 using System.Globalization;
 using System.Text;
 using System.Text.Json;
+using Autheris.Application.Governance.Caching;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
@@ -34,11 +35,13 @@ internal sealed class AccessProfileStore(
     AccessProfileDialect dialect,
     Func<bool, CancellationToken, Task<AccessProfileStoreScope>> open,
     TimeProvider? timeProvider = null,
-    ILogger? logger = null)
+    ILogger? logger = null,
+    IGovernanceWriteInvalidator? writeInvalidator = null)
 {
     private const int MaxTermsPerStatement = 900;
     private const AccessProfileAssignmentKind UnknownAssignmentKind = (AccessProfileAssignmentKind)(-1);
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+    private readonly IGovernanceWriteInvalidator? _writeInvalidator = writeInvalidator;
 
     private const string ProfileColumns = "p.profile_id, p.tenant_id, p.name, p.row_scope_json, p.justification, p.created_by, p.created_at, p.valid_to";
     private const int ProfileColumnCount = 8;
@@ -302,6 +305,7 @@ internal sealed class AccessProfileStore(
         }
 
         await tx.CommitAsync(ct).ConfigureAwait(false);
+        await InvalidateAsync(profile.TenantId, ct).ConfigureAwait(false);
     }
 
     public async Task<bool> DeleteProfileAsync(TenantId tenantId, string profileId, CancellationToken ct)
@@ -316,6 +320,11 @@ internal sealed class AccessProfileStore(
         var rows = await ExecAsync(scope.Connection, tx, "DELETE FROM ACCESS_PROFILES WHERE tenant_id = @tenantId AND profile_id = @profileId", ct,
             ("@tenantId", tenantId.Value), ("@profileId", profileId)).ConfigureAwait(false);
         await tx.CommitAsync(ct).ConfigureAwait(false);
+        if (rows > 0)
+        {
+            await InvalidateAsync(tenantId, ct).ConfigureAwait(false);
+        }
+
         return rows > 0;
     }
 
@@ -344,6 +353,7 @@ internal sealed class AccessProfileStore(
         AccessProfileAssignmentRules.ValidateForAssignment(profile, stored, now);
         await UpsertAssignmentAsync(scope.Connection, tx, tenantId, profileId, stored, ct).ConfigureAwait(false);
         await tx.CommitAsync(ct).ConfigureAwait(false);
+        await InvalidateAsync(tenantId, ct).ConfigureAwait(false);
         return stored;
     }
 
@@ -368,6 +378,7 @@ internal sealed class AccessProfileStore(
         var approved = existing with { ApprovedBy = approvedBy.Trim(), ApprovedAt = now };
         await UpsertAssignmentAsync(scope.Connection, tx, tenantId, profileId, approved, ct).ConfigureAwait(false);
         await tx.CommitAsync(ct).ConfigureAwait(false);
+        await InvalidateAsync(tenantId, ct).ConfigureAwait(false);
         return approved;
     }
 
@@ -391,6 +402,7 @@ internal sealed class AccessProfileStore(
         AccessProfileAssignmentRules.ValidateForAssignment(profile, renewed, now);
         await UpsertAssignmentAsync(scope.Connection, tx, tenantId, profileId, renewed, ct).ConfigureAwait(false);
         await tx.CommitAsync(ct).ConfigureAwait(false);
+        await InvalidateAsync(tenantId, ct).ConfigureAwait(false);
         return renewed;
     }
 
@@ -400,8 +412,16 @@ internal sealed class AccessProfileStore(
         await using var tx = await scope.Connection.BeginTransactionAsync(ct).ConfigureAwait(false);
         var rows = await DeleteAssignmentAsync(scope.Connection, tx, tenantId, profileId, type, subject, ct).ConfigureAwait(false);
         await tx.CommitAsync(ct).ConfigureAwait(false);
+        if (rows > 0)
+        {
+            await InvalidateAsync(tenantId, ct).ConfigureAwait(false);
+        }
+
         return rows > 0;
     }
+
+    private Task InvalidateAsync(TenantId tenantId, CancellationToken ct) =>
+        _writeInvalidator?.InvalidateWideAsync(tenantId, invalidateAccessProfiles: true, ct: ct) ?? Task.CompletedTask;
 
     private async Task<(AccessProfile? Profile, AccessProfileAssignment? Assignment)> LoadAssignmentAsync(
         DbConnection conn, DbTransaction tx, TenantId tenantId, string profileId, AccessProfileSubjectType type, string subject, CancellationToken ct)

@@ -118,11 +118,11 @@ public sealed partial class PermissionRequestEngine
                 ?? throw new InvalidOperationException("TryDecideAsync applied decision without returning updated request.");
             var grants = casResult.CreatedGrants ?? [];
 
-            _cacheInvalidator?.InvalidateTenant(finalized.TenantId.Value);
-            if (_policyEpochRepository is not null && !string.IsNullOrWhiteSpace(finalized.TableIdentifier.TableName))
-            {
-                await _policyEpochRepository.IncrementTableEpochAsync(finalized.TableIdentifier, ct).ConfigureAwait(false);
-            }
+            await InvalidateCommittedDecisionAsync(
+                finalized.TenantId,
+                finalized.TableIdentifier,
+                finalized.RequestKind == ConsentRequestKind.ProfileAssignment,
+                ct).ConfigureAwait(false);
 
             await InvalidateGrantTablesAfterCommitAsync(finalized, grants, ct).ConfigureAwait(false);
 

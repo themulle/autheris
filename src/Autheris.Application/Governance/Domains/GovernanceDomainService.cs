@@ -74,7 +74,8 @@ public sealed partial class GovernanceDomainService(
     IGovernanceCacheInvalidator? cacheInvalidator = null,
     TimeProvider? timeProvider = null,
     IDataProductRepository? products = null,
-    IOptions<GatewayOptions>? gatewayOptions = null)
+    IOptions<GatewayOptions>? gatewayOptions = null,
+    IGovernanceWriteInvalidator? writeInvalidator = null)
 {
     private static readonly string[] SafeContactSchemes = ["https", "http", "mailto"];
     private static readonly string[] DangerousContactPrefixes = ["javascript:", "vbscript:", "data:", "file:"];
@@ -85,7 +86,9 @@ public sealed partial class GovernanceDomainService(
     private readonly IAuditWriter _auditWriter = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
     private readonly IGovernanceCapabilities _capabilities = capabilities ?? throw new ArgumentNullException(nameof(capabilities));
     private readonly IAccessPolicySettingsProvider? _policyProvider = policyProvider;
-    private readonly IGovernanceCacheInvalidator? _cacheInvalidator = cacheInvalidator;
+    private readonly IGovernanceWriteInvalidator _writeInvalidator = writeInvalidator ?? new GovernanceWriteInvalidator(
+        cacheInvalidators: cacheInvalidator is null ? null : () => [cacheInvalidator],
+        timeProvider: timeProvider);
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private readonly IDataProductRepository? _products = products;
     private readonly GatewayOptions? _gatewayOptions = gatewayOptions?.Value;
@@ -194,7 +197,7 @@ public sealed partial class GovernanceDomainService(
             await RecordOwnerGroupAuditAsync(tenant, caller.UserSid, result.Domain, null, assignedSid, ct).ConfigureAwait(false);
         }
 
-        _cacheInvalidator?.InvalidateTenant(tenant.Value);
+        await _writeInvalidator.InvalidateWideAsync(tenant, ct: ct).ConfigureAwait(false);
         return new DomainServiceResult<GovernanceDomain>(DomainServiceStatus.Created, result.Domain);
     }
 
@@ -283,7 +286,7 @@ public sealed partial class GovernanceDomainService(
         }
 
         await RecordDomainAuditAsync(tenant, caller.UserSid, result.Domain.Id, "updated", before, result.Domain, ct).ConfigureAwait(false);
-        _cacheInvalidator?.InvalidateTenant(tenant.Value);
+        await _writeInvalidator.InvalidateWideAsync(tenant, ct: ct).ConfigureAwait(false);
         return Ok(result.Domain);
     }
 
@@ -333,7 +336,7 @@ public sealed partial class GovernanceDomainService(
         }
 
         await RecordDomainAuditAsync(tenant, caller.UserSid, domainId, "deleted", before, null, ct).ConfigureAwait(false);
-        _cacheInvalidator?.InvalidateTenant(tenant.Value);
+        await _writeInvalidator.InvalidateWideAsync(tenant, ct: ct).ConfigureAwait(false);
         return new DomainServiceResult<bool>(DomainServiceStatus.Deleted, true);
     }
 
@@ -390,7 +393,7 @@ public sealed partial class GovernanceDomainService(
         }
 
         await RecordOwnerGroupAuditAsync(tenant, caller.UserSid, result.Domain, before.OwnerGroupSid, ownerGroupSid, ct).ConfigureAwait(false);
-        _cacheInvalidator?.InvalidateTenant(tenant.Value);
+        await _writeInvalidator.InvalidateWideAsync(tenant, ct: ct).ConfigureAwait(false);
         return Ok(result.Domain);
     }
 
@@ -459,7 +462,7 @@ public sealed partial class GovernanceDomainService(
 
         await _domains.AssignTablesAsync(tenant, domainId, distinct, caller.UserSid, ct).ConfigureAwait(false);
         await RecordTableAssignmentAuditAsync(tenant, caller.UserSid, domain, distinct, ct).ConfigureAwait(false);
-        _cacheInvalidator?.InvalidateTenant(tenant.Value);
+        await _writeInvalidator.InvalidateWideAsync(tenant, ct: ct).ConfigureAwait(false);
         return Ok(distinct.Count);
     }
 
