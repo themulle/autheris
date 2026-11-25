@@ -11,7 +11,7 @@
 # ==============================================================================
 services:
   gql-gateway:
-    image: ghcr.io/themulle/autheris:v1.10.2@sha256:dc1a1a7a1efc945345adf6dedb71cca7282bfa58746462944fe821ac713daec3
+    image: ghcr.io/themulle/autheris:1.10.6@sha256:aaa2de631356f59fe161b02b49a171f022778e05475f55683793fda2feba5d1d
     container_name: gql-gateway
     user: "10001:10001"
     security_opt:
