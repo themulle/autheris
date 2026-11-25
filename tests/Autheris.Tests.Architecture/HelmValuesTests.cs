@@ -7,6 +7,8 @@ namespace Autheris.Tests.Architecture;
 
 public sealed class HelmValuesTests
 {
+    private const int HelmTimeoutMilliseconds = 60_000;
+
     [Fact]
     [Trait("Category", "Security")]
     public void Image_tag_is_pinned_and_not_latest()
@@ -199,10 +201,11 @@ public sealed class HelmValuesTests
         using var process = Process.Start(psi)!;
         var stdoutTask = process.StandardOutput.ReadToEndAsync();
         var stderrTask = process.StandardError.ReadToEndAsync();
-        if (!process.WaitForExit(10_000))
+        // CI runners under load have needed more than 10 s for a cold `helm template`; 60 s still catches a hung process.
+        if (!process.WaitForExit(HelmTimeoutMilliseconds))
         {
             process.Kill(entireProcessTree: true);
-            throw new TimeoutException($"helm {string.Join(' ', args)} timed out after 10s");
+            throw new TimeoutException($"helm {string.Join(' ', args)} timed out after {HelmTimeoutMilliseconds / 1000}s");
         }
 
         Task.WaitAll(stdoutTask, stderrTask);
