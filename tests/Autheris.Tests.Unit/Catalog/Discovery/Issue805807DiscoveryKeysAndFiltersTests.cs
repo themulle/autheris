@@ -111,8 +111,10 @@ public sealed class Issue805807DiscoveryKeysAndFiltersTests
         described.PrimaryKeyOrder.Select(k => (k.Column, k.Direction)).ShouldBe([("device", "ASC"), ("ts", "DESC")]);
         described.Columns.Where(c => c.PrimaryKey).Select(c => c.Name).ShouldBe(["device", "ts"]);
         described.Indexes.ShouldNotBeNull();
-        var index = described.Indexes.ShouldHaveSingleItem();
-        index.Columns.ShouldBe(["ts"]);
+        // #1105: the index over the masked (sensitive) column "secret" is listed as well.
+        described.Columns.Single(c => c.Name == "secret").Access.ShouldBe("mask");
+        described.Indexes.Select(i => string.Join(",", i.Columns)).ShouldBe(["ts", "secret"]);
+        var index = described.Indexes[0];
         index.Unique.ShouldBeFalse();
         index.Directions.ShouldBe([KeyColumnDirection.Descending]);
     }
@@ -126,7 +128,8 @@ public sealed class Issue805807DiscoveryKeysAndFiltersTests
         var narrowed = McpDescribeNarrowing.Apply(await mcp.DescribeDatasetAsync(user, Readings.ToString()), request);
 
         narrowed.PrimaryKeyOrder.ShouldNotBeNull().Select(k => k.Direction).ShouldBe(["ASC", "DESC"]);
-        narrowed.Indexes.ShouldNotBeNull().ShouldHaveSingleItem().Directions.ShouldBe([KeyColumnDirection.Descending]);
+        narrowed.Indexes.ShouldNotBeNull().Select(i => string.Join(",", i.Columns)).ShouldBe(["ts", "secret"]);
+        narrowed.Indexes[0].Directions.ShouldBe([KeyColumnDirection.Descending]);
     }
 
     [Fact]
@@ -152,9 +155,8 @@ public sealed class Issue805807DiscoveryKeysAndFiltersTests
         detail.PrimaryKeys.ShouldBe(["device", "ts"]);
         detail.PrimaryKeyDirections.ShouldBe(["ASC", "DESC"]);
         detail.Columns.Where(c => c.IsPrimaryKey).Select(c => c.Name).ShouldBe(["device", "ts"]);
-        var index = detail.Indexes.ShouldNotBeNull().ShouldHaveSingleItem();
-        index.Columns.ShouldBe(["ts"]);
-        index.Directions.ShouldBe([KeyColumnDirection.Descending]);
+        detail.Indexes.ShouldNotBeNull().Select(i => string.Join(",", i.Columns)).ShouldBe(["ts", "secret"]);
+        detail.Indexes[0].Directions.ShouldBe([KeyColumnDirection.Descending]);
         detail.RequiredFilterColumns.ShouldBe(["device"]);
         detail.RequiredFilterColumnGroups.ShouldNotBeNull().Select(g => string.Join(",", g)).ShouldBe(["ts", "reading,site"]);
     }
@@ -173,21 +175,41 @@ public sealed class Issue805807DiscoveryKeysAndFiltersTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task MaskedKeyColumn_OmitsKeyAndItsIndex_OnBothSurfaces()
+    public async Task MaskedKeyColumn_KeepsKeyAndItsIndex_OnBothSurfaces()
     {
+        // #1105: a masked key column keeps the key, its order and its index; the caller sees the column name in the same answer.
         var (mcp, rest, context, user) = Build(ReadingsTable(), Pdp(new Dictionary<string, ColumnAccessLevel> { ["ts"] = ColumnAccessLevel.Mask }));
+
+        var described = await mcp.DescribeDatasetAsync(user, Readings.ToString());
+        var detail = await rest.GetDatasetDetailAsync(Readings, context);
+
+        described.Columns.Single(c => c.Name == "ts").Access.ShouldBe("mask");
+        described.PrimaryKeyOrder.ShouldNotBeNull().Select(k => (k.Column, k.Direction)).ShouldBe([("device", "ASC"), ("ts", "DESC")]);
+        described.Columns.Where(c => c.PrimaryKey).Select(c => c.Name).ShouldBe(["device", "ts"]);
+        (described.Indexes ?? []).Select(i => string.Join(",", i.Columns)).ShouldBe(["ts", "secret"]);
+        detail.ShouldNotBeNull();
+        detail.PrimaryKeys.ShouldBe(["device", "ts"]);
+        detail.PrimaryKeyDirections.ShouldBe(["ASC", "DESC"]);
+        (detail.Indexes ?? []).Select(i => string.Join(",", i.Columns)).ShouldBe(["ts", "secret"]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task DeniedKeyColumn_OmitsKeyAndItsIndex_OnBothSurfaces()
+    {
+        var (mcp, rest, context, user) = Build(ReadingsTable(), Pdp(new Dictionary<string, ColumnAccessLevel> { ["ts"] = ColumnAccessLevel.Deny }));
 
         var described = await mcp.DescribeDatasetAsync(user, Readings.ToString());
         var detail = await rest.GetDatasetDetailAsync(Readings, context);
 
         described.PrimaryKeyOrder.ShouldBeNull();
         described.Columns.ShouldAllBe(c => !c.PrimaryKey);
-        (described.Indexes ?? []).ShouldBeEmpty();
+        (described.Indexes ?? []).ShouldAllBe(i => !i.Columns.Contains("ts"));
         detail.ShouldNotBeNull();
         detail.PrimaryKeys.ShouldBeEmpty();
         detail.PrimaryKeyDirections.ShouldBeNull();
         detail.Columns.ShouldAllBe(c => !c.IsPrimaryKey);
-        (detail.Indexes ?? []).ShouldBeEmpty();
+        (detail.Indexes ?? []).ShouldAllBe(i => !i.Columns.Contains("ts"));
     }
 
     [Fact]
@@ -253,7 +275,7 @@ public sealed class Issue805807DiscoveryKeysAndFiltersTests
     }
     [Fact]
     [Trait("Category", "Security")]
-    public async Task RowDependentKeyColumn_MapsToMasked_AndOmitsKeyAndIndex()
+    public async Task RowDependentKeyColumn_MapsToMasked_AndKeepsKeyAndIndex()
     {
         var pdp = new FakeAccessDecisionPoint(r =>
             TableAccessDecision.Allowed(r.Object.Identifier, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true)
@@ -263,12 +285,13 @@ public sealed class Issue805807DiscoveryKeysAndFiltersTests
         var described = await mcp.DescribeDatasetAsync(user, Readings.ToString());
         var detail = await rest.GetDatasetDetailAsync(Readings, context);
 
+        // #1105: a row-dependent column is listed as masked; its key and index stay listed.
         described.Columns.Single(c => c.Name == "ts").Access.ShouldBe("mask");
-        described.PrimaryKeyOrder.ShouldBeNull();
-        (described.Indexes ?? []).ShouldBeEmpty();
+        described.PrimaryKeyOrder.ShouldNotBeNull().Select(k => k.Column).ShouldBe(["device", "ts"]);
+        (described.Indexes ?? []).Select(i => string.Join(",", i.Columns)).ShouldContain("ts");
         detail.ShouldNotBeNull();
-        detail.PrimaryKeys.ShouldBeEmpty();
-        (detail.Indexes ?? []).ShouldBeEmpty();
+        detail.PrimaryKeys.ShouldBe(["device", "ts"]);
+        (detail.Indexes ?? []).Select(i => string.Join(",", i.Columns)).ShouldContain("ts");
     }
 
     [Fact]

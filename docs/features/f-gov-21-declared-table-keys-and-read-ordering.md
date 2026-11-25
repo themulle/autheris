@@ -246,7 +246,7 @@ The bulk table stream seeks on the primary key (else the first unique index) and
 
 ### 5.2.2 Reporting
 
-`describe_dataset` returns `primaryKeyOrder` (`[{ "column", "direction" }]`, key order, `ASC` / `DESC`) and the index `directions` only for a key or index whose columns are all visible to the caller; a key or index touching a hidden column is omitted as a whole, directions included. The catalog dataset detail reports `primaryKeyDirections` parallel to `primaryKeys` (omitted when every column is ascending). OData and the dynamic OpenAPI document have no direction concept and are unchanged.
+`describe_dataset` returns `primaryKeyOrder` (`[{ "column", "direction" }]`, key order, `ASC` / `DESC`) and the index `directions` only for a key or index whose columns are all visible to the caller (access level `Clear` or `Mask`, not discovery-hidden); a key or index touching a denied or hidden column is omitted as a whole, directions included. A masked key column keeps its key and index membership (#1105): the caller already sees the column name in the same answer, and filtering, ordering and joining on a masked column stay refused (`FILTER_ON_MASKED_COLUMN`). The REST catalog dataset detail applies the same rule. The catalog dataset detail reports `primaryKeyDirections` parallel to `primaryKeys` (omitted when every column is ascending). OData and the dynamic OpenAPI document have no direction concept and are unchanged.
 
 ### 5.3 OData next link
 

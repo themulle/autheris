@@ -188,4 +188,39 @@ public sealed class TimeBucketingAggregateParserTests
         ex.Errors.Single().Code.ShouldBe("INVALID_QUERY");
         ex.Errors.Single().Message.ShouldBe("The time zone is not a recognized IANA zone id.");
     }
+
+    private static ParsedAggregateArguments ParseDailyBuckets(int limit) => AggregateArgumentParser.Parse(
+        CreateCatalogTable(),
+        new ListValueNode(new ObjectValueNode(
+            new ObjectFieldNode("column", new EnumValueNode("created_at")),
+            new ObjectFieldNode("bucket", new EnumValueNode("DAY")))),
+        new ListValueNode(new ObjectValueNode(
+            new ObjectFieldNode("fn", new EnumValueNode("COUNT")),
+            new ObjectFieldNode("alias", new StringValueNode("n")))),
+        null,
+        new IntValueNode(limit),
+        new AggregationOptions(),
+        _ => null);
+
+    [Fact]
+    public void Issue1107_TimeBucketedLimitAboveMax_HasItsOwnCode_AndNamesTheMax()
+    {
+        var ex = Should.Throw<HotChocolate.GraphQLException>(() => ParseDailyBuckets(AggregationOptions.MaxTimeBucketedLimit + 1));
+
+        var error = ex.Errors.Single();
+        error.Code.ShouldBe(AggregationErrorCodes.TimeBucketLimitExceeded);
+        error.Code.ShouldBe("AGGREGATION_TIME_BUCKET_LIMIT_EXCEEDED");
+        error.Code.ShouldNotBe("QUERY_TOO_COMPLEX");
+        error.Message.ShouldBe(AggregateErrors.TimeBucketLimitExceededMessage);
+        error.Message.ShouldContain(AggregationOptions.MaxTimeBucketedLimit.ToString(System.Globalization.CultureInfo.InvariantCulture));
+        error.Message.ShouldNotContain("5000");
+    }
+
+    [Fact]
+    public void Issue1107_TimeBucketedLimitAtMax_IsAccepted()
+    {
+        AggregationOptions.MaxTimeBucketedLimit.ShouldBe(1000);
+
+        ParseDailyBuckets(AggregationOptions.MaxTimeBucketedLimit).Limit.ShouldBe(1000);
+    }
 }

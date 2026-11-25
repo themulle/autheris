@@ -63,6 +63,9 @@ public sealed class AggregationOptions
     public const int DefaultMaxAggregates = 16;
     public const int DefaultMaxGroups = 1_000;
     public const int UpperBoundMaxGroups = 50_000;
+
+    /// <summary>#1107: the largest <c>limit</c> a time-bucketed aggregate accepts (<c>AGGREGATION_TIME_BUCKET_LIMIT_EXCEEDED</c> above it).</summary>
+    public const int MaxTimeBucketedLimit = 1_000;
     public const double DefaultAggregateFieldCostWeight = 25.0;
 
     /// <summary>Maximum number of GROUP BY columns permitted in a single aggregation query.</summary>
