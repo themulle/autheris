@@ -441,4 +441,97 @@ public sealed class ScopeQueryExecutionGuardTests
             SqlEndpointInvocation invocation,
             CancellationToken ct = default) => Task.FromException<GovernedSqlResult>(exception);
     }
+
+    [Fact]
+    public async Task Guard_ExtraUnmappedOidcScopes_ShareSameConcurrencyBucket()
+    {
+        var options = CreateGatewayOptions(scopeLimits: new Dictionary<string, ClientTierLimitOverride>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["mcp:query"] = new() { MaxConcurrentQueries = 1 }
+        });
+        var guard = new ScopeQueryExecutionGuard(new ClientTierResolver(NullLogger<ClientTierResolver>.Instance, Options.Create(options)));
+        var held = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        var t1 = guard.RunAsync(CreatePrincipal("S-1-5-21-USER-OIDC", scp: "mcp:query"), null, null, async (_, _) =>
+        {
+            entered.TrySetResult();
+            await held.Task;
+            return 1;
+        });
+
+        await entered.Task;
+        await Should.ThrowAsync<ScopeConcurrencyExceededException>(() =>
+            guard.RunAsync(CreatePrincipal("S-1-5-21-USER-OIDC", scp: "mcp:query openid profile email"), null, null, (_, _) => Task.FromResult(2)));
+
+        held.TrySetResult();
+        (await t1).ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Guard_UnauthenticatedNullIp_UsesBoundedSlotWithoutRandomGuidBypass_AndPropagatesHttpClientIp()
+    {
+        var options = CreateGatewayOptions(tierLimits: new Dictionary<string, ClientTierLimitOverride>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Free"] = new() { MaxConcurrentQueries = 1 }
+        });
+        var guard = new ScopeQueryExecutionGuard(new ClientTierResolver(NullLogger<ClientTierResolver>.Instance, Options.Create(options)));
+        var heldUnassigned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var enteredUnassigned = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+
+        // Even with null principal/apiKey/clientIp outside HTTP, a bounded "anon_unassigned" bucket is enforced instead of random GUID churn.
+        var t1 = guard.RunAsync(null, null, null, async (_, _) =>
+        {
+            enteredUnassigned.TrySetResult();
+            await heldUnassigned.Task;
+            return 1;
+        });
+        await enteredUnassigned.Task;
+        await Should.ThrowAsync<ScopeConcurrencyExceededException>(() =>
+            guard.RunAsync(null, null, null, (_, _) => Task.FromResult(2)));
+        heldUnassigned.TrySetResult();
+        (await t1).ShouldBe(1);
+
+        // Inside IngressTransportMiddleware, RemoteIpAddress is propagated cleanly so distinct client IPs do not share slots while same-IP calls do.
+        var services = new ServiceCollection()
+            .AddScoped<Autheris.Application.DataSources.IIngressTransportContext, Autheris.Application.DataSources.IngressTransportContext>()
+            .BuildServiceProvider();
+        using var scope1 = services.CreateScope();
+        var ctx1 = new DefaultHttpContext { RequestServices = scope1.ServiceProvider };
+        ctx1.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("192.0.2.10");
+
+        var heldIp1 = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var enteredIp1 = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var httpTask1 = new IngressTransportMiddleware(async _ =>
+        {
+            await guard.RunAsync(null, null, null, async (_, _) =>
+            {
+                enteredIp1.TrySetResult();
+                await heldIp1.Task;
+                return 10;
+            });
+        }).InvokeAsync(ctx1);
+
+        await enteredIp1.Task;
+
+        using var scopeSameIp = services.CreateScope();
+        var ctxSameIp = new DefaultHttpContext { RequestServices = scopeSameIp.ServiceProvider };
+        ctxSameIp.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("192.0.2.10");
+        await Should.ThrowAsync<ScopeConcurrencyExceededException>(() =>
+            new IngressTransportMiddleware(async _ =>
+            {
+                await guard.RunAsync(null, null, null, (_, _) => Task.FromResult(11));
+            }).InvokeAsync(ctxSameIp));
+
+        using var scopeOtherIp = services.CreateScope();
+        var ctxOtherIp = new DefaultHttpContext { RequestServices = scopeOtherIp.ServiceProvider };
+        ctxOtherIp.Connection.RemoteIpAddress = System.Net.IPAddress.Parse("198.51.100.20");
+        await new IngressTransportMiddleware(async _ =>
+        {
+            await guard.RunAsync(null, null, null, (_, _) => Task.FromResult(12));
+        }).InvokeAsync(ctxOtherIp);
+
+        heldIp1.TrySetResult();
+        await httpTask1;
+    }
 }

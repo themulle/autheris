@@ -87,6 +87,8 @@ public sealed partial class ODataHandler : IODataHandler
 
     internal Autheris.Application.Common.Quota.IScopeQueryExecutionGuard? ScopeGuard { get; init; }
 
+    internal Autheris.Application.Common.Interfaces.IClientIpResolver? ClientIpResolver { get; init; }
+
     internal Func<string, TableFilterClause> ParseFilter { get; init; } = static filter => ODataFilterParser.Parse(filter);
 
     /// <summary>
@@ -501,7 +503,7 @@ public sealed partial class ODataHandler : IODataHandler
         try
         {
             var guard = ScopeGuard ?? Autheris.Application.Common.Quota.NullScopeQueryExecutionGuard.Instance;
-            var earlyResult = await guard.RunAsync(principal, apiKey: null, clientIp: null, async (lease, scopedCt) =>
+            var earlyResult = await guard.RunAsync(principal, apiKey: null, Autheris.Application.Common.Quota.ScopeQueryExecutionGuard.ResolveClientIp(ClientIpResolver), async (lease, scopedCt) =>
             {
                 var scopedTop = effectiveTop > 0 ? Math.Clamp(lease.ClampRows(effectiveTop), 1, effectiveTop) : 0;
                 var tableMeta = await _metadataRepo.GetTableMetadataAsync(table, scopedCt).ConfigureAwait(false);

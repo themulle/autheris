@@ -200,6 +200,16 @@ public sealed partial class VirtualFilterAdministrationService
         var snapshot = await _repository.LoadSnapshotAsync(ct).ConfigureAwait(false);
         var existing = FindFilter(snapshot, filter.TenantId, filter.Name);
         EnsureWritable(existing?.ManagedBy, filter.ManagedBy, actor, $"virtual filter '{filter.Name}'");
+        if (!actor.IsSync)
+        {
+            if (existing?.Sql != null)
+            {
+                await EnsureMaySaveSqlFilterAsync(existing, actor, ct).ConfigureAwait(false);
+            }
+
+            EnsureNoSelfWideningOnProfiles(actor, ProfilesUsingFilter(snapshot, filter.TenantId, filter.Name));
+        }
+
         ValidateSupersedes(snapshot.Filters.Where(f => f.TenantId == filter.TenantId && f.Name != filter.Name).Append(filter).ToList());
 
         // Single approval: the save of a writer who holds the capacity activates the filter at once.
@@ -284,6 +294,15 @@ public sealed partial class VirtualFilterAdministrationService
         var snapshot = await _repository.LoadSnapshotAsync(ct).ConfigureAwait(false);
         var existing = FindFilter(snapshot, tenantId, name) ?? throw new KeyNotFoundException($"The virtual filter '{name}' does not exist.");
         EnsureWritable(existing.ManagedBy, null, actor, $"virtual filter '{name}'");
+        if (!actor.IsSync)
+        {
+            if (existing.Sql != null)
+            {
+                await EnsureMaySaveSqlFilterAsync(existing, actor, ct).ConfigureAwait(false);
+            }
+
+            EnsureNoSelfWideningOnProfiles(actor, ProfilesUsingFilter(snapshot, tenantId, name));
+        }
 
         var user = snapshot.Profiles.FirstOrDefault(p => p.TenantId == tenantId && p.Bindings.Any(b => b.FilterName == name));
         if (user != null)

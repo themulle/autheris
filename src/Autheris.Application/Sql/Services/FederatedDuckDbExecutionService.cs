@@ -155,7 +155,7 @@ public sealed partial class FederatedDuckDbExecutionService : IFederatedQueryExe
         ArgumentNullException.ThrowIfNull(request);
         ArgumentNullException.ThrowIfNull(rowWriter);
 
-        return _scopeGuard.RunAsync(user, apiKey: null, clientIp: null, async (_, scopedCt) =>
+        return _scopeGuard.RunAsync(user, apiKey: null, Autheris.Application.Common.Quota.ScopeQueryExecutionGuard.ResolveClientIp(_clientIpResolver), async (_, scopedCt) =>
         {
             var (duckDbResult, plan, _) = await ExecuteFederatedInternalAsync(request, user, tenantId, scopedCt).ConfigureAwait(false);
 
@@ -219,7 +219,7 @@ public sealed partial class FederatedDuckDbExecutionService : IFederatedQueryExe
             return BufferedCoreAsync(request, user, tenantId, definer, ct);
         }
 
-        return _scopeGuard.RunAsync(user, apiKey: null, clientIp: null, (_, scopedCt) =>
+        return _scopeGuard.RunAsync(user, apiKey: null, Autheris.Application.Common.Quota.ScopeQueryExecutionGuard.ResolveClientIp(_clientIpResolver), (_, scopedCt) =>
             BufferedCoreAsync(request, user, tenantId, definer: null, scopedCt), ct);
     }
 

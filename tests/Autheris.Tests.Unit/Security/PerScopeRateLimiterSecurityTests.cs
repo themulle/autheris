@@ -187,8 +187,8 @@ public sealed class PerScopeRateLimiterSecurityTests
         var ctxUnmapped = await resolver.ResolveAsync(unmappedPrincipal, apiKey: null, clientIp: null);
 
         ctxUnmapped.Tier.ShouldBe(ClientTier.Standard);
-        ctxUnmapped.SubjectId.ShouldBe("user:tenant-x:usr-unmapped:app-1:another.scope+unknown.scope");
-        ctxUnmapped.ResolvedScope.ShouldBe("another.scope+unknown.scope");
+        ctxUnmapped.SubjectId.ShouldBe("user:tenant-x:usr-unmapped:app-1:default");
+        ctxUnmapped.ResolvedScope.ShouldBe("default");
 
         // Case C: Unrecognized tier string fails closed to Standard
         var invalidTierOptions = new ClientTierOptions

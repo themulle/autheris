@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Autheris.Api.Endpoints.Support;
 using Autheris.Api.Extensions;
 using Autheris.Api.Security;
+using Autheris.Application.Catalog.External;
 using Autheris.Application.Governance.SingleApproval;
 using Autheris.Application.Identity.Attributes;
 using Autheris.Domain.Audit;
@@ -255,9 +256,10 @@ public static class CallerAttributeAdminEndpoints
             return Forbidden();
         }
 
-        // Every identifier form of the caller (subject key, UPN, mail, object id) and the caller's groups feed the self-widening check.
+        // Every identifier form of the caller (subject key, app/client ids, UPN, mail, object id) and the caller's groups feed the self-widening check.
         var identifiers = context.User.GetUserIdentifiers();
         identifiers.Add(security.UserSid.Value);
+        AddApplicationIdentifiers(identifiers, context.User, security.UserSid.Value);
         var actor = new CallerAttributeActor(
             security.UserSid.Value,
             security.HasRole(GatewayRole.CallerAttributeApprover),
@@ -286,6 +288,53 @@ public static class CallerAttributeAdminEndpoints
         {
             SafeErrorResults.LogFailure(context, ex, "CALLER_ATTRIBUTE_INVALID_REQUEST");
             return SafeErrorResults.BadRequest("CALLER_ATTRIBUTE_INVALID_REQUEST", "The request is invalid.", context);
+        }
+    }
+
+    private static readonly string[] AppIdClaimTypes = ["appid", "azp", "client_id"];
+
+    private static void AddApplicationIdentifiers(
+        HashSet<string> identifiers, System.Security.Claims.ClaimsPrincipal principal, string userSid)
+    {
+        static void AddId(HashSet<string> set, string? value)
+        {
+            if (string.IsNullOrWhiteSpace(value))
+            {
+                return;
+            }
+
+            var trimmed = value.Trim();
+            set.Add(trimmed);
+            set.Add(CallerAttributeNameRules.CanonicalApplicationId(trimmed));
+        }
+
+        static void AddRealmSuffix(HashSet<string> set, string? raw)
+        {
+            if (string.IsNullOrWhiteSpace(raw))
+            {
+                return;
+            }
+
+            var pipe = raw.IndexOf('|', StringComparison.Ordinal);
+            if (pipe >= 0 && pipe + 1 < raw.Length)
+            {
+                AddId(set, raw[(pipe + 1)..]);
+            }
+        }
+
+        AddId(identifiers, AppOnlyPrincipal.GetClientId(principal));
+        foreach (var type in AppIdClaimTypes)
+        {
+            foreach (var claim in principal.FindAll(type))
+            {
+                AddId(identifiers, claim.Value);
+            }
+        }
+
+        AddRealmSuffix(identifiers, userSid);
+        foreach (var claim in principal.FindAll(System.Security.Claims.ClaimTypes.PrimarySid))
+        {
+            AddRealmSuffix(identifiers, claim.Value);
         }
     }
 

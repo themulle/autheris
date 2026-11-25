@@ -444,8 +444,21 @@ public sealed class MandatoryRowFilterResolver : IMandatoryRowFilterResolver
     {
         ArgumentNullException.ThrowIfNull(query);
         var snapshot = await _snapshots.GetAsync(ct).ConfigureAwait(false);
+        snapshot = await WithoutStaleSqlFiltersAsync(snapshot, query.Tenant, ct).ConfigureAwait(false);
         var trace = new List<ProfileExplanation>();
-        var tenantContext = await LoadTenantContextAsync(snapshot, query.Tenant, ct).ConfigureAwait(false);
+        VirtualFilterTenantContext? tenantContext;
+        try
+        {
+            tenantContext = await LoadTenantContextAsync(snapshot, query.Tenant, ct).ConfigureAwait(false);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return new MandatoryFilterExplanation(
+                snapshot.Generation,
+                MandatoryFilterOutcome.Deny($"{VirtualFilterErrorCodes.BindingMisconfigured}: the tenant columns of the virtual filter source tables could not be resolved ({ex.GetType().Name})."),
+                trace);
+        }
+
         var outcome = Resolve(snapshot, query, trace, tenantContext);
         return new MandatoryFilterExplanation(snapshot.Generation, outcome, trace);
     }

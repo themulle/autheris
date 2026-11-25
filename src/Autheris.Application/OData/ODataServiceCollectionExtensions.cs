@@ -34,7 +34,8 @@ public static class ODataServiceCollectionExtensions
             sp.GetRequiredService<IODataQueryPolicyEnforcer>())
         {
             EpochProvider = sp.GetService<Autheris.Application.Governance.Caching.GovernanceEpochProvider>(),
-            ScopeGuard = sp.GetService<Autheris.Application.Common.Quota.IScopeQueryExecutionGuard>()
+            ScopeGuard = sp.GetService<Autheris.Application.Common.Quota.IScopeQueryExecutionGuard>(),
+            ClientIpResolver = sp.GetService<Autheris.Application.Common.Interfaces.IClientIpResolver>()
         });
         return services;
     }

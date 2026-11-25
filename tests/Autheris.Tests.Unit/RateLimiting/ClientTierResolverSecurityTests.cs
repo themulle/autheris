@@ -2,12 +2,15 @@ using Autheris.Tests.Unit.TestSupport;
 namespace Autheris.Tests.Unit.RateLimiting;
 
 using System;
+using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Autheris.Application.State.Caching.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging.Abstractions;
+using Microsoft.Extensions.Options;
 using Shouldly;
 using Xunit;
 
@@ -94,5 +97,76 @@ public sealed class ClientTierResolverSecurityTests
         context.Tier.ShouldBe(ClientTier.Enterprise);
         // SEC M-16: Subjekt = Tenant + Benutzer-SID
         context.SubjectId.ShouldBe($"user:{Autheris.Tests.Common.TestTenants.Default.Value}:user-42");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ScopeTierMappingAboveStandardWithoutUserCeiling_DoesNotClampToStandard()
+    {
+        var options = Options.Create(new GatewayOptions
+        {
+            RateLimiting = new RateLimitingOptions
+            {
+                ClientTiers = new ClientTierOptions
+                {
+                    ScopeTierMappings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["analytics:enterprise"] = "Enterprise"
+                    }
+                }
+            }
+        });
+        var resolver = new ClientTierResolver(NullLogger<ClientTierResolver>.Instance, options);
+        var principal = new ClaimsPrincipal(new ClaimsIdentity([
+            new Claim(ClaimTypes.NameIdentifier, "user-scope"),
+            new Claim("scp", "analytics:enterprise"),
+            DefaultTenantCaller.Claim
+        ], "Bearer"));
+
+        var context = await resolver.ResolveAsync(principal, null, null);
+
+        context.Tier.ShouldBe(ClientTier.Enterprise);
+        context.ResolvedScope.ShouldBe("analyticsenterprise");
+    }
+
+    [Fact]
+    public async Task ResolveAsync_ExtraUnmappedOidcScopes_KeyByMatchedConfiguredScopeOrDefault()
+    {
+        var options = Options.Create(new GatewayOptions
+        {
+            RateLimiting = new RateLimitingOptions
+            {
+                ClientTiers = new ClientTierOptions
+                {
+                    ScopeTierMappings = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["mcp:query"] = "Standard"
+                    },
+                    ScopeLimits = new Dictionary<string, ClientTierLimitOverride>(StringComparer.OrdinalIgnoreCase)
+                    {
+                        ["mcp:query"] = new ClientTierLimitOverride { MaxConcurrentQueries = 1 }
+                    }
+                }
+            }
+        });
+        var resolver = new ClientTierResolver(NullLogger<ClientTierResolver>.Instance, options);
+
+        ClaimsPrincipal Principal(string scopes) => new(new ClaimsIdentity([
+            new Claim(ClaimTypes.NameIdentifier, "user-42"),
+            new Claim("scp", scopes),
+            DefaultTenantCaller.Claim
+        ], "Bearer"));
+
+        var configuredOnly = await resolver.ResolveAsync(Principal("mcp:query"), null, null);
+        var withOidcNoise = await resolver.ResolveAsync(Principal("mcp:query openid profile email offline_access"), null, null);
+        var unmappedA = await resolver.ResolveAsync(Principal("openid"), null, null);
+        var unmappedB = await resolver.ResolveAsync(Principal("openid profile email"), null, null);
+
+        configuredOnly.ResolvedScope.ShouldBe("mcpquery");
+        withOidcNoise.SubjectId.ShouldBe(configuredOnly.SubjectId);
+        withOidcNoise.ResolvedScope.ShouldBe(configuredOnly.ResolvedScope);
+
+        unmappedA.ResolvedScope.ShouldBe("default");
+        unmappedB.SubjectId.ShouldBe(unmappedA.SubjectId);
+        unmappedB.ResolvedScope.ShouldBe("default");
     }
 }

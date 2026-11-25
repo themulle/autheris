@@ -102,7 +102,8 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
             execution.CostQuota,
             execution.PageTokenCodec,
             execution.WriteBudgetStore,
-            execution.ScopeGuard);
+            execution.ScopeGuard,
+            rewrite.ClientIpResolver);
     }
 
     /// <summary>Fail-closed: a cross-source query without a federated executor is rejected, never executed locally.</summary>
