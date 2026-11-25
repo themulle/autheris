@@ -320,6 +320,14 @@ public sealed partial class PermissionRequestEngine
             return null;
         }
 
+        // Issue #1121: a grant on secret data needs two distinct approvals; the getting-started switch never activates it.
+        if (_protectionProvider is not null &&
+            !string.IsNullOrWhiteSpace(created.TableIdentifier.TableName) &&
+            SecretFourEyesRule.Applies(created.RequestKind, await ResolveMaxClassAsync(created, ct).ConfigureAwait(false)))
+        {
+            return null;
+        }
+
         await _approvalRepository.ActivateConsentForAutoApproveAsync(created.Id, ct).ConfigureAwait(false);
         var approved = await _approvalRepository.GetConsentRequestAsync(created.Id, ct).ConfigureAwait(false) ?? created;
         await _auditWriter.RecordRequiredAsync(new AuditLogEntry
@@ -627,8 +635,12 @@ public sealed partial class PermissionRequestEngine
         Guid? profileId,
         CancellationToken ct)
     {
-        var existing = await _approvalRepository.GetRequestsByRequesterSidAsync(requesterSid, tenant, "PENDING", ct).ConfigureAwait(false);
-        if (existing is null or { Count: 0 })
+        var pending = await _approvalRepository.GetRequestsByRequesterSidAsync(requesterSid, tenant, "PENDING", ct).ConfigureAwait(false);
+        // A request awaiting its second approval (#1121) is still open: a duplicate of it is refused like a duplicate of a pending one.
+        var awaitingSecond = await _approvalRepository.GetRequestsByRequesterSidAsync(
+            requesterSid, tenant, SecretFourEyesRule.PendingSecondApproval, ct).ConfigureAwait(false);
+        var existing = (pending ?? []).Concat(awaitingSecond ?? []).ToList();
+        if (existing.Count == 0)
         {
             return;
         }

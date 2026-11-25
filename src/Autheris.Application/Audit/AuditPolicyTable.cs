@@ -179,6 +179,7 @@ public static class AuditPolicyTable
         [AuditEventTypes.PermissionApproved] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.PermissionRejected] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.PermissionDecisionConflict] = AuditFailurePolicy.FailClosed,
+        [AuditEventTypes.PermissionApprovalRecorded] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CatalogGrantCreated] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.CatalogGrantRevoked] = AuditFailurePolicy.FailClosed,
         [AuditEventTypes.UnmaskGrantCreated] = AuditFailurePolicy.FailClosed,

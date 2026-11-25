@@ -1,5 +1,6 @@
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
@@ -118,6 +119,13 @@ public sealed partial class PermissionRequestEngine
                 ?? throw new InvalidOperationException("TryDecideAsync applied decision without returning updated request.");
             var grants = casResult.CreatedGrants ?? [];
 
+            if (evaluated is { IsFinal: false })
+            {
+                // Issue #1121: a recorded first approval of a grant on secret data changes no access; the second deciders are notified.
+                await NotifyApprovalRecordedAsync(finalized, command.Decider, validatedReason, ct).ConfigureAwait(false);
+                return new PermissionDecisionResult(finalized, [], null);
+            }
+
             await InvalidateCommittedDecisionAsync(
                 finalized.TenantId,
                 finalized.TableIdentifier,
@@ -208,9 +216,11 @@ public sealed partial class PermissionRequestEngine
         }
 
         var candidateValidTo = command.ValidTo?.ToUniversalTime() ?? req.RequestedValidTo.ToUniversalTime();
+        var nextStepNumber = req.ApprovalSteps.Count == 0 ? 1 : req.ApprovalSteps.Max(st => st.StepNumber) + 1;
 
         if (!command.Approve)
         {
+            // First decision wins for rejections: one rejection ends the request, also while a second approval is outstanding (#1121).
             return new PermissionDecisionRecord(
                 NewStatus: "REJECTED",
                 DecidedBy: command.Decider.UserSid,
@@ -219,7 +229,8 @@ public sealed partial class PermissionRequestEngine
                 SelfGrant: false,
                 StepDecision: "REJECTED",
                 Reason: validatedReason,
-                ApprovedValidTo: req.RequestedValidTo);
+                ApprovedValidTo: req.RequestedValidTo,
+                StepNumber: nextStepNumber);
         }
 
         if (req.RequestKind == ConsentRequestKind.ProfileAssignment && capacity.Value == ApproverCapacity.ItAdmin)
@@ -236,7 +247,7 @@ public sealed partial class PermissionRequestEngine
         if (selfGrant)
         {
             var selfRecord = await EvaluateSelfGrantRulesAsync(command.Decider, req, candidateValidTo, ct).ConfigureAwait(false);
-            return selfRecord with { Reason = validatedReason };
+            return selfRecord with { Reason = validatedReason, StepNumber = nextStepNumber };
         }
 
         var policy = await GetTenantPolicyAsync(req.TenantId, ct).ConfigureAwait(false);
@@ -244,6 +255,35 @@ public sealed partial class PermissionRequestEngine
         if (_protectionProvider is not null && !string.IsNullOrWhiteSpace(req.TableIdentifier.TableName))
         {
             protectionClass = await ResolveMaxClassAsync(req, ct).ConfigureAwait(false);
+        }
+
+        // Issue #1121: a grant on secret data needs two distinct eligible approvals. The rule and the class are re-evaluated at every decision.
+        var fourEyesClass = req.RequestKind == ConsentRequestKind.ProfileAssignment
+            ? await ResolveProfileAssignmentMaxClassAsync(req, ct).ConfigureAwait(false)
+            : protectionClass;
+        var fourEyes = SecretFourEyesRule.Applies(req.RequestKind, fourEyesClass);
+        var priorApprovals = SecretFourEyesRule.RecordedApprovals(req);
+        var approverIdentity = SecretFourEyesRule.ApproverIdentity(command.Decider);
+        if (fourEyes && !SecretFourEyesRule.IsEligibleCapacity(capacity.Value))
+        {
+            throw new ConsentDecisionException("FORBIDDEN", "Grants on secret data are decided by owner-group members or Data Governance only.", 403);
+        }
+
+        if (priorApprovals.Any(step => SecretFourEyesRule.IsSameApprover(step, approverIdentity)))
+        {
+            throw new ConsentDecisionException(
+                ConsentDecisionErrorCodes.FourEyesSameApprover,
+                "Four-eyes principle: the second approval must come from a different person than the first.",
+                403);
+        }
+
+        if (priorApprovals.Count > 0 && candidateValidTo > req.RequestedValidTo.ToUniversalTime())
+        {
+            // The second approval can shorten, never extend, the period the first approver approved.
+            throw new ConsentDecisionException(
+                ConsentDecisionErrorCodes.ValidityExceedsRequested,
+                "The second approval cannot extend the validity approved by the first approver.",
+                422);
         }
 
         var evalValidTo = req.RequestKind == ConsentRequestKind.Catalog && !command.ValidTo.HasValue && req.RequestedValidTo >= DateTimeOffset.MaxValue.AddDays(-1)
@@ -271,15 +311,87 @@ public sealed partial class PermissionRequestEngine
             }
         }
 
+        var completes = !fourEyes || priorApprovals.Count + 1 >= SecretFourEyesRule.RequiredApprovals;
         return new PermissionDecisionRecord(
-            NewStatus: "APPROVED",
+            NewStatus: completes ? "APPROVED" : SecretFourEyesRule.PendingSecondApproval,
             DecidedBy: command.Decider.UserSid,
             DecidedAt: now,
             Capacity: capacity.Value,
             SelfGrant: false,
             StepDecision: "APPROVED",
             Reason: validatedReason,
-            ApprovedValidTo: evalValidTo ?? DateTimeOffset.MaxValue);
+            ApprovedValidTo: evalValidTo ?? DateTimeOffset.MaxValue,
+            StepNumber: nextStepNumber,
+            ApproverIdentifiers: approverIdentity);
+    }
+
+    /// <summary>
+    /// Maximum class over the explicitly named tables of the requested access profile (and the table of a pattern coverage request).
+    /// Pattern items never cover a <c>secret</c> table (enforced when access is evaluated), so they do not raise the class here.
+    /// </summary>
+    private async Task<ProtectionClass> ResolveProfileAssignmentMaxClassAsync(ConsentRequest req, CancellationToken ct)
+    {
+        if (_protectionProvider is null)
+        {
+            return ProtectionClass.Confidential;
+        }
+
+        var tables = new HashSet<TableIdentifier>();
+        if (!string.IsNullOrWhiteSpace(req.TableIdentifier.TableName))
+        {
+            tables.Add(req.TableIdentifier);
+        }
+
+        if (req.ProfileId is { } profileId && profileId != Guid.Empty && _accessProfileRepository is not null)
+        {
+            var profile = await _accessProfileRepository.GetProfileAsync(req.TenantId, profileId.ToString("D"), ct).ConfigureAwait(false);
+            foreach (var raw in profile?.TargetTables ?? [])
+            {
+                var target = raw?.Trim();
+                if (string.IsNullOrWhiteSpace(target) || target.Contains('*', StringComparison.Ordinal) || target.Contains('?', StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (TableIdentifier.TryParse(target, out var table))
+                {
+                    tables.Add(table);
+                }
+            }
+        }
+
+        var max = ProtectionClass.Public;
+        foreach (var table in tables)
+        {
+            var effective = await _protectionProvider.GetAsync(req.TenantId, table, ct).ConfigureAwait(false);
+            var cls = SecretFourEyesRule.MaxEffectiveClass(effective);
+            if (cls > max)
+            {
+                max = cls;
+            }
+        }
+
+        return max;
+    }
+
+    private Task NotifyApprovalRecordedAsync(ConsentRequest request, SecurityPrincipalContext decider, string? reason, CancellationToken ct)
+    {
+        if (_notificationDispatcher is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        return _notificationDispatcher.DispatchAsync(
+            new GovernanceNotificationMessage(
+                AuditEventTypes.PermissionApprovalRecorded,
+                request.TenantId.Value,
+                string.Empty,
+                request.RequestedGranteeRef,
+                $"Permission request {request.Id:D} on secret data has its first approval ({PermissionAuditDetails.ResolveActorKind(decider)}); a second, different approver is required.",
+                _time.GetUtcNow(),
+                ObjectName: FormatTargetObject(request),
+                Justification: reason ?? request.BusinessJustification),
+            ct);
     }
 
     private async Task<IReadOnlyList<GrantRef>> ApplyDecisionEffectAndAuditAsync(
@@ -296,7 +408,7 @@ public sealed partial class PermissionRequestEngine
             validFrom = decision.DecidedAt;
         }
 
-        if (string.Equals(decision.StepDecision, "APPROVED", StringComparison.OrdinalIgnoreCase))
+        if (decision.IsFinal && string.Equals(decision.StepDecision, "APPROVED", StringComparison.OrdinalIgnoreCase))
         {
             if (!_appliers.TryGetValue(updatedReq.RequestKind, out var applier))
             {
@@ -317,9 +429,12 @@ public sealed partial class PermissionRequestEngine
                 ct).ConfigureAwait(false);
         }
 
-        var eventType = string.Equals(decision.StepDecision, "APPROVED", StringComparison.OrdinalIgnoreCase)
-            ? (decision.SelfGrant ? AuditEventTypes.SelfGrant : AuditEventTypes.PermissionApproved)
-            : AuditEventTypes.PermissionRejected;
+        var eventType = !decision.IsFinal
+            ? AuditEventTypes.PermissionApprovalRecorded
+            : string.Equals(decision.StepDecision, "APPROVED", StringComparison.OrdinalIgnoreCase)
+                ? (decision.SelfGrant ? AuditEventTypes.SelfGrant : AuditEventTypes.PermissionApproved)
+                : AuditEventTypes.PermissionRejected;
+        var fourEyesStep = !decision.IsFinal || decision.StepNumber > 1;
         var actorKind = PermissionAuditDetails.ResolveActorKind(command.Decider);
 
         await _auditWriter.RecordRequiredAsync(new AuditLogEntry
@@ -345,7 +460,9 @@ public sealed partial class PermissionRequestEngine
                 ActorKind: actorKind,
                 GrantKind: updatedReq.GrantKind.ToSqlString(),
                 ExternalSystemId: command.External?.ExternalSystemId,
-                ExternalReference: command.External?.ExternalReference).ToDetailsJson()
+                ExternalReference: command.External?.ExternalReference,
+                ApprovalStep: fourEyesStep ? decision.StepNumber : null,
+                RequiredApprovals: fourEyesStep ? SecretFourEyesRule.RequiredApprovals : null).ToDetailsJson()
         }, ct).ConfigureAwait(false);
 
         return grants;

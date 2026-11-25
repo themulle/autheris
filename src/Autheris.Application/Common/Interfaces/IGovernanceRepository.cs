@@ -645,6 +645,7 @@ public interface IConsentApprovalRepository
         => Task.FromResult(new ConsentRequestPage(Array.Empty<ConsentRequest>(), null));
 }
 
+/// <param name="AdditionalStatus">A second status matched besides <paramref name="Status"/> (the decision inbox lists PENDING and PENDING_SECOND_APPROVAL).</param>
 public sealed record ConsentRequestPageQuery(
     TenantId TenantId,
     string? Status = null,
@@ -655,7 +656,8 @@ public sealed record ConsentRequestPageQuery(
     string? Domain = null,
     string? Schema = null,
     string? TableName = null,
-    string? RequesterSid = null);
+    string? RequesterSid = null,
+    string? AdditionalStatus = null);
 
 public sealed record ConsentRequestPage(
     IReadOnlyList<ConsentRequest> Items,

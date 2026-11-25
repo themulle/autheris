@@ -441,3 +441,5 @@ Autheris.Tests.Unit.Governance.Grants.OwnerGrantTests.OwnerGrant_Unassign_Revoke
 Autheris.Tests.Unit.Governance.Grants.OwnerGrantTests.OwnerGrant_WritesOpenEndedClearReadGrant_ExemptFromMaxDuration	#1009	Owner grants (grant source OWNER) are deleted with the ownership model; step 0045 revokes stored ones
 Autheris.Tests.Unit.Products.ProductDecisionTests.A_failed_owner_link_fails_the_operation	#1009	The product owner link into TABLE_OWNERS is deleted (D13); ownership comes from container owner groups only
 Autheris.Tests.Unit.Products.ProductDecisionTests.Product_owner_linked_as_data_owner	#1009	The product owner link into TABLE_OWNERS is deleted (D13); ownership comes from container owner groups only
+Autheris.Tests.Architecture.FourEyesRemovalArchitectureTests.No_second_approver_path	#1121	Four eyes is back for secret data only; the ratchet now pins the single secret four-eyes rule
+Autheris.Tests.Unit.Governance.Requests.FirstDecisionWinsTests.Secret_request_single_approver	#1121	Grants on secret data need two distinct approvals (owner decision); replaced by SecretFourEyesApprovalTests

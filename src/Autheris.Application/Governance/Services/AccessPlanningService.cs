@@ -19,6 +19,7 @@ using Autheris.Application.Events;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Interfaces;
 using Autheris.Application.Governance.Grants;
+using Autheris.Application.Governance.Requests;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Governance.Protection;
 using Autheris.Application.Identity;
@@ -81,6 +82,17 @@ public class AccessPlanningService : IAccessPlanningService
         CancellationToken ct)
     {
         var maxValidTo = new List<DateTimeOffset?>(request.Grants.Count);
+
+        // Issue #1121: a grant on secret data needs two distinct approvals; the single-administrator plan never grants it (plan and apply).
+        if (request.Grants.Count > 0 && meta is not null && _protectionProvider is not null)
+        {
+            var protection = await _protectionProvider.GetAsync(tenantId, meta.Identifier, ct).ConfigureAwait(false);
+            if (SecretFourEyesRule.MaxEffectiveClass(protection) == ProtectionClass.Secret)
+            {
+                throw SecretFourEyesRule.DeclarativeRefusal(meta.Identifier.ToString());
+            }
+        }
+
         foreach (var grant in request.Grants)
         {
             var hasParsedGrantee = AccessGrantRecords.TryParseGrantee(grant.Principal, out var granteeType, out var granteeId);

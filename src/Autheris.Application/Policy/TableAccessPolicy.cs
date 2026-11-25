@@ -335,7 +335,7 @@ public sealed partial class TableAccessPolicy
         {
             // Most restrictive masking mode of the matched profiles; the row filters of all of them are AND-ed. An invalid profile row
             // filter or conflicting parameters deny the table (fail closed).
-            decision = ApplyAccessProfiles(decision, profiles, query.Metadata);
+            decision = ApplyAccessProfiles(decision, profiles, query.Metadata, query.Protection);
             if (!decision.IsAllowed)
             {
                 return decision;

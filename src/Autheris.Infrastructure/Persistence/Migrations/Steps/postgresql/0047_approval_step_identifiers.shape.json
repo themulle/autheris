@@ -1,0 +1,9 @@
+{
+  "ops": [
+    {
+      "op": "addColumn",
+      "table": "approval_steps",
+      "column": { "name": "approver_identifiers_json", "type": "TEXT", "family": "string", "nullable": true }
+    }
+  ]
+}

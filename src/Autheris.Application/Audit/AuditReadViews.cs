@@ -22,6 +22,7 @@ public static class AuditReadViews
 
     private static readonly string[] DecisionEventTypes =
     [
+        AuditEventTypes.PermissionApprovalRecorded,
         AuditEventTypes.PermissionApproved,
         AuditEventTypes.PermissionRejected,
         AuditEventTypes.PermissionDecisionConflict
