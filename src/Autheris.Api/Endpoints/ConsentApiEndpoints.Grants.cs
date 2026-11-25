@@ -320,7 +320,7 @@ public static partial class ConsentApiEndpoints
         IConsentWorkflowConfigRepository workflowConfigRepo,
         [FromServices] IProfileAssignmentStore assignmentStore,
         [FromServices] IProfileAssignmentMaintenanceService profileAssignmentService,
-        IContainerOwnership ownershipRepo,
+        [FromServices] GrantRevokeAuthority? revokeAuthority = null,
         IIdempotencyStore? idempotencyStore = null,
         IRateLimiterService? rateLimiter = null,
         IOptions<GovernanceOptions>? governanceOptions = null,
@@ -332,7 +332,7 @@ public static partial class ConsentApiEndpoints
             return limited;
         }
 
-        var (tenantId, userSid, clientId, isServicePrincipal, isClusterAdmin, _) = ResolveCaller(context);
+        var (tenantId, userSid, clientId, isServicePrincipal, _, _) = ResolveCaller(context);
         ExternalWorkflowSystem? callerSystem = null;
         if (isServicePrincipal)
         {
@@ -365,7 +365,7 @@ public static partial class ConsentApiEndpoints
         }
 
         var req = await approvalRepo.GetConsentRequestAsync(id, ct).ConfigureAwait(false);
-        if (req is not null && !isClusterAdmin && req.TenantId != tenantId)
+        if (req is not null && req.TenantId != tenantId)
         {
             return ApiProblems.NotFound(ConsentDecisionErrorCodes.GrantNotFound, $"Profile assignment '{id}' was not found.", context);
         }
@@ -377,7 +377,7 @@ public static partial class ConsentApiEndpoints
         }
 
         var grants = await assignmentStore.GetConsentsByProfileAssignmentAsync(null, effectiveTenant, id, ct).ConfigureAwait(false);
-        if (req is null && grants.Count == 0)
+        if ((req is null && grants.Count == 0) || grants.Any(g => g.TenantId != effectiveTenant))
         {
             return ApiProblems.NotFound(ConsentDecisionErrorCodes.GrantNotFound, $"Profile assignment '{id}' was not found.", context);
         }
@@ -395,22 +395,11 @@ public static partial class ConsentApiEndpoints
             }
 
             actorSid = userSid.Value;
-            bool isAdmin = isClusterAdmin || context.User.IsInRole("GovernanceAdmin");
-            bool isSelf = (req is not null && req.RequesterSid == actorSid) || grants.Any(g => g.GranteeSid == actorSid);
-            bool isApprover = false;
-            if (!isAdmin && !isSelf)
-            {
-                isApprover = grants.Any(g => g.IsPatternGrant && g.ApprovingOwners.Any(o => string.Equals(o, actorSid.Value, StringComparison.OrdinalIgnoreCase)));
-                var tables = grants.Select(static g => g.TableIdentifier).Where(static t => !string.IsNullOrWhiteSpace(t.TableName)).Distinct().ToList();
-                if (!isApprover && tables.Count > 0)
-                {
-                    // One set-based ownership resolution for all grants of the assignment (no per-grant owner lookup).
-                    var owned = await ownershipRepo.GetOwnedOrDelegatedTablesAsync(actorSid, tables, (timeProvider ?? TimeProvider.System).GetUtcNow(), ct).ConfigureAwait(false);
-                    isApprover = owned.Count > 0;
-                }
-            }
-
-            if (!isAdmin && !isSelf && !isApprover)
+            var callerContext = context.GetSecurityContext() ?? SecurityPrincipalContext.FromPrincipal(context.User);
+            var capacity = revokeAuthority is null
+                ? null
+                : await revokeAuthority.EvaluateProfileAssignmentAsync(callerContext, effectiveTenant, req, grants, ct).ConfigureAwait(false);
+            if (capacity is null)
             {
                 return ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, "Caller is not authorized to revoke this profile assignment.", context);
             }

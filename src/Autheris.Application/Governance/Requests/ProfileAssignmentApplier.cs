@@ -4,6 +4,7 @@ using System.Linq;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.ConsentRequests.ProfileAssignments;
@@ -112,12 +113,12 @@ public sealed class ProfileAssignmentApplier(
                 }
 
                 var matched = await _metadataRepository.GetTableMetadataAsync(parsedTable, ct).ConfigureAwait(false);
-                if (matched is null)
+                if (!CatalogTenantOwnership.IsEligibleTargetInTenant(matched, req.TenantId))
                 {
                     throw new ConsentDecisionException("NOT_FOUND", $"Profile target table '{rawTarget}' was not found.", 404);
                 }
 
-                tableId = matched.Table.Id;
+                tableId = matched!.Table.Id;
                 tableIdentifier = matched.Identifier;
             }
 

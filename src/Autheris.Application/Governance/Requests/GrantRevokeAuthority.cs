@@ -1,6 +1,8 @@
 namespace Autheris.Application.Governance.Requests;
 
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
@@ -72,8 +74,12 @@ public sealed class GrantRevokeAuthority(
 
         try
         {
-            if (caller.GroupResolutionStatus == GroupResolutionStatus.Complete &&
-                _capabilities.IsGovernance(caller.Principal, grant.TenantId))
+            if (HasDegradedGroupOrRoleResolution(caller))
+            {
+                return null;
+            }
+
+            if (_capabilities.IsGovernance(caller.Principal, grant.TenantId))
             {
                 return GrantRevokeCapacity.Governance;
             }
@@ -136,7 +142,7 @@ public sealed class GrantRevokeAuthority(
     {
         ArgumentNullException.ThrowIfNull(grant);
         if (caller is null || !caller.IsAuthenticated || caller.TenantClaimInvalid ||
-            caller.GroupResolutionStatus != GroupResolutionStatus.Complete ||
+            HasDegradedGroupOrRoleResolution(caller) ||
             string.IsNullOrWhiteSpace(grant.TenantId.Value) || TenantId.IsReserved(grant.TenantId) ||
             grant.ContainerId == Guid.Empty ||
             !string.Equals(caller.ResolvedTenant?.Value, grant.TenantId.Value, StringComparison.OrdinalIgnoreCase))
@@ -175,24 +181,80 @@ public sealed class GrantRevokeAuthority(
         }
     }
 
-    private static bool IsGrantee(SecurityPrincipalContext caller, Consent grant)
+    /// <summary>
+    /// Evaluates revocation authority for a profile assignment: the grantee (user or SP), Data Governance (excluding plain
+    /// ClusterAdmin/ItAdmin), or a ContainerOwner who owns every target in the assignment. Degraded resolution fails closed.
+    /// </summary>
+    public async ValueTask<GrantRevokeCapacity?> EvaluateProfileAssignmentAsync(
+        SecurityPrincipalContext? caller,
+        TenantId tenant,
+        ConsentRequest? request,
+        IReadOnlyList<Consent> grants,
+        CancellationToken ct = default)
     {
-        if (grant.GranteeType is not (GranteeType.User or GranteeType.ServicePrincipal) ||
-            grant.GranteeSid is not { } granteeSid ||
-            string.IsNullOrWhiteSpace(granteeSid.Value))
+        ArgumentNullException.ThrowIfNull(grants);
+        if (caller is null || !caller.IsAuthenticated || caller.TenantClaimInvalid ||
+            string.IsNullOrWhiteSpace(tenant.Value) || TenantId.IsReserved(tenant) ||
+            !string.Equals(caller.ResolvedTenant?.Value, tenant.Value, StringComparison.OrdinalIgnoreCase))
         {
-            return false;
+            return null;
         }
 
-        var identifiers = SeparationOfDutiesService.CollectSubjectIdentifiers(caller.Principal, caller.UserSid.Value);
-        foreach (var identifier in identifiers)
+        if (grants.Count > 0 && grants.All(g => g.TenantId == tenant && IsGrantee(caller, g))) return GrantRevokeCapacity.Grantee;
+        if (grants.Count == 0 && request is not null && request.TenantId == tenant &&
+            MatchesSubject(caller, request.RequestedGranteeType, new Sid(request.RequestedGranteeRef))) return GrantRevokeCapacity.Grantee;
+        if (HasDegradedGroupOrRoleResolution(caller)) return null;
+
+        try
         {
-            if (SeparationOfDutiesService.IdentifiersOverlap(identifier, granteeSid.Value))
+            if (_capabilities.IsGovernance(caller.Principal, tenant)) return GrantRevokeCapacity.Governance;
+            if (grants.Count == 0 || grants.Any(g => g.TenantId != tenant)) return null;
+
+            var callerIds = SeparationOfDutiesService.CollectSubjectIdentifiers(caller.Principal, caller.UserSid.Value);
+            var tableKinds = new Dictionary<TableIdentifier, ConsentRequestKind>();
+            foreach (var grant in grants)
             {
-                return true;
-            }
-        }
+                if (grant.IsPatternGrant || string.IsNullOrWhiteSpace(grant.TableIdentifier.TableName))
+                {
+                    if (!grant.ApprovingOwners.Any(o => SeparationOfDutiesService.AnyOverlap(callerIds, o) ||
+                            caller.GroupSids.Any(gs => SeparationOfDutiesService.IdentifiersOverlap(gs.Value, o)))) return null;
+                    continue;
+                }
 
-        return false;
+                tableKinds.TryAdd(grant.TableIdentifier, grant.GrantKind == PermissionGrantKind.Unmask
+                    ? ConsentRequestKind.Unmask : ConsentRequestKind.Data);
+            }
+
+            var cache = new ApproverResolutionCache(tenant);
+            foreach (var (table, kind) in tableKinds)
+            {
+                var set = await _approverResolver.ResolveAsync(tenant, kind, PermissionTarget.ForTable(table), default, string.Empty, cache, ct).ConfigureAwait(false);
+                if (await _approverEligibility.EvaluateAsync(caller, set, ct).ConfigureAwait(false) != ApproverCapacity.DataOwner) return null;
+            }
+
+            return GrantRevokeCapacity.ContainerOwner;
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return null;
+        }
+    }
+
+    private static bool HasDegradedGroupOrRoleResolution(SecurityPrincipalContext caller) =>
+        caller.GroupResolutionStatus != GroupResolutionStatus.Complete ||
+        GroupResolutionClaims.HasAnyDegradedClaim(caller.Claims) ||
+        SeparationOfDutiesService.IsDegradedGroupOrRoleResolution(caller.Principal);
+
+    private static bool IsGrantee(SecurityPrincipalContext caller, Consent grant) =>
+        grant.GranteeSid is { } granteeSid && MatchesSubject(caller, grant.GranteeType, granteeSid);
+
+    private static bool MatchesSubject(SecurityPrincipalContext caller, GranteeType granteeType, Sid granteeSid)
+    {
+        if (granteeType is not (GranteeType.User or GranteeType.ServicePrincipal) || string.IsNullOrWhiteSpace(granteeSid.Value)) return false;
+        var identifiers = granteeType == GranteeType.ServicePrincipal
+            ? SeparationOfDutiesService.CollectServicePrincipalIdentifiers(
+                caller.Principal, caller.UserSid.Value, string.IsNullOrWhiteSpace(caller.Caller?.ClientId) ? null : [caller.Caller.ClientId!])
+            : SeparationOfDutiesService.CollectSubjectIdentifiers(caller.Principal, caller.UserSid.Value);
+        return identifiers.Any(identifier => SeparationOfDutiesService.IdentifiersOverlap(identifier, granteeSid.Value));
     }
 }

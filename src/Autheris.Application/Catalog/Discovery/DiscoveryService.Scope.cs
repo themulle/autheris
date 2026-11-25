@@ -256,7 +256,7 @@ public sealed partial class DiscoveryService
                 {
                     admitted.Add(table.Identifier);
                 }
-                else if (!IsOwnedByAnotherTenant(table, caller.Tenant))
+                else if (!CatalogTenantOwnership.IsOwnedByAnotherTenant(table, caller.Tenant))
                 {
                     containerCandidates.Add(table);
                 }
@@ -314,7 +314,7 @@ public sealed partial class DiscoveryService
             var hasGrant = grantCandidates.IsCandidate(table);
             candidateHasGrant[i] = hasGrant;
 
-            if (table.Table.DiscoveryHidden || (!hasGrant && !IsOwnedByAnotherTenant(table, caller.Tenant)))
+            if (table.Table.DiscoveryHidden || (!hasGrant && !CatalogTenantOwnership.IsOwnedByAnotherTenant(table, caller.Tenant)))
             {
                 ownershipQueryIds.Add(table.Identifier);
             }
@@ -337,11 +337,11 @@ public sealed partial class DiscoveryService
                 continue;
             }
 
-            if (candidateHasGrant[i] || (!IsOwnedByAnotherTenant(table, caller.Tenant) && ownedTables.Contains(table.Identifier)))
+            if (candidateHasGrant[i] || (!CatalogTenantOwnership.IsOwnedByAnotherTenant(table, caller.Tenant) && ownedTables.Contains(table.Identifier)))
             {
                 admitted.Add(table.Identifier);
             }
-            else if (!IsOwnedByAnotherTenant(table, caller.Tenant))
+            else if (!CatalogTenantOwnership.IsOwnedByAnotherTenant(table, caller.Tenant))
             {
                 ungrantedCandidates.Add(table);
             }
@@ -559,8 +559,4 @@ public sealed partial class DiscoveryService
         snapshot.IsAvailable &&
         snapshot.Containers.TryGetValue(container, out var info) &&
         !info.IsSystemUnassigned;
-
-    private static bool IsOwnedByAnotherTenant(TableMetadata table, TenantId tenant) =>
-        !string.IsNullOrWhiteSpace(table.OwnerTenantId) &&
-        !string.Equals(table.OwnerTenantId, tenant.Value, StringComparison.OrdinalIgnoreCase);
 }

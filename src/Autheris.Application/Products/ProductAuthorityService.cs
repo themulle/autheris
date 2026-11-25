@@ -129,7 +129,7 @@ public sealed class ProductAuthorityService(
                         return ProductAuthorityDecision.Deny(ProductErrorCodes.OwnerMustDiffer);
                     }
 
-                    if (!SidFormat.IsCanonical(explicitSid.Value.Trim()))
+                    if (!SidFormat.IsGroupOrRealmGroupIdentifier(explicitSid.Value.Trim()))
                     {
                         return ProductAuthorityDecision.Deny(ProductErrorCodes.DefinitionInvalid);
                     }
@@ -166,7 +166,7 @@ public sealed class ProductAuthorityService(
         }
 
         var normalized = newOwnerGroupSid.Value.Trim();
-        if (!SidFormat.IsCanonical(normalized))
+        if (!SidFormat.IsGroupOrRealmGroupIdentifier(normalized))
         {
             return ProductAuthorityDecision.Deny(ProductErrorCodes.DefinitionInvalid);
         }
@@ -227,7 +227,7 @@ public sealed class ProductAuthorityService(
         }
 
         var normalized = owner.Value.Trim();
-        if (!SidFormat.IsCanonical(normalized))
+        if (!SidFormat.IsGroupOrRealmGroupIdentifier(normalized))
         {
             return ProductAuthorityDecision.Deny(ProductErrorCodes.DefinitionInvalid);
         }

@@ -122,7 +122,7 @@ public sealed class AccessPolicyOptionsValidator : IValidateOptions<AccessPolicy
 
         foreach (var raw in sids)
         {
-            if (!SidFormat.IsCanonical(raw?.Trim()))
+            if (!SidFormat.IsGroupOrRealmGroupIdentifier(raw?.Trim()))
             {
                 failures.Add("AccessPolicy:Internal:EmployeeGroupSids contains a non-canonical SID.");
             }
