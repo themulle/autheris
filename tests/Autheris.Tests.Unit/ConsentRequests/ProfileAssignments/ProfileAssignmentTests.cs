@@ -331,11 +331,10 @@ public sealed class ProfileAssignmentTests
         public Task<IReadOnlyList<ConsentRequest>> GetTimedOutRequestsAsync(DateTimeOffset olderThan, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<ConsentRequest>>([]);
         public Task DeleteConsentRequestAsync(Guid requestId, CancellationToken ct = default) { Requests.RemoveAll(r => r.Id == requestId); return Task.CompletedTask; }
 
-        public Task<DataOwner> RegisterDataOwnerAsync(DataOwner owner, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<ContainerOwnerEntry> RegisterDataOwnerAsync(ContainerOwnerEntry owner, CancellationToken ct = default) => throw new NotSupportedException();
         public Task AssignTableOwnerAsync(TableIdentifier table, Guid ownerId, CancellationToken ct = default) => Task.CompletedTask;
-        public Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<DataOwner>>(TableOwners.TryGetValue(table, out var sids) ? sids.Select(s => new DataOwner { Id = Guid.NewGuid(), AdSid = new Sid(s), DisplayName = s, Email = $"{s}@x.test", IsActive = true }).ToList() : []);
+        public Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<ContainerOwnerEntry>>(TableOwners.TryGetValue(table, out var sids) ? sids.Select(s => new ContainerOwnerEntry { AdSid = new Sid(s), DisplayName = s, Email = $"{s}@x.test", IsActive = true }).ToList() : []);
         public Task<IReadOnlyList<Sid>> GetAuthorizedApproverSidsForTableAsync(TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<Sid>>(TableOwners.TryGetValue(table, out var sids) ? sids.Select(s => new Sid(s)).ToList() : []);
         public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default) =>
@@ -423,7 +422,7 @@ public sealed class ProfileAssignmentTests
         public Task<ConsentWorkflowRoute?> ResolveWorkflowRouteAsync(TenantId tenantId, TableIdentifier table, CancellationToken ct = default) =>
             Task.FromResult(Routes.FirstOrDefault(r => r.TenantId == tenantId.Value));
         public Task<ConsentWorkflowTableInputs> GetRoutingInputsForTableAsync(TenantId tenantId, TableIdentifier table, CancellationToken ct = default) =>
-            Task.FromResult(new ConsentWorkflowTableInputs(Routes.Where(r => r.TenantId == tenantId.Value).ToList(), TableOwners.TryGetValue(table, out var s) ? s.ToHashSet(StringComparer.OrdinalIgnoreCase) : new HashSet<string>(StringComparer.OrdinalIgnoreCase)));
+            Task.FromResult(new ConsentWorkflowTableInputs(Routes.Where(r => r.TenantId == tenantId.Value).ToList()));
         public Task<IReadOnlyList<ConsentWorkflowRoute>> ListWorkflowRoutesAsync(TenantId tenantId, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<ConsentWorkflowRoute>>(Routes.Where(r => r.TenantId == tenantId.Value).ToList());
         public Task<ConsentWorkflowRoute?> GetWorkflowRouteAsync(TenantId tenantId, WorkflowRouteScopeKind scopeKind, string scopeRef, CancellationToken ct = default) => Task.FromResult<ConsentWorkflowRoute?>(null);

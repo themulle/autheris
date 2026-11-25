@@ -37,7 +37,7 @@ public static partial class TreeSqlCompiler
     /// as flat tables through the governed compile path but offer no nested relation fields.
     /// </summary>
     public static bool SupportsTreeCompile(DatabaseDialect dialect) =>
-        dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql;
+        dialect is DatabaseDialect.SqlServer or DatabaseDialect.PostgreSql or DatabaseDialect.Databricks;
 
     public static CompiledTreeQuery Compile(
         TreeQueryNode root,
@@ -208,21 +208,17 @@ public static partial class TreeSqlCompiler
             {
                 throw new GatewayInvalidQueryException($"The query uses more than {MaxParameters} values.");
             }
+            var prefix = Dialect == DatabaseDialect.Databricks ? ":gq" : "@gq";
             string name;
             do
             {
-                name = "@gq" + (_parameterCounter++).ToString(CultureInfo.InvariantCulture);
+                name = prefix + (_parameterCounter++).ToString(CultureInfo.InvariantCulture);
             }
             while (Parameters.ContainsKey(name));
             Parameters[name] = value ?? DBNull.Value;
             return name;
         }
 
-        /// <summary>
-        /// SQL2-11: binds the parameters of one table's row filter. Row filters of different tables may use the same
-        /// parameter name with different values (each consent names its own parameters); such a parameter gets a name
-        /// unique to this query and the filter SQL is rewritten accordingly, instead of rejecting the whole query.
-        /// </summary>
         public string BindRowFilter(string filterSql, IReadOnlyDictionary<string, object?>? parameters)
         {
             if (parameters == null || parameters.Count == 0)
@@ -233,25 +229,34 @@ public static partial class TreeSqlCompiler
             // two keys of one decision that name the same parameter (marker prefix or case) fail closed.
             _ = Autheris.Application.Sql.Policy.RowFilterParameterNames.Checked(parameters);
 
+            var markerPrefix = Dialect == DatabaseDialect.Databricks ? ":" : "@";
+            var rfPrefix = Dialect == DatabaseDialect.Databricks ? ":rf" : "@rf";
             var renames = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
             foreach (var (name, value) in parameters)
             {
                 var bound = value ?? DBNull.Value;
-                if (Parameters.TryGetValue(name, out var existing) && !Equals(existing, bound))
+                var raw = name.TrimStart('@', ':');
+                var targetName = markerPrefix + raw;
+                if (Parameters.TryGetValue(targetName, out var existing) && !Equals(existing, bound))
                 {
                     string unique;
                     do
                     {
-                        unique = "@rf" + (_parameterCounter++).ToString(CultureInfo.InvariantCulture) + "_" + name.TrimStart('@');
+                        unique = rfPrefix + (_parameterCounter++).ToString(CultureInfo.InvariantCulture) + "_" + raw;
                     }
                     while (Parameters.ContainsKey(unique));
 
-                    renames[name.TrimStart('@')] = unique;
+                    renames[raw] = unique;
                     Parameters[unique] = bound;
                     continue;
                 }
 
-                Parameters[name] = bound;
+                if (!string.Equals(name, targetName, StringComparison.Ordinal))
+                {
+                    renames[raw] = targetName;
+                }
+
+                Parameters[targetName] = bound;
             }
 
             return renames.Count == 0 ? filterSql : RenameParameters(filterSql, renames);
@@ -326,8 +331,11 @@ public static partial class TreeSqlCompiler
                 else
                 {
                     var colMeta = metadata.GetColumn(column);
-                var isString = colMeta == null || IsStringType(colMeta.DataType);
-                outputs.Add(new OutputColumn(column, null, MaskLiteral(rule, context.Dialect, isString)));
+                    var isString = colMeta == null || IsStringType(colMeta.DataType);
+                    var maskExpr = context.Dialect == DatabaseDialect.Databricks
+                        ? DatabricksMaskExpression(rule, context, isString)
+                        : MaskLiteral(rule, context.Dialect, isString);
+                    outputs.Add(new OutputColumn(column, null, maskExpr));
                 }
             }
             else
@@ -642,7 +650,10 @@ public static partial class TreeSqlCompiler
         {
             var tenantColumn = metadata.GetColumn(plan.Access.TenantColumn)?.ColumnName
                 ?? throw new GatewayForbiddenException("Access denied.");
-            where.Add($"{target}.{Q(context, tenantColumn)} = {context.AddParameter(plan.Access.TenantValue)}");
+            var tenantParam = context.AddParameter(plan.Access.TenantValue);
+            where.Add(context.Dialect == DatabaseDialect.Databricks
+                ? $"CAST({target}.{Q(context, tenantColumn)} AS BINARY) = CAST({tenantParam} AS BINARY)"
+                : $"{target}.{Q(context, tenantColumn)} = {tenantParam}");
         }
 
         if (plan.Access.Decision.HasRowFilter && securedSource == null)
@@ -754,9 +765,9 @@ public static partial class TreeSqlCompiler
     private static string OuterOrderBy(NodePlan plan, CompileContext context) =>
         string.Join(", ", plan.Order.Select(o => $"{Q(context, plan.Alias)}.{Q(context, o.Column)}{(o.Descending ? " DESC" : string.Empty)}"));
 
-    private static string ColumnExpression(NodePlan plan, CompileContext context, string column)
+    private static string ColumnExpression(NodePlan plan, CompileContext context, string column, string? rowAlias = null)
     {
-        var quoted = $"{Q(context, plan.Alias)}.{Q(context, column)}";
+        var quoted = $"{Q(context, rowAlias ?? plan.Alias)}.{Q(context, column)}";
         var dataType = plan.Access.Metadata.GetColumn(column)?.DataType?.Trim().ToLowerInvariant();
         if (dataType is "geometry" or "geography" or "spatial" or "point" or "polygon" or "linestring" or "multipolygon" or "multipoint")
         {
@@ -778,12 +789,12 @@ public static partial class TreeSqlCompiler
         return quoted;
     }
 
-    private static List<(string Key, string Expression)> ObjectPairs(NodePlan plan, CompileContext context)
+    private static List<(string Key, string Expression)> ObjectPairs(NodePlan plan, CompileContext context, string? rowAlias = null)
     {
         var pairs = new List<(string Key, string Expression)>(plan.Outputs.Count + plan.Children.Count);
         foreach (var output in plan.Outputs)
         {
-            pairs.Add((output.Key, output.LiteralExpression ?? ColumnExpression(plan, context, output.SourceColumn!)));
+            pairs.Add((output.Key, output.LiteralExpression ?? ColumnExpression(plan, context, output.SourceColumn!, rowAlias)));
         }
         foreach (var (relation, child) in plan.Children)
         {
@@ -807,6 +818,11 @@ public static partial class TreeSqlCompiler
 
     private static string BuildCorrelatedRoot(NodePlan plan, CompileContext context)
     {
+        if (context.Dialect == DatabaseDialect.Databricks)
+        {
+            return BuildDatabricksCorrelatedRoot(plan, context);
+        }
+
         var inner = BuildInner(plan, context, parent: null, relation: null);
         var alias = Q(context, plan.Alias);
         var order = OuterOrderBy(plan, context);
@@ -825,6 +841,11 @@ public static partial class TreeSqlCompiler
 
     private static string BuildChild(NodePlan plan, CompileContext context, NodePlan parent, TreeRelationNode relation)
     {
+        if (context.Dialect == DatabaseDialect.Databricks)
+        {
+            return BuildDatabricksChild(plan, context, parent, relation);
+        }
+
         var inner = BuildInner(plan, context, parent, relation);
         var alias = Q(context, plan.Alias);
         var order = OuterOrderBy(plan, context);
@@ -889,7 +910,9 @@ public static partial class TreeSqlCompiler
 
         public char LikeEscape => '\\';
 
-        public string LikeSpecials => "%_[";
+        public string LikeEscapeLiteral => context.Dialect == DatabaseDialect.Databricks ? "'\\\\'" : $"'{LikeEscape}'";
+
+        public string LikeSpecials => context.Dialect == DatabaseDialect.Databricks ? "%_" : "%_[";
 
         public bool AlwaysEmitLikeEscape => true;
     }

@@ -86,26 +86,6 @@ public sealed class ConsentRevocationAuthorityTests : IDisposable
         await cmd.ExecuteNonQueryAsync();
     }
 
-    private async Task SeedOwnerAsync(Sid sid)
-    {
-        var ownerId = Guid.NewGuid().ToString();
-        var conn = _repo.RawConnection();
-        await using (var oCmd = conn.CreateCommand())
-        {
-            oCmd.CommandText = "INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active) VALUES (@id, @sid, 'corp\\\\owner', 'Owner', 'owner@corp.local', 1)";
-            oCmd.Parameters.AddWithValue("@id", ownerId);
-            oCmd.Parameters.AddWithValue("@sid", sid.Value);
-            await oCmd.ExecuteNonQueryAsync();
-        }
-
-        await using var tCmd = conn.CreateCommand();
-        tCmd.CommandText = "INSERT INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role) VALUES (@id, @tid, @oid, 'PRIMARY')";
-        tCmd.Parameters.AddWithValue("@id", Guid.NewGuid().ToString());
-        tCmd.Parameters.AddWithValue("@tid", _tableId.ToString());
-        tCmd.Parameters.AddWithValue("@oid", ownerId);
-        await tCmd.ExecuteNonQueryAsync();
-    }
-
     [Fact]
     public async Task Revoke_TokenGovernanceAdmin_SameTenant_Succeeds()
     {
@@ -176,14 +156,18 @@ public sealed class ConsentRevocationAuthorityTests : IDisposable
     }
 
     [Fact]
-    public async Task Revoke_OwnerOrDelegate_Succeeds()
+    public async Task Revoke_ByNonGranteeToken_IsDenied_OwnersRevokeThroughVerifiedAuthority()
     {
+        // #1009 W3-12b (D13): the store has no per-table owner fallback any more. A container owner revokes through the grant revoke
+        // authority, which hands the store a verified tenant authority; a plain token of a non-admin, non-grantee caller is refused.
         await EnsureTableAsync();
-        await SeedOwnerAsync(Owner);
         var consent = await _repo.CreateConsentAsync(UserConsent(Alice.Value, TenantA));
 
-        await _repo.RevokeConsentAsync(consent.Id, Owner, "owner revoke", ConsentRevocationAuthority.FromPrincipal(PrincipalWith(Owner.Value, "Consumer", TenantA.Value)));
+        await Should.ThrowAsync<Exception>(() => _repo.RevokeConsentAsync(
+            consent.Id, Owner, "owner revoke", ConsentRevocationAuthority.FromPrincipal(PrincipalWith(Owner.Value, "Consumer", TenantA.Value))));
+        (await _repo.GetConsentByIdAsync(consent.Id))!.IsRevoked.ShouldBeFalse();
 
+        await _repo.RevokeConsentAsync(consent.Id, Owner, "owner revoke", ConsentRevocationAuthority.ForVerifiedRevocation(TenantA, "ContainerOwner"));
         (await _repo.GetConsentByIdAsync(consent.Id))!.IsRevoked.ShouldBeTrue();
     }
 
@@ -279,7 +263,19 @@ public sealed class ConsentRevocationAuthorityTests : IDisposable
     {
         await EnsureTableAsync();
         await SeedRoleMemberAsync(Bob, "GovernanceAdmin");
+        var request = await _repo.CreateConsentRequestAsync(new ConsentRequest
+        {
+            TenantId = TenantA,
+            TableId = _tableId,
+            TableIdentifier = _table,
+            RequesterSid = Alice,
+            RequestedGranteeType = GranteeType.User,
+            RequestedGranteeRef = Alice.Value,
+            BusinessJustification = "role row is no ownership",
+            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7)
+        });
 
-        (await _repo.IsAuthorizedApproverForTableAsync(_table, Bob)).ShouldBeFalse();
+        // Without a container owner group nobody decides at the store level (#1009 D13).
+        await Should.ThrowAsync<UnauthorizedAccessException>(() => _repo.ApproveConsentRequestStepAsync(request.Id, Bob));
     }
 }

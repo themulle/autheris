@@ -270,11 +270,11 @@ internal sealed class FakeDiscoveryApprovalRepository : IConsentApprovalReposito
 
 internal sealed class FakeDiscoveryOwnershipRepository : IContainerOwnership
 {
-    public Dictionary<TableIdentifier, List<DataOwner>> Owners { get; } = [];
+    public Dictionary<TableIdentifier, List<ContainerOwnerEntry>> Owners { get; } = [];
     public HashSet<TableIdentifier> OwnedTables { get; } = [];
 
-    public Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default)
-        => Task.FromResult<IReadOnlyList<DataOwner>>(Owners.TryGetValue(table, out var list) ? list : []);
+    public Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default)
+        => Task.FromResult<IReadOnlyList<ContainerOwnerEntry>>(Owners.TryGetValue(table, out var list) ? list : []);
 
     public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default)
         => Task.FromResult(OwnedTables.Contains(table));
@@ -282,7 +282,6 @@ internal sealed class FakeDiscoveryOwnershipRepository : IContainerOwnership
     public Task<IReadOnlySet<TableIdentifier>> GetOwnedOrDelegatedTablesAsync(Sid actorSid, IReadOnlyCollection<TableIdentifier> tables, DateTimeOffset atTime, CancellationToken ct = default)
         => Task.FromResult<IReadOnlySet<TableIdentifier>>(OwnedTables.Where(tables.Contains).ToHashSet());
 
-    public Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default) => throw new NotSupportedException();
 }
 
 internal sealed class FakeDiscoveryArtifactStore : IDiscoveryArtifactStore

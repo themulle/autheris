@@ -36,12 +36,20 @@ public static partial class GovernanceEndpoints
         app.MapPost("/api/v1/profiles/{id}/assignments/approve", ApproveProfileAssignmentAsync).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApproved);
         app.MapDelete("/api/v1/profiles/{id}", DeleteProfileAsync).RequireAuthorization(GatewayPolicies.ProfileAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.AuditConfigChanged);
 
-        // Issue #40: GitOps / Declarative Consent & Row Filter Import API
-        app.MapPost("/api/v1/governance/consents/apply", ApplyConsentManifestAsync)
-            .RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApplied);
+        // Issue #40: GitOps / Declarative Consent & Row Filter Import API. Amendment 6: Data Governance applies; IT administration submits a proposal.
+        app.MapPost("/api/v1/governance/consents/apply", ApplyOrProposeConsentManifestAsync)
+            .RequireAuthorization(GatewayPolicies.AdminOnly).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApplied);
 
-        app.MapPost("/api/governance/consents/apply", ApplyConsentManifestAsync)
-            .RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApplied);
+        app.MapPost("/api/governance/consents/apply", ApplyOrProposeConsentManifestAsync)
+            .RequireAuthorization(GatewayPolicies.AdminOnly).WithAudit(AuditLevel.Full, AuditEventTypes.ConsentApplied);
+
+        // Amendment 6: manifest proposals are reviewed by IT administration or Data Governance and decided by one Data Governance member.
+        app.MapGet("/api/v1/governance/consents/proposals/{id:guid}", GetManifestProposalAsync)
+            .RequireAuthorization(GatewayPolicies.AdminOnly).WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+        app.MapPost("/api/v1/governance/consents/proposals/{id:guid}/confirm", ConfirmManifestProposalAsync)
+            .RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ManifestProposalConfirmed);
+        app.MapPost("/api/v1/governance/consents/proposals/{id:guid}/reject", RejectManifestProposalAsync)
+            .RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ManifestProposalRejected);
 
         return app;
     }

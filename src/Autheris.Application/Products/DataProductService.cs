@@ -50,7 +50,6 @@ public sealed partial class DataProductService(
     IConsentEventOutbox? outbox = null,
     TimeProvider? timeProvider = null,
     ILogger<DataProductService>? logger = null,
-    IProductOwnershipSync? ownershipSync = null,
     IProductCatalogStore? catalogStore = null,
     ViewDowngradeGuard? downgradeGuard = null,
     IAccessPolicySettingsProvider? policyProvider = null,
@@ -58,7 +57,6 @@ public sealed partial class DataProductService(
     IGovernanceWriteInvalidator? writeInvalidator = null)
 {
     private readonly IProductCatalogStore? _catalogStore = catalogStore;
-    private readonly IProductOwnershipSync? _ownershipSync = ownershipSync;
     private readonly ViewDowngradeGuard? _downgradeGuard = downgradeGuard;
     private readonly IAccessPolicySettingsProvider? _policyProvider = policyProvider;
     private readonly IGovernanceWriteInvalidator _writeInvalidator = writeInvalidator ?? new GovernanceWriteInvalidator(
@@ -169,11 +167,6 @@ public sealed partial class DataProductService(
 
         var stored = outcome.Product ?? product;
         await PersistCatalogAsync(stored, ct).ConfigureAwait(false);
-        if (_ownershipSync is not null && (existing is null || existing.OwnerGroupSid != stored.OwnerGroupSid))
-        {
-            await _ownershipSync.SyncAsync(stored, ct).ConfigureAwait(false);
-        }
-
         await _writeInvalidator.InvalidateWideAsync(caller.Tenant, ct: ct).ConfigureAwait(false);
         var notified = definitionChanged
             ? await NotifyBaseOwnersAsync(stored, existing is null ? ProductEventTypes.Created : ProductEventTypes.Changed, now, ct).ConfigureAwait(false)
@@ -207,11 +200,6 @@ public sealed partial class DataProductService(
         var now = _time.GetUtcNow();
         var retired = await ReplaceAsync(product with { Status = DataProductStatus.Retired, UpdatedAt = now, Version = product.Version + 1 }, product.Version, ct).ConfigureAwait(false);
         await PersistCatalogAsync(retired, ct).ConfigureAwait(false);
-        if (_ownershipSync is not null)
-        {
-            await _ownershipSync.SyncAsync(retired, ct).ConfigureAwait(false);
-        }
-
         await _writeInvalidator.InvalidateWideAsync(caller.Tenant, ct: ct).ConfigureAwait(false);
         var notified = await NotifyBaseOwnersAsync(retired, ProductEventTypes.Retired, now, ct).ConfigureAwait(false);
         await AuditAsync(AuditEventTypes.ProductRetired, caller, retired, new { baseOwnersNotified = notified }, now, ct).ConfigureAwait(false);
@@ -239,11 +227,6 @@ public sealed partial class DataProductService(
             product with { OwnerGroupSid = decision.OwnerGroupSid, UpdatedAt = now, Version = product.Version + 1 },
             product.Version, ct).ConfigureAwait(false);
         await PersistCatalogAsync(updated, ct).ConfigureAwait(false);
-        if (_ownershipSync is not null)
-        {
-            await _ownershipSync.SyncAsync(updated, ct).ConfigureAwait(false);
-        }
-
         await _writeInvalidator.InvalidateWideAsync(caller.Tenant, ct: ct).ConfigureAwait(false);
         await AuditAsync(
             AuditEventTypes.OwnerGroupAssigned,

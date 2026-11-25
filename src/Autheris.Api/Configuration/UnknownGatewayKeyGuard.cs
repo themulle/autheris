@@ -47,7 +47,8 @@ public static class UnknownGatewayKeyGuard
         (GatewayConfigurationSchema.Root + ":WebSql:CrossSource:PredicatePushdown:Enabled", "WebSql:CrossSource:PredicatePushdown:Enabled (removed; predicate pushdown is always active)"),
         (GatewayConfigurationSchema.Root + ":Arrow:Enabled", "Arrow:Enabled (removed; Arrow IPC export is always active)"),
         (GatewayConfigurationSchema.Root + ":ParquetEgress:Enabled", "ParquetEgress:Enabled (removed; Parquet egress is always active)"),
-        (GatewayConfigurationSchema.Root + ":ResourceGroups:Enabled", "ResourceGroups:Enabled (removed; resource groups are always active)")
+        (GatewayConfigurationSchema.Root + ":ResourceGroups:Enabled", "ResourceGroups:Enabled (removed; resource groups are always active)"),
+        (GatewayConfigurationSchema.Root + ":Dbt:ImportDataOwners", "Dbt:ImportDataOwners (removed; per-table data owners no longer exist, Data Governance assigns owner groups to containers)")
     ];
 
     private static readonly (string Key, string Message)[] RemovedEventBusKeys =

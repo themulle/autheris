@@ -25,9 +25,7 @@ public partial class GovernanceRepository : IConsentWorkflowAdminRepository
     {
         TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.ConsentWorkflowRoutes));
         var routes = await ListWorkflowRoutesAsync(tenantId, ct).ConfigureAwait(false);
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        var ownerIds = await GetTableOwnerIdsForRouteAsync(conn, table, ct).ConfigureAwait(false);
-        return new ConsentWorkflowTableInputs(routes, ownerIds);
+        return new ConsentWorkflowTableInputs(routes);
     }
 
     public async Task<IReadOnlyList<ConsentWorkflowRoute>> ListWorkflowRoutesAsync(

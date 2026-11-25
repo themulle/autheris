@@ -15,8 +15,6 @@ public static class DbtServiceCollectionExtensions
 
         services.TryAddSingleton<ITelemetryMetricsProvider, InMemoryTelemetryMetricsProvider>();
         services.TryAddSingleton<IDbtTestTargetMap, DbtTestTargetMap>();
-        // Core consumers of the verifier exist only through dbt; a missing verifier would silently accept owners (NotConfigured).
-        services.TryAddSingleton<IDataOwnerIdentityVerifier, ScimDataOwnerIdentityVerifier>();
         services.Replace(ServiceDescriptor.Singleton<IDbtHealthCircuitBreaker, DbtHealthCircuitBreaker>());
         services.AddSemanticCatalog();
         services.TryAddScoped<IDbtSemanticManifestIngestionService, DbtSemanticManifestIngestionService>();

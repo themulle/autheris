@@ -173,7 +173,7 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
         var existingVersions = await _changeStore.GetObjectVersionsAsync(tenantId, ct).ConfigureAwait(false);
         var ownersByTable = activeTables.Count > 0
             ? await _ownershipRepository.GetDataOwnersForTablesAsync(activeTables.Select(static t => t.Identifier).ToList(), ct).ConfigureAwait(false)
-            : new Dictionary<TableIdentifier, IReadOnlyList<DataOwner>>();
+            : new Dictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>();
         var artifactsByTable = _artifactStore is not null && activeTables.Count > 0
             ? await _artifactStore.GetAllForTablesAsync(activeTables.Select(static t => t.Table.Id).ToList(), ct).ConfigureAwait(false)
             : null;
@@ -197,7 +197,7 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
             var objectId = table.Identifier.ToString();
             activeObjectIds.Add(objectId);
 
-            var owners = ownersByTable.TryGetValue(table.Identifier, out var list) ? list : Array.Empty<DataOwner>();
+            var owners = ownersByTable.TryGetValue(table.Identifier, out var list) ? list : Array.Empty<ContainerOwnerEntry>();
             var artifacts = artifactsByTable is not null && artifactsByTable.TryGetValue(table.Table.Id, out var tableArtifacts)
                 ? DiscoveryTenantScope.SelectPrimaryArtifact(tableArtifacts)
                 : null;

@@ -16,7 +16,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Infrastructure.Persistence.Dialects;
 
-public partial class GovernanceRepository : IOwnerGrantStore, IProfileAssignmentStore
+public partial class GovernanceRepository : IProfileAssignmentStore
 {
     private sealed class ProfileAssignmentDbTx(GovernanceRepository repo, DbConnection conn, DbTransaction tx) : IProfileAssignmentTransaction
     {
@@ -88,25 +88,6 @@ UPDATE PROFILE_ASSIGNMENT_ITEMS
 SET owner_decision = @decision, decided_by = @decidedBy, decided_at = @decidedAt
 WHERE request_id = @requestId AND owner_decision = 'PENDING' AND UPPER(owner_sid) = UPPER(@ownerSid)";
 
-    private const string SelectActiveOwnerGrantsSql = @"
-SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
-       c.grantee_sid, c.valid_from, c.valid_to,
-       c.is_revoked, c.tenant_id, c.renewal_count,
-       c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_stage,
-       t.source_name, t.schema_name, t.table_name,
-       c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns
-FROM CONSENTS c
-JOIN TABLES t ON c.table_id = t.id
-WHERE c.table_id = @tid
-  AND c.is_revoked = 0
-  AND UPPER(c.grantee_sid) = UPPER(@sid)
-  AND c.grant_source = @grantSource";
-
-    private const string CountActiveTableOwnershipSql = @"
-SELECT COUNT(*)
-FROM TABLE_OWNERS
-WHERE table_id = @tid AND data_owner_id = @oid";
-
     private const string SelectActiveProfileConsentsSql = @"
 SELECT c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type,
        c.grantee_sid, c.valid_from, c.valid_to,
@@ -120,53 +101,6 @@ LEFT JOIN TABLES t ON c.table_id = t.id
 WHERE c.tenant_id = @tenantId
   AND c.profile_assignment_id = @assignmentId
   AND c.is_revoked = 0";
-
-    async Task<IReadOnlyList<Consent>> IOwnerGrantStore.GetActiveOwnerGrantsAsync(
-        DbTransaction transaction, Guid tableId, Sid ownerSid, CancellationToken ct)
-    {
-        var conn = transaction.Connection ?? throw new InvalidOperationException("Transaction connection unavailable.");
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = transaction;
-        cmd.CommandText = SelectActiveOwnerGrantsSql;
-        cmd.AddBound("@tid", tableId.ToString("D"));
-        cmd.AddBound("@sid", ownerSid.Value);
-        cmd.AddBound("@grantSource", ConsentGrantSource.Owner.ToSqlString());
-
-        var rows = new List<Consent>();
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            rows.Add(ReadConsentRowWithTable(reader, hasPatternCols: false));
-        }
-
-        return rows;
-    }
-
-    async Task<bool> IOwnerGrantStore.HasActiveTableOwnershipAsync(
-        DbTransaction transaction, Guid tableId, string ownerId, CancellationToken ct)
-    {
-        var conn = transaction.Connection ?? throw new InvalidOperationException("Transaction connection unavailable.");
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = transaction;
-        cmd.CommandText = CountActiveTableOwnershipSql;
-        cmd.AddBound("@tid", tableId.ToString("D"));
-        cmd.AddBound("@oid", ownerId);
-        var count = Convert.ToInt64(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false), CultureInfo.InvariantCulture);
-        return count > 0;
-    }
-
-    async Task IOwnerGrantStore.MarkOwnerGrantRevokedAsync(
-        DbTransaction transaction, Guid consentId, Sid actorSid, string reason, DateTimeOffset now, CancellationToken ct)
-    {
-        var conn = transaction.Connection ?? throw new InvalidOperationException("Transaction connection unavailable.");
-        await ConsentGrantSqlCore.MarkRevokedAsync(conn, transaction, consentId, actorSid, reason, now, ct).ConfigureAwait(false);
-    }
-
-    Task IOwnerGrantStore.IncrementTableEpochAsync(DbTransaction transaction, TableIdentifier table, CancellationToken ct) =>
-        IncrementTableEpochInternalAsync(transaction.Connection!, transaction, table, ct);
-
-    Task IOwnerGrantStore.RecordAuditInTransactionAsync(DbTransaction transaction, AuditLogEntry entry, CancellationToken ct) =>
-        RecordAuditEventAsync(entry, transaction, ct);
 
     async Task<IProfileAssignmentTransaction> IProfileAssignmentStore.BeginTransactionAsync(CancellationToken ct)
     {
@@ -389,53 +323,6 @@ WHERE c.tenant_id = @tenantId
         if (specific.Length > 0)
             await _writeInvalidator.InvalidateTablesAsync(null, specific, metadataInvalidator: InvalidateTableMetadata, ct: ct).ConfigureAwait(false);
     }
-
-    private async Task SyncOwnerGrantsInTransactionAsync(
-        DbConnection conn, DbTransaction tx, DataOwnerAssignmentRequest request,
-        IReadOnlyList<DataOwnerChange> changes, CancellationToken ct)
-    {
-        if (_grantWriter is null || changes.Count == 0)
-        {
-            return;
-        }
-
-        var ownerService = new OwnerGrantService(_grantWriter, this);
-        var tableSql = _dialect is PostgreSqlGovernanceDialect ? TableLookupPgSql : TableLookupSsSql;
-        var actor = request.CallerIdentifiers is { Count: > 0 }
-            ? new Sid(request.CallerIdentifiers.First())
-            : new Sid("system:ownership");
-
-        foreach (var change in changes)
-        {
-            if (change.Kind != DataOwnerChangeKind.OwnerAssigned && change.Kind != DataOwnerChangeKind.OwnerRemoved)
-            {
-                continue;
-            }
-
-            var tableIdRaw = await ReadTableIdAsync(conn, tx, tableSql, change.Table, ct).ConfigureAwait(false);
-            if (tableIdRaw is null || !Guid.TryParse(tableIdRaw, out var tableGuid) || string.IsNullOrWhiteSpace(change.OwnerSid))
-            {
-                continue;
-            }
-
-            var tenant = ResolveGrantTenant(request.TenantId);
-            if (change.Kind == DataOwnerChangeKind.OwnerAssigned)
-            {
-                await ownerService.GrantOwnerAsync(tx, new OwnerGrantAssignment(
-                    tableGuid, change.Table, change.OwnerId, new Sid(change.OwnerSid),
-                    change.Role ?? "Owner", tenant, actor, request.CallerIdentifiers), ct).ConfigureAwait(false);
-            }
-            else
-            {
-                await ownerService.RevokeOwnerAsync(tx, new OwnerGrantRemoval(
-                    tableGuid, change.Table, change.OwnerId, new Sid(change.OwnerSid),
-                    change.Role ?? "Owner", tenant, actor, "Data owner assignment removed."), ct).ConfigureAwait(false);
-            }
-        }
-    }
-
-    /// <summary>The catalog is global (TABLES has no tenant column), so an owner grant takes the tenant of the request, else the platform tenant.</summary>
-    private static TenantId ResolveGrantTenant(TenantId? requestTenant) => requestTenant ?? TenantId.Platform;
 
     private static Consent ReadConsentRowWithTable(DbDataReader reader, bool hasPatternCols)
     {

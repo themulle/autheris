@@ -239,8 +239,7 @@ public sealed class DeclarativeConsentApplyPruneSecurityTests
 
     private sealed class StubOwnershipRepository(Func<TableIdentifier, Sid, bool> isApprover) : IContainerOwnership
     {
-        public Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<DataOwner>>([]);
+        public Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<ContainerOwnerEntry>>([]);
         public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default) =>
             Task.FromResult(isApprover(table, approverSid));
     }
@@ -367,7 +366,6 @@ public sealed class DeclarativeConsentApplyPruneSecurityTests
         {
             ConsentGrantSource.ConsentRequest,
             ConsentGrantSource.AccessProfile,
-            ConsentGrantSource.Owner,
             ConsentGrantSource.Bulk,
             ConsentGrantSource.AccessPlan
         };

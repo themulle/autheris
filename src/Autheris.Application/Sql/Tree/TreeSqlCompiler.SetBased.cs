@@ -257,6 +257,8 @@ public static partial class TreeSqlCompiler
                         $"JSON_QUERY(ISNULL({cteName}.{Q(context, "autheris_json")}, N'[]'))",
                     DatabaseDialect.PostgreSql =>
                         $"coalesce({cteName}.{Q(context, "autheris_json")}, '[]'::jsonb)",
+                    DatabaseDialect.Databricks =>
+                        $"coalesce({cteName}.{Q(context, "autheris_json")}, array())",
                     _ =>
                         $"json(coalesce({cteName}.{Q(context, "autheris_json")}, '[]'))"
                 };
@@ -297,6 +299,11 @@ public static partial class TreeSqlCompiler
             case DatabaseDialect.PostgreSql:
                 var pgObj = BuildPostgresObject(pairs, context);
                 rootQuery = $"SELECT coalesce(jsonb_agg({pgObj}{(outerOrder.Length > 0 ? " ORDER BY " + outerOrder : string.Empty)}), '[]'::jsonb)::text FROM {fromBuilder}";
+                break;
+
+            case DatabaseDialect.Databricks:
+                var dbxObj = BuildDatabricksStruct(pairs, context.Dialect);
+                rootQuery = BuildDatabricksProjectedRoot(fromBuilder.ToString(), rootAlias, dbxObj, rootOrderWithTieBreaks, context);
                 break;
 
             default:
@@ -421,7 +428,7 @@ public static partial class TreeSqlCompiler
             }
         }
 
-        var orderBy = orderTerms.Count > 0 ? string.Join(", ", orderTerms) : "(SELECT NULL)";
+        var orderBy = orderTerms.Count > 0 ? string.Join(", ", orderTerms) : (context.Dialect == DatabaseDialect.Databricks ? "1" : "(SELECT NULL)");
         childInnerCols.Add($"ROW_NUMBER() OVER (PARTITION BY {partitionBy} ORDER BY {orderBy}) AS {Q(context, "autheris_rn")}");
 
         var securedSource = child.Access.SecuredSource;
@@ -458,6 +465,8 @@ public static partial class TreeSqlCompiler
                 $"CAST((SELECT {SqlServerSelectList(child, context)} FOR JSON PATH, INCLUDE_NULL_VALUES, WITHOUT_ARRAY_WRAPPER) AS nvarchar(max))",
             DatabaseDialect.PostgreSql =>
                 PostgresObject(child, context),
+            DatabaseDialect.Databricks =>
+                DatabricksObject(child, context),
             _ => throw new NotSupportedException($"Set-based tree SQL compiler does not support dialect '{context.Dialect}'.")
         };
         level2Cols.Add($"{rowJsonExpr} AS {Q(context, "autheris_row")}");
@@ -472,12 +481,16 @@ public static partial class TreeSqlCompiler
             level3Cols.Add($"{xAlias}.{Q(context, $"autheris_k{j}")} AS {Q(context, $"autheris_k{j}")}");
         }
 
+        var dbxRn = Q(context, "__rn");
+        var dbxVal = Q(context, "__v");
         string aggExpr = context.Dialect switch
         {
             DatabaseDialect.SqlServer =>
                 $"N'[' + STRING_AGG({xAlias}.{Q(context, "autheris_row")}, N',') WITHIN GROUP (ORDER BY {xAlias}.{Q(context, "autheris_rn")}) + N']'",
             DatabaseDialect.PostgreSql =>
                 $"jsonb_agg({xAlias}.{Q(context, "autheris_row")} ORDER BY {xAlias}.{Q(context, "autheris_rn")})",
+            DatabaseDialect.Databricks =>
+                $"transform(array_sort(collect_list(named_struct('__rn', {xAlias}.{Q(context, "autheris_rn")}, '__v', {xAlias}.{Q(context, "autheris_row")})), (l, r) -> CASE WHEN l.{dbxRn} < r.{dbxRn} THEN -1 WHEN l.{dbxRn} > r.{dbxRn} THEN 1 ELSE 0 END), e -> e.{dbxVal})",
             _ => throw new NotSupportedException($"Set-based tree SQL compiler does not support dialect '{context.Dialect}'.")
         };
         level3Cols.Add($"{aggExpr} AS {Q(context, "autheris_json")}");
@@ -516,7 +529,7 @@ public static partial class TreeSqlCompiler
         while (i < sql.Length)
         {
             char c = sql[i];
-            if (c is '\'' or '"' or '[')
+            if (c is '\'' or '"' or '[' or '`')
             {
                 char close = c == '[' ? ']' : c;
                 int end = i + 1;

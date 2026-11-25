@@ -90,17 +90,16 @@ public sealed class DiscoveryTenantScopeTests
     private sealed class CountingOwnershipRepository : IContainerOwnership
     {
         public int BatchOwnerCalls { get; private set; }
-        public Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<DataOwner>>([]);
+        public Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<ContainerOwnerEntry>>([]);
         public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default) => Task.FromResult(false);
         public Task<IReadOnlySet<TableIdentifier>> GetOwnedOrDelegatedTablesAsync(Sid actorSid, IReadOnlyCollection<TableIdentifier> tables, DateTimeOffset atTime, CancellationToken ct = default)
             => Task.FromResult<IReadOnlySet<TableIdentifier>>(new HashSet<TableIdentifier>());
 
-        public Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<DataOwner>>> GetDataOwnersForTablesAsync(
+        public Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>> GetDataOwnersForTablesAsync(
             IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct = default)
         {
             BatchOwnerCalls++;
-            return Task.FromResult<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<DataOwner>>>(new Dictionary<TableIdentifier, IReadOnlyList<DataOwner>>());
+            return Task.FromResult<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>>(new Dictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>());
         }
     }
 }

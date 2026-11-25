@@ -40,10 +40,8 @@ public sealed class GovernanceWriteInvalidationArchitectureTests
         "Autheris.Domain.Interfaces.IClassificationRepository",
         "Autheris.Domain.Interfaces.IAccessProfileRepository",
         "Autheris.Domain.Interfaces.ICatalogVisibilityGrantRepository",
-        "Autheris.Domain.Interfaces.IDataOwnerAssignmentRepository",
         "Autheris.Domain.Interfaces.IGovernanceDomainRepository",
-        "Autheris.Domain.Interfaces.IAccessPolicySettingsRepository",
-        "Autheris.Application.Products.IProductCatalogOwnerStore"
+        "Autheris.Domain.Interfaces.IAccessPolicySettingsRepository"
     ];
 
     private static readonly string[] WriteMethodPrefixes =
@@ -75,8 +73,6 @@ public sealed class GovernanceWriteInvalidationArchitectureTests
         "Autheris.Infrastructure.Persistence.GovernanceRepository::ActivateConsentForAutoApproveAsync",
         "Autheris.Infrastructure.Persistence.GovernanceRepository::RecordGrantExpiryAsync",
         "Autheris.Infrastructure.Persistence.GovernanceRepository::Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentStore.InvalidateTablesAfterCommitAsync",
-        "Autheris.Infrastructure.Persistence.GovernanceRepository::ApplyTableOwnerAssignmentsAsync",
-        "Autheris.Infrastructure.Persistence.GovernanceRepository::DelegateDataOwnershipAsync",
         "Autheris.Infrastructure.Persistence.GovernanceRepository::UpsertClassificationAsync",
         "Autheris.Infrastructure.Persistence.GovernanceRepository::UpsertClassificationMaskRuleAsync",
         "Autheris.Infrastructure.Persistence.GovernanceRepository::AssignColumnClassificationAsync",
@@ -95,7 +91,6 @@ public sealed class GovernanceWriteInvalidationArchitectureTests
         "Autheris.Infrastructure.Persistence.AccessProfileStore::ApproveAssignmentAsync",
         "Autheris.Infrastructure.Persistence.AccessProfileStore::RenewAssignmentAsync",
         "Autheris.Infrastructure.Persistence.AccessProfileStore::RemoveAssignmentAsync",
-        "Autheris.Infrastructure.Persistence.Products.ProductCatalogOwnerStore::SetOwnerAsync",
         "Autheris.Infrastructure.Persistence.CatalogVisibilityGrantStore::CreateAsync",
         "Autheris.Infrastructure.Persistence.CatalogVisibilityGrantStore::RevokeAsync",
         "Autheris.Infrastructure.Persistence.CatalogVisibilityGrantStore::RevokeAllForSubjectAsync",
@@ -195,8 +190,7 @@ public sealed class GovernanceWriteInvalidationArchitectureTests
             "Autheris.Infrastructure.Persistence.GovernanceRepository",
             "Autheris.Infrastructure.Persistence.CatalogVisibilityGrantStore",
             "Autheris.Infrastructure.Persistence.GovernanceDomainStore",
-            "Autheris.Infrastructure.Persistence.AccessPolicySettingsStore",
-            "Autheris.Infrastructure.Persistence.Products.ProductCatalogOwnerStore"
+            "Autheris.Infrastructure.Persistence.AccessPolicySettingsStore"
         };
 
         var interfaceWriteNames = allTypes

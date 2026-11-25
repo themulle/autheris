@@ -264,6 +264,37 @@ public sealed partial class DeclarativeConsentApplyService
             ?? throw new System.Security.SecurityException("Caller must carry a user SID to apply declarative consent manifests.");
     }
 
+    /// <summary>
+    /// Amendment 6: IT administration (TenantAdmin, or ClusterAdmin through the role implication) or Data Governance may submit a manifest
+    /// proposal. A proposal is always bound to a real tenant: a reserved or unresolved tenant is refused.
+    /// </summary>
+    private void AuthorizeProposalSubmitter(ClaimsPrincipal caller, DeclarativeConsentManifest manifest, out Sid actorSid, out TenantId tenantId)
+    {
+        if (caller.Identity?.IsAuthenticated != true)
+        {
+            throw new ConsentApplyForbiddenException();
+        }
+
+        try
+        {
+            tenantId = caller.GetTenantId();
+        }
+        catch (GatewaySecurityException)
+        {
+            throw new ConsentApplyForbiddenException();
+        }
+
+        if (!TenantId.TryParse(tenantId.Value, out _) || !_roleEvaluator.HasAnyRole(caller, ProposalSubmitRoles, tenantId.Value))
+        {
+            throw new ConsentApplyForbiddenException();
+        }
+
+        RejectForeignManifestTenant(manifest, tenantId);
+
+        actorSid = caller.GetUserSid()
+            ?? throw new System.Security.SecurityException("Caller must carry a user SID to submit declarative consent manifests.");
+    }
+
     private static void RejectForeignManifestTenant(DeclarativeConsentManifest manifest, TenantId callerTenant)
     {
         if (!MatchesCallerTenant(manifest.TenantId, callerTenant))

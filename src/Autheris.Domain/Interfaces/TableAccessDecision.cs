@@ -626,12 +626,11 @@ public enum DecisionStep
 
 public enum GrantSourceKind
 {
-    ConsentRequest,
-    AccessProfile,
-    Owner,
-    Bulk,
-    Declarative,
-    AccessPlan
+    ConsentRequest = 0,
+    AccessProfile = 1,
+    Bulk = 3,
+    Declarative = 4,
+    AccessPlan = 5
 }
 
 public readonly record struct DecisionReason(

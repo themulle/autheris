@@ -85,11 +85,14 @@ public sealed class UnknownGatewayKeyGuardTests
         ex.Message.ShouldContain(key.StartsWith("Gateway:Itsm", StringComparison.OrdinalIgnoreCase) ? "Gateway:Itsm" : key);
     }
 
-    [Fact]
-    public void GatewayConfigurationSchema_AcceptsDbtImportDataOwners()
+    [Theory]
+    [InlineData("true")]
+    [InlineData("false")]
+    public void Removed_DbtImportDataOwners_StopsStartup_WithItsRemovalNote(string value)
     {
-        Should.NotThrow(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config(("Gateway:Dbt:ImportDataOwners", "true"))));
-        Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config(("Gateway:Dbt:ImportDataOwner", "true"))));
+        // #1009 W3-12b (D13): per-table data owners no longer exist; the opt-in of the dbt owner import is gone.
+        var ex = Should.Throw<InvalidOperationException>(() => UnknownGatewayKeyGuard.ThrowIfUnknownKeys(Config(("Gateway:Dbt:ImportDataOwners", value))));
+        ex.Message.ShouldContain("Dbt:ImportDataOwners");
     }
 
     [Fact]

@@ -21,13 +21,58 @@ using Autheris.Infrastructure.Persistence.Dialects;
 /// <summary>System revocation by id and the kind-complete grant enumeration used by deprovisioning and grant renewal.</summary>
 public partial class GovernanceRepository
 {
-    /// <summary>All grant kinds; with <paramref name="maxResults"/> &gt; 0 only Allow rows are read and the SQL read is bounded at that count.</summary>
-    public async Task<IReadOnlyList<Consent>> GetActiveGrantsForSubjectsAsync(
-        TenantId tenantId, IReadOnlyCollection<Sid> subjects, DateTimeOffset atTime, int maxResults, CancellationToken ct = default)
+    private const string SelectPendingRequestsForSubjectSql =
+        @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
+                 r.business_justification, r.status, r.requested_at, r.requested_valid_to,
+                 t.source_name, t.schema_name, t.table_name, r.context_json, r.requested_write_rules_json,
+                 r.version, r.workflow_mode, r.external_system_id, r.external_reference, r.requested_valid_from, r.updated_at, r.request_kind, r.profile_id, r.grant_kind, r.target_columns, r.container_kind, r.container_id, r.approver_capacity, r.self_grant, r.bundle_id, r.decided_by, r.decided_at,
+                 r.tenant_id
+          FROM CONSENT_REQUESTS r
+          LEFT JOIN TABLES t ON r.table_id = t.id
+          WHERE r.tenant_id = @tenantId
+            AND UPPER(r.status) IN ('PENDING', 'PENDING_SECOND_APPROVAL', 'PENDING_EXTERNAL_APPROVAL')
+            AND (r.requester_sid = @sub OR UPPER(r.requester_sid) = @subNorm OR r.requested_grantee_ref = @sub OR UPPER(r.requested_grantee_ref) = @subNorm)
+          ORDER BY r.requested_at DESC";
+
+    /// <summary>All grant kinds including scheduled future grants; with <paramref name="maxResults"/> &gt; 0 only Allow rows are read and bounded.</summary>
+    public Task<IReadOnlyList<Consent>> GetActiveGrantsForSubjectsAsync(
+        TenantId tenantId, IReadOnlyCollection<Sid> subjects, DateTimeOffset atTime, int maxResults, CancellationToken ct = default) =>
+        GetActiveGrantsForSubjectsAfterAsync(tenantId, subjects, atTime, afterId: null, maxResults, ct);
+
+    /// <summary>Keyset-paginated grant enumeration ordered by consent ID for deprovisioning sweeps.</summary>
+    public async Task<IReadOnlyList<Consent>> GetActiveGrantsForSubjectsAfterAsync(
+        TenantId tenantId, IReadOnlyCollection<Sid> subjects, DateTimeOffset atTime, Guid? afterId, int maxResults, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(subjects);
-        var all = await AllActiveCoreAsync(subjects, atTime, TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), false, maxResults, ct).ConfigureAwait(false);
+        var all = await AllActiveCoreAsync(subjects, atTime, TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), false, maxResults, ct, includeFuture: true, afterId: afterId).ConfigureAwait(false);
         return maxResults > 0 && all.Count > maxResults ? all.Take(maxResults).ToList() : all;
+    }
+
+    public async Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForSubjectAsync(Sid subject, TenantId tenantId, CancellationToken ct = default)
+    {
+        var validTenant = TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.ConsentRequests));
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = SelectPendingRequestsForSubjectSql;
+        cmd.AddBound("@tenantId", validTenant.Value);
+        cmd.AddBound("@sub", subject.Value);
+        cmd.AddBound("@subNorm", ConsentSubjectFilter.Normalize(subject.Value));
+
+        var list = new List<ConsentRequest>();
+        await using var reader = await ExecuteReaderAsync(cmd, "ConsentRequest.GetPendingForSubject", ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var req = ConsentSqlCore.ReadSummaryConsentRequestRow(reader);
+            if (req.RequesterSid == subject ||
+                (req.RequestedGranteeType != GranteeType.Group &&
+                 !string.IsNullOrWhiteSpace(req.RequestedGranteeRef) &&
+                 new Sid(req.RequestedGranteeRef.Trim()) == subject))
+            {
+                list.Add(req);
+            }
+        }
+
+        return list;
     }
 
     public async Task<bool> RevokeSystemConsentByIdAsync(TenantId tenantId, Guid consentId, Sid revokedBySid, string reason, CancellationToken ct = default)

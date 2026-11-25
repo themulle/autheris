@@ -24,6 +24,7 @@ public sealed class RedisGovernanceChangeChannel : IGovernanceChangeNotifier, ID
     private readonly ConcurrentDictionary<Guid, Action<GovernanceChangeEvent>> _localSubscribers = new();
     private readonly ISubscriber? _subscriber;
     private readonly Action<RedisChannel, RedisValue>? _redisHandler;
+    private readonly EventHandler<ConnectionFailedEventArgs>? _connectionRestoredHandler;
     private int _disposed;
 
     public RedisGovernanceChangeChannel(
@@ -38,10 +39,12 @@ public sealed class RedisGovernanceChangeChannel : IGovernanceChangeNotifier, ID
         if (_multiplexer is not null)
         {
             _redisHandler = OnRedisMessageReceived;
+            _connectionRestoredHandler = OnConnectionRestored;
             try
             {
                 _subscriber = _multiplexer.GetSubscriber();
                 _subscriber?.Subscribe(RedisPubSubChannel, _redisHandler, CommandFlags.FireAndForget);
+                _multiplexer.ConnectionRestored += _connectionRestoredHandler;
             }
             catch (Exception ex)
             {
@@ -112,6 +115,17 @@ public sealed class RedisGovernanceChangeChannel : IGovernanceChangeNotifier, ID
         }
     }
 
+    private void OnConnectionRestored(object? sender, ConnectionFailedEventArgs e)
+    {
+        if (Volatile.Read(ref _disposed) != 0)
+        {
+            return;
+        }
+
+        _logger.LogWarning(e?.Exception, "Redis governance change connection restored ({FailureType}); flushing local governance caches.", e?.FailureType);
+        NotifyLocal(GovernanceChangeEvent.All(_time.GetUtcNow()));
+    }
+
     private void NotifyLocal(GovernanceChangeEvent change)
     {
         foreach (var subscriber in _localSubscribers.Values)
@@ -146,6 +160,18 @@ public sealed class RedisGovernanceChangeChannel : IGovernanceChangeNotifier, ID
         }
 
         _localSubscribers.Clear();
+        if (_multiplexer is not null && _connectionRestoredHandler is not null)
+        {
+            try
+            {
+                _multiplexer.ConnectionRestored -= _connectionRestoredHandler;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogDebug(ex, "Failed to detach ConnectionRestored handler from Redis multiplexer.");
+            }
+        }
+
         if (_subscriber is not null && _redisHandler is not null)
         {
             try

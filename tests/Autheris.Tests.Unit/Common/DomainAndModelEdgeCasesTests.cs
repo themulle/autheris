@@ -362,37 +362,6 @@ public class DomainAndModelEdgeCasesTests
         revokedConsent.IsActive(from.AddHours(1)).ShouldBeFalse();
     }
 
-    [Fact]
-    public void DataOwnerDelegation_IsActive_TemporalBoundaryChecks()
-    {
-        var from = DateTimeOffset.UtcNow;
-        var to = from.AddDays(7);
-
-        var delegation = new DataOwnerDelegation
-        {
-            ValidFrom = from,
-            ValidTo = to
-        };
-
-        // Before start
-        delegation.IsActive(from.AddMinutes(-1)).ShouldBeFalse();
-
-        // Exactly at start -> Active
-        delegation.IsActive(from).ShouldBeTrue();
-
-        // Mid-period -> Active
-        delegation.IsActive(from.AddDays(3)).ShouldBeTrue();
-
-        // 1 tick before end -> Active
-        delegation.IsActive(to.AddTicks(-1)).ShouldBeTrue();
-
-        // Exactly at end -> Inactive
-        delegation.IsActive(to).ShouldBeFalse();
-
-        // After end -> Inactive
-        delegation.IsActive(to.AddSeconds(1)).ShouldBeFalse();
-    }
-
     #endregion
 
     #region PolicyEpoch Boundaries

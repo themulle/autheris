@@ -253,12 +253,12 @@ public class ConcurrencyAndAuditReplicationTests : IDisposable
         var isValidBefore = await _repository.VerifyAuditHashChainAsync();
         isValidBefore.ShouldBeTrue();
 
-        // 2. Anonymize user in DataOwners or external directory
+        // 2. Anonymize the person in directory data outside the audit payload (the governance domain contact)
         using (var cmd = _repository.RawConnection().CreateCommand())
         {
-            cmd.CommandText = @"UPDATE DATA_OWNERS
-                                SET display_name = 'Anonymized User', email = 'anonymized@corp.local'
-                                WHERE ad_sid = @sid";
+            cmd.CommandText = @"UPDATE GOVERNANCE_DOMAINS
+                                SET contact = 'anonymized@corp.local'
+                                WHERE owner_group_sid = @sid";
             cmd.Parameters.AddWithValue("@sid", actorSid.Value);
             await cmd.ExecuteNonQueryAsync();
         }

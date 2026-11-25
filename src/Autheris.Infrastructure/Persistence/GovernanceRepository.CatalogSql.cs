@@ -31,7 +31,6 @@ public partial class GovernanceRepository
     private string RelationsForParentTableSql => IsPostgreSql ? CatalogSql.RelationsForParentTableSqlPg : CatalogSql.RelationsForParentTableSqlSs;
     private string AllRelationsSql => IsPostgreSql ? CatalogSql.AllRelationsSqlPg : CatalogSql.AllRelationsSqlSs;
     private string InsertRelationSql => IsPostgreSql ? CatalogSql.InsertRelationSqlPg : CatalogSql.InsertRelationSqlSs;
-    private string InsertDelegationSql => IsPostgreSql ? CatalogSql.InsertDelegationSqlPg : CatalogSql.InsertDelegationSqlSs;
     private string CatalogVersionSql => IsPostgreSql ? CatalogSql.CatalogVersionSqlPg : CatalogSql.CatalogVersionSqlSs;
     private string BumpCatalogVersionSql => IsPostgreSql ? CatalogSql.BumpCatalogVersionSqlPg : CatalogSql.BumpCatalogVersionSqlSs;
 
@@ -280,57 +279,6 @@ WHEN NOT MATCHED THEN INSERT (id, parent_table_id, child_table_id, relation_name
 OUTPUT inserted.id, $action;";
 
         public const string ResolveActiveTableIdSql = "SELECT id FROM TABLES WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema) AND LOWER(table_name) = LOWER(@table) AND is_active = 1";
-
-        public const string DataOwnersForTableSql = @"SELECT o.id, o.ad_sid, o.ad_account, o.display_name, o.email, o.is_active
-FROM DATA_OWNERS o
-JOIN TABLE_OWNERS tow ON o.id = tow.data_owner_id
-JOIN TABLES t ON tow.table_id = t.id
-WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table) AND o.is_active = 1";
-
-        public const string AllActiveDataOwnersWithTableSql = @"SELECT t.source_name, t.schema_name, t.table_name, o.id, o.ad_sid, o.ad_account, o.display_name, o.email, o.is_active
-FROM DATA_OWNERS o
-JOIN TABLE_OWNERS tow ON o.id = tow.data_owner_id
-JOIN TABLES t ON tow.table_id = t.id
-WHERE t.is_active = 1 AND o.is_active = 1";
-
-        public const string OwnedOrDelegatedTablesForSidSql = @"SELECT DISTINCT t.source_name, t.schema_name, t.table_name
-FROM TABLES t
-JOIN TABLE_OWNERS tow ON t.id = tow.table_id
-JOIN DATA_OWNERS o ON tow.data_owner_id = o.id
-WHERE t.is_active = 1
-  AND o.is_active = 1
-  AND (
-      o.ad_sid = @sid
-      OR EXISTS (
-          SELECT 1 FROM DATA_OWNER_DELEGATIONS d
-          WHERE d.data_owner_id = o.id
-            AND d.delegate_sid = @sid
-            AND d.valid_from <= @now
-            AND d.valid_to > @now
-      )
-  )";
-
-        public const string ResolveDataOwnerIdsSql = @"SELECT id FROM DATA_OWNERS
-WHERE LOWER(ad_sid) = LOWER(@p) OR LOWER(ad_account) = LOWER(@p) OR LOWER(email) = LOWER(@p)";
-
-        public const string InsertDelegationSqlPg = @"INSERT INTO DATA_OWNER_DELEGATIONS (id, data_owner_id, delegate_sid, valid_from, valid_to, reason)
-VALUES (@id, @ownerId, @delegateSid, @validFrom, @validTo, @reason)
-ON CONFLICT (id) DO UPDATE SET
-    delegate_sid = EXCLUDED.delegate_sid,
-    valid_from = EXCLUDED.valid_from,
-    valid_to = EXCLUDED.valid_to,
-    reason = EXCLUDED.reason";
-
-        public const string InsertDelegationSqlSs = @"MERGE DATA_OWNER_DELEGATIONS WITH (HOLDLOCK) AS t
-USING (SELECT @id AS id) AS s
-ON t.id = s.id
-WHEN MATCHED THEN UPDATE SET
-    delegate_sid = @delegateSid,
-    valid_from = @validFrom,
-    valid_to = @validTo,
-    reason = @reason
-WHEN NOT MATCHED THEN INSERT (id, data_owner_id, delegate_sid, valid_from, valid_to, reason)
-    VALUES (@id, @ownerId, @delegateSid, @validFrom, @validTo, @reason);";
 
         public const string CatalogVersionSqlPg = "SELECT structure_version, content_version FROM catalog_state WHERE id = 1;";
 

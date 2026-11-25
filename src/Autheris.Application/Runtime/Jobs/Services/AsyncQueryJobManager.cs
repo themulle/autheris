@@ -209,7 +209,9 @@ public sealed partial class AsyncQueryJobManager : IAsyncQueryJobManager, IAsync
         d.SubmittedByRoles,
         d.SubmittedByScopes,
         d.SubmittedGovernanceEpoch,
-        d.TargetTables);
+        d.TargetTables,
+        d.SubmittedGroupResolutionComplete,
+        d.SubmittedTableSnapshots);
 
     /// <summary>Writes the cluster record of a job (TTL is reset on every write). A failure is fatal only for the submit.</summary>
     private async ValueTask WriteRecordAsync(AsyncJobDescriptor descriptor, bool throwOnFailure, CancellationToken ct)
@@ -341,7 +343,8 @@ public sealed partial class AsyncQueryJobManager : IAsyncQueryJobManager, IAsync
             SubmittedByRoles: roles,
             SubmittedByScopes: scopes,
             SubmittedGovernanceEpoch: submittedEpoch,
-            TargetTables: targetTables);
+            TargetTables: targetTables,
+            SubmittedGroupResolutionComplete: secCtx.GroupResolutionStatus == Autheris.Domain.Identity.GroupResolutionStatus.Complete);
 
         // Per-tenant, per-user and scratch quota backlog caps: counted and reserved under one gate so concurrent submits cannot overshoot them.
         var jobOpts = _jobOptions?.Value ?? _options?.Value?.AsyncJobs ?? new AsyncJobOptions();
@@ -534,7 +537,9 @@ public sealed partial class AsyncQueryJobManager : IAsyncQueryJobManager, IAsync
             SubmittedByRoles: record.SubmittedByRoles,
             SubmittedByScopes: record.SubmittedByScopes,
             SubmittedGovernanceEpoch: record.SubmittedGovernanceEpoch,
-            TargetTables: record.TargetTables);
+            TargetTables: record.TargetTables,
+            SubmittedGroupResolutionComplete: record.SubmittedGroupResolutionComplete,
+            SubmittedTableSnapshots: record.SubmittedTableSnapshots);
 
         // The owner node vanished without a terminal write: computed, never persisted.
         var jobs = _jobOptions?.Value ?? _options?.Value?.AsyncJobs ?? new AsyncJobOptions();

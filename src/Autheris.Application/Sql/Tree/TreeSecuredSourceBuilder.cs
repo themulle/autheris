@@ -54,7 +54,7 @@ public sealed class TreeSecuredSourceBuilder(
         }
 
         if (!SqlDialectMapper.TryToTargetDialect(dialect, out var target)
-            || target is not (TargetSqlDialect.SqlServer or TargetSqlDialect.PostgreSql))
+            || target is not (TargetSqlDialect.SqlServer or TargetSqlDialect.PostgreSql or TargetSqlDialect.Databricks))
         {
             throw TreeSecuredSourceMarkers.Denied();
         }
@@ -93,9 +93,10 @@ public sealed class TreeSecuredSourceBuilder(
         // F4 at build time: a dry run of the remap proves the markers before the tree compiler ever sees the source.
         var dry = new Dictionary<string, string>(StringComparer.Ordinal);
         var counter = 0;
+        var dryPrefix = target == TargetSqlDialect.Databricks ? ":gq" : "@gq";
         foreach (var parameter in compiled.Parameters)
         {
-            if (!dry.TryAdd(parameter.Marker, "@gq" + counter++))
+            if (!dry.TryAdd(parameter.Marker, dryPrefix + counter++))
             {
                 throw TreeSecuredSourceMarkers.Denied();
             }

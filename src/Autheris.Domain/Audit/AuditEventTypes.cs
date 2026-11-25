@@ -236,5 +236,12 @@ public static class AuditEventTypes
     public const string NotificationChannelChanged = "NOTIFICATION_CHANNEL_CHANGED";
     public const string WebhookDeliveryFailed = "WEBHOOK_DELIVERY_FAILED";
     public const string MigrationGrantsPurged = "MIGRATION_GRANTS_PURGED";
+
+    // Declarative manifest proposals (Amendment 6): IT submits, one Data Governance member confirms or rejects.
+    public const string ManifestProposalSubmitted = "MANIFEST_PROPOSAL_SUBMITTED";
+    public const string ManifestProposalConfirmed = "MANIFEST_PROPOSAL_CONFIRMED";
+    public const string ManifestProposalRejected = "MANIFEST_PROPOSAL_REJECTED";
+    public const string ManifestProposalExpired = "MANIFEST_PROPOSAL_EXPIRED";
+    public const string ManifestProposalStale = "MANIFEST_PROPOSAL_STALE";
 }
 

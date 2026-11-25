@@ -88,7 +88,6 @@ public static partial class GatewayGovernanceServiceExtensions
                 sp.GetRequiredService<Autheris.Application.Governance.Requests.IPermissionRequestEngine>(),
                 sp.GetService<Autheris.Application.Common.Interfaces.IIdentitySubjectResolver>()));
         services.AddSingleton<Autheris.Application.Policy.Classification.IClassificationAdminService, Autheris.Application.Policy.Classification.ClassificationAdminService>();
-        services.AddSingleton<Autheris.Application.Governance.Grants.IOwnerGrantService, Autheris.Application.Governance.Grants.OwnerGrantService>();
         services.AddSingleton<Autheris.Application.ConsentRequests.ProfileAssignments.IProfileGrantMaterializer, Autheris.Application.ConsentRequests.ProfileAssignments.ProfileGrantMaterializer>();
         services.AddScoped<Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentMaintenanceService, Autheris.Application.ConsentRequests.ProfileAssignments.ProfileAssignmentMaintenanceService>();
         services.AddSingleton<Autheris.Infrastructure.Persistence.PermissionRequestStore>(sp =>

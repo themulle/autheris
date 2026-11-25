@@ -65,28 +65,4 @@ public sealed class InMemoryClassificationProposalStore : IClassificationProposa
 
         return Task.FromResult(proposal);
     }
-
-    public Task<bool> UpdateDataOwnerAsync(TableIdentifier table, string dataOwnerSid, CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(dataOwnerSid);
-
-        var existing = _proposals.Values
-            .Where(p => p.TableIdentifier.Equals(table))
-            .OrderByDescending(p => p.CreatedAtUtc)
-            .FirstOrDefault();
-
-        if (existing == null)
-        {
-            return Task.FromResult(false);
-        }
-
-        var updated = existing with
-        {
-            DataOwnerSid = dataOwnerSid,
-            Status = existing.Status == "UNCLASSIFIED" ? "PENDING_OWNER_REVIEW" : existing.Status
-        };
-
-        _proposals[existing.ProposalId] = updated;
-        return Task.FromResult(true);
-    }
 }
