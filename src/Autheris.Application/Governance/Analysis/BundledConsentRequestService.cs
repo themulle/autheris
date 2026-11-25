@@ -175,8 +175,8 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
             throw new UnauthorizedAccessException("Authenticated principal is required to submit a bundled consent request.");
         }
 
-        ConsentSubmissionPipeline.EnsurePersonSubject(requester, _subjectResolver);
-        ConsentSubmissionPipeline.EnsureSelfServiceEnabled(_gatewayOptions?.Value);
+        ConsentSubmissionGuards.EnsurePersonSubject(requester, _subjectResolver);
+        ConsentSubmissionGuards.EnsureSelfServiceEnabled(_gatewayOptions?.Value);
 
         if (request.Items == null || request.Items.Count == 0)
         {

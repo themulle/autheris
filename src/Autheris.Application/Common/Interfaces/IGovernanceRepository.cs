@@ -566,16 +566,6 @@ public interface IConsentApprovalRepository
         CancellationToken ct = default) =>
         throw new NotSupportedException($"{GetType().Name} does not implement atomic single-transaction request decisions.");
 
-    Task<Consent> ExecuteExternalAtomicApprovalWithConsentAsync(
-        Guid requestId,
-        ExternalDecisionAttribution attribution,
-        ApprovalStep step,
-        Consent consent,
-        IReadOnlyList<ConsentRowFilter> rowFilters,
-        IReadOnlyList<ConsentColumnRule> columnRules,
-        CancellationToken ct = default)
-        => throw new NotSupportedException($"{GetType().Name} does not implement external atomic approval.");
-
     Task<ConsentRequest> RejectExternalConsentRequestAsync(
         Guid requestId,
         ExternalDecisionAttribution attribution,

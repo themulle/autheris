@@ -472,11 +472,11 @@ public sealed class TenantIngressTests
     public void ConsentRequest_ResolveTenantId_Uses_Context_Then_Claim_And_Never_A_Legacy_Sentinel()
     {
         var context = new TenantId("ctx");
-        Autheris.Application.ConsentRequests.ConsentRequestService.ResolveTenantId(User("ctx"), context, false).ShouldBe(context);
-        Autheris.Application.ConsentRequests.ConsentRequestService.ResolveTenantId(User("own"), default, false).Value.ShouldBe("own");
-        Should.Throw<Exception>(() => Autheris.Application.ConsentRequests.ConsentRequestService.ResolveTenantId(User("own"), context, false));
-        Should.Throw<TenantUnresolvedException>(() => Autheris.Application.ConsentRequests.ConsentRequestService.ResolveTenantId(User(null), default, false));
-        Autheris.Application.ConsentRequests.ConsentRequestService.ResolveTenantId(User("own"), context, true).ShouldBe(context);
+        Autheris.Application.ConsentRequests.ConsentTenantResolver.Resolve(User("ctx"), context, false).ShouldBe(context);
+        Autheris.Application.ConsentRequests.ConsentTenantResolver.Resolve(User("own"), default, false).Value.ShouldBe("own");
+        Should.Throw<Exception>(() => Autheris.Application.ConsentRequests.ConsentTenantResolver.Resolve(User("own"), context, false));
+        Should.Throw<TenantUnresolvedException>(() => Autheris.Application.ConsentRequests.ConsentTenantResolver.Resolve(User(null), default, false));
+        Autheris.Application.ConsentRequests.ConsentTenantResolver.Resolve(User("own"), context, true).ShouldBe(context);
     }
 
     // ---- DT-SC-04 (request-path part): the default TenantId never matches ----

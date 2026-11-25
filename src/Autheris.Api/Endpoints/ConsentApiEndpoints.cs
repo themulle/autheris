@@ -49,6 +49,8 @@ public static partial class ConsentApiEndpoints
         MapConsentGrantEndpoints(group);
         MapSelfGrantEndpoints(group);
 
+        MapDecisionEndpoints(app, group);
+
         return app;
     }
 

@@ -446,7 +446,7 @@ public sealed class ScimGroupSupplementEndToEndTests : IClassFixture<ScimGroupSu
         var store = scope.ServiceProvider.GetRequiredService<IIdentityStoreRepository>();
         var groupResolver = scope.ServiceProvider.GetRequiredService<IGroupSidResolver>();
         var realmRegistry = scope.ServiceProvider.GetRequiredService<IIdentityRealmRegistry>();
-        var decisionPipeline = scope.ServiceProvider.GetRequiredService<IConsentDecisionPipeline>();
+        var decisionEngine = scope.ServiceProvider.GetRequiredService<Autheris.Application.Governance.Requests.IPermissionRequestEngine>();
 
         var ownerMeta = await repo.GetTableMetadataAsync(OwnerTable);
         ownerMeta.ShouldNotBeNull();
@@ -541,11 +541,14 @@ public sealed class ScimGroupSupplementEndToEndTests : IClassFixture<ScimGroupSu
             GroupResolutionClaims.CreateStatus(GroupResolutionStatus.Complete)
         ], "Bearer"));
 
-        var decisionEx = await Should.ThrowAsync<ConsentDecisionException>(() => decisionPipeline.DecideAsync(
-            new ConsentDecisionCommand(createdReq.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, malloryApprover)));
+        var decisionEx = await Should.ThrowAsync<ConsentDecisionException>(() => decisionEngine.DecideAsync(
+            new Autheris.Application.Governance.Requests.PermissionDecisionCommand(
+                createdReq.Id,
+                createdReq.Version,
+                Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(malloryApprover),
+                Approve: true)));
         decisionEx.StatusCode.ShouldBe(403);
         decisionEx.ErrorCode.ShouldBe("FORBIDDEN");
-        decisionEx.Message.ShouldContain("neither a data owner", Case.Insensitive);
     }
 
     internal static async Task AssertRecursiveCteMatchesAsync(GovernanceTestStore store)

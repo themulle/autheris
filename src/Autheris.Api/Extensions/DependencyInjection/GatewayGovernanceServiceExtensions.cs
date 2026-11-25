@@ -317,6 +317,10 @@ public static partial class GatewayGovernanceServiceExtensions
                 sp.GetService<TimeProvider>(),
                 sp.GetService<Autheris.Application.Governance.Caching.IGovernanceChangeNotifier>()));
         services.AddSingleton<ICatalogVisibilityGrantRepository>(sp => sp.GetRequiredService<CatalogVisibilityGrantStore>());
+        services.AddSingleton<ICatalogGrantRevocationWriter>(sp => new CatalogGrantRevocationWriter(
+            sp.GetRequiredService<TRepository>() as GovernanceRepository
+                ?? throw new InvalidOperationException("Catalog grant revocation needs the SQL governance repository for its audit transaction."),
+            sp.GetRequiredService<CatalogVisibilityGrantStore>()));
         services.AddSingleton<AccessPolicySettingsStore>(sp =>
             new AccessPolicySettingsStore(
                 sp.GetRequiredService<IGovernanceSqlDialect>(),

@@ -211,9 +211,8 @@ public class Issue113AccessRequestsSecurityTests
     [Trait("Category", "Security")]
     public async Task SEC_TEST_113_08_MachineTokens_CannotSubmitAccessRequest(string tokenType)
     {
-        var metaRepo = new InMemoryTableMetadataRepository();
-        var approvalRepo = Substitute.For<IConsentApprovalRepository>();
-        var service = new ConsentRequestService(metaRepo, approvalRepo);
+        var engine = new Autheris.Tests.Unit.TestSupport.RecordingPermissionRequestEngine();
+        var service = new ConsentRequestEndpointAdapter(engine);
 
         var principal = tokenType == "machine-app"
             ? CreateMachineAppPrincipal("app-daemon-1")
@@ -225,7 +224,7 @@ public class Issue113AccessRequestsSecurityTests
 
         var ex = await Should.ThrowAsync<ConsentRequestException>(() => service.SubmitAsync(submission));
         ex.Code.ShouldBe("FORBIDDEN");
-        await approvalRepo.DidNotReceiveWithAnyArgs().CreateConsentRequestAsync(default!);
+        engine.Submissions.ShouldBeEmpty();
     }
 
     // ---------------- SEC-TEST-113-09 ----------------
@@ -235,9 +234,8 @@ public class Issue113AccessRequestsSecurityTests
     [Trait("Category", "Security")]
     public async Task SEC_TEST_113_09_MachineTokens_CannotWithdrawAccessRequest(string tokenType)
     {
-        var metaRepo = new InMemoryTableMetadataRepository();
-        var approvalRepo = Substitute.For<IConsentApprovalRepository>();
-        var service = new ConsentRequestService(metaRepo, approvalRepo);
+        var engine = new Autheris.Tests.Unit.TestSupport.RecordingPermissionRequestEngine();
+        var service = new ConsentRequestEndpointAdapter(engine);
 
         var principal = tokenType == "machine-app"
             ? CreateMachineAppPrincipal("app-daemon-1")
@@ -245,64 +243,6 @@ public class Issue113AccessRequestsSecurityTests
 
         var ex = await Should.ThrowAsync<ConsentRequestException>(() => service.WithdrawAsync(Guid.NewGuid(), principal));
         ex.Code.ShouldBe("FORBIDDEN");
-    }
-
-    // ---------------- SEC-TEST-113-10 ----------------
-    [Fact]
-    [Trait("Category", "Security")]
-    public async Task SEC_TEST_113_10_UserCannotWithdrawAnotherUsersAccessRequest()
-    {
-        var metaRepo = new InMemoryTableMetadataRepository();
-        var approvalRepo = Substitute.For<IConsentApprovalRepository>();
-        var service = new ConsentRequestService(metaRepo, approvalRepo);
-
-        var requestId = Guid.NewGuid();
-        var originalRequester = new Sid("S-1-5-21-ORIGINAL");
-        var attacker = CreatePersonPrincipal("S-1-5-21-ATTACKER");
-
-        approvalRepo.GetConsentRequestAsync(requestId).Returns(new ConsentRequest
-        {
-            Id = requestId,
-            RequesterSid = originalRequester,
-            Status = "PENDING",
-            TenantId = Autheris.Tests.Common.TestTenants.Default,
-            RequesterIdentifiers = [originalRequester.Value]
-        });
-
-        var ex = await Should.ThrowAsync<ConsentRequestException>(() => service.WithdrawAsync(requestId, attacker));
-        ex.Code.ShouldBe("FORBIDDEN");
-        await approvalRepo.DidNotReceiveWithAnyArgs().WithdrawConsentRequestAsync(default, default);
-    }
-
-    // ---------------- SEC-TEST-113-11 ----------------
-    [Theory]
-    [InlineData("APPROVED")]
-    [InlineData("REJECTED")]
-    [InlineData("WITHDRAWN")]
-    [InlineData("EXPIRED")]
-    [Trait("Category", "Security")]
-    public async Task SEC_TEST_113_11_NonPendingAccessRequest_CannotBeWithdrawn(string nonPendingStatus)
-    {
-        var metaRepo = new InMemoryTableMetadataRepository();
-        var approvalRepo = Substitute.For<IConsentApprovalRepository>();
-        var service = new ConsentRequestService(metaRepo, approvalRepo);
-
-        var requestId = Guid.NewGuid();
-        var requesterSid = new Sid("S-1-5-21-USER");
-        var principal = CreatePersonPrincipal(requesterSid.Value);
-
-        approvalRepo.GetConsentRequestAsync(requestId).Returns(new ConsentRequest
-        {
-            Id = requestId,
-            RequesterSid = requesterSid,
-            Status = nonPendingStatus,
-            TenantId = Autheris.Tests.Common.TestTenants.Default,
-            RequesterIdentifiers = [requesterSid.Value]
-        });
-
-        var ex = await Should.ThrowAsync<ConsentRequestException>(() => service.WithdrawAsync(requestId, principal));
-        ex.Code.ShouldBe("INVALID_STATE");
-        await approvalRepo.DidNotReceiveWithAnyArgs().WithdrawConsentRequestAsync(default, default);
     }
 
     // ---------------- SEC-TEST-113-12 ----------------

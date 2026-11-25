@@ -50,6 +50,8 @@ public sealed class GovernanceDomainStore(
     internal const string GetContainerForTableSql = "SELECT d.id, d.owner_group_sid, d.default_class, d.visibility FROM GOVERNANCE_DOMAIN_TABLES dt INNER JOIN GOVERNANCE_DOMAINS d ON d.tenant_id = dt.tenant_id AND d.id = dt.domain_id WHERE dt.tenant_id = @tenantId AND dt.table_id = @tableId UNION ALL SELECT d.id, d.owner_group_sid, d.default_class, d.visibility FROM GOVERNANCE_DOMAINS d WHERE d.tenant_id = @tenantId AND d.id = @unassignedId AND NOT EXISTS (SELECT 1 FROM GOVERNANCE_DOMAIN_TABLES dt WHERE dt.tenant_id = @tenantId AND dt.table_id = @tableId)";
     internal const string ListDomainTableIdsPgSql = "SELECT table_id FROM GOVERNANCE_DOMAIN_TABLES WHERE tenant_id = @tenantId AND domain_id = @domainId ORDER BY table_id LIMIT @limit";
     internal const string ListDomainTableIdsSsSql = "SELECT table_id FROM GOVERNANCE_DOMAIN_TABLES WHERE tenant_id = @tenantId AND domain_id = @domainId ORDER BY table_id OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY";
+    internal const string ListDomainTablesPgSql = "SELECT t.source_name, t.schema_name, t.table_name FROM GOVERNANCE_DOMAIN_TABLES dt INNER JOIN TABLES t ON t.id = dt.table_id WHERE dt.tenant_id = @tenantId AND dt.domain_id = @domainId ORDER BY dt.table_id LIMIT @limit";
+    internal const string ListDomainTablesSsSql = "SELECT t.source_name, t.schema_name, t.table_name FROM GOVERNANCE_DOMAIN_TABLES dt INNER JOIN TABLES t ON t.id = dt.table_id WHERE dt.tenant_id = @tenantId AND dt.domain_id = @domainId ORDER BY dt.table_id OFFSET 0 ROWS FETCH NEXT @limit ROWS ONLY";
     internal const string GetEpochSql = "SELECT epoch FROM GOVERNANCE_EPOCHS WHERE tenant_id = @tenantId";
     internal const string BumpEpochPgSql = "INSERT INTO GOVERNANCE_EPOCHS (tenant_id, epoch, updated_at) VALUES (@tenantId, 1, @updatedAt) ON CONFLICT (tenant_id) DO UPDATE SET epoch = GOVERNANCE_EPOCHS.epoch + 1, updated_at = EXCLUDED.updated_at RETURNING epoch";
     internal const string BumpEpochSsSql = "MERGE GOVERNANCE_EPOCHS WITH (HOLDLOCK) AS target USING (VALUES (@tenantId)) AS source (tenant_id) ON target.tenant_id = source.tenant_id WHEN MATCHED THEN UPDATE SET epoch = target.epoch + 1, updated_at = @updatedAt WHEN NOT MATCHED THEN INSERT (tenant_id, epoch, updated_at) VALUES (@tenantId, 1, @updatedAt) OUTPUT inserted.epoch;";
@@ -488,6 +490,28 @@ public sealed class GovernanceDomainStore(
         }
 
         return ids;
+    }
+
+    public async Task<IReadOnlyList<TableIdentifier>> ListDomainTablesAsync(TenantId tenant, Guid domainId, int limit, CancellationToken ct = default)
+    {
+        var tenantId = RequireTenant(tenant, GovernanceTable.GovernanceDomainTables);
+        ArgumentOutOfRangeException.ThrowIfNegativeOrZero(limit);
+        await using var conn = await OpenAsync(ct).ConfigureAwait(false);
+        await using var cmd = Cmd(
+            conn, null, IsSqlServer ? ListDomainTablesSsSql : ListDomainTablesPgSql, tenantId,
+            ("@domainId", domainId.ToString("D"), null),
+            ("@limit", Math.Min(limit, IGovernanceDomainRepository.MaxPageSize * 10), DbType.Int32));
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        var tables = new List<TableIdentifier>();
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            if (TableIdentifier.TryCreate(reader.GetString(0), reader.GetString(1), reader.GetString(2), out var table))
+            {
+                tables.Add(table);
+            }
+        }
+
+        return tables;
     }
 
     public async Task<long> GetEpochAsync(TenantId tenant, CancellationToken ct = default)

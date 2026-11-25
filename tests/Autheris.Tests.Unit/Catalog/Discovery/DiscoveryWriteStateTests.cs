@@ -249,7 +249,8 @@ public sealed class DiscoveryWriteStateTests
         before.Owners.ShouldHaveSingleItem().DisplayName.ShouldBe("Orders Owner");
 
         // Submit write request using Discovery object identifiers
-        var requestService = new ConsentRequestService(tableRepo, approvals);
+        var engine = new Autheris.Tests.Unit.TestSupport.RecordingPermissionRequestEngine();
+        var requestService = new ConsentRequestEndpointAdapter(engine);
         var submitResult = await requestService.SubmitAsync(new ConsentRequestSubmission(
             before.Domain,
             before.Schema,
@@ -264,10 +265,8 @@ public sealed class DiscoveryWriteStateTests
             RequestWriteOnly: true));
         submitResult.Status.ShouldBe("PENDING");
 
-        var pending = approvals.Requests.ShouldHaveSingleItem();
-
         // Deciding the routed request is the engine's job (PermissionRequestEngineDecideTests); no GraphQL mutation decides.
-        pending.Status.ShouldBe("PENDING");
+        engine.Submissions.ShouldHaveSingleItem();
     }
 
     private static TableMetadata MakeOrdersTable(string name)

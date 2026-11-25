@@ -85,6 +85,7 @@ public sealed record AuditLogPageQuery(
 public sealed record AuditLogPage(IReadOnlyList<AuditLogEntry> Items, long? NextBeforeSequence);
 
 /// <summary>Keyset page request over the consents of one tenant, ordered by id. <see cref="AfterId"/> is exclusive.</summary>
+/// <param name="DomainId">When set, only grants on tables assigned to this governance domain (joined in the query, never truncated).</param>
 public sealed record ConsentPageQuery(
     TenantId Tenant,
     TableIdentifier? Table = null,
@@ -93,7 +94,8 @@ public sealed record ConsentPageQuery(
     bool IncludeInactive = false,
     Guid? AfterId = null,
     int PageSize = ConsentPageQuery.DefaultPageSize,
-    Autheris.Domain.Model.PermissionGrantKind? GrantKind = Autheris.Domain.Model.PermissionGrantKind.Data)
+    Autheris.Domain.Model.PermissionGrantKind? GrantKind = Autheris.Domain.Model.PermissionGrantKind.Data,
+    Guid? DomainId = null)
 {
     public const int DefaultPageSize = 100;
     public const int MaxPageSize = 500;

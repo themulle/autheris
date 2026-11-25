@@ -82,9 +82,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Governance.Grants.IGrantValidityPolicy, Autheris.Application.Governance.Grants.GrantValidityPolicy>();
         services.AddSingleton<Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter, Autheris.Application.ConsentRequests.Routing.ConsentWorkflowRouter>();
         services.AddSingleton<Autheris.Application.Governance.ConsentRequests.ISeparationOfDutiesService, Autheris.Application.Governance.ConsentRequests.SeparationOfDutiesService>();
-        services.AddSingleton<Autheris.Application.ConsentRequests.ILegacyExternalDecisionGuard, Autheris.Application.ConsentRequests.LegacyExternalDecisionGuard>();
         services.AddSingleton<Microsoft.AspNetCore.Authorization.IAuthorizationHandler, ExternalSystemRequirementHandler>();
-        services.AddScoped<Autheris.Application.ConsentRequests.IConsentDecisionPipeline, Autheris.Application.ConsentRequests.ConsentDecisionPipeline>();
         services.AddScoped<Autheris.Application.ConsentRequests.IConsentRequestService>(sp =>
             new Autheris.Application.ConsentRequests.ConsentRequestEndpointAdapter(
                 sp.GetRequiredService<Autheris.Application.Governance.Requests.IPermissionRequestEngine>(),
@@ -92,9 +90,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Policy.Classification.IClassificationAdminService, Autheris.Application.Policy.Classification.ClassificationAdminService>();
         services.AddSingleton<Autheris.Application.Governance.Grants.IOwnerGrantService, Autheris.Application.Governance.Grants.OwnerGrantService>();
         services.AddSingleton<Autheris.Application.ConsentRequests.ProfileAssignments.IProfileGrantMaterializer, Autheris.Application.ConsentRequests.ProfileAssignments.ProfileGrantMaterializer>();
-        services.AddScoped<Autheris.Application.ConsentRequests.ProfileAssignments.ProfileAssignmentRequestService>();
-        services.AddScoped<Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentRequestService>(sp => sp.GetRequiredService<Autheris.Application.ConsentRequests.ProfileAssignments.ProfileAssignmentRequestService>());
-        services.AddScoped<Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentDecisionHandler>(sp => sp.GetRequiredService<Autheris.Application.ConsentRequests.ProfileAssignments.ProfileAssignmentRequestService>());
+        services.AddScoped<Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentMaintenanceService, Autheris.Application.ConsentRequests.ProfileAssignments.ProfileAssignmentMaintenanceService>();
         services.AddSingleton<Autheris.Infrastructure.Persistence.PermissionRequestStore>(sp =>
             new Autheris.Infrastructure.Persistence.PermissionRequestStore(
                 sp.GetRequiredService<Autheris.Infrastructure.Persistence.Dialects.IGovernanceSqlDialect>(),
@@ -125,6 +121,18 @@ public static partial class GatewayGovernanceServiceExtensions
                 sp.GetRequiredService<Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter>()));
         services.AddScoped<Autheris.Application.Governance.Requests.IPermissionRequestEngine>(sp => sp.GetRequiredService<Autheris.Application.Governance.Requests.PermissionRequestEngine>());
         services.AddScoped<Autheris.Application.Governance.Requests.SelfGrantService>();
+        services.AddSingleton<Autheris.Application.Governance.Requests.GrantRevokeAuthority>();
+        services.AddScoped<Autheris.Application.Governance.Requests.PermissionInboxService>(sp =>
+            new Autheris.Application.Governance.Requests.PermissionInboxService(
+                sp.GetRequiredService<Autheris.Application.Common.Interfaces.IConsentApprovalRepository>(),
+                sp.GetRequiredService<Autheris.Application.Common.Interfaces.IConsentRepository>(),
+                sp.GetRequiredService<Autheris.Application.Governance.Requests.ApproverResolver>(),
+                sp.GetRequiredService<Autheris.Application.Governance.Requests.ApproverEligibility>(),
+                sp.GetRequiredService<Autheris.Application.Governance.ConsentRequests.ISeparationOfDutiesService>(),
+                sp.GetRequiredService<Autheris.Application.Common.Interfaces.IGovernanceCapabilities>(),
+                sp.GetService<Autheris.Application.Common.Interfaces.IGovernanceDomainRepository>(),
+                sp.GetService<TimeProvider>(),
+                sp.GetService<Autheris.Application.Common.Interfaces.ICatalogVisibilityGrantRepository>()));
         services.AddSingleton<Autheris.Application.Governance.Grants.IGrantRevocationService>(sp => new Autheris.Application.Governance.Grants.GrantRevocationService(
             sp.GetRequiredService<Autheris.Application.Common.Interfaces.IConsentRepository>(),
             sp.GetRequiredService<Autheris.Application.Common.Interfaces.IConsentApprovalRepository>(),

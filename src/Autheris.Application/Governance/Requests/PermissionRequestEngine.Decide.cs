@@ -124,6 +124,8 @@ public sealed partial class PermissionRequestEngine
                 await _policyEpochRepository.IncrementTableEpochAsync(finalized.TableIdentifier, ct).ConfigureAwait(false);
             }
 
+            await InvalidateGrantTablesAfterCommitAsync(finalized, grants, ct).ConfigureAwait(false);
+
             if (_notificationDispatcher is not null)
             {
                 var notifyEvent = string.Equals(finalized.Status, "APPROVED", StringComparison.OrdinalIgnoreCase)
@@ -395,4 +397,43 @@ public sealed partial class PermissionRequestEngine
                 PermissionTarget.ForProfile(req.ProfileId.Value),
             _ => PermissionTarget.ForTable(req.TableIdentifier, req.TargetColumns)
         };
+
+    /// <summary>
+    /// Issue #1044: a decision can create data grants on tables other than the request's own (an access profile spans several
+    /// tables and object patterns). The applier advanced their epochs in the decision transaction; after the commit each table is
+    /// invalidated, and a pattern grant (no table) publishes a catalog version change through the empty table key.
+    /// </summary>
+    private async Task InvalidateGrantTablesAfterCommitAsync(ConsentRequest finalized, IReadOnlyList<GrantRef> grants, CancellationToken ct)
+    {
+        if (_assignmentStore is null || grants.Count == 0)
+        {
+            return;
+        }
+
+        var tables = new HashSet<TableIdentifier>();
+        foreach (var grant in grants)
+        {
+            if (grant.GrantKind != PermissionGrantKind.Data)
+            {
+                continue;
+            }
+
+            if (grant.Table is { } table && !string.IsNullOrWhiteSpace(table.TableName))
+            {
+                if (!table.Equals(finalized.TableIdentifier))
+                {
+                    tables.Add(table);
+                }
+            }
+            else if (grant.ContainerKind is null)
+            {
+                tables.Add(default);
+            }
+        }
+
+        if (tables.Count > 0)
+        {
+            await _assignmentStore.InvalidateTablesAfterCommitAsync(tables, ct).ConfigureAwait(false);
+        }
+    }
 }

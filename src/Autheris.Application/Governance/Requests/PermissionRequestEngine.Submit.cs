@@ -82,7 +82,7 @@ public sealed partial class PermissionRequestEngine
         Guid? bundleIdOverride,
         CancellationToken ct)
     {
-        ConsentSubmissionPipeline.EnsureSelfServiceEnabled(_gatewayOptions);
+        ConsentSubmissionGuards.EnsureSelfServiceEnabled(_gatewayOptions);
         var validTenant = ValidateTenant(submission.TenantId);
         var callerCtx = ValidateAuthenticatedCaller(submission.Caller, submission.CallerContext, validTenant);
 
@@ -101,7 +101,7 @@ public sealed partial class PermissionRequestEngine
             throw new ConsentRequestException("VALIDATION_ERROR", "Write rules are supported for Data requests only.");
         }
 
-        await ConsentSubmissionPipeline.CheckAccessRequestRateAsync(
+        await ConsentSubmissionGuards.CheckAccessRequestRateAsync(
             validTenant, callerCtx.UserSid, _rateLimiter, _gatewayOptions, _discoveryOptions, ct).ConfigureAwait(false);
 
         var normalizedJustification = JustificationPolicy.Validate(submission.Justification);
@@ -438,6 +438,11 @@ public sealed partial class PermissionRequestEngine
                 }
             }
 
+            if (submission.RequestKind == ConsentRequestKind.Data && meta is not null && submission.RequestedWriteRules is { Count: > 0 } writeRules)
+            {
+                Autheris.Application.ConsentRequests.WriteRuleWorkflowHelper.ValidateRulesAgainstMetadata(meta, writeRules, table);
+            }
+
             ContainerKind? resolvedContainerKind = target.ContainerKind;
             Guid? resolvedContainerId = target.ContainerId;
 
@@ -589,7 +594,7 @@ public sealed partial class PermissionRequestEngine
             return DateTimeOffset.MaxValue;
         }
 
-        return ConsentSubmissionPipeline.ResolveRequestedValidTo(
+        return ConsentSubmissionGuards.ResolveRequestedValidTo(
             _validityPolicy,
             now,
             validFrom,

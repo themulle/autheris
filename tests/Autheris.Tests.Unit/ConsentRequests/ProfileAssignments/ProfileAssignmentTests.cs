@@ -40,224 +40,102 @@ using Xunit;
 public sealed class ProfileAssignmentTests
 {
     private static readonly DateTimeOffset FixedNow = new(2026, 11, 15, 10, 0, 0, TimeSpan.Zero);
-    private static readonly TenantId Tenant = new("tenant-a");
-    private static readonly Sid Requester = new("S-1-5-21-USER-ALICE");
+    internal static readonly TenantId Tenant = new("tenant-a");
+    internal static readonly Sid Requester = new("S-1-5-21-USER-ALICE");
     private static readonly Sid OwnerA = new("S-1-5-21-OWNER-A");
     private static readonly Sid OwnerB = new("S-1-5-21-OWNER-B");
-    private static readonly Sid OwnerC = new("S-1-5-21-OWNER-C");
+    internal static readonly Sid OwnerC = new("S-1-5-21-OWNER-C");
 
     [Fact]
-    public async Task Submit_ConcreteAndPatternProfile_RoutesSingleDataSource_AndCreatesPendingItems()
+    public async Task PatternNewOwnerHook_QueuesOwnerApprovalForTheNewObject()
     {
         var fx = new Fixture();
-        var result = await fx.Service.SubmitAsync(new ProfileAssignmentSubmission(
-            fx.ProfileId, Requester, fx.UserPrincipal(Requester), Tenant, Justification: "BI dashboard access"));
-
-        result.Status.ShouldBe("PENDING");
-        fx.Requests.Count.ShouldBe(1);
-        fx.Requests[0].RequestKind.ShouldBe(ConsentRequestKind.ProfileAssignment);
-        fx.Requests[0].ProfileId.ShouldBe(fx.ProfileId);
-        fx.Items.Count.ShouldBe(2);
-        fx.Items.ShouldContain(i => i.ItemNo == 0 && i.OwnerSid == OwnerA.Value && i.OwnerDecision == "PENDING");
-        fx.Items.ShouldContain(i => i.ItemNo == 1 && i.OwnerSid == OwnerB.Value && i.OwnerDecision == "PENDING");
-        fx.Items.Where(i => i.ItemNo == 1).Select(i => i.ObjectRef).First().ShouldBe("pg.analytics.*");
-    }
-
-    [Fact]
-    public async Task Submit_MultiDataSource_UsesTenantRoute_AndRejectsRoleAssigneeWith400()
-    {
-        var fx = new Fixture(multiSource: true, tenantRouteExternal: true);
-        var ex = await Should.ThrowAsync<ConsentRequestException>(() => fx.Service.SubmitAsync(new ProfileAssignmentSubmission(
-            fx.ProfileId, Requester, fx.UserPrincipal(Requester, isGovAdmin: true), Tenant, GranteeRef: "RoleReader", GranteeType: "Role")));
-        ex.Code.ShouldBe(AccessProfileAssignmentRules.RoleSubjectUnsupported);
-
-        var result = await fx.Service.SubmitAsync(new ProfileAssignmentSubmission(
-            fx.ProfileId, Requester, fx.UserPrincipal(Requester, isGovAdmin: true), Tenant, GranteeRef: "grp-analysts", GranteeType: "Group"));
-        result.Status.ShouldBe("PENDING_EXTERNAL_APPROVAL");
-        fx.Requests.Single().WorkflowMode.ShouldBe(ConsentWorkflowMode.External);
-        fx.Requests.Single().RequestedGranteeType.ShouldBe(GranteeType.Group);
-    }
-
-    [Fact]
-    public async Task InternalApproval_MultiOwner_PartialThenFinal_MaterializesSignedGrantsPerItem()
-    {
-        var fx = new Fixture();
-        var sub = await fx.Service.SubmitAsync(new ProfileAssignmentSubmission(
-            fx.ProfileId, Requester, fx.UserPrincipal(Requester), Tenant, Justification: "Q4 reporting"));
-
-        var partial = await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
-            sub.RequestId, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerA),
-            ContextTenantId: Tenant));
-        partial.Request.Status.ShouldBe("PENDING");
-        fx.Consents.ShouldBeEmpty();
-
-        fx.Clock.Advance(TimeSpan.FromMinutes(10));
-        var final = await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
-            sub.RequestId, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerB),
-            ContextTenantId: Tenant));
-        final.Request.Status.ShouldBe("APPROVED");
-
-        fx.Consents.Count.ShouldBe(2);
-        fx.Consents.All(c => c.GrantSource == ConsentGrantSource.AccessProfile && c.ProfileAssignmentId == sub.RequestId).ShouldBeTrue();
-        var patternGrant = fx.Consents.Single(c => c.IsPatternGrant);
-        patternGrant.ColumnSetMode.ShouldBe(ColumnSetMode.AllNonHidden);
-        patternGrant.ApprovingOwners.ShouldContain(OwnerB.Value);
-        patternGrant.RowScope.Count.ShouldBe(1);
-
-        var verifier = new GrantChainVerifier(fx, fx.Signer);
-        (await verifier.VerifyTenantChainAsync(Tenant.Value)).IsValid.ShouldBeTrue();
-        fx.Records.Count(r => r.RecordType == GrantRecordType.Issued).ShouldBe(2);
-        fx.EpochBumps.ShouldBeGreaterThanOrEqualTo(1);
-    }
-
-    [Fact]
-    public async Task InternalApproval_SelfApproval_And_FourEyesSameApprover_AreBlocked()
-    {
-        var fx = new Fixture(highlySensitive: true);
-        var sub = await fx.Service.SubmitAsync(new ProfileAssignmentSubmission(
-            fx.ProfileId, Requester, fx.UserPrincipal(Requester), Tenant));
-
-        var selfEx = await Should.ThrowAsync<ConsentDecisionException>(() => fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
-            sub.RequestId, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(Requester), ContextTenantId: Tenant)));
-        selfEx.ErrorCode.ShouldBe(ConsentDecisionErrorCodes.SelfApprovalForbidden);
-
-        await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
-            sub.RequestId, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerA), ContextTenantId: Tenant));
-
-        var fourEyesEx = await Should.ThrowAsync<ConsentDecisionException>(() => fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
-            sub.RequestId, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerA), ContextTenantId: Tenant)));
-        fourEyesEx.ErrorCode.ShouldBe(ConsentDecisionErrorCodes.FourEyesSameApprover);
-    }
-
-    [Fact]
-    public async Task InternalRejection_UpdatesItems_MarksRejected_AndRecordsRejectedGrantRecord()
-    {
-        var fx = new Fixture();
-        var sub = await fx.Service.SubmitAsync(new ProfileAssignmentSubmission(
-            fx.ProfileId, Requester, fx.UserPrincipal(Requester), Tenant));
-
-        var decided = await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
-            sub.RequestId, ConsentDecisionKind.Reject, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerA),
-            Reason: "Dataset out of scope", ContextTenantId: Tenant));
-
-        decided.Request.Status.ShouldBe("REJECTED");
-        fx.Consents.ShouldBeEmpty();
-        fx.Records.Count.ShouldBe(1);
-        fx.Records[0].RecordType.ShouldBe(GrantRecordType.Rejected);
-        fx.Records[0].ProfileAssignmentId.ShouldBe(sub.RequestId);
-    }
-
-    [Fact]
-    public async Task PatternNewOwnerHook_ExtendsApprovingOwners_WithNewSignedGrantRecord()
-    {
-        var fx = new Fixture();
-        var sub = await fx.Service.SubmitAsync(new ProfileAssignmentSubmission(
-            fx.ProfileId, Requester, fx.UserPrincipal(Requester), Tenant));
-        await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
-            sub.RequestId, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerA), ContextTenantId: Tenant));
-        await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
-            sub.RequestId, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerB), ContextTenantId: Tenant));
-
-        var patternConsent = fx.Consents.Single(c => c.IsPatternGrant);
+        var assignment = fx.SeedApprovedAssignment();
+        var patternConsent = new Consent
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Tenant,
+            GranteeType = GranteeType.User,
+            GranteeSid = Requester,
+            ProfileAssignmentId = assignment.Id,
+            ProfileItemNo = 1,
+            ObjectPattern = "pg.analytics.*",
+            WorkflowMode = ConsentWorkflowMode.Internal,
+            ApprovingOwners = [OwnerB.Value],
+            ValidTo = FixedNow.AddDays(30)
+        };
         var newTable = Fixture.BuildTable("pg", "analytics", "events_v2", "LOW");
         fx.Tables.Add(newTable);
-        fx.TableOwners[newTable.Identifier] = [OwnerC.Value];
 
-        fx.Clock.Advance(TimeSpan.FromHours(1));
-        await fx.Service.HandlePatternNewOwnerAsync(patternConsent, newTable, [OwnerC.Value], fx.Clock.GetUtcNow());
+        await fx.Maintenance.HandlePatternNewOwnerAsync(patternConsent, newTable, [OwnerC.Value], fx.Clock.GetUtcNow());
 
-        var extReq = fx.Requests.Single(r => r.Id != sub.RequestId);
+        var extReq = fx.Requests.Single(r => r.Id != assignment.Id);
         extReq.RequestKind.ShouldBe(ConsentRequestKind.ProfileAssignment);
+        extReq.ProfileId.ShouldBe(fx.ProfileId);
+        extReq.RequesterSid.ShouldBe(ProfileAssignmentMaintenanceService.PatternCoverageRequester);
+        extReq.RequestedGranteeRef.ShouldBe(Requester.Value);
+        ProfileAssignmentSnapshots.Parse(extReq).ExtendingConsentId.ShouldBe(patternConsent.Id);
+        extReq.Status.ShouldBe("PENDING");
+        fx.Items.ShouldHaveSingleItem().OwnerSid.ShouldBe(OwnerC.Value);
 
-        var step1Ext = await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
-            extReq.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerC), ContextTenantId: Tenant));
-        step1Ext.Request.Status.ShouldBe("PENDING_SECOND_APPROVAL");
-
-        var step2Ext = await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
-            extReq.Id, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerB, isGovAdmin: true), ContextTenantId: Tenant));
-        step2Ext.Request.Status.ShouldBe("APPROVED");
-
-        var refreshedPattern = fx.Consents.Single(c => c.Id == patternConsent.Id);
-        refreshedPattern.ApprovingOwners.ShouldContain(OwnerC.Value);
-        fx.Records.Count(r => r.ConsentId == patternConsent.Id && r.RecordType == GrantRecordType.Issued).ShouldBe(2);
-        (await new GrantChainVerifier(fx, fx.Signer).VerifyTenantChainAsync(Tenant.Value)).IsValid.ShouldBeTrue();
+        // The same object is not queued twice.
+        await fx.Maintenance.HandlePatternNewOwnerAsync(patternConsent, newTable, [OwnerC.Value], fx.Clock.GetUtcNow());
+        fx.Requests.Count.ShouldBe(2);
     }
 
     [Fact]
-    [Trait("Category", "Security")]
-    public async Task PatternGrants_OfAProfileAssignment_SignalAnInvalidation_OnMaterializeAndRevoke()
-    {
-        // Issue #1044: a pattern grant has no table; the store must still be told (an empty table key, which it turns into a catalog
-        // version change), in the transaction and after the commit, so cached decisions and access views see the grant and its revoke.
-        var fx = new Fixture();
-        var sub = await fx.Service.SubmitAsync(new ProfileAssignmentSubmission(
-            fx.ProfileId, Requester, fx.UserPrincipal(Requester), Tenant));
-        await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
-            sub.RequestId, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerA), ContextTenantId: Tenant));
-        await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
-            sub.RequestId, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerB), ContextTenantId: Tenant));
-
-        fx.Consents.ShouldContain(c => c.IsPatternGrant);
-        fx.EpochBumpTargets.ShouldContain(t => string.IsNullOrWhiteSpace(t.TableName), "materializing a pattern grant");
-        fx.InvalidatedAfterCommit.ShouldContain(t => string.IsNullOrWhiteSpace(t.TableName), "after the materializing commit");
-
-        fx.EpochBumpTargets.Clear();
-        fx.InvalidatedAfterCommit.Clear();
-        await fx.Service.RevokeAssignmentAsync(Tenant, sub.RequestId, OwnerA, "Project completed");
-
-        fx.EpochBumpTargets.ShouldContain(t => string.IsNullOrWhiteSpace(t.TableName), "revoking a pattern grant");
-        fx.InvalidatedAfterCommit.ShouldContain(t => string.IsNullOrWhiteSpace(t.TableName), "after the revoking commit");
-    }
-
-    [Fact]
-    public async Task ProfileEditAfterMaterialization_DoesNotMutateMaterializedGrants()
+    public async Task PatternNewOwnerHook_DoesNotConsumeTheGranteesPendingRequestCap()
     {
         var fx = new Fixture();
-        var sub = await fx.Service.SubmitAsync(new ProfileAssignmentSubmission(
-            fx.ProfileId, Requester, fx.UserPrincipal(Requester), Tenant));
-        await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
-            sub.RequestId, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerA), ContextTenantId: Tenant));
-        await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
-            sub.RequestId, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerB), ContextTenantId: Tenant));
-
-        var existingProfile = fx.Profiles[fx.ProfileId.ToString("D")];
-        fx.Profiles[fx.ProfileId.ToString("D")] = new AccessProfile
+        var assignment = fx.SeedApprovedAssignment();
+        var patternConsent = new Consent
         {
-            ProfileId = existingProfile.ProfileId,
-            TenantId = existingProfile.TenantId,
-            Name = existingProfile.Name,
-            TargetTables = ["other.schema.unrelated"],
-            MaskingMode = MaskingPolicyMode.Unmasked,
-            RowScope = existingProfile.RowScope
+            Id = Guid.NewGuid(),
+            TenantId = Tenant,
+            GranteeType = GranteeType.User,
+            GranteeSid = Requester,
+            ProfileAssignmentId = assignment.Id,
+            ObjectPattern = "pg.analytics.*",
+            WorkflowMode = ConsentWorkflowMode.Internal,
+            ValidTo = FixedNow.AddDays(30)
         };
 
-        fx.Consents.Count.ShouldBe(2);
-        fx.Consents.ShouldContain(c => c.TableIdentifier.TableName == "orders");
-        fx.Consents.ShouldNotContain(c => c.TableIdentifier.TableName == "unrelated");
+        for (var i = 0; i < 3; i++)
+        {
+            var table = Fixture.BuildTable("pg", "analytics", "events_" + i, "LOW");
+            fx.Tables.Add(table);
+            await fx.Maintenance.HandlePatternNewOwnerAsync(patternConsent, table, [OwnerC.Value], fx.Clock.GetUtcNow());
+        }
+
+        // The pending cap counts requests by requester SID; system-initiated requests never use the grantee as requester.
+        fx.Requests.Count(r => r.Id != assignment.Id).ShouldBe(3);
+        fx.Requests.Count(r => r.RequesterSid == Requester && r.Status == "PENDING").ShouldBe(0);
     }
 
     [Fact]
-    public async Task RevokeWholeProfileAssignment_RevokesAllActiveGrantsAtomically_AndRecordsRevokedChain()
+    public async Task PatternNewOwnerHook_IgnoresGrantWhoseAssignmentRequestIsUnknown()
     {
         var fx = new Fixture();
-        var sub = await fx.Service.SubmitAsync(new ProfileAssignmentSubmission(
-            fx.ProfileId, Requester, fx.UserPrincipal(Requester), Tenant));
-        await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
-            sub.RequestId, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerA), ContextTenantId: Tenant));
-        await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(
-            sub.RequestId, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerB), ContextTenantId: Tenant));
+        var patternConsent = new Consent
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Tenant,
+            GranteeType = GranteeType.User,
+            GranteeSid = Requester,
+            ProfileAssignmentId = Guid.NewGuid(),
+            ObjectPattern = "pg.analytics.*",
+            WorkflowMode = ConsentWorkflowMode.Internal,
+            ValidTo = FixedNow.AddDays(30)
+        };
+        var newTable = Fixture.BuildTable("pg", "analytics", "events_v2", "LOW");
 
-        fx.Clock.Advance(TimeSpan.FromDays(1));
-        int revoked = await fx.Service.RevokeAssignmentAsync(Tenant, sub.RequestId, OwnerA, "Project completed");
+        await fx.Maintenance.HandlePatternNewOwnerAsync(patternConsent, newTable, [OwnerC.Value], fx.Clock.GetUtcNow());
 
-        revoked.ShouldBe(2);
-        fx.Consents.All(c => c.IsRevoked).ShouldBeTrue();
-        fx.Records.Count(r => r.RecordType == GrantRecordType.Revoked).ShouldBe(2);
-        (await new GrantChainVerifier(fx, fx.Signer).VerifyTenantChainAsync(Tenant.Value)).IsValid.ShouldBeTrue();
+        fx.Requests.ShouldBeEmpty();
     }
 
     [Fact]
-    public async Task RestEndpoints_CreateDecideAndRevokeProfileAssignment_EnforceAuthAnd400ForRole()
+    public async Task RestEndpoint_CreatesProfileAssignmentThroughTheEngine_AndRefusesRoleAssignee()
     {
         var fx = new Fixture();
         var sp = new ServiceCollection().AddLogging().BuildServiceProvider();
@@ -294,32 +172,9 @@ public sealed class ProfileAssignmentTests
         await okResult.ExecuteAsync(okCtx);
         okCtx.Response.StatusCode.ShouldBe(StatusCodes.Status201Created);
         fx.Requests.Single().RequestKind.ShouldBe(ConsentRequestKind.ProfileAssignment);
-
-        // Decisions and revocation of an already materialised assignment: submitted through the profile service so the item snapshot exists.
-        var otherRequester = new Sid("S-1-5-21-OTHER-REQUESTER");
-        var reqId = (await fx.Service.SubmitAsync(new ProfileAssignmentSubmission(
-            fx.ProfileId, otherRequester, fx.UserPrincipal(otherRequester), Tenant, DurationDays: 14))).RequestId;
-
-        await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(reqId, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerA), ContextTenantId: Tenant));
-        await fx.Pipeline.DecideAsync(new ConsentDecisionCommand(reqId, ConsentDecisionKind.Approve, ConsentDecisionChannel.Internal, fx.ApproverPrincipal(OwnerB), ContextTenantId: Tenant));
-
-        var revokeDeniedCtx = new DefaultHttpContext { RequestServices = sp, Response = { Body = new System.IO.MemoryStream() }, User = fx.UserPrincipal(new Sid("S-1-5-21-STRANGER")) };
-        revokeDeniedCtx.Request.Headers["Idempotency-Key"] = "key-rev-denied";
-        var deniedResult = await ConsentApiEndpoints.RevokeProfileAssignmentAsync(
-            reqId, new RevokeConsentGrantBody("Unauthorized attempt"), revokeDeniedCtx, fx, fx, fx, fx.Service, fx, timeProvider: fx.Clock);
-        await deniedResult.ExecuteAsync(revokeDeniedCtx);
-        revokeDeniedCtx.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
-
-        var revokeOkCtx = new DefaultHttpContext { RequestServices = sp, Response = { Body = new System.IO.MemoryStream() }, User = fx.UserPrincipal(otherRequester) };
-        revokeOkCtx.Request.Headers["Idempotency-Key"] = "key-rev-ok";
-        var okRevoke = await ConsentApiEndpoints.RevokeProfileAssignmentAsync(
-            reqId, new RevokeConsentGrantBody("No longer needed"), revokeOkCtx, fx, fx, fx, fx.Service, fx, timeProvider: fx.Clock);
-        await okRevoke.ExecuteAsync(revokeOkCtx);
-        revokeOkCtx.Response.StatusCode.ShouldBe(StatusCodes.Status200OK);
-        fx.Consents.All(c => c.IsRevoked).ShouldBeTrue();
     }
 
-    private sealed class Fixture :
+    internal sealed class Fixture :
         IAccessProfileRepository, ITableMetadataRepository, IConsentApprovalRepository, IContainerOwnership,
         IProfileAssignmentStore, IConsentWorkflowConfigRepository, IConsentWorkflowAdminRepository, IGrantRecordStore, IAuditLogRepository
     {
@@ -340,8 +195,7 @@ public sealed class ProfileAssignmentTests
         public List<TableIdentifier> EpochBumpTargets { get; } = [];
         public List<TableIdentifier> InvalidatedAfterCommit { get; } = [];
         public ProfileGrantMaterializer Materializer { get; }
-        public ProfileAssignmentRequestService Service { get; }
-        public ConsentDecisionPipeline Pipeline { get; }
+        public ProfileAssignmentMaintenanceService Maintenance { get; }
         public Guid ExternalSystemId { get; } = Guid.NewGuid();
 
         public Fixture(bool multiSource = false, bool tenantRouteExternal = false, bool highlySensitive = false)
@@ -378,15 +232,34 @@ public sealed class ProfileAssignmentTests
             var grantPolicy = new GrantPolicy();
             var validityPolicy = GrantValidityPolicy.CreateDefault();
             Materializer = new ProfileGrantMaterializer(writer, this, Clock);
-            Service = new ProfileAssignmentRequestService(
-                this, this, this, this, this, Materializer, grantPolicy, validityPolicy, writer, router, timeProvider: Clock);
-            Pipeline = new ConsentDecisionPipeline(
-                this, this, this, new ConsentDecisionGuard(new IdentitySubjectResolver()),
-                grantPolicy, validityPolicy, new LegacyExternalDecisionGuard(),
-                workflowConfigRepository: this, timeProvider: Clock, fallbackTenantId: Tenant, profileAssignmentHandler: Service);
+            Maintenance = new ProfileAssignmentMaintenanceService(this, this, Materializer, grantPolicy);
         }
 
         private List<ConsentWorkflowRoute> Routes { get; } = [];
+
+        /// <summary>The original profile assignment request whose id becomes the assignment id of its grants.</summary>
+        public ConsentRequest SeedApprovedAssignment(string status = "APPROVED")
+        {
+            var request = new ConsentRequest
+            {
+                Id = Guid.NewGuid(),
+                TenantId = Tenant,
+                RequesterSid = Requester,
+                RequestedGranteeType = GranteeType.User,
+                RequestedGranteeRef = Requester.Value,
+                BusinessJustification = "Analyst onboarding for the analytics profile.",
+                Status = status,
+                RequestedAt = FixedNow,
+                RequestedValidFrom = FixedNow,
+                RequestedValidTo = FixedNow.AddDays(30),
+                RequestKind = ConsentRequestKind.ProfileAssignment,
+                GrantKind = PermissionGrantKind.Data,
+                ProfileId = ProfileId,
+                WorkflowMode = ConsentWorkflowMode.Internal
+            };
+            Requests.Add(request);
+            return request;
+        }
 
         public static TableMetadata BuildTable(string domain, string schema, string name, string sensitivity)
         {

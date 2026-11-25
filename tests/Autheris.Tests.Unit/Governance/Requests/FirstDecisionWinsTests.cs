@@ -47,7 +47,9 @@ public sealed class FirstDecisionWinsTests
     };
 
     private static (PermissionRequestEngine Engine, InMemoryCasApprovalRepo Repo, InMemoryAuditWriter Audit, List<Consent> CreatedConsents) CreateHarness(
-        IProtectionSnapshotProvider? protection = null)
+        IProtectionSnapshotProvider? protection = null,
+        IGrantEffectApplier? applier = null,
+        Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentStore? assignmentStore = null)
     {
         var req = new ConsentRequest
         {
@@ -92,9 +94,10 @@ public sealed class FirstDecisionWinsTests
             new SeparationOfDutiesService(),
             new GrantPolicy(),
             GrantValidityPolicy.CreateDefault(),
-            [new DataGrantApplier(grantWriter)],
+            [applier ?? new DataGrantApplier(grantWriter)],
             protectionProvider: protection,
-            timeProvider: new FakeTimeProvider(Now));
+            timeProvider: new FakeTimeProvider(Now),
+            assignmentStore: assignmentStore);
 
         return (engine, repo, audit, consents);
     }
@@ -114,6 +117,44 @@ public sealed class FirstDecisionWinsTests
         conflict.ErrorCode.ShouldBe("REQUEST_ALREADY_DECIDED");
         consents.Count.ShouldBe(1);
         audit.Entries.ShouldContain(e => e.EventType == AuditEventTypes.PermissionDecisionConflict && e.Decision == "CONFLICT");
+    }
+
+    [Fact]
+    public async Task Approval_invalidates_every_granted_table_and_signals_pattern_grants_after_commit()
+    {
+        // Issue #1044: an approval can create grants beyond the request's own table (access profiles span tables and patterns).
+        var invoices = new TableIdentifier("sales", "dbo", "invoices");
+        var applier = NullFake.Create<IGrantEffectApplier>((m, _) => m.Name switch
+        {
+            "get_" + nameof(IGrantEffectApplier.RequestKind) => ConsentRequestKind.Data,
+            nameof(IGrantEffectApplier.ApplyAsync) => Task.FromResult<IReadOnlyList<GrantRef>>(
+            [
+                new GrantRef(Guid.NewGuid(), PermissionGrantKind.Data, Table: OrdersTable),
+                new GrantRef(Guid.NewGuid(), PermissionGrantKind.Data, Table: invoices),
+                new GrantRef(Guid.NewGuid(), PermissionGrantKind.Data),
+                new GrantRef(Guid.NewGuid(), PermissionGrantKind.Data, ContainerKind: ContainerKind.Domain, ContainerId: Guid.NewGuid())
+            ]),
+            _ => NullFake.UseDefault
+        });
+        var invalidated = new List<TableIdentifier>();
+        var store = NullFake.Create<Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentStore>((m, args) =>
+        {
+            if (m.Name == nameof(Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentStore.InvalidateTablesAfterCommitAsync))
+            {
+                invalidated.AddRange((IReadOnlyCollection<TableIdentifier>)args![0]!);
+                return Task.CompletedTask;
+            }
+
+            return NullFake.UseDefault;
+        });
+        var (engine, repo, _, _) = CreateHarness(applier: applier, assignmentStore: store);
+
+        await engine.DecideAsync(new PermissionDecisionCommand(repo.Current.Id, 1, Approver("user:approver-1"), Approve: true));
+
+        invalidated.ShouldContain(invoices);
+        invalidated.ShouldContain(t => string.IsNullOrWhiteSpace(t.TableName), "a pattern grant signals a catalog version change");
+        invalidated.ShouldNotContain(OrdersTable, "the request table is already advanced through the policy epoch repository");
+        invalidated.Count.ShouldBe(2);
     }
 
     [Fact]

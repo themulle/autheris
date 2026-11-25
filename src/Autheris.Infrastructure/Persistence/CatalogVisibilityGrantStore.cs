@@ -168,25 +168,10 @@ public sealed class CatalogVisibilityGrantStore(
         var tenantIdStr = RequireTenant(tenantId);
         ArgumentException.ThrowIfNullOrWhiteSpace(reason);
         var now = revokedAt.ToUniversalTime();
-        var (revoked, epoch) = await ExecuteWriteAsync(transaction, async (conn, tx) =>
-        {
-            await using var cmd = conn.CreateCommand();
-            cmd.Transaction = tx;
-            cmd.CommandText = IsSqlServer ? RevokeSsSql : RevokePgSql;
-            cmd.AddBound("@tenantId", tenantIdStr);
-            cmd.AddBound("@id", grantId.ToString("D"));
-            cmd.AddBound("@revokedBy", revokedBySid.Value);
-            cmd.AddBound("@revokedAt", now, DbType.DateTimeOffset);
-            cmd.AddBound("@reason", reason.Trim());
-            var count = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            if (count <= 0)
-            {
-                return (false, 0L);
-            }
-
-            var bumped = await BumpEpochInTxAsync(conn, tx, tenantIdStr, now, ct).ConfigureAwait(false);
-            return (true, bumped);
-        }, ct).ConfigureAwait(false);
+        var (revoked, epoch) = await ExecuteWriteAsync(
+            transaction,
+            (conn, tx) => RevokeCoreAsync(conn, tx, tenantIdStr, grantId, revokedBySid, reason, now, ct),
+            ct).ConfigureAwait(false);
 
         if (revoked && transaction is null && _changeNotifier is not null)
         {
@@ -194,6 +179,55 @@ public sealed class CatalogVisibilityGrantStore(
         }
 
         return revoked;
+    }
+
+    /// <summary>
+    /// Revokes inside a transaction the caller owns (for example together with its audit entry); the caller commits and then
+    /// calls <see cref="NotifyRevokedAsync"/>. Returns whether a row changed and the bumped tenant epoch.
+    /// </summary>
+    internal Task<(bool Revoked, long Epoch)> RevokeInTransactionAsync(
+        DbConnection conn,
+        DbTransaction tx,
+        TenantId tenantId,
+        Guid grantId,
+        Sid revokedBySid,
+        string reason,
+        DateTimeOffset revokedAt,
+        CancellationToken ct)
+    {
+        var tenantIdStr = RequireTenant(tenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(reason);
+        return RevokeCoreAsync(conn, tx, tenantIdStr, grantId, revokedBySid, reason, revokedAt.ToUniversalTime(), ct);
+    }
+
+    /// <summary>Publishes the governance change of a committed revocation.</summary>
+    internal async Task NotifyRevokedAsync(TenantId tenantId, long epoch, DateTimeOffset revokedAt, CancellationToken ct)
+    {
+        if (_changeNotifier is not null)
+        {
+            await _changeNotifier.NotifyAsync(new GovernanceChangeEvent(RequireTenant(tenantId), epoch, null, revokedAt.ToUniversalTime()), ct).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<(bool Revoked, long Epoch)> RevokeCoreAsync(
+        DbConnection conn, DbTransaction tx, string tenantIdStr, Guid grantId, Sid revokedBySid, string reason, DateTimeOffset now, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = IsSqlServer ? RevokeSsSql : RevokePgSql;
+        cmd.AddBound("@tenantId", tenantIdStr);
+        cmd.AddBound("@id", grantId.ToString("D"));
+        cmd.AddBound("@revokedBy", revokedBySid.Value);
+        cmd.AddBound("@revokedAt", now, DbType.DateTimeOffset);
+        cmd.AddBound("@reason", reason.Trim());
+        var count = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        if (count <= 0)
+        {
+            return (false, 0L);
+        }
+
+        var bumped = await BumpEpochInTxAsync(conn, tx, tenantIdStr, now, ct).ConfigureAwait(false);
+        return (true, bumped);
     }
 
     public async Task<int> RevokeAllForSubjectAsync(
@@ -421,9 +455,8 @@ public sealed class CatalogVisibilityGrantStore(
         }
     }
 
-    private static string RequireTenant(TenantId tenant)
-    {
-        var valid = TenantScope.RequireTenant(tenant, GovernanceTable.CatalogVisibilityGrants.ToSqlName());
-        return StoredTenant.RequireWritable(valid);
-    }
+    private static string RequireTenant(TenantId tenant) =>
+        TenantId.TryParse(TenantScope.RequireTenant(tenant, GovernanceTable.CatalogVisibilityGrants.ToSqlName()).Value, out var valid)
+            ? valid.Value
+            : throw new ArgumentException("A valid non-reserved TenantId is required.", nameof(tenant));
 }

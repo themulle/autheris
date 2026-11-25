@@ -13,7 +13,9 @@ public enum ConsentRevocationScope
 
 /// <summary>
 /// Token-bound authorization context required by consent revocation and replacement entry points.
-/// Constructible only via <see cref="FromPrincipal"/> so callers cannot forge admin authority or omit principal binding.
+/// It is created either from the caller's token (<see cref="FromPrincipal"/>) or, for a revocation the grant revoke
+/// authority already verified, through <see cref="ForVerifiedRevocation"/>. An architecture ratchet allows only the grant
+/// revoke authority to call <see cref="ForVerifiedRevocation"/>, so no other code path can mint tenant-admin authority.
 /// </summary>
 public sealed class ConsentRevocationAuthority
 {
@@ -22,16 +24,44 @@ public sealed class ConsentRevocationAuthority
 
     private readonly bool _denyAllTenants;
 
-    private ConsentRevocationAuthority(ConsentRevocationScope scope, TenantId? tenantId, bool denyAllTenants = false)
+    private ConsentRevocationAuthority(ConsentRevocationScope scope, TenantId? tenantId, bool denyAllTenants = false, string? verifiedCapacity = null)
     {
         Scope = scope;
         TenantId = tenantId;
         _denyAllTenants = denyAllTenants;
+        VerifiedCapacity = verifiedCapacity;
     }
 
     public ConsentRevocationScope Scope { get; }
 
     public TenantId? TenantId { get; }
+
+    /// <summary>
+    /// The capacity the grant revoke authority verified (for example <c>ContainerOwner</c>); recorded in the revocation
+    /// audit entry. <see langword="null"/> for token-derived authority.
+    /// </summary>
+    public string? VerifiedCapacity { get; }
+
+    /// <summary>
+    /// Authority for a revocation that the grant revoke authority already authorized for <paramref name="tenant"/>
+    /// (grantee, container owner member, governance, or IT for grants it may decide). Only the grant revoke authority may
+    /// call this (architecture ratchet); never derive it from caller input.
+    /// </summary>
+    /// <summary>The capacity recorded in the revocation audit entry for a revocation performed with this authority.</summary>
+    public string DescribeCapacity(bool isAdminForTenant, bool isGranteeSelf) =>
+        VerifiedCapacity
+        ?? (isAdminForTenant ? Scope.ToString() : isGranteeSelf ? "Grantee" : "Approver");
+
+    public static ConsentRevocationAuthority ForVerifiedRevocation(TenantId tenant, string capacity)
+    {
+        if (string.IsNullOrWhiteSpace(tenant.Value) || Autheris.Domain.Common.TenantId.IsReserved(tenant))
+        {
+            throw new ArgumentException("A verified revocation requires a concrete tenant.", nameof(tenant));
+        }
+
+        ArgumentException.ThrowIfNullOrWhiteSpace(capacity);
+        return new(ConsentRevocationScope.TenantGovernanceAdmin, tenant, verifiedCapacity: capacity);
+    }
 
     public static ConsentRevocationAuthority FromPrincipal(ClaimsPrincipal? principal)
     {

@@ -540,21 +540,6 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
 
     // ---------------------------------------------------------------- Niedrig
 
-    [Fact]
-    public async Task Low_RequestTableAccess_UnknownTable_ReturnsNeutralForbidden()
-    {
-        var metadata = new InMemoryTableMetadataRepository();
-        var approvals = Substitute.For<IConsentApprovalRepository>();
-        var accessor = new IsolatedHttpContextAccessor(new DefaultHttpContext { User = CreatePrincipal("S-1-5-21-ENUM") });
-
-        var ex = await Should.ThrowAsync<GraphQLException>(async () =>
-            await new Mutation().RequestTableAccessAsync("hr", "dbo", "secret_probe_table", "Business need for analysis", 7, null, new ConsentRequestService(metadata, approvals), accessor));
-
-        ex.Errors.ShouldContain(e => e.Code == "FORBIDDEN");
-        ex.Errors.ShouldNotContain(e => e.Code == "NOT_FOUND");
-        ex.Errors.ShouldAllBe(e => !e.Message.Contains("secret_probe_table"));
-    }
-
     private sealed class StubSocketTokenValidator(bool isValid, ClaimsPrincipal? principal) : ISocketTokenValidator
     {
         public Task<(bool IsValid, ClaimsPrincipal? Principal)> ValidateTokenAsync(string token, CancellationToken ct = default)

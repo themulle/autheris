@@ -185,6 +185,72 @@ public sealed class PermissionRequestEngineDecideTests
         withdrawn.ShouldBeFalse("The state change must not commit when the required audit cannot be written.");
     }
 
+    private static PermissionRequestEngine WithdrawEngine(ConsentRequest req, Action onWithdraw)
+    {
+        var approvals = NullFake.Create<IConsentApprovalRepository>((m, _) =>
+        {
+            if (m.Name == nameof(IConsentApprovalRepository.GetConsentRequestAsync))
+            {
+                return Task.FromResult<ConsentRequest?>(req);
+            }
+
+            if (m.Name == nameof(IConsentApprovalRepository.WithdrawConsentRequestAsync))
+            {
+                onWithdraw();
+                return Task.FromResult(true);
+            }
+
+            return NullFake.UseDefault;
+        });
+        return new PermissionRequestEngine(
+            approvals,
+            new InMemoryAuditWriter(),
+            new ApproverResolver(),
+            new ApproverEligibility(new GovernanceCapabilities()),
+            new SeparationOfDutiesService(),
+            new GrantPolicy(),
+            GrantValidityPolicy.CreateDefault(),
+            Array.Empty<IGrantEffectApplier>(),
+            timeProvider: new FakeTimeProvider(Now));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Withdraw_by_another_user_is_indistinguishable_from_missing()
+    {
+        var req = PendingRequest();
+        var withdrawn = false;
+        var engine = WithdrawEngine(req, () => withdrawn = true);
+        var attacker = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.PrimarySid, "user:mallory"), new Claim("tenant_id", TenantA.Value)], "Bearer"));
+
+        var ex = await Should.ThrowAsync<ConsentRequestException>(() => engine.WithdrawAsync(req.Id, attacker));
+
+        ex.Code.ShouldBe("NOT_FOUND");
+        withdrawn.ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData("APPROVED")]
+    [InlineData("REJECTED")]
+    [InlineData("WITHDRAWN")]
+    [InlineData("EXPIRED")]
+    [Trait("Category", "Security")]
+    public async Task Withdraw_of_a_decided_request_is_refused(string status)
+    {
+        var req = PendingRequest();
+        req.Status = status;
+        var withdrawn = false;
+        var engine = WithdrawEngine(req, () => withdrawn = true);
+        var owner = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.PrimarySid, "user:alice"), new Claim("tenant_id", TenantA.Value)], "Bearer"));
+
+        var ex = await Should.ThrowAsync<ConsentRequestException>(() => engine.WithdrawAsync(req.Id, owner));
+
+        ex.Code.ShouldBe("INVALID_STATE");
+        withdrawn.ShouldBeFalse();
+    }
+
     [Fact]
     public async Task Withdraw_that_throws_audits_the_failure_and_rethrows()
     {

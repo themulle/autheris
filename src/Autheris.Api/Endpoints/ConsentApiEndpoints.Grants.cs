@@ -15,6 +15,7 @@ using Autheris.Application.ConsentRequests;
 using Autheris.Application.ConsentRequests.Events;
 using Autheris.Application.ConsentRequests.ProfileAssignments;
 using Autheris.Application.Governance.Grants.Records;
+using Autheris.Application.Governance.Requests;
 using Autheris.Application.Governance.Paging;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -176,6 +177,8 @@ public static partial class ConsentApiEndpoints
         IRateLimiterService? rateLimiter = null,
         IOptions<GovernanceOptions>? governanceOptions = null,
         TimeProvider? timeProvider = null,
+        [FromServices] GrantRevokeAuthority? revokeAuthority = null,
+        IAuditWriter? auditWriter = null,
         CancellationToken ct = default)
     {
         if (await EnforceRateLimitAsync(context, rateLimiter, governanceOptions, ConsentApiRateLimitBucket.DecisionsAndRevokes, ct).ConfigureAwait(false) is { } limited)
@@ -183,7 +186,7 @@ public static partial class ConsentApiEndpoints
             return limited;
         }
 
-        var (tenantId, userSid, clientId, isServicePrincipal, isClusterAdmin, _) = ResolveCaller(context);
+        var (tenantId, userSid, clientId, isServicePrincipal, _, _) = ResolveCaller(context);
         ExternalWorkflowSystem? callerSystem = null;
         if (isServicePrincipal)
         {
@@ -215,8 +218,10 @@ public static partial class ConsentApiEndpoints
             return replayResult!;
         }
 
+        // A grant is revoked within the caller's resolved tenant only (ClusterAdmin included): a grant of another tenant is
+        // indistinguishable from a missing one and is never loaded into the revoke authority check.
         var consent = await consentRepo.GetConsentByIdAsync(id, ct).ConfigureAwait(false);
-        if (consent is null || (!isClusterAdmin && consent.TenantId != tenantId))
+        if (consent is null || consent.TenantId != tenantId)
         {
             return ApiProblems.NotFound(ConsentDecisionErrorCodes.GrantNotFound, $"Consent grant '{id}' was not found.", context);
         }
@@ -277,9 +282,20 @@ public static partial class ConsentApiEndpoints
                 return ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, "Authenticated user SID is required.", context);
             }
 
+            var callerContext = context.GetSecurityContext() ?? SecurityPrincipalContext.FromPrincipal(context.User);
+            var verified = revokeAuthority is null
+                ? null
+                : await revokeAuthority.AuthorizeAsync(callerContext, consent, ct).ConfigureAwait(false);
+            if (verified is null)
+            {
+                await RecordRevokeDeniedAsync(auditWriter, consent, userSid.Value, ct).ConfigureAwait(false);
+                return ApiProblems.Forbidden(ApiErrorCodes.AccessDenied, ConsentRevocationForbiddenException.FixedMessage, context);
+            }
+
             try
             {
-                await consentRepo.RevokeConsentAsync(id, userSid.Value, reason, ConsentRevocationAuthority.FromPrincipal(context.User), ct).ConfigureAwait(false);
+                // The verified authority carries the capacity, which the repository records in CONSENT_REVOKED.
+                await consentRepo.RevokeConsentAsync(id, userSid.Value, reason, verified.Authority, ct).ConfigureAwait(false);
             }
             catch (ConsentRevocationForbiddenException)
             {
@@ -303,7 +319,7 @@ public static partial class ConsentApiEndpoints
         IConsentApprovalRepository approvalRepo,
         IConsentWorkflowConfigRepository workflowConfigRepo,
         [FromServices] IProfileAssignmentStore assignmentStore,
-        [FromServices] IProfileAssignmentRequestService profileAssignmentService,
+        [FromServices] IProfileAssignmentMaintenanceService profileAssignmentService,
         IContainerOwnership ownershipRepo,
         IIdempotencyStore? idempotencyStore = null,
         IRateLimiterService? rateLimiter = null,
@@ -410,6 +426,27 @@ public static partial class ConsentApiEndpoints
         var responsePayload = new { profileAssignmentId = id, revokedGrantCount = revokedCount, status = "REVOKED", revokedAt = now };
         await StoreIdempotentResponseAsync(idempotencyStore, scopedKey, bodyHash, StatusCodes.Status200OK, responsePayload, null, ct).ConfigureAwait(false);
         return Results.Ok(responsePayload);
+    }
+
+    private static async Task RecordRevokeDeniedAsync(IAuditWriter? auditWriter, Consent consent, Sid actor, CancellationToken ct)
+    {
+        if (auditWriter is null)
+        {
+            return;
+        }
+
+        await auditWriter.RecordBestEffortAsync(
+            new AuditLogEntry
+            {
+                TenantId = consent.TenantId,
+                EventType = AuditEventTypes.ConsentDenied,
+                ActorSid = actor,
+                TargetTable = consent.TableIdentifier.ToString(),
+                Decision = "DENY",
+                TraceId = Guid.NewGuid().ToString("N"),
+                DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { ConsentId = consent.Id, Operation = "REVOKE" })
+            },
+            ct).ConfigureAwait(false);
     }
 
     internal static async Task<IResult> EvaluateProofAsync(

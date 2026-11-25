@@ -31,6 +31,11 @@ public partial class GovernanceRepository
             where.Append(" AND LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)");
         }
 
+        if (query.DomainId is not null)
+        {
+            where.Append(" AND EXISTS (SELECT 1 FROM GOVERNANCE_DOMAIN_TABLES dt WHERE dt.tenant_id = c.tenant_id AND dt.table_id = c.table_id AND dt.domain_id = @domainId)");
+        }
+
         if (query.GranteeType is not null)
         {
             where.Append(" AND c.grantee_type = @gtype");
@@ -70,6 +75,11 @@ public partial class GovernanceRepository
                 cmd.AddBound("@domain", table.Domain);
                 cmd.AddBound("@schema", table.Schema);
                 cmd.AddBound("@table", table.TableName);
+            }
+
+            if (query.DomainId is { } domainId)
+            {
+                cmd.AddBound("@domainId", domainId.ToString("D"));
             }
 
             if (query.GranteeType is { } type)

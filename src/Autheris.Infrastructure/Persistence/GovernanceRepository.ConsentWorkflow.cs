@@ -92,108 +92,6 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
         }
     }
 
-    public async Task<Consent> ExecuteExternalAtomicApprovalWithConsentAsync(
-        Guid requestId,
-        ExternalDecisionAttribution attribution,
-        ApprovalStep step,
-        Consent consent,
-        IReadOnlyList<ConsentRowFilter> rowFilters,
-        IReadOnlyList<ConsentColumnRule> columnRules,
-        CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(attribution);
-        ArgumentNullException.ThrowIfNull(step);
-        ArgumentNullException.ThrowIfNull(consent);
-        StoredTenant.RequireWritable(consent.TenantId);
-        TenantScope.RequireTenant(consent.TenantId, nameof(GovernanceTable.Consents));
-
-        consent.RowFilters = rowFilters ?? Array.Empty<ConsentRowFilter>();
-        consent.ColumnRules = columnRules ?? Array.Empty<ConsentColumnRule>();
-        consent.Validate();
-        await EnsureMayMaterializeAsync(consent.TenantId, consent.TableIdentifier, consent.RowFilters, ct).ConfigureAwait(false);
-
-        var req = await GetConsentRequestAsync(requestId, ct).ConfigureAwait(false)
-            ?? throw new InvalidOperationException($"Request {requestId} not found.");
-
-        TenantScope.RequireTenant(req.TenantId, nameof(GovernanceTable.ConsentRequests));
-        StoredTenant.RequireWritable(req.TenantId);
-
-        if (req.WorkflowMode != ConsentWorkflowMode.External)
-        {
-            throw new InvalidOperationException($"Request {requestId} is in internal workflow mode and cannot be approved through external channels.");
-        }
-
-        var approverOwnerIds = await EnsureApproverIsNotRequesterAsync(req, step.ApproverSid, ct).ConfigureAwait(false);
-
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
-        try
-        {
-            string currentStatus = await ConsentSqlCore.ReadRequestStatusOrThrowAsync(conn, tx, SelectRequestStatusForUpdateSql, requestId, ct).ConfigureAwait(false);
-            ConsentApprovalPolicy.EnsureApprovableStatus(requestId, currentStatus, ConsentWorkflowMode.External);
-
-            var state = await ConsentSqlCore.ReadApprovalStateAsync(
-                conn, tx, requestId, step.ApproverSid, approverOwnerIds,
-                ids => ResolveDataOwnerIdsInternalAsync(ids, ct), ct).ConfigureAwait(false);
-
-            if (state.SameApprover)
-            {
-                throw new InvalidOperationException(ConsentApprovalPolicy.SameApproverViolationMessage);
-            }
-
-            var approvers = attribution.EffectiveApprovers;
-            int stepNumber = state.NextStepNumber;
-            if (approvers.Count > 1)
-            {
-                for (int i = 0; i < approvers.Count - 1; i++)
-                {
-                    var priorSid = new Sid(string.IsNullOrWhiteSpace(approvers[i].ResolvedSid) ? approvers[i].Subject : approvers[i].ResolvedSid!);
-                    if (string.Equals(priorSid.Value, step.ApproverSid.Value, StringComparison.OrdinalIgnoreCase))
-                    {
-                        continue;
-                    }
-
-                    await EnsureApproverIsNotRequesterAsync(req, priorSid, ct).ConfigureAwait(false);
-                    await ConsentSqlCore.InsertApprovedStepAsync(conn, tx, Guid.NewGuid(), requestId, stepNumber, priorSid, attribution.DecidedAt, ct).ConfigureAwait(false);
-                    stepNumber++;
-                }
-            }
-
-            string newStatus = ConsentApprovalPolicy.StatusAfterApproval(state.RequiresFourEyes, stepNumber, ConsentWorkflowMode.External, state.Sensitivity);
-            if (!string.Equals(newStatus, ConsentApprovalPolicy.Approved, StringComparison.Ordinal))
-            {
-                throw new InvalidOperationException(ConsentApprovalPolicy.FourEyesNotSatisfiedMessage(requestId));
-            }
-
-            await ConsentSqlCore.InsertApprovedStepAsync(conn, tx, step.Id, requestId, stepNumber, step.ApproverSid, step.DecidedAt ?? attribution.DecidedAt, ct).ConfigureAwait(false);
-            await ConsentSqlCore.ApplyGuardedStatusAsync(conn, tx, ConsentStatusUpdateSeam, requestId, newStatus, currentStatus, ct).ConfigureAwait(false);
-
-            req.Status = newStatus;
-            await RecordAuditEventAsync(
-                ConsentApprovalPolicy.BuildStepAudit(
-                    req,
-                    step.ApproverSid,
-                    "CONSENT_APPROVAL_STEP",
-                    "APPROVED",
-                    newStatus,
-                    attribution.Justification,
-                    attribution.ExternalReference,
-                    attribution.CorrelationId),
-                tx, ct).ConfigureAwait(false);
-
-            var createdConsent = await InsertConsentCoreAsync(conn, tx, consent, ct).ConfigureAwait(false);
-            await IncrementTableEpochInternalAsync(conn, tx, consent.TableIdentifier, ct).ConfigureAwait(false);
-            await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
-
-            await InvalidateTableEpochAsync(consent.TableIdentifier, ct).ConfigureAwait(false);
-            return createdConsent;
-        }
-        catch
-        {
-            await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
-            throw;
-        }
-    }
 
     public async Task<ConsentRequest> RejectExternalConsentRequestAsync(
         Guid requestId,
@@ -425,51 +323,13 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
         return new ConsentRequestPage(items, nextCursor);
     }
 
-    private static string EncodeConsentRequestCursor(DateTimeOffset updatedAt, Guid id)
-    {
-        var raw = string.Concat(updatedAt.ToString("O", CultureInfo.InvariantCulture), "|", id.ToString("D"));
-        return Convert.ToBase64String(System.Text.Encoding.UTF8.GetBytes(raw))
-            .TrimEnd('=')
-            .Replace('+', '-')
-            .Replace('/', '_');
-    }
+    private static string EncodeConsentRequestCursor(DateTimeOffset updatedAt, Guid id) =>
+        Autheris.Application.Governance.Paging.ConsentRequestCursor.Encode(updatedAt, id);
 
-    private static (DateTimeOffset? UpdatedAt, Guid? Id) DecodeConsentRequestCursor(string? cursor)
-    {
-        if (string.IsNullOrWhiteSpace(cursor))
-        {
-            return (null, null);
-        }
-
-        try
-        {
-            var padded = cursor.Trim().Replace('-', '+').Replace('_', '/');
-            var mod = padded.Length % 4;
-            if (mod > 0)
-            {
-                padded = padded + new string('=', 4 - mod);
-            }
-
-            var text = System.Text.Encoding.UTF8.GetString(Convert.FromBase64String(padded));
-            var sep = text.IndexOf('|', StringComparison.Ordinal);
-            if (sep <= 0)
-            {
-                return (null, null);
-            }
-
-            if (DateTimeOffset.TryParse(text.AsSpan(0, sep), CultureInfo.InvariantCulture, DateTimeStyles.RoundtripKind, out var ts)
-                && Guid.TryParse(text.AsSpan(sep + 1), out var id))
-            {
-                return (ts.ToUniversalTime(), id);
-            }
-        }
-        catch (FormatException)
-        {
-            // Invalid cursor degrades cleanly to null (start from newest).
-        }
-
-        return (null, null);
-    }
+    private static (DateTimeOffset? UpdatedAt, Guid? Id) DecodeConsentRequestCursor(string? cursor) =>
+        Autheris.Application.Governance.Paging.ConsentRequestCursor.TryDecode(cursor, out var ts, out var id)
+            ? (ts, id)
+            : (null, null);
 
     private static ExternalWorkflowSystem ReadExternalWorkflowSystem(DbDataReader reader) =>
         new(

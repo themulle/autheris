@@ -45,21 +45,41 @@ public sealed class ApproverResolver(
     private readonly IScimGroupStore? _groupStore = groupStore;
     private readonly IIdentityRealmRegistry? _realmRegistry = realmRegistry;
 
+    public ValueTask<ApproverSet> ResolveAsync(
+        TenantId tenant,
+        ConsentRequestKind kind,
+        PermissionTarget target,
+        Sid requester,
+        string granteeRef,
+        CancellationToken ct = default) =>
+        ResolveAsync(tenant, kind, target, requester, granteeRef, cache: null, ct);
+
+    /// <summary>
+    /// Resolves the approver set, memoizing container and owner-group membership lookups in <paramref name="cache"/>
+    /// so a batch of requests over the same containers resolves each container once.
+    /// </summary>
     public async ValueTask<ApproverSet> ResolveAsync(
         TenantId tenant,
         ConsentRequestKind kind,
         PermissionTarget target,
         Sid requester,
         string granteeRef,
+        ApproverResolutionCache? cache,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(target);
+        if (cache is not null && !string.Equals(cache.Tenant.Value, tenant.Value, StringComparison.Ordinal))
+        {
+            // A cache belongs to exactly one tenant; never reuse resolutions across tenants.
+            cache = null;
+        }
+
         if (string.IsNullOrWhiteSpace(tenant.Value) || TenantId.IsReserved(tenant))
         {
             return new ApproverSet(tenant, kind, null, null, false, GovernanceEligible: false, ItAdminEligible: false);
         }
 
-        var (container, ownerGroupSid) = await ResolveContainerAsync(tenant, target, ct).ConfigureAwait(false);
+        var (container, ownerGroupSid) = await ResolveContainerCachedAsync(tenant, target, cache, ct).ConfigureAwait(false);
         var ownerGroupAssigned = ownerGroupSid is { } og && !string.IsNullOrWhiteSpace(og.Value);
 
         if (kind == ConsentRequestKind.Catalog)
@@ -98,8 +118,18 @@ public sealed class ApproverResolver(
                 ItAdminEligible: true);
         }
 
-        var a7Fallback = await IsRequesterOrGranteeOwnerMemberAsync(
-            tenant, ownerGroupSid!.Value, requester, granteeRef, ct).ConfigureAwait(false);
+        bool a7Fallback;
+        var a7Key = (ownerGroupSid!.Value.Value ?? string.Empty, requester.Value ?? string.Empty, granteeRef ?? string.Empty);
+        if (cache is not null && cache.OwnerMembership.TryGetValue(a7Key, out var memo))
+        {
+            a7Fallback = memo;
+        }
+        else
+        {
+            a7Fallback = await IsRequesterOrGranteeOwnerMemberAsync(
+                tenant, ownerGroupSid.Value, requester, granteeRef ?? string.Empty, ct).ConfigureAwait(false);
+            cache?.OwnerMembership.TryAdd(a7Key, a7Fallback);
+        }
 
         return new ApproverSet(
             tenant,
@@ -110,6 +140,44 @@ public sealed class ApproverResolver(
             GovernanceEligible: a7Fallback,
             ItAdminEligible: false,
             A7GovernanceFallback: a7Fallback);
+    }
+
+    private async ValueTask<(ContainerRef? Container, Sid? OwnerGroupSid)> ResolveContainerCachedAsync(
+        TenantId tenant,
+        PermissionTarget target,
+        ApproverResolutionCache? cache,
+        CancellationToken ct)
+    {
+        if (cache is null)
+        {
+            return await ResolveContainerAsync(tenant, target, ct).ConfigureAwait(false);
+        }
+
+        if (target.HasContainer)
+        {
+            var key = new ContainerRef(target.ContainerKind!.Value, target.ContainerId!.Value);
+            if (!cache.Containers.TryGetValue(key, out var byContainer))
+            {
+                byContainer = await ResolveContainerAsync(tenant, target, ct).ConfigureAwait(false);
+                cache.Containers[key] = byContainer;
+            }
+
+            return byContainer;
+        }
+
+        if (target.HasTable)
+        {
+            var key = target.Table!.Value;
+            if (!cache.Tables.TryGetValue(key, out var byTable))
+            {
+                byTable = await ResolveContainerAsync(tenant, target, ct).ConfigureAwait(false);
+                cache.Tables[key] = byTable;
+            }
+
+            return byTable;
+        }
+
+        return await ResolveContainerAsync(tenant, target, ct).ConfigureAwait(false);
     }
 
     private async ValueTask<(ContainerRef? Container, Sid? OwnerGroupSid)> ResolveContainerAsync(
@@ -227,4 +295,19 @@ public sealed class ApproverResolver(
         identifier.StartsWith($"{realmId}|", StringComparison.OrdinalIgnoreCase) && identifier.Length > realmId.Length + 1
             ? identifier[(realmId.Length + 1)..]
             : identifier;
+}
+
+/// <summary>
+/// Memo of container and owner-group membership resolutions for one tenant within one caller operation (for example one
+/// inbox page). It is never shared across callers or requests, so it cannot serve stale ownership beyond that operation.
+/// </summary>
+public sealed class ApproverResolutionCache(TenantId tenant)
+{
+    public TenantId Tenant { get; } = tenant;
+
+    internal Dictionary<ContainerRef, (ContainerRef? Container, Sid? OwnerGroupSid)> Containers { get; } = new();
+
+    internal Dictionary<TableIdentifier, (ContainerRef? Container, Sid? OwnerGroupSid)> Tables { get; } = new();
+
+    internal Dictionary<(string OwnerGroup, string Requester, string Grantee), bool> OwnerMembership { get; } = new();
 }
