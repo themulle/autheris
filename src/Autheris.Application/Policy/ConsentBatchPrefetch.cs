@@ -71,7 +71,7 @@ public sealed class ConsentBatchPrefetch
         ArgumentNullException.ThrowIfNull(tables);
         var subjectSet = subjects.ToHashSet();
         var byTable = await repository.GetActiveConsentsForSubjectsBatchAsync(subjectSet, tables, readAt, tenant, ct).ConfigureAwait(false);
-        var patterns = await repository.GetPatternConsentsWithPendingDeniesAsync(tenant, readAt, ct).ConfigureAwait(false);
+        var patterns = await repository.GetPatternConsentsForSubjectsWithPendingDeniesAsync(subjectSet, tenant, readAt, ct).ConfigureAwait(false);
 
         HashSet<string>? candidateApprovers = null;
         IReadOnlyDictionary<TableIdentifier, IReadOnlySet<string>>? authorizedByTable = null;
@@ -161,7 +161,14 @@ public sealed class ConsentBatchPrefetch
     }
 
     /// <summary>The result of <see cref="IConsentRepository.GetActivePatternConsentsAsync"/> for <paramref name="tenant"/> at <paramref name="now"/>.</summary>
-    public bool TryGetActivePatternConsents(TenantId tenant, DateTimeOffset now, out List<Consent> consents)
+    public bool TryGetActivePatternConsents(TenantId tenant, DateTimeOffset now, out List<Consent> consents) =>
+        TryGetActivePatternConsents(_subjects, tenant, now, out consents);
+
+    /// <summary>
+    /// The result of <see cref="IConsentRepository.GetActivePatternConsentsForSubjectsAsync"/> for
+    /// <paramref name="subjects"/> and <paramref name="tenant"/> at <paramref name="now"/>, when this prefetch covers the subjects.
+    /// </summary>
+    public bool TryGetActivePatternConsents(IEnumerable<Sid> subjects, TenantId tenant, DateTimeOffset now, out List<Consent> consents)
     {
         consents = [];
         if (tenant != Tenant || !IsFresh(now))
@@ -169,9 +176,26 @@ public sealed class ConsentBatchPrefetch
             return false;
         }
 
+        var callSubjects = subjects.ToHashSet();
+        if (callSubjects.Count == 0)
+        {
+            return true;
+        }
+
+        foreach (var subject in callSubjects)
+        {
+            if (!_subjects.Contains(subject))
+            {
+                return false;
+            }
+        }
+
         foreach (var consent in _tenantPatterns)
         {
-            if (consent.IsActive(now))
+            if (consent.GrantKind == PermissionGrantKind.Data &&
+                consent.IsActive(now) &&
+                consent.GranteeSid is { } sid &&
+                callSubjects.Contains(sid))
             {
                 consents.Add(consent);
             }

@@ -85,6 +85,18 @@ public sealed partial class ClassificationAccessResolver
         return BuildCatalog(tenantId, defs, rules);
     }
 
+    /// <summary>
+    /// <see cref="LoadCatalogAsync(string, CancellationToken)"/>, or the catalog captured by <paramref name="prefetch"/> when it covers
+    /// <paramref name="tenantId"/> and is fresh at the current time (one catalog read per batch of decisions).
+    /// </summary>
+    public ValueTask<ClassificationPolicyCatalog> LoadCatalogAsync(
+        string tenantId,
+        ColumnPolicyRowPrefetch? prefetch,
+        CancellationToken ct = default) =>
+        prefetch?.CatalogFor(tenantId, _timeProvider.GetUtcNow()) is { } prefetched
+            ? ValueTask.FromResult(prefetched)
+            : LoadCatalogAsync(tenantId, ct);
+
     public static ClassificationPolicyCatalog BuiltInCatalog(string tenantId)
     {
         var epoch = DateTimeOffset.UnixEpoch;

@@ -19,14 +19,25 @@ public sealed partial class TableAccessPolicy
     /// active UNMASK grant (user or current groups) covers it. An unmask grant never widens access: it only changes the form of a
     /// column the caller may already read, so denied columns stay denied and denied tables stay denied.
     /// </summary>
-    private async Task<TableAccessDecision> ApplyProtectionMasksAsync(
+    private Task<TableAccessDecision> ApplyProtectionMasksAsync(
         TableAccessDecision decision,
         TableAccessQuery query,
         EffectiveProtection protection,
         bool groupsComplete,
+        CancellationToken ct) =>
+        ApplyProtectionMasksCoreAsync(decision, query, protection, groupsComplete, _unmaskResolver, _classificationResolver, AuthorizationHooksActive, ct);
+
+    internal static async Task<TableAccessDecision> ApplyProtectionMasksCoreAsync(
+        TableAccessDecision decision,
+        TableAccessQuery query,
+        EffectiveProtection protection,
+        bool groupsComplete,
+        IUnmaskGrantResolver? unmaskResolver,
+        ClassificationAccessResolver? classificationResolver,
+        bool authorizationHooksActive,
         CancellationToken ct)
     {
-        if (!decision.IsAllowed || (query.AllowOnly && !AuthorizationHooksActive))
+        if (!decision.IsAllowed || (query.AllowOnly && !authorizationHooksActive))
         {
             return decision;
         }
@@ -64,7 +75,7 @@ public sealed partial class TableAccessPolicy
 
         var coverage = query.Unmask is { } unmask
             ? await unmask.GetAsync(ct).ConfigureAwait(false)
-            : await ResolveUnmaskCoverageAsync(query, groupsComplete, ct).ConfigureAwait(false);
+            : await ResolveUnmaskCoverageCoreAsync(query, groupsComplete, unmaskResolver, ct).ConfigureAwait(false);
         if (!coverage.IsEmpty)
         {
             // In-place compaction: keep only the columns the unmask grants do not cover. CREDENTIALS is never lifted (#1009 A-3).
@@ -93,23 +104,30 @@ public sealed partial class TableAccessPolicy
         }
 
         var withAccess = decision with { ColumnAccess = updatedAccess };
-        return await WithCategoryMaskSpecsAsync(withAccess, query, toMask, ct).ConfigureAwait(false);
+        return await WithCategoryMaskSpecsCoreAsync(withAccess, query, toMask, classificationResolver, ct).ConfigureAwait(false);
     }
 
     private static bool IsNeverUnmaskedCategory(string category) =>
         string.Equals(category, ClassificationScopes.CredentialsCode, StringComparison.OrdinalIgnoreCase);
 
-    private async ValueTask<UnmaskCoverage> ResolveUnmaskCoverageAsync(TableAccessQuery query, bool groupsComplete, CancellationToken ct)
+    private ValueTask<UnmaskCoverage> ResolveUnmaskCoverageAsync(TableAccessQuery query, bool groupsComplete, CancellationToken ct) =>
+        ResolveUnmaskCoverageCoreAsync(query, groupsComplete, _unmaskResolver, ct);
+
+    internal static async ValueTask<UnmaskCoverage> ResolveUnmaskCoverageCoreAsync(
+        TableAccessQuery query,
+        bool groupsComplete,
+        IUnmaskGrantResolver? unmaskResolver,
+        CancellationToken ct)
     {
-        if (_unmaskResolver is null || !groupsComplete)
+        if (unmaskResolver is null || !groupsComplete)
         {
             return UnmaskCoverage.None;
         }
 
-        IReadOnlyCollection<Sid> subjects = query.AllUserSids is { Count: > 0 } all ? all : SubjectsOf(query);
+        var subjects = query.GetEffectiveSubjectSids();
         try
         {
-            return await _unmaskResolver.ResolveAsync(query.Tenant, subjects, groupsComplete, query.Metadata.Identifier, ct).ConfigureAwait(false);
+            return await unmaskResolver.ResolveAsync(query.Tenant, subjects, groupsComplete, query.Metadata.Identifier, ct).ConfigureAwait(false);
         }
         catch (Exception) when (!ct.IsCancellationRequested)
         {
@@ -117,30 +135,18 @@ public sealed partial class TableAccessPolicy
         }
     }
 
-    private static List<Sid> SubjectsOf(TableAccessQuery query)
-    {
-        var groups = query.GroupSids;
-        var subjects = new List<Sid>(groups.Count + 1);
-        subjects.AddRange(groups);
-        if (!groups.Contains(query.UserSid))
-        {
-            subjects.Add(query.UserSid);
-        }
-
-        return subjects;
-    }
-
     /// <summary>
     /// Attaches the mask function of the column's category (rule lookup by category). A category without a usable rule (unknown,
     /// deleted, unparsable) keeps the column masked and leaves the spec to the type default; it never becomes clear.
     /// </summary>
-    private async Task<TableAccessDecision> WithCategoryMaskSpecsAsync(
+    private static async Task<TableAccessDecision> WithCategoryMaskSpecsCoreAsync(
         TableAccessDecision decision,
         TableAccessQuery query,
         List<(string Column, string? DataType, string Category)> masked,
+        ClassificationAccessResolver? classificationResolver,
         CancellationToken ct)
     {
-        if (_classificationResolver is null || decision.ColumnMasks is not null and not ColumnMaskPolicy)
+        if (classificationResolver is null || decision.ColumnMasks is not null and not ColumnMaskPolicy)
         {
             return decision;
         }
@@ -148,7 +154,7 @@ public sealed partial class TableAccessPolicy
         ClassificationPolicyCatalog catalog;
         try
         {
-            catalog = await _classificationResolver.LoadCatalogAsync(query.Tenant.Value, ct).ConfigureAwait(false);
+            catalog = await classificationResolver.LoadCatalogAsync(query.Tenant.Value, query.ColumnRowPrefetch, ct).ConfigureAwait(false);
         }
         catch (Exception) when (!ct.IsCancellationRequested)
         {
@@ -163,7 +169,7 @@ public sealed partial class TableAccessPolicy
                 continue;
             }
 
-            var spec = _classificationResolver.ResolveCategoryMaskSpec(
+            var spec = classificationResolver.ResolveCategoryMaskSpec(
                 catalog, category, column, dataType, query.Metadata.Dialect, query.Tenant);
             if (spec is null)
             {

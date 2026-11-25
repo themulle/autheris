@@ -430,12 +430,58 @@ public interface IConsentRepository
         => Task.FromResult<IReadOnlyList<Consent>>([]);
 
     /// <summary>
+    /// Returns active non-revoked data pattern grants in <paramref name="tenantId"/> at <paramref name="atTime"/>
+    /// targeting any SID in <paramref name="subjects"/>.
+    /// </summary>
+    Task<IReadOnlyList<Consent>> GetActivePatternConsentsForSubjectsAsync(
+        IEnumerable<Sid> subjects, TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default)
+        => FilterPatternConsentsBySubjectsAsync(GetActivePatternConsentsAsync(tenantId, atTime, ct), subjects);
+
+    /// <summary>
     /// Issue #1043: <see cref="GetActivePatternConsentsAsync"/> plus the not-yet-valid Deny pattern grants, for a batch prefetch that
     /// re-applies the activity rule at each decision's time (a Deny that starts during the batch must not be lost).
     /// </summary>
     Task<IReadOnlyList<Consent>> GetPatternConsentsWithPendingDeniesAsync(
         TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default)
         => GetActivePatternConsentsAsync(tenantId, atTime, ct);
+
+    /// <summary>
+    /// Returns active data pattern grants plus not-yet-valid Deny pattern grants in <paramref name="tenantId"/>
+    /// targeting any SID in <paramref name="subjects"/>.
+    /// </summary>
+    Task<IReadOnlyList<Consent>> GetPatternConsentsForSubjectsWithPendingDeniesAsync(
+        IEnumerable<Sid> subjects, TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default)
+        => FilterPatternConsentsBySubjectsAsync(GetPatternConsentsWithPendingDeniesAsync(tenantId, atTime, ct), subjects);
+
+    private static async Task<IReadOnlyList<Consent>> FilterPatternConsentsBySubjectsAsync(
+        Task<IReadOnlyList<Consent>> sourceTask, IEnumerable<Sid> subjects)
+    {
+        ArgumentNullException.ThrowIfNull(subjects);
+        var subjectSet = subjects as IReadOnlySet<Sid> ?? subjects.ToHashSet();
+        if (subjectSet.Count == 0)
+        {
+            return [];
+        }
+
+        var all = await sourceTask.ConfigureAwait(false);
+        if (all.Count == 0)
+        {
+            return all;
+        }
+
+        var filtered = new List<Consent>(all.Count);
+        foreach (var consent in all)
+        {
+            if (consent.GrantKind == PermissionGrantKind.Data &&
+                consent.GranteeSid is { } sid &&
+                subjectSet.Contains(sid))
+            {
+                filtered.Add(consent);
+            }
+        }
+
+        return filtered;
+    }
 
     /// <summary>Returns all active non-revoked Internal-workflow Allow pattern grants across tenants at <paramref name="atTime"/>.</summary>
     Task<IReadOnlyList<Consent>> GetActiveInternalPatternConsentsAsync(

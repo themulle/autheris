@@ -218,6 +218,36 @@ public sealed record SecurityPrincipalContext
         return string.Equals(roleTenant, tenant.Value, StringComparison.OrdinalIgnoreCase);
     }
 
+    /// <summary>Returns the deterministic, deduplicated union of user and group SIDs.</summary>
+    public IReadOnlyList<Sid> GetEffectiveSubjectSids() =>
+        CombineEffectiveSubjectSids(UserSid, Principal?.GetAllUserSids(), GroupSids);
+
+    /// <summary>Combines <paramref name="allUserSids"/> (or <paramref name="userSid"/>) with <paramref name="groupSids"/> deterministically.</summary>
+    public static IReadOnlyList<Sid> CombineEffectiveSubjectSids(
+        Sid userSid, IReadOnlySet<Sid>? allUserSids, IReadOnlySet<Sid>? groupSids)
+    {
+        var union = new HashSet<Sid>();
+        IEnumerable<Sid> userSource = allUserSids is { Count: > 0 } ? allUserSids : [userSid];
+        foreach (var sid in userSource)
+        {
+            if (!string.IsNullOrWhiteSpace(sid.Value)) union.Add(sid);
+        }
+        if (groupSids is { Count: > 0 })
+        {
+            foreach (var sid in groupSids)
+            {
+                if (!string.IsNullOrWhiteSpace(sid.Value)) union.Add(sid);
+            }
+        }
+        var sorted = union.ToArray();
+        Array.Sort(sorted, static (l, r) =>
+        {
+            var cmp = StringComparer.OrdinalIgnoreCase.Compare(l.Value, r.Value);
+            return cmp != 0 ? cmp : StringComparer.Ordinal.Compare(l.Value, r.Value);
+        });
+        return sorted;
+    }
+
     /// <summary>K-K10: Checks whether the principal satisfies any of the required GatewayRoles.</summary>
     public bool HasAnyRole(params GatewayRole[] roles) => HasAnyRole((IEnumerable<GatewayRole>)roles);
 

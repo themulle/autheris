@@ -204,4 +204,119 @@ public sealed class GrantRenewalTests
         var ex = await Should.ThrowAsync<ConsentDecisionException>(() => h.Engine.RenewGrantAsync(Cmd(other, H.Actor("user:dg", "GovernanceAdmin"))));
         ex.StatusCode.ShouldBe(404);
     }
+
+    [Fact]
+    public async Task Renewal_mints_fresh_child_ids_and_updates_consent_id_for_all_rules_and_filters()
+    {
+        var originalId = Guid.NewGuid();
+        var origColRule1 = Guid.NewGuid();
+        var origColRule2 = Guid.NewGuid();
+        var origFilter1 = Guid.NewGuid();
+        var origFilter2 = Guid.NewGuid();
+        var origWrite1 = Guid.NewGuid();
+        var origWrite2 = Guid.NewGuid();
+
+        var existing = new Consent
+        {
+            Id = originalId,
+            TableId = Guid.NewGuid(),
+            TableIdentifier = H.Orders,
+            ConsentRequestId = Guid.NewGuid(),
+            TenantId = H.Tenant,
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid("user:alice"),
+            ValidFrom = H.Now.AddDays(-20),
+            ValidTo = H.Now.AddDays(10),
+            GrantKind = PermissionGrantKind.Data,
+            GrantSource = ConsentGrantSource.ConsentRequest,
+            ColumnRules =
+            [
+                new ConsentColumnRule
+                {
+                    Id = origColRule1,
+                    ConsentId = originalId,
+                    TableColumnId = Guid.NewGuid(),
+                    ColumnName = "id",
+                    AccessLevel = ColumnAccessLevel.Clear,
+                    ApplicableScopes = ["Orders.Read"]
+                },
+                new ConsentColumnRule
+                {
+                    Id = origColRule2,
+                    ConsentId = originalId,
+                    TableColumnId = Guid.NewGuid(),
+                    ColumnName = "amount",
+                    AccessLevel = ColumnAccessLevel.Mask,
+                    ApplicableScopes = []
+                }
+            ],
+            RowFilters =
+            [
+                new ConsentRowFilter
+                {
+                    Id = origFilter1,
+                    ConsentId = originalId,
+                    FilterGroup = 0,
+                    TableColumnId = Guid.NewGuid(),
+                    ColumnName = "region",
+                    Operator = "EQ",
+                    ValueType = "string",
+                    ValueJson = "\"EU\"",
+                    ValueSource = "LITERAL"
+                },
+                new ConsentRowFilter
+                {
+                    Id = origFilter2,
+                    ConsentId = originalId,
+                    FilterGroup = 1,
+                    TableColumnId = Guid.NewGuid(),
+                    ColumnName = "owner_sid",
+                    Operator = "EQ",
+                    ValueType = "string",
+                    ValueJson = "[]",
+                    ValueSource = "USER_ATTRIBUTE",
+                    UserAttribute = "sid"
+                }
+            ],
+            WriteRules =
+            [
+                new WriteRule(origWrite1, WriteOperation.Update, ["amount"], WriteRowScope.OwnRows, null, 25),
+                new WriteRule(origWrite2, WriteOperation.Delete, [], WriteRowScope.AllRows, null, 10)
+            ]
+        };
+
+        var h = Harness(existing);
+        await h.Engine.RenewGrantAsync(Cmd(existing, H.Actor("user:dg", "GovernanceAdmin")));
+        var created = h.CreatedConsents.ShouldHaveSingleItem();
+
+        created.Id.ShouldNotBe(originalId);
+        created.ColumnRules.Count.ShouldBe(2);
+        created.ColumnRules.Select(r => r.Id).ShouldNotContain(origColRule1);
+        created.ColumnRules.Select(r => r.Id).ShouldNotContain(origColRule2);
+        created.ColumnRules.Select(r => r.Id).Distinct().Count().ShouldBe(2);
+        created.ColumnRules.ShouldAllBe(r => r.ConsentId == created.Id);
+        created.ColumnRules[0].ColumnName.ShouldBe("id");
+        created.ColumnRules[0].ApplicableScopes.ShouldBe(["Orders.Read"]);
+        created.ColumnRules[1].AccessLevel.ShouldBe(ColumnAccessLevel.Mask);
+
+        created.RowFilters.Count.ShouldBe(2);
+        created.RowFilters.Select(f => f.Id).ShouldNotContain(origFilter1);
+        created.RowFilters.Select(f => f.Id).ShouldNotContain(origFilter2);
+        created.RowFilters.Select(f => f.Id).Distinct().Count().ShouldBe(2);
+        created.RowFilters.ShouldAllBe(f => f.ConsentId == created.Id);
+        created.RowFilters[0].ValueJson.ShouldBe("\"EU\"");
+        created.RowFilters[1].UserAttribute.ShouldBe("sid");
+
+        created.WriteRules.Count.ShouldBe(2);
+        created.WriteRules.Select(w => w.Id).ShouldNotContain(origWrite1);
+        created.WriteRules.Select(w => w.Id).ShouldNotContain(origWrite2);
+        created.WriteRules.Select(w => w.Id).Distinct().Count().ShouldBe(2);
+        created.WriteRules[0].Columns.ShouldBe(["amount"]);
+        created.WriteRules[1].Operation.ShouldBe(WriteOperation.Delete);
+
+        // Original child IDs remain untouched on the superseded consent.
+        existing.ColumnRules[0].Id.ShouldBe(origColRule1);
+        existing.RowFilters[0].Id.ShouldBe(origFilter1);
+        existing.WriteRules[0].Id.ShouldBe(origWrite1);
+    }
 }

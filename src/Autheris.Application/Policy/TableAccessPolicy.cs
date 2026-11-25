@@ -58,6 +58,12 @@ public sealed record TableAccessQuery(
     /// </summary>
     public Autheris.Application.Policy.Protection.UnmaskCoverageSource? Unmask { get; init; }
 
+    /// <summary>
+    /// Returns the deterministic, deduplicated union of user SIDs and group SIDs for consent and unmask lookups.
+    /// </summary>
+    public IReadOnlyList<Sid> GetEffectiveSubjectSids() =>
+        SecurityPrincipalContext.CombineEffectiveSubjectSids(UserSid, AllUserSids, GroupSids);
+
     public static TableAccessQuery ForPrincipal(
         ClaimsPrincipal principal,
         Sid userSid,

@@ -12,6 +12,7 @@ using Autheris.Application.Policy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 
 public sealed class WriteGrantEvaluator : IWriteGrantEvaluator
 {
@@ -80,10 +81,7 @@ public sealed class WriteGrantEvaluator : IWriteGrantEvaluator
 
         var allUserSids = query.User.GetAllUserSids();
         var groupSids = query.User.GetGroupSids();
-
-        var allSubjects = new List<Sid>(groupSids.Count + 1);
-        allSubjects.AddRange(groupSids);
-        allSubjects.Add(userSid.Value);
+        var allSubjects = SecurityPrincipalContext.CombineEffectiveSubjectSids(userSid.Value, allUserSids, groupSids);
 
         var now = _timeProvider.GetUtcNow();
 
@@ -97,6 +95,7 @@ public sealed class WriteGrantEvaluator : IWriteGrantEvaluator
         {
             if (consent.TenantId == query.Tenant &&
                 consent.TableIdentifier.Equals(query.Table.Identifier) &&
+                consent.GrantKind == PermissionGrantKind.Data &&
                 consent.IsActive(now) &&
                 GranteeMatcher.MatchesGrant(
                     consent.GranteeType,
