@@ -14,6 +14,7 @@ using Autheris.Api.Endpoints;
 using Autheris.Api.Endpoints.Health;
 using Autheris.Api.Hosting.Warmup;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Mcp.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Health;
 using Microsoft.AspNetCore.Builder;
@@ -125,6 +126,11 @@ public sealed class ReadinessProbeTests
         public WarmupPhase Phase { get; set; } = phase;
     }
 
+    private sealed class FakeMcpDiscoveryState(McpSchemaDiscoveryPhase phase) : IMcpSchemaDiscoveryState
+    {
+        public McpSchemaDiscoveryPhase Phase { get; set; } = phase;
+    }
+
     public class RedisDispatchProxy : DispatchProxy
     {
         private Func<MethodInfo?, object?[]?, object?> _handler = null!;
@@ -152,9 +158,10 @@ public sealed class ReadinessProbeTests
         ReadinessProbe? probe,
         IGraphQlExecutorGate? gate,
         IStartupWarmupState? warmup,
-        IDictionary<string, string>? headers = null)
+        IDictionary<string, string>? headers = null,
+        IMcpSchemaDiscoveryState? mcpDiscovery = null)
     {
-        var result = await HealthEndpoints.HandleReadyAsync(drain, probe, gate, warmup, gatewayOptions, environment, CancellationToken.None);
+        var result = await HealthEndpoints.HandleReadyAsync(drain, probe, gate, warmup, gatewayOptions, environment, CancellationToken.None, mcpDiscovery);
         var context = new DefaultHttpContext
         {
             RequestServices = new ServiceCollection().AddLogging().BuildServiceProvider()
@@ -172,6 +179,43 @@ public sealed class ReadinessProbeTests
         bodyStream.Seek(0, SeekOrigin.Begin);
         var body = new StreamReader(bodyStream).ReadToEnd();
         return (context.Response.StatusCode, body);
+    }
+
+    [Theory]
+    [InlineData(McpSchemaDiscoveryPhase.Pending, 503, "Warming")]
+    [InlineData(McpSchemaDiscoveryPhase.Failed, 503, "Unhealthy")]
+    [InlineData(McpSchemaDiscoveryPhase.Ready, 200, "Ready")]
+    public async Task Ready_IsGatedOnMcpSchemaDiscovery(McpSchemaDiscoveryPhase phase, int expectedStatus, string expectedState)
+    {
+        // Issue #1109: the executor gate and the warm-up are ready, but the MCP tools are not discovered yet.
+        var health = new FakeHealthCheckService(_ => Task.FromResult(new GatewayHealthReport(true, [])));
+        var (statusCode, body) = await ExecuteReadyAsync(
+            CreateEnvironment("Production"), new GatewayOptions(), new FakeDrainController(),
+            new ReadinessProbe(health, NullLogger<ReadinessProbe>.Instance),
+            new FakeExecutorGate(ExecutorGateState.Ready), new FakeWarmupState(WarmupPhase.Ready),
+            mcpDiscovery: new FakeMcpDiscoveryState(phase));
+
+        statusCode.ShouldBe(expectedStatus);
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("status").GetString().ShouldBe(expectedState);
+        doc.RootElement.EnumerateObject().Select(p => p.Name).Order().ShouldBe(["status", "timestamp"]);
+    }
+
+    [Fact]
+    public async Task Ready_WhileExecutorGatePending_IsWarming_EvenWhenMcpDiscoveryIsReady()
+    {
+        var health = new FakeHealthCheckService(_ => Task.FromResult(new GatewayHealthReport(true, [])));
+        var (statusCode, body) = await ExecuteReadyAsync(
+            CreateEnvironment("Development"), new GatewayOptions(), new FakeDrainController(),
+            new ReadinessProbe(health, NullLogger<ReadinessProbe>.Instance),
+            new FakeExecutorGate(ExecutorGateState.Pending), new FakeWarmupState(WarmupPhase.Ready),
+            mcpDiscovery: new FakeMcpDiscoveryState(McpSchemaDiscoveryPhase.Ready));
+
+        statusCode.ShouldBe((int)HttpStatusCode.ServiceUnavailable);
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("status").GetString().ShouldBe("Warming");
+        doc.RootElement.GetProperty("executorGate").GetString().ShouldBe("Pending");
+        doc.RootElement.GetProperty("mcpSchemaDiscovery").GetString().ShouldBe("Ready");
     }
 
     [Fact]
