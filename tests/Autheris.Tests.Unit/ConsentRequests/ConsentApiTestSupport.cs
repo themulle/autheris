@@ -134,7 +134,8 @@ internal sealed class ConsentApiTestHarness : IAsyncDisposable
             Array.Empty<IGrantEffectApplier>(),
             metadataRepository: store,
             subjectResolver: resolver,
-            timeProvider: clock));
+            timeProvider: clock,
+            consentRepository: store));
         services.AddSingleton<IAuthorizationHandler, ExternalSystemRequirementHandler>();
         services.AddAuthorization(options => options.AddGatewayAuthorizationPolicies());
 
@@ -288,6 +289,53 @@ internal sealed class ConsentApiTestHarness : IAsyncDisposable
             ctx,
             sp.GetRequiredService<IConsentApprovalRepository>(),
             sp.GetRequiredService<IConsentWorkflowConfigRepository>(),
+            sp.GetService<IRateLimiterService>(),
+            sp.GetService<IOptions<GovernanceOptions>>());
+        return await ExecuteResultAsync(ctx, result);
+    }
+
+    public async Task<ExecutedEndpointResponse> ListGrantsAsync(
+        ClaimsPrincipal caller,
+        string? table = null,
+        string? grantee = null,
+        bool? includeInactive = null,
+        string? kind = null)
+    {
+        if (!(await AuthorizeAsync(caller, GatewayPolicies.ConsentRead)).Succeeded)
+        {
+            return ForbiddenResponse();
+        }
+
+        var ctx = CreateHttpContext(caller);
+        await using var scope = _services.CreateAsyncScope();
+        var sp = scope.ServiceProvider;
+        var result = await ConsentApiEndpoints.ListGrantsAsync(
+            ctx,
+            sp.GetRequiredService<IConsentRepository>(),
+            sp.GetService<IRateLimiterService>(),
+            sp.GetService<IOptions<GovernanceOptions>>(),
+            sp.GetService<TimeProvider>(),
+            table: table,
+            grantee: grantee,
+            includeInactive: includeInactive,
+            kind: kind);
+        return await ExecuteResultAsync(ctx, result);
+    }
+
+    public async Task<ExecutedEndpointResponse> GetGrantByIdAsync(ClaimsPrincipal caller, Guid grantId)
+    {
+        if (!(await AuthorizeAsync(caller, GatewayPolicies.ConsentRead)).Succeeded)
+        {
+            return ForbiddenResponse();
+        }
+
+        var ctx = CreateHttpContext(caller);
+        await using var scope = _services.CreateAsyncScope();
+        var sp = scope.ServiceProvider;
+        var result = await ConsentApiEndpoints.GetGrantByIdAsync(
+            grantId,
+            ctx,
+            sp.GetRequiredService<IConsentRepository>(),
             sp.GetService<IRateLimiterService>(),
             sp.GetService<IOptions<GovernanceOptions>>());
         return await ExecuteResultAsync(ctx, result);

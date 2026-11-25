@@ -50,7 +50,9 @@ public sealed record GrantRecordView(
     IReadOnlyList<Guid> RowFilterIds,
     DateTimeOffset ValidFrom,
     DateTimeOffset ValidTo,
-    string? ApprovedBy);
+    string? ApprovedBy,
+    string GrantKind = "Data",
+    IReadOnlyList<string>? TargetColumns = null);
 
 public sealed record GrantsListResult(ExplainOutcome Outcome, IReadOnlyList<GrantRecordView>? Grants = null, bool Truncated = false);
 
@@ -216,7 +218,7 @@ public sealed class AccessExplanationService(
             Guid? after = null;
             for (var page = 0; page < MaxGrantPages; page++)
             {
-                var result = await consents.GetConsentPageAsync(new ConsentPageQuery(caller.TenantId, metadata.Identifier, AfterId: after), ct).ConfigureAwait(false);
+                var result = await consents.GetConsentPageAsync(new ConsentPageQuery(caller.TenantId, metadata.Identifier, AfterId: after, GrantKind: null), ct).ConfigureAwait(false);
                 views.AddRange(result.Items.Where(c => c.IsActive(now)).Select(ToView));
                 if (result.NextAfterId is not { } next)
                 {
@@ -287,12 +289,20 @@ public sealed class AccessExplanationService(
     private static GrantRecordView ToView(Consent c)
     {
         var operations = new List<string>();
-        if (c.ColumnRules.Count > 0 || c.WriteRules.Count == 0)
+        if (c.GrantKind == PermissionGrantKind.Unmask)
         {
-            operations.Add("Read");
+            operations.Add("Unmask");
+        }
+        else
+        {
+            if (c.ColumnRules.Count > 0 || c.WriteRules.Count == 0)
+            {
+                operations.Add("Read");
+            }
+
+            operations.AddRange(c.WriteRules.Select(w => w.Operation.ToString()));
         }
 
-        operations.AddRange(c.WriteRules.Select(w => w.Operation.ToString()));
         return new GrantRecordView(
             c.Id,
             c.Effect.ToString(),
@@ -303,7 +313,9 @@ public sealed class AccessExplanationService(
             c.RowFilters.Select(f => f.Id).ToList(),
             c.ValidFrom,
             c.EffectiveValidTo,
-            c.CreatedBySid?.Value);
+            c.CreatedBySid?.Value,
+            c.GrantKind.ToString(),
+            c.TargetColumns);
     }
 
     private Task AuditAsync(string eventType, SecurityPrincipalContext caller, string? objectName, string? subjectSid, ExplainOutcome outcome, bool? allowed, CancellationToken ct)

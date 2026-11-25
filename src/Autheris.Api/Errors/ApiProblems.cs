@@ -30,8 +30,8 @@ public static class ApiProblems
     public static IResult NotFound(string code = ApiErrorCodes.ResourceNotFound, string detail = "The requested resource was not found.", HttpContext? httpContext = null) =>
         Problem(StatusCodes.Status404NotFound, code, detail, httpContext, title: "Not Found");
 
-    public static IResult Conflict(string code, string detail, HttpContext? httpContext = null) =>
-        Problem(StatusCodes.Status409Conflict, code, detail, httpContext, title: "Conflict");
+    public static IResult Conflict(string code, string detail, HttpContext? httpContext = null, IDictionary<string, object?>? extraExtensions = null) =>
+        Problem(StatusCodes.Status409Conflict, code, detail, httpContext, title: "Conflict", extraExtensions: extraExtensions);
 
     public static IResult PayloadTooLarge(string detail, HttpContext? httpContext = null, string code = ApiErrorCodes.PayloadTooLarge) =>
         Problem(StatusCodes.Status413PayloadTooLarge, code, detail, httpContext, title: "Payload Too Large");
@@ -197,7 +197,9 @@ public static class ApiProblems
         // Discovery artifact validation code
         "violation",
         // Safe non-raising expression remediation hint
-        "hint"
+        "hint",
+        // Existing active grant covering a duplicate unmask request
+        "grantId"
     };
 
     private static void AddAllowedExtensions(IDictionary<string, object?> target, IEnumerable<KeyValuePair<string, object?>>? source)

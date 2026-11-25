@@ -51,12 +51,14 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
             return true;
         }
 
+        var isControlPlane = IsControlPlanePath(httpContext.Request.Path);
+
         // WP-X0a: compiler, policy and DML errors carry a stable `code` and the fixed message of that code.
         string? code = null;
         string? limit = null;
         string? hint = null;
         (int status, string title, int? retryAfter) = (0, string.Empty, null);
-        if (SqlCompilerErrorMapper.TryMap(exception, out var mapped))
+        if (SqlCompilerErrorMapper.TryMap(exception, out var mapped) && (!isControlPlane || !IsDataSourceOnlySqlMapping(mapped.Code)))
         {
             SqlCompilerErrorMapper.RecordOutcome(mapped);
             (status, title, retryAfter) = (mapped.Status, mapped.Title, mapped.Status == StatusCodes.Status503ServiceUnavailable ? UnavailableRetryAfterSeconds : null);
@@ -86,12 +88,12 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
         }
         else if (exception is GatewayInvalidQueryException invalidQuery)
         {
-            (status, title, retryAfter) = Map(exception);
+            (status, title, retryAfter) = Map(exception, isControlPlane);
             code = ApiErrorCodes.Resolve(status, invalidQuery.ErrorCode);
         }
         else
         {
-            (status, title, retryAfter) = Map(exception);
+            (status, title, retryAfter) = Map(exception, isControlPlane);
             code = (exception as GatewaySecurityException) is { } denied
                 ? GatewayDenialStatusMapper.SpecificCode(denied) ?? CodeForStatus(status)
                 : CodeForStatus(status);
@@ -144,7 +146,53 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
         _ => ApiErrorCodes.InternalError
     };
 
-    private static (int Status, string Title, int? RetryAfter) Map(Exception exception) => exception switch
+    private static readonly PathString[] ControlPlanePrefixes =
+    [
+        new("/api/v1/consent"),
+        new("/api/v1/governance"),
+        new("/api/v1/authz"),
+        new("/api/v1/catalog"),
+        new("/api/v1/identity"),
+        new("/api/v1/admin"),
+        new("/api/v1/scim"),
+        new("/api/v1/audit"),
+        new("/api/v1/usage"),
+        new("/api/v1/webhooks"),
+        new("/api/v1/tenants"),
+        new("/api/v1/domains"),
+        new("/api/v1/products"),
+        new("/api/v1/profiles"),
+        new("/api/v1/access-profiles"),
+        new("/api/governance"),
+        new("/api/admin"),
+        new("/api/consent"),
+        new("/api/catalog")
+    ];
+
+    private static bool IsControlPlanePath(PathString path)
+    {
+        if (!path.HasValue)
+        {
+            return false;
+        }
+
+        foreach (var prefix in ControlPlanePrefixes)
+        {
+            if (path.StartsWithSegments(prefix, StringComparison.OrdinalIgnoreCase))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    private static bool IsDataSourceOnlySqlMapping(string code) =>
+        code is SourceDriftErrors.SchemaMismatchCode
+            or SourceDriftErrors.PermissionDeniedCode
+            or TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.StatementRejected;
+
+    private static (int Status, string Title, int? RetryAfter) Map(Exception exception, bool isControlPlane) => exception switch
     {
         // the framework message names the binding parameter; only the status survives, with a fixed text.
         BadHttpRequestException { StatusCode: StatusCodes.Status413PayloadTooLarge } => (StatusCodes.Status413PayloadTooLarge, "The request is too large.", null),
@@ -174,7 +222,7 @@ public sealed class GatewayExceptionHandler(ILogger<GatewayExceptionHandler> log
         {
             DataAccessErrorKind.Timeout => (StatusCodes.Status504GatewayTimeout, "The request exceeded the execution time limit.", null),
             DataAccessErrorKind.Unavailable => (StatusCodes.Status503ServiceUnavailable, "The data source is temporarily unavailable. Retry later.", UnavailableRetryAfterSeconds),
-            DataAccessErrorKind.StatementRejected => (StatusCodes.Status400BadRequest, "The data source rejected the SQL statement.", null),
+            DataAccessErrorKind.StatementRejected when !isControlPlane => (StatusCodes.Status400BadRequest, "The data source rejected the SQL statement.", null),
             _ => (StatusCodes.Status500InternalServerError, "The request could not be processed.", (int?)null)
         }
     };

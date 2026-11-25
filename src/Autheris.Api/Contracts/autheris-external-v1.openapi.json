@@ -276,7 +276,8 @@
           { "name": "cursor", "in": "query", "schema": { "type": "string" } },
           { "name": "pageSize", "in": "query", "schema": { "type": "integer" } },
           { "name": "includeInactive", "in": "query", "schema": { "type": "boolean" } },
-          { "name": "clamped", "in": "query", "schema": { "type": "boolean" } }
+          { "name": "clamped", "in": "query", "schema": { "type": "boolean" } },
+          { "name": "kind", "in": "query", "schema": { "type": "string", "enum": ["data", "unmask"] } }
         ],
         "responses": {
           "200": {
@@ -847,7 +848,7 @@
       },
       "ConsentGrantDto": {
         "type": "object",
-        "required": ["id", "tenantId", "table", "effect", "granteeType", "validFrom", "validTo", "isRevoked", "grantSource", "grantRecordSeq"],
+        "required": ["id", "tenantId", "table", "effect", "granteeType", "validFrom", "validTo", "isRevoked", "grantSource", "grantRecordSeq", "grantKind"],
         "properties": {
           "id": { "type": "string", "format": "uuid" },
           "tenantId": { "type": "string" },
@@ -864,7 +865,9 @@
           "grantSource": { "type": "string" },
           "grantRecordSeq": { "type": "integer", "format": "int64" },
           "profileAssignmentId": { "type": "string", "format": "uuid", "nullable": true },
-          "description": { "type": "string", "nullable": true }
+          "description": { "type": "string", "nullable": true },
+          "grantKind": { "type": "string" },
+          "targetColumns": { "type": "array", "items": { "type": "string" }, "nullable": true }
         }
       },
       "CreateConsentRequestBody": {

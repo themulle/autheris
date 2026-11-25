@@ -20,6 +20,11 @@ public sealed class GatewayExceptionHandlerTests
         public int Number { get; } = number;
     }
 
+    private sealed class FakePostgresException(string sqlState, string message) : DbException(message)
+    {
+        public override string? SqlState { get; } = sqlState;
+    }
+
     private static DefaultHttpContext CreateContext()
     {
         var context = new DefaultHttpContext();
@@ -163,6 +168,35 @@ public sealed class GatewayExceptionHandlerTests
         contentType.ShouldStartWith("application/problem+json");
         body.ShouldNotContain("no viable alternative");
         body.ShouldContain("Invalid SQL syntax.");
+    }
+
+    [Fact]
+    public async Task ControlPlaneRoute_PostgresDatatypeMismatch_Returns500InternalError_NotSourceSchemaMismatch()
+    {
+        var (status, contentType, body) = await HandleAsync(
+            new FakePostgresException("42804", "COALESCE types timestamp with time zone and text cannot be matched"),
+            c => c.Request.Path = "/api/v1/consent/requests");
+
+        status.ShouldBe(StatusCodes.Status500InternalServerError);
+        contentType.ShouldStartWith("application/problem+json");
+        body.ShouldNotContain("COALESCE");
+        body.ShouldNotContain("SOURCE_SCHEMA_MISMATCH");
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("code").GetString().ShouldBe("INTERNAL_ERROR");
+        doc.RootElement.GetProperty("title").GetString().ShouldBe("The request could not be processed.");
+    }
+
+    [Fact]
+    public async Task DataPlaneRoute_PostgresDatatypeMismatch_StillReturns502SourceSchemaMismatch()
+    {
+        var (status, contentType, body) = await HandleAsync(
+            new FakePostgresException("42804", "COALESCE types timestamp with time zone and text cannot be matched"),
+            c => c.Request.Path = "/api/v1/sql");
+
+        status.ShouldBe(StatusCodes.Status502BadGateway);
+        contentType.ShouldStartWith("application/problem+json");
+        using var doc = JsonDocument.Parse(body);
+        doc.RootElement.GetProperty("title").GetString().ShouldBe(Autheris.Application.Common.SourceDriftErrors.SchemaMismatchMessage);
     }
 
     private sealed class StartedResponseFeature : Microsoft.AspNetCore.Http.Features.HttpResponseFeature

@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Threading.Tasks;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Paging;
 using Autheris.Domain.Common;
@@ -546,6 +547,100 @@ public abstract class ConsentContract : GovernanceContractBase
         var groupConsent = activeConsents.Should().ContainSingle().Which;
         groupConsent.GranteeType.Should().Be(GranteeType.Group);
         groupConsent.GranteeSid.Should().Be(groupSid);
+    }
+
+    [RequiresContainerRuntimeFact]
+    public async Task QueryTenantConsentRequests_PagesWithKeysetCursorAndUpdatedSinceFilter()
+    {
+        if (!Store.IsAvailable) return;
+
+        var table = await SeedTableAsync("consent_pg_query");
+        var baseTime = DateTimeOffset.UtcNow.AddMinutes(-10);
+
+        var r1 = await Store.ConsentApprovals.CreateConsentRequestAsync(new ConsentRequest
+        {
+            Id = Guid.NewGuid(),
+            TableId = table.Table.Id,
+            TableIdentifier = table.Identifier,
+            RequesterSid = RequesterSid,
+            RequestedGranteeType = GranteeType.User,
+            RequestedGranteeRef = GranteeSid.Value,
+            BusinessJustification = "First request for keyset paging",
+            Status = "PENDING",
+            RequestedAt = baseTime,
+            RequestedValidFrom = baseTime,
+            RequestedValidTo = baseTime.AddDays(5),
+            UpdatedAt = baseTime,
+            TenantId = Store.TenantA
+        });
+
+        var r2 = await Store.ConsentApprovals.CreateConsentRequestAsync(new ConsentRequest
+        {
+            Id = Guid.NewGuid(),
+            TableId = table.Table.Id,
+            TableIdentifier = table.Identifier,
+            RequesterSid = RequesterSid,
+            RequestedGranteeType = GranteeType.User,
+            RequestedGranteeRef = GranteeSid.Value,
+            BusinessJustification = "Second request for keyset paging",
+            Status = "PENDING",
+            RequestedAt = baseTime.AddMinutes(1),
+            RequestedValidFrom = baseTime.AddMinutes(1),
+            RequestedValidTo = baseTime.AddDays(5),
+            UpdatedAt = baseTime.AddMinutes(1),
+            TenantId = Store.TenantA
+        });
+
+        var r3 = await Store.ConsentApprovals.CreateConsentRequestAsync(new ConsentRequest
+        {
+            Id = Guid.NewGuid(),
+            TableId = table.Table.Id,
+            TableIdentifier = table.Identifier,
+            RequesterSid = RequesterSid,
+            RequestedGranteeType = GranteeType.User,
+            RequestedGranteeRef = GranteeSid.Value,
+            BusinessJustification = "Third request for keyset paging",
+            Status = "PENDING",
+            RequestedAt = baseTime.AddMinutes(2),
+            RequestedValidFrom = baseTime.AddMinutes(2),
+            RequestedValidTo = baseTime.AddDays(5),
+            UpdatedAt = baseTime.AddMinutes(2),
+            TenantId = Store.TenantA
+        });
+
+        // Page through all 3 requests with Limit = 1, following NextCursor on every page
+        var seen = new List<Guid>();
+        string? cursor = null;
+        for (var i = 0; i < 5; i++)
+        {
+            var page = await Store.ConsentApprovals.QueryTenantConsentRequestsAsync(new ConsentRequestPageQuery(
+                TenantId: Store.TenantA,
+                Status: "PENDING",
+                Domain: table.Identifier.Domain,
+                Schema: table.Identifier.Schema,
+                TableName: table.Identifier.TableName,
+                RequesterSid: RequesterSid.Value,
+                Limit: 1,
+                Cursor: cursor));
+            seen.AddRange(page.Items.Select(x => x.Id));
+            cursor = page.NextCursor;
+            if (cursor is null)
+            {
+                break;
+            }
+        }
+
+        seen.Should().Equal(r3.Id, r2.Id, r1.Id);
+
+        // UpdatedSince filter with DateTimeOffset parameter binding works on PostgreSQL and SQL Server
+        var sincePage = await Store.ConsentApprovals.QueryTenantConsentRequestsAsync(new ConsentRequestPageQuery(
+            TenantId: Store.TenantA,
+            UpdatedSince: baseTime.AddSeconds(90),
+            Domain: table.Identifier.Domain,
+            Schema: table.Identifier.Schema,
+            TableName: table.Identifier.TableName,
+            Limit: 10));
+        sincePage.Items.Select(x => x.Id).Should().Equal(r3.Id);
     }
 }
 

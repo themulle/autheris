@@ -118,6 +118,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         // #1009: expected refusals of the permission request engine (GraphQL requestTableAccess); fixed text, a hidden and an unknown target share one code.
         "TARGET_NOT_FOUND",
         "DUPLICATE_PENDING_REQUEST",
+        "ALREADY_COVERED",
         "PENDING_REQUEST_LIMIT_EXCEEDED",
         "BUNDLE_LIMIT_EXCEEDED",
         "UNAUTHENTICATED",
@@ -147,6 +148,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         ["SELF_GRANT_EXCEEDS_CEILING"] = "The target object protection class exceeds the self-grant ceiling.",
         ["TARGET_NOT_FOUND"] = "The requested target was not found.",
         ["DUPLICATE_PENDING_REQUEST"] = "An identical permission request is already pending.",
+        ["ALREADY_COVERED"] = "The requested columns are already covered by an active unmask grant.",
         ["PENDING_REQUEST_LIMIT_EXCEEDED"] = "The maximum number of pending permission requests has been reached.",
         ["BUNDLE_LIMIT_EXCEEDED"] = "The request bundle contains too many items.",
         ["UNAUTHENTICATED"] = "An authenticated subject is required.",
