@@ -209,7 +209,7 @@ public static partial class GatewayServiceCollectionExtensions
             // Issue #447: transport gate for every root field of the compiled operation, before any resolver runs.
             .UseRequest<Autheris.GraphQL.Interceptors.TransportGateMiddleware>()
             .UseOperationExecution()
-            .UseField<Autheris.GraphQL.Interceptors.TransportIngressFieldMiddleware>()
+            .UseField(next => new Autheris.GraphQL.Interceptors.TransportIngressFieldMiddleware(next).InvokeAsync)
             .AddApplicationService<IHostEnvironment>()
             .AddApplicationService<ErrorSanitizingFilter>()
             .AddApplicationService<WebSocketAuthInterceptor>()
