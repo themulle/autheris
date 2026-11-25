@@ -6,6 +6,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Policy.Protection;
 using Autheris.Application.Services;
 using Autheris.Application.Sql.Masking;
 using Autheris.Application.Sql.Policy;
@@ -38,8 +39,9 @@ public sealed record ClassificationPolicyCatalog(
     IReadOnlyDictionary<string, ClassificationMaskRule> MaskRules);
 
 /// <summary>
-/// Resolves per-grant and multi-grant column access and winning typed masks from column classifications,
-/// grant classification approvals, hierarchy mask inheritance, and per-column overrides.
+/// Resolves per-grant and multi-grant column access and winning typed masks from column classifications, hierarchy mask
+/// inheritance, and per-column overrides. The taxonomy only decides how a column is masked (#1009 A-3): every column carrying a
+/// classification other than <c>PUBLIC</c> is masked unless an active unmask grant covers it; <c>CREDENTIALS</c> is never clear.
 /// </summary>
 public sealed partial class ClassificationAccessResolver
 {
@@ -60,6 +62,12 @@ public sealed partial class ClassificationAccessResolver
         _repository = repository;
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
+
+    /// <summary>
+    /// True when a classification masks its column on default access: every classification except <c>PUBLIC</c> does.
+    /// </summary>
+    public static bool IsMaskingClassification(string? code) =>
+        !string.Equals(code, ClassificationScopes.PublicCode, StringComparison.Ordinal);
 
     public bool HasRepository => _repository is not null;
 
@@ -84,21 +92,13 @@ public sealed partial class ClassificationAccessResolver
             string code,
             string display,
             string? parent,
-            short rank,
-            bool clearGrantable,
-            bool separateApproval,
-            ApproverMode mode = ApproverMode.DataOwner,
-            string? steward = null) => new()
+            short rank) => new()
         {
             Scope = ClassificationScopes.Global,
             Code = code,
             DisplayName = display,
             ParentCode = parent,
             RestrictionRank = rank,
-            ClearGrantable = clearGrantable,
-            SeparateApproval = separateApproval,
-            ApproverMode = mode,
-            StewardGroupSid = steward,
             IsActive = true,
             Version = 1,
             UpdatedBy = "built-in",
@@ -119,12 +119,12 @@ public sealed partial class ClassificationAccessResolver
 
         DataClassification[] defs =
         [
-            Def(ClassificationScopes.PublicCode, "Public", null, 0, true, false),
-            Def(ClassificationScopes.ConfidentialCode, "Confidential", null, 20, true, true),
-            Def(ClassificationScopes.FinancialCode, "Financial", null, 30, true, true),
-            Def(ClassificationScopes.PiiCode, "Personal Data (PII)", null, 40, true, true),
-            Def(ClassificationScopes.PiiSpecialCode, "Special Category PII", ClassificationScopes.PiiCode, 60, true, true, ApproverMode.DataOwnerAndSteward, "STEWARD_UNCONFIGURED"),
-            Def(ClassificationScopes.CredentialsCode, "Credentials & Secrets", null, 90, false, true)
+            Def(ClassificationScopes.PublicCode, "Public", null, 0),
+            Def(ClassificationScopes.ConfidentialCode, "Confidential", null, 20),
+            Def(ClassificationScopes.FinancialCode, "Financial", null, 30),
+            Def(ClassificationScopes.PiiCode, "Personal Data (PII)", null, 40),
+            Def(ClassificationScopes.PiiSpecialCode, "Special Category PII", ClassificationScopes.PiiCode, 60),
+            Def(ClassificationScopes.CredentialsCode, "Credentials & Secrets", null, 90)
         ];
 
         ClassificationMaskRule[] rules =
@@ -169,25 +169,28 @@ public sealed partial class ClassificationAccessResolver
         IReadOnlySet<string>? callerScopes,
         ClassificationPolicyCatalog? preloadedCatalog = null,
         ColumnPolicyRowPrefetch? columnRowPrefetch = null,
+        UnmaskCoverageSource? unmask = null,
         CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentNullException.ThrowIfNull(allowGrants);
 
         var catalog = preloadedCatalog ?? await LoadCatalogAsync(tenant.Value, ct).ConfigureAwait(false);
-        var now = _timeProvider.GetUtcNow();
         var dialect = PolicyParameterNamer.ToTargetDialect(metadata.Dialect);
 
         var colClassifications = await LoadEffectiveColumnClassificationsAsync(metadata, tenant.Value, columnRowPrefetch, ct).ConfigureAwait(false);
         var colOverrides = await LoadEffectiveColumnOverridesAsync(metadata, tenant.Value, columnRowPrefetch, ct).ConfigureAwait(false);
-        var grantAccessMap = await LoadEffectiveGrantAccessAsync(allowGrants, tenant.Value, ct).ConfigureAwait(false);
+
+        // Without a coverage source nothing is unmasked (fail closed); the coverage is only resolved when a classified column exists.
+        var coverage = unmask is not null && allowGrants.Count > 0 && colClassifications.Count > 0
+            ? await unmask.GetAsync(ct).ConfigureAwait(false)
+            : UnmaskCoverage.None;
 
         var perGrant = new Dictionary<Guid, IReadOnlyDictionary<string, ColumnClassificationGrantOutcome>>();
         var combinedWinners = new Dictionary<string, ColumnClassificationGrantOutcome>(StringComparer.OrdinalIgnoreCase);
 
         foreach (var grant in allowGrants)
         {
-            grantAccessMap.TryGetValue(grant.Id, out var entries);
             var perCol = new Dictionary<string, ColumnClassificationGrantOutcome>(StringComparer.OrdinalIgnoreCase);
 
             foreach (var col in metadata.Columns)
@@ -202,17 +205,15 @@ public sealed partial class ClassificationAccessResolver
 
                 var outcome = ResolveColumnForGrant(
                     grant,
-                    entries ?? Array.Empty<ConsentClassificationAccess>(),
                     col.ColumnName,
                     col.DataType,
                     columnLevel,
                     classifications,
                     overrides ?? Array.Empty<ColumnMaskOverride>(),
                     catalog,
-                    now,
                     tenant,
                     dialect,
-                    callerScopes);
+                    unmasked: coverage.Covers(col.ColumnName));
 
                 perCol[col.ColumnName] = outcome;
 
@@ -235,22 +236,24 @@ public sealed partial class ClassificationAccessResolver
         return (perGrant, combinedWinners);
     }
 
+    /// <summary>
+    /// Resolves one column under one grant. A column classification other than <c>PUBLIC</c> masks the column unless
+    /// <paramref name="unmasked"/> (an active unmask grant covers the column); <c>CREDENTIALS</c> stays masked even then. An unknown
+    /// or inactive classification denies the column (fail closed).
+    /// </summary>
     public ColumnClassificationGrantOutcome ResolveColumnForGrant(
         Consent grant,
-        IReadOnlyList<ConsentClassificationAccess> grantAccess,
         string columnName,
         string? dataType,
         ColumnAccessLevel grantColumnSetLevel,
         IReadOnlyList<ColumnClassification> columnClassifications,
         IReadOnlyList<ColumnMaskOverride> columnOverrides,
         ClassificationPolicyCatalog catalog,
-        DateTimeOffset now,
         TenantId tenant,
         TargetSqlDialect dialect,
-        IReadOnlySet<string>? callerScopes = null)
+        bool unmasked = false)
     {
         ArgumentNullException.ThrowIfNull(grant);
-        ArgumentNullException.ThrowIfNull(grantAccess);
         ArgumentException.ThrowIfNullOrWhiteSpace(columnName);
         ArgumentNullException.ThrowIfNull(columnClassifications);
         ArgumentNullException.ThrowIfNull(columnOverrides);
@@ -283,51 +286,23 @@ public sealed partial class ClassificationAccessResolver
             defs.Add(def);
         }
 
-        var accessByCode = grantAccess
-            .GroupBy(a => a.Code, StringComparer.Ordinal)
-            .ToDictionary(g => g.Key, g => g.Last(), StringComparer.Ordinal);
-
-        bool canBeClear = grantColumnSetLevel == ColumnAccessLevel.Clear;
         var maskDefs = new List<DataClassification>(defs.Count);
-
+        var credentials = false;
         foreach (var def in defs)
         {
-            accessByCode.TryGetValue(def.Code, out var entry);
-            bool entryValid = entry is not null && (entry.ValidUntil is null || now < entry.ValidUntil.Value);
-
-            if (entryValid && entry!.AccessLevel == ColumnAccessLevel.Deny)
+            if (string.Equals(def.Code, ClassificationScopes.CredentialsCode, StringComparison.Ordinal))
             {
-                return new ColumnClassificationGrantOutcome(
-                    ColumnAccessLevel.Deny, null, def.Code, null, "CLASSIFICATION_GRANT_DENY", CatalogTextVisibility.Visible);
+                credentials = true;
             }
 
-            if (string.Equals(def.Code, ClassificationScopes.CredentialsCode, StringComparison.Ordinal) ||
-                !def.ClearGrantable)
-            {
-                canBeClear = false;
-                maskDefs.Add(def);
-                continue;
-            }
-
-            if (def.SeparateApproval)
-            {
-                if (!entryValid || entry!.AccessLevel != ColumnAccessLevel.Clear)
-                {
-                    canBeClear = false;
-                    maskDefs.Add(def);
-                }
-            }
-            else if (entryValid && entry!.AccessLevel == ColumnAccessLevel.Mask)
-            {
-                canBeClear = false;
-                maskDefs.Add(def);
-            }
-            else if (grantColumnSetLevel != ColumnAccessLevel.Clear)
+            if (IsMaskingClassification(def.Code))
             {
                 maskDefs.Add(def);
             }
         }
 
+        var canBeClear = grantColumnSetLevel == ColumnAccessLevel.Clear &&
+                         (maskDefs.Count == 0 || (unmasked && !credentials));
         if (canBeClear)
         {
             return new ColumnClassificationGrantOutcome(
@@ -359,9 +334,7 @@ public sealed partial class ClassificationAccessResolver
 
         var candidates = new List<MaskCandidate>(defs.Count);
         var catalogText = CatalogTextVisibility.Visible;
-        bool hasRestrictedClass = defs.Any(d =>
-            d.SeparateApproval || !d.ClearGrantable ||
-            string.Equals(d.Code, ClassificationScopes.CredentialsCode, StringComparison.Ordinal));
+        bool hasRestrictedClass = defs.Any(static d => IsMaskingClassification(d.Code));
 
         foreach (var def in defs)
         {
@@ -464,7 +437,7 @@ public sealed partial class ClassificationAccessResolver
                 def.Code, def.RestrictionRank, rule.MaskFunction, rule.ParamsJson, rule.KeyRef, rule.CatalogText);
         }
 
-        if (!def.SeparateApproval && def.ClearGrantable && hasRestrictedClass)
+        if (!IsMaskingClassification(def.Code) && hasRestrictedClass)
         {
             return null;
         }
@@ -673,61 +646,6 @@ public sealed partial class ClassificationAccessResolver
             }
         }
 
-        return result;
-    }
-
-    private async ValueTask<Dictionary<Guid, IReadOnlyList<ConsentClassificationAccess>>> LoadEffectiveGrantAccessAsync(
-        IReadOnlyList<Consent> grants,
-        string tenantId,
-        CancellationToken ct)
-    {
-        var map = new Dictionary<Guid, List<ConsentClassificationAccess>>();
-        var missingIds = new List<Guid>();
-
-        foreach (var g in grants)
-        {
-            if (g.ClassificationAccess.Count > 0)
-            {
-                map[g.Id] = [.. g.ClassificationAccess];
-            }
-            else if (g.Id != Guid.Empty)
-            {
-                missingIds.Add(g.Id);
-            }
-        }
-
-        if (_repository is not null && missingIds.Count > 0)
-        {
-            var rows = await _repository.GetConsentClassificationAccessBatchAsync(tenantId, missingIds, ct).ConfigureAwait(false);
-            foreach (var row in rows)
-            {
-                if (!map.TryGetValue(row.ConsentId, out var list))
-                {
-                    list = [];
-                    map[row.ConsentId] = list;
-                }
-
-                list.Add(row);
-            }
-        }
-
-        return map.ToDictionary(kv => kv.Key, kv => (IReadOnlyList<ConsentClassificationAccess>)kv.Value);
-    }
-
-    internal async ValueTask<IReadOnlyList<GrantClassificationAuditEntry>> BuildGrantAuditEntriesAsync(IReadOnlyList<Consent> allowGrants, TenantId tenant, CancellationToken ct = default)
-    {
-        if (allowGrants.Count == 0) return Array.Empty<GrantClassificationAuditEntry>();
-        var grantAccessMap = await LoadEffectiveGrantAccessAsync(allowGrants, tenant.Value, ct).ConfigureAwait(false);
-        var now = _timeProvider.GetUtcNow();
-        var result = new List<GrantClassificationAuditEntry>(allowGrants.Count);
-        foreach (var grant in allowGrants.OrderBy(static g => g.Id))
-        {
-            if (!grantAccessMap.TryGetValue(grant.Id, out var rows) || rows.Count == 0) continue;
-            var levels = new SortedDictionary<string, string>(StringComparer.Ordinal);
-            foreach (var row in rows)
-                levels[row.Code] = (row.ValidUntil is null || now < row.ValidUntil.Value ? row.AccessLevel : ColumnAccessLevel.Mask).ToString().ToUpperInvariant();
-            if (levels.Count > 0) result.Add(new GrantClassificationAuditEntry(grant.Id.ToString("D"), levels));
-        }
         return result;
     }
 

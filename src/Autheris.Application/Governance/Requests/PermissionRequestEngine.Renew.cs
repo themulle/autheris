@@ -155,8 +155,7 @@ public sealed partial class PermissionRequestEngine
                 RowFilters = consent.RowFilters,
                 WriteRules = consent.WriteRules,
                 RowScope = consent.RowScope,
-                ApprovingOwners = consent.ApprovingOwners,
-                ClassificationAccess = consent.ClassificationAccess
+                ApprovingOwners = consent.ApprovingOwners
             };
 
             var created = await _consentRepository.CreateConsentAsync(renewedConsent, ct).ConfigureAwait(false);

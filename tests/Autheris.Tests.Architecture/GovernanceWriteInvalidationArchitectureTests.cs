@@ -83,7 +83,6 @@ public sealed class GovernanceWriteInvalidationArchitectureTests
         "Autheris.Infrastructure.Persistence.GovernanceRepository::RemoveColumnClassificationAsync",
         "Autheris.Infrastructure.Persistence.GovernanceRepository::UpsertColumnMaskOverrideAsync",
         "Autheris.Infrastructure.Persistence.GovernanceRepository::DeleteColumnMaskOverrideAsync",
-        "Autheris.Infrastructure.Persistence.GovernanceRepository::UpsertConsentClassificationAccessAsync",
         "Autheris.Infrastructure.Persistence.GovernanceRepository::UpsertProfileAsync",
         "Autheris.Infrastructure.Persistence.GovernanceRepository::DeleteProfileAsync",
         "Autheris.Infrastructure.Persistence.GovernanceRepository::AssignProfileAsync",

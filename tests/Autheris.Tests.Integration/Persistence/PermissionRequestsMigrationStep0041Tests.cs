@@ -28,7 +28,7 @@ public sealed class PermissionRequestsMigrationStep0041Tests
         "CONSENT_ROW_FILTERS",
         "CONSENT_ROW_SCOPES",
         "CONSENT_WRITE_RULES",
-        "consent_classification_access",
+        // consent_classification_access is dropped by step 0044 (W5-03); its removal is asserted in RetireClassificationClearMigrationStep0044Tests.
         "consent_approving_owners",
         "CONSENTS",
         "GRANT_RECORDS",

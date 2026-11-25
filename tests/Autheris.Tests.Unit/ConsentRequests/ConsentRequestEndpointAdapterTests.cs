@@ -5,7 +5,6 @@ using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading.Tasks;
 using Autheris.Application.ConsentRequests;
-using Autheris.Application.ConsentRequests.ClassificationClear;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Tests.Unit.Catalog;
@@ -22,11 +21,11 @@ public sealed class ConsentRequestEndpointAdapterTests
         ClaimsPrincipal? principal = null,
         IReadOnlyList<WriteRule>? writeRules = null,
         bool? writeOnly = null,
-        IReadOnlyList<RequestedClearItem>? clear = null,
+        IReadOnlyList<string>? clear = null,
         DateTimeOffset? validTo = null) => new(
         "sales", "dbo", "orders", "Quarterly audit of order totals", 7, null, new Sid("S-1"),
         principal ?? Wp0.User("S-1", "tenant-a"), Tenant,
-        RequestedWriteRules: writeRules, RequestWriteOnly: writeOnly, RequestedValidTo: validTo, RequestedClear: clear);
+        RequestedWriteRules: writeRules, RequestWriteOnly: writeOnly, RequestedValidTo: validTo, RequestedUnmaskColumns: clear);
 
     [Fact]
     public async Task Data_request_is_one_engine_submission_for_the_caller()
@@ -58,14 +57,10 @@ public sealed class ConsentRequestEndpointAdapterTests
     }
 
     [Fact]
-    public async Task Clear_columns_become_one_unmask_request_over_the_union()
+    public async Task Clear_columns_become_one_unmask_request_over_the_distinct_columns()
     {
         var engine = new RecordingPermissionRequestEngine();
-        await new ConsentRequestEndpointAdapter(engine).SubmitAsync(Command(clear:
-        [
-            new RequestedClearItem("pii", ["email", "phone"]),
-            new RequestedClearItem("finance", ["phone", "iban"])
-        ]));
+        await new ConsentRequestEndpointAdapter(engine).SubmitAsync(Command(clear: ["email", "phone", "PHONE", "iban"]));
 
         var s = engine.Submissions.ShouldHaveSingleItem();
         s.RequestKind.ShouldBe(ConsentRequestKind.Unmask);
@@ -81,7 +76,7 @@ public sealed class ConsentRequestEndpointAdapterTests
 
         (await Should.ThrowAsync<ConsentRequestException>(() => adapter.SubmitAsync(Command(writeOnly: true)))).Code.ShouldBe("VALIDATION_ERROR");
         (await Should.ThrowAsync<ConsentRequestException>(() => adapter.SubmitAsync(Command(
-            writeRules: [new WriteRule(Guid.NewGuid(), WriteOperation.Insert, ["id"], WriteRowScope.OwnRows)], clear: [new RequestedClearItem("pii", ["email"])])))).Code.ShouldBe("INVALID_COLUMNS");
+            writeRules: [new WriteRule(Guid.NewGuid(), WriteOperation.Insert, ["id"], WriteRowScope.OwnRows)], clear: ["email"])))).Code.ShouldBe("INVALID_COLUMNS");
         engine.Submissions.ShouldBeEmpty();
     }
 

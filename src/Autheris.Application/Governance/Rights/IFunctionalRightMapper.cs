@@ -4,6 +4,7 @@ using System.Collections.Generic;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Governance.SingleApproval;
 using Autheris.Domain.Common;
 using Autheris.Domain.Governance;
 
@@ -28,23 +29,21 @@ public interface IFunctionalRightMapper
         FunctionalRight right,
         CancellationToken ct = default);
 
-    Task CreateMappingAsync(FunctionalRightMapping mapping, CancellationToken ct = default);
-    Task<FunctionalRightMapping> ProposeMappingAsync(
+    /// <summary>Saves a mapping; the save is the approval (single approval), audited with a before/after hash.</summary>
+    Task<FunctionalRightMapping> SaveMappingAsync(
         TenantId tenantId,
         string realmId,
         string groupOrRole,
         FunctionalRight right,
         string recertClass,
-        string createdBy,
+        SingleApprovalWriter writer,
         CancellationToken ct = default);
-
-    Task ApproveMappingAsync(TenantId tenantId, string realmId, string groupOrRole, FunctionalRight right, string approverId, CancellationToken ct = default);
 
     Task DeleteMappingAsync(
         TenantId tenantId,
         string realmId,
         string groupOrRole,
         FunctionalRight right,
-        string deletedBy,
+        SingleApprovalWriter writer,
         CancellationToken ct = default);
 }

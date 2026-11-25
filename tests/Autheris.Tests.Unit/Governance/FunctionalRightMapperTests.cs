@@ -9,12 +9,14 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.Governance.Rights;
+using Autheris.Application.Governance.SingleApproval;
 using Autheris.Application.Identity;
 using Autheris.Domain.Common;
 using Autheris.Domain.Governance;
 using Autheris.Domain.Identity;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 using NSubstitute;
 using Shouldly;
 using Xunit;
@@ -31,220 +33,147 @@ public sealed class FunctionalRightMapperTests
         _sut = new FunctionalRightMapper(_repository, _realmRegistry, _auditWriter);
     }
 
+    private static IdentityRealm WorkforceRealm(string realmId, params GatewayRole[] allowed) => new(
+        realmId,
+        IdentityRealmKind.EntraWorkforce,
+        new TenantBindingSpecification(TenantBindingKind.Fixed, "tenant-1"),
+        RealmGroupSource.Resolver,
+        RealmProvisioningMode.Scim,
+        issuers: ["https://sts.windows.net/test"],
+        allowedGatewayRoles: new HashSet<GatewayRole>(allowed));
+
+    private static SingleApprovalWriter Writer(string subject = "user-alice", string[]? groups = null) =>
+        new(subject, [subject, subject + "@corp.example"], groups ?? ["grp-alice"]);
+
     [Fact]
-    public async Task FunctionalRightMapper_FourEyesEnforced_ThrowsWhenSelfApproved()
+    public async Task Save_is_the_approval_and_the_mapping_is_effective_immediately()
     {
         var tenantId = new TenantId("tenant-1");
-        var realmId = "workforce-entra";
-        var groupOrRole = "engineers";
-        var right = FunctionalRight.SecurityAdmin;
+        _realmRegistry.GetRealm("workforce-entra").Returns(WorkforceRealm("workforce-entra"));
+        FunctionalRightMapping? captured = null;
+        await _repository.CreateMappingAsync(Arg.Do<FunctionalRightMapping>(m => captured = m), Arg.Any<CancellationToken>());
 
-        // Existing mapping created by user-alice
-        var existingMapping = new FunctionalRightMapping(
-            tenantId.Value,
-            realmId,
-            groupOrRole,
-            right,
-            ApprovedBy: string.Empty,
-            ApprovedAt: null,
-            RecertClass: "Standard",
-            CreatedBy: "user-alice",
-            CreatedAt: DateTimeOffset.UtcNow
-        );
+        var saved = await _sut.SaveMappingAsync(tenantId, "workforce-entra", "engineers", FunctionalRight.DataExport, "", Writer());
 
-        _repository.GetMappingAsync(tenantId, realmId, groupOrRole, right, Arg.Any<CancellationToken>())
-            .Returns(existingMapping);
+        captured.ShouldNotBeNull();
+        captured.ApprovedBy.ShouldBe("user-alice");
+        captured.ApprovedAt.ShouldNotBeNull();
+        captured.CreatedBy.ShouldBe("user-alice");
+        captured.RecertClass.ShouldBe("Standard");
+        captured.IsApproved.ShouldBeTrue();
+        saved.ShouldBe(captured);
+    }
 
-        // Attempt self-approval by user-alice
-        var act = () => _sut.ApproveMappingAsync(tenantId, realmId, groupOrRole, right, "user-alice");
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("ClusterAdmin")]
+    [InlineData("TenantAdmin")]
+    [InlineData("GovernanceAdmin")]
+    [InlineData("Governance.Approve")]
+    [InlineData("Governance.Admin")]
+    [InlineData("Security.Admin")]
+    [InlineData("DataProduct.Admin")]
+    public async Task Mapping_never_confers_it_or_governance(string right)
+    {
+        var tenantId = new TenantId("tenant-1");
+        var everyRole = Enum.GetValues<GatewayRole>();
+        _realmRegistry.GetRealm("workforce-entra").Returns(WorkforceRealm("workforce-entra", everyRole));
 
-        await act.ShouldThrowAsync<SecurityException>();
+        // Never saved, even in a realm that allows every gateway role.
+        await Should.ThrowAsync<SecurityException>(() =>
+            _sut.SaveMappingAsync(tenantId, "workforce-entra", "engineers", new FunctionalRight(right), "Privileged", Writer()));
+        await _repository.DidNotReceiveWithAnyArgs().CreateMappingAsync(default!, default);
+
+        // A legacy row that confers a capacity is ignored at read time.
+        var legacy = new FunctionalRightMapping(tenantId, "workforce-entra", "engineers", new FunctionalRight(right),
+            ApprovedBy: "approver-bob", ApprovedAt: DateTimeOffset.UtcNow, RecertClass: "Privileged", CreatedBy: "creator-alice", CreatedAt: DateTimeOffset.UtcNow);
+        _repository.GetApprovedMappingsForGroupsAndRolesAsync(tenantId, "workforce-entra", Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+            .Returns([legacy]);
+
+        (await _sut.GetRightsForGroupsAndRolesAsync(tenantId, "workforce-entra", ["engineers"])).ShouldBeEmpty();
     }
 
     [Fact]
-    public async Task FunctionalRightMapper_Approve_SucceedsWithDifferentApprover()
+    [Trait("Category", "Security")]
+    public async Task Mapping_cannot_confer_role_outside_realm()
     {
         var tenantId = new TenantId("tenant-1");
-        var realmId = "workforce-entra";
-        var groupOrRole = "engineers";
-        var right = new FunctionalRight("Data.Read");
+        _realmRegistry.GetRealm("workforce-entra").Returns(WorkforceRealm("workforce-entra", GatewayRole.Consumer));
 
-        var existingMapping = new FunctionalRightMapping(
-            tenantId.Value,
-            realmId,
-            groupOrRole,
-            right,
-            ApprovedBy: string.Empty,
-            ApprovedAt: null,
-            RecertClass: "Standard",
-            CreatedBy: "user-alice",
-            CreatedAt: DateTimeOffset.UtcNow
-        );
+        // Inside the realm's allowed roles: saved and effective.
+        var allowed = await _sut.SaveMappingAsync(tenantId, "workforce-entra", "engineers", FunctionalRight.Consumer, "Standard", Writer());
+        allowed.FunctionalRight.ShouldBe(FunctionalRight.Consumer);
 
-        _repository.GetMappingAsync(tenantId, realmId, groupOrRole, right, Arg.Any<CancellationToken>())
-            .Returns(existingMapping);
+        // Outside the realm's allowed roles, or in an unknown realm: refused (fail closed).
+        await Should.ThrowAsync<SecurityException>(() =>
+            _sut.SaveMappingAsync(tenantId, "workforce-entra", "engineers", FunctionalRight.SchemaPublisher, "Standard", Writer()));
+        await Should.ThrowAsync<SecurityException>(() =>
+            _sut.SaveMappingAsync(tenantId, "unknown-realm", "engineers", FunctionalRight.Consumer, "Standard", Writer()));
+        await _repository.Received(1).CreateMappingAsync(Arg.Any<FunctionalRightMapping>(), Arg.Any<CancellationToken>());
 
-        await _sut.ApproveMappingAsync(tenantId, realmId, groupOrRole, right, "user-bob");
+        // A legacy row outside the realm's roles confers nothing; a right that names no role is not bounded by the realm.
+        FunctionalRightMapping Row(FunctionalRight right) => new(tenantId, "workforce-entra", "engineers", right,
+            ApprovedBy: "approver-bob", ApprovedAt: DateTimeOffset.UtcNow, RecertClass: "Standard", CreatedBy: "creator-alice", CreatedAt: DateTimeOffset.UtcNow);
+        _repository.GetApprovedMappingsForGroupsAndRolesAsync(tenantId, "workforce-entra", Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
+            .Returns([Row(FunctionalRight.Consumer), Row(FunctionalRight.SchemaPublisher), Row(FunctionalRight.DataExport)]);
 
-        await _repository.Received(1).ApproveMappingAsync(
-            tenantId, realmId, groupOrRole, right, "user-bob", Arg.Any<CancellationToken>());
+        var rights = await _sut.GetRightsForGroupsAndRolesAsync(tenantId, "workforce-entra", ["engineers"]);
+
+        rights.ShouldBe([FunctionalRight.Consumer, FunctionalRight.DataExport], ignoreOrder: true);
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("user-alice")]
+    [InlineData("USER-ALICE@corp.example")]
+    [InlineData("grp-alice")]
+    [InlineData("DataSteward")]
+    public async Task Writer_cannot_map_a_right_to_own_identifier_group_or_role(string groupOrRole)
+    {
+        _realmRegistry.GetRealm("workforce-entra").Returns(WorkforceRealm("workforce-entra"));
+        var writer = Writer(groups: ["grp-alice", "DataSteward"]);
+
+        var ex = await Should.ThrowAsync<SingleApprovalRefusedException>(() =>
+            _sut.SaveMappingAsync(new TenantId("tenant-1"), "workforce-entra", groupOrRole, FunctionalRight.DataExport, "Standard", writer));
+
+        ex.Code.ShouldBe("SelfWidening");
+        await _repository.DidNotReceiveWithAnyArgs().CreateMappingAsync(default!, default);
+        await _auditWriter.DidNotReceiveWithAnyArgs().RecordRequiredAsync(default!, default);
     }
 
     [Fact]
-    public async Task FunctionalRightMapper_PrivilegedRight_CustomerRealm_Blocked()
+    [Trait("Category", "Security")]
+    public async Task Save_audits_before_and_after_hash_without_values_and_fails_closed()
     {
         var tenantId = new TenantId("tenant-1");
-        var customerRealmId = "customer-b2b";
-        var groupOrRole = "analysts";
-        var privilegedRight = new FunctionalRight("Security.Admin"); // IsPrivileged = true
+        _realmRegistry.GetRealm("workforce-entra").Returns(WorkforceRealm("workforce-entra"));
+        AuditLogEntry? entry = null;
+        await _auditWriter.RecordRequiredAsync(Arg.Do<AuditLogEntry>(e => entry = e), Arg.Any<CancellationToken>());
 
-        // Configure realm as Customer realm
-        var customerRealm = new IdentityRealm(
-            customerRealmId,
-            IdentityRealmKind.Customer,
-            new TenantBindingSpecification(TenantBindingKind.Fixed, tenantId.Value),
-            RealmGroupSource.Resolver,
-            RealmProvisioningMode.Scim,
-            issuers: ["https://customer.issuer.com"]);
+        await _sut.SaveMappingAsync(tenantId, "workforce-entra", "engineers", FunctionalRight.DataExport, "Standard", Writer());
 
-        _realmRegistry.GetRealm(customerRealmId).Returns(customerRealm);
+        entry.ShouldNotBeNull();
+        entry.EventType.ShouldBe("SECURITY_FUNCTIONAL_MAPPING_SAVED");
+        entry.ActorSid.ShouldBe(new Sid("user-alice"));
+        entry.TargetTable.ShouldBe("FUNCTIONAL_RIGHT_MAPPINGS");
+        entry.DetailsJson.ShouldContain("\"after\":\"");
+        entry.DetailsJson.ShouldNotContain("engineers");
+        entry.DetailsJson.ShouldNotContain("Data.Export");
 
-        var act = () => _sut.ProposeMappingAsync(
-            tenantId, customerRealmId, groupOrRole, privilegedRight, "Privileged", "user-alice");
+        // A failing audit refuses the change before anything is written.
+        _repository.ClearReceivedCalls();
+        _auditWriter.RecordRequiredAsync(Arg.Any<AuditLogEntry>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromException(new InvalidOperationException("audit down")));
+        var ex = await Should.ThrowAsync<SingleApprovalRefusedException>(() =>
+            _sut.SaveMappingAsync(tenantId, "workforce-entra", "engineers", FunctionalRight.DataExport, "Standard", Writer()));
+        ex.Code.ShouldBe("AuditFailed");
+        await _repository.DidNotReceiveWithAnyArgs().CreateMappingAsync(default!, default);
 
-        await act.ShouldThrowAsync<SecurityException>();
-    }
-
-    [Fact]
-    public async Task FunctionalRightMapper_AuditRecorded_OnCreateAndApprove()
-    {
-        var tenantId = new TenantId("tenant-1");
-        var realmId = "workforce-entra";
-        var groupOrRole = "engineers";
-        var right = new FunctionalRight("Data.Read");
-
-        var workforceRealm = new IdentityRealm(
-            realmId,
-            IdentityRealmKind.EntraWorkforce,
-            new TenantBindingSpecification(TenantBindingKind.Fixed, tenantId.Value),
-            RealmGroupSource.Resolver,
-            RealmProvisioningMode.Scim,
-            issuers: ["https://sts.windows.net/test"]);
-
-        _realmRegistry.GetRealm(realmId).Returns(workforceRealm);
-
-        var proposed = await _sut.ProposeMappingAsync(
-            tenantId, realmId, groupOrRole, right, "Standard", "user-alice");
-
-        proposed.ShouldNotBeNull();
-        await _auditWriter.Received(1).RecordRequiredAsync(
-            Arg.Is<AuditLogEntry>(e => e.EventType == "SECURITY_FUNCTIONAL_MAPPING_CREATED"),
-            Arg.Any<CancellationToken>());
-
-        var existingMapping = new FunctionalRightMapping(
-            tenantId.Value,
-            realmId,
-            groupOrRole,
-            right,
-            ApprovedBy: string.Empty,
-            ApprovedAt: null,
-            RecertClass: "Standard",
-            CreatedBy: "user-alice",
-            CreatedAt: DateTimeOffset.UtcNow
-        );
-
-        _repository.GetMappingAsync(tenantId, realmId, groupOrRole, right, Arg.Any<CancellationToken>())
-            .Returns(existingMapping);
-
-        await _sut.ApproveMappingAsync(tenantId, realmId, groupOrRole, right, "user-bob");
-
-        await _auditWriter.Received(1).RecordRequiredAsync(
-            Arg.Is<AuditLogEntry>(e => e.EventType == "SECURITY_FUNCTIONAL_MAPPING_APPROVED"),
-            Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task FunctionalRightMapper_NonPrivilegedRight_PreservesSelfApproval()
-    {
-        var tenantId = new TenantId("tenant-1");
-        var realmId = "workforce-entra";
-        var groupOrRole = "engineers";
-        var nonPrivilegedRight = FunctionalRight.DataExport; // IsPrivileged = false
-
-        var workforceRealm = new IdentityRealm(
-            realmId,
-            IdentityRealmKind.EntraWorkforce,
-            new TenantBindingSpecification(TenantBindingKind.Fixed, tenantId.Value),
-            RealmGroupSource.Resolver,
-            RealmProvisioningMode.Scim,
-            issuers: ["https://sts.windows.net/test"]);
-
-        _realmRegistry.GetRealm(realmId).Returns(workforceRealm);
-
-        FunctionalRightMapping? createdMapping = null;
-        await _repository.CreateMappingAsync(
-            Arg.Do<FunctionalRightMapping>(m => createdMapping = m),
-            Arg.Any<CancellationToken>());
-
-        var mapping = new FunctionalRightMapping(
-            tenantId.Value,
-            realmId,
-            groupOrRole,
-            nonPrivilegedRight,
-            ApprovedBy: "user-alice",
-            ApprovedAt: DateTimeOffset.UtcNow,
-            RecertClass: "Standard",
-            CreatedBy: "user-alice",
-            CreatedAt: DateTimeOffset.UtcNow
-        );
-
-        await _sut.CreateMappingAsync(mapping);
-
-        createdMapping.ShouldNotBeNull();
-        createdMapping.ApprovedBy.ShouldBe("user-alice");
-        createdMapping.ApprovedAt.ShouldNotBeNull();
-    }
-
-    [Fact]
-    public async Task FunctionalRightMapper_PrivilegedRight_CreatorIdenticalToApprover_ClearsApproval()
-    {
-        var tenantId = new TenantId("tenant-1");
-        var realmId = "workforce-entra";
-        var groupOrRole = "engineers";
-        var privilegedRight = FunctionalRight.SecurityAdmin; // IsPrivileged = true
-
-        var workforceRealm = new IdentityRealm(
-            realmId,
-            IdentityRealmKind.EntraWorkforce,
-            new TenantBindingSpecification(TenantBindingKind.Fixed, tenantId.Value),
-            RealmGroupSource.Resolver,
-            RealmProvisioningMode.Scim,
-            issuers: ["https://sts.windows.net/test"]);
-
-        _realmRegistry.GetRealm(realmId).Returns(workforceRealm);
-
-        FunctionalRightMapping? createdMapping = null;
-        await _repository.CreateMappingAsync(
-            Arg.Do<FunctionalRightMapping>(m => createdMapping = m),
-            Arg.Any<CancellationToken>());
-
-        var mapping = new FunctionalRightMapping(
-            tenantId.Value,
-            realmId,
-            groupOrRole,
-            privilegedRight,
-            ApprovedBy: "user-alice",
-            ApprovedAt: DateTimeOffset.UtcNow,
-            RecertClass: "Privileged",
-            CreatedBy: "user-alice",
-            CreatedAt: DateTimeOffset.UtcNow
-        );
-
-        await _sut.CreateMappingAsync(mapping);
-
-        createdMapping.ShouldNotBeNull();
-        createdMapping.ApprovedBy.ShouldBeNull();
-        createdMapping.ApprovedAt.ShouldBeNull();
+        // Without an audit writer nothing is written either.
+        var unaudited = new FunctionalRightMapper(_repository, _realmRegistry);
+        (await Should.ThrowAsync<SingleApprovalRefusedException>(() =>
+            unaudited.SaveMappingAsync(tenantId, "workforce-entra", "engineers", FunctionalRight.DataExport, "Standard", Writer()))).Code.ShouldBe("AuditFailed");
+        await _repository.DidNotReceiveWithAnyArgs().CreateMappingAsync(default!, default);
     }
 
     [Theory]
@@ -364,15 +293,15 @@ public sealed class FunctionalRightMapperTests
     }
 
     [Fact]
-    public async Task FunctionalRightMapper_GetRightsForGroupsAndRoles_UnapprovedOrSelfApprovedPrivileged_FilteredFailClosed()
+    public async Task FunctionalRightMapper_GetRightsForGroupsAndRoles_UnapprovedOrPrivileged_FilteredFailClosed()
     {
         var tenantId = new TenantId("tenant-1");
         var realmId = "workforce-entra";
 
-        var selfApprovedPrivileged = new FunctionalRightMapping(
+        var privileged = new FunctionalRightMapping(
             tenantId.Value, realmId, "devs", FunctionalRight.SecurityAdmin,
-            ApprovedBy: "alice", ApprovedAt: DateTimeOffset.UtcNow,
-            RecertClass: "Privileged", CreatedBy: "alice", // Self-approved!
+            ApprovedBy: "bob", ApprovedAt: DateTimeOffset.UtcNow,
+            RecertClass: "Privileged", CreatedBy: "alice",
             CreatedAt: DateTimeOffset.UtcNow);
 
         var unapprovedStandard = new FunctionalRightMapping(
@@ -383,7 +312,7 @@ public sealed class FunctionalRightMapperTests
 
         _repository.GetApprovedMappingsForGroupsAndRolesAsync(
             tenantId, realmId, Arg.Any<IReadOnlyCollection<string>>(), Arg.Any<CancellationToken>())
-            .Returns([selfApprovedPrivileged, unapprovedStandard]);
+            .Returns([privileged, unapprovedStandard]);
 
         var rights = await _sut.GetRightsForGroupsAndRolesAsync(tenantId, realmId, ["devs"]);
 
@@ -468,7 +397,7 @@ public sealed class FunctionalRightMapperTests
         var principal = new ClaimsPrincipal(new ClaimsIdentity(claims, "TestAuth"));
 
         var mapping1 = new FunctionalRightMapping(
-            tenantId.Value, realmId, "role-4", FunctionalRight.Consumer,
+            tenantId.Value, realmId, "role-4", FunctionalRight.McpUse,
             ApprovedBy: "admin", ApprovedAt: DateTimeOffset.UtcNow,
             RecertClass: "Standard", CreatedBy: "admin",
             CreatedAt: DateTimeOffset.UtcNow);
@@ -488,20 +417,7 @@ public sealed class FunctionalRightMapperTests
             });
 
         var rights = await _sut.GetRightsForCallerAsync(principal, tenantId, realmId);
-        rights.ShouldContain(FunctionalRight.Consumer);
-    }
-
-    [Fact]
-    public async Task FunctionalRightMapper_ApproveMappingAsync_NotFound_ThrowsKeyNotFoundException()
-    {
-        var tenantId = new TenantId("tenant-1");
-        var realmId = "workforce-entra";
-
-        _repository.GetMappingAsync(tenantId, realmId, "non-existent-group", FunctionalRight.Consumer, Arg.Any<CancellationToken>())
-            .Returns((FunctionalRightMapping?)null);
-
-        await Should.ThrowAsync<KeyNotFoundException>(() =>
-            _sut.ApproveMappingAsync(tenantId, realmId, "non-existent-group", FunctionalRight.Consumer, "approver-1"));
+        rights.ShouldContain(FunctionalRight.McpUse);
     }
 
     [Fact]
@@ -510,7 +426,7 @@ public sealed class FunctionalRightMapperTests
         var tenantId = new TenantId("tenant-1");
         var realmId = "workforce-entra";
 
-        await _sut.DeleteMappingAsync(tenantId, realmId, "dev-group", FunctionalRight.DataExport, "deleter-1");
+        await _sut.DeleteMappingAsync(tenantId, realmId, "dev-group", FunctionalRight.DataExport, SingleApprovalWriter.Of("deleter-1"));
 
         await _repository.Received(1).DeleteMappingAsync(tenantId, realmId, "dev-group", FunctionalRight.DataExport, Arg.Any<CancellationToken>());
         await _auditWriter.Received(1).RecordRequiredAsync(
@@ -519,45 +435,5 @@ public sealed class FunctionalRightMapperTests
                 e.ActorSid == new Sid("deleter-1") &&
                 e.Decision == "ALLOW"),
             Arg.Any<CancellationToken>());
-    }
-
-    [Fact]
-    public async Task ProposeMapping_PassesNullApprovalToRepository()
-    {
-        var tenantId = new TenantId("tenant-1");
-        var realmId = "workforce-entra";
-        var groupOrRole = "engineers";
-        var right = FunctionalRight.SecurityAdmin;
-
-        var workforceRealm = new IdentityRealm(
-            realmId,
-            IdentityRealmKind.EntraWorkforce,
-            new TenantBindingSpecification(TenantBindingKind.Fixed, tenantId.Value),
-            RealmGroupSource.Resolver,
-            RealmProvisioningMode.Scim,
-            issuers: ["https://sts.windows.net/test"]);
-
-        _realmRegistry.GetRealm(realmId).Returns(workforceRealm);
-
-        FunctionalRightMapping? captured = null;
-        await _repository.CreateMappingAsync(
-            Arg.Do<FunctionalRightMapping>(m => captured = m),
-            Arg.Any<CancellationToken>());
-
-        var proposed = await _sut.ProposeMappingAsync(
-            tenantId, realmId, groupOrRole, right, "Privileged", "user-alice");
-
-        captured.ShouldNotBeNull();
-        captured.TenantId.ShouldBe(tenantId);
-        captured.RealmId.ShouldBe(realmId);
-        captured.GroupOrRole.ShouldBe(groupOrRole);
-        captured.FunctionalRight.ShouldBe(right);
-        captured.ApprovedBy.ShouldBeNull();
-        captured.ApprovedAt.ShouldBeNull();
-        captured.RecertClass.ShouldBe("Privileged");
-        captured.CreatedBy.ShouldBe("user-alice");
-
-        proposed.ApprovedBy.ShouldBeNull();
-        proposed.ApprovedAt.ShouldBeNull();
     }
 }

@@ -16,46 +16,6 @@ using Xunit;
 public sealed class ClassificationWorkflowStateMachineTests
 {
     [Fact]
-    public async Task TransitionAsync_EnforcesSegregationOfDuties_AntiSelfApproval()
-    {
-        var options = new GatewayOptions { Classification = new ClassificationOptions() };
-        var stateMachine = new ClassificationWorkflowStateMachine(
-            new StaticOptionsMonitor<GatewayOptions>(options),
-            NullLogger<ClassificationWorkflowStateMachine>.Instance);
-
-        var ownerSid = "S-1-5-21-finance-owner";
-        var proposal = new TableClassificationProposal(
-            Guid.NewGuid(),
-            new TableIdentifier("db", "finance", "salaries"),
-            ownerSid,
-            "PENDING_GOVERNANCE_REVIEW",
-            new List<ColumnClassificationProposal>
-            {
-                new("salary_amount", "decimal", "L4_STRICTLY_CONFIDENTIAL", 4, "SALARY", "REDACT", 0.95, false)
-            },
-            DateTimeOffset.UtcNow);
-
-        // Data owner attempts to act as Governance Reviewer on their own proposal
-        var request = new TableClassificationApprovalRequest(
-            proposal.ProposalId,
-            proposal.TableIdentifier,
-            new Sid(ownerSid),
-            ReviewerRole: "DATA_GOVERNANCE_REVIEWER",
-            Action: "APPROVE",
-            ColumnDecisions: new List<ColumnClassificationDecision>
-            {
-                new("salary_amount", "ACCEPT_PROPOSAL", "L4_STRICTLY_CONFIDENTIAL", 4, "REDACT")
-            },
-            StepUpAuthToken: "valid-stepup-token");
-
-        var result = await stateMachine.TransitionAsync(proposal, request);
-
-        result.Success.ShouldBeFalse();
-        result.ErrorCode.ShouldBe("SOD_ANTI_SELF_APPROVAL_VIOLATION");
-        result.Message.ShouldContain("SoD Violation");
-    }
-
-    [Fact]
     public async Task TransitionAsync_RequiresStepUpMfa_ForHighSensitivityRank()
     {
         var options = new GatewayOptions { Classification = new ClassificationOptions() };
@@ -114,7 +74,7 @@ public sealed class ClassificationWorkflowStateMachineTests
     }
 
     [Fact]
-    public async Task TransitionAsync_TwoStageApproval_ProgressesFromOwnerToGovernanceReviewer()
+    public async Task TransitionAsync_SingleApproval_OneDecisionClassifies()
     {
         var options = new GatewayOptions { Classification = new ClassificationOptions() };
         var stateMachine = new ClassificationWorkflowStateMachine(
@@ -132,7 +92,7 @@ public sealed class ClassificationWorkflowStateMachineTests
             },
             DateTimeOffset.UtcNow);
 
-        // Step 1: Data Owner approves (Rank 3 >= FourEyesThresholdRank 3) -> Advances to PENDING_GOVERNANCE_REVIEW
+        // Single approval (Amendment 2): the Data Owner's decision classifies a rank-3 proposal immediately, without a second stage.
         var ownerRequest = new TableClassificationApprovalRequest(
             proposal.ProposalId,
             proposal.TableIdentifier,
@@ -146,14 +106,13 @@ public sealed class ClassificationWorkflowStateMachineTests
 
         var ownerResult = await stateMachine.TransitionAsync(proposal, ownerRequest);
         ownerResult.Success.ShouldBeTrue();
-        ownerResult.NewStatus.ShouldBe("PENDING_GOVERNANCE_REVIEW");
-        ownerResult.RequiresSecondStage.ShouldBeTrue();
+        ownerResult.NewStatus.ShouldBe("CLASSIFIED");
 
-        // Step 2: Governance Reviewer (independent SID) approves -> CLASSIFIED
+        // A Data Governance member decides alone as well, also on a legacy proposal still waiting for the retired second stage.
         var reviewerRequest = new TableClassificationApprovalRequest(
             proposal.ProposalId,
             proposal.TableIdentifier,
-            new Sid("dpo-reviewer@corp.local"),
+            new Sid("dg-member@corp.local"),
             ReviewerRole: "DATA_GOVERNANCE_REVIEWER",
             Action: "APPROVE",
             ColumnDecisions: new List<ColumnClassificationDecision>
@@ -161,9 +120,8 @@ public sealed class ClassificationWorkflowStateMachineTests
                 new("iban", "ACCEPT_PROPOSAL", "L3_CONFIDENTIAL", 3, "IBAN_STANDARD_4_4")
             });
 
-        // Stage 2 operates on the proposal as persisted after Stage 1 (status + recorded Stage 1 approver).
-        var pendingGovernance = proposal with { Status = "PENDING_GOVERNANCE_REVIEW", Stage1ApproverSid = "owner@corp.local" };
-        var reviewerResult = await stateMachine.TransitionAsync(pendingGovernance, reviewerRequest);
+        var legacyPending = proposal with { Status = "PENDING_GOVERNANCE_REVIEW" };
+        var reviewerResult = await stateMachine.TransitionAsync(legacyPending, reviewerRequest);
         reviewerResult.Success.ShouldBeTrue();
         reviewerResult.NewStatus.ShouldBe("CLASSIFIED");
     }

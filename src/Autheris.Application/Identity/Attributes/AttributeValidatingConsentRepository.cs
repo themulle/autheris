@@ -173,4 +173,14 @@ public sealed class AttributeValidatingConsentRepository : IConsentRepository, I
 
     public Task<IReadOnlyList<Consent>> GetActiveInternalPatternConsentsAsync(DateTimeOffset atTime, CancellationToken ct = default) =>
         _inner.GetActiveInternalPatternConsentsAsync(atTime, ct);
+
+    // The interface defaults of the two reads below return nothing; not forwarding them silently drops every unmask grant (#1009 A-3)
+    // and every recently expired consent of the registered repository.
+    public Task<IReadOnlyList<Consent>> GetActiveUnmaskGrantsForSubjectsAsync(
+        IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId tenantId, CancellationToken ct = default) =>
+        _inner.GetActiveUnmaskGrantsForSubjectsAsync(subjects, table, atTime, tenantId, ct);
+
+    public Task<IReadOnlySet<TableIdentifier>> GetRecentlyExpiredTableIdsAsync(
+        Sid userSid, TenantId tenantId, DateTimeOffset since, CancellationToken ct = default) =>
+        _inner.GetRecentlyExpiredTableIdsAsync(userSid, tenantId, since, ct);
 }

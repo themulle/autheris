@@ -15,9 +15,6 @@ public sealed class ClassificationOptions
     /// <summary>Default sensitivity level key assigned when a column has no explicit classification.</summary>
     public string DefaultSensitivityKey { get; init; } = "L2_INTERNAL";
 
-    /// <summary>Minimum sensitivity rank at which four-eyes approval is required for consent grants.</summary>
-    public int FourEyesThresholdRank { get; init; } = 3;
-
     /// <summary>Configured mapping from classification level keys to canonical <see cref="ProtectionClass"/> values.</summary>
     public Dictionary<string, ProtectionClass> LevelProtectionClasses { get; init; } = GetDefaultLevelProtectionClasses();
 
@@ -75,10 +72,10 @@ public sealed class ClassificationOptions
 
     public static List<SensitivityLevelDefinition> GetDefaultSensitivityLevels() => new()
     {
-        new("L1_PUBLIC", "Stufe 1: Öffentlich", "Frei zugängliche Daten, Pressemitteilungen, öffentliche Stammdaten.", 1, RequiresFourEyes: false, RequiresStepUpAuth: false, MaxConsentTtlDays: 365, ProtectionClass: ProtectionClass.Public),
-        new("L2_INTERNAL", "Stufe 2: Intern", "Betriebsinterne Informationen ohne direkten Personen- oder Finanzbezug.", 2, RequiresFourEyes: false, RequiresStepUpAuth: false, MaxConsentTtlDays: 180, ProtectionClass: ProtectionClass.Internal),
-        new("L3_CONFIDENTIAL", "Stufe 3: Vertraulich", "Sensible Geschäftsdaten, Kundendaten, Standard-PII, interne Verträge.", 3, RequiresFourEyes: true, RequiresStepUpAuth: false, MaxConsentTtlDays: 60, ProtectionClass: ProtectionClass.Confidential),
-        new("L4_STRICTLY_CONFIDENTIAL", "Stufe 4: Höchst vertraulich", "Gehälter, Gesundheitsdaten, M&A-Planungen, biometrische Daten.", 4, RequiresFourEyes: true, RequiresStepUpAuth: true, MaxConsentTtlDays: 7, ProtectionClass: ProtectionClass.Secret)
+        new("L1_PUBLIC", "Stufe 1: Öffentlich", "Frei zugängliche Daten, Pressemitteilungen, öffentliche Stammdaten.", 1, RequiresStepUpAuth: false, MaxConsentTtlDays: 365, ProtectionClass: ProtectionClass.Public),
+        new("L2_INTERNAL", "Stufe 2: Intern", "Betriebsinterne Informationen ohne direkten Personen- oder Finanzbezug.", 2, RequiresStepUpAuth: false, MaxConsentTtlDays: 180, ProtectionClass: ProtectionClass.Internal),
+        new("L3_CONFIDENTIAL", "Stufe 3: Vertraulich", "Sensible Geschäftsdaten, Kundendaten, Standard-PII, interne Verträge.", 3, RequiresStepUpAuth: false, MaxConsentTtlDays: 60, ProtectionClass: ProtectionClass.Confidential),
+        new("L4_STRICTLY_CONFIDENTIAL", "Stufe 4: Höchst vertraulich", "Gehälter, Gesundheitsdaten, M&A-Planungen, biometrische Daten.", 4, RequiresStepUpAuth: true, MaxConsentTtlDays: 7, ProtectionClass: ProtectionClass.Secret)
     };
 
     public static List<PiiCategoryDefinition> GetDefaultPiiCategories() => new()
@@ -109,17 +106,17 @@ public sealed class WorkflowOptions
         ["ENTERPRISE_HYBRID"] = new(
             new OwnerResolutionConfig("MetadataFirstThenCatalogCascade"),
             new PreClassificationConfig("Disabled", ZeroTouchAutoApprovePublicAndLowRisk: false, AutoApproveConfidenceThreshold: 0.95, AutoApproveMaxSensitivityRank: 1),
-            new ApprovalPipelineConfig(EnableFourEyes: true, Mode: "ConditionalDualStage", FourEyesThresholdRank: 3, RequireSecondStageOnDisputed: true, RequireStepUpAuthThresholdRank: 4, RequireFourEyesOnDowngrades: true)
+            new ApprovalPipelineConfig(RequireStepUpAuthThresholdRank: 4)
         ),
         ["LEAN_DATA_MESH"] = new(
             new OwnerResolutionConfig("MetadataFirstThenCatalogCascade"),
             new PreClassificationConfig("Disabled", ZeroTouchAutoApprovePublicAndLowRisk: true, AutoApproveConfidenceThreshold: 0.95, AutoApproveMaxSensitivityRank: 2),
-            new ApprovalPipelineConfig(EnableFourEyes: false, Mode: "SingleStageDataOwnerOnly", FourEyesThresholdRank: 999, RequireSecondStageOnDisputed: false, RequireStepUpAuthThresholdRank: 999, RequireFourEyesOnDowngrades: false)
+            new ApprovalPipelineConfig(RequireStepUpAuthThresholdRank: 999)
         ),
         ["TRADITIONAL_NO_AI_ENTERPRISE"] = new(
             new OwnerResolutionConfig("MetadataFirstThenCatalogCascade"),
             new PreClassificationConfig("Disabled", ZeroTouchAutoApprovePublicAndLowRisk: false),
-            new ApprovalPipelineConfig(EnableFourEyes: true, Mode: "ConditionalDualStage", FourEyesThresholdRank: 3, RequireSecondStageOnDisputed: true, RequireStepUpAuthThresholdRank: 4, RequireFourEyesOnDowngrades: true)
+            new ApprovalPipelineConfig(RequireStepUpAuthThresholdRank: 4)
         )
     };
 

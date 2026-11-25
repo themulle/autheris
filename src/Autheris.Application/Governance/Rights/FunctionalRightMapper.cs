@@ -4,11 +4,13 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
-using System.Text.Json;
+using System.Security.Cryptography;
+using System.Text;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.Governance.Rights.Validators;
+using Autheris.Application.Governance.SingleApproval;
 using Autheris.Application.Identity;
 using Autheris.Domain.Common;
 using Autheris.Domain.Governance;
@@ -75,7 +77,6 @@ public sealed class FunctionalRightMapper : IFunctionalRightMapper
         }
 
         var realm = _realmRegistry.GetRealm(realmId);
-        bool isCustomerRealm = realm != null && (realm.Kind is IdentityRealmKind.EntraExternalId or IdentityRealmKind.AzureAdB2C or IdentityRealmKind.Customer);
 
         var mappings = await _repository.GetApprovedMappingsForGroupsAndRolesAsync(
             tenantId, realmId, groupsAndRoles, ct).ConfigureAwait(false);
@@ -83,35 +84,18 @@ public sealed class FunctionalRightMapper : IFunctionalRightMapper
         var rights = new HashSet<FunctionalRight>();
         foreach (var mapping in mappings)
         {
-            // Four-Eyes Principle: privileged rights require approved_by != created_by (both non-null)
-            if (mapping.FunctionalRight.IsPrivileged)
+            // Single approval: a saved mapping is approved; a row without an approver never confers a right (fail closed).
+            if (string.IsNullOrWhiteSpace(mapping.ApprovedBy))
             {
-                if (string.IsNullOrWhiteSpace(mapping.ApprovedBy) ||
-                    string.Equals(mapping.ApprovedBy.Trim(), mapping.CreatedBy.Trim(), StringComparison.OrdinalIgnoreCase))
-                {
-                    // Unapproved or self-approved: fails closed (ignored)
-                    continue;
-                }
-            }
-            else
-            {
-                if (string.IsNullOrWhiteSpace(mapping.ApprovedBy))
-                {
-                    // Non-privileged also requires approved status
-                    continue;
-                }
+                continue;
             }
 
-            // Customer Realm Ceiling: barred from admin, approve, and unmask rights
-            if (isCustomerRealm)
+            // A mapping never confers an IT or governance capacity (any realm, customer realms included) and never a role outside the
+            // realm's allowed gateway roles: a legacy row that does is ignored.
+            if (FunctionalRightMappingValidator.ConfersCapacity(mapping.FunctionalRight) ||
+                !FunctionalRightMappingValidator.WithinRealmRoles(mapping.FunctionalRight, realm))
             {
-                if (mapping.FunctionalRight.IsPrivileged ||
-                    mapping.FunctionalRight == FunctionalRight.TenantAdmin ||
-                    mapping.FunctionalRight == FunctionalRight.GovernanceAdmin ||
-                    mapping.FunctionalRight == FunctionalRight.ClusterAdmin)
-                {
-                    continue;
-                }
+                continue;
             }
 
             rights.Add(mapping.FunctionalRight);
@@ -131,109 +115,39 @@ public sealed class FunctionalRightMapper : IFunctionalRightMapper
         return rights.Contains(right);
     }
 
-    public async Task CreateMappingAsync(FunctionalRightMapping mapping, CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(mapping);
-        var realm = _realmRegistry.GetRealm(mapping.RealmId);
-
-        FunctionalRightMappingValidator.ValidateCreation(mapping, realm);
-
-        // If Privileged and creator attempts self-approval in the creation payload, clear approval
-        var sanitized = mapping;
-        if (mapping.FunctionalRight.IsPrivileged &&
-            !string.IsNullOrWhiteSpace(mapping.ApprovedBy) &&
-            string.Equals(mapping.ApprovedBy.Trim(), mapping.CreatedBy.Trim(), StringComparison.OrdinalIgnoreCase))
-        {
-            sanitized = mapping with { ApprovedBy = null, ApprovedAt = null };
-        }
-
-        await _repository.CreateMappingAsync(sanitized, ct).ConfigureAwait(false);
-
-        if (_auditWriter != null)
-        {
-            var entry = new AuditLogEntry
-            {
-                TenantId = mapping.TenantId,
-                EventType = "SECURITY_FUNCTIONAL_MAPPING_CREATED",
-                ActorSid = new Sid(mapping.CreatedBy),
-                TargetTable = "FUNCTIONAL_RIGHT_MAPPINGS",
-                Decision = "ALLOW",
-                DetailsJson = JsonSerializer.Serialize(new
-                {
-                    realm_id = mapping.RealmId,
-                    group_or_role = mapping.GroupOrRole,
-                    functional_right = mapping.FunctionalRight.Value,
-                    is_privileged = mapping.FunctionalRight.IsPrivileged,
-                    approved_by = sanitized.ApprovedBy
-                })
-            };
-            await _auditWriter.RecordRequiredAsync(entry, ct).ConfigureAwait(false);
-        }
-    }
-
-    public async Task ApproveMappingAsync(
-        TenantId tenantId,
-        string realmId,
-        string groupOrRole,
-        FunctionalRight right,
-        string approverId,
-        CancellationToken ct = default)
-    {
-        ArgumentException.ThrowIfNullOrWhiteSpace(approverId);
-
-        var existing = await _repository.GetMappingAsync(tenantId, realmId, groupOrRole, right, ct).ConfigureAwait(false);
-        if (existing == null)
-        {
-            throw new KeyNotFoundException($"Mapping for '{groupOrRole}' -> '{right.Value}' not found.");
-        }
-
-        FunctionalRightMappingValidator.ValidateApproval(existing, approverId);
-
-        await _repository.ApproveMappingAsync(tenantId, realmId, groupOrRole, right, approverId, ct).ConfigureAwait(false);
-
-        if (_auditWriter != null)
-        {
-            var entry = new AuditLogEntry
-            {
-                TenantId = tenantId,
-                EventType = "SECURITY_FUNCTIONAL_MAPPING_APPROVED",
-                ActorSid = new Sid(approverId),
-                TargetTable = "FUNCTIONAL_RIGHT_MAPPINGS",
-                Decision = "ALLOW",
-                DetailsJson = JsonSerializer.Serialize(new
-                {
-                    realm_id = realmId,
-                    group_or_role = groupOrRole,
-                    functional_right = right.Value,
-                    approved_by = approverId,
-                    created_by = existing.CreatedBy
-                })
-            };
-            await _auditWriter.RecordRequiredAsync(entry, ct).ConfigureAwait(false);
-        }
-    }
-
-    public async Task<FunctionalRightMapping> ProposeMappingAsync(
+    public async Task<FunctionalRightMapping> SaveMappingAsync(
         TenantId tenantId,
         string realmId,
         string groupOrRole,
         FunctionalRight right,
         string recertClass,
-        string createdBy,
+        SingleApprovalWriter writer,
         CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(writer);
+        ArgumentException.ThrowIfNullOrWhiteSpace(writer.SubjectKey);
+        var now = _timeProvider.GetUtcNow();
+
+        // Single approval (Amendment 2): the save of a governance admin is the approval, so the mapping is effective immediately.
         var mapping = new FunctionalRightMapping(
             tenantId,
             realmId,
             groupOrRole,
             right,
-            ApprovedBy: null,
-            ApprovedAt: null,
+            ApprovedBy: writer.SubjectKey,
+            ApprovedAt: now,
             RecertClass: string.IsNullOrWhiteSpace(recertClass) ? "Standard" : recertClass,
-            CreatedBy: createdBy,
-            CreatedAt: _timeProvider.GetUtcNow());
+            CreatedBy: writer.SubjectKey,
+            CreatedAt: now);
 
-        await CreateMappingAsync(mapping, ct).ConfigureAwait(false);
+        FunctionalRightMappingValidator.ValidateCreation(mapping, _realmRegistry.GetRealm(realmId));
+
+        // Compensating control: a writer never maps a right to an own identifier, group or role.
+        SelfWideningGuard.EnsureDoesNotWidenOwnAccess(writer, [groupOrRole]);
+
+        var before = await _repository.GetMappingAsync(tenantId, realmId, groupOrRole, right, ct).ConfigureAwait(false);
+        await RecordChangeAsync(writer, tenantId, "SECURITY_FUNCTIONAL_MAPPING_SAVED", HashOf(before), HashOf(mapping), ct).ConfigureAwait(false);
+        await _repository.CreateMappingAsync(mapping, ct).ConfigureAwait(false);
         return mapping;
     }
 
@@ -242,30 +156,45 @@ public sealed class FunctionalRightMapper : IFunctionalRightMapper
         string realmId,
         string groupOrRole,
         FunctionalRight right,
-        string deletedBy,
+        SingleApprovalWriter writer,
         CancellationToken ct = default)
     {
+        ArgumentNullException.ThrowIfNull(writer);
+        ArgumentException.ThrowIfNullOrWhiteSpace(writer.SubjectKey);
+        var before = await _repository.GetMappingAsync(tenantId, realmId, groupOrRole, right, ct).ConfigureAwait(false);
+        await RecordChangeAsync(writer, tenantId, "SECURITY_FUNCTIONAL_MAPPING_DELETED", HashOf(before), null, ct).ConfigureAwait(false);
         await _repository.DeleteMappingAsync(tenantId, realmId, groupOrRole, right, ct).ConfigureAwait(false);
+    }
 
-        if (_auditWriter != null)
+    // Compensating control: every change is audited with a before/after hash (never values) before it is written; without an audit writer, or
+    // when the audit fails, the change is refused (fail closed).
+    private async Task RecordChangeAsync(SingleApprovalWriter writer, TenantId tenantId, string eventType, string? beforeHash, string? afterHash, CancellationToken ct)
+    {
+        if (_auditWriter is null)
         {
-            var entry = new AuditLogEntry
-            {
-                TenantId = tenantId,
-                EventType = "SECURITY_FUNCTIONAL_MAPPING_DELETED",
-                ActorSid = new Sid(deletedBy),
-                TargetTable = "FUNCTIONAL_RIGHT_MAPPINGS",
-                Decision = "ALLOW",
-                DetailsJson = JsonSerializer.Serialize(new
-                {
-                    realm_id = realmId,
-                    group_or_role = groupOrRole,
-                    functional_right = right.Value,
-                    deleted_by = deletedBy
-                })
-            };
+            throw new SingleApprovalRefusedException("AuditFailed", "The functional-right change was refused: no audit writer is available.");
+        }
+
+        var entry = SelfWideningGuard.AuditEntry(writer, new SingleApprovalChange(tenantId, eventType, "FUNCTIONAL_RIGHT_MAPPINGS", beforeHash, afterHash));
+        try
+        {
             await _auditWriter.RecordRequiredAsync(entry, ct).ConfigureAwait(false);
         }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            throw new SingleApprovalRefusedException("AuditFailed", "The functional-right change was refused: the audit entry could not be written.", ex);
+        }
+    }
+
+    private static string? HashOf(FunctionalRightMapping? mapping)
+    {
+        if (mapping is null)
+        {
+            return null;
+        }
+
+        var canonical = string.Join('\n', mapping.TenantId.Value, mapping.RealmId, mapping.GroupOrRole, mapping.FunctionalRight.Value,
+            mapping.ApprovedBy ?? string.Empty, mapping.RecertClass);
+        return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(canonical)));
     }
 }
-

@@ -187,6 +187,45 @@ public abstract class ClassificationContract : GovernanceContractBase
 
     [RequiresContainerRuntimeFact]
     [Trait("Category", "Security")]
+    public async Task Classification_reference_check_counts_column_classifications_by_scope()
+    {
+        if (!Store.IsAvailable) return;
+
+        var id = new TableIdentifier("crm", "public", "ref_" + Guid.NewGuid().ToString("N")[..10]);
+        var table = new Table
+        {
+            Id = Guid.NewGuid(), SourceType = "sql", SourceName = id.Domain, SchemaName = id.Schema, TableName = id.TableName,
+            DisplayName = id.TableName, IsActive = true
+        };
+        await Store.TableMetadata.UpsertTableMetadataAsync(new TableMetadata
+        {
+            Identifier = id,
+            Table = table,
+            Columns = [new TableColumn { TableId = table.Id, ColumnName = "ssn", DataType = "TEXT" }]
+        });
+        var columnId = (await Store.TableMetadata.GetTableMetadataAsync(id))!.Columns.Single().Id.ToString();
+
+        (await Classifications.IsClassificationReferencedAsync(ClassificationScopes.Global, "REF_TAG")).Should().BeFalse();
+
+        await Classifications.AssignColumnClassificationAsync(new ColumnClassification
+        {
+            Scope = Store.TenantA.Value,
+            TableColumnId = columnId,
+            Code = "REF_TAG",
+            Source = "ADMIN",
+            AssignedBy = "admin-a",
+            AssignedAt = FixedTime
+        });
+
+        (await Classifications.IsClassificationReferencedAsync(Store.TenantA.Value, "REF_TAG")).Should().BeTrue();
+        (await Classifications.IsClassificationReferencedAsync(ClassificationScopes.Global, "REF_TAG")).Should().BeTrue();
+        (await Classifications.IsClassificationReferencedAsync(Store.TenantB.Value, "REF_TAG")).Should().BeFalse();
+        Func<Task> invalid = () => Classifications.IsClassificationReferencedAsync(Store.TenantA.Value, "bad code");
+        await invalid.Should().ThrowAsync<ArgumentException>();
+    }
+
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
     public async Task Unknown_column_id_resolves_to_no_table_and_blank_id_is_rejected()
     {
         if (!Store.IsAvailable) return;

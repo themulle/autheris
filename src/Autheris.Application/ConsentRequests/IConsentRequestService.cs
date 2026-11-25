@@ -25,7 +25,7 @@ using Autheris.Domain.Model;
 /// <param name="RequestedDuration">Optional ISO-8601 duration string (for example, <c>P2W</c>).</param>
 /// <param name="RequestedValidFrom">Optional start of the requested validity window.</param>
 /// <param name="RequestedValidTo">Optional explicit end of the requested validity window.</param>
-/// <param name="RequestedClear">Optional per-classification Clear access: classifications with the columns they should be cleared for.</param>
+/// <param name="RequestedUnmaskColumns">Optional columns the requester wants in clear form: submitted as one per-object unmask request.</param>
 public sealed record ConsentRequestSubmission(
     string Domain,
     string Schema,
@@ -42,7 +42,7 @@ public sealed record ConsentRequestSubmission(
     string? RequestedDuration = null,
     DateTimeOffset? RequestedValidFrom = null,
     DateTimeOffset? RequestedValidTo = null,
-    IReadOnlyList<Autheris.Application.ConsentRequests.ClassificationClear.RequestedClearItem>? RequestedClear = null);
+    IReadOnlyList<string>? RequestedUnmaskColumns = null);
 
 /// <summary>Outcome of a consent request submission.</summary>
 public sealed class SubmitConsentRequestResult

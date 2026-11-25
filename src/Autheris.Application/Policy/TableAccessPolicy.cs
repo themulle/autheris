@@ -52,6 +52,12 @@ public sealed record TableAccessQuery(
     /// <summary>Issue #1047: only <see cref="TableAccessDecision.IsAllowed"/> is used (see <see cref="AccessRequest.AllowOnly"/>).</summary>
     public bool AllowOnly { get; init; }
 
+    /// <summary>
+    /// The caller's unmask coverage for this decision (set by the policy, resolved lazily and once). Every masking stage reads it, so a
+    /// classification mask and a protection mask are lifted by the same unmask grants. <c>null</c> = nothing is unmasked.
+    /// </summary>
+    public Autheris.Application.Policy.Protection.UnmaskCoverageSource? Unmask { get; init; }
+
     public static TableAccessQuery ForPrincipal(
         ClaimsPrincipal principal,
         Sid userSid,

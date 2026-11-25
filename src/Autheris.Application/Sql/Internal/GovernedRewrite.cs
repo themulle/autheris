@@ -22,7 +22,6 @@ internal sealed record GovernedRewrite(
     IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>? IndexHints = null,
     long? WriteMaxRowsPerStatement = null,
     IReadOnlyList<Autheris.Domain.Interfaces.MaskedColumnAuditEntry>? MaskedColumnsAudit = null,
-    IReadOnlyList<Autheris.Domain.Interfaces.GrantClassificationAuditEntry>? GrantClassificationsAudit = null,
     string? MetricViewHiddenCountAlias = null,
     int MetricViewMinGroupSize = 0);
 

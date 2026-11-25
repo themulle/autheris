@@ -6,7 +6,9 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Governance.Caching;
 using Autheris.Application.Governance.Policy;
+using Autheris.Application.Identity.Attributes;
 using Autheris.Application.Policy.Pdp;
 using Autheris.Application.Policy.Services;
 using Autheris.Application.Policy;
@@ -160,6 +162,17 @@ public sealed class TableAccessPolicyUnmaskTests
     }
 
     [Fact]
+    public async Task Credentials_column_stays_masked_with_unmask_grant()
+    {
+        var resolver = new FakeUnmaskResolver((_, _) => new UnmaskCoverage(wholeTable: true, new HashSet<string>()));
+        var decision = await CreatePolicy(Protection(Columns(("password_hash", "CREDENTIALS"), ("email", "PII"))), resolver)
+            .DecideAsync(Query(), CancellationToken.None);
+
+        decision.GetColumnAccess("password_hash").ShouldBe(ColumnAccessLevel.Mask);
+        decision.GetColumnAccess("email").ShouldBe(ColumnAccessLevel.Clear);
+    }
+
+    [Fact]
     public async Task Unmask_without_data_access_yields_nothing()
     {
         var resolver = new FakeUnmaskResolver((_, _) => new UnmaskCoverage(wholeTable: true, new HashSet<string>()));
@@ -192,6 +205,38 @@ public sealed class TableAccessPolicyUnmaskTests
 
         decision.IsAllowed.ShouldBeTrue();
         decision.GetColumnAccess("email").ShouldBe(ColumnAccessLevel.Mask);
+    }
+
+    [Fact]
+    public async Task Unmask_grant_lifts_mask_through_registered_consent_repository_decorator_but_never_credentials()
+    {
+        // #1009 A-3 regression: the composition root registers AttributeValidatingConsentRepository as IConsentRepository. Before the
+        // fix it did not forward the unmask read, so the interface default (no grants) hid every unmask grant from the resolver.
+        var store = new FakeConsentRepository();
+        await store.CreateConsentAsync(new Consent
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Tenant,
+            TableIdentifier = TableId,
+            GranteeType = GranteeType.User,
+            GranteeSid = CallerSid,
+            Effect = ConsentEffect.Allow,
+            GrantKind = PermissionGrantKind.Unmask,
+            TargetColumns = ["email", "password_hash"],
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1)
+        });
+        var registered = new AttributeValidatingConsentRepository(store, NSubstitute.Substitute.For<IConsentMaterializationGuard>());
+        var epochs = new GovernanceEpochProvider(NSubstitute.Substitute.For<IGovernanceEpochStore>());
+        using var resolver = new UnmaskGrantResolver(registered, epochs);
+
+        var decision = await CreatePolicy(Protection(Columns(("email", "PII"), ("password_hash", "CREDENTIALS"), ("amount", "FINANCIAL"))), resolver)
+            .DecideAsync(Query(), CancellationToken.None);
+
+        decision.IsAllowed.ShouldBeTrue();
+        decision.GetColumnAccess("email").ShouldBe(ColumnAccessLevel.Clear);
+        decision.GetColumnAccess("password_hash").ShouldBe(ColumnAccessLevel.Mask);
+        decision.GetColumnAccess("amount").ShouldBe(ColumnAccessLevel.Mask);
     }
 
     private sealed class FakeUnmaskResolver(Func<IReadOnlyCollection<Sid>, bool, UnmaskCoverage> factory) : IUnmaskGrantResolver

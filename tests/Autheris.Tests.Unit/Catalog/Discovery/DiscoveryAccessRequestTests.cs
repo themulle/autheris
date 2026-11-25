@@ -12,7 +12,6 @@ using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
-using Autheris.Application.ConsentRequests.ClassificationClear;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -45,7 +44,9 @@ public sealed class DiscoveryAccessRequestTests
     }
 
     private static DiscoveryColumn Col(string name, DiscoveryColumnState state = DiscoveryColumnState.Masked, params string[] clearable) =>
-        new(name, null, "varchar", null, clearable.Length > 0, clearable.Length > 0, state, null, ClearRequestable: clearable);
+        new(name, null, "varchar", null, clearable.Length > 0, clearable.Length > 0, state, null,
+            Classifications: clearable.Select(static c => new DiscoveryColumnClassification(c, c)).ToList(),
+            ClearRequestable: clearable.Where(static c => c != ClassificationScopes.CredentialsCode).ToList());
 
     private static DiscoveryObject Table(bool hidden = false, params DiscoveryColumn[] columns) =>
         new(DiscoveryObjectKind.Table, "sales", "dbo", "orders", null, null, "NORMAL", [], [], DiscoveryAccessState.None, null, columns, null, false, hidden);
@@ -65,16 +66,14 @@ public sealed class DiscoveryAccessRequestTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task RequestAccess_ClearColumns_MapToRequestedClearByClassification()
+    public async Task RequestAccess_ClearColumns_BecomeOnePerObjectUnmaskRequest()
     {
-        Discovered(Table(false, Col("email", DiscoveryColumnState.Masked, "PII"), Col("iban", DiscoveryColumnState.Masked, "PII", "FINANCIAL"), Col("id", DiscoveryColumnState.Clear)));
+        Discovered(Table(false, Col("email", DiscoveryColumnState.Masked, "PII"), Col("iban", DiscoveryColumnState.Masked, "PII", "FINANCIAL"),
+            Col("note", DiscoveryColumnState.Masked), Col("id", DiscoveryColumnState.Clear)));
 
-        await Service().RequestAsync(Request("EMAIL", "iban"), Caller());
+        await Service().RequestAsync(Request("iban", "EMAIL", "note", "email"), Caller());
 
-        var clear = _submitted!.RequestedClear!.ToDictionary(i => i.Classification, i => i.Columns.ToArray());
-        clear.Keys.Order().ShouldBe(["FINANCIAL", "PII"]);
-        clear["PII"].ShouldBe(["email", "iban"]);
-        clear["FINANCIAL"].ShouldBe(["iban"]);
+        _submitted!.RequestedUnmaskColumns.ShouldBe(["email", "iban", "note"]);
     }
 
     [Fact]
@@ -82,10 +81,10 @@ public sealed class DiscoveryAccessRequestTests
     public async Task RequestAccess_HiddenOrUnknownColumn_SameInvalidColumnsError()
     {
         Discovered(Table(false, Col("email", DiscoveryColumnState.Masked, "PII"), Col("denied", DiscoveryColumnState.NoAccess, "PII"),
-            Col("plain", DiscoveryColumnState.Masked), Col("open", DiscoveryColumnState.Clear, "PII")));
+            Col("secret", DiscoveryColumnState.Masked, ClassificationScopes.CredentialsCode), Col("open", DiscoveryColumnState.Clear, "PII")));
 
         var errors = new List<(string Code, string Message)>();
-        foreach (var name in new[] { "missing", "hidden_in_catalog", "denied", "plain", "open", "  " })
+        foreach (var name in new[] { "missing", "hidden_in_catalog", "denied", "secret", "open", "  " })
         {
             var ex = await Should.ThrowAsync<ConsentRequestException>(() => Service().RequestAsync(Request("email", name), Caller()));
             errors.Add((ex.Code, ex.Message));
@@ -155,7 +154,7 @@ public sealed class DiscoveryAccessRequestTests
         await Service().RequestAsync(Request() with { DurationDays = null }, Caller());
 
         _submitted!.DurationDays.ShouldBeGreaterThanOrEqualTo(1);
-        _submitted.RequestedClear.ShouldBeNull();
+        _submitted.RequestedUnmaskColumns.ShouldBeNull();
     }
 
     [Fact]

@@ -14,7 +14,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
-using Autheris.Application.ConsentRequests.ClassificationClear;
 using Autheris.Application.ConsentRequests.ProfileAssignments;
 using Autheris.Application.ConsentRequests.Routing;
 using Autheris.Application.Governance.ConsentRequests;

@@ -26,12 +26,6 @@ public sealed class GrantValidityOptions
     public string? DeclarativeMaxDuration { get; set; }
 
     /// <summary>
-    /// Maximum number of days a per-classification Clear access may last when the classification defines no
-    /// <c>max_clear_days</c> of its own. The effective Clear validity is additionally bounded by the grant validity.
-    /// </summary>
-    public int DefaultMaxClearDays { get; set; } = 90;
-
-    /// <summary>
     /// Test/unit default (multi-year) for service construction without dependency injection. It is NOT a production
     /// fallback: production requires explicit configuration and startup validation fails when <see cref="MaxDuration"/> is missing.
     /// </summary>

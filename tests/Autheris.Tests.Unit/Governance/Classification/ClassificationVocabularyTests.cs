@@ -45,33 +45,25 @@ public sealed class ClassificationVocabularyTests
     }
 
     [Fact]
-    public void Tenant_row_overrides_builtin_approver()
+    public void Tenant_row_overrides_builtin_definition()
     {
         var rows = CreateBuiltins().ToList();
         rows.Add(new DataClassification
         {
             Scope = "acme",
             Code = "PII",
-            DisplayName = "Personally Identifiable Information",
+            DisplayName = "Acme personal data",
             RestrictionRank = 40,
-            ClearGrantable = true,
-            SeparateApproval = true,
-            ApproverMode = ApproverMode.Steward,
-            StewardGroupSid = "S-1-5-21-acme-stewards",
-            MaxClearDays = 14,
             UpdatedBy = "acme-admin",
             UpdatedAt = FixedTimestamp
         });
 
         var acmeEffective = ClassificationHierarchyValidator.ResolveEffective(rows, "acme");
-        acmeEffective["PII"].ApproverMode.ShouldBe(ApproverMode.Steward);
-        acmeEffective["PII"].StewardGroupSid.ShouldBe("S-1-5-21-acme-stewards");
-        acmeEffective["PII"].MaxClearDays.ShouldBe(14);
+        acmeEffective["PII"].DisplayName.ShouldBe("Acme personal data");
         acmeEffective["PII"].Scope.ShouldBe("acme");
 
         var otherEffective = ClassificationHierarchyValidator.ResolveEffective(rows, "other-tenant");
-        otherEffective["PII"].ApproverMode.ShouldBe(ApproverMode.DataOwner);
-        otherEffective["PII"].StewardGroupSid.ShouldBeNull();
+        otherEffective["PII"].DisplayName.ShouldNotBe("Acme personal data");
         otherEffective["PII"].Scope.ShouldBe("*");
     }
 
@@ -108,20 +100,6 @@ public sealed class ClassificationVocabularyTests
         var twoNodeCycle = classA with { ParentCode = "CLASS_B" };
         Should.Throw<ArgumentException>(() =>
             ClassificationHierarchyValidator.ValidateDefinition(twoNodeCycle, baseMap));
-    }
-
-    [Fact]
-    public void Credentials_cannot_be_clear_grantable()
-    {
-        var effective = CreateBuiltins().ToDictionary(c => c.Code, StringComparer.Ordinal);
-        var clearCredentials = effective["CREDENTIALS"] with { ClearGrantable = true };
-
-        Should.Throw<ArgumentException>(() =>
-            ClassificationHierarchyValidator.ValidateDefinition(clearCredentials, effective));
-
-        var validCredentials = effective["CREDENTIALS"] with { Scope = "tenant-a", UpdatedAt = FixedTimestamp };
-        Should.NotThrow(() =>
-            ClassificationHierarchyValidator.ValidateDefinition(validCredentials, effective));
     }
 
     [Theory]
@@ -177,9 +155,6 @@ public sealed class ClassificationVocabularyTests
             Code = "PUBLIC",
             DisplayName = "Public",
             RestrictionRank = 0,
-            ClearGrantable = true,
-            SeparateApproval = false,
-            ApproverMode = ApproverMode.DataOwner,
             UpdatedBy = "MIGRATION",
             UpdatedAt = FixedTimestamp
         },
@@ -189,9 +164,6 @@ public sealed class ClassificationVocabularyTests
             Code = "CONFIDENTIAL",
             DisplayName = "Confidential",
             RestrictionRank = 20,
-            ClearGrantable = true,
-            SeparateApproval = true,
-            ApproverMode = ApproverMode.DataOwner,
             UpdatedBy = "MIGRATION",
             UpdatedAt = FixedTimestamp
         },
@@ -201,9 +173,6 @@ public sealed class ClassificationVocabularyTests
             Code = "FINANCIAL",
             DisplayName = "Financial",
             RestrictionRank = 30,
-            ClearGrantable = true,
-            SeparateApproval = true,
-            ApproverMode = ApproverMode.DataOwner,
             UpdatedBy = "MIGRATION",
             UpdatedAt = FixedTimestamp
         },
@@ -213,9 +182,6 @@ public sealed class ClassificationVocabularyTests
             Code = "PII",
             DisplayName = "Personally Identifiable Information",
             RestrictionRank = 40,
-            ClearGrantable = true,
-            SeparateApproval = true,
-            ApproverMode = ApproverMode.DataOwner,
             UpdatedBy = "MIGRATION",
             UpdatedAt = FixedTimestamp
         },
@@ -226,10 +192,6 @@ public sealed class ClassificationVocabularyTests
             DisplayName = "Special Category Personal Data",
             ParentCode = "PII",
             RestrictionRank = 60,
-            ClearGrantable = true,
-            SeparateApproval = true,
-            ApproverMode = ApproverMode.DataOwnerAndSteward,
-            StewardGroupSid = "STEWARD_UNCONFIGURED",
             UpdatedBy = "MIGRATION",
             UpdatedAt = FixedTimestamp
         },
@@ -239,9 +201,6 @@ public sealed class ClassificationVocabularyTests
             Code = "CREDENTIALS",
             DisplayName = "Credentials",
             RestrictionRank = 90,
-            ClearGrantable = false,
-            SeparateApproval = true,
-            ApproverMode = ApproverMode.DataOwner,
             UpdatedBy = "MIGRATION",
             UpdatedAt = FixedTimestamp
         }

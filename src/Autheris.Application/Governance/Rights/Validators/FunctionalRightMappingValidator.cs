@@ -1,11 +1,15 @@
 namespace Autheris.Application.Governance.Rights.Validators;
 
 using System;
-using System.ComponentModel.DataAnnotations;
 using System.Security;
 using Autheris.Domain.Governance;
 using Autheris.Domain.Identity;
+using Autheris.Domain.Security;
 
+/// <summary>
+/// A functional-right mapping takes effect on save (single approval), so what it may confer is bounded instead: never an
+/// IT or governance capacity, and never a role outside the realm's <c>AllowedGatewayRoles</c>.
+/// </summary>
 public static class FunctionalRightMappingValidator
 {
     public static void ValidateCreation(FunctionalRightMapping mapping, IdentityRealm? realm)
@@ -14,33 +18,40 @@ public static class FunctionalRightMappingValidator
         ArgumentException.ThrowIfNullOrWhiteSpace(mapping.GroupOrRole);
         ArgumentException.ThrowIfNullOrWhiteSpace(mapping.CreatedBy);
 
-        // Customer Realm Ceiling
-        if (realm != null && (realm.Kind is IdentityRealmKind.EntraExternalId or IdentityRealmKind.AzureAdB2C or IdentityRealmKind.Customer))
+        if (ConfersCapacity(mapping.FunctionalRight))
         {
-            if (mapping.FunctionalRight.IsPrivileged ||
-                mapping.FunctionalRight == FunctionalRight.TenantAdmin ||
-                mapping.FunctionalRight == FunctionalRight.GovernanceAdmin ||
-                mapping.FunctionalRight == FunctionalRight.ClusterAdmin)
-            {
-                throw new SecurityException(
-                    $"Customer Realm '{realm.Id}' cannot be mapped to administrative or privileged right '{mapping.FunctionalRight.Value}' (SEC-SC-22: customer_realm_privilege_escalation_prohibited).");
-            }
+            throw new SecurityException(
+                $"A functional-right mapping cannot confer the IT or governance capacity '{mapping.FunctionalRight.Value}'.");
+        }
+
+        if (!WithinRealmRoles(mapping.FunctionalRight, realm))
+        {
+            throw new SecurityException(
+                $"A functional-right mapping cannot confer the role '{mapping.FunctionalRight.Value}' outside the realm's allowed gateway roles.");
         }
     }
 
-    public static void ValidateApproval(FunctionalRightMapping mapping, string approverId)
-    {
-        ArgumentNullException.ThrowIfNull(mapping);
-        ArgumentException.ThrowIfNullOrWhiteSpace(approverId);
+    /// <summary>
+    /// True for the rights that are an IT or governance capacity (the privileged rights, TenantAdmin and GovernanceAdmin): they come
+    /// only from the identity configuration, never from a mapping, in every realm (this also covers the customer-realm ceiling).
+    /// </summary>
+    public static bool ConfersCapacity(FunctionalRight right) =>
+        right.IsPrivileged ||
+        right == FunctionalRight.TenantAdmin ||
+        right == FunctionalRight.GovernanceAdmin ||
+        right == FunctionalRight.ClusterAdmin;
 
-        // Four-Eyes Principle: approver != creator for privileged rights
-        if (mapping.FunctionalRight.IsPrivileged)
+    /// <summary>
+    /// A right that names a gateway role is conferred only when the realm is known and lists that role in its allowed gateway roles
+    /// (fail closed for an unknown realm); a right that names no role is not bounded by the realm.
+    /// </summary>
+    public static bool WithinRealmRoles(FunctionalRight right, IdentityRealm? realm)
+    {
+        if (!GatewayRoleExtensions.TryParseGlobalRole(right.Value, out var role))
         {
-            if (string.Equals(approverId.Trim(), mapping.CreatedBy.Trim(), StringComparison.OrdinalIgnoreCase))
-            {
-                throw new SecurityException(
-                    $"Self-approval prohibited: Approver '{approverId}' cannot be identical to Creator '{mapping.CreatedBy}' for privileged right '{mapping.FunctionalRight.Value}' (SEC-SC-22).");
-            }
+            return true;
         }
+
+        return realm is not null && realm.AllowedGatewayRoles.Contains(role);
     }
 }

@@ -15,7 +15,7 @@ using Shouldly;
 using Xunit;
 
 /// <summary>
-/// SR-H-04 regression tests: classification workflow preconditions, distinct approvers, fail-closed rank/step-up.
+/// SR-H-04 regression tests: classification workflow preconditions, single approval (Amendment 2), fail-closed rank/step-up.
 /// </summary>
 public sealed class ClassificationWorkflowSrH04Tests
 {
@@ -70,7 +70,7 @@ public sealed class ClassificationWorkflowSrH04Tests
         var result = await sm.TransitionAsync(forged, Req(forged, Compliance, "DATA_GOVERNANCE_REVIEWER"));
 
         result.Success.ShouldBeFalse();
-        result.ErrorCode.ShouldBe("INVALID_WORKFLOW_STATE");
+        result.ErrorCode.ShouldBe("STEP_UP_AUTH_REQUIRED");
         (await store.GetProposalByIdAsync(real.ProposalId))!.Status.ShouldBe("PENDING_OWNER_REVIEW");
 
         // Forged low ranks cannot dodge step-up either: stored rank 4 still requires the token.
@@ -90,9 +90,6 @@ public sealed class ClassificationWorkflowSrH04Tests
 
     // Problem 2: status preconditions.
     [Theory]
-    [InlineData("PENDING_OWNER_REVIEW", "DATA_GOVERNANCE_REVIEWER", "APPROVE")]
-    [InlineData("UNCLASSIFIED", "DATA_GOVERNANCE_REVIEWER", "APPROVE")]
-    [InlineData("PENDING_GOVERNANCE_REVIEW", "DATA_OWNER", "APPROVE")]
     [InlineData("CLASSIFIED", "DATA_OWNER", "APPROVE")]
     [InlineData("CLASSIFIED", "DATA_GOVERNANCE_REVIEWER", "APPROVE")]
     [InlineData("REJECTED", "DATA_OWNER", "APPROVE")]
@@ -103,7 +100,7 @@ public sealed class ClassificationWorkflowSrH04Tests
     public async Task SR_H_04_InvalidStatusForTransition_IsDenied(string status, string role, string action)
     {
         var (sm, store) = Create();
-        var p = Proposal(1, status) with { Stage1ApproverSid = "S-other" };
+        var p = Proposal(1, status) with { ApprovedBySid = "S-other" };
         await store.SaveProposalAsync(p);
 
         var sid = role == "DATA_OWNER" ? Owner : Compliance;
@@ -125,46 +122,40 @@ public sealed class ClassificationWorkflowSrH04Tests
         result.ErrorCode.ShouldBe("INVALID_ACTION");
     }
 
-    // Problem 3: distinct approvers.
-    [Fact]
-    public async Task SR_H_04_Stage2ByStage1Approver_IsDenied()
+    // Single approval (Amendment 2): one decision by a DG or owner member settles the proposal; no second stage.
+    [Theory]
+    [InlineData("PENDING_OWNER_REVIEW", "DATA_OWNER")]
+    [InlineData("PENDING_OWNER_REVIEW", "DATA_GOVERNANCE_REVIEWER")]
+    [InlineData("UNCLASSIFIED", "DATA_GOVERNANCE_REVIEWER")]
+    [InlineData("PENDING_GOVERNANCE_REVIEW", "DATA_OWNER")]
+    [InlineData("PENDING_GOVERNANCE_REVIEW", "DATA_GOVERNANCE_REVIEWER")]
+    public async Task Single_approval_one_decision_classifies(string status, string role)
     {
         var (sm, store) = Create();
-        var p = Proposal(3);
+        var p = Proposal(3, status);
         await store.SaveProposalAsync(p);
+        var sid = role == "DATA_OWNER" ? Owner : Compliance;
 
-        (await sm.TransitionAsync(p, Req(p, Owner, "DATA_OWNER"))).NewStatus.ShouldBe("PENDING_GOVERNANCE_REVIEW");
-        (await store.GetProposalByIdAsync(p.ProposalId))!.Stage1ApproverSid.ShouldBe(Owner);
+        var result = await sm.TransitionAsync(p, Req(p, sid, role));
 
-        // Same principal performing stage 2 (also covers an owner changed after stage 1).
-        await store.UpdateDataOwnerAsync(p.TableIdentifier, "S-new-owner");
-        var result = await sm.TransitionAsync(p, Req(p, Owner, "DATA_GOVERNANCE_REVIEWER"));
-        result.Success.ShouldBeFalse();
-        result.ErrorCode.ShouldBe("DISTINCT_APPROVER_REQUIRED");
+        result.Success.ShouldBeTrue(result.Message);
+        result.NewStatus.ShouldBe("CLASSIFIED");
+        var stored = (await store.GetProposalByIdAsync(p.ProposalId))!;
+        stored.Status.ShouldBe("CLASSIFIED");
+        stored.ApprovedBySid.ShouldBe(sid);
     }
 
     [Fact]
-    public async Task SR_H_04_ApproverEqualsProposer_IsDeniedUnderFourEyes()
+    public async Task Single_approval_proposer_may_decide_a_proposal_that_lowers_nothing()
     {
         var (sm, store) = Create();
         var p = Proposal(3, proposer: Owner);
         await store.SaveProposalAsync(p);
 
         var result = await sm.TransitionAsync(p, Req(p, Owner, "DATA_OWNER"));
-        result.Success.ShouldBeFalse();
-        result.ErrorCode.ShouldBe("DISTINCT_APPROVER_REQUIRED");
-    }
 
-    [Fact]
-    public async Task SR_H_04_Stage2WithoutRecordedStage1Approver_FailsClosed()
-    {
-        var (sm, store) = Create();
-        var p = Proposal(3, "PENDING_GOVERNANCE_REVIEW");
-        await store.SaveProposalAsync(p);
-
-        var result = await sm.TransitionAsync(p, Req(p, Compliance, "DATA_GOVERNANCE_REVIEWER"));
-        result.Success.ShouldBeFalse();
-        result.ErrorCode.ShouldBe("DISTINCT_APPROVER_REQUIRED");
+        result.Success.ShouldBeTrue(result.Message);
+        result.NewStatus.ShouldBe("CLASSIFIED");
     }
 
     // Problem 5: decisions cannot lower ranks.
@@ -180,20 +171,6 @@ public sealed class ClassificationWorkflowSrH04Tests
 
         result.Success.ShouldBeFalse();
         result.ErrorCode.ShouldBe("STEP_UP_AUTH_REQUIRED");
-    }
-
-    [Fact]
-    public async Task SR_H_04_LoweredColumnDecision_DoesNotBypassFourEyes()
-    {
-        var (sm, store) = Create();
-        var p = Proposal(3);
-        await store.SaveProposalAsync(p);
-
-        var lowered = new ColumnClassificationDecision("SALARY", "OVERRIDE", "L0", 0, "NONE");
-        var result = await sm.TransitionAsync(p, Req(p, Owner, "DATA_OWNER", decisions: lowered));
-
-        result.Success.ShouldBeTrue();
-        result.NewStatus.ShouldBe("PENDING_GOVERNANCE_REVIEW");
     }
 
     [Fact]
@@ -236,26 +213,21 @@ public sealed class ClassificationWorkflowSrH04Tests
         good.Success.ShouldBeTrue();
     }
 
-    // Happy path: two distinct approvers.
+    // Happy path: one decider seals the proposal.
     [Fact]
-    public async Task SR_H_04_TwoDistinctApprovers_SealProposal()
+    public async Task SR_H_04_SingleDecider_SealsProposal()
     {
         var (sm, store) = Create();
         var p = Proposal(4);
         await store.SaveProposalAsync(p);
 
-        var s1 = await sm.TransitionAsync(p, Req(p, Owner, "DATA_OWNER", token: GoodCode));
-        s1.Success.ShouldBeTrue();
-        s1.NewStatus.ShouldBe("PENDING_GOVERNANCE_REVIEW");
-
-        var s2 = await sm.TransitionAsync(p, Req(p, Compliance, "DATA_GOVERNANCE_REVIEWER", token: GoodCode));
-        s2.Success.ShouldBeTrue();
-        s2.NewStatus.ShouldBe("CLASSIFIED");
+        var decided = await sm.TransitionAsync(p, Req(p, Owner, "DATA_OWNER", token: GoodCode));
+        decided.Success.ShouldBeTrue();
+        decided.NewStatus.ShouldBe("CLASSIFIED");
 
         var stored = (await store.GetProposalByIdAsync(p.ProposalId))!;
         stored.Status.ShouldBe("CLASSIFIED");
-        stored.Stage1ApproverSid.ShouldBe(Owner);
-        stored.Stage2ApproverSid.ShouldBe(Compliance);
+        stored.ApprovedBySid.ShouldBe(Owner);
 
         // Sealed proposals cannot be re-approved.
         var again = await sm.TransitionAsync(p, Req(p, Compliance, "DATA_GOVERNANCE_REVIEWER", token: GoodCode));

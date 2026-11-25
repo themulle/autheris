@@ -55,6 +55,22 @@ public sealed class Issue143RestrictedScopeParityTests : IClassFixture<Issue143R
             {
                 ColumnClassifications = ClassificationMetadata.Merge(air1.ColumnClassifications, TableMetadataClassificationTestExtensions.PiiFor("value"))
             });
+
+            // W5-03: classification clear grants are retired; the clear text of a classified column is lifted only by an active per-column unmask grant.
+            await repo.CreateConsentAsync(new Consent
+            {
+                TableId = air1.Table.Id,
+                TableIdentifier = Air1Id,
+                TenantId = new TenantId(Tenant),
+                Effect = ConsentEffect.Allow,
+                GranteeType = GranteeType.User,
+                GranteeSid = new Sid(DavidSid),
+                ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+                ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+                CreatedBySid = new Sid(DavidSid),
+                GrantKind = PermissionGrantKind.Unmask,
+                TargetColumns = ["value"]
+            });
         }
     }
 

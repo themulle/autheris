@@ -11,7 +11,6 @@ using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
-using Autheris.Application.ConsentRequests.ClassificationClear;
 using Autheris.Application.Governance.Grants;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -21,7 +20,7 @@ using Autheris.Domain.Security;
 using Microsoft.Extensions.Options;
 
 /// <summary>Input of a discovery access request (GraphQL and MCP adapters).</summary>
-/// <param name="ClearColumns">Column names the requester wants Clear access for; mapped to per-classification Clear requests.</param>
+/// <param name="ClearColumns">Column names the requester wants in clear form; submitted as one per-object unmask request (#1009 A-3).</param>
 public sealed record DiscoveryAccessRequest(
     string Domain,
     string Schema,
@@ -42,7 +41,7 @@ public interface IDiscoveryAccessRequestService
 /// <summary>
 /// Gate (authentication, optional role/scope; the hourly rate limit lives in the consent request service), discoverability check, clear-column mapping, idempotency of identical
 /// pending requests and audit in front of <see cref="IConsentRequestService"/>. A table that is hidden, foreign or unknown answers
-/// <c>NOT_FOUND</c>; an unknown, hidden, denied, already clear or non-clearable column answers <c>INVALID_COLUMNS</c>.
+/// <c>NOT_FOUND</c>; an unknown, hidden, denied, already clear or never-unmaskable (credentials) column answers <c>INVALID_COLUMNS</c>.
 /// </summary>
 public sealed class DiscoveryAccessRequestService : IDiscoveryAccessRequestService
 {
@@ -115,7 +114,7 @@ public sealed class DiscoveryAccessRequestService : IDiscoveryAccessRequestServi
             throw new ConsentRequestException(NotFoundCode, "The table was not found.");
         }
 
-        var requestedClear = MapClearColumns(discovered, request.ClearColumns);
+        var requestedClear = MapUnmaskColumns(discovered, request.ClearColumns);
 
         var existing = await FindPendingDuplicateAsync(sid, caller.Tenant, tableId, requestedClear, ct).ConfigureAwait(false);
         if (existing is not null)
@@ -134,15 +133,18 @@ public sealed class DiscoveryAccessRequestService : IDiscoveryAccessRequestServi
                 tableId.Domain, tableId.Schema, tableId.TableName, request.Justification, durationDays, request.IdempotencyKey,
                 sid, caller.Principal, caller.Tenant, request.Context,
                 RequestedDuration: request.RequestedDuration,
-                RequestedClear: requestedClear.Count > 0 ? requestedClear : null),
+                RequestedUnmaskColumns: requestedClear.Count > 0 ? requestedClear : null),
             ct).ConfigureAwait(false);
 
         await AuditAsync(caller, sid, tableId, requestedClear, result, ct).ConfigureAwait(false);
         return result;
     }
 
-    /// <summary>Groups the requested columns by the Clear-requestable classifications of each column.</summary>
-    internal static IReadOnlyList<RequestedClearItem> MapClearColumns(DiscoveryObject discovered, IReadOnlyList<string>? clearColumns)
+    /// <summary>
+    /// Canonical names of the requested columns. Only a column that is masked for the caller can be requested in clear form, and never
+    /// a column classified as credentials (an unmask grant never lifts that mask).
+    /// </summary>
+    internal static IReadOnlyList<string> MapUnmaskColumns(DiscoveryObject discovered, IReadOnlyList<string>? clearColumns)
     {
         if (clearColumns is null || clearColumns.Count == 0)
         {
@@ -154,7 +156,7 @@ public sealed class DiscoveryAccessRequestService : IDiscoveryAccessRequestServi
             throw InvalidColumns();
         }
 
-        var byCode = new SortedDictionary<string, List<string>>(StringComparer.Ordinal);
+        var columns = new List<string>(clearColumns.Count);
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var name in clearColumns)
         {
@@ -166,42 +168,33 @@ public sealed class DiscoveryAccessRequestService : IDiscoveryAccessRequestServi
             var column = discovered.Columns.FirstOrDefault(c => string.Equals(c.Name, name.Trim(), StringComparison.OrdinalIgnoreCase));
             if (column is null ||
                 column.State != DiscoveryColumnState.Masked ||
-                column.ClearRequestable.Count == 0)
+                column.Classifications.Any(static c => string.Equals(c.Code, ClassificationScopes.CredentialsCode, StringComparison.Ordinal)))
             {
                 throw InvalidColumns();
             }
 
-            if (!seen.Add(column.Name))
+            if (seen.Add(column.Name))
             {
-                continue;
-            }
-
-            foreach (var code in column.ClearRequestable)
-            {
-                if (!byCode.TryGetValue(code, out var list))
-                {
-                    byCode[code] = list = [];
-                }
-
-                list.Add(column.Name);
+                columns.Add(column.Name);
             }
         }
 
-        return byCode.Select(static kv => new RequestedClearItem(kv.Key, kv.Value)).ToList();
+        columns.Sort(StringComparer.OrdinalIgnoreCase);
+        return columns;
     }
 
     private static ConsentRequestException InvalidColumns() =>
         new(InvalidColumnsCode, "One or more clear columns are invalid.");
 
     private async Task<ConsentRequest?> FindPendingDuplicateAsync(
-        Sid sid, TenantId tenant, TableIdentifier table, IReadOnlyList<RequestedClearItem> wanted, CancellationToken ct)
+        Sid sid, TenantId tenant, TableIdentifier table, IReadOnlyList<string> wanted, CancellationToken ct)
     {
         if (_approvals is null)
         {
             return null;
         }
 
-        var wantedColumnKey = ColumnKey(wanted.SelectMany(i => i.Columns).ToArray());
+        var wantedColumnKey = ColumnKey(wanted);
         var requests = await _approvals.GetRequestsByRequesterSidAsync(sid, tenant, status: null, ct).ConfigureAwait(false);
         foreach (var r in requests)
         {
@@ -259,7 +252,7 @@ public sealed class DiscoveryAccessRequestService : IDiscoveryAccessRequestServi
     }
 
     private async Task AuditAsync(
-        CatalogCaller caller, Sid sid, TableIdentifier table, IReadOnlyList<RequestedClearItem> clear, SubmitConsentRequestResult result, CancellationToken ct)
+        CatalogCaller caller, Sid sid, TableIdentifier table, IReadOnlyList<string> clear, SubmitConsentRequestResult result, CancellationToken ct)
     {
         if (_audit is null)
         {
@@ -277,8 +270,7 @@ public sealed class DiscoveryAccessRequestService : IDiscoveryAccessRequestServi
             {
                 requestId = result.RequestId,
                 surface = caller.Channel.ToString(),
-                clearColumns = clear.SelectMany(static i => i.Columns).Distinct(StringComparer.OrdinalIgnoreCase).ToArray(),
-                classifications = clear.Select(static i => i.Classification).ToArray()
+                clearColumns = clear.ToArray()
             })
         }, ct).ConfigureAwait(false);
     }

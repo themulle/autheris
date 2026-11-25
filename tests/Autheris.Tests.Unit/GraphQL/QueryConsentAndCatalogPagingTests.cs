@@ -149,9 +149,7 @@ public sealed class QueryConsentAndCatalogPagingTests
         public Task<IReadOnlyList<ColumnMaskOverride>> GetColumnMaskOverridesAsync(string tableColumnId, string? tenantScope = null, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<ColumnMaskOverride>>([]);
         public Task<ColumnMaskOverride> UpsertColumnMaskOverrideAsync(ColumnMaskOverride maskOverride, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<bool> DeleteColumnMaskOverrideAsync(string scope, string tableColumnId, string? code, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<IReadOnlyList<ConsentClassificationAccess>> GetConsentClassificationAccessAsync(string tenantId, Guid consentId, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<ConsentClassificationAccess>>([]);
-        public Task<IReadOnlyList<ConsentClassificationAccess>> GetConsentClassificationAccessBatchAsync(string tenantId, IReadOnlyList<Guid> consentIds, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<ConsentClassificationAccess>>([]);
-        public Task<ConsentClassificationAccess> UpsertConsentClassificationAccessAsync(ConsentClassificationAccess entry, CancellationToken ct = default) => throw new NotSupportedException();
+        public Task<bool> IsClassificationReferencedAsync(string scope, string code, CancellationToken ct = default) => Task.FromResult(false);
     }
 
     private sealed class FixedVisibilityService(IReadOnlyList<TableMetadata> tables, CallerScope scope = CallerScope.Tenant) : ICatalogVisibilityService

@@ -13,7 +13,8 @@ namespace Autheris.Tests.Integration.Governance.Contract;
 
 /// <summary>
 /// Contract suite for <c>IFunctionalRightRepository</c> across PostgreSQL and SQL Server engines. Mappings are keyed by (tenant, realm, group or role,
-/// right); the approved read is the store-side defence behind the single mapping authority: self-approved privileged mappings never come back.
+/// right); the approved read is the store-side defence behind the single mapping authority: a mapping without an approver never comes back.
+/// A saved mapping is approved (single approval): what a mapping may confer is decided by the mapper.
 /// </summary>
 public abstract class FunctionalRightContract : GovernanceContractBase
 {
@@ -41,7 +42,7 @@ public abstract class FunctionalRightContract : GovernanceContractBase
         await Repo.CreateMappingAsync(Mapping(Store.TenantA, group, FunctionalRight.DataExport, "approver-a"));
         await Repo.CreateMappingAsync(Mapping(Store.TenantB, group, FunctionalRight.DataExport, "approver-b"));
 
-        await Repo.ApproveMappingAsync(Store.TenantB, Realm, group, FunctionalRight.DataExport, "someone-else");
+        await Repo.CreateMappingAsync(Mapping(Store.TenantB, group, FunctionalRight.DataExport, "someone-else"));
         await Repo.DeleteMappingAsync(Store.TenantB, Realm, group, FunctionalRight.DataExport);
 
         var kept = (await Repo.GetMappingAsync(Store.TenantA, Realm, group, FunctionalRight.DataExport)).ShouldNotBeNull();
@@ -61,7 +62,6 @@ public abstract class FunctionalRightContract : GovernanceContractBase
         await Should.ThrowAsync<ArgumentException>(() => Repo.GetMappingsAsync(default, Realm));
         await Should.ThrowAsync<ArgumentException>(() => Repo.GetMappingAsync(default, Realm, group, FunctionalRight.DataExport));
         await Should.ThrowAsync<ArgumentException>(() => Repo.GetApprovedMappingsForGroupsAndRolesAsync(default, Realm, [group]));
-        await Should.ThrowAsync<ArgumentException>(() => Repo.ApproveMappingAsync(default, Realm, group, FunctionalRight.DataExport, "approver"));
         await Should.ThrowAsync<ArgumentException>(() => Repo.DeleteMappingAsync(default, Realm, group, FunctionalRight.DataExport));
 
         (await Repo.GetMappingsAsync(Store.TenantA, Realm)).ShouldBeEmpty();
@@ -176,46 +176,17 @@ public abstract class FunctionalRightContract : GovernanceContractBase
     }
 
     [RequiresContainerRuntimeFact]
-    public async Task ApproveMapping_ReplacesTheApprover_AndStampsTheApprovalTime()
-    {
-        if (!Store.IsAvailable) return;
-        var group = Group();
-        await Repo.CreateMappingAsync(Mapping(Store.TenantA, group, FunctionalRight.DataExport, "first"));
-
-        await Repo.ApproveMappingAsync(Store.TenantA, Realm, group, FunctionalRight.DataExport, "second");
-
-        var read = (await Repo.GetMappingAsync(Store.TenantA, Realm, group, FunctionalRight.DataExport)).ShouldNotBeNull();
-        read.ApprovedBy.ShouldBe("second");
-        read.ApprovedAt!.Value.ShouldBeGreaterThan(Now);
-        read.CreatedBy.ShouldBe("creator");
-    }
-
-    [RequiresContainerRuntimeFact]
     [Trait("Category", "Security")]
-    public async Task ApprovedMappings_SelfApprovedPrivileged_Excluded()
+    public async Task ApprovedMappings_SavedMapping_Included_WhateverTheApprover()
     {
         if (!Store.IsAvailable) return;
         var group = Group();
-        await Repo.CreateMappingAsync(Mapping(Store.TenantA, group, FunctionalRight.SecurityAdmin, "Same-Person", "same-person"));
         await Repo.CreateMappingAsync(Mapping(Store.TenantA, group, FunctionalRight.DataExport, "same-person", "same-person"));
+        await Repo.CreateMappingAsync(Mapping(Store.TenantA, group, FunctionalRight.McpUse, "approver", "creator"));
 
         var approved = await Repo.GetApprovedMappingsForGroupsAndRolesAsync(Store.TenantA, Realm, [group]);
 
-        approved.ShouldNotContain(m => m.FunctionalRight == FunctionalRight.SecurityAdmin);
-        approved.ShouldContain(m => m.FunctionalRight == FunctionalRight.DataExport);
-    }
-
-    [RequiresContainerRuntimeFact]
-    [Trait("Category", "Security")]
-    public async Task ApprovedMappings_FourEyesPrivileged_Included()
-    {
-        if (!Store.IsAvailable) return;
-        var group = Group();
-        await Repo.CreateMappingAsync(Mapping(Store.TenantA, group, FunctionalRight.SecurityAdmin, "approver", "creator"));
-
-        var approved = await Repo.GetApprovedMappingsForGroupsAndRolesAsync(Store.TenantA, Realm, [group]);
-
-        approved.ShouldContain(m => m.FunctionalRight == FunctionalRight.SecurityAdmin);
+        approved.Select(m => m.FunctionalRight).ShouldBe([FunctionalRight.DataExport, FunctionalRight.McpUse], ignoreOrder: true);
     }
 
     [RequiresContainerRuntimeFact]
@@ -262,24 +233,6 @@ public abstract class FunctionalRightContract : GovernanceContractBase
         approved.ShouldNotContain(m => m.FunctionalRight == FunctionalRight.DataExport);
         approved.ShouldNotContain(m => m.FunctionalRight == FunctionalRight.SecurityAdmin);
         approved.ShouldContain(m => m.FunctionalRight == FunctionalRight.Consumer);
-    }
-
-    [RequiresContainerRuntimeFact]
-    public async Task ApproveMapping_PendingProposal_BecomesEffective()
-    {
-        if (!Store.IsAvailable) return;
-        var group = Group();
-        await Repo.CreateMappingAsync(Mapping(Store.TenantA, group, FunctionalRight.SecurityAdmin, approvedBy: null, createdBy: "creator"));
-
-        (await Repo.GetApprovedMappingsForGroupsAndRolesAsync(Store.TenantA, Realm, [group])).ShouldBeEmpty();
-
-        await Repo.ApproveMappingAsync(Store.TenantA, Realm, group, FunctionalRight.SecurityAdmin, "approver");
-
-        var read = (await Repo.GetMappingAsync(Store.TenantA, Realm, group, FunctionalRight.SecurityAdmin)).ShouldNotBeNull();
-        read.ApprovedBy.ShouldBe("approver");
-        read.ApprovedAt.ShouldNotBeNull();
-        var approved = await Repo.GetApprovedMappingsForGroupsAndRolesAsync(Store.TenantA, Realm, [group]);
-        approved.ShouldContain(m => m.FunctionalRight == FunctionalRight.SecurityAdmin && m.ApprovedBy == "approver");
     }
 
     [RequiresContainerRuntimeFact]

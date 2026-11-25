@@ -21,14 +21,6 @@ public enum MaskFunction
     GeoJitter
 }
 
-/// <summary>Approval workflow mode required to grant clear access for a classification.</summary>
-public enum ApproverMode
-{
-    DataOwner,
-    Steward,
-    DataOwnerAndSteward
-}
-
 /// <summary>Catalog metadata visibility when a column is masked under a rule or override.</summary>
 public enum CatalogTextVisibility
 {
@@ -167,37 +159,6 @@ public static class ClassificationMaskFunctions
     };
 }
 
-/// <summary>Canonical database codes for <see cref="ApproverMode"/>.</summary>
-public static class ClassificationApproverModes
-{
-    public static string ToCode(ApproverMode mode) => mode switch
-    {
-        ApproverMode.DataOwner => "DATA_OWNER",
-        ApproverMode.Steward => "STEWARD",
-        ApproverMode.DataOwnerAndSteward => "DATA_OWNER_AND_STEWARD",
-        _ => throw new ArgumentOutOfRangeException(nameof(mode), mode, "Unknown approver mode.")
-    };
-
-    public static bool TryParse(string? code, out ApproverMode mode)
-    {
-        switch (code)
-        {
-            case "DATA_OWNER":
-                mode = ApproverMode.DataOwner;
-                return true;
-            case "STEWARD":
-                mode = ApproverMode.Steward;
-                return true;
-            case "DATA_OWNER_AND_STEWARD":
-                mode = ApproverMode.DataOwnerAndSteward;
-                return true;
-            default:
-                mode = default;
-                return false;
-        }
-    }
-}
-
 /// <summary>Canonical database codes for <see cref="CatalogTextVisibility"/>.</summary>
 public static class ClassificationCatalogTextVisibilities
 {
@@ -233,11 +194,6 @@ public sealed record DataClassification
     public string? Description { get; init; }
     public string? ParentCode { get; init; }
     public int RestrictionRank { get; init; }
-    public bool ClearGrantable { get; init; } = true;
-    public bool SeparateApproval { get; init; } = true;
-    public ApproverMode ApproverMode { get; init; } = ApproverMode.DataOwner;
-    public string? StewardGroupSid { get; init; }
-    public int? MaxClearDays { get; init; }
     public bool IsActive { get; init; } = true;
     public int Version { get; init; } = 1;
     public string UpdatedBy { get; init; } = string.Empty;
@@ -360,25 +316,6 @@ public static class ClassificationHierarchyValidator
                 nameof(item),
                 item.RestrictionRank,
                 $"RestrictionRank must be between {MinRestrictionRank} and {MaxRestrictionRank}.");
-        }
-
-        if (string.Equals(item.Code, ClassificationScopes.CredentialsCode, StringComparison.Ordinal) &&
-            item.ClearGrantable)
-        {
-            throw new ArgumentException("CREDENTIALS classification can never allow clear access.", nameof(item));
-        }
-
-        if (item.ApproverMode != ApproverMode.DataOwner &&
-            string.IsNullOrWhiteSpace(item.StewardGroupSid))
-        {
-            throw new ArgumentException(
-                "StewardGroupSid is required when ApproverMode involves a steward.",
-                nameof(item));
-        }
-
-        if (item.MaxClearDays is <= 0)
-        {
-            throw new ArgumentOutOfRangeException(nameof(item), item.MaxClearDays, "MaxClearDays must be positive.");
         }
 
         if (item.ParentCode is not null)

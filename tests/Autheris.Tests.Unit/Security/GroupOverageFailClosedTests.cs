@@ -551,15 +551,10 @@ public sealed class GroupOverageFailClosedTests
         public Task<bool> HasRightAsync(ClaimsPrincipal principal, TenantId tenantId, string realmId, FunctionalRight right, CancellationToken ct = default) =>
             Task.FromResult(false);
 
-        public Task CreateMappingAsync(FunctionalRightMapping mapping, CancellationToken ct = default) => Task.CompletedTask;
-
-        public Task<FunctionalRightMapping> ProposeMappingAsync(TenantId tenantId, string realmId, string groupOrRole, FunctionalRight right, string recertClass, string createdBy, CancellationToken ct = default) =>
+        public Task<FunctionalRightMapping> SaveMappingAsync(TenantId tenantId, string realmId, string groupOrRole, FunctionalRight right, string recertClass, Autheris.Application.Governance.SingleApproval.SingleApprovalWriter writer, CancellationToken ct = default) =>
             throw new NotSupportedException();
 
-        public Task ApproveMappingAsync(TenantId tenantId, string realmId, string groupOrRole, FunctionalRight right, string approverId, CancellationToken ct = default) =>
-            Task.CompletedTask;
-
-        public Task DeleteMappingAsync(TenantId tenantId, string realmId, string groupOrRole, FunctionalRight right, string deletedBy, CancellationToken ct = default) =>
+        public Task DeleteMappingAsync(TenantId tenantId, string realmId, string groupOrRole, FunctionalRight right, Autheris.Application.Governance.SingleApproval.SingleApprovalWriter writer, CancellationToken ct = default) =>
             Task.CompletedTask;
     }
 }

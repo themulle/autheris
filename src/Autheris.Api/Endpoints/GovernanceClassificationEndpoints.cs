@@ -39,7 +39,7 @@ public static class GovernanceClassificationEndpoints
         {
             var proposal = await engine.ClassifyTableAsync(context, ct).ConfigureAwait(false);
 
-            // Record the proposer so four-eyes approvals can require a different principal.
+            // Record the proposer so a requester can never decide an own downgrade.
             var proposerSid = httpContext.User.GetUserSid();
             if (proposerSid != null && !string.IsNullOrWhiteSpace(proposerSid.Value.Value))
             {
@@ -165,7 +165,7 @@ public static class GovernanceClassificationEndpoints
             return proposal != null ? Results.Ok(proposal) : ApiProblems.NotFound(ApiErrorCodes.ResourceNotFound, "The proposal was not found.");
         }).RequireAuthorization().WithAudit(AuditLevel.Summarized, AuditEventTypes.ClassificationProposed);
 
-        // 5. Submit Human Approval (Stage 1 Data Owner or Stage 2 Compliance Reviewer)
+        // 5. Submit Human Approval (single decision by a Data Governance member or the data owner)
         app.MapPost("/api/governance/classification/proposals/{proposalId:guid}/approve", async (
             Guid proposalId,
             ClassificationApprovalPayload payload,
@@ -301,8 +301,8 @@ public static class GovernanceClassificationEndpoints
 
     /// <summary>
     /// Derives the reviewer SID and workflow role from the authenticated principal and the proposal stage.
-    /// Data-owner actions require an exact, non-empty <c>DataOwnerSid</c> match (fail closed: an unset owner denies
-    /// everyone, including governance admins, who must assign an owner first). Stage 2 requires a compliance role.
+    /// A Data Governance member decides as <c>DATA_GOVERNANCE_REVIEWER</c>; an owner-capable caller decides as <c>DATA_OWNER</c> and
+    /// needs an exact, non-empty <c>DataOwnerSid</c> match (fail closed: an unset owner denies every non-governance caller).
     /// </summary>
     internal static async Task<ReviewerIdentity> ResolveReviewerAsync(
         HttpContext httpContext,
@@ -320,8 +320,8 @@ public static class GovernanceClassificationEndpoints
         }
 
         var tenant = EndpointSecurity.GetRequestTenant(httpContext);
-        var isCompliance = user.IsInRole("ComplianceReviewer") || user.IsInRole("ComplianceOfficer");
-        var isOwnerCapable = GatewayPolicies.HasRequestRole(httpContext, Autheris.Domain.Security.GatewayRole.GovernanceAdmin) || EndpointSecurity.IsGlobalGovernanceAdmin(user);
+        var isGovernance = GatewayPolicies.HasRequestRole(httpContext, Autheris.Domain.Security.GatewayRole.GovernanceAdmin) || EndpointSecurity.IsGlobalGovernanceAdmin(user);
+        var isOwnerCapable = isGovernance;
         if (!isOwnerCapable && capabilities is not null)
         {
             var containerRef = ContainerDefaults.Unassigned.Container;
@@ -350,26 +350,9 @@ public static class GovernanceClassificationEndpoints
             isOwnerCapable = await capabilities.CanClassifyAsync(callerCtx, containerRef, tenant, ct).ConfigureAwait(false);
         }
 
-        var inGovernanceStage = string.Equals(proposal.Status, "PENDING_GOVERNANCE_REVIEW", StringComparison.OrdinalIgnoreCase);
-
-        string? role = null;
-        if (inGovernanceStage)
-        {
-            if (isCompliance)
-            {
-                role = "DATA_GOVERNANCE_REVIEWER";
-            }
-        }
-        else if (isOwnerCapable)
-        {
-            role = "DATA_OWNER";
-        }
-        else if (isCompliance)
-        {
-            // Let the state machine reject with a precise workflow-state error.
-            role = "DATA_GOVERNANCE_REVIEWER";
-        }
-
+        // Single approval (Amendment 2): one Data Governance member or the data owner decides; there is no second stage and no
+        // compliance-only reviewer any more (a compliance role without one of these capacities is refused, fail closed).
+        string? role = isGovernance ? "DATA_GOVERNANCE_REVIEWER" : isOwnerCapable ? "DATA_OWNER" : null;
         if (role == null)
         {
             return new ReviewerIdentity(default, null, Results.StatusCode(StatusCodes.Status403Forbidden));

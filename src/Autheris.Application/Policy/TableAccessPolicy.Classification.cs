@@ -23,7 +23,6 @@ public sealed partial class TableAccessPolicy
         }
 
         return query.Metadata.ColumnClassifications.Count > 0 ||
-               query.SupplementalConsents?.Any(c => c.ClassificationAccess.Count > 0) == true ||
                _classificationResolver.HasRepository;
     }
 
@@ -88,7 +87,7 @@ public sealed partial class TableAccessPolicy
 
         var callerScopes = ResolveClassificationCallerScopes(query);
         var (perGrant, combinedWinners) = await _classificationResolver!.ResolveForTableAsync(
-            query.Metadata, allowGrants, query.Tenant, callerScopes, ct: ct, columnRowPrefetch: query.ColumnRowPrefetch).ConfigureAwait(false);
+            query.Metadata, allowGrants, query.Tenant, callerScopes, columnRowPrefetch: query.ColumnRowPrefetch, unmask: query.Unmask, ct: ct).ConfigureAwait(false);
 
         if (perGrant.Values.All(m => m.Count == 0))
         {
@@ -117,12 +116,10 @@ public sealed partial class TableAccessPolicy
                         kv.Value.WinningMaskFunction.HasValue ? ClassificationMaskFunctions.ToCode(kv.Value.WinningMaskFunction.Value) : "TYPE_SAFE_REDACT",
                         kv.Value.KeyRef))
                     .ToList();
-                var perCellGrants = await _classificationResolver.BuildGrantAuditEntriesAsync(allowGrants, query.Tenant, ct).ConfigureAwait(false);
                 var perCellHiddenText = CollectHiddenCatalogTextColumns(perCellResult.Decision.ColumnAccess, perGrant, combinedWinners);
                 return perCellResult.Decision with
                 {
                     MaskedColumnsAudit = perCellMasked,
-                    GrantClassificationsAudit = perCellGrants,
                     HiddenCatalogTextColumns = perCellHiddenText
                 };
             }
@@ -252,7 +249,6 @@ public sealed partial class TableAccessPolicy
             ColumnAccess = updatedColumns,
             ColumnMasks = specs.Count > 0 ? new ColumnMaskPolicy(specs) : decision.ColumnMasks,
             MaskedColumnsAudit = maskedAudit,
-            GrantClassificationsAudit = await _classificationResolver.BuildGrantAuditEntriesAsync(allowGrants, query.Tenant, ct).ConfigureAwait(false),
             HiddenCatalogTextColumns = hiddenText
         };
     }

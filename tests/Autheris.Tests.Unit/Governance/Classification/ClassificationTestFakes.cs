@@ -104,7 +104,7 @@ internal sealed class TestInMemoryClassificationStore : IClassificationRepositor
     public Dictionary<string, ClassificationMaskRule> MaskRules { get; }
     public List<ColumnClassification> ColumnClassifications { get; } = [];
     public List<ColumnMaskOverride> ColumnMaskOverrides { get; } = [];
-    public List<ConsentClassificationAccess> GrantAccess { get; } = [];
+    public HashSet<string> ReferencedCodes { get; } = new(StringComparer.Ordinal);
 
     public TestInMemoryClassificationStore(string tenantId)
     {
@@ -172,19 +172,7 @@ internal sealed class TestInMemoryClassificationStore : IClassificationRepositor
     public Task<bool> DeleteColumnMaskOverrideAsync(string scope, string tableColumnId, string? code, CancellationToken ct = default) =>
         Task.FromResult(ColumnMaskOverrides.RemoveAll(o => o.TableColumnId == tableColumnId && o.Scope == scope && o.Code == code) > 0);
 
-    public Task<IReadOnlyList<ConsentClassificationAccess>> GetConsentClassificationAccessAsync(string tenantId, Guid consentId, CancellationToken ct = default) =>
-        Task.FromResult<IReadOnlyList<ConsentClassificationAccess>>(GrantAccess.Where(a => a.TenantId == tenantId && a.ConsentId == consentId).ToList());
+    public Task<bool> IsClassificationReferencedAsync(string scope, string code, CancellationToken ct = default) =>
+        Task.FromResult(ReferencedCodes.Contains(code) || ColumnClassifications.Any(c => c.Code == code));
 
-    public Task<IReadOnlyList<ConsentClassificationAccess>> GetConsentClassificationAccessBatchAsync(string tenantId, IReadOnlyList<Guid> consentIds, CancellationToken ct = default)
-    {
-        var idSet = consentIds.ToHashSet();
-        return Task.FromResult<IReadOnlyList<ConsentClassificationAccess>>(GrantAccess.Where(a => a.TenantId == tenantId && idSet.Contains(a.ConsentId)).ToList());
-    }
-
-    public Task<ConsentClassificationAccess> UpsertConsentClassificationAccessAsync(ConsentClassificationAccess entry, CancellationToken ct = default)
-    {
-        GrantAccess.RemoveAll(a => a.TenantId == entry.TenantId && a.ConsentId == entry.ConsentId && a.Code == entry.Code);
-        GrantAccess.Add(entry);
-        return Task.FromResult(entry);
-    }
 }

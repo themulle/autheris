@@ -13,7 +13,7 @@ public readonly record struct FunctionalRight(string Value)
     public static readonly FunctionalRight SchemaPublisher = new("SchemaPublisher");
     public static readonly FunctionalRight Consumer = new("Consumer");
 
-    // Granular Privileged Rights (Require Four-Eyes Approval)
+    // Granular privileged rights: an IT or governance capacity, never conferred by a mapping
     public static readonly FunctionalRight GovernanceApprove = new("Governance.Approve");
     public static readonly FunctionalRight GovernanceAdminRight = new("Governance.Admin");
     public static readonly FunctionalRight SecurityAdmin = new("Security.Admin");
@@ -26,7 +26,7 @@ public readonly record struct FunctionalRight(string Value)
     public static readonly FunctionalRight McpAdmin = new("Mcp.Admin");
     public static readonly FunctionalRight CatalogCurate = new("Catalog.Curate");
 
-    /// <summary>The values of every privileged right (PERS-09: the store filters self-approved mappings of these in SQL as defense in depth).</summary>
+    /// <summary>The values of every privileged right.</summary>
     public static IReadOnlyList<string> PrivilegedValues { get; } =
     [
         GovernanceApprove.Value,
@@ -63,8 +63,6 @@ public sealed record FunctionalRightMapping(
     DateTimeOffset CreatedAt
 )
 {
-    public bool IsApproved =>
-        !string.IsNullOrWhiteSpace(ApprovedBy) &&
-        (!FunctionalRight.IsPrivileged ||
-         !string.Equals(ApprovedBy, CreatedBy, StringComparison.OrdinalIgnoreCase));
+    /// <summary>A saved mapping is approved (single approval); a row without an approver never is.</summary>
+    public bool IsApproved => !string.IsNullOrWhiteSpace(ApprovedBy);
 }

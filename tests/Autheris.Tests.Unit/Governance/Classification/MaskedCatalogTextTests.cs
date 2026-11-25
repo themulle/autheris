@@ -104,35 +104,9 @@ public sealed class MaskedCatalogTextTests
         ColumnMaskOverrides = colOverrides ?? new Dictionary<string, IReadOnlyList<ColumnMaskOverride>>(StringComparer.OrdinalIgnoreCase)
     };
 
-    private static Consent BuildAllowConsent(bool includePiiSpecialClear = false, string? extraClearCode = null)
+    private static Consent BuildAllowConsent()
     {
         var id = Guid.NewGuid();
-        var access = new List<ConsentClassificationAccess>();
-        if (includePiiSpecialClear)
-        {
-            access.Add(new ConsentClassificationAccess
-            {
-                TenantId = Tenant.Value,
-                ConsentId = id,
-                Code = ClassificationScopes.PiiSpecialCode,
-                AccessLevel = ColumnAccessLevel.Clear,
-                ApprovedBySid = "owner",
-                ApprovedAt = FixedNow.AddDays(-1)
-            });
-        }
-        if (extraClearCode is not null)
-        {
-            access.Add(new ConsentClassificationAccess
-            {
-                TenantId = Tenant.Value,
-                ConsentId = id,
-                Code = extraClearCode,
-                AccessLevel = ColumnAccessLevel.Clear,
-                ApprovedBySid = "owner",
-                ApprovedAt = FixedNow.AddDays(-1)
-            });
-        }
-
         return new Consent
         {
             Id = id,
@@ -142,15 +116,15 @@ public sealed class MaskedCatalogTextTests
             GranteeSid = UserSid,
             Effect = ConsentEffect.Allow,
             ValidFrom = FixedNow.AddDays(-1),
-            ValidTo = FixedNow.AddDays(30),
-            ClassificationAccess = access
+            ValidTo = FixedNow.AddDays(30)
         };
     }
 
     private static async Task<(TableAccessPolicy Policy, TestInMemoryClassificationStore ClassStore)> CreatePolicyAsync(
         IReadOnlyList<Consent> consents,
         CatalogTextVisibility piiSpecialText = CatalogTextVisibility.Hidden,
-        ClassificationMaskRule[]? extraRules = null)
+        ClassificationMaskRule[]? extraRules = null,
+        bool unmask = false)
     {
         var time = new AdjustableClassificationTimeProvider(FixedNow);
         var classStore = new TestInMemoryClassificationStore(Tenant.Value);
@@ -185,7 +159,8 @@ public sealed class MaskedCatalogTextTests
             maskPolicyFactory: new ColumnMaskPolicyFactory(maskProvider),
             rowScopeCompiler: new RowScopeCompiler(rowPolicyFactory: rowFactory, classificationResolver: resolver, timeProvider: time),
             timeProvider: time,
-            classificationResolver: resolver);
+            classificationResolver: resolver,
+            unmaskResolver: unmask ? new WholeTableUnmask() : null);
 
         return (policy, classStore);
     }
@@ -232,7 +207,7 @@ public sealed class MaskedCatalogTextTests
         var idCol = Guid.NewGuid();
         var ssnCol = Guid.NewGuid();
         var table = BuildTable(idCol, ssnCol);
-        var consents = new[] { BuildAllowConsent(includePiiSpecialClear: false) };
+        var consents = new[] { BuildAllowConsent() };
         var (policy, classStore) = await CreatePolicyAsync(consents, CatalogTextVisibility.Hidden);
         var statsJson = """{"schemaVersion":1,"columns":{"ssn":{"minValue":"100","maxValue":"999","nullRatio":0.05,"approxDistinctCount":50,"topValues":["111","222"]},"id":{"approxDistinctCount":500}}}""";
         var artifacts = new DiscoveryArtifacts(table.Table.Id, Tenant.Value, null, statsJson, "abc", "owner", FixedNow);
@@ -300,7 +275,7 @@ public sealed class MaskedCatalogTextTests
     public async Task DescribeDataset_HiddenMaskedColumn_OmitsLongDescription()
     {
         var table = BuildTable(Guid.NewGuid(), Guid.NewGuid());
-        var consents = new[] { BuildAllowConsent(includePiiSpecialClear: false) };
+        var consents = new[] { BuildAllowConsent() };
         var (policy, classStore) = await CreatePolicyAsync(consents, CatalogTextVisibility.Hidden);
         var artifacts = new DiscoveryArtifacts(table.Table.Id, Tenant.Value, null, null, "abc", "owner", FixedNow);
         var discovery = CreateDiscovery(table, policy, classStore, consents, artifacts);
@@ -324,7 +299,7 @@ public sealed class MaskedCatalogTextTests
     public async Task GetTableSchema_HiddenMaskedColumn_OmitsDescriptionAndLongDescription()
     {
         var table = BuildTable(Guid.NewGuid(), Guid.NewGuid());
-        var consents = new[] { BuildAllowConsent(includePiiSpecialClear: false) };
+        var consents = new[] { BuildAllowConsent() };
         var (policy, classStore) = await CreatePolicyAsync(consents, CatalogTextVisibility.Hidden);
         var artifacts = new DiscoveryArtifacts(table.Table.Id, Tenant.Value, null, null, "abc", "owner", FixedNow);
         var discovery = CreateDiscovery(table, policy, classStore, consents, artifacts);
@@ -397,7 +372,7 @@ public sealed class MaskedCatalogTextTests
     public async Task GetDatasetDetail_RepositoryHiddenRule_OmitsDisplayNameDescriptionLongDescription()
     {
         var table = BuildTable(Guid.NewGuid(), Guid.NewGuid());
-        var consents = new[] { BuildAllowConsent(includePiiSpecialClear: false) };
+        var consents = new[] { BuildAllowConsent() };
         var classStore = await HiddenRuleStoreAsync();
         var tables = new FakeDiscoveryTableRepository { Tables = { table } };
         var consentRepo = new TestInMemoryConsentRepository(consents, filterWindow: false);
@@ -425,7 +400,7 @@ public sealed class MaskedCatalogTextTests
     public async Task Examples_selecting_hidden_text_column_dropped()
     {
         var table = BuildTable(Guid.NewGuid(), Guid.NewGuid());
-        var consents = new[] { BuildAllowConsent(includePiiSpecialClear: false) };
+        var consents = new[] { BuildAllowConsent() };
         var (policy, classStore) = await CreatePolicyAsync(consents, CatalogTextVisibility.Hidden);
         var discovery = CreateDiscovery(table, policy, classStore, consents);
         var principal = DiscoveryTestBuilder.User(UserSid.Value, Tenant.Value);
@@ -465,8 +440,8 @@ public sealed class MaskedCatalogTextTests
             ]
         };
         var table = BuildTable(idCol, ssnCol, colClasses: multiClasses);
-        var grantVisible = BuildAllowConsent(includePiiSpecialClear: false);
-        var grantHidden = BuildAllowConsent(includePiiSpecialClear: false);
+        var grantVisible = BuildAllowConsent();
+        var grantHidden = BuildAllowConsent();
         var consents = new[] { grantVisible, grantHidden };
 
         var (policy, classStore) = await CreatePolicyAsync(
@@ -501,8 +476,8 @@ public sealed class MaskedCatalogTextTests
     public async Task Clear_caller_sees_text()
     {
         var table = BuildTable(Guid.NewGuid(), Guid.NewGuid());
-        var consents = new[] { BuildAllowConsent(includePiiSpecialClear: true) };
-        var (policy, classStore) = await CreatePolicyAsync(consents, CatalogTextVisibility.Hidden);
+        var consents = new[] { BuildAllowConsent() };
+        var (policy, classStore) = await CreatePolicyAsync(consents, CatalogTextVisibility.Hidden, unmask: true);
         var discovery = CreateDiscovery(table, policy, classStore, consents);
         var principal = DiscoveryTestBuilder.User(UserSid.Value, Tenant.Value);
 
@@ -518,7 +493,7 @@ public sealed class MaskedCatalogTextTests
     public async Task Default_visible_keeps_today_output()
     {
         var table = BuildTable(Guid.NewGuid(), Guid.NewGuid());
-        var consents = new[] { BuildAllowConsent(includePiiSpecialClear: false) };
+        var consents = new[] { BuildAllowConsent() };
         var (policy, classStore) = await CreatePolicyAsync(consents, CatalogTextVisibility.Visible);
         var discovery = CreateDiscovery(table, policy, classStore, consents);
         var principal = DiscoveryTestBuilder.User(UserSid.Value, Tenant.Value);
@@ -584,8 +559,8 @@ public sealed class MaskedCatalogTextTests
     public async Task RestrictedScope_HideMaskedColumnCatalogTextOption_ControlsCatalogTextAndExamples_AcrossMcpRestAndGraphQl(bool hideOptionEnabled)
     {
         var table = BuildTable(Guid.NewGuid(), Guid.NewGuid());
-        var consents = new[] { BuildAllowConsent(includePiiSpecialClear: true) };
-        var (policy, classStore) = await CreatePolicyAsync(consents, CatalogTextVisibility.Visible);
+        var consents = new[] { BuildAllowConsent() };
+        var (policy, classStore) = await CreatePolicyAsync(consents, CatalogTextVisibility.Visible, unmask: true);
         var discovery = CreateDiscovery(
             table,
             policy,
@@ -690,8 +665,8 @@ public sealed class MaskedCatalogTextTests
     public async Task RestrictedScope_WithRuleLevelHiddenCatalogText_OmitsTextEvenWhenBaseConsentIsClear()
     {
         var table = BuildTable(Guid.NewGuid(), Guid.NewGuid());
-        var consents = new[] { BuildAllowConsent(includePiiSpecialClear: true) };
-        var (policy, classStore) = await CreatePolicyAsync(consents, CatalogTextVisibility.Hidden);
+        var consents = new[] { BuildAllowConsent() };
+        var (policy, classStore) = await CreatePolicyAsync(consents, CatalogTextVisibility.Hidden, unmask: true);
         var discovery = CreateDiscovery(table, policy, classStore, consents);
 
         var restrictedUser = DiscoveryTestBuilder.User(UserSid.Value, Tenant.Value, scopes: "Agent.Read");
@@ -766,5 +741,12 @@ public sealed class MaskedCatalogTextTests
         public ReadOnlyMemory<float> GenerateNormalizedEmbedding(string text) => new float[] { 1, 0, 0, 0 };
         public Task<IReadOnlyList<ReadOnlyMemory<float>>> GenerateNormalizedEmbeddingsAsync(IReadOnlyList<string> texts, CancellationToken ct = default) =>
             Task.FromResult<IReadOnlyList<ReadOnlyMemory<float>>>(texts.Select(_ => (ReadOnlyMemory<float>)new float[] { 1, 0, 0, 0 }).ToList());
+    }
+
+    private sealed class WholeTableUnmask : Autheris.Application.Policy.Protection.IUnmaskGrantResolver
+    {
+        public ValueTask<Autheris.Application.Policy.Protection.UnmaskCoverage> ResolveAsync(
+            TenantId tenant, IReadOnlyCollection<Sid> subjects, bool groupsComplete, TableIdentifier table, CancellationToken ct = default) =>
+            ValueTask.FromResult(new Autheris.Application.Policy.Protection.UnmaskCoverage(wholeTable: true, new HashSet<string>()));
     }
 }

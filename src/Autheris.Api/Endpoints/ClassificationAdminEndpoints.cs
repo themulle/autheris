@@ -33,11 +33,6 @@ public static partial class ClassificationAdminEndpoints
         string? Description = null,
         string? ParentCode = null,
         int RestrictionRank = 0,
-        bool ClearGrantable = true,
-        bool SeparateApproval = true,
-        string? ApproverMode = null,
-        string? StewardGroupSid = null,
-        int? MaxClearDays = null,
         bool IsActive = true);
 
     public sealed record MaskRuleRequest(
@@ -173,28 +168,17 @@ public static partial class ClassificationAdminEndpoints
             ClassificationAdminStatus.Ok => Results.Ok(map(result.Value!)),
             ClassificationAdminStatus.NotFound => ApiProblems.NotFound(result.ErrorCode ?? ApiErrorCodes.ResourceNotFound, "The requested resource was not found.", http),
             ClassificationAdminStatus.Forbidden => ApiProblems.Forbidden(result.ErrorCode ?? ApiErrorCodes.AccessDenied, "The caller is not permitted to perform this classification change.", http),
+            ClassificationAdminStatus.Conflict => ApiProblems.Conflict(result.ErrorCode ?? ApiErrorCodes.Conflict, "The classification is still referenced.", http),
             _ => ApiProblems.BadRequest(result.ErrorCode ?? ApiErrorCodes.BadRequest, "The classification request is not valid.", http)
         };
 
     private static bool TryParseDefinition(ClassificationDefinitionRequest body, out ClassificationDefinitionInput input)
     {
-        input = default!;
-        var mode = Autheris.Domain.Model.ApproverMode.DataOwner;
-        if (body.ApproverMode is not null && !ClassificationApproverModes.TryParse(body.ApproverMode, out mode))
-        {
-            return false;
-        }
-
         input = new ClassificationDefinitionInput(
             body.DisplayName,
             body.Description,
             body.ParentCode,
             body.RestrictionRank,
-            body.ClearGrantable,
-            body.SeparateApproval,
-            mode,
-            body.StewardGroupSid,
-            body.MaxClearDays,
             body.IsActive);
         return true;
     }
@@ -225,11 +209,6 @@ public static partial class ClassificationAdminEndpoints
         description = c.Description,
         parentCode = c.ParentCode,
         restrictionRank = c.RestrictionRank,
-        clearGrantable = c.ClearGrantable,
-        separateApproval = c.SeparateApproval,
-        approverMode = ClassificationApproverModes.ToCode(c.ApproverMode),
-        stewardGroupSid = c.StewardGroupSid,
-        maxClearDays = c.MaxClearDays,
         isActive = c.IsActive,
         version = c.Version
     };

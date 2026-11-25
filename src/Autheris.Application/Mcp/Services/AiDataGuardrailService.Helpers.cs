@@ -409,7 +409,7 @@ public sealed partial class AiDataGuardrailService
         tool.Name.Equals(McpSemanticTools.QueryMetrics, StringComparison.OrdinalIgnoreCase);
 
     /// <summary>
-    /// The real tables a <c>call_procedure</c> or <c>query_metrics</c> call reads, for the four-eyes / inactive / visibility gate.
+    /// The real tables a <c>call_procedure</c> or <c>query_metrics</c> call reads, for the inactive / visibility gate.
     /// Null (fail closed) when they cannot be resolved; empty when the call names nothing the executor could run.
     /// </summary>
     private Task<IReadOnlyList<TableIdentifier>?> ResolveUnderlyingTablesAsync(

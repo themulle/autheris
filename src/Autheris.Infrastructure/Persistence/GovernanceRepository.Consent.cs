@@ -329,7 +329,6 @@ public partial class GovernanceRepository
             WorkflowMode = source.WorkflowMode,
             ProfileItemNo = source.ProfileItemNo,
             ApprovingOwners = source.ApprovingOwners,
-            ClassificationAccess = source.ClassificationAccess,
             GrantKind = source.GrantKind,
             ApproverCapacity = source.ApproverCapacity,
             SelfGrant = source.SelfGrant,
@@ -407,8 +406,6 @@ public partial class GovernanceRepository
             var actorSid = consent.CreatedBySid ?? consent.GranteeSid ?? new Sid("UNKNOWN");
             await RecordAuditEventAsync(ConsentWriteRulesSql.BuildWriteGrantChangedAudit(created, actorSid), tx, ct).ConfigureAwait(false);
         }
-
-        if (ClearGrantAudit.TryBuild(created) is { } clearAudit) { await RecordAuditEventAsync(clearAudit, tx, ct).ConfigureAwait(false); }
 
         return created;
     }

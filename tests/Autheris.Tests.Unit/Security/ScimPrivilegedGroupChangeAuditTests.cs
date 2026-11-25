@@ -331,7 +331,6 @@ public sealed class ScimPrivilegedGroupChangeAuditTests
             Task.FromResult<FunctionalRightMapping?>(null);
 
         public Task CreateMappingAsync(FunctionalRightMapping mapping, CancellationToken ct = default) => Task.CompletedTask;
-        public Task ApproveMappingAsync(TenantId tenantId, string realmId, string groupOrRole, FunctionalRight functionalRight, string approvedBy, CancellationToken ct = default) => Task.CompletedTask;
         public Task DeleteMappingAsync(TenantId tenantId, string realmId, string groupOrRole, FunctionalRight functionalRight, CancellationToken ct = default) => Task.CompletedTask;
     }
 
