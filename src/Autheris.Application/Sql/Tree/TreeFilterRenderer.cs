@@ -16,6 +16,9 @@ internal interface ITreeFilterTarget
     /// <summary>The character that escapes LIKE wildcards; it travels as an explicit ESCAPE clause.</summary>
     char LikeEscape { get; }
 
+    /// <summary>The SQL literal representation of <see cref="LikeEscape"/> inside an <c>ESCAPE</c> clause.</summary>
+    string LikeEscapeLiteral => $"'{LikeEscape}'";
+
     /// <summary>The LIKE special characters that are escaped (the escape character itself is always escaped).</summary>
     string LikeSpecials { get; }
 
@@ -154,7 +157,7 @@ internal static class TreeFilterRenderer
 
         // The NULL parameter is intentionally untyped: the column it is compared with types it.
         var clause = $"{column} {symbol} {target.AddParameter(null)}";
-        return symbol == "LIKE" && target.AlwaysEmitLikeEscape ? clause + $" ESCAPE '{target.LikeEscape}'" : clause;
+        return symbol == "LIKE" && target.AlwaysEmitLikeEscape ? clause + $" ESCAPE {target.LikeEscapeLiteral}" : clause;
     }
 
     private static string Like(string column, string text, string prefix, string suffix, ITreeFilterTarget target)
@@ -163,7 +166,7 @@ internal static class TreeFilterRenderer
         var pattern = prefix + escaped + suffix;
         var clause = $"{column} LIKE {target.AddParameter(pattern)}";
         return target.AlwaysEmitLikeEscape || !string.Equals(escaped, text, StringComparison.Ordinal)
-            ? clause + $" ESCAPE '{target.LikeEscape}'"
+            ? clause + $" ESCAPE {target.LikeEscapeLiteral}"
             : clause;
     }
 
