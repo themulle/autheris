@@ -378,5 +378,39 @@ public sealed class MandatoryRowFilterResolverTests
 
         outcome.AppliedFilters.ShouldNotContain("filter_david");
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ExplainAsync_DropsStaleSqlFilterWithMissingReferencedContainers_SameAsResolveAsync()
+    {
+        var sqlFilter = new VirtualFilter
+        {
+            TenantId = Tenant,
+            Name = "stale_sql",
+            Source = "fms",
+            Sql = "from fms.air1 a where a.client_id = target.client_id",
+            ReferencedContainers = []
+        };
+        var profile = Profile(UncoveredPolicy.Deny, new FilterBinding { FilterName = "stale_sql" });
+        var resolver = new MandatoryRowFilterResolver(
+            new FixedSnapshot(Snapshot([sqlFilter], profile)),
+            new StructuredFilterSqlBuilder(),
+            ownership: new FixedContainerOwnership());
+
+        var query = Query(Table("fms", "air1", "client_id"));
+        var outcome = await resolver.ResolveAsync(query);
+        var explanation = await resolver.ExplainAsync(query);
+
+        outcome.IsDenied.ShouldBeTrue();
+        explanation.Outcome.IsDenied.ShouldBeTrue();
+        explanation.Outcome.DenyReason.ShouldBe(outcome.DenyReason);
+    }
+
+    private sealed class FixedContainerOwnership : Autheris.Application.Governance.Ownership.IContainerOwnership
+    {
+        public Task<string?> GetContainerKeyForTableAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult<string?>("c1");
+        public Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<DataOwner>>([]);
+        public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default) => Task.FromResult(false);
+    }
 }
 

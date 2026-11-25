@@ -52,12 +52,23 @@ public sealed partial class VirtualFilterAdministrationService
         }
 
         var stamp = DateTimeOffset.UtcNow;
+        var savedFilters = new List<VirtualFilter>(changes.SaveFilters.Count);
+        foreach (var f in changes.SaveFilters)
+        {
+            savedFilters.Add(f with
+            {
+                UpdatedBy = actor.Sid.Value,
+                UpdatedAt = stamp,
+                ReferencedContainers = await RecordReferencedContainersAsync(f, ct).ConfigureAwait(false)
+            });
+        }
+
         // The sync (including its deletes) and its audit entry commit in one transaction.
         var audit = AuditEntry(request.TenantId, actor, "VIRTUAL_FILTER_SYNC_APPLIED", "virtual_filter:*",
             new { path = request.ManagedBy.Path, commit = request.ManagedBy.Commit, force, plan });
         await ApplyAsync(changes with
         {
-            SaveFilters = changes.SaveFilters.Select(f => f with { UpdatedBy = actor.Sid.Value, UpdatedAt = stamp }).ToList(),
+            SaveFilters = savedFilters,
             SaveProfiles = changes.SaveProfiles.Select(p => p with { UpdatedBy = actor.Sid.Value, UpdatedAt = stamp }).ToList(),
             AuditEntries = [audit]
         }, snapshot.Generation, ct).ConfigureAwait(false);

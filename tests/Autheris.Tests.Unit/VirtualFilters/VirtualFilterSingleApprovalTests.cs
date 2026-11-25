@@ -549,6 +549,111 @@ public sealed class VirtualFilterSingleApprovalTests
         audit.Entries.Select(e => e.EventType).ShouldBe(["VIRTUAL_FILTER_CREATED", "ACCESS_PROFILE_CREATED", "ACCESS_PROFILE_DELETED", "VIRTUAL_FILTER_DELETED"]);
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ApplySyncAsync_populates_referenced_containers_so_resolver_enforces_synced_sql_filters()
+    {
+        var repo = new InMemoryFilterRepo();
+        var owners = new InMemoryOwnershipRepo();
+        var service = CreateService(repo, owners);
+        var managedBy = new ManagedBy("governance/access", "commit-1");
+        var syncActor = new VirtualFilterActor(new Sid("S-1-5-21-SYNC"), IsSync: true, IsDataGovernance: true);
+        var profile = Profile("synced_user", GranteeType.User, new Sid("S-1-5-21-USER"), UncoveredPolicy.Deny) with { ManagedBy = managedBy };
+        var request = new VirtualFilterSyncRequest(Tenant, managedBy, [SqlPolicy() with { ManagedBy = managedBy }], [profile]);
+
+        await service.ApplySyncAsync(request, syncActor);
+
+        var syncedFilter = (await repo.LoadSnapshotAsync()).Filters.ShouldHaveSingleItem();
+        syncedFilter.ReferencedContainers.Select(r => (r.Table, r.Container)).ShouldBe(
+        [
+            (ClientTable.ToString(), "container-1"),
+            (CraneTable.ToString(), "container-1")
+        ]);
+
+        var resolver = new MandatoryRowFilterResolver(new SnapshotRepoProvider(repo), new StructuredFilterSqlBuilder(), ownership: owners);
+        var outcome = await resolver.ResolveAsync(OrdersQuery);
+        outcome.IsDenied.ShouldBeFalse();
+        outcome.AppliedFilters.ShouldBe(["active_cranes_sql"]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task SaveFilterAsync_and_DeleteFilterAsync_require_ownership_of_existing_sql_filter_tables()
+    {
+        var repo = new InMemoryFilterRepo();
+        var owners = new InMemoryOwnershipRepo();
+        var service = CreateService(repo, owners);
+        await service.SaveFilterAsync(SqlPolicy(), GovAuthorActor);
+
+        var partialOwner = new VirtualFilterActor(
+            PartialOwner,
+            IsSync: false,
+            Roles: new HashSet<string>([nameof(GatewayRole.FilterAdmin)], StringComparer.OrdinalIgnoreCase),
+            Groups: []);
+        owners.Allow(CraneTable, PartialOwner);
+
+        // Overwriting an existing SQL filter with a structured filter must still verify ownership of the old SQL tables.
+        var structuredOverwrite = VirtualFilterTestData.DavidFilter("active_cranes_sql");
+        await Should.ThrowAsync<UnauthorizedAccessException>(() => service.SaveFilterAsync(structuredOverwrite, partialOwner));
+
+        // Overwriting with SQL referencing only an owned table must still check ownership of the old unowned table.
+        var partialSqlOverwrite = SqlPolicy("from md.crane crane where crane.is_delivered is null and target.client_id = crane.serial_number");
+        await Should.ThrowAsync<UnauthorizedAccessException>(() => service.SaveFilterAsync(partialSqlOverwrite, partialOwner));
+
+        // Deleting an existing SQL filter also requires GovernanceAdmin or ownership of all referenced tables.
+        await Should.ThrowAsync<UnauthorizedAccessException>(() => service.DeleteFilterAsync(Tenant, "active_cranes_sql", partialOwner));
+        (await repo.LoadSnapshotAsync()).Filters.ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task SelfWideningGuard_blocks_filter_update_delete_and_profile_update_delete_affecting_writer_or_groups()
+    {
+        var repo = new InMemoryFilterRepo();
+        var service = CreateService(repo, new InMemoryOwnershipRepo());
+        await service.SaveFilterAsync(SqlPolicy("from conf.client client where client.client_id = target.client_id"), GovAuthorActor);
+        await service.SaveProfileAsync(Profile("own_deny_profile", GranteeType.User, GovAuthor, UncoveredPolicy.Deny), GovAuthorActor);
+        await service.SaveProfileAsync(Profile("group_deny_profile", GranteeType.Group, new Sid("S-1-5-21-GOV-GROUP"), UncoveredPolicy.Deny), GovAuthorActor);
+
+        // Updating a filter bound to the writer's own or group profile can widen own access.
+        (await Should.ThrowAsync<Autheris.Application.Governance.SingleApproval.SingleApprovalRefusedException>(
+            () => service.SaveFilterAsync(SqlPolicy(), GovAuthorActor)))
+            .Code.ShouldBe("SelfWidening");
+
+        // Deleting a bound filter affecting the writer's own or group profile must be refused for self-widening.
+        (await Should.ThrowAsync<Autheris.Application.Governance.SingleApproval.SingleApprovalRefusedException>(
+            () => service.DeleteFilterAsync(Tenant, "active_cranes_sql", GovAuthorActor)))
+            .Code.ShouldBe("SelfWidening");
+
+        // Updating an existing profile for own SID (even when Uncovered remains Deny) can narrow Scope or alter filters.
+        (await Should.ThrowAsync<Autheris.Application.Governance.SingleApproval.SingleApprovalRefusedException>(
+            () => service.SaveProfileAsync(Profile("own_deny_profile", GranteeType.User, GovAuthor, UncoveredPolicy.Deny) with { Scope = "lwetem_prod.sales.*" }, GovAuthorActor)))
+            .Code.ShouldBe("SelfWidening");
+
+        // Deleting an existing profile for own SID or own group removes mandatory filtering.
+        (await Should.ThrowAsync<Autheris.Application.Governance.SingleApproval.SingleApprovalRefusedException>(
+            () => service.DeleteProfileAsync(Tenant, "own_deny_profile", GovAuthorActor)))
+            .Code.ShouldBe("SelfWidening");
+        (await Should.ThrowAsync<Autheris.Application.Governance.SingleApproval.SingleApprovalRefusedException>(
+            () => service.DeleteProfileAsync(Tenant, "group_deny_profile", GovAuthorActor)))
+            .Code.ShouldBe("SelfWidening");
+
+        // Degraded groups when updating a filter bound to a group profile fails closed as unverifiable.
+        var unknownGroupsOther = new VirtualFilterActor(new Sid("S-1-5-21-OTHER-DG"), IsSync: false,
+            Roles: new HashSet<string>([nameof(GatewayRole.GovernanceAdmin)], StringComparer.OrdinalIgnoreCase),
+            Groups: null, IsDataGovernance: true);
+        (await Should.ThrowAsync<Autheris.Application.Governance.SingleApproval.SingleApprovalRefusedException>(
+            () => service.SaveFilterAsync(SqlPolicy(), unknownGroupsOther)))
+            .Code.ShouldBe("SelfWideningUnverifiable");
+    }
+
+    private sealed class SnapshotRepoProvider(InMemoryFilterRepo repo) : IVirtualFilterSnapshotProvider
+    {
+        public async ValueTask<VirtualFilterSnapshot> GetAsync(CancellationToken ct = default) =>
+            await repo.LoadSnapshotAsync(ct).ConfigureAwait(false);
+        public void Invalidate() { }
+    }
+
     /// <summary>Models the store transaction: the writes and the audit entries of a change set commit together or not at all.</summary>
     private sealed class InMemoryFilterRepo : IVirtualFilterRepository
     {

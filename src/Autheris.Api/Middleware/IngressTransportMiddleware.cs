@@ -1,7 +1,10 @@
 namespace Autheris.Api.Middleware;
 
+using System.Net;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
+using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Common.Quota;
 using Autheris.Application.DataSources;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
@@ -13,7 +16,7 @@ using Microsoft.Extensions.DependencyInjection;
 /// </summary>
 public sealed class IngressTransportMiddleware(RequestDelegate next)
 {
-    public Task InvokeAsync(HttpContext context)
+    public async Task InvokeAsync(HttpContext context)
     {
         var metadata = context.GetEndpoint()?.Metadata.GetMetadata<IngressTransportMetadata>();
         if (metadata is not null)
@@ -21,6 +24,13 @@ public sealed class IngressTransportMiddleware(RequestDelegate next)
             context.RequestServices.GetRequiredService<IIngressTransportContext>().Set(metadata.Transport);
         }
 
-        return next(context);
+        var ip = context.RequestServices?.GetService<IClientIpResolver>()?.ResolveClientIp()
+            ?? context.Connection.RemoteIpAddress;
+        var clientIp = ip is not null && !ip.Equals(IPAddress.None) ? ip.ToString() : null;
+        var apiKey = context.Request.Headers.TryGetValue("X-API-Key", out var k) && !string.IsNullOrWhiteSpace(k)
+            ? k.ToString()
+            : null;
+        using var _ = ScopeQueryExecutionGuard.BeginCallerContext(clientIp, apiKey);
+        await next(context).ConfigureAwait(false);
     }
 }

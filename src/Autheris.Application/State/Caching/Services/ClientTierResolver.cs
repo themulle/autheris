@@ -77,7 +77,7 @@ public sealed class ClientTierResolver : IClientTierResolver
         // 2. Check JWT Claims, Scopes, or RoleTierMappings from Principal
         if (principal?.Identity?.IsAuthenticated == true)
         {
-            var canonicalScope = GetCanonicalScopeIdentifier(principal);
+            var canonicalScope = GetCanonicalScopeIdentifier(principal, tierOptions);
             var subjectId = BuildAuthenticatedSubjectId(principal, canonicalScope);
 
             // Determine user/role ceiling (anti-escalation maximum tier)
@@ -115,23 +115,14 @@ public sealed class ClientTierResolver : IClientTierResolver
                 }
             }
 
-            ClientTier maxPermittedTier;
-            if (explicitClaimTier.HasValue && highestRoleTier.HasValue)
+            bool hasUserCeiling = explicitClaimTier.HasValue || highestRoleTier.HasValue;
+            ClientTier maxPermittedTier = (explicitClaimTier, highestRoleTier) switch
             {
-                maxPermittedTier = explicitClaimTier.Value > highestRoleTier.Value ? explicitClaimTier.Value : highestRoleTier.Value;
-            }
-            else if (explicitClaimTier.HasValue)
-            {
-                maxPermittedTier = explicitClaimTier.Value;
-            }
-            else if (highestRoleTier.HasValue)
-            {
-                maxPermittedTier = highestRoleTier.Value;
-            }
-            else
-            {
-                maxPermittedTier = ClientTier.Standard;
-            }
+                (ClientTier claimTier, ClientTier roleTier) => claimTier > roleTier ? claimTier : roleTier,
+                (ClientTier claimTier, null) => claimTier,
+                (null, ClientTier roleTier) => roleTier,
+                _ => ClientTier.Standard
+            };
 
             // Check Scope-to-Tier mappings and ScopeLimits (prioritize scope mapping ahead of default role fallback, clamped by anti-escalation ceiling)
             var scopes = Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims);
@@ -172,17 +163,9 @@ public sealed class ClientTierResolver : IClientTierResolver
                 }
             }
 
-            ClientTier effectiveTier;
-            if (matchedScopeTier.HasValue)
-            {
-                // Clamped to caller's maximum permitted user/role tier (anti-escalation)
-                effectiveTier = matchedScopeTier.Value > maxPermittedTier ? maxPermittedTier : matchedScopeTier.Value;
-            }
-            else
-            {
-                // Fallback to claim / role / standard
-                effectiveTier = explicitClaimTier ?? highestRoleTier ?? ClientTier.Standard;
-            }
+            ClientTier effectiveTier = matchedScopeTier.HasValue
+                ? (hasUserCeiling && matchedScopeTier.Value > maxPermittedTier ? maxPermittedTier : matchedScopeTier.Value)
+                : (explicitClaimTier ?? highestRoleTier ?? ClientTier.Standard);
 
             ClientQuotaPolicy effectivePolicy = matchedScopeLimits is { Count: > 0 }
                 ? ClientQuotaPolicy.CombineStrictestScopeLimits(effectiveTier, matchedScopeLimits, tierOptions)
@@ -207,51 +190,65 @@ public sealed class ClientTierResolver : IClientTierResolver
     /// <summary>
     /// Scope canonicalization, delimiter sanitization, DoS bounds and ordinal sorting.
     /// </summary>
-    internal static string? GetCanonicalScopeIdentifier(ClaimsPrincipal? principal)
+    internal static string? GetCanonicalScopeIdentifier(ClaimsPrincipal? principal) =>
+        GetCanonicalScopeIdentifierCore(principal, tierOptions: null, matchConfiguredOnly: false);
+
+    internal static string? GetCanonicalScopeIdentifier(ClaimsPrincipal? principal, ClientTierOptions? tierOptions) =>
+        GetCanonicalScopeIdentifierCore(principal, tierOptions, matchConfiguredOnly: true);
+
+    private static string? GetCanonicalScopeIdentifierCore(ClaimsPrincipal? principal, ClientTierOptions? tierOptions, bool matchConfiguredOnly)
     {
         if (principal == null) return null;
 
         var rawScopes = Autheris.Domain.Security.TokenAccessScope.GetScopeSet(principal.Claims);
         if (rawScopes == null || rawScopes.Count == 0) return null;
 
-        var sanitizedScopes = new HashSet<string>(StringComparer.Ordinal);
+        var selectedScopes = new HashSet<string>(StringComparer.Ordinal);
+        bool hasValidTokenScopes = false;
         foreach (var raw in rawScopes)
         {
             if (string.IsNullOrWhiteSpace(raw)) continue;
             var bare = Autheris.Domain.Security.ScopeNames.ToBareName(raw.Trim());
             if (string.IsNullOrWhiteSpace(bare)) continue;
 
-            // Sanitize delimiters (:, +, {, }, \r, \n) to prevent subject key or Redis injection
-            var sb = new StringBuilder(bare.Length);
-            foreach (var ch in bare)
+            var clean = SanitizeBareScope(bare);
+            if (string.IsNullOrEmpty(clean)) continue;
+            hasValidTokenScopes = true;
+
+            if (matchConfiguredOnly)
             {
-                if (ch != ':' && ch != '+' && ch != '{' && ch != '}' && ch != '\r' && ch != '\n')
-                {
-                    sb.Append(char.ToLowerInvariant(ch));
-                }
+                bool matchesConfigured =
+                    (tierOptions?.ScopeTierMappings != null && TryGetByBareScope(tierOptions.ScopeTierMappings, bare, out _)) ||
+                    (tierOptions?.ScopeLimits != null && TryGetByBareScope(tierOptions.ScopeLimits, bare, out _));
+                if (!matchesConfigured) continue;
             }
 
-            var clean = sb.ToString().Trim();
-            if (!string.IsNullOrEmpty(clean))
+            if (selectedScopes.Count < 32)
             {
-                sanitizedScopes.Add(clean);
-                if (sanitizedScopes.Count >= 32) // DoS guard, max 32 distinct scopes
-                {
-                    break;
-                }
+                selectedScopes.Add(clean);
             }
         }
 
-        if (sanitizedScopes.Count == 0) return null;
+        if (!hasValidTokenScopes) return null;
+        if (matchConfiguredOnly && selectedScopes.Count == 0) return "default";
+        if (selectedScopes.Count == 0) return null;
 
-        var sorted = sanitizedScopes.OrderBy(s => s, StringComparer.Ordinal).ToList();
-        var canonical = string.Join("+", sorted);
-        if (canonical.Length > 256) // Max 256 characters
+        var canonical = string.Join("+", selectedScopes.OrderBy(s => s, StringComparer.Ordinal));
+        return canonical.Length > 256 ? canonical[..256] : canonical;
+    }
+
+    private static string SanitizeBareScope(string bare)
+    {
+        var sb = new StringBuilder(bare.Length);
+        foreach (var ch in bare)
         {
-            canonical = canonical[..256];
+            if (ch != ':' && ch != '+' && ch != '{' && ch != '}' && ch != '\r' && ch != '\n')
+            {
+                sb.Append(char.ToLowerInvariant(ch));
+            }
         }
 
-        return canonical;
+        return sb.ToString().Trim();
     }
 
     /// <summary>

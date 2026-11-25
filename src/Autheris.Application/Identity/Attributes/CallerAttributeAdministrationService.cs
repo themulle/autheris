@@ -161,16 +161,15 @@ public sealed class CallerAttributeAdministrationService
         }
 
         RequireApproverRole(CallerAttributeProviderBinding.ServiceSet, actor);
+        var app = CallerAttributeNameRules.CanonicalApplicationId(applicationId);
         try
         {
-            SelfWideningGuard.EnsureDoesNotWidenOwnAccess(actor.ToWriter(), [applicationId]);
+            SelfWideningGuard.EnsureDoesNotWidenOwnAccess(actor.ToWriter(), [app, applicationId]);
         }
         catch (SingleApprovalRefusedException ex)
         {
             throw new CallerAttributeAdminException(ex.Code, ex.Message);
         }
-
-        var app = CallerAttributeNameRules.CanonicalApplicationId(applicationId);
         var before = (await _repository.LoadCallerAttributeSnapshotAsync(ct).ConfigureAwait(false)).ServiceSets
             .FirstOrDefault(x => x.Set.Tenant == tenant && string.Equals(x.Set.ApplicationId, app, StringComparison.Ordinal) && string.Equals(x.Set.AttributeName, attributeName, StringComparison.Ordinal));
         var after = new ServiceAttributeSet(Guid.Empty, tenant, app, attributeName, values, FilterApprovalStatus.Active);

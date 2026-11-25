@@ -80,6 +80,27 @@ public sealed class ScopeQueryExecutionGuard : IScopeQueryExecutionGuard
     private readonly TimeProvider _timeProvider;
     private readonly ConcurrentDictionary<string, SubjectSlot> _slots = new(StringComparer.Ordinal);
 
+    private sealed record AmbientCaller(string? ClientIp, string? ApiKey);
+    private static readonly AsyncLocal<AmbientCaller?> AmbientCallerContext = new();
+
+    private sealed class CallerContextScope(AmbientCaller? previous) : IDisposable
+    {
+        public void Dispose() => AmbientCallerContext.Value = previous;
+    }
+
+    public static IDisposable BeginCallerContext(string? clientIp, string? apiKey = null)
+    {
+        var previous = AmbientCallerContext.Value;
+        AmbientCallerContext.Value = new AmbientCaller(clientIp, apiKey);
+        return new CallerContextScope(previous);
+    }
+
+    internal static string? ResolveClientIp(Autheris.Application.Common.Interfaces.IClientIpResolver? resolver)
+    {
+        var ip = resolver?.ResolveClientIp();
+        return ip is not null && !ip.Equals(System.Net.IPAddress.None) ? ip.ToString() : null;
+    }
+
     public ScopeQueryExecutionGuard(IClientTierResolver tierResolver, TimeProvider? timeProvider = null)
     {
         _tierResolver = tierResolver ?? throw new ArgumentNullException(nameof(tierResolver));
@@ -165,7 +186,17 @@ public sealed class ScopeQueryExecutionGuard : IScopeQueryExecutionGuard
 
         callerToken.ThrowIfCancellationRequested();
 
-        var clientContext = await _tierResolver.ResolveAsync(principal, apiKey, clientIp, callerToken).ConfigureAwait(false);
+        var ambientCaller = AmbientCallerContext.Value;
+        var effectiveApiKey = !string.IsNullOrWhiteSpace(apiKey) ? apiKey : ambientCaller?.ApiKey;
+        var effectiveClientIp = !string.IsNullOrWhiteSpace(clientIp) ? clientIp : ambientCaller?.ClientIp;
+        if (principal?.Identity?.IsAuthenticated != true &&
+            string.IsNullOrWhiteSpace(effectiveApiKey) &&
+            string.IsNullOrWhiteSpace(effectiveClientIp))
+        {
+            effectiveClientIp = "unassigned";
+        }
+
+        var clientContext = await _tierResolver.ResolveAsync(principal, effectiveApiKey, effectiveClientIp, callerToken).ConfigureAwait(false);
         var policy = clientContext.Policy;
         var subjectId = clientContext.SubjectId;
         var scope = clientContext.ResolvedScope;

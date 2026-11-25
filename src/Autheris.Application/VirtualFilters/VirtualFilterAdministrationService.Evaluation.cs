@@ -125,19 +125,14 @@ public sealed partial class VirtualFilterAdministrationService
         EnsureWritable(existing?.ManagedBy, profile.ManagedBy, actor, $"access profile '{profile.Name}'");
 
         EnsureDataGovernance(actor);
-        if (!actor.IsSync && profile.Uncovered != UncoveredPolicy.Deny && profile.GranteeSid is { } grantee)
+        if (existing is not null)
         {
-            if (actor.Groups is null && profile.GranteeType == GranteeType.Group)
-            {
-                // The writer's groups are unknown (degraded resolution): whether the grantee group is one of them cannot be verified.
-                throw new SingleApprovalRefusedException("SelfWideningUnverifiable", "The writer's groups could not be resolved; the change cannot be verified.");
-            }
+            EnsureNoSelfWideningOnProfiles(actor, [existing]);
+        }
 
-            // An access profile only narrows rows: leaving uncovered objects to the consents is no narrowing for the writer's own identity
-            // or for a group the writer belongs to.
-            SelfWideningGuard.EnsureDoesNotWidenOwnAccess(
-                new SingleApprovalWriter(actor.Sid.Value, actor.Identifiers ?? [], actor.Groups ?? []),
-                [grantee.Value]);
+        if (profile.Uncovered != UncoveredPolicy.Deny)
+        {
+            EnsureNoSelfWideningOnProfiles(actor, [profile]);
         }
 
         var direct = profile with
@@ -169,10 +164,41 @@ public sealed partial class VirtualFilterAdministrationService
         var snapshot = await _repository.LoadSnapshotAsync(ct).ConfigureAwait(false);
         var existing = FindProfile(snapshot, tenantId, name) ?? throw new KeyNotFoundException($"The access profile '{name}' does not exist.");
         EnsureWritable(existing.ManagedBy, null, actor, $"access profile '{name}'");
+        EnsureNoSelfWideningOnProfiles(actor, [existing]);
 
         // The delete and its audit entry commit in one transaction (never a delete without an entry, never an entry without the delete).
         var audit = AuditEntry(tenantId, actor, "ACCESS_PROFILE_DELETED", $"access_profile:{name}", new { name, before = existing.ComputeDefinitionHash() });
         await ApplyAsync(new VirtualFilterChangeSet { DeleteProfiles = [(tenantId, name)], AuditEntries = [audit] }, snapshot.Generation, ct).ConfigureAwait(false);
+    }
+
+    private static IEnumerable<VirtualFilterAccessProfile> ProfilesUsingFilter(
+        VirtualFilterSnapshot snapshot, TenantId tenantId, string filterName) =>
+        snapshot.Profiles.Where(p => p.TenantId == tenantId && p.Bindings.Any(b => b.FilterName == filterName));
+
+    private static void EnsureNoSelfWideningOnProfiles(VirtualFilterActor actor, IEnumerable<VirtualFilterAccessProfile> profiles)
+    {
+        if (actor.IsSync)
+        {
+            return;
+        }
+
+        var writer = new SingleApprovalWriter(actor.Sid.Value, actor.Identifiers ?? [], actor.Groups ?? []);
+        foreach (var profile in profiles)
+        {
+            if (profile.GranteeSid is not { } grantee)
+            {
+                continue;
+            }
+
+            if (actor.Groups is null && profile.GranteeType == GranteeType.Group)
+            {
+                throw new SingleApprovalRefusedException(
+                    "SelfWideningUnverifiable",
+                    "The writer's groups could not be resolved; the change cannot be verified.");
+            }
+
+            SelfWideningGuard.EnsureDoesNotWidenOwnAccess(writer, [grantee.Value]);
+        }
     }
 
     /// <summary>

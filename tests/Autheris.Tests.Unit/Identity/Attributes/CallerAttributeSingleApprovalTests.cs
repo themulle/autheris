@@ -136,6 +136,18 @@ public sealed class CallerAttributeSingleApprovalTests
         ex.Code.ShouldBe("NotFound");
     }
 
+    [Fact]
+    public async Task SaveServiceSetAsync_refuses_canonicalized_application_guid_variants_for_self_widening()
+    {
+        const string lowerGuid = "aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee";
+        var actorLower = new CallerAttributeActor(lowerGuid, true, [], []);
+
+        var ex = await Should.ThrowAsync<CallerAttributeAdminException>(() =>
+            Service().SaveServiceSetAsync(Tenant, lowerGuid.ToUpperInvariant(), "cost_center", ["a"], actorLower));
+        ex.Code.ShouldBe("SelfWidening");
+        _repository.ServiceSetSaves.ShouldBe(0);
+    }
+
     private sealed class FakeRepository : ICallerAttributeRepository
     {
         public List<string> DefinitionSaves { get; } = [];

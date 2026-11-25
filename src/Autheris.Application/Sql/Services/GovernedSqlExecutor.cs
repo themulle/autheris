@@ -66,6 +66,7 @@ public sealed partial class GovernedSqlExecutor
     private readonly Autheris.Application.Sql.Paging.IWebSqlPageTokenCodec _pageTokenCodec;
     private readonly IKeyVaultSecretProvider? _secrets;
     private readonly Autheris.Application.Common.Quota.IScopeQueryExecutionGuard _scopeGuard;
+    private readonly Autheris.Application.Common.Interfaces.IClientIpResolver? _clientIpResolver;
 
     public GovernedSqlExecutor(
         GovernedSqlRewriter rewriter,
@@ -83,11 +84,13 @@ public sealed partial class GovernedSqlExecutor
         Autheris.Application.Common.Quota.IQueryCostQuota? costQuota = null,
         Autheris.Application.Sql.Paging.IWebSqlPageTokenCodec? pageTokenCodec = null,
         Autheris.Application.Policy.WriteGrants.IWriteBudgetStore? writeBudgetStore = null,
-        Autheris.Application.Common.Quota.IScopeQueryExecutionGuard? scopeGuard = null)
+        Autheris.Application.Common.Quota.IScopeQueryExecutionGuard? scopeGuard = null,
+        Autheris.Application.Common.Interfaces.IClientIpResolver? clientIpResolver = null)
     {
         _costQuota = costQuota;
         _writeBudgetStore = writeBudgetStore;
         _scopeGuard = scopeGuard ?? Autheris.Application.Common.Quota.NullScopeQueryExecutionGuard.Instance;
+        _clientIpResolver = clientIpResolver;
         // Issue #447 no gate means deny, never pass-through.
         _transportGate = transportGate ?? Autheris.Application.DataSources.TransportGateFallback.Current;
         _rewriter = rewriter ?? throw new ArgumentNullException(nameof(rewriter));
@@ -293,7 +296,7 @@ public sealed partial class GovernedSqlExecutor
 
         AuditLogEntry? pendingDenyEntry = null;
         Exception? pendingDenyException = null;
-        var executionResult = await _scopeGuard.RunAsync(user, apiKey: null, clientIp: null, async (lease, scopedCt) =>
+        var executionResult = await _scopeGuard.RunAsync(user, apiKey: null, Autheris.Application.Common.Quota.ScopeQueryExecutionGuard.ResolveClientIp(_clientIpResolver), async (lease, scopedCt) =>
         {
             var effectiveRequest = !request.PlannedTableRead && lease.MaxResultRows is > 0
                 ? request with { RowLimit = lease.ClampRowLimit(request.RowLimit ?? SqlRowLimit.For(_options.Value.WebSql)) }
