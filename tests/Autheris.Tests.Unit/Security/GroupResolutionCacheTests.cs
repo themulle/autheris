@@ -21,7 +21,7 @@ public sealed class GroupResolutionCacheTests
     private const string SidA = "S-1-5-21-1-2-3-1105";
     private const string SidB = "S-1-5-21-1-2-3-1106";
 
-    private static IdentityRealm Realm(string id, IdentityRealmKind kind = IdentityRealmKind.Customer) => new(
+    private static IdentityRealm Realm(string id, IdentityRealmKind kind = IdentityRealmKind.EntraWorkforce) => new(
         id, kind, TenantBindingSpecification.Fixed(new TenantId("t")), RealmGroupSource.Resolver, RealmProvisioningMode.Scim, resolverChain: ["p"]);
 
     private static ResolvedIdentity Identity(string realmId, string userKey = "user-1") =>
@@ -60,7 +60,7 @@ public sealed class GroupResolutionCacheTests
     [Trait("SecurityCondition", "SEC-AUTH-07a")]
     public async Task Workforce_realm_uses_configured_ttl_not_fifteen_minutes(IdentityRealmKind kind, int ttl)
     {
-        var sut = new RoleResolver([Provider(_ => Groups(SidA))], new RoleResolverCache(), null, Options(ttl));
+        var sut = new RoleResolver([Provider(r => Groups(SidFormat.UsesWorkforceAdSids(r.Kind) ? SidA : $"realm:{r.Id}:grp-a"))], new RoleResolverCache(), null, Options(ttl));
 
         var resolution = await sut.ResolveAsync(Identity("r"), Realm("r", kind));
 

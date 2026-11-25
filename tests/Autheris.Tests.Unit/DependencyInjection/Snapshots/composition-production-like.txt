@@ -486,7 +486,7 @@
 0485 Autheris.Application.Identity.Services.IRedisLockPubSubChannel Singleton key=- type:Autheris.Infrastructure.Identity.Locks.RedisLockPubSubChannel
 0486 Microsoft.Extensions.Hosting.IHostedService Singleton key=- type:Autheris.Application.Identity.Services.LockRoleCacheInvalidationHostedService
 0487 Autheris.Application.Identity.Services.IIdentityDeprovisioningService Singleton key=- type:Autheris.Application.Identity.Services.IdentityDeprovisioningService
-0488 Autheris.Application.Identity.Services.IEmployeeGroupLookup Singleton key=- type:Autheris.Application.Identity.Services.EmptyEmployeeGroupLookup
+0488 Autheris.Application.Identity.Services.IEmployeeGroupLookup Singleton key=- type:Autheris.Application.Identity.Services.AccessPolicyEmployeeGroupLookup
 0489 Autheris.Application.Governance.Notifications.GovernanceNotificationDispatcher Singleton key=- type:Autheris.Application.Governance.Notifications.GovernanceNotificationDispatcher
 0490 Autheris.Application.Governance.Notifications.IGovernanceNotificationDispatcher Singleton key=- factory:Autheris.Application.Governance.Notifications.IGovernanceNotificationDispatcher
 0491 Autheris.Application.Identity.Services.PrivilegedGroupChangeAuditor Singleton key=- factory:Autheris.Application.Identity.Services.PrivilegedGroupChangeAuditor

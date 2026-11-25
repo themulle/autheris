@@ -56,7 +56,7 @@ public sealed class RealmRoleOriginTests
         TestIdentityPipeline.StubResolution(
             resolver,
             new RoleResolution(
-                new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "S-1-5-21-1-2-3-1100" },
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase),
                 new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "ClusterAdmin", "TenantAdmin", "GovernanceAdmin", "Consumer" },
                 new Dictionary<string, string>(),
                 DateTimeOffset.UtcNow,

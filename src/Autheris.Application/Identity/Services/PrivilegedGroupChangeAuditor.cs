@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Governance.Notifications;
+using Autheris.Application.Products;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -20,6 +21,10 @@ using Autheris.Domain.Model;
 public interface IEmployeeGroupLookup
 {
     IReadOnlyCollection<string> GetEmployeeGroupSids(TenantId tenantId);
+
+    ValueTask<IReadOnlyCollection<string>> GetEmployeeGroupSidsAsync(
+        TenantId tenantId,
+        CancellationToken ct = default) => ValueTask.FromResult(GetEmployeeGroupSids(tenantId));
 }
 
 /// <summary>
@@ -46,14 +51,13 @@ public sealed record ScimMembershipAuditItem(string MemberKey, string MemberType
 /// </summary>
 public sealed class PrivilegedGroupChangeAuditor
 {
-    private const int MaxDomainPages = 200;
-
     private readonly IGovernanceDomainRepository? _domainRepository;
     private readonly IFunctionalRightRepository? _functionalRightRepository;
     private readonly IEmployeeGroupLookup _employeeGroupLookup;
     private readonly IAuditWriter? _auditWriter;
     private readonly IGovernanceNotificationDispatcher _notificationDispatcher;
     private readonly HashSet<string> _configuredEmployeeGroupSids;
+    private readonly IDataProductRepository? _productRepository;
 
     public PrivilegedGroupChangeAuditor(
         IGovernanceDomainRepository? domainRepository = null,
@@ -61,7 +65,8 @@ public sealed class PrivilegedGroupChangeAuditor
         IEmployeeGroupLookup? employeeGroupLookup = null,
         IAuditWriter? auditWriter = null,
         IGovernanceNotificationDispatcher? notificationDispatcher = null,
-        IEnumerable<string>? configuredEmployeeGroupSids = null)
+        IEnumerable<string>? configuredEmployeeGroupSids = null,
+        IDataProductRepository? productRepository = null)
     {
         _domainRepository = domainRepository;
         _functionalRightRepository = functionalRightRepository;
@@ -73,6 +78,7 @@ public sealed class PrivilegedGroupChangeAuditor
             .Select(s => s.Trim())
             .ToHashSet(StringComparer.OrdinalIgnoreCase)
             ?? new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        _productRepository = productRepository;
     }
 
     public async Task<PrivilegedGroupClassification> ClassifyGroupAsync(
@@ -83,7 +89,7 @@ public sealed class PrivilegedGroupChangeAuditor
         string? previousGroupObjectSid = null,
         CancellationToken ct = default)
     {
-        var candidates = BuildCandidateKeys(realmId, groupId, groupObjectSid, previousGroupObjectSid);
+        var candidates = PrivilegedGroupLookupHelper.BuildCandidateKeys(realmId, groupId, groupObjectSid, previousGroupObjectSid);
         if (candidates.Count == 0)
         {
             return new PrivilegedGroupClassification(false, [], [], []);
@@ -95,50 +101,29 @@ public sealed class PrivilegedGroupChangeAuditor
 
         if (_domainRepository is not null)
         {
-            var offset = 0;
-            for (var pageIndex = 0; pageIndex < MaxDomainPages; pageIndex++)
+            foreach (var ownerSid in await PrivilegedGroupLookupHelper.FindMatchingDomainOwnerGroupSidsAsync(
+                tenantId, candidates, _domainRepository, stopOnFirst: false, ct).ConfigureAwait(false))
             {
-                var domains = await _domainRepository.ListAsync(
-                    tenantId, IGovernanceDomainRepository.MaxPageSize, offset, ct).ConfigureAwait(false);
-                if (domains.Count == 0)
-                {
-                    break;
-                }
-
-                foreach (var domain in domains)
-                {
-                    if (domain.OwnerGroupSid is { Value: var ownerSid } && candidates.Contains(ownerSid))
-                    {
-                        categories.Add("tenant_owner_group");
-                        matchedIds.Add(ownerSid);
-                    }
-                }
-
-                if (domains.Count < IGovernanceDomainRepository.MaxPageSize)
-                {
-                    break;
-                }
-
-                offset += domains.Count;
+                categories.Add("tenant_owner_group");
+                matchedIds.Add(ownerSid);
             }
         }
 
-        foreach (var employeeSid in _employeeGroupLookup.GetEmployeeGroupSids(tenantId))
+        if (_productRepository is not null)
         {
-            if (!string.IsNullOrWhiteSpace(employeeSid) && candidates.Contains(employeeSid.Trim()))
+            foreach (var ownerSid in await PrivilegedGroupLookupHelper.FindMatchingProductOwnerGroupSidsAsync(
+                tenantId, candidates, _productRepository, stopOnFirst: false, ct).ConfigureAwait(false))
             {
-                categories.Add("employee_group");
-                matchedIds.Add(employeeSid.Trim());
+                categories.Add("data_product_owner_group");
+                matchedIds.Add(ownerSid);
             }
         }
 
-        foreach (var employeeSid in _configuredEmployeeGroupSids)
+        foreach (var employeeSid in await PrivilegedGroupLookupHelper.FindMatchingEmployeeGroupSidsAsync(
+            tenantId, candidates, _employeeGroupLookup, _configuredEmployeeGroupSids, stopOnFirst: false, ct).ConfigureAwait(false))
         {
-            if (candidates.Contains(employeeSid))
-            {
-                categories.Add("employee_group");
-                matchedIds.Add(employeeSid);
-            }
+            categories.Add("employee_group");
+            matchedIds.Add(employeeSid);
         }
 
         if (_functionalRightRepository is not null)
@@ -245,34 +230,5 @@ public sealed class PrivilegedGroupChangeAuditor
             summary,
             occurredAt);
         return _notificationDispatcher.DispatchAsync(message, ct);
-    }
-
-    private static HashSet<string> BuildCandidateKeys(
-        string realmId,
-        string groupId,
-        string? groupObjectSid,
-        string? previousGroupObjectSid)
-    {
-        var keys = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        if (!string.IsNullOrWhiteSpace(groupId))
-        {
-            keys.Add(groupId.Trim());
-            if (!string.IsNullOrWhiteSpace(realmId) && SidFormat.TryFormatRealmGroupKey(realmId, groupId, out var realmKey))
-            {
-                keys.Add(realmKey);
-            }
-        }
-
-        if (!string.IsNullOrWhiteSpace(groupObjectSid))
-        {
-            keys.Add(groupObjectSid.Trim());
-        }
-
-        if (!string.IsNullOrWhiteSpace(previousGroupObjectSid))
-        {
-            keys.Add(previousGroupObjectSid.Trim());
-        }
-
-        return keys;
     }
 }
