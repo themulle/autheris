@@ -79,7 +79,24 @@ public sealed partial class TableAccessPolicy
 
         if (allowGrants.Count == 0)
         {
-            return decision;
+            if (!decision.HasUnconstrainedColumnAllow)
+            {
+                return decision;
+            }
+
+            allowGrants =
+            [
+                new Consent
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = query.Tenant,
+                    TableIdentifier = query.Metadata.Identifier,
+                    Effect = ConsentEffect.Allow,
+                    GranteeType = GranteeType.User,
+                    GranteeSid = query.UserSid,
+                    ColumnRules = []
+                }
+            ];
         }
 
         // Issue #1047: below, only the per-cell compilation of several row-scoped grants can turn the allow into a deny; everything else

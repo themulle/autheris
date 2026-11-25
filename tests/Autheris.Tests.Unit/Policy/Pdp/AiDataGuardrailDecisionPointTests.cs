@@ -273,10 +273,10 @@ public sealed class AiDataGuardrailDecisionPointTests
     }
 
     [Theory]
-    // describe_dataset now omits legacy value profiles and checks PDP unless brief:true is requested.
-    [InlineData(CatalogOutputShape.Full, CatalogView.Granted, false, false, true)]
+    // Non-brief describe_dataset checks PDP when granted (value profiles possible) and allows visible ungranted metadata (#1150).
+    [InlineData(CatalogOutputShape.Full, CatalogView.Granted, false, false, false)]
     [InlineData(CatalogOutputShape.Full, CatalogView.Granted, false, true, true)]
-    [InlineData(CatalogOutputShape.Full, CatalogView.Granted, true, false, true)]
+    [InlineData(CatalogOutputShape.Full, CatalogView.Granted, true, false, false)]
     public async Task Describe_non_brief_is_always_decided(
         CatalogOutputShape shape, CatalogView view, bool released, bool granted, bool decided)
     {

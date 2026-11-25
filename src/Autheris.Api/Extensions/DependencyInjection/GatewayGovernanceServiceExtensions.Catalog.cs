@@ -73,7 +73,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddScoped<Autheris.Application.Policy.Pdp.IEffectiveAccessService, Autheris.Application.Policy.Pdp.EffectiveAccessService>();
         services.AddScoped<Autheris.Application.Policy.Pdp.IGrantEffectPreview, Autheris.Application.Policy.Pdp.GrantEffectPreviewService>();
         services.AddSingleton<IEuAiActAuditExporter, EuAiActAuditExporter>();
-        services.AddSingleton<Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService, Autheris.Application.Governance.Services.EffectiveAccessExplanationService>();
+        services.AddScoped<Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService, Autheris.Application.Governance.Services.EffectiveAccessExplanationService>();
         services.AddOptions<Autheris.Domain.Options.IndividualGrantOptions>() // 16
             .Configure<Microsoft.Extensions.Configuration.IConfiguration>((o, cfg) =>
                 Microsoft.Extensions.Configuration.ConfigurationBinder.Bind(cfg.GetSection(Autheris.Domain.Options.IndividualGrantOptions.SectionName), o))
