@@ -1,18 +1,11 @@
 namespace Autheris.Tests.Integration.Transports;
 
-using System;
 using System.Collections.Concurrent;
-using System.Collections.Generic;
 using System.Diagnostics.Metrics;
-using System.IO;
-using System.Linq;
 using System.Net;
-using System.Net.Http;
 using System.Net.Http.Json;
 using System.Text;
 using System.Text.Json;
-using System.Threading;
-using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -94,6 +87,9 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
                 b.UseSetting("Gateway:DataSources:Connections:" + SourceT + ":Provider", "PostgreSql");
                 b.UseSetting("Gateway:DataSources:Connections:" + SourceT + ":DefaultSchema", "main");
                 b.UseSetting("Gateway:DataSources:Connections:" + SourceT + ":ConnectionString", tConn);
+                // No periodic catalog check: a tick while S is restricted would drop S from the served schema at a random point of the
+                // run (issue #447 hides it), so the schema changes only when a test asks (ServeSchemaNamingBothSourcesAsync).
+                b.UseSetting("Gateway:GraphQL:CatalogSchemaRefreshSeconds", "0");
                 b.UseSetting("Gateway:WebSql:Enabled", "true");
                 b.UseSetting("Gateway:WebSql:DefaultDataSourceName", SourceT);
                 b.UseSetting("Gateway:WebSql:AllowedDataSources:0", SourceT);
@@ -158,7 +154,7 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
         }
 
         await TestSupport.GraphQlSchemaReadiness.AwaitCatalogSchemaAsync(
-            _factory.Services, ["src_s_main_s_items", "src_t_main_t_items"], TestSupport.GraphQlSchemaReadiness.DefaultTimeout);
+            _factory.Services, [SField, TField], TestSupport.GraphQlSchemaReadiness.DefaultTimeout);
 
         // Warm-up while S allows everything: one-time source initialisation must not be mistaken for data access of a denied call.
         using var warm = Client();
@@ -427,8 +423,20 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
     // ------------------------------------------------------------------------------------------------------------- GraphQL
 
     // Catalog root fields are named <domain>_<schema>_<table>.
-    private static Task<string> GraphQlRootFieldAsync(HttpClient client, string table) =>
-        Task.FromResult(table == "s_items" ? "src_s_main_s_items" : "src_t_main_t_items");
+    private const string SField = "src_s_main_s_items";
+    private const string TField = "src_t_main_t_items";
+
+    /// <summary>
+    /// A catalog check drops a source without GraphQL from the served schema (issue #447); the gate guards requests that still name
+    /// it. Each GraphQL test starts from a served executor that names S and T (rebuilt with S allowed), so the denial hits the gate.
+    /// </summary>
+    private async Task ServeSchemaNamingBothSourcesAsync()
+    {
+        await EnsureSeededAsync();
+        SourceSAllows("All");
+        await TestSupport.GraphQlSchemaReadiness.AwaitCatalogSchemaAsync(
+            _factory.Services, [SField, TField], TestSupport.GraphQlSchemaReadiness.DefaultTimeout);
+    }
 
     private static async Task<JsonElement> GraphQlAsync(HttpClient client, string query)
     {
@@ -445,10 +453,9 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
     [Fact]
     public async Task GraphQL_SourceRestOnly_Denied()
     {
-        await EnsureSeededAsync();
+        await ServeSchemaNamingBothSourcesAsync();
         using var client = Client();
-        var sField = await GraphQlRootFieldAsync(client, "s_items");
-        var query = $"{{ {sField}(first: 5) {{ id name }} }}";
+        var query = $"{{ {SField}(first: 5) {{ id name }} }}";
 
         SourceSAllows("Rest");
         var before = await TakeAsync();
@@ -466,15 +473,13 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
     [Fact]
     public async Task GraphQL_MixedSAndT_DeniedWhole()
     {
-        await EnsureSeededAsync();
+        await ServeSchemaNamingBothSourcesAsync();
         using var client = Client();
-        var sField = await GraphQlRootFieldAsync(client, "s_items");
-        var tField = await GraphQlRootFieldAsync(client, "t_items");
         SourceSAllows("Rest");
         var tBefore = _connections.ToT;
 
         var before = await TakeAsync();
-        var denied = await GraphQlAsync(client, $"{{ t: {tField}(first: 5) {{ id name }} s: {sField}(first: 5) {{ id name }} }}");
+        var denied = await GraphQlAsync(client, $"{{ t: {TField}(first: 5) {{ id name }} s: {SField}(first: 5) {{ id name }} }}");
 
         FirstErrorCode(denied).ShouldBe("TRANSPORT_NOT_ALLOWED", denied.ToString());
         denied.ToString().ShouldNotContain("row-one");
@@ -486,15 +491,13 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
     public async Task GraphQL_DeniedSourceInMixedOperation_NoResolverRuns()
     {
         // SEC-ATR-06 with aliases and a fragment hiding the denied field behind the allowed one.
-        await EnsureSeededAsync();
+        await ServeSchemaNamingBothSourcesAsync();
         using var client = Client();
-        var sField = await GraphQlRootFieldAsync(client, "s_items");
-        var tField = await GraphQlRootFieldAsync(client, "t_items");
         SourceSAllows("Rest");
         var tBefore = _connections.ToT;
 
         var before = await TakeAsync();
-        var denied = await GraphQlAsync(client, $"query Q {{ first: {tField}(first: 1) {{ id }} ...F }} fragment F on Query {{ hidden: {sField}(first: 1) {{ id }} }}");
+        var denied = await GraphQlAsync(client, $"query Q {{ first: {TField}(first: 1) {{ id }} ...F }} fragment F on Query {{ hidden: {SField}(first: 1) {{ id }} }}");
 
         FirstErrorCode(denied).ShouldBe("TRANSPORT_NOT_ALLOWED", denied.ToString());
         _connections.ToT.ShouldBe(tBefore);
@@ -505,10 +508,9 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
     [Fact]
     public async Task GraphQL_CacheHit_DoesNotBypassGate()
     {
-        await EnsureSeededAsync();
+        await ServeSchemaNamingBothSourcesAsync();
         using var client = Client();
-        var sField = await GraphQlRootFieldAsync(client, "s_items");
-        var query = $"{{ {sField}(first: 5) {{ id name }} }}";
+        var query = $"{{ {SField}(first: 5) {{ id name }} }}";
 
         // warm every cache (document, operation, planner) while the transport is allowed, then reload and repeat the identical request
         SourceSAllows("GraphQL");
@@ -682,7 +684,7 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
     [InlineData("GraphQL")]
     public async Task FailClosed_Theory_AllTransports(string sourceAllows)
     {
-        await EnsureSeededAsync();
+        await ServeSchemaNamingBothSourcesAsync();
         using var client = Client();
         await using var mcp = await McpTestClient.ConnectAsync(client);
         // "None" (an explicit deny) and a profile that lists only another transport: every ingress except GraphQL is refused.
@@ -697,8 +699,7 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
         Expect((await BodyAsync(await client.GetAsync("/odata/v4/src_s/main/s_items"))).Contains("TRANSPORT_NOT_ALLOWED", StringComparison.Ordinal), "OData");
         var (_, mcpText) = await McpTestClient.CallAsync(mcp, "query_sql", new { query = "SELECT id FROM src_s.main.s_items" });
         Expect(mcpText.Contains("TRANSPORT_NOT_ALLOWED", StringComparison.Ordinal), "Mcp");
-        var sField = await GraphQlRootFieldAsync(client, "s_items");
-        var gql = (await GraphQlAsync(client, $"{{ {sField}(first: 1) {{ id }} }}")).ToString();
+        var gql = (await GraphQlAsync(client, $"{{ {SField}(first: 1) {{ id }} }}")).ToString();
         Expect(gql.Contains("TRANSPORT_NOT_ALLOWED", StringComparison.Ordinal), "GraphQL");
     }
 
