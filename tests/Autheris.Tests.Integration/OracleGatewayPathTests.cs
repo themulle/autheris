@@ -195,6 +195,78 @@ public sealed class OracleGatewayPathTests : IDisposable
         ((string)(await check.ExecuteScalarAsync())!).ShouldBe($"BINARY|BINARY|{AstCompilerOracleFixture.AppUser}|-");
     }
 
+    // ---- read-only governed reads (#505, #1138) ----
+
+    private static async Task<int> ExecAsync(DbConnection conn, DbTransaction? tx, string sql)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = sql;
+        return await cmd.ExecuteNonQueryAsync();
+    }
+
+    private static string InsertOrder(int id) =>
+        $"INSERT INTO {AstCompilerOracleFixture.AppUser}.ORDERS (ID, TENANT_ID, REGION, STATUS, AMOUNT, EMAIL) VALUES ({id}, 'acme', 'EU', 'open', 1, NULL)";
+
+    /// <summary>
+    /// #1138: a governed read session (<see cref="AccessMode.ReadOnly"/>) on a real ODP.NET session with a pinned default schema
+    /// reads on every rental of the pooled physical session (no ORA-01453), and the database refuses DML in it (ORA-01456).
+    /// </summary>
+    [Fact]
+    public async Task ReadOnlySession_Reads_AndTheDatabaseRefusesDml_OnEveryPooledRental()
+    {
+        for (var rental = 0; rental < 3; rental++)
+        {
+            await using var conn = await _connections.CreateOpenConnectionAsync(_options);
+            var tx = await _sessions.InitializeSessionAsync(conn, "Oracle", new TenantId("acme"), AccessMode.ReadOnly);
+            tx.ShouldNotBeNull();
+            try
+            {
+                await using (var count = conn.CreateCommand())
+                {
+                    count.Transaction = tx;
+                    count.CommandText = "SELECT COUNT(*) FROM ORDERS";
+                    Convert.ToInt32(await count.ExecuteScalarAsync()).ShouldBeGreaterThan(0);
+                }
+
+                var refused = await Should.ThrowAsync<Oracle.ManagedDataAccess.Client.OracleException>(() => ExecAsync(conn, tx, InsertOrder(9000 + rental)));
+                refused.Number.ShouldBe(1456); // ORA-01456: may not perform insert/delete/update operation inside a READ ONLY transaction
+            }
+            finally
+            {
+                await tx.RollbackAsync();
+                await tx.DisposeAsync();
+            }
+        }
+
+        // The read-only mode is transaction-scoped: the same pooled session accepts DML on the write path afterwards.
+        await using var writeConn = await _connections.CreateOpenConnectionAsync(_options);
+        (await _sessions.InitializeSessionAsync(writeConn, "Oracle", new TenantId("acme"))).ShouldBeNull();
+        await using var writeTx = await writeConn.BeginTransactionAsync();
+        (await ExecAsync(writeConn, writeTx, InsertOrder(9100))).ShouldBe(1);
+        await writeTx.RollbackAsync();
+    }
+
+    /// <summary>
+    /// #1138: beginning a transaction on the gateway's Oracle connection sends no transaction-control statement (no
+    /// <c>SET TRANSACTION ISOLATION LEVEL ...</c>), with or without an explicit isolation level, so <c>SET TRANSACTION READ ONLY</c>
+    /// is the first statement of the transaction. A second <c>SET TRANSACTION</c> is the control: Oracle refuses it (ORA-01453).
+    /// </summary>
+    [Theory]
+    [InlineData(System.Data.IsolationLevel.Unspecified)]
+    [InlineData(System.Data.IsolationLevel.ReadCommitted)]
+    public async Task BeginTransaction_SendsNoTransactionControlStatement_SoReadOnlyIsFirst(System.Data.IsolationLevel isolation)
+    {
+        await using var conn = await _connections.CreateOpenConnectionAsync(_options);
+        await using var tx = await conn.BeginTransactionAsync(isolation);
+
+        await ExecAsync(conn, tx, "SET TRANSACTION READ ONLY");
+
+        var second = await Should.ThrowAsync<Oracle.ManagedDataAccess.Client.OracleException>(() => ExecAsync(conn, tx, "SET TRANSACTION READ ONLY"));
+        second.Number.ShouldBe(1453); // ORA-01453: SET TRANSACTION must be first statement of transaction
+        await tx.RollbackAsync();
+    }
+
     // ---- masks ----
 
     private static PolicyParameterExpression MaskParam(string name, SqlParameterType type) => new(name, type, ParameterOrigin.Mask);

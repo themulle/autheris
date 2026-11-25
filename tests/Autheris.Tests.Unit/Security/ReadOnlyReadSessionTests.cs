@@ -340,6 +340,87 @@ public sealed class ReadOnlyReadSessionTests
         backend.HasDanglingActiveTransaction.ShouldBeFalse();
     }
 
+    /// <summary>
+    /// #1138: the Oracle read path begins its transaction without an explicit isolation level, so nothing precedes
+    /// <c>SET TRANSACTION READ ONLY</c>: it is the first and only transaction-control statement, followed by the session
+    /// initialization and the query inside the same transaction. A driver that emits its own isolation statement for an
+    /// explicit request (the reported failure mode) would otherwise break every Oracle read with ORA-01453.
+    /// </summary>
+    [Fact]
+    public async Task Oracle_read_issues_exactly_one_transaction_control_statement_first()
+    {
+        var backend = new PooledBackendState { DriverEmitsStatementForExplicitIsolation = true };
+        var (executor, _) = CreateExecutor("Oracle", backend);
+
+        await executor.ExecuteRewrittenAsync(
+            new GovernedSqlQueryRequest("SELECT id FROM orders"),
+            Caller(),
+            new TenantId(Tenant),
+            new GovernedRewrite(CompiledSelect(TargetSqlDialect.Oracle, "SELECT \"ID\" FROM \"ORDERS\""), [], DataSource),
+            new DmlAuditContext(),
+            new Dictionary<string, object?>(),
+            static (_, _, _) => Task.CompletedTask,
+            CancellationToken.None);
+
+        var rental = backend.Rentals.ShouldHaveSingleItem();
+        var tx = rental.Transactions.ShouldHaveSingleItem();
+        tx.RequestedIsolation.ShouldBe(IsolationLevel.Unspecified);
+        tx.IsReadOnly.ShouldBeTrue();
+        rental.Commands.Select(c => c.Sql).ShouldBe(
+        [
+            "SET TRANSACTION READ ONLY",
+            "BEGIN DBMS_SESSION.SET_IDENTIFIER(:corr); DBMS_APPLICATION_INFO.SET_MODULE(:module, NULL); END;",
+            "SELECT \"ID\" FROM \"ORDERS\""
+        ]);
+        rental.Commands.ShouldAllBe(c => c.HasTransaction);
+        tx.CommitCount.ShouldBe(0);
+        tx.RollbackCount.ShouldBe(1);
+        backend.HasDanglingActiveTransaction.ShouldBeFalse();
+    }
+
+    /// <summary>#1138: the fake really models ORA-01453, so the test above has teeth (an explicit isolation request fails closed).</summary>
+    [Fact]
+    public async Task Explicit_isolation_statement_before_read_only_fails_closed()
+    {
+        var backend = new PooledBackendState { DriverEmitsStatementForExplicitIsolation = true };
+        await using var conn = backend.RentConnection();
+        await using var tx = await conn.BeginTransactionAsync(IsolationLevel.ReadCommitted);
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = "SET TRANSACTION READ ONLY";
+
+        await Should.ThrowAsync<SimulatedTransactionControlNotFirstException>(() => cmd.ExecuteNonQueryAsync());
+        ((PooledTransaction)tx).IsReadOnly.ShouldBeFalse();
+    }
+
+    /// <summary>#1138: no dialect's read-only session requests an explicit isolation level; PostgreSQL and SQL Server are unchanged.</summary>
+    [Theory]
+    [InlineData(DatabaseDialect.PostgreSql, new[] { "SET TRANSACTION READ ONLY", "set_config" })]
+    [InlineData(DatabaseDialect.Oracle, new[] { "SET TRANSACTION READ ONLY", "DBMS_SESSION.SET_IDENTIFIER" })]
+    [InlineData(DatabaseDialect.SqlServer, new[] { "sys.sp_set_session_context" })]
+    public async Task Read_only_session_requests_no_isolation_level(DatabaseDialect dialect, string[] expectedStatements)
+    {
+        var backend = new PooledBackendState { DriverEmitsStatementForExplicitIsolation = true };
+        await using var conn = backend.RentConnection();
+        var sut = new DbSessionContextInitializer();
+
+        await using var tx = await sut.InitializeSessionAsync(conn, dialect, new TenantId(Tenant), AccessMode.ReadOnly, userSid: "S-1-5-21-1");
+
+        tx.ShouldNotBeNull();
+        var rental = backend.Rentals.ShouldHaveSingleItem();
+        rental.Transactions.ShouldHaveSingleItem().RequestedIsolation.ShouldBe(IsolationLevel.Unspecified);
+        rental.Commands.Count.ShouldBe(expectedStatements.Length);
+        for (var i = 0; i < expectedStatements.Length; i++)
+        {
+            rental.Commands[i].Sql.ShouldContain(expectedStatements[i]);
+            rental.Commands[i].HasTransaction.ShouldBeTrue();
+        }
+
+        rental.Commands.Count(c => c.Sql.TrimStart().StartsWith("SET TRANSACTION", StringComparison.OrdinalIgnoreCase))
+            .ShouldBe(dialect == DatabaseDialect.SqlServer ? 0 : 1);
+        await tx.RollbackAsync();
+    }
+
     [Theory]
     [InlineData((DatabaseDialect)0)]
     [InlineData((DatabaseDialect)99)]
@@ -357,11 +438,20 @@ public sealed class ReadOnlyReadSessionTests
 
     private sealed class SimulatedReadOnlyTransactionViolationException(string message) : DbException(message);
 
+    private sealed class SimulatedTransactionControlNotFirstException(string message) : DbException(message);
+
     private sealed record ExecutedCommand(string Sql, bool HasTransaction);
 
     private sealed class PooledBackendState
     {
         public bool FailOnSetTransactionReadOnly { get; init; }
+
+        /// <summary>
+        /// #1138: models a driver that turns an explicit isolation request into its own <c>SET TRANSACTION ISOLATION LEVEL</c>
+        /// statement (the failure mode reported for Oracle). Combined with the Oracle rule that a transaction-control statement must
+        /// be the first statement of the transaction, an explicit request then makes <c>SET TRANSACTION READ ONLY</c> fail.
+        /// </summary>
+        public bool DriverEmitsStatementForExplicitIsolation { get; init; }
         public bool SessionLevelReadOnlyPoisoned { get; set; }
         public bool HasDanglingActiveTransaction { get; set; }
         public int ReadOnlyViolationCount { get; set; }
@@ -420,9 +510,15 @@ public sealed class ReadOnlyReadSessionTests
 
         protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel)
         {
-            var tx = new PooledTransaction(this, backend, rental, backend.SessionLevelReadOnlyPoisoned);
+            var tx = new PooledTransaction(this, backend, rental, backend.SessionLevelReadOnlyPoisoned) { RequestedIsolation = isolationLevel };
             backend.CurrentTransaction = tx;
             rental.Transactions.Add(tx);
+            if (backend.DriverEmitsStatementForExplicitIsolation && isolationLevel != IsolationLevel.Unspecified)
+            {
+                rental.RecordCommand("SET TRANSACTION ISOLATION LEVEL " + isolationLevel, tx);
+                tx.StatementCount++;
+            }
+
             return tx;
         }
 
@@ -445,6 +541,8 @@ public sealed class ReadOnlyReadSessionTests
         bool isReadOnly) : DbTransaction
     {
         public bool IsReadOnly { get; set; } = isReadOnly;
+        public IsolationLevel RequestedIsolation { get; init; }
+        public int StatementCount { get; set; }
         public int CommitCount { get; private set; }
         public int RollbackCount { get; private set; }
         public bool Completed { get; private set; }
@@ -501,6 +599,7 @@ public sealed class ReadOnlyReadSessionTests
         public override int ExecuteNonQuery()
         {
             rental.RecordCommand(CommandText, DbTransaction);
+            CountStatement();
 
             if (string.Equals(CommandText, "SET TRANSACTION READ ONLY", StringComparison.OrdinalIgnoreCase))
             {
@@ -533,6 +632,7 @@ public sealed class ReadOnlyReadSessionTests
         protected override DbDataReader ExecuteDbDataReader(CommandBehavior behavior)
         {
             rental.RecordCommand(CommandText, DbTransaction);
+            CountStatement();
 
             if (DbTransaction is PooledTransaction { IsReadOnly: true } &&
                 CommandText.Contains("nextval(", StringComparison.OrdinalIgnoreCase))
@@ -545,6 +645,22 @@ public sealed class ReadOnlyReadSessionTests
         }
 
         protected override DbParameter CreateDbParameter() => new PooledDbParameter();
+
+        /// <summary>Oracle (and PostgreSQL) reject a transaction-control statement once the transaction has run any statement.</summary>
+        private void CountStatement()
+        {
+            if (DbTransaction is not PooledTransaction ptx)
+            {
+                return;
+            }
+
+            if (ptx.StatementCount > 0 && CommandText.TrimStart().StartsWith("SET TRANSACTION", StringComparison.OrdinalIgnoreCase))
+            {
+                throw new SimulatedTransactionControlNotFirstException("ORA-01453: SET TRANSACTION must be first statement of transaction");
+            }
+
+            ptx.StatementCount++;
+        }
     }
 
     private sealed class PooledDbParameter : DbParameter
