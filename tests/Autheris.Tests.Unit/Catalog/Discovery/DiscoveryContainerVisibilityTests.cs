@@ -294,6 +294,61 @@ public sealed class DiscoveryContainerVisibilityTests
     }
 
     [Fact]
+    public async Task KeysetPaging_WithContainerVisibility_OmitsConsentedUnownedHiddenTablesAcrossPages()
+    {
+        var tables = new FakeDiscoveryTableRepository();
+        var consents = new FakeDiscoveryConsentRepository();
+        var owners = new FakeDiscoveryOwnershipRepository();
+
+        var hiddenStart = DiscoveryTestBuilder.MakeTable("dom", "a_hidden_consented", ownerTenantId: null, hidden: true);
+        var vis1 = DiscoveryTestBuilder.MakeTable("dom", "b_visible_01", ownerTenantId: null);
+        var vis2 = DiscoveryTestBuilder.MakeTable("dom", "c_visible_02", ownerTenantId: null);
+        var hiddenMid = DiscoveryTestBuilder.MakeTable("dom", "d_hidden_consented", ownerTenantId: null, hidden: true);
+        var vis3 = DiscoveryTestBuilder.MakeTable("dom", "e_visible_03", ownerTenantId: null);
+        var hiddenOwned = DiscoveryTestBuilder.MakeTable("dom", "f_hidden_owned", ownerTenantId: null, hidden: true);
+        var hiddenEnd = DiscoveryTestBuilder.MakeTable("dom", "g_hidden_consented", ownerTenantId: null, hidden: true);
+
+        tables.Tables.AddRange([hiddenStart, vis1, vis2, hiddenMid, vis3, hiddenOwned, hiddenEnd]);
+        owners.OwnedTables.Add(hiddenOwned.Identifier);
+        foreach (var table in tables.Tables)
+        {
+            consents.Active.Add(AllowRead(table, Caller, TenantA));
+        }
+
+        var protections = new StubProtection(
+            tables.Tables.ToDictionary(static t => t.Identifier, static _ => ProtectionOf(OpenDomain)),
+            OpenDomain);
+        var service = CreateService(
+            tables,
+            consents,
+            owners,
+            protections,
+            new StubContainers(available: true),
+            defaultTenantId: TenantA.Value);
+        var caller = CallerOf(Caller);
+
+        foreach (var (access, search) in new (DiscoveryAccessState? Access, string? Search)[]
+        {
+            (null, null),
+            (DiscoveryAccessState.Granted, null),
+            (null, "dom"),
+            (DiscoveryAccessState.Granted, "dom")
+        })
+        {
+            var page1 = await service.ListKeysetAsync(new DiscoveryKeysetQuery(First: 2, Access: access, Search: search), caller);
+            page1.TotalCount.ShouldBe(4);
+            page1.Items.Select(static i => i.Table.Identifier).ShouldBe([vis1.Identifier, vis2.Identifier]);
+            page1.NextKey.ShouldBe(vis2.Identifier.ToString());
+
+            var page2 = await service.ListKeysetAsync(new DiscoveryKeysetQuery(First: 2, AfterKey: page1.NextKey, Access: access, Search: search), caller);
+            page2.TotalCount.ShouldBe(4);
+            page2.Items.Select(static i => i.Table.Identifier).ShouldBe([vis3.Identifier, hiddenOwned.Identifier]);
+            page2.Items[1].Object.IsHidden.ShouldBeTrue();
+            page2.NextKey.ShouldBeNull();
+        }
+    }
+
+    [Fact]
     public async Task CatalogChangeIndexer_indexes_own_non_unassigned_domain_tables_and_ignores_unassigned_and_foreign_owned()
     {
         var tables = new FakeDiscoveryTableRepository();
