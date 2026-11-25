@@ -513,7 +513,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
         var graphQlColumns = (graphQl?.Columns ?? []).ToDictionary(c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
 
         // The access label is the data-path level seen through the sensitivity rule: a column graded sensitive is never reported as clear
-        // (an explicit Clear on it is shown as mask). The key and index projection uses the same labels, so a key column never shows "mask".
+        // (an explicit Clear on it is shown as mask). The key and index projection uses the same labels.
         string? AccessLabel(TableColumn c) => columnAccessLevels.TryGetValue(c.ColumnName, out var lvl)
             ? lvl switch
             {
@@ -523,17 +523,18 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             }
             : null;
 
-        // I404-SC-L1/L4: keys and indexes only when wholly clear for this caller (the level lookup fails closed to Deny).
-        var clearColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        // I404-SC-L1/L4, #1105: keys and indexes only when every column is clear or masked for this caller (the level lookup fails closed to
+        // Deny); a denied or discovery-hidden column omits the key or index whole.
+        var keyVisibleColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var column in table.Columns)
         {
-            if (AccessLabel(column) == "clear")
+            if (AccessLabel(column) is not null)
             {
-                clearColumns.Add(column.ColumnName);
+                keyVisibleColumns.Add(column.ColumnName);
             }
         }
 
-        var keyView = Autheris.Application.DataSources.Services.DatasetIndexProjection.Project(table, clearColumns);
+        var keyView = Autheris.Application.DataSources.Services.DatasetIndexProjection.Project(table, keyVisibleColumns);
         var primaryKeys = new HashSet<string>(keyView.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
 
         var hiddenCols = await ResolveFallbackHiddenColumnsAsync(table, columnAccessLevels, activeConsents, principal, ct).ConfigureAwait(false);

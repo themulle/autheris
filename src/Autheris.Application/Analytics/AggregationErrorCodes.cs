@@ -21,6 +21,9 @@ public static class AggregationErrorCodes
     /// <summary>Time bucketing is not supported for this column (data type, non-UTC zone on Databricks/Oracle, etc.).</summary>
     public const string TimeBucketUnsupported = "AGGREGATION_TIME_BUCKET_UNSUPPORTED";
 
+    /// <summary>#1107: a time-bucketed aggregate asks for a <c>limit</c> above <c>AggregationOptions.MaxTimeBucketedLimit</c>.</summary>
+    public const string TimeBucketLimitExceeded = "AGGREGATION_TIME_BUCKET_LIMIT_EXCEEDED";
+
     /// <summary>The governed compiler does not support the aggregation for this dataset (translation limit, any dialect or construct).</summary>
     public const string NotSupported = "AGGREGATION_NOT_SUPPORTED";
 }

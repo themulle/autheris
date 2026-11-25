@@ -5,7 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using Autheris.Domain.Model;
 
-/// <summary>The primary key, declared indexes and physical non-unique indexes a caller may see (I404-SC-L1..L6).</summary>
+/// <summary>The primary key, declared indexes and physical non-unique indexes a caller may see (I404-SC-L1..L6, #1105).</summary>
 public sealed record DatasetKeyProjection(
     IReadOnlyList<string> PrimaryKeyColumns,
     IReadOnlyList<KeyColumnDirection> PrimaryKeyDirections,
@@ -14,7 +14,7 @@ public sealed record DatasetKeyProjection(
     /// <summary>Nothing visible: the fail-closed result.</summary>
     public static DatasetKeyProjection Empty { get; } = new([], [], []);
 
-    /// <summary>Issue #390: the key columns in key order with their direction; null when the key is not wholly readable.</summary>
+    /// <summary>Issue #390: the key columns in key order with their direction; null when the key is not wholly visible.</summary>
     public IReadOnlyList<McpKeyColumn>? PrimaryKeyOrder => KeyOrder(PrimaryKeyColumns, PrimaryKeyDirections);
 
     /// <summary>The key columns in key order with their direction; null for an empty key.</summary>
@@ -36,12 +36,15 @@ public sealed record DatasetKeyProjection(
 }
 
 /// <summary>
-/// I404-SC-L1..L6: the one projection of a declared primary key and declared indexes onto a caller. MCP <c>describe_dataset</c>
-/// (and its GraphQL access block) and the REST catalog detail both use it, so no surface re-implements the filter.
+/// I404-SC-L1..L6 as relaxed by #1105: the one projection of a declared primary key and declared indexes onto a caller. MCP
+/// <c>describe_dataset</c> (and its GraphQL access block) and the REST catalog detail both use it, so no surface re-implements the filter.
 /// <list type="bullet">
-/// <item>A key or an index is emitted only if every one of its columns is readable in clear text for the caller; one masked, denied,
-/// hidden or unresolved column omits it whole. There is no subset, no direction and no name.</item>
-/// <item>The clear set must come from the caller's access levels, never from the list of listed columns. A missing set (null) or an
+/// <item>A key or an index is emitted only if every one of its columns is visible for the caller: level <c>Clear</c> or <c>Mask</c>, and
+/// not discovery-hidden. One denied, hidden or unresolved column omits it whole. There is no subset, no direction and no name.</item>
+/// <item>#1105: a masked column keeps its key and index membership. The caller sees the column name in the same answer, and the structure
+/// reveals no value; filtering, ordering and joining on a masked column stay refused (<c>FILTER_ON_MASKED_COLUMN</c>), so the key order is
+/// no ranking oracle.</item>
+/// <item>The visible set must come from the caller's access levels, never from the list of listed columns. A missing set (null) or an
 /// empty one omits everything (fail closed).</item>
 /// <item>The cap (<see cref="MaxIndexesPerTable"/> indexes, <see cref="MaxColumnsPerKey"/> columns each) is applied after the
 /// visibility filter and after de-duplication, so an omitted index can influence neither the counts nor the order.</item>
@@ -56,17 +59,18 @@ public static class DatasetIndexProjection
     public const int MaxColumnsPerKey = 32;
 
     /// <summary>
-    /// Projects the declared definition of <paramref name="table"/> onto the columns in <paramref name="clearColumns"/>.
+    /// Projects the declared definition of <paramref name="table"/> onto the columns in <paramref name="visibleColumns"/> (the columns at
+    /// level <c>Clear</c> or <c>Mask</c> for the caller, see <see cref="VisibleSet"/>).
     /// </summary>
-    public static DatasetKeyProjection Project(TableMetadata table, IReadOnlySet<string>? clearColumns)
+    public static DatasetKeyProjection Project(TableMetadata table, IReadOnlySet<string>? visibleColumns)
     {
         ArgumentNullException.ThrowIfNull(table);
-        if (clearColumns is not { Count: > 0 })
+        if (visibleColumns is not { Count: > 0 })
         {
             return DatasetKeyProjection.Empty;
         }
 
-        var pkReadable = Readable(table, table.PrimaryKeyColumns, clearColumns);
+        var pkReadable = Readable(table, table.PrimaryKeyColumns, visibleColumns);
         var primaryKey = pkReadable ? table.PrimaryKeyColumns.ToArray() : [];
         IReadOnlyList<KeyColumnDirection> primaryKeyDirections = pkReadable
             ? KeyDirections.Canonical(table.PrimaryKeyDirections)?.ToArray() ?? []
@@ -80,7 +84,7 @@ public static class DatasetIndexProjection
         {
             foreach (var index in table.Indexes)
             {
-                if (index.IsUnique != (pass == 0) || !Readable(table, index.Columns, clearColumns))
+                if (index.IsUnique != (pass == 0) || !Readable(table, index.Columns, visibleColumns))
                 {
                     continue;
                 }
@@ -105,8 +109,8 @@ public static class DatasetIndexProjection
     private static string Shape(IReadOnlyList<string> columns, KeyColumnDirection[]? directions) =>
         string.Join('\u0001', columns) + "|" + (directions == null ? "" : string.Join(',', directions));
 
-    // Every name must be a real column of the table (a stale name never resolves) and Clear for the caller; no allocation.
-    private static bool Readable(TableMetadata table, IReadOnlyList<string> names, IReadOnlySet<string> clear)
+    // Every name must be a listed column of the table (a stale or discovery-hidden name never resolves) and visible for the caller; no allocation.
+    private static bool Readable(TableMetadata table, IReadOnlyList<string> names, IReadOnlySet<string> visible)
     {
         if (names.Count is 0 or > MaxColumnsPerKey)
         {
@@ -115,7 +119,7 @@ public static class DatasetIndexProjection
 
         for (var i = 0; i < names.Count; i++)
         {
-            if (!clear.Contains(names[i]) || !IsColumnOf(table, names[i]))
+            if (!visible.Contains(names[i]) || !IsListedColumnOf(table, names[i]))
             {
                 return false;
             }
@@ -124,18 +128,27 @@ public static class DatasetIndexProjection
         return true;
     }
 
-    private static bool IsColumnOf(TableMetadata table, string name)
+    private static bool IsListedColumnOf(TableMetadata table, string name)
     {
         for (var i = 0; i < table.Columns.Count; i++)
         {
             if (string.Equals(table.Columns[i].ColumnName, name, StringComparison.OrdinalIgnoreCase))
             {
-                return true;
+                // #1105: a discovery-hidden column is not listed to anyone, so a key or index over it stays omitted whole.
+                return !table.Columns[i].DiscoveryHidden;
             }
         }
 
         return false;
     }
+
+    /// <summary>#1105: the columns whose level is <c>Clear</c> or <c>Mask</c> (the key and index visibility set); a missing level is denied.</summary>
+    public static IReadOnlySet<string> VisibleSet(IReadOnlyDictionary<string, Autheris.Domain.Interfaces.ColumnAccessLevel>? levels) =>
+        levels == null
+            ? new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+            : new HashSet<string>(
+                levels.Where(kv => kv.Value is Autheris.Domain.Interfaces.ColumnAccessLevel.Clear or Autheris.Domain.Interfaces.ColumnAccessLevel.Mask).Select(kv => kv.Key),
+                StringComparer.OrdinalIgnoreCase);
 
     /// <summary>The columns whose level is exactly <c>Clear</c>; a missing level is not clear.</summary>
     public static IReadOnlySet<string> ClearSet(IReadOnlyDictionary<string, Autheris.Domain.Interfaces.ColumnAccessLevel>? levels) =>

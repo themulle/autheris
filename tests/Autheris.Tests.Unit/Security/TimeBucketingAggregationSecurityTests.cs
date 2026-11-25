@@ -173,7 +173,7 @@ public sealed class TimeBucketingAggregationSecurityTests
                 new ObjectFieldNode("bucket", new EnumValueNode("HOUR")),
                 new ObjectFieldNode("timeZone", new StringValueNode("UTC"))));
 
-        // Limit = 1001 must fail closed with QUERY_TOO_COMPLEX
+        // Limit = 1001 must fail closed before any SQL is generated; #1107: with its own code, not the cost analyzer's QUERY_TOO_COMPLEX
         var act = () => AggregateArgumentParser.Parse(
             tableType,
             groupByNode,
@@ -184,7 +184,7 @@ public sealed class TimeBucketingAggregationSecurityTests
             _ => null);
 
         var ex = act.ShouldThrow<HotChocolate.GraphQLException>();
-        ex.Errors[0].Code.ShouldBe("QUERY_TOO_COMPLEX");
+        ex.Errors[0].Code.ShouldBe("AGGREGATION_TIME_BUCKET_LIMIT_EXCEEDED");
     }
 
     [Fact]
