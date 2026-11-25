@@ -78,10 +78,13 @@ public sealed class RoleResolver : IRoleResolver
 
         // 1. Check L1 / L2 Cache
         var cacheKey = await BuildCacheKeyAsync(identity, realm, cancellationToken).ConfigureAwait(false);
-        var cached = await _cache.GetAsync(realm.Id, cacheKey, cancellationToken).ConfigureAwait(false);
-        if (cached != null)
+        if (!string.IsNullOrEmpty(cacheKey))
         {
-            return cached;
+            var cached = await _cache.GetAsync(realm.Id, cacheKey, cancellationToken).ConfigureAwait(false);
+            if (cached != null)
+            {
+                return cached;
+            }
         }
 
         // 2. Select providers configured in realm.ResolverChain in order
@@ -127,6 +130,7 @@ public sealed class RoleResolver : IRoleResolver
 
                         var trimmed = g.Trim();
                         if (!SidFormat.IsGroupSid(trimmed)
+                            || (SidFormat.IsWindowsAdDomainSid(trimmed) && !SidFormat.UsesWorkforceAdSids(realm.Kind))
                             || (SidFormat.IsEntraCloudSid(trimmed) && !SidFormat.HasTenantBoundEntraIssuers(realm))
                             || (SidFormat.IsRealmGroupKey(trimmed) && !SidFormat.MatchesRealmGroupKey(trimmed, realm.Id)))
                         {
@@ -201,7 +205,7 @@ public sealed class RoleResolver : IRoleResolver
         };
 
         // GOV-08: an incomplete answer is never cached: the next request asks the providers again instead of serving "no groups".
-        if (!degraded)
+        if (!degraded && !string.IsNullOrEmpty(cacheKey))
         {
             await _cache.SetAsync(realm.Id, cacheKey, resolution, cancellationToken).ConfigureAwait(false);
         }
@@ -211,13 +215,18 @@ public sealed class RoleResolver : IRoleResolver
 
     private async Task<string> BuildCacheKeyAsync(ResolvedIdentity identity, IdentityRealm realm, CancellationToken ct)
     {
+        if (string.IsNullOrWhiteSpace(identity.TenantId.Value))
+        {
+            return string.Empty;
+        }
+
         if (realm.Provisioning != RealmProvisioningMode.Scim || _scimProvisioningStore is null)
         {
-            return $"role:{identity.UserKey}";
+            return $"role:t{identity.TenantId.Value}:{identity.UserKey}";
         }
 
         var syncState = await _scimProvisioningStore.GetRealmSyncStateAsync(identity.TenantId, realm.Id, ct).ConfigureAwait(false);
         var epoch = syncState?.DeprovisionEpoch ?? 0;
-        return $"role:e{epoch}:{identity.UserKey}";
+        return $"role:t{identity.TenantId.Value}:e{epoch}:{identity.UserKey}";
     }
 }

@@ -45,14 +45,14 @@ public sealed class RoleResolverTests
         );
 
         _provider.GetRolesAsync(identity, realm, Arg.Any<CancellationToken>())
-            .Returns(new ProviderRoleResult(new HashSet<string> { "S-1-5-21-1-2-3-4001" }, new HashSet<string> { "Viewer" }, new Dictionary<string, string>()));
+            .Returns(new ProviderRoleResult(new HashSet<string> { "realm:customer-b2b:4001" }, new HashSet<string> { "Viewer" }, new Dictionary<string, string>()));
 
         var sut = new RoleResolver(_realmRegistry, [_provider], _cache);
 
         var resolution = await sut.ResolveRolesAsync(identity);
 
-        // Canonical SIDs are globally unique: no realm prefix. Isolation is the cache key (realm, user) and the realm chain.
-        resolution.Groups.ShouldContain("S-1-5-21-1-2-3-4001");
+        // Canonical realm-scoped group identifiers preserve realm isolation without extra pipe prefixes.
+        resolution.Groups.ShouldContain("realm:customer-b2b:4001");
         resolution.Groups.ShouldAllBe(g => !g.Contains('|'));
     }
 

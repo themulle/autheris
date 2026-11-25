@@ -70,10 +70,11 @@ public sealed class GroupSidResolverWiringTests
     [Fact]
     public async Task Basic_resolver_realm_uses_chain()
     {
+        const string basicResolverGroup = "realm:wiring-realm:team-b";
         var provider = Substitute.For<IRoleProvider>();
         provider.ProviderId.Returns("static-mapping");
         provider.GetRolesAsync(Arg.Any<ResolvedIdentity>(), Arg.Any<IdentityRealm>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult(new ProviderRoleResult(new HashSet<string> { GroupB }, new HashSet<string>(), new Dictionary<string, string>())));
+            .Returns(Task.FromResult(new ProviderRoleResult(new HashSet<string> { basicResolverGroup }, new HashSet<string>(), new Dictionary<string, string>())));
         var options = Microsoft.Extensions.Options.Options.Create(new GatewayOptions());
         var registry = Registry(RealmGroupSource.Resolver, IdentityRealmKind.Basic, "static-mapping");
         var roleResolver = new RoleResolver(registry, [provider], new RoleResolverCache(), options);
@@ -84,7 +85,7 @@ public sealed class GroupSidResolverWiringTests
 
         var result = await pipeline.ProcessAsync(Principal("Basic"), "Basic", null, CancellationToken.None);
 
-        result.GetGroupSids().Select(g => g.Value).ShouldBe([GroupB]);
+        result.GetGroupSids().Select(g => g.Value).ShouldBe([basicResolverGroup]);
         GroupResolutionClaims.Read(result).ShouldBe(GroupResolutionStatus.Complete);
     }
 

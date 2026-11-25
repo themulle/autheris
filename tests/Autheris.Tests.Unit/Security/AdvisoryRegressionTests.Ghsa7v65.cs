@@ -100,7 +100,7 @@ public sealed partial class AdvisoryRegressionTests
         var registry = new FakeIdentityRealmRegistry([realmA, realmB], realmA);
         var roleCache = new RecordingRoleCache();
         var options = Options.Create(new GatewayOptions());
-        var roleProvider = new StaticRoleProvider("stub-role-provider", ["S-1-5-21-1000-2000-3000-4001"]);
+        var roleProvider = new StaticRoleProvider("stub-role-provider", ["realm:oidc-b:team-4001"]);
         var roleResolver = new RoleResolver(registry, [roleProvider], roleCache, options);
         var groupResolver = new GroupSidResolver(roleResolver, [roleProvider], options);
         var pipeline = new IdentityPipeline(registry, groupResolver, roleResolver, options: options);
@@ -126,7 +126,7 @@ public sealed partial class AdvisoryRegressionTests
         result.GetAllUserSids().ShouldNotContain(new Sid(victimAdSid));
         result.GetAllUserSids().ShouldNotContain(new Sid("Alice"));
         result.GetAllUserSids().ShouldNotContain(new Sid("oidc-a|Alice"));
-        roleCache.KeysSeen.ShouldContain(("oidc-b", "role:Alice"));
+        roleCache.KeysSeen.ShouldContain(("oidc-b", "role:ttenant-shared:Alice"));
         roleCache.KeysSeen.ShouldNotContain(("oidc-b", "role:victim-oid-001"));
 
         var lowerOidc = new ClaimsPrincipal(new ClaimsIdentity(
@@ -149,7 +149,7 @@ public sealed partial class AdvisoryRegressionTests
         var delimiterResult = await pipeline.ProcessAsync(delimiterPrincipal, "Bearer", null, CancellationToken.None);
         delimiterResult.GetUserSid().ShouldBe(new Sid("oidc-b|oidc-b|alice"));
         (delimiterResult.GetUserSid()!.Value == lowerResult.GetUserSid()!.Value).ShouldBeFalse();
-        roleCache.KeysSeen.ShouldContain(("oidc-b", "role:oidc-b|alice"));
+        roleCache.KeysSeen.ShouldContain(("oidc-b", "role:ttenant-shared:oidc-b|alice"));
 
         // Inbound cert: values without clientCert must still be stripped and realm-bound.
         var certSpoofOidc = new ClaimsPrincipal(new ClaimsIdentity(
@@ -234,7 +234,9 @@ public sealed partial class AdvisoryRegressionTests
         var cache = new RoleResolverCache();
         var scimStore = new InMemoryScimCacheAndEpochStore("cloud-oid-1", "S-1-5-21-1000-2000-3000-7777");
         var options = Options.Create(new GatewayOptions());
-        var roleProvider = new StaticRoleProvider("scim-provider", ["S-1-5-21-1000-2000-3000-8888"]);
+        var roleProvider = new StaticRoleProvider(
+            "scim-provider",
+            r => r.Id == "oidc-scim" ? ["realm:oidc-scim:grp-8888"] : ["S-1-5-21-1000-2000-3000-8888"]);
         var roleResolver = new RoleResolver(registry, [roleProvider], cache, options, scimStore);
         var groupResolver = new GroupSidResolver(
             roleResolver,
@@ -259,7 +261,7 @@ public sealed partial class AdvisoryRegressionTests
         oidcResult.HasClaim(RoleResolutionClaims.ClaimType, RoleResolutionClaims.Degraded).ShouldBeFalse();
         oidcResult.GetUserSid().ShouldBe(new Sid("oidc-scim|sub-alice"));
         oidcResult.GetGroupSids().ShouldContain(new Sid("realm:oidc-scim:grp-7777"));
-        oidcResult.GetGroupSids().ShouldContain(new Sid("S-1-5-21-1000-2000-3000-8888"));
+        oidcResult.GetGroupSids().ShouldContain(new Sid("realm:oidc-scim:grp-8888"));
 
         // Entra SCIM cloud-only user without onprem_sid: synthesized PrimarySid is ignored; malformed inbound objectSid still fails closed.
         var entraCloudPrincipal = new ClaimsPrincipal(new ClaimsIdentity(
@@ -414,7 +416,7 @@ public sealed partial class AdvisoryRegressionTests
 
         var nonScimRealm = new IdentityRealm(
             "nonscim-realm",
-            IdentityRealmKind.GenericOidc,
+            IdentityRealmKind.EntraWorkforce,
             new TenantBindingSpecification(TenantBindingKind.Fixed, TenantA),
             RealmGroupSource.Resolver,
             RealmProvisioningMode.None,
@@ -440,21 +442,21 @@ public sealed partial class AdvisoryRegressionTests
         var groupResolution = await groupResolver.ResolveAsync(principalForScim, scimRealm, TenantA, "Bearer", CancellationToken.None);
         groupResolution.GroupSids.ShouldContain(new Sid("S-1-5-21-1000-2000-3000-7001"));
 
-        var cachedScimEntry = await cache.GetAsync("scim-realm", "scim:e0:scim:alice");
+        var cachedScimEntry = await cache.GetAsync("scim-realm", $"scim:t{TenantA.Value}:e0:scim:alice");
         cachedScimEntry.ShouldNotBeNull();
 
         var roleIdentity = new ResolvedIdentity("scim:alice", null, null, null, TenantA, "scim-realm", []);
         var resolvedRoles = await roleResolver.ResolveRolesAsync(roleIdentity);
         resolvedRoles.Groups.ShouldContain("S-1-5-21-1000-2000-3000-8001");
-        (await cache.GetAsync("scim-realm", "role:e0:scim:alice")).ShouldNotBeNull();
-        // Pre-existing SCIM entry under scim:e0:scim:alice remains untouched by RoleResolver.
-        (await cache.GetAsync("scim-realm", "scim:e0:scim:alice"))!.Groups.ShouldContain("S-1-5-21-1000-2000-3000-7001");
+        (await cache.GetAsync("scim-realm", $"role:t{TenantA.Value}:e0:scim:alice")).ShouldNotBeNull();
+        // Pre-existing SCIM entry under scim:t<tenant>:e0:scim:alice remains untouched by RoleResolver.
+        (await cache.GetAsync("scim-realm", $"scim:t{TenantA.Value}:e0:scim:alice"))!.Groups.ShouldContain("S-1-5-21-1000-2000-3000-7001");
 
         var nonScimIdentity = new ResolvedIdentity("alice-plain", null, null, null, TenantA, "nonscim-realm", []);
         await roleResolver.ResolveRolesAsync(nonScimIdentity);
-        (await cache.GetAsync("nonscim-realm", "role:alice-plain")).ShouldNotBeNull();
+        (await cache.GetAsync("nonscim-realm", $"role:t{TenantA.Value}:alice-plain")).ShouldNotBeNull();
         cache.Invalidate("nonscim-realm", "alice-plain");
-        (await cache.GetAsync("nonscim-realm", "role:alice-plain")).ShouldBeNull();
+        (await cache.GetAsync("nonscim-realm", $"role:t{TenantA.Value}:alice-plain")).ShouldBeNull();
 
         // Cache accommodates max-length (256-char) userKeys with role/SCIM prefixes and invalidates userKeys literally prefixed with "role:".
         var maxUserKey = new string('u', 256);
@@ -470,9 +472,9 @@ public sealed partial class AdvisoryRegressionTests
         (await cache.GetAsync("scim-realm", overlongPrefixedKey)).ShouldBeNull();
 
         await roleResolver.ResolveRolesAsync(new ResolvedIdentity("role:admin", null, null, null, TenantA, "nonscim-realm", []));
-        (await cache.GetAsync("nonscim-realm", "role:role:admin")).ShouldNotBeNull();
+        (await cache.GetAsync("nonscim-realm", $"role:t{TenantA.Value}:role:admin")).ShouldNotBeNull();
         cache.Invalidate("nonscim-realm", "role:admin");
-        (await cache.GetAsync("nonscim-realm", "role:role:admin")).ShouldBeNull();
+        (await cache.GetAsync("nonscim-realm", $"role:t{TenantA.Value}:role:admin")).ShouldBeNull();
     }
 
     private static async Task VerifyScimAdditionInvalidationAsync()
@@ -564,12 +566,13 @@ public sealed partial class AdvisoryRegressionTests
         public void Dispose() => _inner.Dispose();
     }
 
-    private sealed class StaticRoleProvider(string providerId, params string[] groupSids) : IRoleProvider
+    private sealed class StaticRoleProvider(string providerId, Func<IdentityRealm, string[]> groupSidsForRealm) : IRoleProvider
     {
+        public StaticRoleProvider(string providerId, params string[] groupSids) : this(providerId, _ => groupSids) { }
         public string ProviderId => providerId;
 
         public Task<ProviderRoleResult> GetRolesAsync(ResolvedIdentity identity, IdentityRealm realm, CancellationToken cancellationToken = default) =>
-            Task.FromResult(new ProviderRoleResult(new HashSet<string>(groupSids), new HashSet<string>(), new Dictionary<string, string>()));
+            Task.FromResult(new ProviderRoleResult(new HashSet<string>(groupSidsForRealm(realm)), new HashSet<string>(), new Dictionary<string, string>()));
     }
 
     private sealed class RecordingApprovalRepository : IConsentApprovalRepository

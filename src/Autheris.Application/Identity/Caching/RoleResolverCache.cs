@@ -20,7 +20,7 @@ public interface IRoleResolverCache
 
 public sealed class RoleResolverCache : IRoleResolverCache, IGovernanceCacheInvalidator, IDisposable
 {
-    private const int MaxCacheKeyLength = IdentityGroupsChangedChannel.MaxKeyLength + 32;
+    private const int MaxCacheKeyLength = IdentityGroupsChangedChannel.MaxKeyLength + 128;
     private readonly ConcurrentLru<(string RealmId, string UserKey), RoleResolution> _l1Cache;
     private readonly byte[] _hmacKey;
     private readonly TimeProvider _timeProvider;
@@ -40,33 +40,57 @@ public sealed class RoleResolverCache : IRoleResolverCache, IGovernanceCacheInva
 
     private void OnGovernanceChange(GovernanceChangeEvent change)
     {
-        if (change.IsFullInvalidation || !string.IsNullOrEmpty(change.GroupId))
+        if (change.IsFullInvalidation)
         {
             InvalidateAll();
             return;
         }
 
+        if (!string.IsNullOrEmpty(change.GroupId))
+        {
+            InvalidateTenant(change.TenantId);
+            return;
+        }
+
         if (!string.IsNullOrEmpty(change.SubjectKey))
         {
-            if (!string.IsNullOrEmpty(change.RealmId))
+            foreach (var entry in _l1Cache)
             {
-                Invalidate(change.RealmId, change.SubjectKey);
-            }
-            else
-            {
-                foreach (var entry in _l1Cache)
+                if (!MatchesTenantScope(entry.Key.UserKey, change.TenantId))
                 {
-                    if (string.Equals(entry.Key.UserKey, change.SubjectKey, StringComparison.Ordinal)
-                        || IsEpochCacheKeyForUser(entry.Key.UserKey, change.SubjectKey))
-                    {
-                        _l1Cache.TryRemove(entry.Key);
-                    }
+                    continue;
+                }
+
+                if (!string.IsNullOrEmpty(change.RealmId)
+                    && !string.Equals(entry.Key.RealmId, change.RealmId, StringComparison.Ordinal))
+                {
+                    continue;
+                }
+
+                if (MatchesUserKey(entry.Key.UserKey, change.SubjectKey))
+                {
+                    _l1Cache.TryRemove(entry.Key);
                 }
             }
         }
     }
 
-    public void InvalidateTenant(string tenantId) => InvalidateAll();
+    public void InvalidateTenant(string tenantId)
+    {
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            InvalidateAll();
+            return;
+        }
+
+        foreach (var entry in _l1Cache)
+        {
+            if (MatchesTenantScope(entry.Key.UserKey, tenantId))
+            {
+                _l1Cache.TryRemove(entry.Key);
+            }
+        }
+    }
 
     public void Dispose() => _governanceSubscription?.Dispose();
 
@@ -79,13 +103,10 @@ public sealed class RoleResolverCache : IRoleResolverCache, IGovernanceCacheInva
             return false;
         }
 
-        if (TryStripEpochPrefix(userKey, out var unwrapped))
-        {
-            return unwrapped.Length > 0 && unwrapped.Length <= IdentityGroupsChangedChannel.MaxKeyLength;
-        }
-
-        var rawLength = userKey.StartsWith("role:", StringComparison.Ordinal) ? userKey.Length - 5 : userKey.Length;
-        return rawLength > 0 && rawLength <= IdentityGroupsChangedChannel.MaxKeyLength;
+        var hasTenant = TryParseCacheKey(userKey, out _, out var afterTenant);
+        _ = hasTenant;
+        var effectiveSpan = TryStripEpochPrefix(afterTenant, out var unwrapped) ? unwrapped : afterTenant;
+        return effectiveSpan.Length > 0 && effectiveSpan.Length <= IdentityGroupsChangedChannel.MaxKeyLength;
     }
 
     public ValueTask<RoleResolution?> GetAsync(string realmId, string userKey, CancellationToken ct = default)
@@ -141,25 +162,92 @@ public sealed class RoleResolverCache : IRoleResolverCache, IGovernanceCacheInva
         foreach (var entry in _l1Cache)
         {
             if (string.Equals(entry.Key.RealmId, realmId, StringComparison.Ordinal)
-                && IsEpochCacheKeyForUser(entry.Key.UserKey, userKey))
+                && MatchesUserKey(entry.Key.UserKey, userKey))
             {
                 _l1Cache.TryRemove(entry.Key);
             }
         }
     }
 
-    private static bool IsEpochCacheKeyForUser(string cachedKey, string userKey) =>
-        TryStripEpochPrefix(cachedKey, out var unwrapped) && unwrapped.Equals(userKey.AsSpan(), StringComparison.Ordinal);
+    private static bool MatchesTenantScope(string cachedKey, string tenantId) =>
+        !TryParseCacheKey(cachedKey, out var entryTenant, out _)
+        || entryTenant.Equals(tenantId.AsSpan(), StringComparison.Ordinal);
 
-    private static bool TryStripEpochPrefix(string key, out ReadOnlySpan<char> unwrapped)
+    private static bool MatchesUserKey(string cachedKey, string userKey)
     {
-        unwrapped = default;
-        if (!key.StartsWith("role:e", StringComparison.Ordinal) && !key.StartsWith("scim:e", StringComparison.Ordinal))
+        var target = userKey.AsSpan();
+        if (cachedKey.AsSpan().Equals(target, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        _ = TryParseCacheKey(cachedKey, out _, out var afterTenant);
+        if (afterTenant.Equals(target, StringComparison.Ordinal))
+        {
+            return true;
+        }
+
+        return TryStripEpochPrefix(afterTenant, out var unwrapped) && unwrapped.Equals(target, StringComparison.Ordinal);
+    }
+
+    private static bool TryParseCacheKey(string key, out ReadOnlySpan<char> tenantId, out ReadOnlySpan<char> afterTenant)
+    {
+        tenantId = default;
+        var span = key.AsSpan();
+        var hasKindPrefix = span.StartsWith("role:", StringComparison.Ordinal) || span.StartsWith("scim:", StringComparison.Ordinal);
+        if (!hasKindPrefix)
+        {
+            afterTenant = span;
+            return false;
+        }
+
+        var afterKind = span[5..];
+        if (afterKind.Length >= 3 && afterKind[0] == 't')
+        {
+            var colonIdx = afterKind[1..].IndexOf(':');
+            if (colonIdx > 0)
+            {
+                var candidateTenant = afterKind.Slice(1, colonIdx);
+                if (IsValidTenantSegment(candidateTenant))
+                {
+                    tenantId = candidateTenant;
+                    afterTenant = afterKind[(colonIdx + 2)..];
+                    return true;
+                }
+            }
+        }
+
+        afterTenant = afterKind;
+        return false;
+    }
+
+    private static bool IsValidTenantSegment(ReadOnlySpan<char> segment)
+    {
+        if (segment.Length is < 1 or > 64 || segment[0] == '_')
         {
             return false;
         }
 
-        var rest = key.AsSpan(6);
+        foreach (var ch in segment)
+        {
+            if (!char.IsAsciiLetterOrDigit(ch) && ch is not '_' and not '-')
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    private static bool TryStripEpochPrefix(ReadOnlySpan<char> span, out ReadOnlySpan<char> unwrapped)
+    {
+        unwrapped = default;
+        if (span.Length < 3 || span[0] != 'e')
+        {
+            return false;
+        }
+
+        var rest = span[1..];
         var colonIdx = rest.IndexOf(':');
         if (colonIdx <= 0)
         {

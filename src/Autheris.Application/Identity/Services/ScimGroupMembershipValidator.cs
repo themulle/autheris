@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Governance.Caching;
+using Autheris.Application.Products;
 using Autheris.Domain.Common;
 using Autheris.Domain.Governance;
 using Autheris.Domain.Interfaces;
@@ -27,8 +28,6 @@ public sealed class MassMembershipChangeQuarantineException : Exception
 
 public sealed class ScimGroupMembershipValidator
 {
-    private const int MaxDomainPages = 200;
-
     private readonly IFunctionalRightRepository? _functionalRightRepository;
     private readonly IAuditWriter? _auditWriter;
     private readonly double _thresholdPercentage;
@@ -36,6 +35,7 @@ public sealed class ScimGroupMembershipValidator
     private readonly IEmployeeGroupLookup _employeeGroupLookup;
     private readonly IGovernanceChangeNotifier? _changeNotifier;
     private readonly TimeProvider _timeProvider;
+    private readonly IDataProductRepository? _productRepository;
 
     public ScimGroupMembershipValidator(
         IFunctionalRightRepository? functionalRightRepository = null,
@@ -44,7 +44,8 @@ public sealed class ScimGroupMembershipValidator
         IGovernanceDomainRepository? domainRepository = null,
         IEmployeeGroupLookup? employeeGroupLookup = null,
         IGovernanceChangeNotifier? changeNotifier = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        IDataProductRepository? productRepository = null)
     {
         _functionalRightRepository = functionalRightRepository;
         _auditWriter = auditWriter;
@@ -53,6 +54,7 @@ public sealed class ScimGroupMembershipValidator
         _employeeGroupLookup = employeeGroupLookup ?? EmptyEmployeeGroupLookup.Instance;
         _changeNotifier = changeNotifier;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _productRepository = productRepository;
     }
 
     public Task ValidateMembershipChangeAsync(
@@ -74,11 +76,8 @@ public sealed class ScimGroupMembershipValidator
             return;
         }
 
-        // Check if group is privileged (role-mapped right, tenant owner group, or employee group)
-        var groupKeys = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { groupId };
-        if (SidFormat.TryFormatRealmGroupKey(realmId, groupId, out var realmKey)) groupKeys.Add(realmKey);
-        if (!string.IsNullOrWhiteSpace(groupObjectSid)) groupKeys.Add(groupObjectSid.Trim());
-        if (!string.IsNullOrWhiteSpace(previousGroupObjectSid)) groupKeys.Add(previousGroupObjectSid.Trim());
+        // Check if group is privileged (role-mapped right, owner group, or employee group)
+        var groupKeys = PrivilegedGroupLookupHelper.BuildCandidateKeys(realmId, groupId, groupObjectSid, previousGroupObjectSid);
 
         bool isPrivileged = false;
         if (_functionalRightRepository != null)
@@ -98,44 +97,23 @@ public sealed class ScimGroupMembershipValidator
 
         if (!isPrivileged && _domainRepository != null)
         {
-            var offset = 0;
-            for (var pageIndex = 0; pageIndex < MaxDomainPages; pageIndex++)
-            {
-                var domains = await _domainRepository.ListAsync(
-                    tenantId, IGovernanceDomainRepository.MaxPageSize, offset, ct).ConfigureAwait(false);
-                if (domains.Count == 0)
-                {
-                    break;
-                }
+            var domainMatches = await PrivilegedGroupLookupHelper.FindMatchingDomainOwnerGroupSidsAsync(
+                tenantId, groupKeys, _domainRepository, stopOnFirst: true, ct).ConfigureAwait(false);
+            isPrivileged = domainMatches.Count > 0;
+        }
 
-                foreach (var d in domains)
-                {
-                    if (d.OwnerGroupSid is { Value: var ownerSid } && groupKeys.Contains(ownerSid))
-                    {
-                        isPrivileged = true;
-                        break;
-                    }
-                }
-
-                if (isPrivileged || domains.Count < IGovernanceDomainRepository.MaxPageSize)
-                {
-                    break;
-                }
-
-                offset += domains.Count;
-            }
+        if (!isPrivileged && _productRepository != null)
+        {
+            var productMatches = await PrivilegedGroupLookupHelper.FindMatchingProductOwnerGroupSidsAsync(
+                tenantId, groupKeys, _productRepository, stopOnFirst: true, ct).ConfigureAwait(false);
+            isPrivileged = productMatches.Count > 0;
         }
 
         if (!isPrivileged)
         {
-            foreach (var sid in _employeeGroupLookup.GetEmployeeGroupSids(tenantId))
-            {
-                if (!string.IsNullOrWhiteSpace(sid) && groupKeys.Contains(sid.Trim()))
-                {
-                    isPrivileged = true;
-                    break;
-                }
-            }
+            var employeeMatches = await PrivilegedGroupLookupHelper.FindMatchingEmployeeGroupSidsAsync(
+                tenantId, groupKeys, _employeeGroupLookup, configuredEmployeeGroupSids: null, stopOnFirst: true, ct).ConfigureAwait(false);
+            isPrivileged = employeeMatches.Count > 0;
         }
 
         if (isPrivileged)

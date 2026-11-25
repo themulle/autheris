@@ -403,8 +403,10 @@ public sealed class GroupSidResolver : IGroupSidResolver
         CancellationToken ct)
     {
         var realmId = realm.Id;
-        var cacheKey = $"scim:e{epoch}:{scimUserKey}";
-        if (_roleCache is not null)
+        var cacheKey = !string.IsNullOrWhiteSpace(tenant.Value)
+            ? $"scim:t{tenant.Value}:e{epoch}:{scimUserKey}"
+            : string.Empty;
+        if (_roleCache is not null && cacheKey.Length > 0)
         {
             var cached = await _roleCache.GetAsync(realmId, cacheKey, ct).ConfigureAwait(false);
             if (cached is not null)
@@ -439,7 +441,7 @@ public sealed class GroupSidResolver : IGroupSidResolver
             sids.Add(new Sid(g));
         }
 
-        if (_roleCache is not null)
+        if (_roleCache is not null && cacheKey.Length > 0)
         {
             var resolution = new RoleResolution(
                 projected,
@@ -481,6 +483,7 @@ public sealed class GroupSidResolver : IGroupSidResolver
         foreach (var group in resolution.Groups)
         {
             if (SidFormat.IsGroupSid(group)
+                && (!SidFormat.IsWindowsAdDomainSid(group) || SidFormat.UsesWorkforceAdSids(realm.Kind))
                 && (!SidFormat.IsEntraCloudSid(group) || (validTid && SidFormat.HasTenantBoundEntraIssuers(realm, tokenIssuer, tokenTid)))
                 && (!SidFormat.IsRealmGroupKey(group) || SidFormat.MatchesRealmGroupKey(group, realm.Id)))
             {

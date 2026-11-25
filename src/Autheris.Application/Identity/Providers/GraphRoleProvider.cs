@@ -103,7 +103,8 @@ public sealed class GraphRoleProvider : IRoleProvider
             var incomplete = false;
             foreach (var group in groups)
             {
-                if (SidFormat.IsCanonical(group))
+                if (SidFormat.IsCanonical(group)
+                    && (!SidFormat.IsWindowsAdDomainSid(group) || SidFormat.UsesWorkforceAdSids(realm.Kind)))
                     sids.Add(group);
                 else if (Guid.TryParseExact(group, "D", out var objectId)
                     && SidFormat.TryFromEntraObjectId(objectId, realm, tokenIssuer, out var cloudSid, tokenTid))

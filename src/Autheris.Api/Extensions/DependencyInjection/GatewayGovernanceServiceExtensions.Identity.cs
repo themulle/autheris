@@ -80,7 +80,7 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Identity.Services.IRedisLockPubSubChannel, Autheris.Infrastructure.Identity.Locks.RedisLockPubSubChannel>();
         services.AddHostedService<Autheris.Application.Identity.Services.LockRoleCacheInvalidationHostedService>();
         services.AddSingleton<Autheris.Application.Identity.Services.IIdentityDeprovisioningService, Autheris.Application.Identity.Services.IdentityDeprovisioningService>();
-        services.TryAddSingleton<Autheris.Application.Identity.Services.IEmployeeGroupLookup, Autheris.Application.Identity.Services.EmptyEmployeeGroupLookup>();
+        services.TryAddSingleton<Autheris.Application.Identity.Services.IEmployeeGroupLookup, Autheris.Application.Identity.Services.AccessPolicyEmployeeGroupLookup>();
         services.TryAddSingleton<Autheris.Application.Governance.Notifications.GovernanceNotificationDispatcher>();
         services.TryAddSingleton<Autheris.Application.Governance.Notifications.IGovernanceNotificationDispatcher>(sp =>
             sp.GetRequiredService<Autheris.Application.Governance.Notifications.GovernanceNotificationDispatcher>());
@@ -90,7 +90,8 @@ public static partial class GatewayGovernanceServiceExtensions
                 sp.GetService<IFunctionalRightRepository>(),
                 sp.GetService<Autheris.Application.Identity.Services.IEmployeeGroupLookup>(),
                 sp.GetService<IAuditWriter>(),
-                sp.GetService<Autheris.Application.Governance.Notifications.IGovernanceNotificationDispatcher>()));
+                sp.GetService<Autheris.Application.Governance.Notifications.IGovernanceNotificationDispatcher>(),
+                productRepository: sp.GetService<Autheris.Application.Products.IDataProductRepository>()));
         services.AddSingleton<Autheris.Application.Identity.Services.ScimGroupMembershipValidator>(sp =>
             new Autheris.Application.Identity.Services.ScimGroupMembershipValidator(
                 sp.GetService<IFunctionalRightRepository>(),
@@ -98,7 +99,8 @@ public static partial class GatewayGovernanceServiceExtensions
                 domainRepository: sp.GetService<Autheris.Application.Common.Interfaces.IGovernanceDomainRepository>(),
                 employeeGroupLookup: sp.GetService<Autheris.Application.Identity.Services.IEmployeeGroupLookup>(),
                 changeNotifier: sp.GetService<Autheris.Application.Governance.Caching.IGovernanceChangeNotifier>(),
-                timeProvider: sp.GetService<TimeProvider>()));
+                timeProvider: sp.GetService<TimeProvider>(),
+                productRepository: sp.GetService<Autheris.Application.Products.IDataProductRepository>()));
         services.AddSingleton<Autheris.Application.Identity.Services.ScimMassChangeGuard>();
         services.AddSingleton<Autheris.Application.Identity.Services.IScimService, Autheris.Application.Identity.Services.ScimService>();
         services.AddSingleton<Autheris.Application.Governance.Rights.IFunctionalRightMapper, Autheris.Application.Governance.Rights.FunctionalRightMapper>();
