@@ -222,6 +222,7 @@ public sealed class DeprovisioningGrantRevocationTests
                 switch (m.Name)
                 {
                     case nameof(ICatalogVisibilityGrantRepository.ListActiveForSubjectsAsync):
+                    case nameof(ICatalogVisibilityGrantRepository.ListForDeprovisioningAsync):
                         return Task.FromResult<IReadOnlyList<CatalogVisibilityGrant>>(ActiveCatalog.Where(c => !CatalogRevoked.Contains(c.Id)).ToList());
                     case nameof(ICatalogVisibilityGrantRepository.RevokeAsync):
                         CatalogRevoked.Add((Guid)args![1]!);
@@ -235,6 +236,7 @@ public sealed class DeprovisioningGrantRevocationTests
                 switch (m.Name)
                 {
                     case nameof(IConsentApprovalRepository.GetRequestsByRequesterSidAsync):
+                    case nameof(IConsentApprovalRepository.GetPendingRequestsForSubjectAsync):
                         return Task.FromResult<IReadOnlyList<ConsentRequest>>(Pending.Where(r => !Withdrawn.Contains(r.Id)).ToList());
                     case nameof(IConsentApprovalRepository.WithdrawConsentRequestAsync):
                         Withdrawn.Add((Guid)args![0]!);

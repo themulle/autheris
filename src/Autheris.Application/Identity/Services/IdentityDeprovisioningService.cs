@@ -90,6 +90,9 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
         var lockEntry = new ScimLock(tenantId, realmId, userKey, reason, source, now);
         await _storeRepository.AddLockAsync(lockEntry, ct).ConfigureAwait(false);
 
+        // Load correlated user attributes before deactivation/deletion so all identity forms can be revoked.
+        var user = await _storeRepository.GetUserAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false);
+
         // 2. Deactivate user in store
         await _storeRepository.DeactivateUserAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false);
 
@@ -163,7 +166,7 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
         // 7. Revoke every data, unmask and catalog grant and withdraw pending requests. The lock and deactivation above stay
         // in force; an incomplete run fails the call so the deprovisioning is retried idempotently.
         var revocation = new GrantRevocationResult(0, 0, 0, 0, false);
-        foreach (var form in await SubjectFormsAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false))
+        foreach (var form in await SubjectFormsAsync(tenantId, realmId, userKey, user, ct).ConfigureAwait(false))
         {
             var partial = await _grantRevocationService.RevokeAllForSubjectAsync(tenantId, form, reason, ct).ConfigureAwait(false);
             revocation = new GrantRevocationResult(
@@ -183,18 +186,74 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
     /// <summary>
     /// The realm-qualified subject form always belongs to this realm. The bare form is revoked only when no other realm of the
     /// tenant holds the same user key, so a deprovisioning never revokes the grants of an unrelated user of another realm.
+    /// Correlated identifiers from the loaded SCIM user are included and deduplicated.
     /// </summary>
-    private async Task<Sid[]> SubjectFormsAsync(TenantId tenantId, string realmId, string userKey, CancellationToken ct)
+    private async Task<Sid[]> SubjectFormsAsync(
+        TenantId tenantId,
+        string realmId,
+        string userKey,
+        ScimUser? user,
+        CancellationToken ct)
     {
         var qualified = new Sid($"{realmId}|{userKey}");
-        if (await _storeRepository.UserKeyExistsInOtherRealmAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false))
+        var bareAmbiguous = await _storeRepository.UserKeyExistsInOtherRealmAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false);
+        if (bareAmbiguous)
         {
             _logger?.LogWarning(
                 "Bare subject form of a deprovisioned user key is ambiguous across realms of tenant {Tenant}; only the realm-qualified grants of realm {Realm} are revoked.",
                 LogSanitizer.Sanitize(tenantId.Value), LogSanitizer.Sanitize(realmId));
-            return [qualified];
         }
 
-        return [new Sid(userKey), qualified];
+        var forms = new List<Sid>();
+        var seen = new HashSet<Sid>();
+        void AddIfDistinct(string? candidate)
+        {
+            if (string.IsNullOrWhiteSpace(candidate))
+            {
+                return;
+            }
+
+            var sid = new Sid(candidate.Trim());
+            if (seen.Add(sid))
+            {
+                forms.Add(sid);
+            }
+        }
+
+        if (!bareAmbiguous)
+        {
+            AddIfDistinct(userKey);
+        }
+
+        if (seen.Add(qualified))
+        {
+            forms.Add(qualified);
+        }
+
+        if (user is not null)
+        {
+            AddIfDistinct(user.ObjectSid);
+
+            if (!string.IsNullOrWhiteSpace(user.EntraObjectId))
+            {
+                var entraObjectId = user.EntraObjectId.Trim();
+                AddIfDistinct($"{realmId}|{entraObjectId}");
+                if (!bareAmbiguous || !string.Equals(entraObjectId, userKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    AddIfDistinct(entraObjectId);
+                }
+            }
+
+            if (!string.IsNullOrWhiteSpace(user.ExternalId))
+            {
+                var externalId = user.ExternalId.Trim();
+                if (!bareAmbiguous || !string.Equals(externalId, userKey, StringComparison.OrdinalIgnoreCase))
+                {
+                    AddIfDistinct(externalId);
+                }
+            }
+        }
+
+        return forms.ToArray();
     }
 }
