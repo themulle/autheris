@@ -76,3 +76,12 @@ public interface IGovernanceDomainRepository
     Task<IReadOnlyList<TableIdentifier>> ListDomainTablesAsync(TenantId tenant, Guid domainId, int limit, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<TableIdentifier>>([]);
 }
+
+/// <summary>
+/// Optional transaction coordinator for governance domain stores, allowing multi-step protection writes and required WORM audit
+/// calls to commit or roll back together atomically.
+/// </summary>
+public interface IAtomicGovernanceDomainRepository
+{
+    Task ExecuteInTransactionAsync(Func<CancellationToken, Task> action, CancellationToken ct = default);
+}

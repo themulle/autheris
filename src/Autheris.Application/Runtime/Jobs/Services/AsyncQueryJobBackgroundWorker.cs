@@ -295,6 +295,20 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
                 scope.ServiceProvider.GetService<Autheris.Application.DataSources.IIngressTransportContext>()?.Set(item.Ingress);
             }
             var sqlExec = scope.ServiceProvider.GetRequiredService<IGovernedSqlExecutionService>();
+            IReadOnlyDictionary<string, AsyncJobTablePolicySnapshot>? tableSnapshots = null;
+            if ((_jobManager as AsyncQueryJobManager ?? _queue as AsyncQueryJobManager) is { } jobManager &&
+                scope.ServiceProvider.GetService<Autheris.Application.Policy.Pdp.IAccessDecisionPoint>() is { } pdp &&
+                scope.ServiceProvider.GetService<ITableMetadataRepository>() is { } metaRepo)
+            {
+                tableSnapshots = await jobManager.CaptureExecutionSnapshotsAsync(
+                    runningJob,
+                    item.User,
+                    tenantId,
+                    pdp,
+                    metaRepo,
+                    scope.ServiceProvider.GetService<TrinoSqlEngine.ISqlEngine>(),
+                    linkedCts.Token).ConfigureAwait(false);
+            }
 
             // SR-H-05 defence in depth: re-derive the bounds server-side; the queued request is never trusted.
             var options = _options?.Value;
@@ -335,7 +349,8 @@ public sealed class AsyncQueryJobBackgroundWorker : BackgroundService
                 CompletedAt = DateTimeOffset.UtcNow,
                 ResultFilePath = filePath,
                 RowsProduced = result.RowCount,
-                BytesProduced = fileInfo.Length
+                BytesProduced = fileInfo.Length,
+                SubmittedTableSnapshots = tableSnapshots ?? runningJob.SubmittedTableSnapshots
             };
             if (!await _queue.TryTransitionAsync(completed, writeCt).ConfigureAwait(false))
             {

@@ -477,35 +477,47 @@ public sealed class ClassificationWorkflowStateMachine : IClassificationWorkflow
         }
 
         var datasetId = proposal.TableIdentifier.ToString();
-        var tableOutcome = await _governanceDomainService.SetTableProtectionAsync(
-            callerCtx, tenant, datasetId, baselineClass, requestedMaskCategory: null, ct).ConfigureAwait(false);
-        if (tableOutcome.Status == DomainServiceStatus.NotFound)
+        var atomic = _domainRepository as IAtomicGovernanceDomainRepository ?? _governanceDomainService!.AtomicRepository;
+        if (atomic is null) return await WriteProtectionBatchAsync(proposal, request, callerCtx, tenant, datasetId, baselineClass, resolvedColumns, ct).ConfigureAwait(false);
+        try
         {
+            await atomic.ExecuteInTransactionAsync(async innerCt =>
+            {
+                if (await WriteProtectionBatchAsync(proposal, request, callerCtx, tenant, datasetId, baselineClass, resolvedColumns, innerCt).ConfigureAwait(false) is { } f)
+                    throw new ProtectionBatchRollbackException(f);
+            }, ct).ConfigureAwait(false);
             return null;
         }
+        catch (ProtectionBatchRollbackException ex) { return ex.Failure; }
+    }
 
+    private async Task<TableClassificationApprovalResult?> WriteProtectionBatchAsync(
+        TableClassificationProposal proposal,
+        TableClassificationApprovalRequest request,
+        SecurityPrincipalContext callerCtx,
+        TenantId tenant,
+        string datasetId,
+        ProtectionClass baselineClass,
+        List<(string ColumnName, ProtectionClass Class, string? MaskCategory)> resolvedColumns,
+        CancellationToken ct)
+    {
+        var tableOutcome = await _governanceDomainService!.SetTableProtectionAsync(callerCtx, tenant, datasetId, baselineClass, requestedMaskCategory: null, ct).ConfigureAwait(false);
+        if (tableOutcome.Status == DomainServiceStatus.NotFound) return null;
         if (tableOutcome.Status != DomainServiceStatus.Ok)
-        {
             return Fail(proposal, request, tableOutcome.ErrorCode ?? "PROTECTION_WRITE_FAILED", tableOutcome.ErrorMessage ?? "Failed to write table protection.");
-        }
 
         foreach (var (colName, colClass, colMask) in resolvedColumns)
         {
-            if (colClass == baselineClass && colMask is null)
-            {
-                continue;
-            }
-
-            var colOutcome = await _governanceDomainService.SetColumnProtectionAsync(
-                callerCtx, tenant, datasetId, colName, colClass, colMask, ct).ConfigureAwait(false);
+            if (colClass == baselineClass && colMask is null) continue;
+            var colOutcome = await _governanceDomainService!.SetColumnProtectionAsync(callerCtx, tenant, datasetId, colName, colClass, colMask, ct).ConfigureAwait(false);
             if (colOutcome.Status != DomainServiceStatus.Ok && colOutcome.Status != DomainServiceStatus.NotFound)
-            {
                 return Fail(proposal, request, colOutcome.ErrorCode ?? "PROTECTION_WRITE_FAILED", colOutcome.ErrorMessage ?? $"Failed to write column protection for '{colName}'.");
-            }
         }
 
         return null;
     }
+
+    private sealed class ProtectionBatchRollbackException(TableClassificationApprovalResult failure) : Exception { public TableClassificationApprovalResult Failure { get; } = failure; }
 
     private static string? NormalizeMaskCategory(string? maskCategory)
     {
