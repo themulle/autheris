@@ -642,7 +642,7 @@ internal sealed class InMemoryExternalApprovalRepository : IConsentApprovalRepos
 
 internal sealed class PerUserOwnershipRepository : IContainerOwnership
 {
-    private readonly Dictionary<TableIdentifier, List<DataOwner>> _owners = [];
+    private readonly Dictionary<TableIdentifier, List<ContainerOwnerEntry>> _owners = [];
     private readonly Dictionary<string, HashSet<TableIdentifier>> _ownedBySid = new(StringComparer.OrdinalIgnoreCase);
 
     public void AssignOwner(TableIdentifier table, string ownerSid, string displayName, string? email = null, bool isActive = true)
@@ -653,11 +653,9 @@ internal sealed class PerUserOwnershipRepository : IContainerOwnership
             _owners[table] = list;
         }
 
-        list.Add(new DataOwner
+        list.Add(new ContainerOwnerEntry
         {
-            Id = Guid.NewGuid(),
             AdSid = new Sid(ownerSid),
-            AdAccount = ownerSid,
             DisplayName = displayName,
             Email = email ?? $"{ownerSid}@example.test",
             IsActive = isActive
@@ -672,8 +670,8 @@ internal sealed class PerUserOwnershipRepository : IContainerOwnership
         owned.Add(table);
     }
 
-    public Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) =>
-        Task.FromResult<IReadOnlyList<DataOwner>>(_owners.TryGetValue(table, out var list) ? list : []);
+    public Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<ContainerOwnerEntry>>(_owners.TryGetValue(table, out var list) ? list : []);
 
     public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default) =>
         Task.FromResult(_ownedBySid.TryGetValue(approverSid.Value, out var owned) && owned.Contains(table));
@@ -692,11 +690,10 @@ internal sealed class PerUserOwnershipRepository : IContainerOwnership
         return Task.FromResult<IReadOnlySet<TableIdentifier>>(owned.Where(tables.Contains).ToHashSet());
     }
 
-    public Task<DataOwner> RegisterDataOwnerAsync(DataOwner owner, CancellationToken ct = default) => throw new NotSupportedException();
+    public Task<ContainerOwnerEntry> RegisterDataOwnerAsync(ContainerOwnerEntry owner, CancellationToken ct = default) => throw new NotSupportedException();
     public Task AssignTableOwnerAsync(TableIdentifier table, Guid ownerId, CancellationToken ct = default) => throw new NotSupportedException();
     public Task<IReadOnlyList<TableIdentifier>> GetTablesOwnedOrDelegatedAsync(Sid userSid, CancellationToken ct = default) =>
         Task.FromResult<IReadOnlyList<TableIdentifier>>(_ownedBySid.TryGetValue(userSid.Value, out var owned) ? owned.ToList() : []);
-    public Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default) => throw new NotSupportedException();
 }
 
 internal sealed class InMemoryExternalWorkflowRepository : IConsentWorkflowConfigRepository

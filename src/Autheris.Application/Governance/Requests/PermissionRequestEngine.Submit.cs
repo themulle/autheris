@@ -5,12 +5,15 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
+using Autheris.Application.Catalog;
+using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Notifications;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
+using Autheris.Domain.Identity;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 using Autheris.Domain.Tenancy;
@@ -428,11 +431,7 @@ public sealed partial class PermissionRequestEngine
 
             if (_metadataRepository is not null)
             {
-                if (meta is null ||
-                    !meta.Table.IsActive ||
-                    meta.Table.DiscoveryHidden ||
-                    (!string.IsNullOrWhiteSpace(meta.OwnerTenantId) &&
-                     !string.Equals(meta.OwnerTenantId, tenant.Value, StringComparison.OrdinalIgnoreCase)))
+                if (!CatalogTenantOwnership.IsEligibleTargetInTenant(meta, tenant))
                 {
                     throw new ConsentRequestException("TARGET_NOT_FOUND", "Target was not found.");
                 }
@@ -455,10 +454,10 @@ public sealed partial class PermissionRequestEngine
                     resolvedContainerId ??= containerRef.Id;
                 }
 
-                if (_catalogVisibilityRepository is not null &&
+                if ((_catalogVisibility is not null || _catalogVisibilityRepository is not null) &&
                     protection.Visibility == CatalogVisibilityMode.OnRequest)
                 {
-                    var visible = await HasCatalogVisibilityForTargetAsync(tenant, caller, protection.Container, ct).ConfigureAwait(false);
+                    var visible = await HasCatalogVisibilityForTargetAsync(tenant, caller, protection.Container, table, ct).ConfigureAwait(false);
                     if (!visible)
                     {
                         throw new ConsentRequestException("TARGET_NOT_FOUND", "Target was not found.");
@@ -547,32 +546,46 @@ public sealed partial class PermissionRequestEngine
     }
 
     private async Task<bool> HasCatalogVisibilityForTargetAsync(
-        TenantId tenant,
-        SecurityPrincipalContext caller,
-        ContainerRef container,
-        CancellationToken ct)
+        TenantId tenant, SecurityPrincipalContext caller, ContainerRef container, TableIdentifier table, CancellationToken ct)
     {
-        if (_capabilities is not null)
+        if (caller.GroupResolutionStatus != GroupResolutionStatus.Complete ||
+            GroupResolutionClaims.HasAnyDegradedClaim(caller.Claims) ||
+            SeparationOfDutiesService.IsDegradedGroupOrRoleResolution(caller.Principal))
         {
-            if (_capabilities.IsGovernance(caller.Principal, tenant) || _capabilities.IsItAdmin(caller.Principal, tenant))
-            {
-                return true;
-            }
-
-            if (await _capabilities.IsOwnerMemberAsync(caller, container, ct).ConfigureAwait(false))
-            {
-                return true;
-            }
+            return false;
         }
 
-        var subjects = new HashSet<Sid> { caller.UserSid };
-        foreach (var groupSid in caller.GroupSids)
+        if (_catalogVisibility is not null && caller.Principal is not null)
         {
-            subjects.Add(groupSid);
+            if (await _catalogVisibility.FindVisibleAsync(new CatalogCaller(caller.Principal, tenant, CatalogChannel.Rest), table, ct).ConfigureAwait(false) is not null)
+                return true;
+            return _capabilities?.IsItAdmin(caller.Principal, tenant) == true;
         }
 
-        var grants = await _catalogVisibilityRepository!.ListActiveForSubjectsAsync(tenant, subjects, _time.GetUtcNow(), ct).ConfigureAwait(false);
-        return grants.Any(g => g.ContainerKind == container.Kind && g.ContainerId == container.Id);
+        if (_capabilities is not null &&
+            (_capabilities.IsGovernance(caller.Principal, tenant) || _capabilities.IsItAdmin(caller.Principal, tenant) ||
+             (container.Id != Guid.Empty && await _capabilities.IsOwnerMemberAsync(caller, container, ct).ConfigureAwait(false))))
+        {
+            return true;
+        }
+
+        var subjects = new HashSet<Sid>(caller.GroupSids) { caller.UserSid };
+        if (caller.Principal is not null) subjects.UnionWith(caller.Principal.GetAllUserSids());
+        var now = _time.GetUtcNow();
+        if (_catalogVisibilityRepository is not null && container.Id != Guid.Empty)
+        {
+            var grants = await _catalogVisibilityRepository.ListActiveForSubjectsAsync(tenant, subjects, now, ct).ConfigureAwait(false);
+            if (grants.Any(g => g.ContainerKind == container.Kind && g.ContainerId == container.Id)) return true;
+        }
+
+        if (_consentRepository is not null)
+        {
+            var consents = await _consentRepository.GetActiveConsentsForSubjectsAsync(subjects, table, now, tenant, ct).ConfigureAwait(false);
+            return !consents.Any(c => c.Effect == ConsentEffect.Deny && c.GrantKind == PermissionGrantKind.Data && !c.IsRevoked && c.IsActive(now)) &&
+                   consents.Any(c => c.Effect == ConsentEffect.Allow && c.GrantKind == PermissionGrantKind.Data && !c.IsRevoked && c.IsActive(now));
+        }
+
+        return false;
     }
 
     private DateTimeOffset ResolveRequestedValidToCore(

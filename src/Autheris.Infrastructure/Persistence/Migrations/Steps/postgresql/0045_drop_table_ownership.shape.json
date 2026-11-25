@@ -1,0 +1,7 @@
+{
+  "ops": [
+    { "op": "dropTable", "table": "data_owner_delegations" },
+    { "op": "dropTable", "table": "table_owners" },
+    { "op": "dropTable", "table": "data_owners" }
+  ]
+}

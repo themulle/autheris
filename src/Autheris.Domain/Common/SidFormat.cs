@@ -183,6 +183,31 @@ public static class SidFormat
     }
 
     public static bool IsGroupSid(string? value) => IsCanonical(value) || IsRealmGroupKey(value);
+    public static bool IsGroupOrRealmGroupIdentifier(string? value) => IsGroupSid(value);
+
+    public static bool IsValidGroupIdentifierForRealm(
+        string? value,
+        IdentityRealmKind? realmKind,
+        string? realmId = null,
+        bool allowEntraCloudSid = false)
+    {
+        if (!IsGroupSid(value))
+        {
+            return false;
+        }
+
+        if (IsRealmGroupKey(value))
+        {
+            return string.IsNullOrWhiteSpace(realmId) || MatchesRealmGroupKey(value, realmId);
+        }
+
+        if (realmKind is not { } kind)
+        {
+            return true;
+        }
+
+        return UsesWorkforceAdSids(kind) && (!IsEntraCloudSid(value) || allowEntraCloudSid);
+    }
     public static bool MatchesRealmGroupKey(string? value, string realmId) =>
         IsRealmGroupKey(value) && !string.IsNullOrWhiteSpace(realmId)
         && value!.StartsWith($"{RealmGroupKeyPrefix}{Uri.EscapeDataString(realmId.Trim())}:", StringComparison.Ordinal);

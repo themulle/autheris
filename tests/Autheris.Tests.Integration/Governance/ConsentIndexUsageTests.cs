@@ -21,7 +21,6 @@ public sealed class ConsentIndexUsageTests : IDisposable
     [InlineData("CONSENTS", "ix_consents_tenant_grantee", "tenant_id,grantee_sid_norm,is_revoked")]
     [InlineData("CONSENT_COLUMN_RULES", "ix_consent_column_rules_consent", "consent_id")]
     [InlineData("CONSENT_ROW_FILTERS", "ix_consent_row_filters_consent", "consent_id")]
-    [InlineData("TABLE_OWNERS", "ix_table_owners_owner", "data_owner_id")]
     [InlineData("TABLES", "ix_tables_natural_ci", "source_name,schema_name,table_name")]
     public void Baseline_CreatesSupportingIndex(string table, string index, string columns)
     {

@@ -69,7 +69,8 @@ public sealed class ApproverEligibility(IGovernanceCapabilities capabilities)
 
         if (set.OwnerGroupAssigned && set.Container is { } container && container.Id != Guid.Empty)
         {
-            if (await _capabilities.IsOwnerMemberAsync(decider!, container, ct).ConfigureAwait(false))
+            if (IsTenantMatchingContext(decider!, set.Tenant) &&
+                await _capabilities.IsOwnerMemberAsync(decider!, container, ct).ConfigureAwait(false))
             {
                 return ApproverCapacity.DataOwner;
             }

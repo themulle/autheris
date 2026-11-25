@@ -42,6 +42,9 @@ public sealed class Pol12ApprovalAuditFailClosedTests
             Status = "PENDING"
         });
 
+        // The approver is the owner group of the table's container (#1009 D13), so only the audit failure can stop the approval.
+        await Autheris.Tests.Integration.Governance.ContainerOwnerSeed.SetOwnerAsync(repo.RawConnection(), "tenant-a", meta.Table.Id, approver.Value);
+
         // Break the audit table to simulate an unrecoverable audit write failure
         using (var cmd = repo.RawConnection().CreateCommand())
         {

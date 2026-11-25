@@ -43,8 +43,8 @@ public sealed class AccessDecisionContractsTests
 
         // GrantSourceKind
         var sources = Enum.GetNames<GrantSourceKind>();
-        sources.Length.ShouldBe(6);
-        sources.ShouldBe(["ConsentRequest", "AccessProfile", "Owner", "Bulk", "Declarative", "AccessPlan"]);
+        sources.Length.ShouldBe(5);
+        sources.ShouldBe(["ConsentRequest", "AccessProfile", "Bulk", "Declarative", "AccessPlan"]);
     }
 
     [Fact]
@@ -101,14 +101,14 @@ public sealed class AccessDecisionContractsTests
 
         // Parameterized ValidUntil
         var validUntil = validFrom.AddHours(4);
-        var grantWithUntil = new DecisionGrantRef("grant-002", GrantSourceKind.Owner, validFrom, validUntil);
+        var grantWithUntil = new DecisionGrantRef("grant-002", GrantSourceKind.Declarative, validFrom, validUntil);
         grantWithUntil.GrantId.ShouldBe("grant-002");
-        grantWithUntil.Source.ShouldBe(GrantSourceKind.Owner);
+        grantWithUntil.Source.ShouldBe(GrantSourceKind.Declarative);
         grantWithUntil.ValidFrom.ShouldBe(validFrom);
         grantWithUntil.ValidUntil.ShouldBe(validUntil);
 
         // Value equality
-        var same = new DecisionGrantRef("grant-002", GrantSourceKind.Owner, validFrom, validUntil);
+        var same = new DecisionGrantRef("grant-002", GrantSourceKind.Declarative, validFrom, validUntil);
         grantWithUntil.ShouldBe(same);
         (grantWithUntil == same).ShouldBeTrue();
 
@@ -302,7 +302,7 @@ public sealed class AccessDecisionContractsTests
 
         // Setting extended properties via with-expression
         var reason = new DecisionReason(DecisionStep.Grant, "GRANT_FOUND", "Grant", "grant-99");
-        var grantRef = new DecisionGrantRef("grant-99", GrantSourceKind.Owner, DateTimeOffset.UtcNow);
+        var grantRef = new DecisionGrantRef("grant-99", GrantSourceKind.Declarative, DateTimeOffset.UtcNow);
         var enriched = allowed with
         {
             Reasons = [reason],

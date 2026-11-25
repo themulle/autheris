@@ -73,6 +73,10 @@ public class GovernanceSecurityTests : IDisposable
         return accessor;
     }
 
+    /// <summary>#1009 D13: makes <paramref name="owner"/> the owner group of the container of <paramref name="table"/> (default tenant).</summary>
+    private async Task MakeOwnerAsync(TableMetadata meta, Sid owner) =>
+        await ContainerOwnerSeed.SetOwnerAsync(_repository.RawConnection(), Autheris.Tests.Common.TestTenants.Default.Value, meta.Table.Id, owner.Value);
+
     [Fact]
     public async Task ConsentRequest_StateMachine_PreventsReApprovalOrRejection()
     {
@@ -95,6 +99,7 @@ public class GovernanceSecurityTests : IDisposable
             RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7)
         });
 
+        await MakeOwnerAsync(meta, approverSid);
         var approved = await _repository.ApproveConsentRequestStepAsync(req.Id, approverSid);
         approved.Status.ShouldBe("APPROVED");
 
@@ -123,8 +128,10 @@ public class GovernanceSecurityTests : IDisposable
         metaFinance.ShouldNotBeNull();
         metaSales.ShouldNotBeNull();
 
-        // DATAOWNER-1 owns finance_table_1 (seeded). Let's submit requests for finance and sales.
+        // The owner group of finance_table_1's container; sales_table_1 has another owner.
         var ownerFinance = new Sid("S-1-5-21-1000-1000-1000-1001");
+        await MakeOwnerAsync(metaFinance, ownerFinance);
+        await MakeOwnerAsync(metaSales, new Sid("S-1-5-21-SALES-OWNERS"));
         var requester = new Sid("S-1-5-21-SOME-USER");
 
         var reqFinance = await _repository.CreateConsentRequestAsync(new ConsentRequest
@@ -158,46 +165,6 @@ public class GovernanceSecurityTests : IDisposable
     }
 
     [Fact]
-    public async Task GetPendingRequests_WhenDelegationExpired_ExcludesRequests()
-    {
-        // Expired delegation must not grant approval view
-        var tableFinance = new TableIdentifier("finance", "dbo", "finance_table_1");
-        var metaFinance = await _repository.GetTableMetadataAsync(tableFinance);
-        metaFinance.ShouldNotBeNull();
-
-        var owners = await _repository.GetDataOwnersForTableAsync(tableFinance);
-        var activeOwner = owners.First(o => o.IsActive);
-
-        var delegateSid = new Sid("S-1-5-21-EXPIRED-DELEGATE");
-
-        // Expired delegation: valid_to is in the past
-        await _repository.DelegateDataOwnershipAsync(new DataOwnerDelegation
-        {
-            DataOwnerId = activeOwner.Id,
-            DelegateSid = delegateSid,
-            ValidFrom = DateTimeOffset.UtcNow.AddDays(-10),
-            ValidTo = DateTimeOffset.UtcNow.AddMinutes(-1), // Expired!
-            Reason = "Vacation coverage in the past"
-        });
-
-        var requester = new Sid("S-1-5-21-REQUESTER-EXPIRED");
-        var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
-        {
-            TenantId = Autheris.Tests.Common.TestTenants.Default,
-            TableId = metaFinance.Table.Id,
-            TableIdentifier = tableFinance,
-            RequesterSid = requester,
-            RequestedGranteeType = GranteeType.User,
-            RequestedGranteeRef = requester.Value,
-            BusinessJustification = "Access request",
-            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7)
-        });
-
-        var pendingForDelegate = await _repository.GetPendingRequestsForApproverAsync(delegateSid, Autheris.Tests.Common.TestTenants.Default);
-        pendingForDelegate.ShouldNotContain(r => r.Id == req.Id);
-    }
-
-    [Fact]
     public async Task RejectConsentRequest_WhenSecondStepRejection_IncrementsStepNumberWithoutUniqueConstraintViolation()
     {
         var table = new TableIdentifier("finance", "dbo", "finance_table_5");
@@ -208,29 +175,6 @@ public class GovernanceSecurityTests : IDisposable
         var requester = new Sid("S-1-5-21-REQ-1");
         var approver1 = new Sid("S-1-5-21-APP-1");
         var approver2 = new Sid("S-1-5-21-APP-2");
-
-        var owners = await _repository.GetDataOwnersForTableAsync(table);
-        var primaryOwner = owners[0];
-
-        await _repository.DelegateDataOwnershipAsync(new DataOwnerDelegation
-        {
-            Id = Guid.NewGuid(),
-            DataOwnerId = primaryOwner.Id,
-            DelegateSid = approver1,
-            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-            ValidTo = DateTimeOffset.UtcNow.AddDays(7),
-            Reason = "Four eyes step 1 delegation"
-        });
-
-        await _repository.DelegateDataOwnershipAsync(new DataOwnerDelegation
-        {
-            Id = Guid.NewGuid(),
-            DataOwnerId = primaryOwner.Id,
-            DelegateSid = approver2,
-            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-            ValidTo = DateTimeOffset.UtcNow.AddDays(7),
-            Reason = "Four eyes step 2 delegation"
-        });
 
         var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
         {
@@ -244,48 +188,17 @@ public class GovernanceSecurityTests : IDisposable
             RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7)
         });
 
-        // Step 1: Approved by Approver 1 -> Status is PENDING_SECOND_APPROVAL
+        // Step 1: Approved by Approver 1 (owner group) -> Status is PENDING_SECOND_APPROVAL
+        await MakeOwnerAsync(meta, approver1);
         var approvedStep1 = await _repository.ApproveConsentRequestStepAsync(req.Id, approver1, requireSecondApprover: true);
         approvedStep1.Status.ShouldBe("PENDING_SECOND_APPROVAL");
+
+        // The container ownership moves to Approver 2 before the second step.
+        await MakeOwnerAsync(meta, approver2);
 
         // Step 2: Rejected by Approver 2 -> Must succeed without UNIQUE constraint violation on step_number
         var rejectedReq = await _repository.RejectConsentRequestAsync(req.Id, approver2, "Second approver rejected");
         rejectedReq.Status.ShouldBe("REJECTED");
-    }
-
-    [Fact]
-    public async Task IsAuthorizedApprover_WhenDirectOwnerOrDelegatedOrUnauthorized()
-    {
-        var table = new TableIdentifier("finance", "dbo", "finance_table_1");
-        var directOwnerSid = new Sid("S-1-5-21-1000-1000-1000-1001");
-        var delegateSid = new Sid("S-1-5-21-DELEGATE-TEST");
-        var unrelatedSid = new Sid("S-1-5-21-RANDOM-USER");
-
-        // 1. Direct owner is authorized
-        var isDirect = await _repository.IsAuthorizedApproverForTableAsync(table, directOwnerSid);
-        isDirect.ShouldBeTrue();
-
-        // 2. Unrelated user is not authorized
-        var isUnrelated = await _repository.IsAuthorizedApproverForTableAsync(table, unrelatedSid);
-        isUnrelated.ShouldBeFalse();
-
-        // 3. Delegate to delegateSid
-        var owners = await _repository.GetDataOwnersForTableAsync(table);
-        var primaryOwner = owners.First(o => o.AdSid == directOwnerSid);
-
-        await _repository.DelegateDataOwnershipAsync(new DataOwnerDelegation
-        {
-            Id = Guid.NewGuid(),
-            DataOwnerId = primaryOwner.Id,
-            DelegateSid = delegateSid,
-            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-            ValidTo = DateTimeOffset.UtcNow.AddDays(7),
-            Reason = "Vacation delegation"
-        });
-
-        // Delegate is now authorized
-        var isDelegate = await _repository.IsAuthorizedApproverForTableAsync(table, delegateSid);
-        isDelegate.ShouldBeTrue();
     }
 
     [Fact]

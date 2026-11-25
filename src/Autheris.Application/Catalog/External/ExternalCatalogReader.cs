@@ -376,7 +376,7 @@ public sealed partial class ExternalCatalogReader(
 
     public static string ComputeAdminRepresentationHash(
         TableMetadata table,
-        IReadOnlyList<DataOwner> owners,
+        IReadOnlyList<ContainerOwnerEntry> owners,
         DiscoveryArtifacts? artifacts,
         EffectiveProtection? protection = null)
     {
@@ -594,7 +594,7 @@ public sealed partial class ExternalCatalogReader(
         CancellationToken ct)
     {
         var ownersByTable = await _ownershipRepository.GetDataOwnersForTablesAsync([table.Identifier], ct).ConfigureAwait(false);
-        var owners = ownersByTable.TryGetValue(table.Identifier, out var list) ? list : Array.Empty<DataOwner>();
+        var owners = ownersByTable.TryGetValue(table.Identifier, out var list) ? list : Array.Empty<ContainerOwnerEntry>();
         var artifacts = _artifactStore is null
             ? null
             : await _artifactStore.GetAsync(table.Table.Id, ct).ConfigureAwait(false);
@@ -607,7 +607,7 @@ public sealed partial class ExternalCatalogReader(
 
     private static ExternalCatalogObjectDto MapAppObject(
         TableMetadata table,
-        IReadOnlyList<DataOwner> activeOwners,
+        IReadOnlyList<ContainerOwnerEntry> activeOwners,
         DiscoveryArtifacts? artifacts,
         long? changeSeq,
         bool includeHiddenColumns,

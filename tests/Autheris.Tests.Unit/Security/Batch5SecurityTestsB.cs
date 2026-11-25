@@ -403,7 +403,7 @@ public sealed class Batch5SecurityTestsB : IDisposable
         var metadataRepo = new InMemoryTableMetadataRepository(stored);
         var graphStore = new InMemoryLineageGraphStore();
         var auditWriter = new InMemoryAuditWriter();
-        var ownershipRepo = new InMemoryDataOwnershipRepository();
+        var ownershipRepo = new InMemoryContainerOwnership();
 
         var gatewayOptions = Options.Create(new GatewayOptions
         {
@@ -426,8 +426,6 @@ public sealed class Batch5SecurityTestsB : IDisposable
             null,
             NullLogger<DbtMetadataIngestionService>.Instance,
             auditLog: new InMemoryAuditLogRepository(),
-            ownerAssignments: null,
-            ownerIdentityVerifier: null,
             auditWriter: auditWriter,
             ownershipRepo: ownershipRepo);
 

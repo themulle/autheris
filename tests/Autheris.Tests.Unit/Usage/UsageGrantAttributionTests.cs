@@ -194,7 +194,7 @@ public sealed class UsageGrantAttributionTests
             rowFilterSql: null,
             hasUnconstrainedColumnAllow: true) with
         {
-            Grants = [new DecisionGrantRef(ownerGrantId, GrantSourceKind.Owner, validFrom, validUntil)]
+            Grants = [new DecisionGrantRef(ownerGrantId, GrantSourceKind.Declarative, validFrom, validUntil)]
         };
 
         await GovernedQueryStages.RecordTableReadAsync(

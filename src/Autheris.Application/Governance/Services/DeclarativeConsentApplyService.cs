@@ -51,6 +51,8 @@ public sealed partial class DeclarativeConsentApplyService(
     private static readonly Dictionary<string, KeyedLockEntry> GranteeLocks = new(StringComparer.Ordinal);
     // Declarative grants are authored by Data Governance only; IT administration never applies a manifest directly.
     private static readonly GatewayRole[] RequiredApplyRoles = [GatewayRole.GovernanceAdmin];
+    // Amendment 6: IT administration submits proposals only (no effect until one Data Governance confirmation); Data Governance may propose as well.
+    private static readonly GatewayRole[] ProposalSubmitRoles = [GatewayRole.TenantAdmin, GatewayRole.GovernanceAdmin];
 
     // the policy is stateless; without an injected instance the test-default validity maxima apply (never "no policy").
     // Kept for constructor/DI compatibility: the APPLIED audit entries are written by ReplaceConsentsAsync inside its transaction, never separately.
@@ -78,7 +80,7 @@ public sealed partial class DeclarativeConsentApplyService(
         AuthorizeCaller(caller, manifest, out _, out var tenantId);
         await using var granteeLocks = await AcquireGranteeLocksAsync(dryRun ? [] : LockKeys(manifest, tenantId), ct).ConfigureAwait(false);
 
-        var build = await BuildAsync(caller, manifest, dryRun, callerContext, pruneMode, ct).ConfigureAwait(false);
+        var build = await BuildAsync(caller, manifest, dryRun, callerContext, pruneMode, BuildMode.Direct, proposalId: null, ct).ConfigureAwait(false);
         if (!dryRun)
         {
             await CommitAsync(build, caller, ct).ConfigureAwait(false);
@@ -99,8 +101,25 @@ public sealed partial class DeclarativeConsentApplyService(
         ArgumentNullException.ThrowIfNull(manifest);
 
         // Side-effect free: nothing is written, no lock is taken, no audit entry is produced.
-        var build = await BuildAsync(caller, manifest, dryRun: true, callerContext, pruneMode, ct).ConfigureAwait(false);
-        return new DeclarativeManifestPlan(manifest, pruneMode, callerContext, build.TenantId, build.ActorSid, build.StateHash, build.Result);
+        var build = await BuildAsync(caller, manifest, dryRun: true, callerContext, pruneMode, BuildMode.Direct, proposalId: null, ct).ConfigureAwait(false);
+        return new DeclarativeManifestPlan(manifest, pruneMode, callerContext, build.TenantId, build.ActorSid, build.StateHash, build.Result, build.Diff);
+    }
+
+    /// <inheritdoc />
+    public async Task<DeclarativeManifestPlan> ValidateProposalAsync(
+        ClaimsPrincipal submitter,
+        DeclarativeConsentManifest manifest,
+        SecurityPrincipalContext? callerContext = null,
+        DeclarativePruneMode pruneMode = DeclarativePruneMode.False,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(submitter);
+        ArgumentNullException.ThrowIfNull(manifest);
+
+        // Amendment 6: the same full validation as a Data Governance apply, side-effect free. The submitter may be a beneficiary (Data Governance
+        // decides, as for a request) and needs no revocation authority for a prune; the confirmer is checked for both when the proposal is applied.
+        var build = await BuildAsync(submitter, manifest, dryRun: true, callerContext, pruneMode, BuildMode.Proposal, proposalId: null, ct).ConfigureAwait(false);
+        return new DeclarativeManifestPlan(manifest, pruneMode, callerContext, build.TenantId, build.ActorSid, build.StateHash, build.Result, build.Diff);
     }
 
     /// <inheritdoc />
@@ -121,7 +140,7 @@ public sealed partial class DeclarativeConsentApplyService(
         await using var granteeLocks = await AcquireGranteeLocksAsync(LockKeys(plan.Manifest, tenantId), ct).ConfigureAwait(false);
 
         // The plan is re-validated against the current state under the grantee locks: a grant set that changed since the diff makes the plan stale.
-        var build = await BuildAsync(caller, plan.Manifest, dryRun: false, plan.CallerContext, plan.PruneMode, ct).ConfigureAwait(false);
+        var build = await BuildAsync(caller, plan.Manifest, dryRun: false, plan.CallerContext, plan.PruneMode, BuildMode.Direct, plan.ProposalId, ct).ConfigureAwait(false);
         if (!string.Equals(build.StateHash, plan.StateHash, StringComparison.Ordinal))
         {
             throw new DeclarativePlanStaleException();
@@ -154,7 +173,15 @@ public sealed partial class DeclarativeConsentApplyService(
         HashSet<Guid> PrunedIds,
         List<(string Id, DatasetCatalogEdit Edit)> DatasetEdits,
         int SkippedDatasets,
-        int PolicyEvaluatedGrants);
+        int PolicyEvaluatedGrants,
+        IReadOnlyList<DeclarativeDiffEntry> Diff);
+
+    /// <summary>Direct: a Data Governance apply (self-grant refusal, revocation authority). Proposal: the submit-time validation of an IT proposal.</summary>
+    private enum BuildMode
+    {
+        Direct,
+        Proposal
+    }
 
     private async Task<BuildResult> BuildAsync(
         ClaimsPrincipal caller,
@@ -162,21 +189,36 @@ public sealed partial class DeclarativeConsentApplyService(
         bool dryRun,
         SecurityPrincipalContext? callerContext,
         DeclarativePruneMode pruneMode,
+        BuildMode mode,
+        Guid? proposalId,
         CancellationToken ct)
     {
-        AuthorizeCaller(caller, manifest, out var actorSid, out var tenantId);
+        var proposal = mode == BuildMode.Proposal;
+        Sid actorSid;
+        TenantId tenantId;
+        if (proposal)
+        {
+            AuthorizeProposalSubmitter(caller, manifest, out actorSid, out tenantId);
+        }
+        else
+        {
+            AuthorizeCaller(caller, manifest, out actorSid, out tenantId);
+        }
+
         var now = DateTimeOffset.UtcNow;
         var stateParts = new List<string>();
+        var diff = new List<DeclarativeDiffEntry>();
 
         // SR-M-10: the self-grant check compares against every identifier form of the actor and the groups and roles it holds.
-        var actorIdentifiers = ActorIdentifiers.Collect(caller, actorSid, callerContext);
+        // A proposal submitter may be a beneficiary (Amendment 6): the check runs against the confirmer when the proposal is applied.
+        var actorIdentifiers = proposal ? new HashSet<string>(StringComparer.Ordinal) : ActorIdentifiers.Collect(caller, actorSid, callerContext);
         // The group set is only as good as its resolution: a Degraded status (set by the identity pipeline, never by a token claim) refuses a
         // group Allow instead of skipping the self-grant check.
-        var groupsDegraded = callerContext is not null
+        var groupsDegraded = !proposal && (callerContext is not null
             ? callerContext.GroupResolutionStatus == GroupResolutionStatus.Degraded
               || GroupResolutionClaims.IsMarkedDegraded(caller)
               || GroupResolutionClaims.IsMarkedDegraded(callerContext.Principal)
-            : GroupResolutionClaims.IsMarkedDegraded(caller);
+            : GroupResolutionClaims.IsMarkedDegraded(caller));
 
         int totalEvaluated = 0;
         int applied = 0;
@@ -203,7 +245,7 @@ public sealed partial class DeclarativeConsentApplyService(
                 actorSid,
                 ComputeStateHash(stateParts),
                 manifest.Version,
-                [], [], [], [], [], [], 0, 0);
+                [], [], [], [], [], [], 0, 0, diff);
         }
 
         var policies = manifest.Policies ?? [];
@@ -292,6 +334,7 @@ public sealed partial class DeclarativeConsentApplyService(
                 }
 
                 details.Add($"Table '{tableId}' not found in catalog; skipped policy.");
+                diff.Add(DiffEntry(DeclarativeDiffAction.Skipped, policy, tableId, description));
                 continue;
             }
 
@@ -402,16 +445,18 @@ public sealed partial class DeclarativeConsentApplyService(
                         ActorSid = actorSid,
                         TargetTable = tableId.ToString(),
                         Decision = "APPLIED",
-                        DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { Version = manifest.Version, Update = "description", DescriptionLength = length, DescriptionSha256Prefix = prefix }),
+                        DetailsJson = System.Text.Json.JsonSerializer.Serialize(new { Version = manifest.Version, Update = "description", DescriptionLength = length, DescriptionSha256Prefix = prefix, ProposalId = proposalId }),
                         TenantId = tenantId
                     });
 
                     details.Add($"{(dryRun ? "[DryRun] Would update" : "Updated")} description for '{tableId}' -> '{policy.GranteeRef}'.");
+                    diff.Add(DiffEntry(DeclarativeDiffAction.Update, policy, tableId, description));
                     continue;
                 }
 
                 unchanged++;
                 details.Add($"Policy for '{tableId}' -> '{policy.GranteeRef}' is unchanged.");
+                diff.Add(DiffEntry(DeclarativeDiffAction.Unchanged, policy, tableId, description));
                 continue;
             }
 
@@ -496,13 +541,15 @@ public sealed partial class DeclarativeConsentApplyService(
                     Reason = $"Applied declarative policy version {manifest.Version}",
                     Version = manifest.Version,
                     DescriptionLength = fingerprintLength,
-                    DescriptionSha256Prefix = fingerprintPrefix
+                    DescriptionSha256Prefix = fingerprintPrefix,
+                    ProposalId = proposalId
                 }),
                 TenantId = tenantId
             });
 
             applied++;
             details.Add($"{(dryRun ? "[DryRun] Would apply" : "Applied")} policy for '{tableId}' -> '{policy.GranteeRef}'.");
+            diff.Add(DiffEntry(activeExisting.Count > 0 ? DeclarativeDiffAction.Replace : DeclarativeDiffAction.Add, policy, tableId, description));
         }
 
         // Issue #111 (A-7, BC-11): the dataset entries run the service dry run first (same authorization, tenant rule and validation as the
@@ -533,6 +580,7 @@ public sealed partial class DeclarativeConsentApplyService(
                         case DatasetCatalogOutcome.Applied:
                             applied++;
                             datasetEdits.Add((datasetId, edit));
+                            diff.Add(new DeclarativeDiffEntry(DeclarativeDiffAction.Catalog, null, string.Empty, datasetId, null, null, null));
                             details.Add($"{(dryRun ? "[DryRun] Would apply" : "Applied")} catalog settings for '{datasetId}'.");
                             break;
                         case DatasetCatalogOutcome.Unchanged:
@@ -581,12 +629,13 @@ public sealed partial class DeclarativeConsentApplyService(
 
             if (pruneCandidates.Count > 0)
             {
-                if (!authority.CanAccessTenant(tenantId))
+                // The revocation authority of a proposal is the confirmer's: it is checked when the proposal is applied, not at submit.
+                if (!proposal && !authority.CanAccessTenant(tenantId))
                 {
                     throw new ConsentRevocationForbiddenException();
                 }
 
-                if (!authority.AllowsAdminForTenant(tenantId))
+                if (!proposal && !authority.AllowsAdminForTenant(tenantId))
                 {
                     foreach (var table in pruneCandidates.Select(c => c.TableIdentifier).Distinct())
                     {
@@ -622,6 +671,14 @@ public sealed partial class DeclarativeConsentApplyService(
                     details.Add($"{(dryRun ? "[DryRun] Would prune" : "Pruned")} declarative consent '{candidate.Id}' for '{candidate.TableIdentifier}' -> '{candidate.GranteeSid!.Value.Value}'.");
 
                     prunedIdSet.Add(candidate.Id);
+                    diff.Add(new DeclarativeDiffEntry(
+                        DeclarativeDiffAction.Prune,
+                        candidate.GranteeType.ToString(),
+                        candidate.GranteeSid!.Value.Value,
+                        candidate.TableIdentifier.ToString(),
+                        candidate.Effect.ToString(),
+                        candidate.ValidTo,
+                        null));
                     auditEntries.Add(new AuditLogEntry
                     {
                         Id = Guid.NewGuid(),
@@ -636,7 +693,8 @@ public sealed partial class DeclarativeConsentApplyService(
                             Grantee = candidate.GranteeSid!.Value.Value,
                             TableId = candidate.TableIdentifier.ToString(),
                             Reason = PrunedByManifestReason,
-                            ManifestSha256 = manifestSha256
+                            ManifestSha256 = manifestSha256,
+                            ProposalId = proposalId
                         }),
                         TenantId = tenantId
                     });
@@ -668,8 +726,12 @@ public sealed partial class DeclarativeConsentApplyService(
             prunedIdSet,
             datasetEdits,
             skippedDatasets,
-            policyEvaluatedGrants);
+            policyEvaluatedGrants,
+            diff);
     }
+
+    private static DeclarativeDiffEntry DiffEntry(DeclarativeDiffAction action, DeclarativeConsentPolicy policy, TableIdentifier table, string? justification) =>
+        new(action, policy.GranteeType, policy.GranteeRef, table.ToString(), policy.Effect, policy.ValidUntil, justification);
 
     private static string ComputeStateHash(List<string> parts)
     {

@@ -40,9 +40,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
     private readonly Microsoft.Extensions.Options.IOptions<Autheris.Application.Catalog.Services.CatalogDiscoveryOptions>? _discoveryOptions;
     private readonly TimeProvider _timeProvider = TimeProvider.System;
     private readonly IDbtTestTargetMap? _testTargetMap;
-    private readonly IDataOwnerAssignmentRepository? _ownerAssignments;
     private readonly IAuditLogRepository? _auditLog;
-    private readonly Autheris.Application.Governance.IDataOwnerIdentityVerifier? _ownerIdentityVerifier;
     private readonly Autheris.Application.Audit.IAuditWriter? _auditWriter;
     private readonly Autheris.Application.Governance.Notifications.IGovernanceNotificationDispatcher? _notifications;
     private readonly IContainerOwnership? _ownershipRepo;
@@ -1201,13 +1199,12 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             }
         }
 
-        // Issue #393 (part b): an owner payload is gated before anything is read or written (flag, global governance admin, repositories).
-        var ownerPayload = AnyOwnerKeys(modelsArray);
-        var ownerCollector = new OwnerImportCollector();
-        if (ownerPayload && OwnerImportGate(caller) is { } gateCode)
+        // #1009 (D13): per-table owners no longer exist; Data Governance assigns owner groups to containers. An owner payload rejects
+        // the whole import before anything is read or written.
+        if (AnyOwnerKeys(modelsArray))
         {
-            _logger.LogWarning("Dbt governance import rejected: the owner payload is not allowed ({Code}).", gateCode);
-            return OwnerFailure(gateCode, warnings);
+            _logger.LogWarning("Dbt governance import rejected: the owner payload is not supported ({Code}).", OwnerImportRetiredCode);
+            return OwnerFailure(OwnerImportRetiredCode, warnings);
         }
 
         if (modelsArray.ValueKind == JsonValueKind.Array)
@@ -1266,18 +1263,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         tableId = existingMeta.Identifier;
                     }
                 }
-                if (ownerPayload && DbtOwnerSpecValidator.HasOwnerKeys(item))
-                {
-                    if (existingMeta == null)
-                    {
-                        ownerCollector.Errors.Add(new OwnerImportError("dbt_owner_table_not_found", tableId.ToString(), "table"));
-                    }
-                    else
-                    {
-                        CollectOwners(item, existingMeta.Identifier, caller, ownerCollector);
-                    }
-                }
-
                 if (existingMeta == null)
                 {
                     // R-51: Distinguish routine / procedure from missing catalog tables
@@ -1555,18 +1540,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                 RelaxedMaskingRulesCount: relaxedMaskingRulesCount);
         }
 
-        OwnerImportPlan? ownerPlan = null;
-        if (ownerPayload)
-        {
-            var (ownerFailure, plan) = await PrepareOwnerImportAsync(ownerCollector, caller, effectiveReplace, dryRun, warnings, ct).ConfigureAwait(false);
-            if (ownerFailure is not null)
-            {
-                return ownerFailure;
-            }
-
-            ownerPlan = plan;
-        }
-
         if (!dryRun && pendingUpserts.Count > 0)
         {
             await _metadataRepository.UpsertBatchWithFallbackAsync(pendingUpserts, ct).ConfigureAwait(false);
@@ -1603,18 +1576,6 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             }
         }
 
-        IReadOnlyList<DataOwnerChange> ownerChanges = ownerPlan?.Changes ?? [];
-        if (ownerPlan is not null && !dryRun)
-        {
-            var (applyFailure, applied) = await ApplyOwnersAsync(ownerCollector, ownerPlan, caller, effectiveReplace, warnings, ct).ConfigureAwait(false);
-            if (applyFailure is not null)
-            {
-                return applyFailure;
-            }
-
-            ownerChanges = applied;
-        }
-
         return new DbtGovernanceSyncResult(
             Success: true,
             UpdatedTablesCount: updatedTables,
@@ -1624,10 +1585,7 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
             AccessProfilesCount: accessProfilesCount,
             Warnings: warnings,
             RemovedMaskingRulesCount: removedMaskingRulesCount,
-            RelaxedMaskingRulesCount: relaxedMaskingRulesCount,
-            CreatedDataOwnersCount: ownerChanges.Count(c => c.Kind == DataOwnerChangeKind.OwnerCreated),
-            AssignedTableOwnersCount: ownerChanges.Count(c => c.Kind == DataOwnerChangeKind.OwnerAssigned),
-            RemovedTableOwnersCount: ownerChanges.Count(c => c.Kind == DataOwnerChangeKind.OwnerRemoved)
+            RelaxedMaskingRulesCount: relaxedMaskingRulesCount
         );
     }
 

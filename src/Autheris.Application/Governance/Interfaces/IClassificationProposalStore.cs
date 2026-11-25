@@ -35,9 +35,4 @@ public interface IClassificationProposalStore
     /// Retrieves the most recent proposal for a specific table.
     /// </summary>
     Task<TableClassificationProposal?> GetProposalByTableAsync(TableIdentifier table, CancellationToken ct = default);
-
-    /// <summary>
-    /// Updates the data owner on an existing proposal for a given table.
-    /// </summary>
-    Task<bool> UpdateDataOwnerAsync(TableIdentifier table, string dataOwnerSid, CancellationToken ct = default);
 }

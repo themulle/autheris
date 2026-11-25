@@ -83,8 +83,9 @@ public sealed partial class TableAccessPolicy
             ? query.AllUserSids
             : null;
         var resolvedScopes = scopes is { Count: > 0 } ? scopes : null;
-        var decision = (activeConsents.Any(static c => c.IsPatternGrant) || query.Metadata.Table.ObjectKind == DiscoveryObjectKind.MetricView)
-            ? _resolutionService.ResolveAccess(
+        bool needsMetadata = activeConsents.Any(static c => c.IsPatternGrant) || query.Metadata.Table.ObjectKind == DiscoveryObjectKind.MetricView;
+        var decision = _resolutionService is ConsentResolutionService concreteResolver
+            ? concreteResolver.ResolveAccess(
                 query.UserSid,
                 query.GroupSids,
                 query.Roles,
@@ -93,16 +94,28 @@ public sealed partial class TableAccessPolicy
                 query.Metadata.Dialect,
                 allSids,
                 resolvedScopes,
-                query.Metadata)
-            : _resolutionService.ResolveAccess(
-                query.UserSid,
-                query.GroupSids,
-                query.Roles,
-                table,
-                activeConsents,
-                query.Metadata.Dialect,
-                allSids,
-                resolvedScopes);
+                needsMetadata ? query.Metadata : null,
+                now)
+            : needsMetadata
+                ? _resolutionService.ResolveAccess(
+                    query.UserSid,
+                    query.GroupSids,
+                    query.Roles,
+                    table,
+                    activeConsents,
+                    query.Metadata.Dialect,
+                    allSids,
+                    resolvedScopes,
+                    query.Metadata)
+                : _resolutionService.ResolveAccess(
+                    query.UserSid,
+                    query.GroupSids,
+                    query.Roles,
+                    table,
+                    activeConsents,
+                    query.Metadata.Dialect,
+                    allSids,
+                    resolvedScopes);
         if (decision == null)
         {
             return TableAccessDecision.Denied(table, "Access denied: consent resolution returned no decision.");
@@ -584,7 +597,7 @@ public sealed partial class TableAccessPolicy
     /// empty when none applies.
     /// </summary>
     internal Task<IReadOnlyList<AccessProfile>> ResolveActiveAccessProfilesAsync(TableAccessQuery query, CancellationToken ct) =>
-        ResolveActiveAccessProfilesCoreAsync(query, _accessProfileCache, _accessProfileRepository, _memoryCache, _options, ct);
+        ResolveActiveAccessProfilesCoreAsync(query, _accessProfileCache, _accessProfileRepository, _memoryCache, _options, ct, _timeProvider);
 
     internal static async Task<IReadOnlyList<AccessProfile>> ResolveActiveAccessProfilesCoreAsync(
         TableAccessQuery query,
@@ -592,7 +605,8 @@ public sealed partial class TableAccessPolicy
         IAccessProfileRepository? accessProfileRepository,
         Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache,
         GatewayOptions? options,
-        CancellationToken ct)
+        CancellationToken ct,
+        TimeProvider? timeProvider = null)
     {
         if (accessProfileCache == null && accessProfileRepository == null)
         {
@@ -632,7 +646,7 @@ public sealed partial class TableAccessPolicy
         }
 
         var table = query.Metadata.Identifier;
-        var now = TimeProvider.System.GetUtcNow();
+        var now = (timeProvider ?? TimeProvider.System).GetUtcNow();
         return AccessProfileAssignmentRules.Order(profiles.Where(p => p.IsActive(now) && p.MatchesTable(table)));
     }
 }

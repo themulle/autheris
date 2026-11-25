@@ -17,8 +17,7 @@ public sealed record ConsentWorkflowRouteResolution(
     bool ConflictDetected = false);
 
 public sealed record ConsentWorkflowTableInputs(
-    IReadOnlyList<ConsentWorkflowRoute> TenantRoutes,
-    IReadOnlySet<string> TableOwnerIds);
+    IReadOnlyList<ConsentWorkflowRoute> TenantRoutes);
 
 public sealed record ConsentRerouteResult(
     int ReroutedCount,

@@ -46,7 +46,7 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
         }
 
         ConsentApprovalPolicy.EnsureApprovableStatus(requestId, req.Status, ConsentWorkflowMode.External);
-        var approverOwnerIds = await EnsureApproverIsNotRequesterAsync(req, effectiveApproverSid, ct).ConfigureAwait(false);
+        EnsureApproverIsNotRequester(req, effectiveApproverSid);
 
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
@@ -56,8 +56,7 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
             ConsentApprovalPolicy.EnsureApprovableStatus(requestId, currentStatus, ConsentWorkflowMode.External);
 
             var state = await ConsentSqlCore.ReadApprovalStateAsync(
-                conn, tx, requestId, effectiveApproverSid, approverOwnerIds,
-                ids => ResolveDataOwnerIdsInternalAsync(ids, ct), ct).ConfigureAwait(false);
+                conn, tx, requestId, effectiveApproverSid, ct).ConfigureAwait(false);
 
             if (state.SameApprover)
             {
@@ -343,28 +342,5 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
             reader.GetString(7),
             ConsentWorkflowSql.ReadOptionalTimestamp(reader, 8) ?? TimeProvider.System.GetUtcNow(),
             ConsentWorkflowSql.ReadOptionalTimestamp(reader, 9));
-
-    private static async Task<HashSet<string>> GetTableOwnerIdsForRouteAsync(DbConnection conn, TableIdentifier table, CancellationToken ct)
-    {
-        const string selectTableOwnerIdsSql = @"SELECT DISTINCT tow.data_owner_id
-FROM TABLE_OWNERS tow
-JOIN TABLES t ON tow.table_id = t.id
-WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)";
-
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = selectTableOwnerIdsSql;
-        cmd.AddBound("@domain", table.Domain);
-        cmd.AddBound("@schema", table.Schema);
-        cmd.AddBound("@table", table.TableName);
-
-        var ownerIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            ownerIds.Add(reader.GetString(0));
-        }
-
-        return ownerIds;
-    }
 
 }

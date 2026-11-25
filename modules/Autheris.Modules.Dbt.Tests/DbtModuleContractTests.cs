@@ -179,14 +179,12 @@ public sealed class DbtModuleContractTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public void Dbt_module_registers_owner_identity_verifier()
+    public void Dbt_module_registers_its_own_webhook_handler()
     {
         var services = new ServiceCollection();
         new DbtModule().ConfigureServices(services, new ConfigurationBuilder().Build(), new ContractHostContext());
 
-        var verifier = services.Single(d => d.ServiceType == typeof(IDataOwnerIdentityVerifier));
-        verifier.ImplementationType.ShouldBe(typeof(ScimDataOwnerIdentityVerifier));
-
+        services.ShouldNotContain(d => d.ServiceType.Name == "IDataOwnerIdentityVerifier", "per-table owners are gone (#1009 D13); no owner identity verifier is registered");
         var handler = services.Single(d => d.ServiceType == typeof(IDbtCloudWebhookHandler));
         handler.ImplementationType.ShouldNotBeNull().Assembly.ShouldBe(typeof(DbtModule).Assembly);
     }

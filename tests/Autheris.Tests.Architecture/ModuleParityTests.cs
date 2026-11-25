@@ -141,7 +141,7 @@ public sealed class ModuleParityTests
         "Autheris.Modules.Dbt.Tests.DbtModuleContractTests.Dbt_module_maps_no_anonymous_route",
         "Autheris.Modules.Dbt.Tests.DbtModuleContractTests.Dbt_endpoint_audit_levels_preserved",
         "Autheris.Modules.Dbt.Tests.DbtModuleContractTests.Dbt_body_limits_preserved",
-        "Autheris.Modules.Dbt.Tests.DbtModuleContractTests.Dbt_module_registers_owner_identity_verifier",
+        "Autheris.Modules.Dbt.Tests.DbtModuleContractTests.Dbt_module_registers_its_own_webhook_handler",
         "Autheris.Modules.Dbt.Tests.DbtModuleContractTests.Dbt_module_loads_under_the_service_guard",
         "Autheris.Modules.Dbt.Tests.DbtModuleContractTests.Dbt_config_without_module_fails_fast",
         "Autheris.Tests.Integration.DbtModuleAbsentTests.Dbt_routes_404_when_absent",

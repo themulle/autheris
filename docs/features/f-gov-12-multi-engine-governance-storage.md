@@ -107,7 +107,6 @@ The consent lookup of the request path (`GetActiveConsentsForSubjectsAsync`) fil
 | `ix_consent_column_rules_consent`, `ix_consent_row_filters_consent` | `consent_id` of the rule tables |
 | `ix_column_masking_rules_column` | `COLUMN_MASKING_RULES (table_column_id)` |
 | `ix_role_members_member` | `ROLE_MEMBERS (member_sid)` |
-| `ix_table_owners_owner` | `TABLE_OWNERS (data_owner_id)` |
 | `ix_tables_natural_ci` | case-insensitive natural key of `TABLES` (source, schema, table) |
 
 - `CONSENTS.grantee_sid_norm` holds the upper-invariant grantee SID written by the repository, so the subject match is case-insensitive and sargable. Rows without it (`NULL`) and role consents always pass the SQL prefilter.

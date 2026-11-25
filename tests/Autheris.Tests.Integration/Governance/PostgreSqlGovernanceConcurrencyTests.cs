@@ -21,6 +21,9 @@ public sealed class PostgreSqlGovernanceConcurrencyTests : IDisposable
 {
     private static readonly TableIdentifier FourEyesTable = new("finance", "dbo", "finance_table_5");
 
+    /// <summary>#1009 D13: the owner group of the container of <see cref="FourEyesTable"/>, the only identity that decides at the store level.</summary>
+    private const string OwnerGroup = "S-1-5-21-1000-1000-1000-1002";
+
     private readonly PostgreSqlGovernanceRepository _repository;
     private readonly string _connectionString;
 
@@ -34,6 +37,14 @@ public sealed class PostgreSqlGovernanceConcurrencyTests : IDisposable
                 GovernanceDb = new GovernanceDbOptions { SeedDemoData = true },
                 Audit = new AuditOptions { SynchronousQueryAudit = true }
             }));
+        SeedOwnerAsync(_repository).GetAwaiter().GetResult();
+    }
+
+    private static async Task SeedOwnerAsync(PostgreSqlGovernanceRepository repository)
+    {
+        var meta = await repository.GetTableMetadataAsync(FourEyesTable);
+        meta.ShouldNotBeNull();
+        await ContainerOwnerSeed.SetOwnerAsync(repository.RawConnection(), Autheris.Tests.Common.TestTenants.Default.Value, meta.Table.Id, OwnerGroup);
     }
 
     public void Dispose() => _repository.Dispose();
@@ -101,7 +112,7 @@ public sealed class PostgreSqlGovernanceConcurrencyTests : IDisposable
         var approvals = Enumerable.Range(0, 6).Select(n => Task.Run(async () =>
         {
             var request = await NewFourEyesRequestAsync($"S-1-5-21-REQ-CHAIN-{n}");
-            await _repository.ApproveConsentRequestStepAsync(request.Id, new Sid("S-1-5-21-1000-1000-1000-1002"), requireSecondApprover: true);
+            await _repository.ApproveConsentRequestStepAsync(request.Id, new Sid(OwnerGroup), requireSecondApprover: true);
         }));
 
         await Task.WhenAll(auditWriters.Concat(approvals));
@@ -118,7 +129,7 @@ public sealed class PostgreSqlGovernanceConcurrencyTests : IDisposable
     public async Task ConcurrentApprovalsBySameApprover_RecordExactlyOneStep()
     {
         var request = await NewFourEyesRequestAsync("S-1-5-21-REQ-SAME-APPROVER");
-        var approver = new Sid("S-1-5-21-1000-1000-1000-1002");
+        var approver = new Sid(OwnerGroup);
 
         var attempts = await Task.WhenAll(Enumerable.Range(0, 8).Select(_ => Task.Run(() =>
             TryAsync(() => _repository.ApproveConsentRequestStepAsync(request.Id, approver, requireSecondApprover: true)))));
@@ -130,16 +141,30 @@ public sealed class PostgreSqlGovernanceConcurrencyTests : IDisposable
     }
 
     [Fact]
-    public async Task ConcurrentApprovalsByTwoApprovers_NeverCompleteWithoutTwoDistinctSteps()
+    public async Task ConcurrentApprovalsByOwnerAndOutsider_RecordOnlyTheOwnersStep()
     {
+        // One owner group per container (#1009 D13): an approver outside it never records a step, even under concurrency.
         var request = await NewFourEyesRequestAsync("S-1-5-21-REQ-TWO-APPROVERS");
+        var refused = 0;
 
         var results = await Task.WhenAll(
-            Enumerable.Range(0, 6).Select(n => Task.Run(() =>
-                TryAsync(() => _repository.ApproveConsentRequestStepAsync(request.Id, new Sid(n % 2 == 0 ? "S-1-5-21-1000-1000-1000-1002" : "S-1-5-21-1000-1000-1000-1003"), requireSecondApprover: true)))));
+            Enumerable.Range(0, 6).Select(n => Task.Run(async () =>
+            {
+                try
+                {
+                    return await TryAsync(() => _repository.ApproveConsentRequestStepAsync(request.Id, new Sid(n % 2 == 0 ? OwnerGroup : "S-1-5-21-1000-1000-1000-1003"), requireSecondApprover: true));
+                }
+                catch (UnauthorizedAccessException)
+                {
+                    Interlocked.Increment(ref refused);
+                    return false;
+                }
+            })));
 
-        results.Count(r => r).ShouldBe(2, "exactly one step per distinct approver");
-        Scalar("SELECT COUNT(DISTINCT approver_sid) FROM APPROVAL_STEPS WHERE consent_request_id = @id", ("@id", request.Id.ToString())).ShouldBe(2);
+        results.Count(r => r).ShouldBe(1, "exactly one step, recorded by the owner group");
+        refused.ShouldBe(3, "every attempt of the outsider is refused");
+        Scalar("SELECT COUNT(DISTINCT approver_sid) FROM APPROVAL_STEPS WHERE consent_request_id = @id", ("@id", request.Id.ToString())).ShouldBe(1);
+        (await _repository.GetConsentRequestAsync(request.Id))!.Status.ShouldBe("PENDING_SECOND_APPROVAL");
     }
 
     [Fact]
@@ -149,8 +174,8 @@ public sealed class PostgreSqlGovernanceConcurrencyTests : IDisposable
         {
             var request = await NewFourEyesRequestAsync($"S-1-5-21-REQ-RACE-{round}");
 
-            var approve = Task.Run(() => TryAsync(() => _repository.ApproveConsentRequestStepAsync(request.Id, new Sid("S-1-5-21-1000-1000-1000-1002"), requireSecondApprover: true)));
-            var reject = Task.Run(() => TryAsync(() => _repository.RejectConsentRequestAsync(request.Id, new Sid("S-1-5-21-1000-1000-1000-1003"), "race")));
+            var approve = Task.Run(() => TryAsync(() => _repository.ApproveConsentRequestStepAsync(request.Id, new Sid(OwnerGroup), requireSecondApprover: true)));
+            var reject = Task.Run(() => TryAsync(() => _repository.RejectConsentRequestAsync(request.Id, new Sid(OwnerGroup), "race")));
             var approved = await approve;
             var rejected = await reject;
 
@@ -191,10 +216,10 @@ public sealed class PostgreSqlGovernanceConcurrencyTests : IDisposable
         var actorAuth = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
             new System.Security.Claims.ClaimsIdentity(
             [
-                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, "S-1-5-21-1000-1000-1000-1001"),
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, "S-1-5-21-REVOKE-VISIBLE"),
                 new System.Security.Claims.Claim("tenant_id", Autheris.Tests.Common.TestTenants.Default.Value)
             ], "test")));
-        await _repository.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-1000-1000-1000-1001"), "no longer needed", actorAuth);
+        await _repository.RevokeConsentAsync(consent.Id, new Sid("S-1-5-21-REVOKE-VISIBLE"), "no longer needed", actorAuth);
 
         // A separate connection (not the one that revoked) sees the committed revocation immediately.
         Scalar("SELECT is_revoked FROM CONSENTS WHERE id = @id", ("@id", consent.Id.ToString())).ShouldBe(1);
@@ -234,6 +259,7 @@ public sealed class PostgreSqlGovernanceConcurrencyTests : IDisposable
                 GovernanceDb = new GovernanceDbOptions { SeedDemoData = true },
                 Audit = new AuditOptions { SynchronousQueryAudit = false }
             }));
+        await SeedOwnerAsync(repository);
         var meta = await repository.GetTableMetadataAsync(FourEyesTable);
         meta.ShouldNotBeNull();
 
@@ -256,7 +282,7 @@ public sealed class PostgreSqlGovernanceConcurrencyTests : IDisposable
         var approvals = Enumerable.Range(0, 5).Select(n => Task.Run(async () =>
         {
             var request = await repository.CreateConsentRequestAsync(NewRequest(meta, $"S-1-5-21-REQ-CHANNEL-{n}"));
-            await repository.ApproveConsentRequestStepAsync(request.Id, new Sid("S-1-5-21-1000-1000-1000-1002"), requireSecondApprover: true);
+            await repository.ApproveConsentRequestStepAsync(request.Id, new Sid(OwnerGroup), requireSecondApprover: true);
         }));
         var flushAndVerify = Task.Run(async () =>
         {

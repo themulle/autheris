@@ -76,6 +76,39 @@ public sealed class DeclarativeGrantAlignmentTests
     }
 
     [Fact]
+    public async Task ClusterAdmin_direct_apply_refused()
+    {
+        // Amendment 6: IT administration (ClusterAdmin included) goes through a proposal; the direct apply path never accepts it, not even as a dry run.
+        var repo = new FakeConsentRepository();
+        var clusterAdmin = Caller("ClusterAdmin", new Claim(ClaimTypes.Role, "TenantAdmin"));
+
+        await Should.ThrowAsync<ConsentApplyForbiddenException>(() => Sut(repo).ApplyManifestAsync(clusterAdmin, Manifest(Policy())));
+        await Should.ThrowAsync<ConsentApplyForbiddenException>(() => Sut(repo).ApplyManifestAsync(clusterAdmin, Manifest(Policy()), dryRun: true));
+        await Should.ThrowAsync<ConsentApplyForbiddenException>(() => Sut(repo).ValidateAndDiffAsync(clusterAdmin, Manifest(Policy())));
+
+        repo.ReplaceCalls.ShouldBe(0);
+        repo.Active(DateTimeOffset.UtcNow).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Fallback_justification_removed()
+    {
+        // No entry is ever stored with a generated justification: a missing description refuses the manifest instead of falling back to a fixed text.
+        var repo = new FakeConsentRepository();
+
+        await Should.ThrowAsync<DeclarativeManifestValidationException>(() =>
+            Sut(repo).ApplyManifestAsync(Caller(), Manifest(Policy(description: null))));
+        await Should.ThrowAsync<DeclarativeManifestValidationException>(() =>
+            Sut(repo).ValidateProposalAsync(Caller("TenantAdmin"), Manifest(Policy(description: null))));
+        repo.Active(DateTimeOffset.UtcNow).ShouldBeEmpty();
+
+        await Sut(repo).ApplyManifestAsync(Caller(), Manifest(Policy()));
+        var stored = repo.Active(DateTimeOffset.UtcNow).ShouldHaveSingleItem();
+        stored.Description.ShouldBe(Justification);
+        stored.Description!.ShouldNotContain("GitOps manifest", Case.Insensitive);
+    }
+
+    [Fact]
     public async Task Governance_admin_can_author()
     {
         var repo = new FakeConsentRepository();

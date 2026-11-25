@@ -1108,13 +1108,9 @@ The tenant signal of the tenant administrator view is derived from consent recor
 
 ---
 
-### 2.23 `Dbt:ImportDataOwners` (data owners from the dbt governance import)
+### 2.23 Owner keys in the dbt governance import
 
-| Key | Type | Default | Meaning |
-|---|---|---|---|
-| `Gateway:Dbt:ImportDataOwners` | bool | `false` | Allows `POST /modules/dbt/governance` to write table data owners (`owner` / `owners` per table item). Data owners act as consent approvers, so the switch is explicit configuration and never a request parameter. |
-
-With the default `false`, a payload that carries `owner`, `owners`, `group` or `groups` is rejected as a whole (`dbt_owner_import_disabled`); nothing is written. With `true`, the caller must additionally hold the `GovernanceAdmin` role (re-checked in the import service; `DbtAdmin` alone is rejected), and the write repository and the audit repository must be registered. The manifest sync (`/sync`) never writes owners. See the dbt module documentation for the payload and its limits.
+Per-table data owners do not exist; Data Governance assigns owner groups to containers (domains). A `POST /modules/dbt/governance` payload whose table item carries `owner`, `owners`, `group` or `groups` is rejected as a whole (`dbt_owner_import_disabled`); nothing is written. The former `Gateway:Dbt:ImportDataOwners` switch is removed and stops startup when configured. The manifest sync (`/sync`) keeps `meta.owner` only as a suggestion.
 
 ## 3. Deployment & Environment Variables
 

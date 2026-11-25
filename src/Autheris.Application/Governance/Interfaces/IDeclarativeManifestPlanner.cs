@@ -19,6 +19,17 @@ public interface IDeclarativeManifestPlanner
         CancellationToken ct = default);
 
     /// <summary>
+    /// Amendment 6: validates a manifest an IT administrator (or Data Governance) submits as a proposal, with the same rules as a direct apply,
+    /// without writing anything. The submitter may be a beneficiary; the confirmer's separation of duties is checked by <see cref="ApplyAsync"/>.
+    /// </summary>
+    Task<DeclarativeManifestPlan> ValidateProposalAsync(
+        ClaimsPrincipal submitter,
+        DeclarativeConsentManifest manifest,
+        SecurityPrincipalContext? callerContext = null,
+        DeclarativePruneMode pruneMode = DeclarativePruneMode.False,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Applies a validated plan in one transaction after re-validating it against the current state
     /// (<see cref="DeclarativePlanStaleException"/> when the grant set changed).
     /// </summary>

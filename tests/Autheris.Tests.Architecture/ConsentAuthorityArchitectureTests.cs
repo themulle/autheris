@@ -65,8 +65,33 @@ public sealed class ConsentAuthorityArchitectureTests
     [Fact]
     public void GetTransitiveRolesAsync_IsRemoved()
     {
-        typeof(IDataOwnershipRepository).GetMethods().Any(m => m.Name == "GetTransitiveRolesAsync").ShouldBeFalse();
+        typeof(Autheris.Application.Governance.Ownership.IContainerOwnership).GetMethods().Any(m => m.Name == "GetTransitiveRolesAsync").ShouldBeFalse();
         typeof(GovernanceRepository).GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
             .Any(m => m.Name == "GetTransitiveRolesAsync").ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Ownership_IsResolvedFromContainersOnly_NoPerTableOwnerSeamRemains()
+    {
+        // #1009 W3-12b (D13): the per-table ownership model is gone; IContainerOwnership is the only owner authority.
+        var ownerSeams = new[] { "IDataOwnershipRepository", "IDataOwnerAssignmentRepository", "IOwnerGrantStore", "IOwnerGrantService" };
+        typeof(IGovernanceRepository).GetInterfaces().Select(i => i.Name).ShouldNotContain(n => ownerSeams.Contains(n));
+        typeof(GovernanceRepository).GetInterfaces().Select(i => i.Name).ShouldNotContain(n => ownerSeams.Contains(n));
+
+        var legacyOwnerMethods = new[]
+        {
+            "GetDataOwnersForTableAsync", "GetDataOwnersForTablesAsync", "IsAuthorizedApproverForTableAsync", "GetOwnedOrDelegatedTablesAsync",
+            "GetAuthorizedApproverSidsForTableAsync", "IsAnyApproverAuthorizedForTableAsync", "DelegateDataOwnershipAsync", "ApplyTableOwnerAssignmentsAsync"
+        };
+        typeof(GovernanceRepository).GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance | BindingFlags.Static)
+            .Select(m => m.Name).Where(legacyOwnerMethods.Contains).ShouldBeEmpty("the governance store no longer answers ownership; container ownership does");
+    }
+
+    [Fact]
+    public void OwnerGrantSource_IsRemoved()
+    {
+        Enum.GetNames<Autheris.Domain.Model.ConsentGrantSource>().ShouldNotContain("Owner");
+        Enum.GetNames<Autheris.Domain.Interfaces.GrantSourceKind>().ShouldNotContain("Owner");
+        Autheris.Domain.Model.ConsentWorkflowSqlMapping.TryParseGrantSource("OWNER", out _).ShouldBeFalse();
     }
 }

@@ -17,13 +17,12 @@ namespace Autheris.Tests.Integration.Governance.Contract;
 
 /// <summary>
 /// Engine-agnostic contract suite for <c>IConsentRepository</c>, <c>IConsentApprovalRepository</c>,
-/// <c>IConsentDescriptionRepository</c>, <c>IOwnerGrantStore</c>, and <c>IProfileAssignmentStore</c>
-/// (including grants, revocations, decisions, profile assignment items, owner grants, and keyset paging).
+/// <c>IConsentDescriptionRepository</c>, and <c>IProfileAssignmentStore</c>
+/// (including grants, revocations, decisions, profile assignment items, and keyset paging).
 /// </summary>
 public abstract class ConsentContract : GovernanceContractBase
 {
     private static readonly Sid Owner1Sid = new("S-1-5-21-900-1");
-    private static readonly Sid Owner2Sid = new("S-1-5-21-900-2");
     private static readonly Sid RequesterSid = new("S-1-5-21-900-3");
     private static readonly Sid GranteeSid = new("S-1-5-21-900-4");
 
@@ -65,18 +64,8 @@ public abstract class ConsentContract : GovernanceContractBase
         };
 
         var saved = await Store.TableMetadata.UpsertTableMetadataAsync(table);
-        _ = await Store.DataOwnerAssignments.ApplyTableOwnerAssignmentsAsync(
-            new DataOwnerAssignmentRequest(
-                [
-                    new TableOwnerAssignmentSpec(
-                        id,
-                        [
-                            new DataOwnerSpec(Owner1Sid.Value, "owner1", "Owner One", "owner1@example.com", "PRIMARY"),
-                            new DataOwnerSpec(Owner2Sid.Value, "owner2", "Owner Two", "owner2@example.com", "DELEGATE")
-                        ])
-                ],
-                Replace: true,
-                DryRun: false));
+        // The owner group of the table's container is the only owner authority (#1009, D13).
+        await OpenDomainSeeder.AssignToOpenDomainAsync(Store.Services, Store.TenantA, id, Owner1Sid);
         return saved;
     }
 
@@ -387,10 +376,10 @@ public abstract class ConsentContract : GovernanceContractBase
         var ownerAuth = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
             new System.Security.Claims.ClaimsIdentity(
             [
-                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, Owner1Sid.Value),
+                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, GranteeSid.Value),
                 new System.Security.Claims.Claim("tenant_id", Store.TenantA.Value)
             ], "test")));
-        await Store.Consents.RevokeConsentAsync(consent.Id, Owner1Sid, "Revoked in contract test", ownerAuth);
+        await Store.Consents.RevokeConsentAsync(consent.Id, GranteeSid, "Revoked in contract test", ownerAuth);
 
         var activeBySubj = await Store.Consents.GetActiveConsentsForSubjectsAsync([GranteeSid], table.Identifier, now, Store.TenantA);
         activeBySubj.Should().BeEmpty();
@@ -430,12 +419,8 @@ public abstract class ConsentContract : GovernanceContractBase
                 new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, unauthorizedSid.Value),
                 new System.Security.Claims.Claim("tenant_id", Store.TenantA.Value)
             ], "test")));
-        var ownerAuth = Autheris.Domain.Security.ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(
-            new System.Security.Claims.ClaimsIdentity(
-            [
-                new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, Owner1Sid.Value),
-                new System.Security.Claims.Claim("tenant_id", Store.TenantA.Value)
-            ], "test")));
+        // #1009 D13: an owner replaces grants through the verified grant revoke authority; the store has no per-table owner fallback.
+        var ownerAuth = Autheris.Domain.Security.ConsentRevocationAuthority.ForVerifiedRevocation(Store.TenantA, "ContainerOwner");
         Store.SetCaller(new CallerContext("stranger-app", "1.0", "revoke"));
         var unauthAct = () => Store.Consents.RevokeConsentAsync(c2.Id, unauthorizedSid, "Unauthorized attempt", strangerAuth);
         await unauthAct.Should().ThrowAsync<Autheris.Domain.Exceptions.ConsentRevocationForbiddenException>();
@@ -571,12 +556,12 @@ public abstract class ConsentContract : GovernanceContractBase
         var afterFirst = await Store.ConsentApprovals.ApproveConsentRequestStepAsync(req2.Id, Owner1Sid, requireSecondApprover: true);
         afterFirst.Status.Should().Be("PENDING_SECOND_APPROVAL");
 
-        var afterSecond = await Store.ConsentApprovals.ApproveConsentRequestStepAsync(req2.Id, Owner2Sid, requireSecondApprover: true);
-        afterSecond.Status.Should().Be("APPROVED");
-
-        await Store.ConsentApprovals.ActivateConsentAsync(req2.Id, Owner2Sid);
+        // #1009 D13: per-table delegates are gone; only the container owner group decides, so a second person outside it is refused.
+        var outsider = () => Store.ConsentApprovals.ApproveConsentRequestStepAsync(req2.Id, new Sid("S-1-5-21-900-2"), requireSecondApprover: true);
+        await outsider.Should().ThrowAsync<UnauthorizedAccessException>();
+        (await Store.ConsentApprovals.GetConsentRequestAsync(req2.Id))!.Status.Should().Be("PENDING_SECOND_APPROVAL");
         var active = await Store.Consents.GetActiveConsentsForSubjectsAsync([GranteeSid], table.Identifier, DateTimeOffset.UtcNow, Store.TenantA);
-        active.Should().ContainSingle();
+        active.Should().BeEmpty();
     }
 
     [RequiresContainerRuntimeFact]

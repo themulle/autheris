@@ -70,6 +70,7 @@ src/Autheris.Api/Endpoints/GovernanceEndpoints.Audit.cs|/api/governance/gdpr/exp
 src/Autheris.Api/Endpoints/GovernanceEndpoints.Audit.cs|/api/governance/sunsetting/rules
 src/Autheris.Api/Endpoints/GovernanceEndpoints.Audit.cs|/api/v1/governance/audit
 src/Autheris.Api/Endpoints/GovernanceEndpoints.Audit.cs|/api/v1/governance/grants
+src/Autheris.Api/Endpoints/GovernanceEndpoints.cs|/api/v1/governance/consents/proposals/{id:guid}
 src/Autheris.Api/Endpoints/GovernanceEndpoints.cs|/api/v1/profiles
 src/Autheris.Api/Endpoints/GovernanceEndpoints.cs|/api/v1/profiles/{id}
 src/Autheris.Api/Endpoints/GovernancePlanEndpoints.cs|/api/governance/plans/{planId}

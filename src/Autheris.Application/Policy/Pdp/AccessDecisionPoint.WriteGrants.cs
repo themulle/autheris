@@ -327,15 +327,29 @@ public sealed partial class AccessDecisionPoint
 
         var allUserSids = principal.GetAllUserSids();
         var scopes = TokenAccessScope.GetScopeSet(subject.Claims);
-        var readDecision = _resolutionService.ResolveAccess(
-            subject.UserSid,
-            principal.GetGroupSids(),
-            roles,
-            metadata.Identifier,
-            readRelevant,
-            metadata.Dialect,
-            allUserSids.Any(s => s != subject.UserSid) ? allUserSids : null,
-            scopes is { Count: > 0 } ? scopes : null);
+        var callerScopes = scopes is { Count: > 0 } ? scopes : null;
+        var filteredUserSids = allUserSids.Any(s => s != subject.UserSid) ? allUserSids : null;
+        var readDecision = _resolutionService is ConsentResolutionService concreteResolver
+            ? concreteResolver.ResolveAccess(
+                subject.UserSid,
+                principal.GetGroupSids(),
+                roles,
+                metadata.Identifier,
+                readRelevant,
+                metadata.Dialect,
+                filteredUserSids,
+                callerScopes,
+                tableMetadata: null,
+                nowUtc: _timeProvider.GetUtcNow())
+            : _resolutionService.ResolveAccess(
+                subject.UserSid,
+                principal.GetGroupSids(),
+                roles,
+                metadata.Identifier,
+                readRelevant,
+                metadata.Dialect,
+                filteredUserSids,
+                callerScopes);
 
         return readDecision is { IsAllowed: true }
             ? (readDecision.ColumnAccess, readDecision.HasUnconstrainedColumnAllow)

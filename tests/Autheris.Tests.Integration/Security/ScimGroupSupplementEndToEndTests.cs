@@ -440,8 +440,7 @@ public sealed class ScimGroupSupplementEndToEndTests : IClassFixture<ScimGroupSu
 
         using var scope = _fixture.Factory.Services.CreateScope();
         var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
-        var ownerAssignments = scope.ServiceProvider.GetRequiredService<IDataOwnerAssignmentRepository>();
-        var ownership = scope.ServiceProvider.GetRequiredService<IDataOwnershipRepository>();
+        var ownership = scope.ServiceProvider.GetRequiredService<Autheris.Application.Governance.Ownership.IContainerOwnership>();
         var scim = scope.ServiceProvider.GetRequiredService<IScimService>();
         var store = scope.ServiceProvider.GetRequiredService<IIdentityStoreRepository>();
         var groupResolver = scope.ServiceProvider.GetRequiredService<IGroupSidResolver>();
@@ -450,12 +449,8 @@ public sealed class ScimGroupSupplementEndToEndTests : IClassFixture<ScimGroupSu
 
         var ownerMeta = await repo.GetTableMetadataAsync(OwnerTable);
         ownerMeta.ShouldNotBeNull();
-        var assignResult = await ownerAssignments.ApplyTableOwnerAssignmentsAsync(new DataOwnerAssignmentRequest(
-            [new TableOwnerAssignmentSpec(OwnerTable, [new DataOwnerSpec(OwnerGroupSid, null, "Table Owner", "owner@corp.example", "PRIMARY")])],
-            Replace: false,
-            DryRun: false,
-            TenantId: tenant));
-        assignResult.Success.ShouldBeTrue();
+        // #1009 D13: the owner group of the table's container is the only owner authority.
+        await Autheris.Tests.Integration.Governance.OpenDomainSeeder.AssignToOpenDomainAsync(_fixture.Factory.Services, tenant, OwnerTable, new Sid(OwnerGroupSid));
 
         // 1. A SCIM client in a foreign GenericOidc realm cannot inject an AD/owner objectSid.
         using var client = _fixture.Factory.CreateClient();
@@ -497,7 +492,8 @@ public sealed class ScimGroupSupplementEndToEndTests : IClassFixture<ScimGroupSu
         partnerGroups.GroupSids.ShouldNotContain(new Sid(OwnerGroupSid));
         (await ownership.IsAuthorizedApproverForTableAsync(OwnerTable, new Sid($"realm:{PartnerRealmId}:{ownerGroupId}"))).ShouldBeFalse();
 
-        // 3. Even inside EntraWorkforce SCIM, membership in a group carrying OwnerGroupSid grants no ownership authority.
+        // 3. The owner group itself owns the table (#1009: container owner group); an unqualified identifier never resolves group
+        //    memberships while several realms are configured, so a bare member SID is no owner (fail closed).
         if (await scim.GetUserAsync(tenant, RealmId, "mallory-e2e") is null)
         {
             await scim.CreateUserAsync(tenant, RealmId, new ScimUser(
@@ -536,7 +532,8 @@ public sealed class ScimGroupSupplementEndToEndTests : IClassFixture<ScimGroupSu
             new Claim("tid", RequestTenant),
             new Claim("autheris:realm", RealmId),
             new Claim(ClaimTypes.Role, "DataOwner"),
-            IdentityClaimIssuers.CreateGroupSidClaim(OwnerGroupSid),
+            // #1009 D13: only the foreign-realm group that reuses the owner group id is asserted; it never confers container ownership.
+            IdentityClaimIssuers.CreateGroupSidClaim($"realm:{PartnerRealmId}:{ownerGroupId}"),
             GroupResolutionClaims.CreateMarker(),
             GroupResolutionClaims.CreateStatus(GroupResolutionStatus.Complete)
         ], "Bearer"));
