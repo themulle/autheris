@@ -176,8 +176,15 @@ public partial class GovernanceRepository
         IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default) =>
         AllActiveCoreAsync(subjects, atTime, TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), true, 0, ct);
 
+    public Task<IReadOnlyList<Consent>> GetAllActiveConsentHeadersForSubjectsAsync(
+        IEnumerable<Sid> subjects, DateTimeOffset? atTime, TenantId tenantId, CancellationToken ct = default) =>
+        AllActiveCoreAsync(subjects, atTime, TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), true, 0, ct, hydrateChildren: false);
+
+    public Task<DateTimeOffset?> GetNextScheduledAllowAsync(IEnumerable<Sid> subjects, DateTimeOffset atTime, TenantId tenantId, CancellationToken ct = default) =>
+        ScheduledAllowReader.ReadAsync(OpenConnectionAsync, static (c, s) => { var cmd = c.CreateCommand(); cmd.CommandText = s; return cmd; }, ExecuteReaderAsync, subjects, atTime, tenantId, ct);
+
     private async Task<IReadOnlyList<Consent>> AllActiveCoreAsync(
-        IEnumerable<Sid> subjects, DateTimeOffset? atTime, TenantId tenantId, bool dataOnly, int maxRows, CancellationToken ct, bool includeFuture = false, Guid? afterId = null)
+        IEnumerable<Sid> subjects, DateTimeOffset? atTime, TenantId tenantId, bool dataOnly, int maxRows, CancellationToken ct, bool includeFuture = false, Guid? afterId = null, bool hydrateChildren = true)
     {
         var effectiveAt = atTime ?? TimeProvider.System.GetUtcNow();
         var subjectEnumerated = subjects.ToList();
@@ -236,7 +243,10 @@ public partial class GovernanceRepository
             consents.RemoveRange(maxRows, consents.Count - maxRows);
         }
 
-        await HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
+        if (hydrateChildren)
+        {
+            await HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
+        }
         return consents;
     }
 

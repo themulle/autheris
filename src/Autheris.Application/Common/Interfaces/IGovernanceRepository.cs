@@ -299,6 +299,19 @@ public interface IConsentRepository
     }
 
     Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reads active data-consent headers (without hydrating child rule tables) for grant candidate pre-screening.
+    /// </summary>
+    Task<IReadOnlyList<Consent>> GetAllActiveConsentHeadersForSubjectsAsync(IEnumerable<Sid> subjects, DateTimeOffset? atTime, TenantId tenantId, CancellationToken ct = default) =>
+        GetAllActiveConsentsForSubjectsAsync(subjects, null, atTime, tenantId, ct);
+
+    /// <summary>
+    /// Earliest <c>ValidFrom</c> strictly after <paramref name="atTime"/> among non-revoked data Allow consents for
+    /// <paramref name="subjects"/> in <paramref name="tenantId"/> (#1063 §4d), or null when none are scheduled.
+    /// </summary>
+    Task<DateTimeOffset?> GetNextScheduledAllowAsync(IEnumerable<Sid> subjects, DateTimeOffset atTime, TenantId tenantId, CancellationToken ct = default)
+        => Task.FromResult<DateTimeOffset?>(null);
     Task<Consent> CreateConsentAsync(Consent consent, CancellationToken ct = default);
     Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default);
     Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, ConsentRevocationAuthority authority, CancellationToken ct = default);

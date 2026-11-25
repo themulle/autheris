@@ -108,7 +108,7 @@ public sealed partial class DiscoveryService
                         caller, sid, scopeKey, slice, query.Language, ct).ConfigureAwait(false);
                     for (var i = 0; i < projected.Count; i++)
                     {
-                        pageItems.Add(new DiscoveryKeysetItem(projected[i], slice[i]));
+                        pageItems.Add(new DiscoveryKeysetItem(projected[i], slice[i], TryGetMemoizedProtection(caller.Tenant, slice[i].Identifier)));
                     }
                 }
             }
@@ -387,7 +387,7 @@ public sealed partial class DiscoveryService
 
                 if (pageItems.Count < first)
                 {
-                    pageItems.Add(new DiscoveryKeysetItem(projected[i], batch[i]));
+                    pageItems.Add(new DiscoveryKeysetItem(projected[i], batch[i], TryGetMemoizedProtection(caller.Tenant, batch[i].Identifier)));
                 }
                 else
                 {
@@ -431,7 +431,7 @@ public sealed partial class DiscoveryService
                     continue;
                 }
 
-                collected.Add(new DiscoveryKeysetItem(projected[i], window[i]));
+                collected.Add(new DiscoveryKeysetItem(projected[i], window[i], TryGetMemoizedProtection(caller.Tenant, window[i].Identifier)));
                 if (collected.Count >= first + 1)
                 {
                     break;

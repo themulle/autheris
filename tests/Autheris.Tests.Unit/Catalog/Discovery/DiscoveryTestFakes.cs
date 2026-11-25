@@ -239,6 +239,19 @@ internal sealed class FakeDiscoveryConsentRepository : IConsentRepository
         return Task.FromResult<IReadOnlyList<Consent>>(Active.Where(c => IsSubjectConsent(c, sids, tenantId, at)).ToList());
     }
 
+    public Task<DateTimeOffset?> GetNextScheduledAllowAsync(IEnumerable<Sid> subjects, DateTimeOffset atTime, TenantId tenantId, CancellationToken ct = default)
+    {
+        var sids = subjects.ToHashSet();
+        var next = Active
+            .Where(c => !c.IsRevoked && c.Effect == ConsentEffect.Allow && c.GrantKind == PermissionGrantKind.Data &&
+                        c.TenantId == tenantId && c.ValidFrom > atTime && c.EffectiveValidTo > c.ValidFrom &&
+                        c.GranteeSid is { } g && sids.Contains(g))
+            .Select(static c => (DateTimeOffset?)c.ValidFrom)
+            .OrderBy(static d => d)
+            .FirstOrDefault();
+        return Task.FromResult(next);
+    }
+
     // As the SQL repository: active consents of the subjects, plus not-yet-valid Deny consents (fail closed).
     private static bool IsSubjectConsent(Consent c, HashSet<Sid> sids, TenantId? tenantId, DateTimeOffset at) =>
         c.GranteeSid is { } g && sids.Contains(g) && (tenantId is null || c.TenantId == tenantId.Value) &&
@@ -272,16 +285,63 @@ internal sealed class FakeDiscoveryOwnershipRepository : IContainerOwnership
 {
     public Dictionary<TableIdentifier, List<ContainerOwnerEntry>> Owners { get; } = [];
     public HashSet<TableIdentifier> OwnedTables { get; } = [];
+    public Dictionary<TableIdentifier, HashSet<string>> AuthorizedApproversByTable { get; } = [];
+    public int BatchApproverCalls { get; private set; }
+    public int SingleApproverCalls { get; private set; }
 
     public Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<ContainerOwnerEntry>>(Owners.TryGetValue(table, out var list) ? list : []);
 
     public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default)
-        => Task.FromResult(OwnedTables.Contains(table));
+    {
+        SingleApproverCalls++;
+        if (AuthorizedApproversByTable.TryGetValue(table, out var configured))
+        {
+            return Task.FromResult(configured.Contains(approverSid.Value));
+        }
+
+        return Task.FromResult(OwnedTables.Contains(table));
+    }
 
     public Task<IReadOnlySet<TableIdentifier>> GetOwnedOrDelegatedTablesAsync(Sid actorSid, IReadOnlyCollection<TableIdentifier> tables, DateTimeOffset atTime, CancellationToken ct = default)
         => Task.FromResult<IReadOnlySet<TableIdentifier>>(OwnedTables.Where(tables.Contains).ToHashSet());
 
+    public Task<IReadOnlyDictionary<TableIdentifier, IReadOnlySet<string>>> FilterAuthorizedApproversForTablesAsync(
+        IReadOnlyCollection<TableMetadata> requested,
+        IReadOnlyCollection<string> candidateApproverSids,
+        DateTimeOffset atTime,
+        CancellationToken ct = default)
+    {
+        BatchApproverCalls++;
+        var result = new Dictionary<TableIdentifier, IReadOnlySet<string>>();
+        foreach (var meta in requested)
+        {
+            if (result.ContainsKey(meta.Identifier))
+            {
+                continue;
+            }
+
+            if (AuthorizedApproversByTable.TryGetValue(meta.Identifier, out var configured))
+            {
+                result[meta.Identifier] = candidateApproverSids
+                    .Where(configured.Contains)
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            }
+            else if (OwnedTables.Contains(meta.Identifier))
+            {
+                result[meta.Identifier] = candidateApproverSids
+                    .Where(static s => !string.IsNullOrWhiteSpace(s))
+                    .Select(static s => s.Trim())
+                    .ToHashSet(StringComparer.OrdinalIgnoreCase);
+            }
+            else
+            {
+                result[meta.Identifier] = System.Collections.Frozen.FrozenSet<string>.Empty;
+            }
+        }
+
+        return Task.FromResult<IReadOnlyDictionary<TableIdentifier, IReadOnlySet<string>>>(result);
+    }
 }
 
 internal sealed class FakeDiscoveryArtifactStore : IDiscoveryArtifactStore

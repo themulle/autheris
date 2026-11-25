@@ -264,7 +264,7 @@ public partial class GovernanceRepository
             {
                 Id = Guid.Parse(reader.GetString(0)),
                 TableId = reader.IsDBNull(1) ? Guid.Empty : Guid.Parse(reader.GetString(1)),
-                TableIdentifier = new TableIdentifier(dataSource ?? string.Empty, string.Empty, string.Empty),
+                TableIdentifier = default,
                 ConsentRequestId = ConsentWorkflowSql.ReadOptionalGuid(reader, 2),
                 Effect = Enum.Parse<ConsentEffect>(reader.GetString(3), ignoreCase: true),
                 GranteeType = GranteeTypeParsing.ParseStored(reader.GetString(4)),

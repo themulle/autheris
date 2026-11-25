@@ -95,4 +95,22 @@ public interface IContainerOwnership
 
         return false;
     }
+
+    /// <summary>Batch-checks which SIDs in <paramref name="candidateApproverSids"/> are authorized container approvers per table (#1063 §4a).</summary>
+    async Task<IReadOnlyDictionary<TableIdentifier, IReadOnlySet<string>>> FilterAuthorizedApproversForTablesAsync(
+        IReadOnlyCollection<TableMetadata> requested, IReadOnlyCollection<string> candidateApproverSids, DateTimeOffset atTime, CancellationToken ct = default)
+    {
+        var candidates = candidateApproverSids.Where(static s => !string.IsNullOrWhiteSpace(s)).Select(static s => s.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        var result = new Dictionary<TableIdentifier, IReadOnlySet<string>>();
+        foreach (var meta in requested)
+        {
+            if (result.ContainsKey(meta.Identifier)) continue;
+            var authorized = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (meta.Table.IsActive)
+                foreach (var sid in candidates)
+                    if (await IsAuthorizedApproverForTableAsync(meta.Identifier, new Sid(sid), ct).ConfigureAwait(false)) authorized.Add(sid);
+            result[meta.Identifier] = authorized;
+        }
+        return result;
+    }
 }

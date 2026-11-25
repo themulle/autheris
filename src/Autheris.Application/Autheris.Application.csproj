@@ -35,6 +35,7 @@
     <InternalsVisibleTo Include="Autheris.Modules.Dbt.Tests" />
     <InternalsVisibleTo Include="Autheris.Tests.SqlCompilerGate" />
     <InternalsVisibleTo Include="Autheris.Benchmarks" />
+    <InternalsVisibleTo Include="Autheris.Tests.Architecture" />
   </ItemGroup>
 
 </Project>

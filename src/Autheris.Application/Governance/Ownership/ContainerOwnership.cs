@@ -143,6 +143,62 @@ public sealed class ContainerOwnership(
         return false;
     }
 
+    /// <inheritdoc />
+    public async Task<IReadOnlyDictionary<TableIdentifier, IReadOnlySet<string>>> FilterAuthorizedApproversForTablesAsync(
+        IReadOnlyCollection<TableMetadata> requested,
+        IReadOnlyCollection<string> candidateApproverSids,
+        DateTimeOffset atTime,
+        CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(requested);
+        ArgumentNullException.ThrowIfNull(candidateApproverSids);
+        var result = new Dictionary<TableIdentifier, IReadOnlySet<string>>();
+        var distinctActive = requested.Where(m => result.TryAdd(m.Identifier, System.Collections.Frozen.FrozenSet<string>.Empty) && m.Table.IsActive).ToList();
+        var candidates = candidateApproverSids.Where(static s => !string.IsNullOrWhiteSpace(s)).Select(static s => s.Trim()).Distinct(StringComparer.OrdinalIgnoreCase).ToList();
+        if (distinctActive.Count == 0 || candidates.Count == 0) return result;
+
+        try
+        {
+            var unresolved = distinctActive.Where(static m => m.Table.Id == Guid.Empty).Select(static m => m.Identifier).ToList();
+            var fetched = unresolved.Count > 0 ? await tables.GetStructuralTableMetadataBatchAsync(unresolved, ct).ConfigureAwait(false) : [];
+            var byId = Enumerable.Range(0, Math.Min(unresolved.Count, fetched.Count))
+                .Where(i => fetched[i] is { Table.IsActive: true })
+                .ToDictionary(i => unresolved[i], i => fetched[i]!);
+            var active = distinctActive
+                .Select(m => (Key: m.Identifier, Meta: m.Table.Id != Guid.Empty ? m : byId.GetValueOrDefault(m.Identifier)))
+                .Where(static x => x.Meta is not null)
+                .Select(static x => (x.Key, x.Meta!))
+                .ToList();
+            var resolved = new Dictionary<TableIdentifier, Resolved>();
+            await ResolveActiveAsync(active, resolved, ct).ConfigureAwait(false);
+            var groupsCache = new Dictionary<(TenantId, string), IReadOnlyCollection<string>>();
+            var authCache = new Dictionary<(TenantId, string), IReadOnlySet<string>>();
+            foreach (var (table, r) in resolved)
+            {
+                if (!authCache.TryGetValue((r.Tenant, r.OwnerGroup.Value), out var auth))
+                {
+                    var matching = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+                    foreach (var sid in candidates)
+                    {
+                        if (SeparationOfDutiesService.IdentifiersOverlap(sid, r.OwnerGroup.Value) ||
+                            (await CachedGroupsAsync(groupsCache, r.Tenant, sid, ct).ConfigureAwait(false)).Any(g => SeparationOfDutiesService.IdentifiersOverlap(g, r.OwnerGroup.Value)))
+                            matching.Add(sid);
+                    }
+                    authCache[(r.Tenant, r.OwnerGroup.Value)] = auth = matching;
+                }
+                result[table] = auth;
+            }
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            foreach (var key in result.Keys.ToList()) result[key] = System.Collections.Frozen.FrozenSet<string>.Empty;
+        }
+        return result;
+    }
+
+    private async Task<IReadOnlyCollection<string>> CachedGroupsAsync(Dictionary<(TenantId, string), IReadOnlyCollection<string>> cache, TenantId tenant, string sid, CancellationToken ct) =>
+        cache.TryGetValue((tenant, sid), out var cached) ? cached : cache[(tenant, sid)] = await EffectiveGroupsAsync(tenant, sid, ct).ConfigureAwait(false);
+
     private async Task<ContainerOwnerEntry> OwnerEntryAsync(Resolved r, Dictionary<(TenantId, Guid), string?> contacts, CancellationToken ct)
     {
         string? contact = null;
@@ -190,43 +246,16 @@ public sealed class ContainerOwnership(
         try
         {
             var metas = await tables.GetStructuralTableMetadataBatchAsync(distinct, ct).ConfigureAwait(false);
-            var byTenant = new Dictionary<TenantId, List<(TableIdentifier Table, Guid TableId)>>();
+            var active = new List<(TableIdentifier Key, TableMetadata Meta)>(distinct.Count);
             for (var i = 0; i < distinct.Count && i < metas.Count; i++)
             {
-                var meta = metas[i];
-                if (meta is null || !meta.Table.IsActive)
+                if (metas[i] is { Table.IsActive: true } meta)
                 {
-                    continue;
-                }
-
-                if (OwnerTenantOf(meta) is not { } tenant)
-                {
-                    continue;
-                }
-
-                if (!byTenant.TryGetValue(tenant, out var list))
-                {
-                    list = [];
-                    byTenant[tenant] = list;
-                }
-
-                list.Add((distinct[i], meta.Table.Id));
-            }
-
-            foreach (var (tenant, list) in byTenant)
-            {
-                var containers = await domains.GetContainersForTablesAsync(tenant, list.Select(t => t.TableId).Distinct().ToList(), ct).ConfigureAwait(false);
-                foreach (var (table, tableId) in list)
-                {
-                    if (containers.TryGetValue(tableId, out var container) &&
-                        container.IsValid &&
-                        container.OwnerGroupSid is { } group &&
-                        !string.IsNullOrWhiteSpace(group.Value))
-                    {
-                        result[table] = new Resolved(tenant, container, group);
-                    }
+                    active.Add((distinct[i], meta));
                 }
             }
+
+            await ResolveActiveAsync(active, result, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -235,6 +264,40 @@ public sealed class ContainerOwnership(
         }
 
         return result;
+    }
+
+    private async Task ResolveActiveAsync(
+        IReadOnlyList<(TableIdentifier Key, TableMetadata Meta)> active,
+        Dictionary<TableIdentifier, Resolved> target,
+        CancellationToken ct)
+    {
+        var byTenant = new Dictionary<TenantId, List<(TableIdentifier Table, Guid TableId)>>();
+        foreach (var (key, meta) in active)
+        {
+            if (!meta.Table.IsActive || OwnerTenantOf(meta) is not { } tenant)
+            {
+                continue;
+            }
+
+            if (!byTenant.TryGetValue(tenant, out var list))
+            {
+                byTenant[tenant] = list = [];
+            }
+
+            list.Add((key, meta.Table.Id));
+        }
+
+        foreach (var (tenant, list) in byTenant)
+        {
+            var containers = await domains.GetContainersForTablesAsync(tenant, list.Select(static t => t.TableId).Distinct().ToList(), ct).ConfigureAwait(false);
+            foreach (var (table, tableId) in list)
+            {
+                if (containers.TryGetValue(tableId, out var c) && c.IsValid && c.OwnerGroupSid is { } g && !string.IsNullOrWhiteSpace(g.Value))
+                {
+                    target[table] = new Resolved(tenant, c, g);
+                }
+            }
+        }
     }
 
     /// <summary>

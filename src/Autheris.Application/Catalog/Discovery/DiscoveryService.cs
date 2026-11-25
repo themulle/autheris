@@ -75,6 +75,12 @@ public sealed partial class DiscoveryService : IDiscoveryService
     private readonly Dictionary<ScopeMemoKey, ScopedCatalog> _scopeMemo = [];
     private readonly Dictionary<ObjectMemoKey, DiscoveryObject> _objectMemo = [];
     private readonly Dictionary<ScopeMemoKey, CallerAccessMemo> _accessMemo = [];
+    private readonly Dictionary<(TenantId, TableIdentifier), EffectiveProtection> _protectionMemo = [];
+
+    private EffectiveProtection? TryGetMemoizedProtection(TenantId tenant, TableIdentifier table)
+    {
+        lock (_memoLock) return _protectionMemo.GetValueOrDefault((tenant, table));
+    }
 
     private readonly record struct ScopeMemoKey(string Subject, string ClaimsHash, string Tenant, CatalogChannel Channel);
     private readonly record struct ObjectMemoKey(ScopeMemoKey ScopeKey, DiscoveryObjectKind Kind, TableIdentifier TableId, string LanguageKey);
