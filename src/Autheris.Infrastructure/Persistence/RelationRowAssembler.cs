@@ -19,7 +19,7 @@ internal readonly record struct RelationRowData(
 
 /// <summary>
 /// Engine-neutral assembly of <see cref="TableRelation"/>from the single relation read statement (issue #151, 151 decision 5).
-/// Rows must be ordered by relation id, then key ordinal. A relation without key rows, with an ordinal gap or violating
+/// The rows of one relation must be contiguous and ordered by key ordinal (the statements order by parent, child and name, then id and ordinal; issue #1099). A relation without key rows, with an ordinal gap or violating
 /// <see cref="RelationKeyRules"/>is skipped (fail closed); the load continues. Logging is bounded per load.
 /// </summary>
 internal static class RelationRowAssembler

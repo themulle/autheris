@@ -3,6 +3,7 @@ namespace Autheris.Modules.Dbt;
 using System;
 using System.Collections.Generic;
 using System.Text.Json;
+using Autheris.Domain.Model;
 
 /// <summary>Issue #392: collects <c>relationships</c> and <c>relationships_combination</c> tests and resolves pending relations.</summary>
 internal static class DbtRelationImport
@@ -87,7 +88,7 @@ internal static class DbtRelationImport
         foreach (var p in pending)
         {
             var r = DbtRelationReferenceResolution.Resolve(p, resolver);
-            var name = p.RelationName ?? (r.ParentName.StartsWith("stg_", StringComparison.Ordinal) ? r.ParentName[4..] : r.ParentName);
+            var name = p.RelationName ?? RelationNameDefaults.ForParent(r.ParentName);
             if (r.ErrorCode is not null || r.ParentUniqueId is null || r.ChildUniqueId is null)
             {
                 relations.Skip(name, r.ChildName, r.ParentName, r.ErrorCode ?? "UNKNOWN_MODEL", reserved: true);
