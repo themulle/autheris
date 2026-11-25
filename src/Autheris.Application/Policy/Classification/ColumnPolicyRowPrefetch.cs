@@ -2,6 +2,8 @@ namespace Autheris.Application.Policy.Classification;
 
 using System;
 using System.Collections.Generic;
+using System.Threading;
+using System.Threading.Tasks;
 using Autheris.Domain.Model;
 
 /// <summary>
@@ -19,6 +21,7 @@ public sealed class ColumnPolicyRowPrefetch
     private readonly HashSet<string> _covered;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>> _classifications;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<ColumnMaskOverride>> _overrides;
+    private ClassificationPolicyCatalog? _catalog;
 
     public ColumnPolicyRowPrefetch(
         string tenantId,
@@ -58,6 +61,34 @@ public sealed class ColumnPolicyRowPrefetch
         }
 
         return true;
+    }
+
+    /// <summary>
+    /// The tenant classification catalog (definitions and category mask rules) for the decisions of this batch: read once, on first
+    /// use, with <paramref name="load"/> and shared by every later decision of the batch, under the same tenant and freshness bound as
+    /// the column rows. Another tenant or a decision more than <see cref="Autheris.Application.Policy.ConsentBatchPrefetch.MaxAge"/>
+    /// after <see cref="ReadAt"/> reads the catalog itself. A failed read is not kept (the next decision reads again).
+    /// </summary>
+    internal async ValueTask<ClassificationPolicyCatalog> GetOrLoadCatalogAsync(
+        string tenantId,
+        DateTimeOffset now,
+        Func<CancellationToken, ValueTask<ClassificationPolicyCatalog>> load,
+        CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(load);
+        if (!string.Equals(TenantId, tenantId, StringComparison.Ordinal) ||
+            now < ReadAt || now - ReadAt > Autheris.Application.Policy.ConsentBatchPrefetch.MaxAge)
+        {
+            return await load(ct).ConfigureAwait(false);
+        }
+
+        if (Volatile.Read(ref _catalog) is { } cached)
+        {
+            return cached;
+        }
+
+        var loaded = await load(ct).ConfigureAwait(false);
+        return Interlocked.CompareExchange(ref _catalog, loaded, null) ?? loaded;
     }
 
     public IReadOnlyList<ColumnClassification> ClassificationsOf(string columnId) =>

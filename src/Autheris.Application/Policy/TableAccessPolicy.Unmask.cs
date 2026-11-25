@@ -154,7 +154,7 @@ public sealed partial class TableAccessPolicy
         ClassificationPolicyCatalog catalog;
         try
         {
-            catalog = await classificationResolver.LoadCatalogAsync(query.Tenant.Value, ct).ConfigureAwait(false);
+            catalog = await classificationResolver.LoadCatalogAsync(query.Tenant.Value, query.ColumnRowPrefetch, ct).ConfigureAwait(false);
         }
         catch (Exception) when (!ct.IsCancellationRequested)
         {

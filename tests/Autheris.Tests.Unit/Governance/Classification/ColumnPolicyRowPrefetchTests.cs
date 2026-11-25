@@ -162,4 +162,38 @@ public sealed class ColumnPolicyRowPrefetchTests
         prefetch.Covers(Tenant.Value, [IdColumn.ToString()], FixedNow.AddSeconds(6)).ShouldBeFalse();
         prefetch.Covers(Tenant.Value, [IdColumn.ToString()], FixedNow.AddSeconds(-1)).ShouldBeFalse();
     }
+    // Issue #1098 follow-up: the tenant classification catalog (definitions and category mask rules) is read once per batch of
+    // decisions, not twice per granted table; it follows the tenant and freshness bound of the column rows.
+    [Fact]
+    public async Task Prefetch_SharesTheClassificationCatalog_WithinItsTenantAndMaxAge()
+    {
+        var store = Store();
+        var time = new AdjustableClassificationTimeProvider(FixedNow);
+        var resolver = new ClassificationAccessResolver(
+            new SqlDataMaskingProvider(Options.Create(new GatewayOptions()), timeProvider: time), store, time);
+        var prefetch = Empty(Tenant.Value, IdColumn);
+
+        var first = await resolver.LoadCatalogAsync(Tenant.Value, prefetch);
+        first.MaskRules[ClassificationScopes.PiiCode].MaskFunction.ShouldBe(MaskFunction.TypeSafeRedact);
+
+        await store.UpsertClassificationMaskRuleAsync(new ClassificationMaskRule
+        {
+            Scope = Tenant.Value,
+            Code = ClassificationScopes.PiiCode,
+            MaskFunction = MaskFunction.Nullify,
+            UpdatedBy = "owner",
+            UpdatedAt = FixedNow
+        });
+
+        // Same batch: the catalog read once is shared.
+        (await resolver.LoadCatalogAsync(Tenant.Value, prefetch)).ShouldBeSameAs(first);
+
+        // Another tenant's prefetch and no prefetch read the catalog themselves.
+        (await resolver.LoadCatalogAsync(Tenant.Value, Empty("tenant-other", IdColumn))).MaskRules[ClassificationScopes.PiiCode].MaskFunction.ShouldBe(MaskFunction.Nullify);
+        (await resolver.LoadCatalogAsync(Tenant.Value)).MaskRules[ClassificationScopes.PiiCode].MaskFunction.ShouldBe(MaskFunction.Nullify);
+
+        // A stale prefetch is not used.
+        time.Advance(TimeSpan.FromSeconds(6));
+        (await resolver.LoadCatalogAsync(Tenant.Value, prefetch)).MaskRules[ClassificationScopes.PiiCode].MaskFunction.ShouldBe(MaskFunction.Nullify);
+    }
 }
