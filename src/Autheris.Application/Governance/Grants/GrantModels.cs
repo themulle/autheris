@@ -1,7 +1,6 @@
 namespace Autheris.Application.Governance.Grants;
 
 using System;
-using System.Collections.Generic;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 
@@ -49,7 +48,6 @@ public sealed record GrantRequest(
     bool PrivilegedRight = false,
     bool CustomerRealm = false,
     string? Requester = null,
-    IReadOnlyList<string>? Approvers = null,
     string? Renewer = null,
     int RenewalCount = 0,
     string? Justification = null,
@@ -64,7 +62,6 @@ public sealed record GrantRequest(
 public sealed record GrantDecision(
     bool Allowed,
     DateTimeOffset? MaxValidTo,
-    bool RequiresFourEyes,
     GrantClass Class,
     string Reason,
     string? ErrorCode = null,
@@ -72,7 +69,7 @@ public sealed record GrantDecision(
     bool RequiresCampaignDecision = false)
 {
     public static GrantDecision Deny(string errorCode, string reason, GrantClass cls = GrantClass.DataOwner, DateTimeOffset? maxValidTo = null) =>
-        new(false, maxValidTo, false, cls, reason, errorCode);
+        new(false, maxValidTo, cls, reason, errorCode);
 }
 
 public static class GrantErrorCodes
@@ -82,6 +79,7 @@ public static class GrantErrorCodes
     public const string ExpiryInPast = "INDIVIDUAL_GRANT_EXPIRY_IN_PAST";
     public const string ExceedsMaximum = "INDIVIDUAL_GRANT_EXCEEDS_MAXIMUM";
     public const string ExceedsApproverLimit = "GRANT_DURATION_EXCEEDS_APPROVER_LIMIT";
+    /// <summary>A declarative manifest grant the actor may not decide alone (self-grant, or a group grant under degraded group resolution).</summary>
     public const string FourEyesRequired = "INDIVIDUAL_GRANT_REQUIRES_FOUR_EYES";
     public const string RenewalByGrantee = "INDIVIDUAL_GRANT_RENEWAL_BY_GRANTEE";
     public const string RenewalRequiresCampaign = "INDIVIDUAL_GRANT_RENEWAL_REQUIRES_CAMPAIGN";

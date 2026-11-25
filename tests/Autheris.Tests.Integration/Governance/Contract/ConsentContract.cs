@@ -300,10 +300,10 @@ public abstract class ConsentContract : GovernanceContractBase
             TenantId = Store.TenantA
         });
 
-        _ = await Store.ConsentApprovals.ApproveConsentRequestStepAsync(req.Id, Owner1Sid, requireSecondApprover: true);
-
-        var duplicateApprove = () => Store.ConsentApprovals.ApproveConsentRequestStepAsync(req.Id, Owner1Sid, requireSecondApprover: true);
-        await duplicateApprove.Should().ThrowAsync<InvalidOperationException>();
+        // The request id is the primary key: storing the same request twice is refused and leaves the first one intact.
+        var duplicate = () => Store.ConsentApprovals.CreateConsentRequestAsync(req);
+        await duplicate.Should().ThrowAsync<Exception>();
+        (await Store.ConsentApprovals.GetConsentRequestAsync(req.Id))!.Status.Should().Be("PENDING");
     }
 
     [RequiresContainerRuntimeFact]
@@ -462,8 +462,15 @@ public abstract class ConsentContract : GovernanceContractBase
 
         _ = await Store.ConsentApprovals.RejectConsentRequestAsync(req.Id, Owner1Sid, "Denied");
 
-        var approveRejected = () => Store.ConsentApprovals.ApproveConsentRequestStepAsync(req.Id, Owner1Sid);
-        await approveRejected.Should().ThrowAsync<ConsentRequestStatusConflictException>();
+        // A rejected request cannot be decided again: the engine's version CAS answers AlreadyDecided and records nothing.
+        var approveRejected = await Store.ConsentApprovals.TryDecideAsync(
+            req.Id,
+            req.Version,
+            (_, locked) => Task.FromResult(new Autheris.Application.Governance.Requests.PermissionDecisionRecord(
+                "APPROVED", Owner1Sid, DateTimeOffset.UtcNow, ApproverCapacity.DataOwner, false, "APPROVED", null, locked.RequestedValidTo)),
+            (_, _, _) => Task.FromResult<IReadOnlyList<Autheris.Application.Governance.Requests.GrantRef>>([]));
+        approveRejected.Outcome.Should().Be(Autheris.Application.Governance.Requests.DecisionCasOutcome.AlreadyDecided);
+        (await Store.ConsentApprovals.GetConsentRequestAsync(req.Id))!.Status.Should().Be("REJECTED");
 
         var withdrewRejected = await Store.ConsentApprovals.WithdrawConsentRequestAsync(req.Id, RequesterSid);
         withdrewRejected.Should().BeFalse();
@@ -494,74 +501,14 @@ public abstract class ConsentContract : GovernanceContractBase
 
         try
         {
-            var step = new ApprovalStep
-            {
-                Id = Guid.NewGuid(),
-                ConsentRequestId = reqRace.Id,
-                StepNumber = 1,
-                ApproverSid = Owner1Sid,
-                Decision = "APPROVED",
-                DecidedAt = DateTimeOffset.UtcNow
-            };
-            var raceConsent = NewConsent(table.Identifier, Store.TenantA, GranteeSid, requestId: reqRace.Id);
-            var raceAct = () => Store.ConsentApprovals.ExecuteAtomicApprovalWithConsentAsync(
-                reqRace.Id,
-                step,
-                raceConsent,
-                [],
-                []);
+            var raceAct = () => Store.ConsentApprovals.RejectConsentRequestAsync(reqRace.Id, Owner1Sid, "Mid-transaction race");
             await raceAct.Should().ThrowAsync<ConsentRequestStatusConflictException>();
-            (await Store.Consents.GetConsentByIdAsync(raceConsent.Id)).Should().BeNull();
+            (await Store.ConsentApprovals.GetConsentRequestAsync(reqRace.Id))!.Status.Should().Be("PENDING");
         }
         finally
         {
             Store.SetConsentStatusUpdateSeam(null);
         }
-    }
-
-    [RequiresContainerRuntimeFact]
-    [Trait("Category", "Security")]
-    public async Task Four_eyes_approval_and_expiry_extension_enforced()
-    {
-        if (!Store.IsAvailable) return;
-
-        var table = await SeedTableAsync("four_eyes_tbl", sensitive: true);
-        var req = await Store.ConsentApprovals.CreateConsentRequestAsync(new ConsentRequest
-        {
-            Id = Guid.NewGuid(),
-            TableIdentifier = table.Identifier,
-            RequesterSid = Owner1Sid,
-            RequestedGranteeType = GranteeType.User,
-            RequestedGranteeRef = GranteeSid.Value,
-            BusinessJustification = "Self-approval check",
-            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7),
-            TenantId = Store.TenantA
-        });
-
-        var selfApprove = () => Store.ConsentApprovals.ApproveConsentRequestStepAsync(req.Id, Owner1Sid, requireSecondApprover: true);
-        await selfApprove.Should().ThrowAsync<InvalidOperationException>();
-
-        var req2 = await Store.ConsentApprovals.CreateConsentRequestAsync(new ConsentRequest
-        {
-            Id = Guid.NewGuid(),
-            TableIdentifier = table.Identifier,
-            RequesterSid = RequesterSid,
-            RequestedGranteeType = GranteeType.User,
-            RequestedGranteeRef = GranteeSid.Value,
-            BusinessJustification = "Valid 4-eyes flow",
-            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7),
-            TenantId = Store.TenantA
-        });
-
-        var afterFirst = await Store.ConsentApprovals.ApproveConsentRequestStepAsync(req2.Id, Owner1Sid, requireSecondApprover: true);
-        afterFirst.Status.Should().Be("PENDING_SECOND_APPROVAL");
-
-        // #1009 D13: per-table delegates are gone; only the container owner group decides, so a second person outside it is refused.
-        var outsider = () => Store.ConsentApprovals.ApproveConsentRequestStepAsync(req2.Id, new Sid("S-1-5-21-900-2"), requireSecondApprover: true);
-        await outsider.Should().ThrowAsync<UnauthorizedAccessException>();
-        (await Store.ConsentApprovals.GetConsentRequestAsync(req2.Id))!.Status.Should().Be("PENDING_SECOND_APPROVAL");
-        var active = await Store.Consents.GetActiveConsentsForSubjectsAsync([GranteeSid], table.Identifier, DateTimeOffset.UtcNow, Store.TenantA);
-        active.Should().BeEmpty();
     }
 
     [RequiresContainerRuntimeFact]

@@ -72,7 +72,7 @@ public sealed class AccessProfileAssignmentRulesTests : IDisposable
     [InlineData("req", "app", " ")]
     public void IndividualUnmasked_WithoutFourEyes_IsRejected(string? created, string? approved, string? why) =>
         Rejected(() => AccessProfileAssignmentRules.ValidateForAssignment(Profile(MaskingPolicyMode.Unmasked), User(created: created, approved: approved, why: why), Now),
-            AccessProfileAssignmentRules.FourEyesRequired);
+            AccessProfileAssignmentRules.ApprovalRequired);
 
     [Fact]
     public void IndividualUnmasked_IsLimitedToTheConfiguredLimit()

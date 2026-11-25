@@ -28,7 +28,7 @@ public interface IAccessProfileRepository
 
     /// <summary>
     /// adds or replaces ONE assignment (the grant period starts now). Individual users need an explicit expiry, an individual<c>Unmasked</c>
-    /// grant needs four-eyes and at most 30 days, a break-glass exception at most 72 hours; otherwise
+    /// grant needs one approver other than its requester and grantee and at most 30 days, a break-glass exception at most 72 hours; otherwise
     /// <see cref="AccessProfileAssignmentRejectedException"/> is thrown and nothing is stored.
     /// </summary>
     Task<AccessProfileAssignment> AssignProfileAsync(TenantId tenantId, string profileId, AccessProfileAssignment assignment, CancellationToken ct = default);

@@ -469,30 +469,6 @@ public sealed class SeparationOfDutiesService(
         return set;
     }
 
-    public static int CountDistinctIndependentApprovers(IEnumerable<string>? approvers, string? requester, string? granteeRef)
-    {
-        if (approvers is null) return 0;
-        var requesterForms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        AddIdentifierForms(requesterForms, requester);
-        var granteeForms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        AddIdentifierForms(granteeForms, granteeRef);
-
-        var counted = new List<HashSet<string>>();
-        foreach (var raw in approvers)
-        {
-            if (string.IsNullOrWhiteSpace(raw)) continue;
-            var forms = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-            AddIdentifierForms(forms, raw);
-            if ((requesterForms.Count > 0 && forms.Overlaps(requesterForms)) ||
-                (granteeForms.Count > 0 && forms.Overlaps(granteeForms)) ||
-                counted.Any(existing => existing.Overlaps(forms)))
-                continue;
-            counted.Add(forms);
-        }
-
-        return counted.Count;
-    }
-
     public static bool IdentifiersOverlap(string? a, string? b)
     {
         var left = new HashSet<string>(StringComparer.OrdinalIgnoreCase);

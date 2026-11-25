@@ -153,25 +153,13 @@ public sealed partial class AdvisoryRegressionTests
 
     private static void AssertGrantPolicyNormalizedApproverDedup()
     {
-        var policy = new GrantPolicy();
-        var now = DateTimeOffset.UtcNow;
+        // Issue #1132: approvers are counted only by the secret four-eyes rule of the engine; a second approval under another identifier
+        // form of the first approver is the same person, and the requester in any identifier form overlaps (separation of duties).
+        static ApprovalStep Step(string approver) => new() { ApproverSid = new Sid(approver), Decision = "APPROVED" };
 
-        var dupApprovers = policy.Evaluate(new GrantRequest(
-            GranteeType.User, "grantee-1", GrantKind.Consent, now.AddDays(10), now, GrantSensitivity.Sensitive,
-            Requester: "requester@corp.com", Approvers: ["user:bob@corp.com", "BOB@CORP.COM"], Justification: "Valid"));
-        dupApprovers.Allowed.ShouldBeFalse();
-        dupApprovers.ErrorCode.ShouldBe(GrantErrorCodes.FourEyesRequired);
-
-        var reqAliasApprover = policy.Evaluate(new GrantRequest(
-            GranteeType.User, "grantee-1", GrantKind.Consent, now.AddDays(10), now, GrantSensitivity.Sensitive,
-            Requester: "requester@corp.com", Approvers: ["user:requester@corp.com", "bob@corp.com"], Justification: "Valid"));
-        reqAliasApprover.Allowed.ShouldBeFalse();
-        reqAliasApprover.ErrorCode.ShouldBe(GrantErrorCodes.FourEyesRequired);
-
-        var distinctTwo = policy.Evaluate(new GrantRequest(
-            GranteeType.User, "grantee-1", GrantKind.Consent, now.AddDays(10), now, GrantSensitivity.Sensitive,
-            Requester: "requester@corp.com", Approvers: ["bob@corp.com", "carol@corp.com"], Justification: "Valid"));
-        distinctTwo.Allowed.ShouldBeTrue();
+        Autheris.Application.Governance.Requests.SecretFourEyesRule.IsSameApprover(Step("user:bob@corp.com"), ["BOB@CORP.COM"]).ShouldBeTrue();
+        SeparationOfDutiesService.IdentifiersOverlap("user:requester@corp.com", "requester@corp.com").ShouldBeTrue();
+        Autheris.Application.Governance.Requests.SecretFourEyesRule.IsSameApprover(Step("bob@corp.com"), ["carol@corp.com"]).ShouldBeFalse();
     }
 
     private static async Task AssertTotpReplayLockoutAndLocalPurgeAsync()

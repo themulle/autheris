@@ -220,7 +220,7 @@ public sealed class DiscoveryWriteStateTests
     {
         var orders = MakeOrdersTable("orders");
         var consents = new InMemoryConsentRepo();
-        var approvals = new InMemoryApprovalRepo(consents);
+        var approvals = new InMemoryApprovalRepo();
         var ownership = new InMemoryOwnershipRepo();
         ownership.OwnersByTable[orders.Identifier] =
         [
@@ -450,7 +450,7 @@ public sealed class DiscoveryWriteStateTests
         public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, ConsentRevocationAuthority authority, IReadOnlyList<AuditLogEntry>? auditEntries = null, CancellationToken ct = default) => throw new NotSupportedException();
     }
 
-    private sealed class InMemoryApprovalRepo(InMemoryConsentRepo consents) : IConsentApprovalRepository
+    private sealed class InMemoryApprovalRepo : IConsentApprovalRepository
     {
         public List<ConsentRequest> Requests { get; } = [];
 
@@ -466,30 +466,8 @@ public sealed class DiscoveryWriteStateTests
         public Task<IReadOnlyList<ConsentRequest>> GetRequestsByRequesterSidAsync(Sid requesterSid, TenantId tenantId, string? status = null, CancellationToken ct = default)
             => Task.FromResult<IReadOnlyList<ConsentRequest>>(Requests.Where(r => r.RequesterSid == requesterSid && (r.TenantId == default || r.TenantId == tenantId)).ToList());
 
-        public Task<Consent> ExecuteAtomicApprovalWithConsentAsync(
-            Guid requestId,
-            ApprovalStep approvalStep,
-            Consent consentToCreate,
-            IReadOnlyList<ConsentRowFilter> rowFilters,
-            IReadOnlyList<ConsentColumnRule> columnRules,
-            CancellationToken ct = default)
-        {
-            var req = Requests.First(r => r.Id == requestId);
-            req.Status = "APPROVED";
-            consentToCreate.RowFilters = rowFilters;
-            consentToCreate.ColumnRules = columnRules;
-            consents.Consents.Add(consentToCreate);
-            return Task.FromResult(consentToCreate);
-        }
-
         public Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, TenantId tenantId, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<ConsentRequest>>([]);
 
-        public Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default)
-        {
-            var req = Requests.First(r => r.Id == requestId);
-            req.Status = "APPROVED";
-            return Task.FromResult(req);
-        }
         public Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, CancellationToken ct = default) => throw new NotSupportedException();
         public Task<ConsentRequest?> GetConsentRequestByExternalReferenceAsync(Guid externalSystemId, string externalReference, TenantId tenantId, CancellationToken ct = default) => Task.FromResult<ConsentRequest?>(null);
         public Task ActivateConsentAsync(Guid requestId, CancellationToken ct = default) => Task.CompletedTask;
@@ -523,7 +501,7 @@ public sealed class DiscoveryWriteStateTests
     private sealed class AllowGrantPolicy : IGrantPolicy
     {
         public GrantDecision Evaluate(GrantRequest request)
-            => new(true, null, false, GrantClass.Standing, "Allowed");
+            => new(true, null, GrantClass.Standing, "Allowed");
     }
 
     private sealed class StaticHttpContextAccessor(HttpContext context) : IHttpContextAccessor

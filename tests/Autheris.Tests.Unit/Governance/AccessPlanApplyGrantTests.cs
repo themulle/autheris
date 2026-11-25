@@ -23,7 +23,7 @@ using NSubstitute;
 using Shouldly;
 using Xunit;
 
-/// <summary>GOV-04: access-plan apply writes grant records, refuses self-grants and four-eyes grants.</summary>
+/// <summary>GOV-04: access-plan apply writes grant records, refuses self-grants and grants on secret data (issue #1132: four eyes only for secret).</summary>
 [Trait("Category", "Security")]
 public sealed class AccessPlanApplyGrantTests
 {
@@ -76,12 +76,23 @@ public sealed class AccessPlanApplyGrantTests
         [new PrincipalAccessGrant(principal, new Dictionary<string, string> { ["id"] = "clear" }, null, DateTimeOffset.UtcNow.AddDays(30))],
         "access for report");
 
-    private async Task<AdminApplyAccessRequest> PlanAndConfirmAsync(AdminPlanAccessRequest request, ClaimsPrincipal? caller = null)
+    private AccessPlanningService ServiceWithProtection(Autheris.Domain.Security.ProtectionClass tableClass)
     {
-        var plan = await _service.PlanAccessAsync(request, AdminSid, Tenant, caller: caller);
+        var protection = new EffectiveProtection(
+            new ContainerRef(ContainerKind.Domain, Guid.NewGuid()), null, tableClass, tableClass, null,
+            new Dictionary<string, ColumnProtection>(StringComparer.OrdinalIgnoreCase), CatalogVisibilityMode.Open);
+        return new AccessPlanningService(
+            global::Autheris.Tests.Unit.TestDoubles.AuditWriterTestServices.Over(Substitute.For<IAuditLogRepository>()), _tableRepo, _consents, _totp, _secrets,
+            protectionProvider: Autheris.Tests.Unit.Security.NullFake.Create<IProtectionSnapshotProvider>(
+                (_, _) => new ValueTask<EffectiveProtection>(protection)));
+    }
+
+    private async Task<AdminApplyAccessRequest> PlanAndConfirmAsync(AdminPlanAccessRequest request, ClaimsPrincipal? caller = null, AccessPlanningService? service = null)
+    {
+        var plan = await (service ?? _service).PlanAccessAsync(request, AdminSid, Tenant, caller: caller);
         var enrollment = _totp.GenerateEnrollment(AdminSid, "admin@autheris.local");
         await _secrets.SetSecretAsync(AdminSid, enrollment.SecretBase32);
-        var confirm = await _service.ConfirmPlanAsync(plan.PlanId, _totp.GenerateTotpCode(enrollment.SecretBase32), AdminSid);
+        var confirm = await (service ?? _service).ConfirmPlanAsync(plan.PlanId, _totp.GenerateTotpCode(enrollment.SecretBase32), AdminSid);
         return new AdminApplyAccessRequest(plan.PlanId, confirm.ConfirmationToken);
     }
 
@@ -140,7 +151,21 @@ public sealed class AccessPlanApplyGrantTests
     }
 
     [Fact]
-    public async Task Apply_SensitiveGrant_RequiresFourEyes_Rejected()
+    public async Task Apply_SensitiveNonSecretGrant_IsASingleDecision()
+    {
+        // Issue #1132 (owner decision on #1121): only secret data needs four eyes; a clear PII column on confidential data is one decision.
+        UseTable(sensitive: true);
+        var service = ServiceWithProtection(Autheris.Domain.Security.ProtectionClass.Confidential);
+        var apply = await PlanAndConfirmAsync(Request("sales.public.orders"), service: service);
+
+        await service.ApplyAccessAsync(apply, AdminSid, new TenantId(Tenant));
+
+        var consent = _created.ShouldHaveSingleItem();
+        consent.ColumnRules.ShouldHaveSingleItem().AccessLevel.ShouldBe(ColumnAccessLevel.Clear);
+    }
+
+    [Fact]
+    public async Task Apply_SensitiveGrant_WithoutProtectionSnapshot_IsRefusedAsPossiblySecret()
     {
         UseTable(sensitive: true);
         var apply = await PlanAndConfirmAsync(Request("sales.public.orders"));
@@ -148,7 +173,8 @@ public sealed class AccessPlanApplyGrantTests
         var ex = await Should.ThrowAsync<GrantPolicyViolationException>(() =>
             _service.ApplyAccessAsync(apply, AdminSid, new TenantId(Tenant)));
 
-        ex.ErrorCode.ShouldBe(GrantErrorCodes.FourEyesRequired);
+        ex.ErrorCode.ShouldBe(GrantErrorCodes.SecretRequiresFourEyes);
+        _created.ShouldBeEmpty();
     }
 
     [Fact]

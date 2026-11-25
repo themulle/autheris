@@ -580,17 +580,6 @@ public interface IConsentApprovalRepository
     Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForSubjectAsync(Sid subject, TenantId tenantId, CancellationToken ct = default)
         => GetRequestsByRequesterSidAsync(subject, tenantId, status: null, ct);
     Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, TenantId tenantId, CancellationToken ct = default);
-    Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default);
-
-    /// <summary>
-    /// Records an approval step like <see cref="ApproveConsentRequestStepAsync(Guid, Sid, CancellationToken)"/>; when
-    /// <paramref name="requireSecondApprover"/> is set the request needs a second distinct approver regardless of the table's
-    /// four-eyes flag (per-classification Clear approved by a steward after the data owner).
-    /// </summary>
-    Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, bool requireSecondApprover, CancellationToken ct = default)
-        => requireSecondApprover
-            ? throw new NotSupportedException($"{GetType().Name} does not implement mandatory second approvers.")
-            : ApproveConsentRequestStepAsync(requestId, approverSid, ct);
     Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, CancellationToken ct = default);
 
     /// <summary>
@@ -614,23 +603,6 @@ public interface IConsentApprovalRepository
         CancellationToken ct = default)
         => throw new NotSupportedException(
             $"{GetType().Name} does not implement tenant-scoped external reference lookup.");
-
-    Task<ConsentRequest> ApproveExternalConsentRequestStepAsync(
-        Guid requestId,
-        ExternalDecisionAttribution attribution,
-        Sid effectiveApproverSid,
-        CancellationToken ct = default)
-        => throw new NotSupportedException($"{GetType().Name} does not implement external approval steps.");
-
-    Task<ConsentRequest> ApproveExternalConsentRequestStepAsync(
-        Guid requestId,
-        ExternalDecisionAttribution attribution,
-        Sid effectiveApproverSid,
-        bool requireSecondApprover,
-        CancellationToken ct = default)
-        => requireSecondApprover
-            ? throw new NotSupportedException($"{GetType().Name} does not support enforcing a second approver on external approval steps.")
-            : ApproveExternalConsentRequestStepAsync(requestId, attribution, effectiveApproverSid, ct);
 
     /// <summary>
     /// Counts pending permission requests submitted by <paramref name="requesterSid"/> in <paramref name="tenantId"/>.
@@ -674,41 +646,6 @@ public interface IConsentApprovalRepository
     /// </summary>
     Task<bool> WithdrawConsentRequestAsync(Guid requestId, Sid requesterSid, CancellationToken ct = default)
         => Task.FromResult(false);
-
-    /// <summary>
-    /// Atomically records the approval step, updates the request status to APPROVED, creates the active consent
-    /// and its column rules and row filters, and bumps the table policy epoch in a single database transaction.
-    /// Security review (four-eyes on the atomic path): implementations must apply the same checks as
-    /// <see cref="ApproveConsentRequestStepAsync(Guid, Sid, CancellationToken)"/> under the row lock (approver is not the requester, has not
-    /// already approved this request) and only complete the request when this step satisfies the four-eyes requirement (table flag or
-    /// HIGH/RESTRICTED/SECRET sensitivity, ADR-008). Otherwise nothing is written and <see cref="InvalidOperationException"/> is thrown
-    /// (<c>ConsentRequestStatusConflictException</c> when the request is no longer pending). The step number is assigned by the
-    /// repository; <see cref="ApprovalStep.StepNumber"/> is ignored.
-    /// </summary>
-    Task<Consent> ExecuteAtomicApprovalWithConsentAsync(
-        Guid requestId,
-        ApprovalStep step,
-        Consent consent,
-        IReadOnlyList<ConsentRowFilter> rowFilters,
-        IReadOnlyList<ConsentColumnRule> columnRules,
-        CancellationToken ct = default)
-        => throw new NotSupportedException($"{GetType().Name} does not implement atomic approval.");
-
-    /// <summary>
-    /// Atomic approval like <see cref="ExecuteAtomicApprovalWithConsentAsync(Guid, ApprovalStep, Consent, IReadOnlyList{ConsentRowFilter}, IReadOnlyList{ConsentColumnRule}, CancellationToken)"/>;
-    /// when <paramref name="requireSecondApprover"/> is set the step only completes the request as the second distinct approval.
-    /// </summary>
-    Task<Consent> ExecuteAtomicApprovalWithConsentAsync(
-        Guid requestId,
-        ApprovalStep step,
-        Consent consent,
-        IReadOnlyList<ConsentRowFilter> rowFilters,
-        IReadOnlyList<ConsentColumnRule> columnRules,
-        bool requireSecondApprover,
-        CancellationToken ct = default)
-        => requireSecondApprover
-            ? throw new NotSupportedException($"{GetType().Name} does not implement mandatory second approvers.")
-            : ExecuteAtomicApprovalWithConsentAsync(requestId, step, consent, rowFilters, columnRules, ct);
 
     Task<ConsentRequestPage> QueryTenantConsentRequestsAsync(
         ConsentRequestPageQuery query,

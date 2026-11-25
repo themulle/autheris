@@ -77,6 +77,15 @@ public class GovernanceSecurityTests : IDisposable
     private async Task MakeOwnerAsync(TableMetadata meta, Sid owner) =>
         await ContainerOwnerSeed.SetOwnerAsync(_repository.RawConnection(), Autheris.Tests.Common.TestTenants.Default.Value, meta.Table.Id, owner.Value);
 
+    /// <summary>One decision through the engine's atomic CAS (issue #1132: the repository has no approval-step API of its own).</summary>
+    private Task<Autheris.Application.Governance.Requests.DecisionCasResult> DecideAsync(ConsentRequest req, Sid approver, string newStatus = "APPROVED") =>
+        _repository.TryDecideAsync(
+            req.Id,
+            req.Version,
+            (_, locked) => Task.FromResult(new Autheris.Application.Governance.Requests.PermissionDecisionRecord(
+                newStatus, approver, DateTimeOffset.UtcNow, ApproverCapacity.DataOwner, false, "APPROVED", null, locked.RequestedValidTo)),
+            (_, _, _) => Task.FromResult<IReadOnlyList<Autheris.Application.Governance.Requests.GrantRef>>([]));
+
     [Fact]
     public async Task ConsentRequest_StateMachine_PreventsReApprovalOrRejection()
     {
@@ -100,15 +109,12 @@ public class GovernanceSecurityTests : IDisposable
         });
 
         await MakeOwnerAsync(meta, approverSid);
-        var approved = await _repository.ApproveConsentRequestStepAsync(req.Id, approverSid);
-        approved.Status.ShouldBe("APPROVED");
+        (await DecideAsync(req, approverSid)).Outcome.ShouldBe(Autheris.Application.Governance.Requests.DecisionCasOutcome.Applied);
+        (await _repository.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("APPROVED");
 
-        // Attempting to approve an already APPROVED request must throw InvalidOperationException
+        // A second decision on an already APPROVED request is refused by the CAS and records nothing
         var anotherApprover = new Sid("S-1-5-21-APPROVER-2");
-        await Should.ThrowAsync<InvalidOperationException>(async () =>
-        {
-            await _repository.ApproveConsentRequestStepAsync(req.Id, anotherApprover);
-        });
+        (await DecideAsync(req, anotherApprover)).Outcome.ShouldBe(Autheris.Application.Governance.Requests.DecisionCasOutcome.AlreadyDecided);
 
         // Attempting to reject an already APPROVED request must throw InvalidOperationException
         await Should.ThrowAsync<InvalidOperationException>(async () =>
@@ -188,10 +194,10 @@ public class GovernanceSecurityTests : IDisposable
             RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7)
         });
 
-        // Step 1: Approved by Approver 1 (owner group) -> Status is PENDING_SECOND_APPROVAL
+        // Step 1: the first of two approvals (issue #1121, recorded through the engine's step CAS) -> Status is PENDING_SECOND_APPROVAL
         await MakeOwnerAsync(meta, approver1);
-        var approvedStep1 = await _repository.ApproveConsentRequestStepAsync(req.Id, approver1, requireSecondApprover: true);
-        approvedStep1.Status.ShouldBe("PENDING_SECOND_APPROVAL");
+        (await DecideAsync(req, approver1, "PENDING_SECOND_APPROVAL")).Outcome.ShouldBe(Autheris.Application.Governance.Requests.DecisionCasOutcome.Applied);
+        (await _repository.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("PENDING_SECOND_APPROVAL");
 
         // The container ownership moves to Approver 2 before the second step.
         await MakeOwnerAsync(meta, approver2);
@@ -227,35 +233,6 @@ public class GovernanceSecurityTests : IDisposable
         await Should.ThrowAsync<ConsentRevocationForbiddenException>(async () =>
         {
             await _repository.RevokeConsentAsync(consent.Id, attackerSid, "Malicious direct revocation", ConsentRevocationAuthority.FromPrincipal(new System.Security.Claims.ClaimsPrincipal(new System.Security.Claims.ClaimsIdentity([new System.Security.Claims.Claim(System.Security.Claims.ClaimTypes.PrimarySid, attackerSid.Value), new System.Security.Claims.Claim("tenant_id", Autheris.Tests.Common.TestTenants.Default.Value)], "test"))));
-        });
-    }
-
-    [Fact]
-    public async Task ApproveConsentRequestStep_WhenCalledDirectlyOnRepoByUnauthorizedUser_ThrowsUnauthorizedAccessException()
-    {
-        var table = new TableIdentifier("finance", "dbo", "finance_table_1");
-        var meta = await _repository.GetTableMetadataAsync(table);
-        meta.ShouldNotBeNull();
-
-        var requesterSid = new Sid("S-1-5-21-REQ-DIRECT-APP");
-        var unauthorizedApproverSid = new Sid("S-1-5-21-UNAUTHORIZED-APPROVER");
-
-        var req = await _repository.CreateConsentRequestAsync(new ConsentRequest
-        {
-            TenantId = Autheris.Tests.Common.TestTenants.Default,
-            TableId = meta.Table.Id,
-            TableIdentifier = table,
-            RequesterSid = requesterSid,
-            RequestedGranteeType = GranteeType.User,
-            RequestedGranteeRef = requesterSid.Value,
-            BusinessJustification = "Direct approval auth test",
-            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7)
-        });
-
-        // Calling repo.ApproveConsentRequestStepAsync directly without authorization must throw UnauthorizedAccessException
-        await Should.ThrowAsync<UnauthorizedAccessException>(async () =>
-        {
-            await _repository.ApproveConsentRequestStepAsync(req.Id, unauthorizedApproverSid);
         });
     }
 
@@ -487,30 +464,19 @@ public class GovernanceSecurityTests : IDisposable
     }
 
     [Fact]
-    public async Task E9_PendingExternalApproval_CannotBeApprovedOutsideItsm()
+    public async Task E9_PendingExternalApproval_CannotBeDecidedOutsideItsm()
     {
         var req = await CreateExternalRequestAsync("S-1-5-21-REQ-E9");
 
         // The data owner may not bypass the external workflow via GraphQL / internal repository call.
         await Should.ThrowAsync<InvalidOperationException>(() =>
-            _repository.ApproveConsentRequestStepAsync(req.Id, new Sid("S-1-5-21-1000-1000-1000-1001")));
+            _repository.RejectConsentRequestAsync(req.Id, new Sid("S-1-5-21-1000-1000-1000-1001"), "internal bypass"));
 
         (await _repository.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("PENDING_EXTERNAL_APPROVAL");
     }
 
     [Fact]
-    public async Task R3_1_ItsmApprovalWithOwnerAccount_IsAccepted_AndForeignApproverIsRejected()
-    {
-        var req = await CreateExternalRequestAsync("S-1-5-21-REQ-R31B");
-        var attr = new ExternalDecisionAttribution(req.ExternalSystemId!.Value, req.ExternalReference!, "APPROVED",
-            new AssertedApprover("dataowner@corp.local", ResolvedSid: "S-1-5-21-1000-1000-1000-1001"), DateTimeOffset.UtcNow);
-
-        var approved = await _repository.ApproveExternalConsentRequestStepAsync(req.Id, attr, new Sid("S-1-5-21-1000-1000-1000-1001"));
-        approved.Status.ShouldBe("APPROVED");
-    }
-
-    [Fact]
-    public async Task E9_ItsmApproval_OnInternalRequest_IsRejected()
+    public async Task E9_ItsmDecision_OnInternalRequest_IsRejected()
     {
         var table = new TableIdentifier("finance", "dbo", "finance_table_1");
         var meta = await _repository.GetTableMetadataAsync(table);
@@ -524,6 +490,6 @@ public class GovernanceSecurityTests : IDisposable
         var attr = new ExternalDecisionAttribution(Guid.NewGuid(), "EXT-INTERNAL", "APPROVED",
             new AssertedApprover("dataowner@corp.local", ResolvedSid: "S-1-5-21-1000-1000-1000-1001"), DateTimeOffset.UtcNow);
         await Should.ThrowAsync<InvalidOperationException>(() =>
-            _repository.ApproveExternalConsentRequestStepAsync(req.Id, attr, new Sid("S-1-5-21-1000-1000-1000-1001")));
+            _repository.RejectExternalConsentRequestAsync(req.Id, attr, new Sid("S-1-5-21-1000-1000-1000-1001"), "external bypass"));
     }
 }
