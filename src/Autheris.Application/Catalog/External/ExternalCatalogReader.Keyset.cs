@@ -38,6 +38,7 @@ public sealed partial class ExternalCatalogReader
         }
 
         var protectionsByTable = await ResolveProtectionsAsync(tenantId, inScope, ct).ConfigureAwait(false);
+        inScope = await FilterContainerVisibleTablesAsync(user, tenantId, inScope, protectionsByTable, ct).ConfigureAwait(false);
         var candidates = FilterAppCandidates(inScope, visibility, query, kindFilter, versions, protectionsByTable);
         candidates.Sort(static (a, b) => DiscoveryService.CompareTableKeys(a.Identifier, b.Identifier));
 

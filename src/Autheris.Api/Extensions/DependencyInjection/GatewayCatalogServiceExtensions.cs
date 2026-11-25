@@ -211,7 +211,8 @@ public static class GatewayCatalogServiceExtensions
             sp.GetService<IConfiguration>(),
             sp.GetService<IProtectionSnapshotProvider>(),
             sp.GetService<IGovernanceRepository>() is null ? null : sp.GetService<ICatalogSnapshotProvider>(),
-            sp.GetService<Autheris.Application.Catalog.Discovery.ICatalogVisibilityEvaluator>()));
+            sp.GetService<Autheris.Application.Catalog.Discovery.ICatalogVisibilityEvaluator>(),
+            sp.GetService<IGovernanceRepository>() is null ? null : sp.GetService<Autheris.Application.Catalog.Visibility.IContainerVisibilitySnapshotProvider>()));
         services.AddHostedService<Autheris.Application.Catalog.External.CatalogChangeIndexerHostedService>();
         return services;
     }
