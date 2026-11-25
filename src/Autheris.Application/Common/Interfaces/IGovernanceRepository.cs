@@ -339,6 +339,16 @@ public interface IConsentRepository
         => throw new NotSupportedException("GetActiveGrantsForSubjectsAsync is not implemented by this repository.");
 
     /// <summary>
+    /// Keyset-paginated counterpart to <see cref="GetActiveGrantsForSubjectsAsync"/> returning rows ordered after
+    /// <paramref name="afterId"/> so a failing or large batch never starves later active grants.
+    /// </summary>
+    Task<IReadOnlyList<Consent>> GetActiveGrantsForSubjectsAfterAsync(
+        TenantId tenantId, IReadOnlyCollection<Sid> subjects, DateTimeOffset atTime, Guid? afterId, int maxResults, CancellationToken ct = default)
+        => afterId is null
+            ? GetActiveGrantsForSubjectsAsync(tenantId, subjects, atTime, maxResults, ct)
+            : Task.FromResult<IReadOnlyList<Consent>>(Array.Empty<Consent>());
+
+    /// <summary>
     /// SR-L-21: Tables on which <paramref name="tenantId"/> holds at least one non-revoked consent record (Allow or Deny).
     /// Consent-derived tenant ownership signal for catalog isolation (decision G-11: <c>TableMetadata</c> has no owner tenant).
     /// The default returns nothing (fail-closed: no consent-derived visibility).
@@ -491,6 +501,13 @@ public interface IConsentApprovalRepository
     Task<ConsentRequest?> GetConsentRequestAsync(Guid requestId, CancellationToken ct = default);
     Task<IReadOnlyList<ConsentRequest>> GetRequestsByRequesterSidAsync(Sid requesterSid, TenantId tenantId, string? status = null, CancellationToken ct = default)
         => Task.FromResult<IReadOnlyList<ConsentRequest>>(Array.Empty<ConsentRequest>());
+
+    /// <summary>
+    /// Pending approval requests in <paramref name="tenantId"/> where <paramref name="subject"/> is either the requester
+    /// or the target grantee, across all withdrawable pending workflow states.
+    /// </summary>
+    Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForSubjectAsync(Sid subject, TenantId tenantId, CancellationToken ct = default)
+        => GetRequestsByRequesterSidAsync(subject, tenantId, status: null, ct);
     Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, TenantId tenantId, CancellationToken ct = default);
     Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default);
 

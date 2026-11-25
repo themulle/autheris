@@ -189,7 +189,8 @@ public partial class GovernanceRepository
         IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default) =>
         AllActiveCoreAsync(subjects, atTime, TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), true, 0, ct);
 
-    private async Task<IReadOnlyList<Consent>> AllActiveCoreAsync(IEnumerable<Sid> subjects, DateTimeOffset? atTime, TenantId tenantId, bool dataOnly, int maxRows, CancellationToken ct)
+    private async Task<IReadOnlyList<Consent>> AllActiveCoreAsync(
+        IEnumerable<Sid> subjects, DateTimeOffset? atTime, TenantId tenantId, bool dataOnly, int maxRows, CancellationToken ct, bool includeFuture = false, Guid? afterId = null)
     {
         var effectiveAt = atTime ?? TimeProvider.System.GetUtcNow();
         var subjectEnumerated = subjects.ToList();
@@ -210,7 +211,11 @@ public partial class GovernanceRepository
                                        c.grant_source, c.grant_record_seq, c.profile_assignment_id, c.expiry_notice_stage, c.grant_kind, c.approver_capacity, c.self_grant, c.target_columns
                                 FROM CONSENTS c
                                 JOIN TABLES t ON c.table_id = t.id
-                                WHERE c.is_revoked = 0 AND c.tenant_id = @tenantId" + (dataOnly ? " AND c.grant_kind = 'DATA'" : string.Empty) + (maxRows > 0 ? " AND UPPER(c.effect) = 'ALLOW'" : string.Empty) + ConsentSubjectFilter.InListPredicate(chunk.Count)
+                                WHERE c.is_revoked = 0 AND c.tenant_id = @tenantId AND (c.valid_to IS NULL OR c.valid_to > @atTime)"
+                                + (dataOnly ? " AND c.grant_kind = 'DATA'" : string.Empty)
+                                + (maxRows > 0 ? " AND UPPER(c.effect) = 'ALLOW'" : string.Empty)
+                                + (afterId.HasValue ? " AND c.id > @afterId" : string.Empty)
+                                + ConsentSubjectFilter.InListPredicate(chunk.Count)
                                 + (maxRows > 0 ? " ORDER BY c.id OFFSET 0 ROWS FETCH NEXT @maxRows ROWS ONLY" : string.Empty);
             for (var si = 0; si < chunk.Count; si++)
             {
@@ -218,18 +223,32 @@ public partial class GovernanceRepository
             }
 
             cmd.AddBound("@tenantId", tenantId.Value);
+            cmd.AddBound("@atTime", effectiveAt.ToUniversalTime().ToString("O"));
+            if (afterId.HasValue)
+            {
+                cmd.AddBound("@afterId", afterId.Value.ToString("D"));
+            }
+
             if (maxRows > 0)
             {
                 cmd.AddBound("@maxRows", maxRows);
             }
 
             await using var reader = await ExecuteReaderAsync(cmd, "Consent.GetAllActiveForSubjects", ct).ConfigureAwait(false);
-            ConsentSqlCore.ReadAllSubjectConsentRows(reader, effectiveAt, subjectSet, seen, consents);
+            ConsentSqlCore.ReadAllSubjectConsentRows(reader, effectiveAt, subjectSet, seen, consents, includeFuture);
         }
 
         await ConsentPatternSql.ReadActivePatternConsentsForDomainAsync(
-            conn, domain: null, tenantId, effectiveAt, subjectSet, seen, consents, ct).ConfigureAwait(false);
-        consents.RemoveAll(c => !c.IsActive(effectiveAt) && !(c.Effect == ConsentEffect.Deny && c.ValidFrom > effectiveAt));
+            conn, domain: null, tenantId, effectiveAt, subjectSet, seen, consents, ct, includeFuture, afterId, allowOnly: maxRows > 0).ConfigureAwait(false);
+        consents.RemoveAll(c => includeFuture
+            ? (c.IsRevoked || effectiveAt >= c.ValidTo)
+            : (!c.IsActive(effectiveAt) && !(c.Effect == ConsentEffect.Deny && c.ValidFrom > effectiveAt)));
+        if (maxRows > 0 && consents.Count > maxRows)
+        {
+            consents.Sort((a, b) => string.Compare(a.Id.ToString("D"), b.Id.ToString("D"), StringComparison.Ordinal));
+            consents.RemoveRange(maxRows, consents.Count - maxRows);
+        }
+
         await HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
         return consents;
     }

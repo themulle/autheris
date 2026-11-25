@@ -107,13 +107,14 @@ internal static class ConsentSqlCore
         }
     }
 
-    public static void ReadAllSubjectConsentRows(DbDataReader reader, DateTimeOffset effectiveAt, HashSet<Sid> subjectSet, HashSet<Guid> seen, List<Consent> consents)
+    public static void ReadAllSubjectConsentRows(
+        DbDataReader reader, DateTimeOffset effectiveAt, HashSet<Sid> subjectSet, HashSet<Guid> seen, List<Consent> consents, bool includeFuture = false)
     {
         while (reader.Read())
         {
             var validFrom = DateTimeOffset.Parse(reader.GetString(6), CultureInfo.InvariantCulture);
             var validTo = DateTimeOffset.Parse(reader.GetString(7), CultureInfo.InvariantCulture);
-            if (effectiveAt < validFrom || effectiveAt >= validTo) continue;
+            if (effectiveAt >= validTo || (!includeFuture && effectiveAt < validFrom)) continue;
 
             var granteeType = GranteeTypeParsing.ParseStored(reader.GetString(4));
             var granteeSidStr = reader.IsDBNull(5) ? null : reader.GetString(5);

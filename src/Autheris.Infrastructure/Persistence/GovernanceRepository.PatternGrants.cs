@@ -221,7 +221,10 @@ public partial class GovernanceRepository
             HashSet<Sid>? subjectSet,
             HashSet<Guid> seen,
             List<Consent> consents,
-            CancellationToken ct)
+            CancellationToken ct,
+            bool includeFuture = false,
+            Guid? afterId = null,
+            bool allowOnly = false)
         {
             await using var cmd = conn.CreateCommand();
             cmd.CommandText = (tenantId != null, !string.IsNullOrWhiteSpace(domain)) switch
@@ -242,6 +245,7 @@ public partial class GovernanceRepository
                 cmd.AddBound("@domain", domain.Trim());
             }
 
+            var afterStr = afterId?.ToString("D");
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
@@ -253,7 +257,12 @@ public partial class GovernanceRepository
                 }
 
                 var effect = Enum.Parse<ConsentEffect>(reader.GetString(3), ignoreCase: true);
-                if (atTime < validFrom && effect != ConsentEffect.Deny)
+                if (!includeFuture && atTime < validFrom && effect != ConsentEffect.Deny)
+                {
+                    continue;
+                }
+
+                if (allowOnly && effect != ConsentEffect.Allow)
                 {
                     continue;
                 }
@@ -267,6 +276,11 @@ public partial class GovernanceRepository
                 }
 
                 var id = Guid.Parse(reader.GetString(0));
+                if (afterStr is not null && string.Compare(id.ToString("D"), afterStr, StringComparison.Ordinal) <= 0)
+                {
+                    continue;
+                }
+
                 if (!seen.Add(id))
                 {
                     continue;

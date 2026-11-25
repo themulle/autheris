@@ -65,6 +65,17 @@ public interface ICatalogVisibilityGrantRepository
         DateTimeOffset atTime,
         CancellationToken ct = default);
 
+    /// <summary>
+    /// Lists non-revoked, non-expired catalog grants for <paramref name="subjects"/> including scheduled future grants
+    /// (<c>valid_from &gt; atTime</c>) so deprovisioning revokes them before they take effect.
+    /// </summary>
+    Task<IReadOnlyList<CatalogVisibilityGrant>> ListForDeprovisioningAsync(
+        TenantId tenantId,
+        IReadOnlyCollection<Sid> subjects,
+        DateTimeOffset atTime,
+        CancellationToken ct = default) =>
+        ListActiveForSubjectsAsync(tenantId, subjects, atTime, ct);
+
     Task<IReadOnlyList<CatalogVisibilityGrant>> ListByContainerAsync(
         TenantId tenantId,
         ContainerKind containerKind,
