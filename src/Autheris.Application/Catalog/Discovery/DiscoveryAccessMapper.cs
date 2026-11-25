@@ -23,7 +23,7 @@ public static class DiscoveryAccessMapper
     public static DiscoveryObject Map(
         TableMetadata table,
         TableAccessDecision decision,
-        IReadOnlyList<DataOwner> activeOwners,
+        IReadOnlyList<ContainerOwnerEntry> activeOwners,
         bool isPendingRequest,
         bool isRecentlyExpired,
         DiscoveryArtifacts? artifacts,

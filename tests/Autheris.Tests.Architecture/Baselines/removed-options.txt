@@ -32,6 +32,7 @@ Autheris.Domain.Options.DataCatalogOptions.SyncMode
 Autheris.Domain.Options.DataCatalogOptions.WebhookSecret
 Autheris.Domain.Options.DataMaskingOptions.MaskingCacheTtlHours
 Autheris.Domain.Options.DatabricksOboOptions.AllowLongRunning
+Autheris.Domain.Options.DbtOptions.ImportDataOwners
 Autheris.Domain.Options.DynamicKeySetOptions.Enabled
 Autheris.Domain.Options.ExtensibilityOptions.BreakGlassAllowedRoles
 Autheris.Domain.Options.ExtensibilityOptions.BreakGlassHeaderName

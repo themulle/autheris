@@ -167,7 +167,7 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
     public void GovernanceEndpoints_AttachExpectedNamedPolicies_AndNoBareRequireAuthorization()
     {
         var endpoints = MapAndGetEndpoints(b => b.MapGovernanceEndpoints());
-        endpoints.Count.ShouldBe(15);
+        endpoints.Count.ShouldBe(18);
         AssertAllProtectedRoutesHaveNamedPolicy(endpoints);
 
         AssertProtectedRoutePolicy(endpoints, "POST", "/api/governance/catalog/ingest-openapi", GatewayPolicies.OpenApiPublish);
@@ -176,8 +176,12 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
         AssertProtectedRoutePolicy(endpoints, "GET", "/api/v1/profiles", GatewayPolicies.ProfileRead);
         AssertProtectedRoutePolicy(endpoints, "GET", "/api/v1/profiles/{id}", GatewayPolicies.ProfileRead);
         AssertProtectedRoutePolicy(endpoints, "POST", "/api/v1/profiles/{id}/assignments/approve", GatewayPolicies.GovernanceAdmin);
-        AssertProtectedRoutePolicy(endpoints, "POST", "/api/v1/governance/consents/apply", GatewayPolicies.GovernanceAdmin);
-        AssertProtectedRoutePolicy(endpoints, "POST", "/api/governance/consents/apply", GatewayPolicies.GovernanceAdmin);
+        // Amendment 6: Data Governance applies, IT administration submits proposals (the handler decides); one Data Governance member decides.
+        AssertProtectedRoutePolicy(endpoints, "POST", "/api/v1/governance/consents/apply", GatewayPolicies.AdminOnly);
+        AssertProtectedRoutePolicy(endpoints, "POST", "/api/governance/consents/apply", GatewayPolicies.AdminOnly);
+        AssertProtectedRoutePolicy(endpoints, "GET", "/api/v1/governance/consents/proposals/{id:guid}", GatewayPolicies.AdminOnly);
+        AssertProtectedRoutePolicy(endpoints, "POST", "/api/v1/governance/consents/proposals/{id:guid}/confirm", GatewayPolicies.GovernanceAdmin);
+        AssertProtectedRoutePolicy(endpoints, "POST", "/api/v1/governance/consents/proposals/{id:guid}/reject", GatewayPolicies.GovernanceAdmin);
         AssertProtectedRoutePolicy(endpoints, "GET", "/api/v1/governance/audit", GatewayPolicies.AuthenticatedCaller);
         AssertProtectedRoutePolicy(endpoints, "GET", "/api/v1/governance/grants", GatewayPolicies.AuditRead);
         AssertProtectedRoutePolicy(endpoints, "GET", "/api/governance/sunsetting/rules", GatewayPolicies.SunsettingRead);

@@ -10,7 +10,10 @@ public enum DeclarativeManifestViolation
     ScopeEntry = 1,
 
     /// <summary>The grantee type is the retired role type or is not a supported type.</summary>
-    GranteeType = 2
+    GranteeType = 2,
+
+    /// <summary>A proposal names its object by a pattern; a proposal may name objects explicitly only (no `secret` object through a pattern).</summary>
+    Pattern = 3
 }
 
 /// <summary>
@@ -31,6 +34,8 @@ public sealed class DeclarativeManifestValidationException(int policyIndex, Decl
             $"Manifest policy at index {policyIndex} has a column rule with a blank scope entry or a scope entry that contains a comma; list scope names only (an empty list sets the base level for all scopes).",
         DeclarativeManifestViolation.GranteeType =>
             $"Manifest policy at index {policyIndex} has an unsupported grantee type; use user, group or service principal.",
+        DeclarativeManifestViolation.Pattern =>
+            $"Manifest policy at index {policyIndex} names its object by a pattern; a proposal must name every domain, schema and table explicitly.",
         _ => $"Manifest policy at index {policyIndex} has an invalid description.",
     };
 }

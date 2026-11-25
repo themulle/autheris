@@ -108,10 +108,8 @@ public sealed class TableStreamVisibilityTests
 
     private sealed class FixedOwnershipRepo(string ownerSid) : IContainerOwnership
     {
-        public Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default) =>
-            Task.FromResult(delegation);
-        public Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<DataOwner>>([]);
+        public Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<ContainerOwnerEntry>>([]);
         public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid userSid, CancellationToken ct = default) =>
             Task.FromResult(string.Equals(userSid.Value, ownerSid, StringComparison.Ordinal));
     }

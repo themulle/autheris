@@ -313,7 +313,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
         var table = new TableIdentifier("hr", "dbo", "salaries");
         var graph = new LineageGraphStore();
         graph.UpdateGraph([new LineageNode(table.ToString(), "salaries", LineageNodeType.Table, [], "HR", "hr@corp.local")]);
-        var ownership = new InMemoryDataOwnershipRepository();
+        var ownership = new InMemoryContainerOwnership();
         var sut = CreateLineageService(new InMemoryConsentRepository(), ownership, await CreateAuditRepoWithReadsAsync(table.ToString()), graph);
 
         var attacker = new CallerSecurityContext(new Sid("S-1-5-21-ATTACKER"), [], ["Analyst"], new TenantId("tenant-1"), false, false);
@@ -332,10 +332,10 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
         var graph = new LineageGraphStore();
         graph.UpdateGraph([new LineageNode(table.ToString(), "salaries", LineageNodeType.Table, [], "HR", "hr@corp.local")]);
         var caller = new CallerSecurityContext(new Sid("S-1-5-21-CALLER"), [], [role], new TenantId("tenant-1"), false, false);
-        var ownership = new InMemoryDataOwnershipRepository();
+        var ownership = new InMemoryContainerOwnership();
         if (isOwner)
         {
-            ownership.AssignOwner(table, new DataOwner { AdSid = caller.UserSid });
+            ownership.AssignOwner(table, new ContainerOwnerEntry { AdSid = caller.UserSid });
         }
         var sut = CreateLineageService(new InMemoryConsentRepository(), ownership, await CreateAuditRepoWithReadsAsync(table.ToString()), graph);
 
@@ -363,7 +363,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
         var table = new TableIdentifier("finance", "dbo", "salaries");
         var consentId = Guid.NewGuid();
         var consentRepo = new InMemoryConsentRepository(CreateConsent(consentId, table, new TenantId("tenant-a")));
-        var ownership = new InMemoryDataOwnershipRepository();
+        var ownership = new InMemoryContainerOwnership();
         var sut = CreateLineageService(consentRepo, ownership, new InMemoryAuditLogRepository(), new LineageGraphStore());
 
         var caller = new CallerSecurityContext(new Sid("S-1-5-21-ANALYST"), [], ["Analyst"], new TenantId("tenant-a"), false, false);
@@ -378,7 +378,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
         var table = new TableIdentifier("finance", "dbo", "salaries");
         var consentId = Guid.NewGuid();
         var consentRepo = new InMemoryConsentRepository(CreateConsent(consentId, table, Autheris.Tests.Common.TestTenants.Default));
-        var sut = CreateLineageService(consentRepo, new InMemoryDataOwnershipRepository(), new InMemoryAuditLogRepository(), new LineageGraphStore());
+        var sut = CreateLineageService(consentRepo, new InMemoryContainerOwnership(), new InMemoryAuditLogRepository(), new LineageGraphStore());
 
         var caller = new CallerSecurityContext(new Sid("S-1-5-21-GOV"), [], ["GovernanceAdmin"], new TenantId("tenant-a"), true, false);
 
@@ -393,8 +393,8 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
         var consentId = Guid.NewGuid();
         var consentRepo = new InMemoryConsentRepository(CreateConsent(consentId, table, new TenantId("tenant-a")));
         var caller = new CallerSecurityContext(new Sid("S-1-5-21-OWNER"), [], ["Analyst"], new TenantId("tenant-a"), false, false);
-        var ownership = new InMemoryDataOwnershipRepository()
-            .AssignOwner(table, new DataOwner { AdSid = caller.UserSid });
+        var ownership = new InMemoryContainerOwnership()
+            .AssignOwner(table, new ContainerOwnerEntry { AdSid = caller.UserSid });
         var sut = CreateLineageService(consentRepo, ownership, new InMemoryAuditLogRepository(), new LineageGraphStore());
 
         var report = await sut.CalculateConsentRevocationImpactAsync(new TenantId("tenant-a"), consentId, caller);

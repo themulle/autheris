@@ -46,7 +46,7 @@ public sealed partial class ExternalCatalogReader
         var ownerFilter = string.IsNullOrWhiteSpace(query.Owner) ? null : query.Owner.Trim();
 
         List<TableMetadata> pageTables;
-        var ownersByTable = new Dictionary<TableIdentifier, IReadOnlyList<DataOwner>>();
+        var ownersByTable = new Dictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>();
         int totalCount;
         bool hasMore;
 
@@ -90,7 +90,7 @@ public sealed partial class ExternalCatalogReader
                 for (var i = 0; i < window.Count; i++)
                 {
                     var table = window[i];
-                    var owners = fetched.TryGetValue(table.Identifier, out var list) ? list : Array.Empty<DataOwner>();
+                    var owners = fetched.TryGetValue(table.Identifier, out var list) ? list : Array.Empty<ContainerOwnerEntry>();
                     if (!owners.Any(ow => ow.IsActive && (
                         string.Equals(ow.DisplayName, ownerFilter, StringComparison.OrdinalIgnoreCase)
                         || string.Equals(ow.Email, ownerFilter, StringComparison.OrdinalIgnoreCase))))
@@ -132,7 +132,7 @@ public sealed partial class ExternalCatalogReader
                 : await _artifactStore.GetAllForTablesAsync(pageTables.Select(static t => t.Table.Id).ToList(), ct).ConfigureAwait(false);
             foreach (var table in pageTables)
             {
-                var owners = ownersByTable.TryGetValue(table.Identifier, out var list) ? list : Array.Empty<DataOwner>();
+                var owners = ownersByTable.TryGetValue(table.Identifier, out var list) ? list : Array.Empty<ContainerOwnerEntry>();
                 var artifacts = artifactsByTable is not null && artifactsByTable.TryGetValue(table.Table.Id, out var tableArtifacts)
                     ? DiscoveryTenantScope.SelectPrimaryArtifact(tableArtifacts)
                     : null;

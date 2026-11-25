@@ -402,11 +402,11 @@ public sealed class QueryAnalysisAndValueProfilingTests
         ownerRepo.IsAuthorizedApproverForTableAsync(Arg.Any<TableIdentifier>(), Arg.Any<Sid>(), Arg.Any<CancellationToken>())
             .Returns(false);
         ownerRepo.GetDataOwnersForTableAsync(ordersTable.Identifier, Arg.Any<CancellationToken>())
-            .Returns(new[] { new DataOwner { AdSid = new Sid("owner-sales"), DisplayName = "Sales Owner", IsActive = true } });
+            .Returns(new[] { new ContainerOwnerEntry { AdSid = new Sid("owner-sales"), DisplayName = "Sales Owner", IsActive = true } });
         ownerRepo.GetDataOwnersForTableAsync(paymentsTable.Identifier, Arg.Any<CancellationToken>())
-            .Returns(new[] { new DataOwner { AdSid = new Sid("owner-sales"), DisplayName = "Sales Owner", IsActive = true } });
+            .Returns(new[] { new ContainerOwnerEntry { AdSid = new Sid("owner-sales"), DisplayName = "Sales Owner", IsActive = true } });
         ownerRepo.GetDataOwnersForTableAsync(shipmentsTable.Identifier, Arg.Any<CancellationToken>())
-            .Returns(new[] { new DataOwner { AdSid = new Sid("owner-logistics"), DisplayName = "Logistics Owner", IsActive = true } });
+            .Returns(new[] { new ContainerOwnerEntry { AdSid = new Sid("owner-logistics"), DisplayName = "Logistics Owner", IsActive = true } });
 
         var engine = new Autheris.Tests.Unit.TestSupport.RecordingPermissionRequestEngine();
         var service = new BundledConsentRequestService(

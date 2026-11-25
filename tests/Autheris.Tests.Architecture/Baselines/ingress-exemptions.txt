@@ -18,7 +18,6 @@ route /api/dev/info | auth, dev-persona or portal route; no governed data access
 route /api/dev/login/{persona} | auth, dev-persona or portal route; no governed data access
 route /api/dev/personas | auth, dev-persona or portal route; no governed data access
 route /api/governance/catalog/ingest-openapi | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
-route /api/governance/classification/assign-owner | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/classification/classify-table | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/classification/config-hash | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
 route /api/governance/classification/proposals/pending | governance admin route (CatalogApiEndpoints and siblings); governance repositories only
@@ -98,6 +97,9 @@ route /api/v1/governance/caller-attributes/simulate | governance, consent, ReBAC
 route /api/v1/governance/config-sync/status | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/consents/apply | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/consents/bundle | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/governance/consents/proposals/{id:guid} | governance admin route (manifest proposals); governance repositories only, no C1..C5 choke point
+route /api/v1/governance/consents/proposals/{id:guid}/confirm | governance admin route (manifest proposals); governance repositories only, no C1..C5 choke point
+route /api/v1/governance/consents/proposals/{id:guid}/reject | governance admin route (manifest proposals); governance repositories only, no C1..C5 choke point
 route /api/v1/governance/contracts | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/contracts/apply | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/effective-filters | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point

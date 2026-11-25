@@ -132,28 +132,6 @@ internal sealed class RecordingCatalogObjectWriter : IProductCatalogObjectWriter
     }
 }
 
-/// <summary>Records the owner links of product catalog objects.</summary>
-internal sealed class RecordingOwnerStore : IProductCatalogOwnerStore
-{
-    public bool Fail { get; set; }
-
-    public Dictionary<TableIdentifier, Sid?> Owners { get; } = [];
-
-    public int Calls { get; private set; }
-
-    public Task SetOwnerAsync(TenantId tenant, TableIdentifier catalogObject, Sid? owner, CancellationToken ct = default)
-    {
-        Calls++;
-        if (Fail)
-        {
-            throw new InvalidOperationException("db down");
-        }
-
-        Owners[catalogObject] = owner;
-        return Task.CompletedTask;
-    }
-}
-
 /// <summary>Records the projected catalog object of every persisted product; <see cref="Fail"/> makes the next persists throw.</summary>
 internal sealed class RecordingCatalogStore : IProductCatalogStore
 {
@@ -200,7 +178,6 @@ internal sealed class ProductHarness
 
     public Dictionary<string, HashSet<TableIdentifier>> Owned { get; } = new(StringComparer.OrdinalIgnoreCase);
 
-    public RecordingOwnerStore OwnerLinks { get; } = new();
 
     public RecordingCatalogStore CatalogObjects { get; } = new();
 
@@ -237,7 +214,7 @@ internal sealed class ProductHarness
         catalog.GetColumnsAsync(default, default, default).ReturnsForAnyArgs(call => Task.FromResult(Columns(call.ArgAt<TableIdentifier>(1))));
 
         Authority = new ProductAuthorityService(ownership, Store);
-        Service = new DataProductService(Store, Authority, catalog, FastSqlEngine.Default, ownership, Audit, Outbox, ownershipSync: new ProductOwnershipSync(OwnerLinks), catalogStore: CatalogObjects);
+        Service = new DataProductService(Store, Authority, catalog, FastSqlEngine.Default, ownership, Audit, Outbox, catalogStore: CatalogObjects);
     }
 
     public static IReadOnlyList<CatalogColumnInfo>? Columns(TableIdentifier table) => table.TableName switch

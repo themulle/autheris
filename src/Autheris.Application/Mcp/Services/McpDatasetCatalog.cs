@@ -708,10 +708,10 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
                 return (null, null);
             }
 
-            static string Label(Autheris.Domain.Model.DataOwner o) =>
+            static string Label(Autheris.Domain.Model.ContainerOwnerEntry o) =>
                 !string.IsNullOrWhiteSpace(o.DisplayName) && !string.IsNullOrWhiteSpace(o.Email)
                     ? $"{o.DisplayName} <{o.Email}>"
-                    : (!string.IsNullOrWhiteSpace(o.DisplayName) ? o.DisplayName : (!string.IsNullOrWhiteSpace(o.Email) ? o.Email : o.AdAccount));
+                    : (!string.IsNullOrWhiteSpace(o.DisplayName) ? o.DisplayName : (!string.IsNullOrWhiteSpace(o.Email) ? o.Email : o.AdSid.Value));
 
             return (Label(activeOwners[0]), activeOwners.Count > 1 ? activeOwners.Skip(1).Select(Label).ToList() : null);
         }

@@ -98,8 +98,6 @@ public sealed class GovernanceTestStore : IAsyncDisposable
     public IAuditPurgeKeyProvider AuditPurgeKey => Services.GetRequiredService<IAuditPurgeKeyProvider>();
     public IAuditChainAnchorStore AuditAnchorStore => Services.GetRequiredService<IAuditChainAnchorStore>();
     public IPolicyEpochRepository PolicyEpochs => Services.GetRequiredService<IPolicyEpochRepository>();
-    public IDataOwnershipRepository DataOwnership => Services.GetRequiredService<IDataOwnershipRepository>();
-    public IDataOwnerAssignmentRepository DataOwnerAssignments => Services.GetRequiredService<IDataOwnerAssignmentRepository>();
     public ITableRelationRepository TableRelations => Services.GetRequiredService<ITableRelationRepository>();
     public IVirtualFilterRepository VirtualFilters => Services.GetRequiredService<IVirtualFilterRepository>();
     public ICallerAttributeRepository CallerAttributes => Services.GetRequiredService<ICallerAttributeRepository>();
@@ -121,6 +119,8 @@ public sealed class GovernanceTestStore : IAsyncDisposable
     public IAccessPolicySettingsRepository AccessPolicySettings => Services.GetRequiredService<IAccessPolicySettingsRepository>();
     public ICatalogVisibilityGrantRepository CatalogVisibilityGrants => Services.GetRequiredService<ICatalogVisibilityGrantRepository>();
     public ICatalogGrantRevocationWriter CatalogGrantRevocations => Services.GetRequiredService<ICatalogGrantRevocationWriter>();
+    public Autheris.Application.Governance.Declarative.IManifestProposalRepository ManifestProposals =>
+        Services.GetRequiredService<Autheris.Application.Governance.Declarative.IManifestProposalRepository>();
 
     /// <summary>
     /// Builds a real PDP over the store's governance services (the API-level PDP registration lives in the gateway

@@ -7,27 +7,16 @@ public sealed class Role
     public string Description { get; init; } = string.Empty;
 }
 
-public sealed class DataOwner
+/// <summary>
+/// The owner of a table as resolved from its governance container (domain or product): the container owner group with the container
+/// contact as display name. A read-only projection for display and approver lists; it never grants anything by itself.
+/// </summary>
+public sealed class ContainerOwnerEntry
 {
-    public Guid Id { get; init; } = Guid.NewGuid();
     public Sid AdSid { get; init; }
-    public string AdAccount { get; init; } = string.Empty;
     public string DisplayName { get; init; } = string.Empty;
     public string Email { get; init; } = string.Empty;
     public bool IsActive { get; init; } = true;
-}
-
-public sealed class DataOwnerDelegation
-{
-    public Guid Id { get; init; } = Guid.NewGuid();
-    public Guid DataOwnerId { get; init; }
-    public Sid DelegateSid { get; init; }
-    public DateTimeOffset ValidFrom { get; init; }
-    public DateTimeOffset ValidTo { get; init; }
-    public string Reason { get; init; } = string.Empty;
-
-    public bool IsActive(DateTimeOffset atTime) =>
-        ValidFrom <= atTime && atTime < ValidTo;
 }
 
 public sealed class ConsentRequest

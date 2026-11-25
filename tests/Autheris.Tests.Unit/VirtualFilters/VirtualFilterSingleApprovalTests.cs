@@ -723,8 +723,8 @@ public sealed class VirtualFilterSingleApprovalTests
         public Task<string?> GetContainerKeyForTableAsync(TableIdentifier table, CancellationToken ct = default) =>
             Task.FromResult<string?>(_containers.TryGetValue(table.ToString(), out var key) ? key : "container-1");
 
-        public Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<DataOwner>>([]);
+        public Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<ContainerOwnerEntry>>([]);
 
         public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default) =>
             Task.FromResult(_allowed.Contains((table.Domain.ToLowerInvariant(), table.Schema.ToLowerInvariant(), table.TableName.ToLowerInvariant(), approverSid.Value)));

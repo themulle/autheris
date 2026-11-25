@@ -409,7 +409,7 @@ public sealed class MandatoryRowFilterResolverTests
     private sealed class FixedContainerOwnership : Autheris.Application.Governance.Ownership.IContainerOwnership
     {
         public Task<string?> GetContainerKeyForTableAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult<string?>("c1");
-        public Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<DataOwner>>([]);
+        public Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<ContainerOwnerEntry>>([]);
         public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default) => Task.FromResult(false);
     }
 }

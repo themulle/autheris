@@ -385,8 +385,7 @@ public sealed class UsageReportAuthorizationTests
     private sealed class FakeOwnershipRepository : IContainerOwnership
     {
         public Dictionary<(TableIdentifier, Sid), bool> Owned { get; } = new();
-        public Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation d, CancellationToken ct = default) => Task.FromResult(d);
-        public Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier t, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<DataOwner>>([]);
+        public Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableAsync(TableIdentifier t, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<ContainerOwnerEntry>>([]);
         public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default) =>
             Task.FromResult(Owned.TryGetValue((table, approverSid), out bool ok) && ok);
     }

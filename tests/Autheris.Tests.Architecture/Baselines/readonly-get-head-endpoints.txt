@@ -81,6 +81,7 @@
 /api/v1/governance/domains/{id:guid}|GET|no side effect: reads single governance domain
 /api/v1/governance/effective-filters|GET|no side effect: reads effective row filters
 /api/v1/governance/grants|GET|no side effect: lists governance grants
+/api/v1/governance/consents/proposals/{id:guid}|GET|no side effect: reads one manifest proposal of the caller tenant (an elapsed proposal is shown as expired, never written)
 /api/v1/governance/policy|GET|no side effect: reads deployment-clamped tenant access policy settings
 /api/v1/governance/virtual-filters/sync/status|GET|no side effect: reads virtual filter sync status
 /api/v1/governance/virtual-filters|GET|no side effect: lists virtual filters

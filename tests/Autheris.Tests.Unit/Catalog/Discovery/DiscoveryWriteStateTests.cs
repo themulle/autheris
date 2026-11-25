@@ -224,10 +224,9 @@ public sealed class DiscoveryWriteStateTests
         var ownership = new InMemoryOwnershipRepo();
         ownership.OwnersByTable[orders.Identifier] =
         [
-            new DataOwner
+            new ContainerOwnerEntry
             {
                 AdSid = DataOwnerSid,
-                AdAccount = "CORP\\owner",
                 DisplayName = "Orders Owner",
                 Email = "owner@example.com",
                 IsActive = true
@@ -499,15 +498,14 @@ public sealed class DiscoveryWriteStateTests
 
     private sealed class InMemoryOwnershipRepo : IContainerOwnership
     {
-        public Dictionary<TableIdentifier, List<DataOwner>> OwnersByTable { get; } = [];
+        public Dictionary<TableIdentifier, List<ContainerOwnerEntry>> OwnersByTable { get; } = [];
 
-        public Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default)
-            => Task.FromResult<IReadOnlyList<DataOwner>>(OwnersByTable.TryGetValue(table, out var list) ? list : []);
+        public Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default)
+            => Task.FromResult<IReadOnlyList<ContainerOwnerEntry>>(OwnersByTable.TryGetValue(table, out var list) ? list : []);
 
         public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default)
             => Task.FromResult(OwnersByTable.TryGetValue(table, out var list) && list.Any(o => o.IsActive && o.AdSid == approverSid));
 
-        public Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default) => throw new NotSupportedException();
     }
 
     private sealed class NullAuditWriter : IAuditWriter

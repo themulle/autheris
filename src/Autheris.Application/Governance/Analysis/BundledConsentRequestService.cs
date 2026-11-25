@@ -335,21 +335,15 @@ public sealed class BundledConsentRequestService : IBundledConsentRequestService
         if (_dataOwnershipRepository != null)
         {
             var owners = await _dataOwnershipRepository.GetDataOwnersForTableAsync(table.Identifier, ct).ConfigureAwait(false);
-            var activeOwners = owners.Where(o => o.IsActive).ToList();
-            if (activeOwners.Count > 0)
+            var primary = owners.FirstOrDefault(o => o.IsActive && !string.IsNullOrWhiteSpace(o.AdSid.Value));
+            if (primary is not null)
             {
-                var primary = activeOwners[0];
-                var key = !string.IsNullOrWhiteSpace(primary.AdSid.Value)
-                    ? $"owner:{primary.AdSid.Value}"
-                    : !string.IsNullOrWhiteSpace(primary.AdAccount)
-                        ? $"owner:{primary.AdAccount}"
-                        : $"owner:{primary.Id:N}";
-
+                var key = $"owner:{primary.AdSid.Value}";
                 var display = !string.IsNullOrWhiteSpace(primary.DisplayName)
                     ? primary.DisplayName
                     : !string.IsNullOrWhiteSpace(primary.Email)
                         ? primary.Email
-                        : primary.AdAccount;
+                        : primary.AdSid.Value;
 
                 return (key, display);
             }

@@ -414,7 +414,8 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
             new StringContent(manifestJson, Encoding.UTF8, "application/json"));
         legacyResponse.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
 
-        // IT administration (ClusterAdmin, TenantAdmin) never applies a manifest directly.
+        // IT administration (ClusterAdmin, TenantAdmin) never applies a manifest directly (Amendment 6): an explicit direct apply is refused,
+        // and without a mode the manifest is stored as a proposal that has no effect until one Data Governance confirmation.
         foreach (var itRole in new[] { "ClusterAdmin", "TenantAdmin" })
         {
             using var itClient = host.CreateClient();
@@ -422,9 +423,14 @@ public sealed class DeclarativeConsentAndAccessIntrospectionTests
             itClient.DefaultRequestHeaders.Add("X-Test-Roles", itRole);
             itClient.DefaultRequestHeaders.Add("X-Test-Tenant", DefaultTenantCaller.Claim.Value);
             var itResponse = await itClient.PostAsync(
-                "/api/v1/governance/consents/apply",
+                "/api/v1/governance/consents/apply?mode=apply",
                 new StringContent(manifestJson, Encoding.UTF8, "application/json"));
             itResponse.StatusCode.ShouldBe(HttpStatusCode.Forbidden, itRole);
+
+            var proposalResponse = await itClient.PostAsync(
+                "/api/v1/governance/consents/apply",
+                new StringContent(manifestJson, Encoding.UTF8, "application/json"));
+            proposalResponse.StatusCode.ShouldBe(HttpStatusCode.Accepted, itRole);
         }
 
         using var adminClient = host.CreateClient();

@@ -204,32 +204,4 @@ public sealed class ProductDecisionTests
             (await Should.ThrowAsync<ProductException>(() => _h.Service.PutAsync(request))).Code.ShouldBe(ProductErrorCodes.DefinitionInvalid);
         }
     }
-
-    [Fact]
-    public async Task Product_owner_linked_as_data_owner()
-    {
-        var admin = _h.Caller(ProductHarness.Admin, admin: true);
-        var created = await _h.Service.PutAsync(_h.Put(admin, "SELECT id FROM crm.public.customers", ProductHarness.Bob));
-        var catalogObject = ProductSource.ObjectOf(created.Tenant, "sales", "orders_view");
-
-        _h.OwnerLinks.Owners[catalogObject].ShouldBe(ProductHarness.Bob);
-
-        await _h.Service.SetOwnerGroupAsync(admin, "sales", "orders_view", ProductHarness.Alice);
-        _h.OwnerLinks.Owners[catalogObject].ShouldBe(ProductHarness.Alice);
-
-        await _h.Service.RetireAsync(admin, "sales", "orders_view");
-        _h.OwnerLinks.Owners[catalogObject].ShouldBeNull("a retired product has no data owner");
-    }
-
-    [Fact]
-    public async Task A_failed_owner_link_fails_the_operation()
-    {
-        var failing = new RecordingOwnerStore { Fail = true };
-        var sync = new ProductOwnershipSync(failing);
-        var product = await CreateProductAsync();
-        var stored = (await _h.Store.GetProductAsync(ProductHarness.Tenant, "sales", "orders_view"))!;
-
-        (await Should.ThrowAsync<ProductException>(() => sync.SyncAsync(stored))).Code.ShouldBe(ProductErrorCodes.OwnerSyncFailed);
-        product.ShouldNotBeNull();
-    }
 }

@@ -688,14 +688,14 @@ internal static class ConsentSqlCore
         return list;
     }
 
-    public static async Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(DbConnection conn, string selectSql, Sid approverSid, TenantId tenantId, DateTimeOffset now, CancellationToken ct)
+    public static async Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(DbConnection conn, string selectSql, Sid approverSid, TenantId tenantId, CancellationToken ct)
     {
         var list = new List<ConsentRequest>();
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = selectSql;
         cmd.AddBound("@apprSid", approverSid.Value);
         cmd.AddBound("@tenantId", tenantId.Value);
-        cmd.AddBound("@now", now.ToString("O"));
+        cmd.AddBound("@unassignedId", Guid.Empty.ToString("D"));
 
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false)) list.Add(ReadSummaryConsentRequestRow(reader));
@@ -714,8 +714,7 @@ internal static class ConsentSqlCore
     }
 
     public static async Task<(bool RequiresFourEyes, string? Sensitivity, bool SameApprover, int NextStepNumber)> ReadApprovalStateAsync(
-        DbConnection conn, DbTransaction? tx, Guid requestId, Sid approverSid,
-        IReadOnlyCollection<string> approverOwnerIds, Func<IReadOnlyList<string>, Task<IReadOnlyCollection<string>>> resolveOwnerIdsAsync, CancellationToken ct)
+        DbConnection conn, DbTransaction? tx, Guid requestId, Sid approverSid, CancellationToken ct)
     {
         var existingApprovers = new List<string>();
         await using (var approversCmd = conn.CreateCommand())
@@ -728,11 +727,6 @@ internal static class ConsentSqlCore
         }
 
         bool sameApprover = existingApprovers.Any(s => ConsentApprovalPolicy.IsSameApprover(s, approverSid));
-        for (int i = 0; !sameApprover && i < existingApprovers.Count; i++)
-        {
-            var storedOwnerIds = await resolveOwnerIdsAsync(ConsentApprovalPolicy.IdentifierCandidates(existingApprovers[i])).ConfigureAwait(false);
-            sameApprover = ConsentApprovalPolicy.ShareOwnerId(storedOwnerIds, approverOwnerIds);
-        }
 
         await using var maxCmd = conn.CreateCommand();
         maxCmd.Transaction = tx;
@@ -799,17 +793,6 @@ internal static class ConsentSqlCore
         cmd.AddBound("@id", requestId.ToString());
         cmd.AddBound("@sid", requesterSid.Value);
         return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) == 1;
-    }
-
-    public static async Task<bool> HasConfiguredDataOwnersAsync(DbConnection conn, string countOwnersSql, TableIdentifier table, CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = countOwnersSql;
-        cmd.AddBound("@domain", table.Domain);
-        cmd.AddBound("@schema", table.Schema);
-        cmd.AddBound("@table", table.TableName);
-        var result = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
-        return result != null && result != DBNull.Value && Convert.ToInt64(result) > 0;
     }
 
     public static async Task<Guid?> FindRequestIdByExternalReferenceAsync(

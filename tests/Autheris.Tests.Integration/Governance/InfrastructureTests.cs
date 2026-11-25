@@ -210,7 +210,8 @@ public class InfrastructureTests : IDisposable
             await _repository.ApproveConsentRequestStepAsync(created.Id, requesterSid);
         });
 
-        // 2. Legitimate approver approves
+        // 2. Legitimate approver (the owner group of the table's container, #1009 D13) approves
+        await ContainerOwnerSeed.SetOwnerAsync(_repository.RawConnection(), Autheris.Tests.Common.TestTenants.Default.Value, meta.Table.Id, approverSid.Value);
         var approved = await _repository.ApproveConsentRequestStepAsync(created.Id, approverSid);
         approved.Status.ShouldBe("APPROVED");
     }
@@ -257,7 +258,8 @@ public class InfrastructureTests : IDisposable
             RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7)
         });
 
-        // Step 1: Approver 1 approves -> status becomes PENDING_SECOND_APPROVAL
+        // Step 1: Approver 1 (owner group of the container, #1009 D13) approves -> status becomes PENDING_SECOND_APPROVAL
+        await ContainerOwnerSeed.SetOwnerAsync(_repository.RawConnection(), Autheris.Tests.Common.TestTenants.Default.Value, sensitiveTable.Table.Id, approver1.Value);
         var step1 = await _repository.ApproveConsentRequestStepAsync(request.Id, approver1, requireSecondApprover: true);
         step1.Status.ShouldBe("PENDING_SECOND_APPROVAL");
 
@@ -267,7 +269,8 @@ public class InfrastructureTests : IDisposable
             await _repository.ApproveConsentRequestStepAsync(request.Id, approver1, requireSecondApprover: true);
         });
 
-        // Step 2: Distinct Approver 2 approves -> status becomes APPROVED
+        // Step 2: the ownership moves to Approver 2, a distinct person, who approves -> status becomes APPROVED
+        await ContainerOwnerSeed.SetOwnerAsync(_repository.RawConnection(), Autheris.Tests.Common.TestTenants.Default.Value, sensitiveTable.Table.Id, approver2.Value);
         var step2 = await _repository.ApproveConsentRequestStepAsync(request.Id, approver2, requireSecondApprover: true);
         step2.Status.ShouldBe("APPROVED");
     }

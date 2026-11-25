@@ -281,7 +281,6 @@ public sealed class ConsentResolutionService : IConsentResolutionService
     private static GrantSourceKind MapGrantSourceKind(Consent consent) => consent.GrantSource switch
     {
         ConsentGrantSource.AccessProfile => GrantSourceKind.AccessProfile,
-        ConsentGrantSource.Owner => GrantSourceKind.Owner,
         ConsentGrantSource.Bulk => GrantSourceKind.Bulk,
         ConsentGrantSource.Declarative => GrantSourceKind.Declarative,
         ConsentGrantSource.AccessPlan => GrantSourceKind.AccessPlan,
