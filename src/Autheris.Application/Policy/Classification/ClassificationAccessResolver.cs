@@ -86,16 +86,16 @@ public sealed partial class ClassificationAccessResolver
     }
 
     /// <summary>
-    /// <see cref="LoadCatalogAsync(string, CancellationToken)"/>, read once per batch of decisions when <paramref name="prefetch"/>
-    /// covers <paramref name="tenantId"/> at the current time.
+    /// <see cref="LoadCatalogAsync(string, CancellationToken)"/>, or the catalog captured by <paramref name="prefetch"/> when it covers
+    /// <paramref name="tenantId"/> and is fresh at the current time (one catalog read per batch of decisions).
     /// </summary>
     public ValueTask<ClassificationPolicyCatalog> LoadCatalogAsync(
         string tenantId,
         ColumnPolicyRowPrefetch? prefetch,
         CancellationToken ct = default) =>
-        prefetch is null || _repository is null
-            ? LoadCatalogAsync(tenantId, ct)
-            : prefetch.GetOrLoadCatalogAsync(tenantId, _timeProvider.GetUtcNow(), c => LoadCatalogAsync(tenantId, c), ct);
+        prefetch?.CatalogFor(tenantId, _timeProvider.GetUtcNow()) is { } prefetched
+            ? ValueTask.FromResult(prefetched)
+            : LoadCatalogAsync(tenantId, ct);
 
     public static ClassificationPolicyCatalog BuiltInCatalog(string tenantId)
     {
@@ -187,7 +187,9 @@ public sealed partial class ClassificationAccessResolver
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentNullException.ThrowIfNull(allowGrants);
 
-        var catalog = preloadedCatalog ?? await LoadCatalogAsync(tenant.Value, columnRowPrefetch, ct).ConfigureAwait(false);
+        var catalog = preloadedCatalog
+            ?? columnRowPrefetch?.CatalogFor(tenant.Value, _timeProvider.GetUtcNow())
+            ?? await LoadCatalogAsync(tenant.Value, ct).ConfigureAwait(false);
         var dialect = PolicyParameterNamer.ToTargetDialect(metadata.Dialect);
 
         var colClassifications = await LoadEffectiveColumnClassificationsAsync(metadata, tenant.Value, columnRowPrefetch, ct).ConfigureAwait(false);

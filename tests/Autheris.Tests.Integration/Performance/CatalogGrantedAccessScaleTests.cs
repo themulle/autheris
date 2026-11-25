@@ -35,6 +35,9 @@ public sealed class CatalogGrantedAccessScaleTests : IClassFixture<CatalogGrante
     private const string Tenant = "tenant-scale";
     private const string GroupSid = "S-1-5-21-1043-1043-1043-3001";
     private const string UserSid = "S-1-5-21-1043-1043-1043-1001";
+    private const string PatternUserSid = "S-1-5-21-1043-1043-1043-1002";
+    private const string PatternGroupSid = "S-1-5-21-1043-1043-1043-3002";
+    private const string PatternOwnerGroupSid = "S-1-5-21-1043-1043-1043-9001";
     private const int ColumnsPerTable = 22;
 
     private readonly HostFixture _fixture;
@@ -89,6 +92,37 @@ public sealed class CatalogGrantedAccessScaleTests : IClassFixture<CatalogGrante
         warm.Statements.ShouldBeLessThan(warmBudget, $"warm request issued {warm.Statements} statements for {TableCount} granted tables");
     }
 
+    // #1063 §4a: an internal-workflow pattern grant resolves container approver authorization set-based rather than once per table.
+    [Theory]
+    [InlineData("/api/v1/catalog/objects?pageSize=50&accessStatus=granted", 200, 60)]
+    [InlineData("/api/v1/catalog/objects/facets?accessStatus=granted", 200, 20)]
+    public async Task PatternGrantedAccessFilter_StatementCount_DoesNotGrowWithTheGrantedTables(string path, int budget, int warmBudget)
+    {
+        await _fixture.SeedAsync(TableCount);
+        await MeasureAsync("/api/v1/catalog/objects?pageSize=50", PatternUserSid, PatternGroupSid);
+
+        var cold = await MeasureAsync(path, PatternUserSid, PatternGroupSid);
+        var warm = await MeasureAsync(path, PatternUserSid, PatternGroupSid);
+
+        cold.Status.ShouldBe(HttpStatusCode.OK, cold.Body);
+        warm.Status.ShouldBe(HttpStatusCode.OK, warm.Body);
+        using (var doc = JsonDocument.Parse(warm.Body))
+        {
+            if (path.Contains("facets", StringComparison.Ordinal))
+            {
+                doc.RootElement.GetProperty("totalCount").GetInt32().ShouldBe(TableCount);
+            }
+            else
+            {
+                doc.RootElement.GetProperty("items").GetArrayLength().ShouldBe(50, warm.Body[..Math.Min(400, warm.Body.Length)]);
+            }
+        }
+
+        budget += 4 * ((TableCount * ColumnsPerTable + 999) / 1000);
+        cold.Statements.ShouldBeLessThan(budget, $"cold pattern-grant request issued {cold.Statements} statements for {TableCount} tables");
+        warm.Statements.ShouldBeLessThan(warmBudget, $"warm pattern-grant request issued {warm.Statements} statements for {TableCount} tables");
+    }
+
     // Issue #1050: one catalog object (found and unknown) must not read the whole catalog per request.
     [Theory]
     [InlineData("/api/v1/catalog/objects/dom_scale.main.t0001", HttpStatusCode.OK)]
@@ -104,12 +138,12 @@ public sealed class CatalogGrantedAccessScaleTests : IClassFixture<CatalogGrante
         warm.Statements.ShouldBeLessThan(60, $"a single-object request issued {warm.Statements} statements for {TableCount} tables");
     }
 
-    private async Task<Measurement> MeasureAsync(string path)
+    private async Task<Measurement> MeasureAsync(string path, string userSid = UserSid, string groupSid = GroupSid)
     {
         using var client = _fixture.Factory.CreateClient();
         client.Timeout = TimeSpan.FromMinutes(10);
-        client.DefaultRequestHeaders.Add("X-Test-User-Sid", UserSid);
-        client.DefaultRequestHeaders.Add("X-Test-Group-Sids", GroupSid);
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", userSid);
+        client.DefaultRequestHeaders.Add("X-Test-Group-Sids", groupSid);
         client.DefaultRequestHeaders.Add("X-Test-Roles", "Reader");
         client.DefaultRequestHeaders.Add("X-Test-Tenant", Tenant);
         client.DefaultRequestHeaders.Add("X-Test-Scope", "Autheris.Catalog.Read");
@@ -208,16 +242,17 @@ public sealed class CatalogGrantedAccessScaleTests : IClassFixture<CatalogGrante
                 b.UseSetting("Gateway:Catalog:Discovery:RequestsPerMinute", "100000");
                 b.UseSetting("Gateway:GovernanceDb:Provider", "PostgreSql");
                 b.UseSetting("Gateway:GovernanceDb:ConnectionString", GovernanceTestDatabase.Create("CatalogGrantedScale"));
-                b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:Tenancy:DefaultTenantId"] = null }));
+                b.ConfigureAppConfiguration((_, cfg) => cfg.AddInMemoryCollection(new Dictionary<string, string?> { ["Gateway:Tenancy:DefaultTenantId"] = Tenant }));
 
                 // Issue #1044: the catalog change indexer re-indexes every freshly seeded table in the background (one artifact read
-                // per table), which inflated the time and statement count of the measured requests at 10,000 tables.
+                // per table), and the snapshot poll refreshes every 30s, which inflated the time and statement count of the measured requests.
                 b.ConfigureTestServices(s =>
                 {
-                    foreach (var indexer in s.Where(static d => d.ServiceType == typeof(IHostedService) &&
-                        d.ImplementationType == typeof(Autheris.Application.Catalog.External.CatalogChangeIndexerHostedService)).ToList())
+                    foreach (var hosted in s.Where(static d => d.ServiceType == typeof(IHostedService) &&
+                        (d.ImplementationType == typeof(Autheris.Application.Catalog.External.CatalogChangeIndexerHostedService) ||
+                         d.ImplementationType == typeof(Autheris.Application.Catalog.CatalogSnapshotBackgroundService))).ToList())
                     {
-                        s.Remove(indexer);
+                        s.Remove(hosted);
                     }
                 });
             });
@@ -265,6 +300,7 @@ public sealed class CatalogGrantedAccessScaleTests : IClassFixture<CatalogGrante
                     {
                         Table = new Table { Id = Guid.NewGuid(), DisplayName = id.TableName, TableName = id.TableName, SchemaName = id.Schema, SourceType = "PostgreSql", SourceName = id.Domain },
                         Identifier = id,
+                        OwnerTenantId = Tenant,
                         Columns = columns,
                         ColumnClassifications = classifications
                     });
@@ -281,12 +317,14 @@ public sealed class CatalogGrantedAccessScaleTests : IClassFixture<CatalogGrante
                 }
 
                 var now = DateTimeOffset.UtcNow;
+                var tableIds = new List<Guid>(identifiers.Count);
                 foreach (var id in identifiers)
                 {
                     var meta = await repo.GetTableMetadataAsync(id);
+                    tableIds.Add(meta!.Table.Id);
                     await repo.CreateConsentAsync(new Consent
                     {
-                        TableId = meta!.Table.Id,
+                        TableId = meta.Table.Id,
                         TableIdentifier = id,
                         TenantId = new TenantId(Tenant),
                         Effect = ConsentEffect.Allow,
@@ -297,6 +335,51 @@ public sealed class CatalogGrantedAccessScaleTests : IClassFixture<CatalogGrante
                         ColumnRules = [new ConsentColumnRule { ColumnName = "c00", AccessLevel = ColumnAccessLevel.Clear }]
                     });
                 }
+
+                var domains = scope.ServiceProvider.GetRequiredService<IGovernanceDomainRepository>();
+                var domainResult = await domains.UpsertAsync(
+                    new GovernanceDomain(
+                        Guid.NewGuid(),
+                        new TenantId(Tenant),
+                        "scale-pattern-domain",
+                        Description: null,
+                        Contact: null,
+                        OwnerGroupSid: new Sid(PatternOwnerGroupSid),
+                        Autheris.Domain.Security.ProtectionClass.Confidential,
+                        CatalogVisibilityMode.Open,
+                        IsSystemUnassigned: false,
+                        Version: 0,
+                        now,
+                        now),
+                    expectedVersion: 0,
+                    new Sid(PatternOwnerGroupSid));
+                if (!domainResult.Succeeded || domainResult.Domain is null)
+                {
+                    throw new InvalidOperationException($"Failed to seed scale-pattern-domain ({domainResult.Status}).");
+                }
+
+                foreach (var chunk in tableIds.Chunk(100))
+                {
+                    await domains.AssignTablesAsync(new TenantId(Tenant), domainResult.Domain.Id, chunk, new Sid(PatternOwnerGroupSid));
+                }
+
+                await repo.CreateConsentAsync(new Consent
+                {
+                    TableId = Guid.Empty,
+                    TenantId = new TenantId(Tenant),
+                    ObjectPattern = "dom_scale.main.*",
+                    DataSource = "dom_scale",
+                    WorkflowMode = ConsentWorkflowMode.Internal,
+                    ApprovingOwners = [PatternOwnerGroupSid],
+                    ColumnSetMode = ColumnSetMode.AllNonHidden,
+                    Effect = ConsentEffect.Allow,
+                    GranteeType = GranteeType.Group,
+                    GranteeSid = new Sid(PatternGroupSid),
+                    ValidFrom = now.AddDays(-1),
+                    ValidTo = now.AddDays(1)
+                });
+
+                await Factory.Services.GetRequiredService<Autheris.Application.Catalog.ICatalogSnapshotProvider>().GetSnapshotAsync();
 
                 Volatile.Write(ref _seeded, 1);
             }

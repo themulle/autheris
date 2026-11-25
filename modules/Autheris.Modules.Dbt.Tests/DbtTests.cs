@@ -516,6 +516,59 @@ public sealed class DbtTests
     }
 
     [Fact]
+    public async Task DbtRelationshipsTests_WithoutRelationName_UseTheDefaultNameTheGraphQlSchemaDerivesFromTheChild()
+    {
+        // Issue #1099: an unnamed dbt relationships test is stored with the parent model name (without "stg_"); the GraphQL
+        // schema recognises that default name and names the parent-side field after the child.
+        var relationRepo = new InMemoryTableRelationRepository();
+        var service = new DbtMetadataIngestionService(
+            new InMemoryDbtProposalRepository(), new InMemoryTableMetadataRepository(), new InMemoryLineageGraphStore(), relationRepo,
+            NullLogger<DbtMetadataIngestionService>.Instance);
+
+        const string manifestJson = """
+        {
+          "metadata": { "dbt_version": "1.8.0", "project_name": "corp_analytics" },
+          "nodes": {
+            "model.corp_analytics.stg_client": {
+              "name": "stg_client", "database": "postgres", "schema": "analytics",
+              "columns": { "id": { "name": "id", "data_type": "integer" } }
+            },
+            "model.corp_analytics.air1": {
+              "name": "air1", "database": "postgres", "schema": "analytics",
+              "columns": { "client_id": { "name": "client_id", "data_type": "integer" } }
+            },
+            "model.corp_analytics.dm1": {
+              "name": "dm1", "database": "postgres", "schema": "analytics",
+              "columns": { "client_id": { "name": "client_id", "data_type": "integer" } }
+            },
+            "test.corp_analytics.relationships_air1_client_id": {
+              "name": "relationships_air1_client_id", "resource_type": "test",
+              "test_metadata": { "name": "relationships", "kwargs": { "column_name": "client_id", "field": "id", "to": "ref('stg_client')" } },
+              "attached_node": "model.corp_analytics.air1",
+              "depends_on": { "nodes": ["model.corp_analytics.stg_client", "model.corp_analytics.air1"] }
+            },
+            "test.corp_analytics.relationships_dm1_client_id": {
+              "name": "relationships_dm1_client_id", "resource_type": "test",
+              "test_metadata": { "name": "relationships", "kwargs": { "column_name": "client_id", "field": "id", "to": "ref('stg_client')" } },
+              "attached_node": "model.corp_analytics.dm1",
+              "depends_on": { "nodes": ["model.corp_analytics.stg_client", "model.corp_analytics.dm1"] }
+            }
+          }
+        }
+        """;
+
+        using var stream = new MemoryStream(Encoding.UTF8.GetBytes(manifestJson));
+        var result = await service.IngestManifestStreamAsClusterAdminAsync(stream, dryRun: false);
+
+        result.Success.ShouldBeTrue();
+        result.ImportedRelationsCount.ShouldBe(2);
+        var relations = await relationRepo.GetAllRelationsAsync();
+        relations.Select(r => r.ChildTableIdentifier.TableName).OrderBy(n => n, StringComparer.Ordinal).ShouldBe(["air1", "dm1"]);
+        relations.ShouldAllBe(r => r.RelationName == "client");
+        relations.ShouldAllBe(r => RelationNameDefaults.IsDefaultFor(r.RelationName, r.ParentTableIdentifier.TableName));
+    }
+
+    [Fact]
     public async Task DbtMetadataIngestionService_IngestGovernanceStreamAsync_ParsesAndUpdatesGovernanceFields()
     {
         var proposalRepo = new InMemoryDbtProposalRepository();

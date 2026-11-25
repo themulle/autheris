@@ -609,9 +609,23 @@ public sealed partial class DbtMetadataIngestionService : IDbtMetadataIngestionS
                         ct,
                         dryRun: dryRun).ConfigureAwait(false);
 
+                    var resolvedSourceType = existingMeta.Table.SourceType;
+                    if (existingMeta.Table.DataSourceType == DataSourceType.Sql &&
+                        !DatabaseDialectExtensions.TryParseDialect(existingMeta.Table.SourceType, out _) &&
+                        _gatewayOptions?.Value is { } gatewayOpts &&
+                        DbtCatalogTableFactory.TryResolveConnection(model.Database, gatewayOpts, out _, out var resolvedProvider))
+                    {
+                        var healedSourceType = DatabaseDialectExtensions.ResolveCatalogSourceType(resolvedProvider, existingMeta.Table.SourceType, out var supported);
+                        if (supported && DatabaseDialectExtensions.TryParseDialect(healedSourceType, out var resolvedDialect))
+                        {
+                            resolvedSourceType = resolvedDialect.ToString();
+                        }
+                    }
+
                     var targetKind = caller.IsClusterAdmin ? resolvedKind : existingMeta.Table.ObjectKind;
                     var updatedTableObj = existingMeta.Table with
                     {
+                        SourceType = resolvedSourceType,
                         DisplayName = string.IsNullOrWhiteSpace(existingMeta.Table.DisplayName) && IsAliased(model) ? model.Name : existingMeta.Table.DisplayName,
                         DbtUniqueId = model.UniqueId,
                         Description = model.Description ?? existingMeta.Table.Description,

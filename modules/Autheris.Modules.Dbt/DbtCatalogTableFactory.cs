@@ -123,7 +123,7 @@ internal static class DbtCatalogTableFactory
     }
 
     /// <summary>mapping entry or the database name itself, looked up in the configured connections; never a fallback.</summary>
-    private static bool TryResolveConnection(string database, GatewayOptions options, out string connectionName, out string provider)
+    internal static bool TryResolveConnection(string database, GatewayOptions options, out string connectionName, out string provider)
     {
         connectionName = string.Empty;
         provider = string.Empty;

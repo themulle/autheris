@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Globalization;
 using System.Text;
+using Autheris.Application.Analytics;
 using Autheris.Application.Mcp.Interfaces;
 using Autheris.Domain.Options;
 
@@ -30,6 +31,7 @@ internal static class McpQueryGuideBuilder
         AppendFilterOperators(sb);
 
         AppendAggregationAndTimeBuckets(sb, gql);
+        AppendMaskedColumnsAndRestrictedScopes(sb, switches);
         AppendMetrics(sb);
 
         if (gql.Subscriptions.Enabled)
@@ -170,6 +172,8 @@ internal static class McpQueryGuideBuilder
         sb.AppendLine("- **Aggregate Ordering (`orderBy`):** `{ column: <col> | alias: \"<alias>\", direction: ASC | DESC }`");
         sb.AppendLine(string.Create(CultureInfo.InvariantCulture,
             $"- **Aggregation Bounds:** Max `{gql.Aggregation.MaxFieldsPerOperation}` aggregate selections per operation; `MaxAggregateRowBudget` is `{gql.MaxAggregateRowBudget}` rows."));
+        sb.AppendLine(string.Create(CultureInfo.InvariantCulture,
+            $"- **Time-Bucket Limit:** With `timeBuckets`, `limit` must not exceed `{AggregationOptions.MaxTimeBucketedLimit}` groups; a larger value is refused with `{AggregationErrorCodes.TimeBucketLimitExceeded}` before any SQL runs. Lower `limit`, narrow `where`, or use a coarser bucket."));
         sb.AppendLine("- **K-Anonymity Metadata:** Results return `groups { key { ... } rowCount isMergedOther aggregates { alias kind intValue decimalValue floatValue stringValue dateTimeValue } }`, plus `count`, `suppressed`, `suppressedGroupsCount`, `minimumGroupSize`, `minimumGroupSizeSource`, `mergedIntoOther`, and `truncated`.");
         sb.AppendLine();
         sb.AppendLine("```graphql");
@@ -186,6 +190,20 @@ internal static class McpQueryGuideBuilder
         sb.AppendLine("  }");
         sb.AppendLine("}");
         sb.AppendLine("```");
+        sb.AppendLine();
+    }
+
+    private static void AppendMaskedColumnsAndRestrictedScopes(StringBuilder sb, IReadPathSwitches? switches)
+    {
+        sb.AppendLine("## 6. Masked Columns, Keys & Restricted Scopes");
+        sb.AppendLine();
+        sb.AppendLine("- **Masked Columns (`access: mask`):** Values come back masked. A masked column cannot be used in `where`, `orderBy` or a join (`FILTER_ON_MASKED_COLUMN`), nor grouped or aggregated (`AGGREGATION_ON_MASKED_COLUMN`).");
+        sb.AppendLine("- **Keys Over Masked Columns:** The primary key, key order and indexes are listed even when a key column is masked, so a query can be planned along the key (for example a query that an app later runs under a scope where those columns are clear). Under this token, filter, order and join only on clear columns; a key or index over a denied or hidden column is not listed.");
+        if (Tool(switches, McpDatasetTools.DescribeMyAccess))
+        {
+            sb.AppendLine($"- **Restricted Scopes:** `{McpDatasetTools.DescribeMyAccess}` returns `restrictedScope: true` when this token carries a restricted scope (for example an agent scope). A column in `scopeClearRequiredColumns` is masked only for the restricted scope of this token; the same person reads it as the base rule says (for example in an app that runs with the person's own scope), so no access request is needed for it. Do not ask the person to request access for these columns.");
+        }
+
         sb.AppendLine();
     }
 

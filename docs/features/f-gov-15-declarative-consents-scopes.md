@@ -209,6 +209,8 @@ Response:
 }
 ```
 
+For a token that carries a restricted scope (for example `Agent.Read`, see `Gateway:Governance:RestrictedScopes`) the answer also contains `restrictedScope: true` and `scopeClearRequiredColumns`. A column in `scopeClearRequiredColumns` is masked only for the restricted scope of this token: the same person reads it as the base rule says (for example in an app that runs with the person's own scope), so no access request is needed for it, and `describe_dataset` offers no `clearRequestable` hint for it. The tool description and the agent query guide (`autheris://api/docs/query-guide`) explain both fields to the agent.
+
 ### GraphQL Self-Service Queries
 
 ```graphql

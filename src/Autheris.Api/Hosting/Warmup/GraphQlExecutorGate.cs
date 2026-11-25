@@ -73,6 +73,9 @@ public sealed partial class GraphQlExecutorGate(
         _stopping = stoppingToken;
         await Task.Yield();
 
+        // Issue #1109: the first build can take minutes on a large catalog; make it observable (start, duration at the end).
+        var buildStart = timeProvider.GetTimestamp();
+        LogBuildStarted(logger);
         var backoff = InitialBackoff;
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -89,6 +92,7 @@ public sealed partial class GraphQlExecutorGate(
             Volatile.Write(ref _state, (int)result);
             if (result == ExecutorGateState.Ready)
             {
+                LogReady(logger, (long)timeProvider.GetElapsedTime(buildStart).TotalMilliseconds);
                 return;
             }
 
@@ -305,8 +309,14 @@ public sealed partial class GraphQlExecutorGate(
     [LoggerMessage(EventId = 15113, Level = LogLevel.Warning, Message = "GraphQL executor probe skipped: an ambient HttpContext is present; readiness stays 503")]
     private static partial void LogAmbientContext(ILogger logger);
 
-    [LoggerMessage(EventId = 15114, Level = LogLevel.Error, Message = "GetExecutorAsync did not return within {TimeoutSeconds} s; readiness stays 503")]
+    [LoggerMessage(EventId = 15114, Level = LogLevel.Warning, Message = "GetExecutorAsync did not return within {TimeoutSeconds} s (schema build still running or hung); readiness stays 503")]
     private static partial void LogHang(ILogger logger, int timeoutSeconds);
+
+    [LoggerMessage(EventId = 15116, Level = LogLevel.Information, Message = "GraphQL executor build started in the background; readiness stays 503 (Warming) until it is ready")]
+    private static partial void LogBuildStarted(ILogger logger);
+
+    [LoggerMessage(EventId = 15117, Level = LogLevel.Information, Message = "GraphQL executor ready after {ElapsedMs} ms")]
+    private static partial void LogReady(ILogger logger, long elapsedMs);
 
     [LoggerMessage(EventId = 15115, Level = LogLevel.Warning, Message = "GraphQL executor eviction handling failed with {ExceptionType}")]
     private static partial void LogEvictionHandlerFailed(ILogger logger, string exceptionType);

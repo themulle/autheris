@@ -16,6 +16,7 @@ using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Search;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Policy;
 using Autheris.Application.Policy.Classification;
 using Autheris.Application.Policy.Pdp;
 using Autheris.Application.Policy.RowScopes;
@@ -165,8 +166,9 @@ public sealed partial class DiscoveryService
     {
         var cache = _accessViewCache!;
 
-        // A current entry is used without waiting for anyone; only misses and revalidations are serialized per key.
-        if (await cache.ReadStampAsync(caller.Tenant, ct).ConfigureAwait(false) is { } early && cache.TryGet(cacheKey, early) is { Stale.Count: 0 } current)
+        // A current entry is used without waiting for anyone; entries with omitted transient failures trigger re-check (#1063 §4c).
+        if (await cache.ReadStampAsync(caller.Tenant, ct).ConfigureAwait(false) is { } early &&
+            cache.TryGet(cacheKey, early) is { Stale.Count: 0, Entry.HasTransientOmissions: false } current)
         {
             return CallerAccessMemo.FromView(current.Entry.Candidates, current.Entry.Allowed, stale: null, cacheKey);
         }
@@ -181,34 +183,48 @@ public sealed partial class DiscoveryService
             }
 
             var hit = cache.TryGet(cacheKey, stamp);
-            if (hit is { Stale.Count: 0 } fresh)
+            if (hit is { Stale.Count: 0, Entry.HasTransientOmissions: false } fresh)
             {
                 return CallerAccessMemo.FromView(fresh.Entry.Candidates, fresh.Entry.Allowed, stale: null, cacheKey);
             }
 
-            var candidates = await LoadGrantCandidatesAsync(caller, subject, ct).ConfigureAwait(false);
+            var candidates = hit is { Stale.Count: 0 } transientHit
+                ? transientHit.Entry.Candidates
+                : await LoadGrantCandidatesAsync(caller, subject, ct).ConfigureAwait(false);
             var memo = hit is { } revalidate
                 ? CallerAccessMemo.FromView(candidates, revalidate.Entry.Allowed, revalidate.Stale, cacheKey)
                 : CallerAccessMemo.FromView(candidates, FrozenDictionary<TableIdentifier, bool>.Empty, stale: null, cacheKey);
 
             var scoped = await LoadScopedCatalogAsync(caller, sid, scopeKey, ct).ConfigureAwait(false);
             var undecided = scoped.VisibleTables.Where(t => memo.IsCandidate(t) && !memo.TryGetAllowed(t.Identifier, out _)).ToList();
+            HashSet<TableIdentifier>? transientOmissions = null;
             if (undecided.Count > 0)
             {
-                var allowed = await _decisionPoint!.DecideAllowedManyAsync(subject, undecided, ct).ConfigureAwait(false);
-                if (allowed.Count != undecided.Count)
+                var decisions = await _decisionPoint!.DecideAllowedManyWithTransientAsync(subject, undecided, ct).ConfigureAwait(false);
+                if (decisions.Count != undecided.Count)
                 {
                     throw new InvalidOperationException("AccessDecisionPoint returned mismatched decision count.");
                 }
 
                 for (var i = 0; i < undecided.Count; i++)
                 {
-                    memo.Allowed[undecided[i].Identifier] = allowed[i];
+                    var d = decisions[i];
+                    memo.Allowed[undecided[i].Identifier] = d.IsAllowed;
+                    if (!d.IsAllowed && d.IsTransientFailure)
+                    {
+                        (transientOmissions ??= []).Add(undecided[i].Identifier);
+                    }
                 }
             }
 
             var notAfter = Min(hit?.Entry.NotAfter ?? cache.Time.GetUtcNow() + cache.Ttl, candidates.NextChange);
-            await cache.TrySetAsync(cacheKey, caller.Tenant, new AccessViewEntry(candidates, memo.ToFrozenDecisions(), stamp, notAfter), ct).ConfigureAwait(false);
+            var frozen = memo.ToFrozenDecisions(transientOmissions);
+            var hasTransient = transientOmissions is { Count: > 0 };
+            if (frozen.Count > 0 || !hasTransient)
+            {
+                await cache.TrySetAsync(cacheKey, caller.Tenant, new AccessViewEntry(candidates, frozen, stamp, notAfter, hasTransient), ct).ConfigureAwait(false);
+            }
+
             return memo;
         }
         finally
@@ -376,36 +392,23 @@ public sealed partial class DiscoveryService
         }
 
         var (decisions, insertDecisions, updateDecisions, deleteDecisions) = (byOperation[0], byOperation[1], byOperation[2], byOperation[3]);
-
+        var prefetchNow = _timeProvider.GetUtcNow();
+        var pdp = _decisionPoint as AccessDecisionPoint;
+        var colPrefetch = pdp?.LastColumnRowPrefetch;
         var defs = _classificationRepository is null
             ? ClassificationAccessResolver.BuiltInCatalog(caller.Tenant.Value).Definitions
-            : ClassificationHierarchyValidator.ResolveEffective(await _classificationRepository.GetClassificationsAsync(caller.Tenant.Value, includeInactive: true, ct).ConfigureAwait(false), caller.Tenant.Value);
-
+            : colPrefetch?.CatalogFor(caller.Tenant.Value, prefetchNow)?.Definitions
+              ?? ClassificationHierarchyValidator.ResolveEffective(
+                  await _classificationRepository.GetClassificationsAsync(caller.Tenant.Value, includeInactive: true, ct).ConfigureAwait(false), caller.Tenant.Value);
         var docLinks = await LoadDocumentLinksAsync(caller.Tenant.Value, uncachedTables, ct).ConfigureAwait(false);
-
-        // Issue #1043 / #1047: the column classifications of the page's visible, not yet classified columns in one read.
         var unclassifiedColumns = _classificationRepository is null
             ? []
-            : uncachedTables
-                .Where(static t => !t.Table.DiscoveryHidden)
+            : uncachedTables.Where(static t => !t.Table.DiscoveryHidden)
                 .SelectMany(static t => t.Columns.Where(c => !c.DiscoveryHidden && !t.ColumnClassifications.ContainsKey(c.ColumnName)))
-                .Select(static c => c.Id.ToString())
-                .Distinct()
-                .ToList();
-        var classificationsByColumnId = unclassifiedColumns.Count == 0
-            ? new Dictionary<string, IReadOnlyList<ColumnClassification>>()
-            : await _classificationRepository!.GetColumnClassificationsBatchAsync(unclassifiedColumns, caller.Tenant.Value, ct).ConfigureAwait(false);
-
-        TenantAccessPolicy? tenantPolicy = null;
-        if (_accessPolicySettings is not null)
-        {
-            tenantPolicy = await _accessPolicySettings.GetEffectiveAsync(caller.Tenant, ct).ConfigureAwait(false);
-        }
-
-        // Protection snapshots of the page, resolved set-based; a table the batch does not answer is resolved per table below.
-        var batchProtections = _protectionProvider is null
-            ? null
-            : await _protectionProvider.ResolveManyAsync(caller.Tenant, uncachedTables, ct).ConfigureAwait(false);
+                .Select(static c => c.Id.ToString()).Distinct().ToList();
+        var classificationsByColumnId = await ResolveUnclassifiedColumnsAsync(caller.Tenant.Value, unclassifiedColumns, colPrefetch, prefetchNow, ct).ConfigureAwait(false);
+        TenantAccessPolicy? tenantPolicy = _accessPolicySettings is null ? null : await _accessPolicySettings.GetEffectiveAsync(caller.Tenant, ct).ConfigureAwait(false);
+        var batchProtections = await ResolveBatchProtectionsWithPrefetchAsync(caller.Tenant, uncachedTables, pdp?.LastProtectionPrefetch, prefetchNow, ct).ConfigureAwait(false);
 
         var artifactsByTableId = _artifactStore is null
             ? null
@@ -461,6 +464,7 @@ public sealed partial class DiscoveryService
             lock (_memoLock)
             {
                 _objectMemo[new ObjectMemoKey(scopeKey, DiscoveryObjectKind.Table, table.Identifier, langKey)] = mapped;
+                if (protection is not null) _protectionMemo[(caller.Tenant, table.Identifier)] = protection;
             }
         }
 
@@ -488,13 +492,23 @@ public sealed partial class DiscoveryService
             Allowed.TryGetValue(table, out allowed) ||
             (_cached is not null && _cached.TryGetValue(table, out allowed) && (_stale is not { Count: > 0 } || !_stale.Contains(table.ToString().ToLowerInvariant())));
 
-        /// <summary>The cached decisions that are still valid, overlaid with the decisions of this request.</summary>
-        public FrozenDictionary<TableIdentifier, bool> ToFrozenDecisions()
+        /// <summary>The cached decisions that are still valid, overlaid with non-transient decisions of this request.</summary>
+        public FrozenDictionary<TableIdentifier, bool> ToFrozenDecisions(IReadOnlySet<TableIdentifier>? transientOmissions = null)
         {
-            var merged = new Dictionary<TableIdentifier, bool>(Allowed);
+            var merged = new Dictionary<TableIdentifier, bool>();
+            foreach (var (table, isAllowed) in Allowed)
+            {
+                if (transientOmissions is null || !transientOmissions.Contains(table))
+                {
+                    merged[table] = isAllowed;
+                }
+            }
+
             foreach (var (table, isAllowed) in _cached ?? FrozenDictionary<TableIdentifier, bool>.Empty)
             {
-                if (!merged.ContainsKey(table) && TryGetAllowed(table, out _))
+                if (!merged.ContainsKey(table) &&
+                    (transientOmissions is null || !transientOmissions.Contains(table)) &&
+                    TryGetAllowed(table, out _))
                 {
                     merged[table] = isAllowed;
                 }
@@ -516,5 +530,31 @@ public sealed partial class DiscoveryService
     {
         public DiscoveryAccessState StateOf(TableIdentifier table) =>
             DiscoveryAccessMapper.AccessStateOf(Granted.Contains(table), Pending.Contains(table), Expired.Contains(table));
+    }
+
+    private async ValueTask<IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>>> ResolveUnclassifiedColumnsAsync(
+        string tenantId, List<string> columnIds, ColumnPolicyRowPrefetch? colPrefetch, DateTimeOffset now, CancellationToken ct)
+    {
+        if (columnIds.Count == 0) return new Dictionary<string, IReadOnlyList<ColumnClassification>>();
+        if (colPrefetch is not null && colPrefetch.Covers(tenantId, columnIds, now))
+        {
+            var dict = new Dictionary<string, IReadOnlyList<ColumnClassification>>(StringComparer.OrdinalIgnoreCase);
+            foreach (var id in columnIds) { var rows = colPrefetch.ClassificationsOf(id); if (rows.Count > 0) dict[id] = rows; }
+            return dict;
+        }
+        return await _classificationRepository!.GetColumnClassificationsBatchAsync(columnIds, tenantId, ct).ConfigureAwait(false);
+    }
+
+    private async ValueTask<IReadOnlyDictionary<TableIdentifier, EffectiveProtection>?> ResolveBatchProtectionsWithPrefetchAsync(
+        TenantId tenant, IReadOnlyList<TableMetadata> tables, ProtectionBatchPrefetch? protPrefetch, DateTimeOffset now, CancellationToken ct)
+    {
+        if (_protectionProvider is null) return null;
+        if (protPrefetch is null) return await _protectionProvider.ResolveManyAsync(tenant, tables, ct).ConfigureAwait(false);
+        var map = new Dictionary<TableIdentifier, EffectiveProtection>(tables.Count);
+        List<TableMetadata>? missing = null;
+        foreach (var t in tables) { if (protPrefetch.TryGet(tenant, t.Identifier, now, out var p)) map[t.Identifier] = p; else (missing ??= []).Add(t); }
+        if (missing is { Count: > 0 })
+            foreach (var kv in await _protectionProvider.ResolveManyAsync(tenant, missing, ct).ConfigureAwait(false)) map[kv.Key] = kv.Value;
+        return map;
     }
 }

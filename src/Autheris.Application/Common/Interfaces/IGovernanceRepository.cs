@@ -8,6 +8,18 @@ public interface ITableMetadataRepository : Autheris.Application.Catalog.ICatalo
     Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default);
     Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default);
 
+    /// <summary>Returns active SQL tables whose stored <c>SourceType</c> is not a supported SQL dialect, avoiding full metadata hydration when healthy.</summary>
+    async Task<IReadOnlyList<(TableIdentifier Identifier, string SourceName, string CurrentSourceType)>> GetUnparseableSqlSourceTypesAsync(CancellationToken ct = default)
+    {
+        var page = await Autheris.Application.Catalog.CatalogTablePageReader.ReadAllAsync(
+            this,
+            new Autheris.Application.Catalog.CatalogTableQuery(IncludeInactive: false),
+            static t => t.Table.DataSourceType == DataSourceType.Sql &&
+                !Autheris.Domain.Common.DatabaseDialectExtensions.TryParseDialect(t.Table.SourceType, out _),
+            ct: ct).ConfigureAwait(false);
+        return page.Select(static t => (t.Identifier, t.Table.SourceName, t.Table.SourceType)).ToList();
+    }
+
     /// <summary>
     /// Issue #1043: the table, its columns, masking rules and global classifications (the epoch-validated structural metadata) without
     /// the dataset catalog overlay (tags, discovery visibility, group size, non-personal flag). For readers that need none of the overlay,
@@ -299,6 +311,19 @@ public interface IConsentRepository
     }
 
     Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default);
+
+    /// <summary>
+    /// Reads active data-consent headers (without hydrating child rule tables) for grant candidate pre-screening.
+    /// </summary>
+    Task<IReadOnlyList<Consent>> GetAllActiveConsentHeadersForSubjectsAsync(IEnumerable<Sid> subjects, DateTimeOffset? atTime, TenantId tenantId, CancellationToken ct = default) =>
+        GetAllActiveConsentsForSubjectsAsync(subjects, null, atTime, tenantId, ct);
+
+    /// <summary>
+    /// Earliest <c>ValidFrom</c> strictly after <paramref name="atTime"/> among non-revoked data Allow consents for
+    /// <paramref name="subjects"/> in <paramref name="tenantId"/> (#1063 §4d), or null when none are scheduled.
+    /// </summary>
+    Task<DateTimeOffset?> GetNextScheduledAllowAsync(IEnumerable<Sid> subjects, DateTimeOffset atTime, TenantId tenantId, CancellationToken ct = default)
+        => Task.FromResult<DateTimeOffset?>(null);
     Task<Consent> CreateConsentAsync(Consent consent, CancellationToken ct = default);
     Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default);
     Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, ConsentRevocationAuthority authority, CancellationToken ct = default);

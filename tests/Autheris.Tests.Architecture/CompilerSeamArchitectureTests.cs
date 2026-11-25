@@ -78,6 +78,53 @@ public sealed class CompilerSeamArchitectureTests
         violations.ShouldBeEmpty("AllowExperimentalDialect is a test-only switch; production code must not set it: " + string.Join(", ", violations));
     }
 
+    private const string PerCellOverrideSetter = "set_PerCellCompileOverrideForTesting";
+    private const string PerCellOverrideOwner = "Autheris.Application.Policy.RowScopes.RowScopeCompiler";
+
+    private static List<string> CallersOfPerCellOverrideSetter(string assemblyPath)
+    {
+        var callers = new List<string>();
+        var module = CecilModuleCache.For(assemblyPath);
+        foreach (var type in module.GetTypes())
+        {
+            foreach (var method in type.Methods.Where(m => m.HasBody))
+            {
+                foreach (var instruction in method.Body.Instructions)
+                {
+                    if (instruction.OpCode.Code is Code.Call or Code.Callvirt or Code.Newobj &&
+                        instruction.Operand is MethodReference called &&
+                        called.Name == PerCellOverrideSetter && called.DeclaringType.FullName == PerCellOverrideOwner)
+                    {
+                        callers.Add($"{type.FullName}.{method.Name}");
+                    }
+                }
+            }
+        }
+
+        return callers;
+    }
+
+    [System.Runtime.CompilerServices.MethodImpl(System.Runtime.CompilerServices.MethodImplOptions.NoInlining)]
+    internal static Autheris.Application.Policy.RowScopes.RowScopeCompiler ControlSetsPerCellOverride() =>
+        new() { PerCellCompileOverrideForTesting = (_, _, _, _) => null };
+
+    [Fact]
+    public void ThePerCellCompileSeamScanner_FindsAConfiguredOverride_InAKnownCaller() =>
+        CallersOfPerCellOverrideSetter(typeof(CompilerSeamArchitectureTests).Assembly.Location)
+            .ShouldContain(c => c.EndsWith(nameof(ControlSetsPerCellOverride), StringComparison.Ordinal));
+
+    [Fact]
+    public void PerCellCompileOverride_IsNeverSetByProductionCode()
+    {
+        var violations = new List<string>();
+        foreach (var assembly in ProductionAssemblies)
+        {
+            violations.AddRange(CallersOfPerCellOverrideSetter(assembly.Location).Select(c => $"{assembly.GetName().Name}: {c}"));
+        }
+
+        violations.ShouldBeEmpty("PerCellCompileOverrideForTesting is a test-only seam; production code must not set it: " + string.Join(", ", violations));
+    }
+
     // CR-ADG-38: production code passes only DmlGuardOptions.Strict. Building a different value needs the constructor, a with-copy
     // (<Clone>$) or an init setter; none may be called outside the options type itself, nor may GovernancePolicy.Dml be assigned.
     private static List<string> CallersOfDmlGuardCustomisation(string assemblyPath)

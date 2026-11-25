@@ -162,8 +162,10 @@ public sealed class ColumnPolicyRowPrefetchTests
         prefetch.Covers(Tenant.Value, [IdColumn.ToString()], FixedNow.AddSeconds(6)).ShouldBeFalse();
         prefetch.Covers(Tenant.Value, [IdColumn.ToString()], FixedNow.AddSeconds(-1)).ShouldBeFalse();
     }
-    // Issue #1098 follow-up: the tenant classification catalog (definitions and category mask rules) is read once per batch of
-    // decisions, not twice per granted table; it follows the tenant and freshness bound of the column rows.
+
+    // Issue #1098 follow-up: the tenant classification catalog (definitions and category mask rules) is captured once per batch of
+    // decisions by the row prefetch and reused by the classification and category-mask stages of every table; it follows the
+    // tenant and freshness bound of the column rows.
     [Fact]
     public async Task Prefetch_SharesTheClassificationCatalog_WithinItsTenantAndMaxAge()
     {
@@ -171,7 +173,8 @@ public sealed class ColumnPolicyRowPrefetchTests
         var time = new AdjustableClassificationTimeProvider(FixedNow);
         var resolver = new ClassificationAccessResolver(
             new SqlDataMaskingProvider(Options.Create(new GatewayOptions()), timeProvider: time), store, time);
-        var prefetch = Empty(Tenant.Value, IdColumn);
+        var prefetch = await resolver.PrefetchColumnRowsAsync([Metadata()], Tenant.Value);
+        prefetch.ShouldNotBeNull();
 
         var first = await resolver.LoadCatalogAsync(Tenant.Value, prefetch);
         first.MaskRules[ClassificationScopes.PiiCode].MaskFunction.ShouldBe(MaskFunction.TypeSafeRedact);
@@ -185,8 +188,11 @@ public sealed class ColumnPolicyRowPrefetchTests
             UpdatedAt = FixedNow
         });
 
-        // Same batch: the catalog read once is shared.
+        // Same batch: the catalog captured by the prefetch is shared.
         (await resolver.LoadCatalogAsync(Tenant.Value, prefetch)).ShouldBeSameAs(first);
+
+        // A prefetch without a captured catalog reads it.
+        (await resolver.LoadCatalogAsync(Tenant.Value, Empty(Tenant.Value, IdColumn))).MaskRules[ClassificationScopes.PiiCode].MaskFunction.ShouldBe(MaskFunction.Nullify);
 
         // Another tenant's prefetch and no prefetch read the catalog themselves.
         (await resolver.LoadCatalogAsync(Tenant.Value, Empty("tenant-other", IdColumn))).MaskRules[ClassificationScopes.PiiCode].MaskFunction.ShouldBe(MaskFunction.Nullify);
