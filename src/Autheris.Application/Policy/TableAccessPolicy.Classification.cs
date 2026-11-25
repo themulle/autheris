@@ -59,7 +59,7 @@ public sealed partial class TableAccessPolicy
                             c, query.Metadata.Identifier, now, query.UserSid, query.GroupSids, query.Roles, query.AllUserSids) &&
                         !(isHidden && c.IsPatternGrant && c.Effect == ConsentEffect.Allow))
             .ToList();
-        return await FilterApplicablePatternConsentsAsync(applicable, query.Metadata, now, query.ConsentPrefetch, ct).ConfigureAwait(false);
+        return await FilterApplicablePatternConsentsAsync(applicable, query.Metadata, query.Protection, now, query.ConsentPrefetch, ct).ConfigureAwait(false);
     }
 
     private async Task<TableAccessDecision> ApplyClassificationAccessAsync(
