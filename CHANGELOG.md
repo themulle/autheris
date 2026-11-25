@@ -6,6 +6,31 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.0.0] - 2026-11-25
+
+### BREAKING
+- Governance & authorization v2 model (#1009, #1024, #1026, #1030, #1031, #1033, #1039, #1041, #1051, #1057, #1060, #1067, #1075, #1085, #1086, #1104): replaced legacy per-table data-owner assignments, legacy consent pipelines, four-eyes second-approver rules, classification clear grants, and recertification workflows (migrations `0036`–`0046`) with governance domains, protection classes (`ProtectionSnapshotProvider`), container ownership and tenant-scoped container visibility, single-approval rules for attributes/virtual filters/profiles, category masking with time-bounded unmask grants, unified `PermissionRequestEngine` decision inbox, IT self-grants, staged expiry reminders, and declarative IT manifest proposals.
+- Separate database migration credentials and `INSERT`-only runtime audit role enforcement (#1029), and retirement of the catalog-mode procedure validator in ADR-018 (#1071, #1073).
+
+### Added
+- Databricks support in the single-statement GraphQL nested-relation tree compiler (`TreeSqlCompiler`, `TreeSecuredSourceBuilder`, `GovernedTreeQueryService`) with Catalyst-compatible JSON/struct projection, `SetBased` CTE keysets, binary tenant isolation, and Spark 4.0 integration coverage (#1110, #1114).
+- Governed cursor pagination on MCP `query_sql` (#1064), per-scope query concurrency, duration, and row limits (#1065), and token-scope to resource-group tier mapping (#1054, #1062).
+- SCIM deprovisioning revocation sweeps, cache synchronization, and group-exit TTL bounds (#1033, #1067, #1095, #1108).
+
+### Changed
+- Shared catalog visibility evaluation, cached tenant consents, batched discovery artifacts, whole-catalog read ratchets, and consolidated `GovernanceWriteInvalidator` across governance stores (#1063, #1076, #1077).
+- Batched protection lookups and cached tenant access policy settings (#1049, #1056, #1061), plus .NET, container, Compose, NuGet, GitHub Actions, and Swagger UI dependency updates (#1078–#1084).
+
+### Fixed
+- Resolved `Table.SourceType` from the configured connection provider dialect (`Databricks`, `Oracle`, `PostgreSql`, `SqlServer`, including `WebSql:DataSourceMappings` and self-healing on re-PUT) in `PutDatasetDefinitionHandler` instead of storing the raw connection name, and propagated `TimeProvider` deterministically into `ConsentResolutionService` (#1115, #1116).
+- Classified `SetOperationDegreeMismatchException` as a typed rejection in the SQL compiler gate (#1032, #1058) and synced `Sim.ApiHost` lockfile and SQLite `OFFSET 0` fence handling (#1034, #1059).
+
+### Security
+- Enforced realm-bound user, service-principal, and group identifiers, isolated tenant role caches, rejected Active Directory SIDs in non-workforce realms, and hardened Entra group overage and degraded resolution fail-closed checks (#1027, #1028, #1091, #1101).
+- Unified MCP/GraphQL caller principal resolution and verified TOTP replay invariants (#1025), preserved app-only MCP client claims, and enforced tenant-bound `GovernanceAdmin` roles (#1093, #1103).
+- Unified tenant catalog boundaries, container visibility across discovery/external catalog surfaces and import samples, realm group validation, and grant revoke authority (#1066, #1072, #1074, #1092, #1096, #1102, #1112).
+- Hardened consent cache invalidation, runtime async-job policy fingerprint verification, governance write atomicity, virtual filter sync/ownership, app-only self-widening guards, scope quotas, and `DENY` masking-rule ranking (#1046, #1094, #1097, #1100, #1111).
+
 ## [1.10.7] - 2026-11-24
 
 ### Fixed
