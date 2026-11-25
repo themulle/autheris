@@ -216,6 +216,22 @@ public sealed class ErrorSanitizingFilterCodeTests
         result.Message.ShouldNotContain("secret");
     }
 
+    [Theory]
+    [InlineData("Production")]
+    [InlineData("Development")]
+    public void Issue1107_TimeBucketLimitExceeded_PassesWithFixedMessageNamingTheMax(string env)
+    {
+        var error = ErrorBuilder.New().SetMessage("limit 5000 for table secret_tbl").SetCode("AGGREGATION_TIME_BUCKET_LIMIT_EXCEEDED").Build();
+
+        var result = CreateFilter(env).OnError(error);
+
+        result.Code.ShouldBe("AGGREGATION_TIME_BUCKET_LIMIT_EXCEEDED");
+        result.Message.ShouldBe(Autheris.GraphQL.Catalog.AggregateErrors.TimeBucketLimitExceededMessage);
+        result.Message.ShouldContain("1000");
+        result.Message.ShouldNotContain("secret_tbl");
+        result.Message.ShouldNotContain("5000");
+    }
+
     /// <summary>
     /// #1009 (Mega-PR 3C): GraphQL <c>requestTableAccess</c> submits through the permission request engine. Its expected refusals keep their
     /// stable code with a fixed message (never the thrower text, never an internal server error); a hidden and an unknown target share one code.

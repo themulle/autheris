@@ -78,6 +78,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "AGG_NEGATED_FILTER_REJECTED",
         "AGGREGATION_PRIVACY_RESTRICTED",
         "AGGREGATION_TIME_BUCKET_UNSUPPORTED",
+        "AGGREGATION_TIME_BUCKET_LIMIT_EXCEEDED",
         "AGGREGATION_NOT_SUPPORTED",
         "UNKNOWN_METRIC",
         "METRIC_FILTER_INVALID",
@@ -173,6 +174,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         ["AGG_NEGATED_FILTER_REJECTED"] = "The aggregation filter is rejected by the privacy policy.",
         ["AGGREGATION_PRIVACY_RESTRICTED"] = "The requested aggregate is not available under the privacy policy.",
         ["AGGREGATION_TIME_BUCKET_UNSUPPORTED"] = "Time bucketing is not supported for this column.",
+        ["AGGREGATION_TIME_BUCKET_LIMIT_EXCEEDED"] = "Time-bucketed aggregation queries cannot exceed a limit of 1000 groups. Lower limit to 1000 or less.",
         ["AGGREGATION_NOT_SUPPORTED"] = "The requested aggregation is not supported for this dataset.",
         ["UNKNOWN_METRIC"] = "The metric is not available.",
         ["METRIC_FILTER_INVALID"] = "The metric filter does not fit the dimension type.",
@@ -213,6 +215,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "ACCESS_REQUEST_NOT_PENDING",
         "READ_ONLY_TOKEN",
         "AGGREGATION_TIME_BUCKET_UNSUPPORTED",
+        "AGGREGATION_TIME_BUCKET_LIMIT_EXCEEDED",
         "ROW_POLICY_EXPRESSION_NOT_ALLOWED"
     };
 

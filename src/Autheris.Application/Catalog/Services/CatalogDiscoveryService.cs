@@ -175,21 +175,12 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
         var tableDescription = tableResolved?.Description ?? metadata.Table.Description;
         var tableLongDescription = tableResolved?.LongDescription ?? metadata.Table.LongDescription;
 
-        // I404-SC-L1/L2/L4: declared keys and indexes are reported only as a whole and only when every column is Clear for this
-        // caller: the caller's resolved access level (shared with describe_dataset) and the catalog masking state must both say Clear.
+        // I404-SC-L1/L2/L4, #1105: declared keys and indexes are reported only as a whole and only when every column is Clear or Mask for
+        // this caller (the resolved access level shared with describe_dataset); a denied, hidden or unresolved column omits them whole.
         var callerLevels = await ResolveCallerColumnLevelsAsync(metadata, context, ct).ConfigureAwait(false);
         var callerClear = Autheris.Application.DataSources.Services.DatasetIndexProjection.ClearSet(callerLevels);
-        var clear = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var column in metadata.Columns)
-        {
-            if (callerClear.Contains(column.ColumnName)
-                && string.Equals(MaskingStateOf(metadata, column), "Clear", StringComparison.OrdinalIgnoreCase))
-            {
-                clear.Add(column.ColumnName);
-            }
-        }
-
-        var keys = Autheris.Application.DataSources.Services.DatasetIndexProjection.Project(metadata, clear);
+        var keys = Autheris.Application.DataSources.Services.DatasetIndexProjection.Project(
+            metadata, Autheris.Application.DataSources.Services.DatasetIndexProjection.VisibleSet(callerLevels));
         var pkSet = new HashSet<string>(keys.PrimaryKeyColumns, StringComparer.OrdinalIgnoreCase);
 
         var hiddenCatalogTextCols = await Autheris.Application.Policy.Classification.ClassificationAccessResolver
