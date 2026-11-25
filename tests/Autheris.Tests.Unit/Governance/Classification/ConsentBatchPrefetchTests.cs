@@ -118,4 +118,95 @@ public sealed class ConsentBatchPrefetchTests
         prefetch.TryGetActiveConsents([User], Orders, ReadAt + ConsentBatchPrefetch.MaxAge + TimeSpan.FromMilliseconds(1), Tenant, out _).ShouldBeFalse();
         prefetch.TryGetActivePatternConsents(Tenant, ReadAt + ConsentBatchPrefetch.MaxAge + TimeSpan.FromMilliseconds(1), out _).ShouldBeFalse();
     }
+
+    [Fact]
+    public async Task PatternPrefetch_FiltersBySubjectsAndExcludesNonDataGrants()
+    {
+        static Consent PatternGrant(Sid grantee, PermissionGrantKind kind = PermissionGrantKind.Data, ConsentEffect effect = ConsentEffect.Allow, DateTimeOffset? from = null) => new()
+        {
+            Id = Guid.NewGuid(),
+            TenantId = Tenant,
+            DataSource = "sales",
+            ObjectPattern = "sales.dbo.*",
+            TableIdentifier = default,
+            GranteeType = grantee == Group ? GranteeType.Group : GranteeType.User,
+            GranteeSid = grantee,
+            Effect = effect,
+            GrantKind = kind,
+            ValidFrom = from ?? ReadAt.AddDays(-1),
+            ValidTo = ReadAt.AddDays(5)
+        };
+
+        var userData = PatternGrant(User);
+        var groupData = PatternGrant(Group);
+        var strangerData = PatternGrant(Stranger);
+        var userUnmask = PatternGrant(User, kind: PermissionGrantKind.Unmask);
+        var allPatterns = new[] { userData, groupData, strangerData, userUnmask };
+        var inner = new TestInMemoryConsentRepository(allPatterns);
+        var spy = new PatternMethodRecordingRepo(inner, allPatterns);
+
+        var prefetch = await ConsentBatchPrefetch.LoadAsync(spy, [User, Group], [Orders], Tenant, ReadAt, default);
+
+        spy.SubjectFilteredPatternCalls.ShouldBe(1);
+        spy.UnfilteredPatternCalls.ShouldBe(0);
+
+        prefetch.TryGetActivePatternConsents([User], Tenant, ReadAt, out var userOnly).ShouldBeTrue();
+        userOnly.Select(static c => c.Id).ShouldBe([userData.Id]);
+
+        prefetch.TryGetActivePatternConsents([User, Group], Tenant, ReadAt, out var both).ShouldBeTrue();
+        both.Select(static c => c.Id).ShouldBe([userData.Id, groupData.Id], ignoreOrder: true);
+
+        prefetch.TryGetActivePatternConsents([User, Stranger], Tenant, ReadAt, out _).ShouldBeFalse();
+    }
+
+    private sealed class PatternMethodRecordingRepo(IConsentRepository inner, IReadOnlyList<Consent> allConsents) : IConsentRepository
+    {
+        public int SubjectFilteredPatternCalls { get; private set; }
+        public int UnfilteredPatternCalls { get; private set; }
+
+        public Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<Consent>>> GetActiveConsentsForSubjectsBatchAsync(
+            IEnumerable<Sid> subjects, IReadOnlyCollection<TableIdentifier> tables, DateTimeOffset atTime, TenantId tenantId, CancellationToken ct = default) =>
+            inner.GetActiveConsentsForSubjectsBatchAsync(subjects, tables, atTime, tenantId, ct);
+
+        public Task<IReadOnlyList<Consent>> GetActiveConsentsForSubjectsAsync(
+            IEnumerable<Sid> subjects, TableIdentifier table, DateTimeOffset atTime, TenantId? tenantId, CancellationToken ct = default) =>
+            inner.GetActiveConsentsForSubjectsAsync(subjects, table, atTime, tenantId, ct);
+
+        public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(
+            IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default) =>
+            inner.GetAllActiveConsentsForSubjectsAsync(subjects, roles, atTime, tenantId, ct);
+
+        public Task<IReadOnlyList<Consent>> GetActivePatternConsentsAsync(TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default)
+        {
+            UnfilteredPatternCalls++;
+            return Task.FromResult<IReadOnlyList<Consent>>(allConsents.Where(c => c.IsPatternGrant && c.TenantId == tenantId && c.IsActive(atTime)).ToList());
+        }
+
+        public Task<IReadOnlyList<Consent>> GetPatternConsentsWithPendingDeniesAsync(TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default)
+        {
+            UnfilteredPatternCalls++;
+            return Task.FromResult<IReadOnlyList<Consent>>(allConsents.Where(c => c.IsPatternGrant && c.TenantId == tenantId && (c.IsActive(atTime) || (c.Effect == ConsentEffect.Deny && c.ValidFrom > atTime))).ToList());
+        }
+
+        public Task<IReadOnlyList<Consent>> GetPatternConsentsForSubjectsWithPendingDeniesAsync(
+            IEnumerable<Sid> subjects, TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default)
+        {
+            SubjectFilteredPatternCalls++;
+            var set = subjects.ToHashSet();
+            return Task.FromResult<IReadOnlyList<Consent>>(allConsents.Where(c =>
+                c.IsPatternGrant && c.TenantId == tenantId &&
+                c.GrantKind == PermissionGrantKind.Data &&
+                c.GranteeSid is { } sid && set.Contains(sid) &&
+                (c.IsActive(atTime) || (c.Effect == ConsentEffect.Deny && c.ValidFrom > atTime))).ToList());
+        }
+
+        public Task<Consent> CreateConsentAsync(Consent consent, CancellationToken ct = default) => inner.CreateConsentAsync(consent, ct);
+        public Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default) => inner.GetConsentByIdAsync(consentId, ct);
+        public Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, Autheris.Domain.Security.ConsentRevocationAuthority authority, CancellationToken ct = default) => inner.RevokeConsentAsync(consentId, revokedBySid, reason, authority, ct);
+        public Task<IReadOnlyList<Consent>> GetExpiringConsentsAsync(DateTimeOffset threshold, int maxResults = 1000, CancellationToken ct = default) => inner.GetExpiringConsentsAsync(threshold, maxResults, ct);
+        public Task<IReadOnlyList<Consent>> GetActiveConsentsByConsentRequestIdAsync(Guid consentRequestId, DateTimeOffset atTime, CancellationToken ct = default) => inner.GetActiveConsentsByConsentRequestIdAsync(consentRequestId, atTime, ct);
+        public Task<bool> RevokeSystemConsentAsync(Guid consentId, Guid consentRequestId, Sid revokedBySid, string reason, CancellationToken ct = default) => inner.RevokeSystemConsentAsync(consentId, consentRequestId, revokedBySid, reason, ct);
+        public Task<Autheris.Application.Governance.Paging.ConsentPage> GetConsentPageAsync(Autheris.Application.Governance.Paging.ConsentPageQuery query, CancellationToken ct = default) => inner.GetConsentPageAsync(query, ct);
+        public Task ReplaceConsentsAsync(IReadOnlyList<Guid> revokeConsentIds, IReadOnlyList<Consent> create, Sid actor, string reason, Autheris.Domain.Security.ConsentRevocationAuthority authority, IReadOnlyList<AuditLogEntry>? auditEntries = null, CancellationToken ct = default) => inner.ReplaceConsentsAsync(revokeConsentIds, create, actor, reason, authority, auditEntries, ct);
+    }
 }

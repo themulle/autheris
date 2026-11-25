@@ -46,13 +46,7 @@ public sealed partial class TableAccessPolicy
 
         // RR-L4-06: epoch snapshot BEFORE loading consents (compare-and-set on cache write)
         var epochAtLoad = useCache ? await _cacheService!.GetEpochSnapshotAsync(table, ct).ConfigureAwait(false) : 0;
-        IEnumerable<Sid> userSids = query.AllUserSids != null && query.AllUserSids.Count > 0
-            ? query.AllUserSids
-            : [query.UserSid];
-        var subjects = userSids
-            .Concat(query.GroupSids)
-            .Distinct()
-            .ToList();
+        var subjects = query.GetEffectiveSubjectSids();
         var now = _timeProvider.GetUtcNow();
         // Issue #1043: a batch of decisions reads the consents once (ConsentBatchPrefetch re-applies the per-table rules at `now`).
         // A decision built from prefetched consents is never written to the decision cache: the prefetch was read before the epoch

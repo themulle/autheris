@@ -169,6 +169,21 @@ public sealed partial class TableAccessPolicy
         return current;
     }
 
+    internal static EffectiveProtection DefaultConfidentialProtectionInternal(TableMetadata metadata) =>
+        DefaultConfidentialProtection(metadata);
+
+    internal static bool AreGroupsComplete(TableAccessQuery query, TimeProvider timeProvider)
+    {
+        var principal = query.Principal;
+        var hasPipelineMarker = principal?.Claims.Any(static c =>
+            string.Equals(c.Type, GroupResolutionClaims.MarkerClaimType, StringComparison.Ordinal) &&
+            string.Equals(c.Issuer, IdentityClaimIssuers.Pipeline, StringComparison.Ordinal)) == true;
+        var groupStatus = hasPipelineMarker
+            ? GroupResolutionClaims.Read(principal, timeProvider.GetUtcNow())
+            : GroupResolutionStatus.Complete;
+        return groupStatus == GroupResolutionStatus.Complete;
+    }
+
     private static EffectiveProtection DefaultConfidentialProtection(TableMetadata metadata) =>
         new(
             Container: ContainerDefaults.Unassigned.Container,

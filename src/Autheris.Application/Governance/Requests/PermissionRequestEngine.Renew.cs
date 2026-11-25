@@ -126,9 +126,10 @@ public sealed partial class PermissionRequestEngine
         {
             var capacity = await EvaluateRenewalWithGrantPolicyAsync(renewer, consent, probe, requestKind, newValidTo, now, ct).ConfigureAwait(false);
 
+            var renewedConsentId = Guid.NewGuid();
             var renewedConsent = new Consent
             {
-                Id = Guid.NewGuid(),
+                Id = renewedConsentId,
                 TableId = consent.TableId,
                 TableIdentifier = consent.TableIdentifier,
                 DataSource = consent.DataSource,
@@ -151,9 +152,18 @@ public sealed partial class PermissionRequestEngine
                 TargetColumns = consent.TargetColumns,
                 ProfileAssignmentId = consent.ProfileAssignmentId,
                 Description = consent.Description,
-                ColumnRules = consent.ColumnRules,
-                RowFilters = consent.RowFilters,
-                WriteRules = consent.WriteRules,
+                ColumnRules = consent.ColumnRules.Select(r => new ConsentColumnRule
+                {
+                    Id = Guid.NewGuid(), ConsentId = renewedConsentId, TableColumnId = r.TableColumnId,
+                    ColumnName = r.ColumnName, AccessLevel = r.AccessLevel, ApplicableScopes = r.ApplicableScopes
+                }).ToList(),
+                RowFilters = consent.RowFilters.Select(f => new ConsentRowFilter
+                {
+                    Id = Guid.NewGuid(), ConsentId = renewedConsentId, FilterGroup = f.FilterGroup, TableColumnId = f.TableColumnId,
+                    ColumnName = f.ColumnName, Operator = f.Operator, ValueType = f.ValueType, ValueJson = f.ValueJson,
+                    ValueSource = f.ValueSource, UserAttribute = f.UserAttribute, FilterType = f.FilterType
+                }).ToList(),
+                WriteRules = consent.WriteRules.Select(w => w with { Id = Guid.NewGuid() }).ToList(),
                 RowScope = consent.RowScope,
                 ApprovingOwners = consent.ApprovingOwners
             };

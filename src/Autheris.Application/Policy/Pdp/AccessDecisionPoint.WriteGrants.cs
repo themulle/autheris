@@ -98,7 +98,7 @@ public sealed partial class AccessDecisionPoint
             }
         }
 
-        var query = new TableAccessQuery(
+        var baseQuery = new TableAccessQuery(
             subject.UserSid,
             subject.TenantId,
             subject.GroupSids,
@@ -111,7 +111,18 @@ public sealed partial class AccessDecisionPoint
             AllUserSids: principal.GetAllUserSids(),
             Principal: principal,
             SupplementalConsents: request.SupplementalConsents,
-            Protection: writeProtection);
+            Protection: writeProtection)
+        {
+            ColumnRowPrefetch = request.ColumnRowPrefetch,
+            ConsentPrefetch = request.ConsentPrefetch,
+            TenantPolicyPrefetch = request.TenantPolicyPrefetch
+        };
+        var groupsComplete = TableAccessPolicy.AreGroupsComplete(baseQuery, _timeProvider);
+        var query = baseQuery with
+        {
+            Unmask = new Autheris.Application.Policy.Protection.UnmaskCoverageSource(
+                c => TableAccessPolicy.ResolveUnmaskCoverageCoreAsync(baseQuery, groupsComplete, _unmaskResolver, c))
+        };
 
         if (TableAccessPolicy.CheckSchemaContract(query, _contractManager) is { } contractDenial)
         {
@@ -168,12 +179,33 @@ public sealed partial class AccessDecisionPoint
         var grantIdSet = grantDecision.GrantIds.ToHashSet(StringComparer.OrdinalIgnoreCase);
 
         var (readAccess, readUnconstrained) = ResolveReadColumnAccessForWrite(principal, subject, metadata, roles, matchingConsents);
-        var columnAccess = AddFilterableColumnsForWriteOnlyCaller(readAccess, metadata, matchingConsents);
+        var hasReadSide = HasReadSideConsents(matchingConsents);
+        var columnAccess = AddFilterableColumnsForWriteOnlyCaller(readAccess, metadata, hasReadSide);
         var decision = TableAccessDecision.Allowed(
             table,
             columnAccess,
             rowFilterSql: null,
             hasUnconstrainedColumnAllow: readUnconstrained);
+
+        decision = _policy is not null
+            ? await _policy.ApplyWriteClassificationAsync(decision, query, hasReadSide, ct).ConfigureAwait(false)
+            : await TableAccessPolicy.ApplyWriteClassificationCoreAsync(
+                decision,
+                query,
+                matchingConsents.MatchingAllows.Concat(matchingConsents.AllMatchingDenies).ToList(),
+                hasReadSide,
+                _typedPolicies?.ClassificationResolver,
+                ct).ConfigureAwait(false);
+
+        decision = await TableAccessPolicy.ApplyProtectionMasksCoreAsync(
+            decision,
+            query,
+            writeProtection ?? TableAccessPolicy.DefaultConfidentialProtectionInternal(metadata),
+            groupsComplete,
+            _unmaskResolver,
+            _typedPolicies?.ClassificationResolver,
+            authorizationHooksActive: false,
+            ct).ConfigureAwait(false);
 
         if (grantDecision.RowScope == WriteRowScope.OwnRows)
         {
@@ -237,19 +269,18 @@ public sealed partial class AccessDecisionPoint
             .ToList();
 
         var writableColumns = FilterWritableColumns(grantDecision.WritableColumns, metadata, writeOp);
-        if (decision.ColumnAccess.Count > 0 && authOpt?.Enabled == true && _authPluginHost?.HasAuthorizationHooks == true)
+        if (decision.ColumnAccess.Count > 0)
         {
-            // Preserve hook-denied column restrictions if any hook explicitly narrowed writable columns.
             writableColumns = writableColumns
                 .Where(c => !decision.ColumnAccess.TryGetValue(c, out var lvl) || lvl != ColumnAccessLevel.Deny)
                 .ToHashSet(StringComparer.OrdinalIgnoreCase);
         }
 
-        if (decision.ColumnMasks == null && _typedPolicies?.MaskPolicies != null && !metadata.IsDelegatedSource)
+        if (_typedPolicies?.MaskPolicies != null && !metadata.IsDelegatedSource)
         {
             try
             {
-                var typedMasks = _typedPolicies.MaskPolicies.ForDecision(decision, metadata, subject.TenantId);
+                var typedMasks = _typedPolicies.MaskPolicies.ForDecision(decision, metadata, subject.TenantId, decision.ColumnMasks);
                 if (typedMasks != null)
                 {
                     decision = decision with { ColumnMasks = typedMasks };
@@ -277,15 +308,17 @@ public sealed partial class AccessDecisionPoint
         };
     }
 
+    private static bool HasReadSideConsents(LoadedWriteConsents consents) =>
+        consents.AllMatchingDenies.Count > 0
+        || consents.MatchingAllows.Any(c => c.WriteRules.Count == 0 || c.ColumnRules.Count > 0);
+
     // A caller whose only grants on the table are write grants holds no read-side column rules. Its statements may still address
     // the non-sensitive columns in WHERE; catalog-sensitive columns stay Mask/Deny, so RejectMaskedReads keeps refusing them.
     private static IReadOnlyDictionary<string, ColumnAccessLevel> AddFilterableColumnsForWriteOnlyCaller(
         IReadOnlyDictionary<string, ColumnAccessLevel> columnAccess,
         TableMetadata metadata,
-        LoadedWriteConsents consents)
+        bool hasReadSide)
     {
-        bool hasReadSide = consents.AllMatchingDenies.Count > 0
-            || consents.MatchingAllows.Any(c => c.WriteRules.Count == 0 || c.ColumnRules.Count > 0);
         if (hasReadSide)
         {
             return columnAccess;
@@ -329,7 +362,7 @@ public sealed partial class AccessDecisionPoint
         var scopes = TokenAccessScope.GetScopeSet(subject.Claims);
         var readDecision = _resolutionService.ResolveAccess(
             subject.UserSid,
-            principal.GetGroupSids(),
+            subject.GroupSids,
             roles,
             metadata.Identifier,
             readRelevant,
@@ -543,20 +576,20 @@ public sealed partial class AccessDecisionPoint
         }
 
         var allUserSids = principal.GetAllUserSids();
-        var groupSids = principal.GetGroupSids();
-        var subjects = allUserSids.Concat(groupSids).Distinct().ToList();
+        var groupSids = subject.GroupSids;
+        var subjects = subject.GetEffectiveSubjectSids();
         IReadOnlyList<Consent> read = prefetch is not null && prefetch.TryGetActiveConsents(subjects, table, now, subject.TenantId, out var prefetched)
             ? prefetched
             : await _consentRepository.GetActiveConsentsForSubjectsAsync(subjects, table, now, subject.TenantId, ct).ConfigureAwait(false);
         var loaded = read
-            .Where(c => c.TenantId == subject.TenantId && c.TableIdentifier == table && c.IsActive(now))
+            .Where(c => c.TenantId == subject.TenantId && c.TableIdentifier == table && c.GrantKind == PermissionGrantKind.Data && c.IsActive(now))
             .ToList();
 
         if (supplementalConsents is { Count: > 0 })
         {
             foreach (var extra in supplementalConsents)
             {
-                if (extra.TenantId == subject.TenantId && extra.TableIdentifier == table && extra.IsActive(now) && loaded.All(e => e.Id != extra.Id))
+                if (extra.TenantId == subject.TenantId && extra.TableIdentifier == table && extra.GrantKind == PermissionGrantKind.Data && extra.IsActive(now) && loaded.All(e => e.Id != extra.Id))
                 {
                     loaded.Add(extra);
                 }

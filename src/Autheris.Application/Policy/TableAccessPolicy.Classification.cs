@@ -15,29 +15,20 @@ using TrinoSqlEngine.Governance;
 
 public sealed partial class TableAccessPolicy
 {
-    private bool NeedsClassificationEvaluation(TableAccessQuery query)
+    private static bool NeedsClassificationEvaluation(TableAccessQuery query, ClassificationAccessResolver? resolver)
     {
-        if (_classificationResolver is null || !query.Metadata.Table.IsActive)
+        if (resolver is null || !query.Metadata.Table.IsActive)
         {
             return false;
         }
 
         return query.Metadata.ColumnClassifications.Count > 0 ||
-               _classificationResolver.HasRepository;
+               resolver.HasRepository;
     }
 
-    private async Task<TableAccessDecision> ApplyClassificationAccessAsync(
-        TableAccessDecision decision,
-        TableAccessQuery query,
-        CancellationToken ct)
+    private async Task<List<Consent>> LoadClassificationConsentsAsync(TableAccessQuery query, DateTimeOffset now, CancellationToken ct)
     {
-        if (!decision.IsAllowed || !NeedsClassificationEvaluation(query))
-        {
-            return decision;
-        }
-
-        var now = _timeProvider.GetUtcNow();
-        IReadOnlyCollection<Sid> subjects = query.AllUserSids is { Count: > 0 } all ? all : SubjectsOf(query);
+        var subjects = query.GetEffectiveSubjectSids();
 
         // Issue #1043: from the batch prefetch when it covers this decision, otherwise from the repository.
         IReadOnlyList<Consent> loaded = query.ConsentPrefetch is { } consentPrefetch &&
@@ -46,10 +37,10 @@ public sealed partial class TableAccessPolicy
                 : await _consentRepository.GetActiveConsentsForSubjectsAsync(
                     subjects, query.Metadata.Identifier, now, query.Tenant, ct).ConfigureAwait(false);
         IReadOnlyList<Consent> patternConsents = query.ConsentPrefetch is { } patternPrefetch &&
-            patternPrefetch.TryGetActivePatternConsents(query.Tenant, now, out var prefetchedPatterns)
+            patternPrefetch.TryGetActivePatternConsents(subjects, query.Tenant, now, out var prefetchedPatterns)
                 ? prefetchedPatterns
-                : await _consentRepository.GetActivePatternConsentsAsync(
-                    query.Tenant, now, ct).ConfigureAwait(false);
+                : await _consentRepository.GetActivePatternConsentsForSubjectsAsync(
+                    subjects, query.Tenant, now, ct).ConfigureAwait(false);
 
         var combinedConsents = new List<Consent>(loaded.Count + patternConsents.Count + (query.SupplementalConsents?.Count ?? 0));
         var seenIds = new HashSet<Guid>();
@@ -63,11 +54,25 @@ public sealed partial class TableAccessPolicy
 
         bool isHidden = query.Metadata.Table.DiscoveryHidden;
         var applicable = combinedConsents
-            .Where(c => ConsentResolutionService.IsApplicable(
+            .Where(c => c.TenantId == query.Tenant &&
+                        ConsentResolutionService.IsApplicable(
                             c, query.Metadata.Identifier, now, query.UserSid, query.GroupSids, query.Roles, query.AllUserSids) &&
                         !(isHidden && c.IsPatternGrant && c.Effect == ConsentEffect.Allow))
             .ToList();
+        return await FilterApplicablePatternConsentsAsync(applicable, query.Metadata, now, ct).ConfigureAwait(false);
+    }
 
+    private async Task<TableAccessDecision> ApplyClassificationAccessAsync(
+        TableAccessDecision decision,
+        TableAccessQuery query,
+        CancellationToken ct)
+    {
+        if (!decision.IsAllowed || !NeedsClassificationEvaluation(query, _classificationResolver))
+        {
+            return decision;
+        }
+
+        var applicable = await LoadClassificationConsentsAsync(query, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
         var allowGrants = applicable
             .Where(c => c.Effect == ConsentEffect.Allow && (c.WriteRules.Count == 0 || c.ColumnRules.Count > 0))
             .ToList();
@@ -85,7 +90,7 @@ public sealed partial class TableAccessPolicy
             return decision;
         }
 
-        var callerScopes = ResolveClassificationCallerScopes(query);
+        var callerScopes = Autheris.Domain.Security.TokenAccessScope.GetScopeSet(query.Claims ?? query.Principal?.Claims);
         var (perGrant, combinedWinners) = await _classificationResolver!.ResolveForTableAsync(
             query.Metadata, allowGrants, query.Tenant, callerScopes, columnRowPrefetch: query.ColumnRowPrefetch, unmask: query.Unmask, ct: ct).ConfigureAwait(false);
 
@@ -126,6 +131,90 @@ public sealed partial class TableAccessPolicy
 
             decision = perCellResult.Decision;
         }
+
+        return await ApplyResolvedClassificationColumnsAsync(
+            decision, query, applicable, allowGrants, callerScopes, perGrant, combinedWinners, _classificationResolver, preserveOmittedDeny: false, ct).ConfigureAwait(false);
+    }
+
+    internal async Task<TableAccessDecision> ApplyWriteClassificationAsync(
+        TableAccessDecision decision,
+        TableAccessQuery query,
+        bool hasReadSide,
+        CancellationToken ct)
+    {
+        if (!decision.IsAllowed || !NeedsClassificationEvaluation(query, _classificationResolver))
+        {
+            return decision;
+        }
+
+        var applicable = await LoadClassificationConsentsAsync(query, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
+        return await ApplyWriteClassificationCoreAsync(
+            decision, query, applicable, hasReadSide, _classificationResolver, ct).ConfigureAwait(false);
+    }
+
+    internal static async Task<TableAccessDecision> ApplyWriteClassificationCoreAsync(
+        TableAccessDecision decision,
+        TableAccessQuery query,
+        IReadOnlyList<Consent> applicable,
+        bool hasReadSide,
+        ClassificationAccessResolver? classificationResolver,
+        CancellationToken ct)
+    {
+        if (!decision.IsAllowed || !NeedsClassificationEvaluation(query, classificationResolver))
+        {
+            return decision;
+        }
+
+        var allowGrants = applicable
+            .Where(c => c.Effect == ConsentEffect.Allow && (c.WriteRules.Count == 0 || c.ColumnRules.Count > 0))
+            .ToList();
+        if (allowGrants.Count == 0)
+        {
+            if (hasReadSide)
+            {
+                return decision;
+            }
+
+            allowGrants =
+            [
+                new Consent
+                {
+                    Id = Guid.NewGuid(),
+                    TenantId = query.Tenant,
+                    TableIdentifier = query.Metadata.Identifier,
+                    Effect = ConsentEffect.Allow,
+                    GranteeType = GranteeType.User,
+                    GranteeSid = query.UserSid,
+                    ColumnRules = []
+                }
+            ];
+        }
+
+        var callerScopes = Autheris.Domain.Security.TokenAccessScope.GetScopeSet(query.Claims ?? query.Principal?.Claims);
+        var (perGrant, combinedWinners) = await classificationResolver!.ResolveForTableAsync(
+            query.Metadata, allowGrants, query.Tenant, callerScopes, columnRowPrefetch: query.ColumnRowPrefetch, unmask: query.Unmask, ct: ct).ConfigureAwait(false);
+
+        if (perGrant.Values.All(m => m.Count == 0))
+        {
+            return decision;
+        }
+
+        return await ApplyResolvedClassificationColumnsAsync(
+            decision, query, applicable, allowGrants, callerScopes, perGrant, combinedWinners, classificationResolver, preserveOmittedDeny: true, ct).ConfigureAwait(false);
+    }
+
+    private static async Task<TableAccessDecision> ApplyResolvedClassificationColumnsAsync(
+        TableAccessDecision decision,
+        TableAccessQuery query,
+        IReadOnlyList<Consent> applicable,
+        List<Consent> allowGrants,
+        IReadOnlySet<string> callerScopes,
+        IReadOnlyDictionary<Guid, IReadOnlyDictionary<string, ColumnClassificationGrantOutcome>> perGrant,
+        IReadOnlyDictionary<string, ColumnClassificationGrantOutcome> combinedWinners,
+        ClassificationAccessResolver classificationResolver,
+        bool preserveOmittedDeny,
+        CancellationToken ct)
+    {
 
         var updatedColumns = new Dictionary<string, ColumnAccessLevel>(decision.ColumnAccess, StringComparer.OrdinalIgnoreCase);
         var denyGrants = applicable.Where(c => c.Effect == ConsentEffect.Deny).ToList();
@@ -198,12 +287,28 @@ public sealed partial class TableAccessPolicy
                 resolvedLevel = ColumnAccessLevel.Mask;
             }
 
-            if (decision.ColumnAccess.TryGetValue(colName, out var existingLevel) && existingLevel < resolvedLevel)
+            if (preserveOmittedDeny)
             {
-                resolvedLevel = existingLevel;
-            }
+                var existingLevel = decision.GetColumnAccess(colName);
+                if (existingLevel < resolvedLevel)
+                {
+                    resolvedLevel = existingLevel;
+                }
 
-            updatedColumns[colName] = resolvedLevel;
+                if (decision.ColumnAccess.ContainsKey(colName) || resolvedLevel != ColumnAccessLevel.Clear)
+                {
+                    updatedColumns[colName] = resolvedLevel;
+                }
+            }
+            else
+            {
+                if (decision.ColumnAccess.TryGetValue(colName, out var existingLevel) && existingLevel < resolvedLevel)
+                {
+                    resolvedLevel = existingLevel;
+                }
+
+                updatedColumns[colName] = resolvedLevel;
+            }
         }
 
         var specs = new Dictionary<string, MaskSpec>(StringComparer.OrdinalIgnoreCase);
@@ -229,7 +334,7 @@ public sealed partial class TableAccessPolicy
             updatedColumns.Any(kv => kv.Value == ColumnAccessLevel.Clear && !scopeClearance.Permits(kv.Key) && ClassificationMetadata.IsColumnSensitive(query.Metadata, kv.Key)))
         {
             var ruleHidden = await ClassificationAccessResolver.ResolveIndexingHiddenTextColumnsAsync(
-                query.Metadata, _classificationResolver.Repository, ct).ConfigureAwait(false);
+                query.Metadata, classificationResolver.Repository, ct).ConfigureAwait(false);
             foreach (var (colName, lvl) in updatedColumns)
             {
                 if (lvl == ColumnAccessLevel.Clear &&
@@ -298,29 +403,5 @@ public sealed partial class TableAccessPolicy
         }
 
         return raw;
-    }
-
-    private static HashSet<string> ResolveClassificationCallerScopes(TableAccessQuery query)
-    {
-        var scopes = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        var claims = query.Claims ?? query.Principal?.Claims;
-        if (claims is null)
-        {
-            return scopes;
-        }
-
-        foreach (var claim in claims)
-        {
-            if (string.Equals(claim.Type, "scp", StringComparison.OrdinalIgnoreCase) ||
-                string.Equals(claim.Type, "scope", StringComparison.OrdinalIgnoreCase))
-            {
-                foreach (var token in claim.Value.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
-                {
-                    scopes.Add(token);
-                }
-            }
-        }
-
-        return scopes;
     }
 }

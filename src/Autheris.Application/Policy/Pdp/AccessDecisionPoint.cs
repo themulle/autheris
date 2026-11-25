@@ -56,6 +56,7 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
     private readonly IProtectionSnapshotProvider? _protectionProvider;
     private readonly Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? _accessPolicySettings;
     private readonly Autheris.Application.Identity.IIdentityRealmRegistry? _realmRegistry;
+    private readonly Autheris.Application.Policy.Protection.IUnmaskGrantResolver? _unmaskResolver;
 
     public AccessDecisionPoint(
         IOptions<GatewayOptions> options,
@@ -108,6 +109,7 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         _catalogVersionProvider = catalogVersionProvider;
         _ownershipRepository = ownershipRepository;
         _productRepository = productRepository;
+        _unmaskResolver = unmaskResolver;
         _writeGrantEvaluator = writeGrantEvaluator ?? (_consentRepository != null
             ? new Autheris.Application.Policy.WriteGrants.WriteGrantEvaluator(_consentRepository, policyDependencyIndex, _timeProvider)
             : null);
@@ -694,8 +696,7 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         }
 
         // Every subject set a decision reads with: the token's user SIDs, the user SID and the group SIDs.
-        var subjects = new HashSet<Sid>(subject.Principal?.GetAllUserSids() ?? []) { subject.UserSid };
-        subjects.UnionWith(subject.GroupSids);
+        var subjects = subject.GetEffectiveSubjectSids();
         return await Autheris.Application.Policy.ConsentBatchPrefetch.LoadAsync(
             _consentRepository, subjects, objects.Select(static o => o.Identifier).ToList(), subject.TenantId, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
     }

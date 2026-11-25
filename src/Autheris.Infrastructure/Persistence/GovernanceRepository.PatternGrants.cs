@@ -25,21 +25,44 @@ public partial class GovernanceRepository
         "AND o.is_active = 1 AND d.valid_from <= @now AND d.valid_to >= @now";
 
     public Task<IReadOnlyList<Consent>> GetActivePatternConsentsAsync(TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default) =>
-        ReadAndHydratePatternConsentsAsync(TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), atTime, c => !c.IsActive(atTime), ct);
+        ReadAndHydratePatternConsentsAsync(TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), subjectSet: null, atTime, c => !c.IsActive(atTime), ct);
+
+    public Task<IReadOnlyList<Consent>> GetActivePatternConsentsForSubjectsAsync(
+        IEnumerable<Sid> subjects, TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(subjects);
+        var subjectSet = subjects as HashSet<Sid> ?? subjects.ToHashSet();
+        var scopedTenant = TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents));
+        return subjectSet.Count == 0
+            ? Task.FromResult<IReadOnlyList<Consent>>([])
+            : ReadAndHydratePatternConsentsAsync(scopedTenant, subjectSet, atTime, c => !c.IsActive(atTime), ct);
+    }
 
     public Task<IReadOnlyList<Consent>> GetPatternConsentsWithPendingDeniesAsync(TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default) =>
-        ReadAndHydratePatternConsentsAsync(TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), atTime, c => !c.IsActive(atTime) && !(c.Effect == ConsentEffect.Deny && c.ValidFrom > atTime), ct);
+        ReadAndHydratePatternConsentsAsync(TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), subjectSet: null, atTime, c => !c.IsActive(atTime) && !(c.Effect == ConsentEffect.Deny && c.ValidFrom > atTime), ct);
+
+    public Task<IReadOnlyList<Consent>> GetPatternConsentsForSubjectsWithPendingDeniesAsync(
+        IEnumerable<Sid> subjects, TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(subjects);
+        var subjectSet = subjects as HashSet<Sid> ?? subjects.ToHashSet();
+        var scopedTenant = TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents));
+        return subjectSet.Count == 0
+            ? Task.FromResult<IReadOnlyList<Consent>>([])
+            : ReadAndHydratePatternConsentsAsync(scopedTenant, subjectSet, atTime, c => !c.IsActive(atTime) && !(c.Effect == ConsentEffect.Deny && c.ValidFrom > atTime), ct);
+    }
 
     public Task<IReadOnlyList<Consent>> GetActiveInternalPatternConsentsAsync(DateTimeOffset atTime, CancellationToken ct = default) =>
-        ReadAndHydratePatternConsentsAsync(null, atTime, c => !c.IsActive(atTime) || c.Effect != ConsentEffect.Allow || c.WorkflowMode != ConsentWorkflowMode.Internal, ct);
+        ReadAndHydratePatternConsentsAsync(null, subjectSet: null, atTime, c => !c.IsActive(atTime) || c.Effect != ConsentEffect.Allow || c.WorkflowMode != ConsentWorkflowMode.Internal, ct);
 
-    private async Task<IReadOnlyList<Consent>> ReadAndHydratePatternConsentsAsync(TenantId? tenantId, DateTimeOffset atTime, Predicate<Consent> exclude, CancellationToken ct)
+    private async Task<IReadOnlyList<Consent>> ReadAndHydratePatternConsentsAsync(
+        TenantId? tenantId, HashSet<Sid>? subjectSet, DateTimeOffset atTime, Predicate<Consent> exclude, CancellationToken ct)
     {
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         var seen = new HashSet<Guid>();
         var consents = new List<Consent>();
         await ConsentPatternSql.ReadActivePatternConsentsForDomainAsync(
-            conn, domain: null, tenantId, atTime, subjectSet: null, seen, consents, ct).ConfigureAwait(false);
+            conn, domain: null, tenantId, atTime, subjectSet, seen, consents, ct).ConfigureAwait(false);
         consents.RemoveAll(exclude);
         await HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
         return consents;
@@ -223,14 +246,47 @@ public partial class GovernanceRepository
             List<Consent> consents,
             CancellationToken ct)
         {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = (tenantId != null, !string.IsNullOrWhiteSpace(domain)) switch
+            var baseSql = (tenantId != null, !string.IsNullOrWhiteSpace(domain)) switch
             {
                 (true, true) => SelectActivePatternsByTenantDomainSql,
                 (true, false) => SelectActivePatternsByTenantSql,
                 (false, true) => SelectActivePatternsByDomainSql,
                 (false, false) => SelectActivePatternsSql
             };
+
+            if (subjectSet == null)
+            {
+                await ReadActivePatternConsentsChunkAsync(conn, baseSql, domain, tenantId, atTime, subjectSet: null, subjectChunk: null, seen, consents, ct).ConfigureAwait(false);
+                return;
+            }
+
+            var normalized = ConsentSubjectFilter.DistinctNormalized(subjectSet);
+            if (normalized.Length == 0)
+            {
+                return;
+            }
+
+            foreach (var chunk in ConsentSubjectFilter.Chunks(normalized))
+            {
+                var sql = baseSql + ConsentSubjectFilter.InListPredicate(chunk.Count);
+                await ReadActivePatternConsentsChunkAsync(conn, sql, domain, tenantId, atTime, subjectSet, chunk, seen, consents, ct).ConfigureAwait(false);
+            }
+        }
+
+        private static async Task ReadActivePatternConsentsChunkAsync(
+            DbConnection conn,
+            string sql,
+            string? domain,
+            TenantId? tenantId,
+            DateTimeOffset atTime,
+            HashSet<Sid>? subjectSet,
+            ArraySegment<string>? subjectChunk,
+            HashSet<Guid> seen,
+            List<Consent> consents,
+            CancellationToken ct)
+        {
+            await using var cmd = conn.CreateCommand();
+            cmd.CommandText = sql;
 
             if (tenantId != null)
             {
@@ -240,6 +296,14 @@ public partial class GovernanceRepository
             if (!string.IsNullOrWhiteSpace(domain))
             {
                 cmd.AddBound("@domain", domain.Trim());
+            }
+
+            if (subjectChunk is { Count: > 0 } chunk)
+            {
+                for (var si = 0; si < chunk.Count; si++)
+                {
+                    cmd.AddBound("@s" + si, chunk[si]);
+                }
             }
 
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
