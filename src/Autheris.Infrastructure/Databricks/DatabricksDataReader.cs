@@ -45,7 +45,41 @@ internal sealed class DatabricksDataReader : DbDataReader, IDbColumnSchemaGenera
     public override byte GetByte(int ordinal) => _inner.GetByte(ordinal);
     public override long GetBytes(int ordinal, long dataOffset, byte[]? buffer, int bufferOffset, int length) => _inner.GetBytes(ordinal, dataOffset, buffer, bufferOffset, length);
     public override char GetChar(int ordinal) => _inner.GetChar(ordinal);
-    public override long GetChars(int ordinal, long dataOffset, char[]? buffer, int bufferOffset, int length) => _inner.GetChars(ordinal, dataOffset, buffer, bufferOffset, length);
+    /// <summary>
+    /// Streams a string cell. <see cref="DataTableReader.GetChars"/> only supports <c>char[]</c> cells and throws
+    /// <see cref="InvalidCastException"/> for the string cells this reader stores (#1140), so the copy is done here following
+    /// the ADO.NET contract: a null buffer returns the value length, otherwise up to <paramref name="length"/> characters from
+    /// <paramref name="dataOffset"/> are copied and their count is returned (0 at the end of the value).
+    /// </summary>
+    public override long GetChars(int ordinal, long dataOffset, char[]? buffer, int bufferOffset, int length)
+    {
+        if (_inner.GetValue(ordinal) is not string text)
+        {
+            return _inner.GetChars(ordinal, dataOffset, buffer, bufferOffset, length);
+        }
+
+        if (buffer is null)
+        {
+            return text.Length;
+        }
+
+        ArgumentOutOfRangeException.ThrowIfNegative(dataOffset);
+        ArgumentOutOfRangeException.ThrowIfNegative(bufferOffset);
+        ArgumentOutOfRangeException.ThrowIfNegative(length);
+        if (bufferOffset + length > buffer.Length)
+        {
+            throw new ArgumentOutOfRangeException(nameof(length), "The buffer is too small for the requested length.");
+        }
+
+        if (dataOffset >= text.Length)
+        {
+            return 0;
+        }
+
+        var count = (int)Math.Min(length, text.Length - dataOffset);
+        text.CopyTo((int)dataOffset, buffer, bufferOffset, count);
+        return count;
+    }
     public override string GetDataTypeName(int ordinal) => _schema[ordinal].DataTypeName ?? _inner.GetDataTypeName(ordinal);
     public override DateTime GetDateTime(int ordinal) => _inner.GetDateTime(ordinal);
     public override decimal GetDecimal(int ordinal) => _inner.GetDecimal(ordinal);
