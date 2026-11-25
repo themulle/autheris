@@ -120,7 +120,7 @@ public sealed class ProfileAssignmentMaintenanceService(
             MaskingPolicyMode.Default,
             Requester: requesterSid.Value,
             Justification: justification));
-        if (!grantDecision.Allowed && !string.Equals(grantDecision.ErrorCode, GrantErrorCodes.FourEyesRequired, StringComparison.Ordinal))
+        if (!grantDecision.Allowed)
         {
             return;
         }

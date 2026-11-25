@@ -180,43 +180,6 @@ public class InfrastructureTests : IDisposable
     }
 
     [Fact]
-    public async Task GovernanceLifecycle_ConsentRequestAndApproval_EnforcesSeparationOfDuties()
-    {
-        var requesterSid = new Sid("S-1-5-21-REQUESTER");
-        var approverSid = new Sid("S-1-5-21-APPROVER");
-        var table = new TableIdentifier("finance", "dbo", "finance_table_1");
-
-        var meta = await _repository.GetTableMetadataAsync(table);
-        meta.ShouldNotBeNull();
-
-        var req = new ConsentRequest
-        {
-            TenantId = Autheris.Tests.Common.TestTenants.Default,
-            TableId = meta.Table.Id,
-            TableIdentifier = table,
-            RequesterSid = requesterSid,
-            RequestedGranteeType = GranteeType.User,
-            RequestedGranteeRef = requesterSid.Value,
-            BusinessJustification = "Q3 Financial Audit",
-            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(30)
-        };
-
-        var created = await _repository.CreateConsentRequestAsync(req);
-        created.Status.ShouldBe("PENDING");
-
-        // 1. Separation of duties: requester cannot approve own request
-        Should.Throw<InvalidOperationException>(async () =>
-        {
-            await _repository.ApproveConsentRequestStepAsync(created.Id, requesterSid);
-        });
-
-        // 2. Legitimate approver (the owner group of the table's container, #1009 D13) approves
-        await ContainerOwnerSeed.SetOwnerAsync(_repository.RawConnection(), Autheris.Tests.Common.TestTenants.Default.Value, meta.Table.Id, approverSid.Value);
-        var approved = await _repository.ApproveConsentRequestStepAsync(created.Id, approverSid);
-        approved.Status.ShouldBe("APPROVED");
-    }
-
-    [Fact]
     public async Task GetRelationsForTable_ReturnsConfiguredRelation()
     {
         var parentTable = new TableIdentifier("finance", "dbo", "finance_table_1");
@@ -232,47 +195,6 @@ public class InfrastructureTests : IDisposable
         itemsRel.JoinKeysParent.ShouldBe(["id"]);
         itemsRel.JoinKeysChild.ShouldBe(["parent_id"]);
         itemsRel.Cardinality.ShouldBe(RelationCardinality.OneToMany);
-    }
-
-    [Fact]
-    public async Task FourEyesWorkflow_RequiresTwoDistinctApprovers()
-    {
-        // finance_table_5 carries an encrypted/PII email column requiring four-eyes approval
-        var sensitiveTable = await _repository.GetTableMetadataAsync(new TableIdentifier("finance", "dbo", "finance_table_5"));
-        sensitiveTable.ShouldNotBeNull();
-        ClassificationMetadata.IsTableSensitive(sensitiveTable).ShouldBeTrue();
-
-        var requesterSid = new Sid("S-1-5-21-REQ-4EYES");
-        var approver1 = new Sid("S-1-5-21-1000-1000-1000-1002");
-        var approver2 = new Sid("S-1-5-21-1000-1000-1000-1003");
-
-        var request = await _repository.CreateConsentRequestAsync(new ConsentRequest
-        {
-            TenantId = Autheris.Tests.Common.TestTenants.Default,
-            TableId = sensitiveTable.Table.Id,
-            TableIdentifier = sensitiveTable.Identifier,
-            RequesterSid = requesterSid,
-            RequestedGranteeType = GranteeType.User,
-            RequestedGranteeRef = requesterSid.Value,
-            BusinessJustification = "Critical audit of sensitive table",
-            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7)
-        });
-
-        // Step 1: Approver 1 (owner group of the container, #1009 D13) approves -> status becomes PENDING_SECOND_APPROVAL
-        await ContainerOwnerSeed.SetOwnerAsync(_repository.RawConnection(), Autheris.Tests.Common.TestTenants.Default.Value, sensitiveTable.Table.Id, approver1.Value);
-        var step1 = await _repository.ApproveConsentRequestStepAsync(request.Id, approver1, requireSecondApprover: true);
-        step1.Status.ShouldBe("PENDING_SECOND_APPROVAL");
-
-        // Same approver trying again must fail
-        await Should.ThrowAsync<InvalidOperationException>(async () =>
-        {
-            await _repository.ApproveConsentRequestStepAsync(request.Id, approver1, requireSecondApprover: true);
-        });
-
-        // Step 2: the ownership moves to Approver 2, a distinct person, who approves -> status becomes APPROVED
-        await ContainerOwnerSeed.SetOwnerAsync(_repository.RawConnection(), Autheris.Tests.Common.TestTenants.Default.Value, sensitiveTable.Table.Id, approver2.Value);
-        var step2 = await _repository.ApproveConsentRequestStepAsync(request.Id, approver2, requireSecondApprover: true);
-        step2.Status.ShouldBe("APPROVED");
     }
 
     [Fact]

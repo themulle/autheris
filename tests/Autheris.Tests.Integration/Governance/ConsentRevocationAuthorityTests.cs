@@ -259,7 +259,7 @@ public sealed class ConsentRevocationAuthorityTests : IDisposable
     }
 
     [Fact]
-    public async Task Approve_RoleMembersRowWithoutOwnership_IsDenied()
+    public async Task Decide_RoleMembersRowWithoutOwnership_IsDenied()
     {
         await EnsureTableAsync();
         await SeedRoleMemberAsync(Bob, "GovernanceAdmin");
@@ -275,7 +275,7 @@ public sealed class ConsentRevocationAuthorityTests : IDisposable
             RequestedValidTo = DateTimeOffset.UtcNow.AddDays(7)
         });
 
-        // Without a container owner group nobody decides at the store level (#1009 D13).
-        await Should.ThrowAsync<UnauthorizedAccessException>(() => _repo.ApproveConsentRequestStepAsync(request.Id, Bob));
+        // Without a container owner group nobody decides at the store level (#1009 D13); approvals run through the engine (issue #1132).
+        await Should.ThrowAsync<UnauthorizedAccessException>(() => _repo.RejectConsentRequestAsync(request.Id, Bob, "no ownership"));
     }
 }

@@ -81,65 +81,6 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
             repo.RevokeConsentAsync(Guid.NewGuid(), new Sid("S-1-5-21-ADMIN"), "test", adminAuth));
     }
 
-    [Fact]
-    public async Task ApproveConsentRequest_HighSensitivityTable_EnforcesFourEyesWhenRequiresFourEyesIsFalse()
-    {
-        if (!_available) return;
-
-        await using var repo = NewRepository();
-        var tableId = new TableIdentifier("sales", "crm", "psql_fe_" + Guid.NewGuid().ToString("N")[..8]);
-        var table = new Table
-        {
-            Id = Guid.NewGuid(),
-            SourceName = tableId.Domain,
-            SchemaName = tableId.Schema,
-            TableName = tableId.TableName,
-            IsActive = true
-        };
-
-        var meta = await repo.UpsertTableMetadataAsync(new TableMetadata
-        {
-            Identifier = tableId,
-            Table = table,
-            Columns = [new TableColumn { TableId = table.Id, ColumnName = "email", DataType = "VARCHAR" }],
-            ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("email")
-        });
-
-        var request = await repo.CreateConsentRequestAsync(new ConsentRequest
-        {
-            TableId = meta.Table.Id,
-            TableIdentifier = tableId,
-            RequesterSid = new Sid("S-1-5-21-REQ"),
-            RequestedGranteeType = GranteeType.User,
-            RequestedGranteeRef = "S-1-5-21-REQ",
-            BusinessJustification = "Support",
-            RequestedValidTo = DateTimeOffset.UtcNow.AddDays(1),
-            Status = "PENDING",
-            TenantId = new TenantId("tenant-pg")
-        });
-
-        var approver1 = new Sid("S-1-5-21-APP1");
-        var approver2 = new Sid("S-1-5-21-APP2");
-
-        await using (var conn = new NpgsqlConnection(_db!.ConnectionString))
-        {
-            await conn.OpenAsync();
-            // #1009 D13: the container owner group is the only owner; per-table co-owners no longer exist.
-            await Autheris.Tests.Integration.Governance.ContainerOwnerSeed.SeedAsync(conn, "tenant-pg", meta.Table.Id, approver1.Value);
-        }
-
-        var step1 = await repo.ApproveConsentRequestStepAsync(request.Id, approver1, requireSecondApprover: true);
-        step1.Status.ShouldBe("PENDING_SECOND_APPROVAL");
-
-        await Should.ThrowAsync<InvalidOperationException>(() =>
-            repo.ApproveConsentRequestStepAsync(request.Id, approver1, requireSecondApprover: true));
-
-        // A second person outside the owner group cannot complete the request.
-        await Should.ThrowAsync<UnauthorizedAccessException>(() =>
-            repo.ApproveConsentRequestStepAsync(request.Id, approver2, requireSecondApprover: true));
-        (await repo.GetConsentRequestAsync(request.Id))!.Status.ShouldBe("PENDING_SECOND_APPROVAL");
-    }
-
     private static async Task<(TableIdentifier Table, Guid TableId)> CreateRevokeTableAsync(PostgreSqlGovernanceRepository repo)
     {
         var tableId = new TableIdentifier("sales", "crm", "psql_rv_" + Guid.NewGuid().ToString("N")[..8]);

@@ -190,50 +190,6 @@ internal sealed class InMemoryConsentStore(
         return Task.FromResult(true);
     }
 
-    public Task<ConsentRequest> ApproveExternalConsentRequestStepAsync(
-        Guid requestId,
-        ExternalDecisionAttribution attribution,
-        Sid effectiveApproverSid,
-        CancellationToken ct = default)
-    {
-        ArgumentNullException.ThrowIfNull(attribution);
-        var idx = Requests.FindIndex(r => r.Id == requestId);
-        if (idx < 0)
-        {
-            throw new InvalidOperationException($"Request {requestId} not found.");
-        }
-
-        var existing = Requests[idx];
-        if (existing.WorkflowMode != ConsentWorkflowMode.External)
-        {
-            throw new InvalidOperationException($"Request {requestId} is in internal workflow mode.");
-        }
-
-        if (!string.Equals(existing.Status, "PENDING_EXTERNAL_APPROVAL", StringComparison.OrdinalIgnoreCase))
-        {
-            throw new ConsentRequestStatusConflictException(requestId);
-        }
-
-        if (existing.ApprovalSteps.Any(s => string.Equals(s.ApproverSid.Value, effectiveApproverSid.Value, StringComparison.OrdinalIgnoreCase)))
-        {
-            throw new InvalidOperationException("FOUR_EYES_SAME_APPROVER: approver has already approved this request.");
-        }
-
-        var step = new ApprovalStep
-        {
-            Id = Guid.NewGuid(),
-            ConsentRequestId = requestId,
-            StepNumber = existing.ApprovalSteps.Count + 1,
-            ApproverSid = effectiveApproverSid,
-            Decision = "APPROVED",
-            DecidedAt = attribution.DecidedAt
-        };
-        var updatedSteps = existing.ApprovalSteps.Concat([step]).ToList();
-        var updated = CloneRequestWith(existing, "PENDING_EXTERNAL_APPROVAL", existing.Version + 1, updatedSteps);
-        Requests[idx] = updated;
-        return Task.FromResult(updated);
-    }
-
     public Task<Consent> ExecuteExternalAtomicApprovalWithConsentAsync(Guid requestId, ExternalDecisionAttribution attribution, ApprovalStep step, Consent consent, IReadOnlyList<ConsentRowFilter> rowFilters, IReadOnlyList<ConsentColumnRule> columnRules, CancellationToken ct = default)
     {
         var idx = Requests.FindIndex(r => r.Id == requestId);
@@ -244,9 +200,6 @@ internal sealed class InMemoryConsentStore(
         AppendGrantRecord(consent, GrantRecordType.Issued, step.ApproverSid.Value);
         return Task.FromResult(consent);
     }
-
-    public Task<Consent> ExecuteAtomicApprovalWithConsentAsync(Guid requestId, ApprovalStep step, Consent consent, IReadOnlyList<ConsentRowFilter> rowFilters, IReadOnlyList<ConsentColumnRule> columnRules, CancellationToken ct = default) =>
-        ExecuteExternalAtomicApprovalWithConsentAsync(requestId, new ExternalDecisionAttribution(Guid.Empty, string.Empty, "APPROVE", null, clock.GetUtcNow()), step, consent, rowFilters, columnRules, ct);
 
     public Task<ConsentRequest> RejectExternalConsentRequestAsync(Guid requestId, ExternalDecisionAttribution attribution, Sid effectiveApproverSid, string reason, CancellationToken ct = default)
     {
@@ -314,7 +267,6 @@ internal sealed class InMemoryConsentStore(
 
     public Task<IReadOnlyList<ConsentRequest>> GetRequestsByRequesterSidAsync(Sid requesterSid, TenantId tenantId, string? status = null, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<ConsentRequest>>(Requests.Where(r => r.RequesterSid == requesterSid && (r.TenantId == default || r.TenantId == tenantId)).ToList());
     public Task<IReadOnlyList<ConsentRequest>> GetPendingRequestsForApproverAsync(Sid approverSid, TenantId tenantId, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<ConsentRequest>>(Array.Empty<ConsentRequest>());
-    public Task<ConsentRequest> ApproveConsentRequestStepAsync(Guid requestId, Sid approverSid, CancellationToken ct = default) => throw new NotImplementedException();
     public Task<ConsentRequest> RejectConsentRequestAsync(Guid requestId, Sid approverSid, string reason, CancellationToken ct = default) => throw new NotImplementedException();
     public Task ActivateConsentAsync(Guid requestId, CancellationToken ct = default) => Task.CompletedTask;
     public Task UpdateRequestStatusAsync(Guid requestId, string status, CancellationToken ct = default) => Task.CompletedTask;

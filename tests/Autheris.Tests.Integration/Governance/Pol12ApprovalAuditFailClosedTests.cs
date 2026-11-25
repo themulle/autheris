@@ -14,10 +14,11 @@ using Xunit;
 public sealed class Pol12ApprovalAuditFailClosedTests
 {
     [Fact]
-    public async Task ApproveConsentRequestStepAsync_WhenAuditFails_RollsBackApprovalStep()
+    public async Task RejectConsentRequestAsync_WhenAuditFails_RollsBackDecisionStep()
     {
-        // POL-12: Audit of approval steps must be atomic / before commit and fail closed.
-        // If audit recording fails, the approval step and request status update must NOT be committed to the database.
+        // POL-12: Audit of decision steps must be atomic / before commit and fail closed.
+        // If audit recording fails, the decision step and request status update must NOT be committed to the database.
+        // Approvals run through the permission request engine (issue #1132), whose fail-closed audit is covered by its own tests.
         var eventBus = new InProcessChannelEventBus();
         var epochService = new EpochValidationService(eventBus: eventBus);
         var repo = GovernanceTestDatabase.CreateRepository(epochService);
@@ -42,7 +43,7 @@ public sealed class Pol12ApprovalAuditFailClosedTests
             Status = "PENDING"
         });
 
-        // The approver is the owner group of the table's container (#1009 D13), so only the audit failure can stop the approval.
+        // The decider is the owner group of the table's container (#1009 D13), so only the audit failure can stop the decision.
         await Autheris.Tests.Integration.Governance.ContainerOwnerSeed.SetOwnerAsync(repo.RawConnection(), "tenant-a", meta.Table.Id, approver.Value);
 
         // Break the audit table to simulate an unrecoverable audit write failure
@@ -52,20 +53,20 @@ public sealed class Pol12ApprovalAuditFailClosedTests
             cmd.ExecuteNonQuery();
         }
 
-        // Act & Assert: approval must throw due to audit failure
+        // Act & Assert: the decision must throw due to audit failure
         await Should.ThrowAsync<Exception>(async () =>
         {
-            await repo.ApproveConsentRequestStepAsync(req.Id, approver);
+            await repo.RejectConsentRequestAsync(req.Id, approver, "audit failure");
         });
 
-        // Verify that the approval was rolled back and is NOT committed in the database
+        // Verify that the decision was rolled back and is NOT committed in the database
         using (var verifyCmd = repo.RawConnection().CreateCommand())
         {
             verifyCmd.CommandText = "SELECT status FROM CONSENT_REQUESTS WHERE id = @id";
             verifyCmd.Parameters.AddWithValue("@id", req.Id.ToString());
             var status = (string)(await verifyCmd.ExecuteScalarAsync())!;
 
-            // RED PHASE: If tx committed before audit, status would be 'APPROVED' even though audit failed!
+            // RED PHASE: If tx committed before audit, status would be 'REJECTED' even though audit failed!
             // GREEN PHASE: Must be 'PENDING' because tx was rolled back.
             status.ShouldBe("PENDING");
         }

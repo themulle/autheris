@@ -28,7 +28,7 @@ public sealed class PostgreSqlGovernanceStoreReadinessTests
     {
         "GetTableMetadata",
         "GetConsentRequest",
-        "ApproveConsentRequestStep",
+        "RejectConsentRequest",
         "LoadSnapshot",
         "TenantTryGet",
         "RecordAuditTierA",
@@ -43,7 +43,7 @@ public sealed class PostgreSqlGovernanceStoreReadinessTests
     {
         "GetTableMetadata" => repository.GetTableMetadataAsync(new TableIdentifier("default", "public", "orders")),
         "GetConsentRequest" => repository.GetConsentRequestAsync(Guid.NewGuid()),
-        "ApproveConsentRequestStep" => repository.ApproveConsentRequestStepAsync(Guid.NewGuid(), new Sid("S-1-5-21-APPROVER")),
+        "RejectConsentRequest" => repository.RejectConsentRequestAsync(Guid.NewGuid(), new Sid("S-1-5-21-APPROVER"), "not ready"),
         "LoadSnapshot" => repository.LoadSnapshotAsync(),
         "TenantTryGet" => repository.TryGetAsync(Autheris.Tests.Common.TestTenants.Default, CancellationToken.None).AsTask(),
         "RecordAuditTierA" => repository.RecordAuditEventAsync(new AuditLogEntry { TenantId = Autheris.Tests.Common.TestTenants.Default, EventType = "ADMIN_ACTION", ActorSid = new Sid("S-1-5-21-A"), TargetTable = "t" }),

@@ -386,7 +386,7 @@ public abstract class AccessProfileContract : GovernanceContractBase
     [InlineData("admin1", null, "need", 10)]
     [InlineData("admin1", "dave", "need", 10)]
     [InlineData("admin1", "owner1", null, 10)]
-    public async Task IndividualUnmaskedGrant_WithoutFourEyesOrOver30Days_IsRejected(string created, string? approved, string? why, int days)
+    public async Task IndividualUnmaskedGrant_WithoutSeparateApprovalOrOver30Days_IsRejected(string created, string? approved, string? why, int days)
     {
         if (!Store.IsAvailable) return;
         var p = await NewProfileAsync(MaskingPolicyMode.Unmasked);
@@ -394,12 +394,12 @@ public abstract class AccessProfileContract : GovernanceContractBase
         var ex = await Should.ThrowAsync<AccessProfileAssignmentRejectedException>(() =>
             Repo.AssignProfileAsync(Store.TenantA, p.ProfileId, UserGrant("dave", days, created, approved, why)));
 
-        ex.Code.ShouldBeOneOf(AccessProfileAssignmentRules.FourEyesRequired, AccessProfileAssignmentRules.TooLong);
+        ex.Code.ShouldBeOneOf(AccessProfileAssignmentRules.ApprovalRequired, AccessProfileAssignmentRules.TooLong);
         (await Repo.GetProfilesForSubjectsAsync(Store.TenantA, ["dave"], [], [])).ShouldBeEmpty();
     }
 
     [RequiresContainerRuntimeFact]
-    public async Task IndividualUnmaskedGrant_WithFourEyes_IsEffective_ThenRenewedOnlyByAnotherPerson()
+    public async Task IndividualUnmaskedGrant_WithSeparateApproval_IsEffective_ThenRenewedOnlyByAnotherPerson()
     {
         if (!Store.IsAvailable) return;
         var p = await NewProfileAsync(MaskingPolicyMode.Unmasked);
@@ -450,7 +450,7 @@ public abstract class AccessProfileContract : GovernanceContractBase
 
         var ex = await Should.ThrowAsync<AccessProfileAssignmentRejectedException>(() => Repo.UpsertProfileAsync(profile));
 
-        ex.Code.ShouldBe(AccessProfileAssignmentRules.FourEyesRequired);
+        ex.Code.ShouldBe(AccessProfileAssignmentRules.ApprovalRequired);
     }
 
     [RequiresContainerRuntimeFact]

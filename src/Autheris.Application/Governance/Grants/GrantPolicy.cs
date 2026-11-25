@@ -10,7 +10,8 @@ using Microsoft.Extensions.Options;
 /// <summary>
 /// Capacity-based grant lifetime policy. Maxima derive solely from the decider's <see cref="ApproverCapacity"/>
 /// (clamped below deployment ceilings from <see cref="AccessPolicyOptions"/>), never from object protection class
-/// or service-principal status. Single decision everywhere (no four-eyes step).
+/// or service-principal status. Single decision everywhere; the only four-eyes review (grants on <c>secret</c> data) is
+/// <see cref="Autheris.Application.Governance.Requests.SecretFourEyesRule"/> in the permission request engine (issue #1132).
 /// </summary>
 public sealed class GrantPolicy(
     IOptions<IndividualGrantOptions>? options = null,
@@ -45,7 +46,7 @@ public sealed class GrantPolicy(
 
         if (r.Effect == ConsentEffect.Deny)
         {
-            return new GrantDecision(true, null, false, GrantClass.Standing, "Deny grants only restrict access and have no maximum.");
+            return new GrantDecision(true, null, GrantClass.Standing, "Deny grants only restrict access and have no maximum.");
         }
 
         var nowUtc = r.Now.ToUniversalTime();
@@ -63,7 +64,7 @@ public sealed class GrantPolicy(
                     tenantMax);
             }
 
-            return new GrantDecision(true, null, false, GrantClass.Standing, "Standing group grant.");
+            return new GrantDecision(true, null, GrantClass.Standing, "Standing group grant.");
         }
 
         var effectiveCapacity = r.SelfGrant
@@ -130,7 +131,7 @@ public sealed class GrantPolicy(
         {
             if (isCatalogRequest)
             {
-                return new GrantDecision(true, null, false, cls, "Allowed (catalog visibility without end date).", null, suggest);
+                return new GrantDecision(true, null, cls, "Allowed (catalog visibility without end date).", null, suggest);
             }
 
             var missingCode = isCapacityEvaluated ? GrantErrorCodes.EndDateRequired : GrantErrorCodes.RequiresExpiry;
@@ -160,34 +161,9 @@ public sealed class GrantPolicy(
             return GrantDecision.Deny(GrantErrorCodes.JustificationRequired, "A justification is required for this grant.", cls, maxValidTo);
         }
 
-        // Legacy four-eyes semantics remain scoped strictly to pre-cutover non-capacity callers until Pair 4 deletion.
-        var legacyFourEyes = !isCapacityEvaluated &&
-            r.GranteeType != GranteeType.ServicePrincipal &&
-            (r.Sensitivity == GrantSensitivity.Sensitive || r.MaskingMode == MaskingPolicyMode.Unmasked || r.PrivilegedRight);
-
-        if (legacyFourEyes && r.Kind == GrantKind.ManifestPolicy)
-        {
-            return GrantDecision.Deny(
-                GrantErrorCodes.FourEyesRequired,
-                "This declarative manifest policy requires explicit approval workflow.",
-                cls,
-                maxValidTo);
-        }
-
-        if (legacyFourEyes && r.Approvers is not null)
-        {
-            var distinct = SeparationOfDutiesService.CountDistinctIndependentApprovers(r.Approvers, r.Requester, r.GranteeRef);
-            if (distinct < 2)
-            {
-                return GrantDecision.Deny(
-                    GrantErrorCodes.FourEyesRequired,
-                    "This grant class requires 2 independent approver(s) different from requester and grantee.",
-                    cls,
-                    maxValidTo);
-            }
-        }
-
-        return new GrantDecision(true, maxValidTo, legacyFourEyes, cls, "Allowed.", null, suggest);
+        // Issue #1132: no sensitivity-based four-eyes step. A second approval exists only for grants on secret data and only through
+        // SecretFourEyesRule in the permission request engine; the declarative paths and the MCP access plan refuse secret targets themselves.
+        return new GrantDecision(true, maxValidTo, cls, "Allowed.", null, suggest);
     }
 
     private TimeSpan ResolveMaxSpan(GrantRequest r, ApproverCapacity capacity)

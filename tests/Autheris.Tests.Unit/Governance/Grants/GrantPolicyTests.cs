@@ -23,11 +23,10 @@ public sealed class GrantPolicyTests
         GranteeType type = GranteeType.User,
         GrantKind kind = GrantKind.Consent,
         bool customer = false,
-        IReadOnlyList<string>? approvers = null,
         string? justification = "needed for the quarterly audit",
         ApproverCapacity? capacity = null) =>
         new(type, "S-1-5-21-ALICE", kind, validFor is null ? null : Now + validFor.Value, Now, sens, mask, privileged, customer,
-            "S-1-5-21-REQ", approvers, Justification: justification, Capacity: capacity);
+            "S-1-5-21-REQ", Justification: justification, Capacity: capacity);
 
     private static GrantPolicy PolicyWithMax(string max, IndividualGrantOptions? o = null) =>
         new(Options.Create(o ?? new IndividualGrantOptions()),
@@ -47,7 +46,6 @@ public sealed class GrantPolicyTests
         var d = Policy().Evaluate(Req(ThreeYears, sens, mask, priv, type, customer: customer, capacity: ApproverCapacity.DataOwner));
 
         d.Allowed.ShouldBeTrue();
-        d.RequiresFourEyes.ShouldBeFalse();
         d.MaxValidTo.ShouldBe(Now + TimeSpan.FromDays(3650));
     }
 
@@ -162,7 +160,6 @@ public sealed class GrantPolicyTests
     {
         var d = Policy().Evaluate(Req(TimeSpan.FromDays(30), GrantSensitivity.Sensitive, capacity: ApproverCapacity.DataOwner));
         d.Allowed.ShouldBeTrue();
-        d.RequiresFourEyes.ShouldBeFalse();
     }
 
     [Fact]

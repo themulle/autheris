@@ -68,7 +68,6 @@ public sealed class GovernanceWriteInvalidationArchitectureTests
         "Autheris.Infrastructure.Persistence.GovernanceRepository::RevokeSystemConsentAsync",
         "Autheris.Infrastructure.Persistence.GovernanceRepository::RevokeSystemConsentByIdAsync",
         "Autheris.Infrastructure.Persistence.GovernanceRepository::ReplaceConsentsAsync",
-        "Autheris.Infrastructure.Persistence.GovernanceRepository::ExecuteAtomicApprovalWithConsentAsync",
         "Autheris.Infrastructure.Persistence.GovernanceRepository::ActivateConsentAsync",
         "Autheris.Infrastructure.Persistence.GovernanceRepository::ActivateConsentForAutoApproveAsync",
         "Autheris.Infrastructure.Persistence.GovernanceRepository::RecordGrantExpiryAsync",

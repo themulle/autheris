@@ -134,7 +134,7 @@ public class Issue113AccessRequestsSecurityTests
         });
         services.AddSingleton(guard);
         var grantPolicy = Substitute.For<IGrantPolicy>();
-        grantPolicy.Evaluate(Arg.Any<GrantRequest>()).Returns(new GrantDecision(true, null, false, GrantClass.Standing, "Test grant allowed"));
+        grantPolicy.Evaluate(Arg.Any<GrantRequest>()).Returns(new GrantDecision(true, null, GrantClass.Standing, "Test grant allowed"));
         services.AddSingleton(grantPolicy);
         return services.BuildServiceProvider();
     }

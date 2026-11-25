@@ -93,37 +93,20 @@ public sealed class SecurityReviewRemediationCoverageTests
     }
 
     // =========================================================================
-    // POL-2 (Medium): Four-eyes approval for HIGH, RESTRICTED, SECRET sensitivity
+    // POL-2 (Medium): four-eyes approval, aligned with the owner decision on #1121 (issue #1132): only grants on secret data
     // =========================================================================
 
     [Theory]
-    [InlineData("HIGH", true)]
-    [InlineData("RESTRICTED", true)]
-    [InlineData("SECRET", true)]
-    [InlineData("high", true)]
-    [InlineData("NORMAL", false)]
-    [InlineData("PUBLIC", false)]
-    public void POL_2_ConsentApprovalPolicy_EnforcesFourEyes_ForHighSensitivityClassifications(string sensitivity, bool expectedFourEyes)
-    {
-        // When requiresFourEyes is false, sensitivity dictates whether four eyes is mandated (ADR-008)
-        var requiresFourEyes = ConsentApprovalPolicy.RequiresFourEyesApproval(requiresFourEyes: false, sensitivity);
-        requiresFourEyes.ShouldBe(expectedFourEyes);
-
-        var statusAfterFirstStep = ConsentApprovalPolicy.StatusAfterApproval(
-            requiresFourEyes: false,
-            stepNumber: 1,
-            mode: ConsentWorkflowMode.Internal,
-            sensitivity: sensitivity);
-
-        if (expectedFourEyes)
-        {
-            statusAfterFirstStep.ShouldBe(ConsentApprovalPolicy.PendingSecond);
-        }
-        else
-        {
-            statusAfterFirstStep.ShouldBe(ConsentApprovalPolicy.Approved);
-        }
-    }
+    [InlineData(ProtectionClass.Secret, ConsentRequestKind.Data, true)]
+    [InlineData(ProtectionClass.Secret, ConsentRequestKind.Unmask, true)]
+    [InlineData(ProtectionClass.Secret, ConsentRequestKind.ProfileAssignment, true)]
+    [InlineData(ProtectionClass.Secret, ConsentRequestKind.Catalog, false)]
+    [InlineData(ProtectionClass.Confidential, ConsentRequestKind.Data, false)]
+    [InlineData(ProtectionClass.Confidential, ConsentRequestKind.Unmask, false)]
+    [InlineData(ProtectionClass.Internal, ConsentRequestKind.Data, false)]
+    [InlineData(ProtectionClass.Public, ConsentRequestKind.Data, false)]
+    public void POL_2_FourEyes_OnlyForGrantsOnSecretData(ProtectionClass maxClass, ConsentRequestKind kind, bool expectedFourEyes) =>
+        Autheris.Application.Governance.Requests.SecretFourEyesRule.Applies(kind, maxClass).ShouldBe(expectedFourEyes);
 
     // =========================================================================
     // POL-4 (Medium): Tenant-scoped HMAC pseudonymization differences between tenants

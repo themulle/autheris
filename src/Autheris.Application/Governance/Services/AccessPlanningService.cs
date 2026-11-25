@@ -78,16 +78,20 @@ public class AccessPlanningService : IAccessPlanningService
         IReadOnlyList<AccessPlanDiffItem> diffs,
         DateTimeOffset now,
         HashSet<string> actorIdentifiers,
-        bool rejectFourEyes,
+        bool isApply,
         CancellationToken ct)
     {
         var maxValidTo = new List<DateTimeOffset?>(request.Grants.Count);
 
-        // Issue #1121: a grant on secret data needs two distinct approvals; the single-administrator plan never grants it (plan and apply).
-        if (request.Grants.Count > 0 && meta is not null && _protectionProvider is not null)
+        // Issue #1121/#1132: a grant on secret data needs two distinct approvals; the single-administrator plan never grants it (plan and apply).
+        // Every other grant is a single decision (non-secret sensitive data and clear PII columns included). Without a protection provider the
+        // effective class is unknown, so the apply treats a table the metadata classifies as sensitive as possibly secret (fail closed).
+        if (request.Grants.Count > 0 && meta is not null)
         {
-            var protection = await _protectionProvider.GetAsync(tenantId, meta.Identifier, ct).ConfigureAwait(false);
-            if (SecretFourEyesRule.MaxEffectiveClass(protection) == ProtectionClass.Secret)
+            var possiblySecret = _protectionProvider is not null
+                ? SecretFourEyesRule.MaxEffectiveClass(await _protectionProvider.GetAsync(tenantId, meta.Identifier, ct).ConfigureAwait(false)) == ProtectionClass.Secret
+                : isApply && GrantClassifier.Classify([meta]) == GrantSensitivity.Sensitive;
+            if (possiblySecret)
             {
                 throw SecretFourEyesRule.DeclarativeRefusal(meta.Identifier.ToString());
             }
@@ -128,17 +132,6 @@ public class AccessPlanningService : IAccessPlanningService
                 Justification: request.Reason));
             GrantPolicyViolationException.ThrowIfDenied(decision);
             maxValidTo.Add(decision.MaxValidTo);
-
-            // GOV-04: the single-actor path never grants sensitive access; those grants go through the consent workflow
-            // (two independent approvers). An unknown table is not classified here (no table to gate yet).
-            if (rejectFourEyes && decision.RequiresFourEyes && (meta is not null || clearPii))
-            {
-                throw new GrantPolicyViolationException(GrantDecision.Deny(
-                    GrantErrorCodes.FourEyesRequired,
-                    "This grant requires four-eyes approval; use the consent request workflow instead of the single-administrator access plan.",
-                    decision.Class,
-                    decision.MaxValidTo));
-            }
         }
 
         return maxValidTo;
@@ -271,7 +264,7 @@ public class AccessPlanningService : IAccessPlanningService
         // every individual (user) principal needs a mandatory, class-bounded validUntil already at planning time.
         await EnsureGrantsAllowedAsync(
             planTenant, caller, actorSid, request, meta, diffs, now,
-            ActorIdentifiers.Collect(caller, actorSid, null), rejectFourEyes: false, ct).ConfigureAwait(false);
+            ActorIdentifiers.Collect(caller, actorSid, null), isApply: false, ct).ConfigureAwait(false);
 
         var planId = $"plan_{Guid.NewGuid():N}";
         var planTtl = TimeSpan.FromMinutes(_planOptions.PlanTtlMinutes);
@@ -392,7 +385,7 @@ public class AccessPlanningService : IAccessPlanningService
             now = _time.GetUtcNow();
             var maxValidTo = await EnsureGrantsAllowedAsync(
                 tenantId, caller, actorSid, plan.Request, applyMeta, plan.Result.Diffs, now,
-                ActorIdentifiers.Collect(caller, actorSid, null), rejectFourEyes: true, innerCt).ConfigureAwait(false);
+                ActorIdentifiers.Collect(caller, actorSid, null), isApply: true, innerCt).ConfigureAwait(false);
             if (applyMeta is null)
             {
                 throw new SecurityException($"Table '{plan.Request.DatasetId}' does not exist; a grant record needs a registered table.");

@@ -20,7 +20,7 @@ public enum AccessProfileAssignmentKind
 
 /// <summary>
 /// One row of <c>ACCESS_PROFILE_ASSIGNMENTS</c>. <see cref="AssignedAt"/> is the start of the current grant period (set by the repository, a
-/// renewal restarts it). <see cref="CreatedBy"/> is the requester, <see cref="ApprovedBy"/>the second person (four-eyes).
+/// renewal restarts it). <see cref="CreatedBy"/> is the requester, <see cref="ApprovedBy"/> the one approver (a single decision, issue #1132).
 /// </summary>
 public sealed record AccessProfileAssignment
 {
@@ -46,8 +46,10 @@ public sealed class AccessProfileAssignmentRejectedException(string code, string
 
 /// <summary>
 /// write-time validation, read-time effectiveness (fail closed) and deterministic precedence of profile assignments.
-/// <c>Unmasked</c> takes effect only through (a) a group/role mapping approved by a second administrator or (b) a time-bound individual grant
-/// (bounded only by the operator-configured limits, requester, approver and grantee all different).
+/// <c>Unmasked</c> takes effect only through (a) a group/role mapping approved by an administrator other than its requester or (b) a time-bound
+/// individual grant (bounded only by the operator-configured limits, requester, approver and grantee all different). Both are a single approval
+/// with separation of duties, not a four-eyes review (issue #1132, owner decision on #1121: unmasking non-<c>secret</c> data is a single approval;
+/// an <c>Unmasked</c> profile is enforced as <c>Default</c> on <c>secret</c> tables, whose grants need the engine's two approvals).
 /// </summary>
 public static class AccessProfileAssignmentRules
 {
@@ -57,7 +59,8 @@ public static class AccessProfileAssignmentRules
     public const string RequiresExpiry = "INDIVIDUAL_GRANT_REQUIRES_EXPIRY";
     public const string ExpiryInThePast = "GRANT_EXPIRY_IN_THE_PAST";
     public const string TooLong = "GRANT_EXCEEDS_MAXIMUM_DURATION";
-    public const string FourEyesRequired = "UNMASKED_REQUIRES_FOUR_EYES";
+    /// <summary>An individual <c>Unmasked</c> grant lacks its approval: a requester, a justification and one approver other than the requester and the grantee.</summary>
+    public const string ApprovalRequired = "UNMASKED_REQUIRES_APPROVAL";
     public const string SameApprover = "APPROVER_MUST_DIFFER";
     public const string SelfRenewal = "RENEWAL_BY_GRANTEE_FORBIDDEN";
     public const string KindConflict = "ASSIGNMENT_KIND_CONFLICT";
@@ -147,17 +150,18 @@ public static class AccessProfileAssignmentRules
         }
 
         var unmasked = profile.MaskingMode == MaskingPolicyMode.Unmasked;
-        if (unmasked && individual && !HasFourEyes(a))
+        if (unmasked && individual && !HasSeparateApproval(a))
         {
-            throw new AccessProfileAssignmentRejectedException(FourEyesRequired, "An individual Unmasked grant needs a requester, a justification and a different approver.");
+            throw new AccessProfileAssignmentRejectedException(ApprovalRequired, "An individual Unmasked grant needs a requester, a justification and an approver other than the requester and the grantee.");
         }
     }
 
-    private static bool HasFourEyes(AccessProfileAssignment a) =>
+    /// <summary>Separation of duties of the single approval: requester, approver and grantee are three different people.</summary>
+    private static bool HasSeparateApproval(AccessProfileAssignment a) =>
         !string.IsNullOrWhiteSpace(a.CreatedBy) && !string.IsNullOrWhiteSpace(a.ApprovedBy) && !string.IsNullOrWhiteSpace(a.Justification) &&
         !Same(a.ApprovedBy, a.CreatedBy) && !Same(a.ApprovedBy, a.Subject) && !Same(a.CreatedBy, a.Subject);
 
-    /// <summary>Validates an approval or renewal by <paramref name="approver"/> of an existing assignment (the grantee never approves; for four-eyes cases the requester does not either).</summary>
+    /// <summary>Validates an approval or renewal by <paramref name="approver"/> of an existing assignment (the grantee never approves; for <c>Unmasked</c> the requester does not either).</summary>
     public static void ValidateApprover(AccessProfile profile, AccessProfileAssignment existing, string approver)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(approver);
@@ -166,8 +170,8 @@ public static class AccessProfileAssignmentRules
             throw new AccessProfileAssignmentRejectedException(SelfRenewal, "The grantee cannot approve or renew its own assignment.");
         }
 
-        var fourEyes = profile.MaskingMode == MaskingPolicyMode.Unmasked;
-        if (fourEyes && Same(approver, existing.CreatedBy))
+        var unmasked = profile.MaskingMode == MaskingPolicyMode.Unmasked;
+        if (unmasked && Same(approver, existing.CreatedBy))
         {
             throw new AccessProfileAssignmentRejectedException(SameApprover, "The approver must differ from the requester.");
         }
@@ -198,7 +202,7 @@ public static class AccessProfileAssignmentRules
         }
 
         return a.SubjectType == AccessProfileSubjectType.User
-            ? a.ExpiresAt is not null && HasFourEyes(a)
+            ? a.ExpiresAt is not null && HasSeparateApproval(a)
             : !string.IsNullOrWhiteSpace(a.CreatedBy) && !string.IsNullOrWhiteSpace(a.ApprovedBy) && !Same(a.ApprovedBy, a.CreatedBy);
     }
 

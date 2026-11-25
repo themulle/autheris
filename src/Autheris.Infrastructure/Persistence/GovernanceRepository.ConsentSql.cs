@@ -17,7 +17,7 @@ using Autheris.Infrastructure.Persistence.Dialects;
 
 /// <summary>
 /// Engine-neutral statement execution and row mapping for consent queries, batch hydration, consent insertion, consent requests,
-/// four-eyes approval state reads, guarded status transitions, and ITSM activation (folded from ConsentSqlCore.cs).
+/// approval step reads and writes, guarded status transitions, and ITSM activation (folded from ConsentSqlCore.cs).
 /// </summary>
 // Transitional: transitional remnant of the per-engine SQL cores; fold into GovernanceRepository.Consent.
 internal static class ConsentSqlCore
@@ -723,30 +723,6 @@ internal static class ConsentSqlCore
         var statusObj = await checkCmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
         if (statusObj == null) throw new InvalidOperationException($"Request {requestId} not found.");
         return statusObj.ToString()!;
-    }
-
-    public static async Task<(bool RequiresFourEyes, string? Sensitivity, bool SameApprover, int NextStepNumber)> ReadApprovalStateAsync(
-        DbConnection conn, DbTransaction? tx, Guid requestId, Sid approverSid, CancellationToken ct)
-    {
-        var existingApprovers = new List<string>();
-        await using (var approversCmd = conn.CreateCommand())
-        {
-            approversCmd.Transaction = tx;
-            approversCmd.CommandText = "SELECT approver_sid FROM APPROVAL_STEPS WHERE consent_request_id = @id AND decision = 'APPROVED' ORDER BY step_number";
-            approversCmd.AddBound("@id", requestId.ToString());
-            await using var reader = await approversCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false)) existingApprovers.Add(reader.GetString(0));
-        }
-
-        bool sameApprover = existingApprovers.Any(s => ConsentApprovalPolicy.IsSameApprover(s, approverSid));
-
-        await using var maxCmd = conn.CreateCommand();
-        maxCmd.Transaction = tx;
-        maxCmd.CommandText = "SELECT COALESCE(MAX(step_number), 0) + 1 FROM APPROVAL_STEPS WHERE consent_request_id = @id";
-        maxCmd.AddBound("@id", requestId.ToString());
-        int nextStepNumber = Convert.ToInt32(await maxCmd.ExecuteScalarAsync(ct).ConfigureAwait(false));
-
-        return (false, null, sameApprover, nextStepNumber);
     }
 
     public static async Task InsertApprovedStepAsync(DbConnection conn, DbTransaction tx, Guid stepId, Guid requestId, int stepNumber, Sid approverSid, DateTimeOffset decidedAt, CancellationToken ct, IReadOnlyList<string>? approverIdentifiers = null)
