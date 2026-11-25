@@ -2,11 +2,11 @@ namespace Autheris.Application.Catalog.External;
 
 using Autheris.Application.Governance.Ownership;
 using System;
+using System.Buffers;
 using System.Collections.Generic;
 using System.Linq;
 using System.Security.Claims;
 using System.Security.Cryptography;
-using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
@@ -374,6 +374,9 @@ public sealed partial class ExternalCatalogReader(
             new ExternalCatalogChangesResponseDto(items, feed.NextSince));
     }
 
+    [ThreadStatic]
+    private static ArrayBufferWriter<byte>? t_hashBuffer;
+
     public static string ComputeAdminRepresentationHash(
         TableMetadata table,
         IReadOnlyList<ContainerOwnerEntry> owners,
@@ -383,42 +386,72 @@ public sealed partial class ExternalCatalogReader(
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(owners);
 
-        var payload = new
+        var buffer = t_hashBuffer ?? new ArrayBufferWriter<byte>(4096);
+        t_hashBuffer = null;
+        try
         {
-            objectId = table.Identifier.ToString(),
-            kind = KindName(table.Table.ObjectKind),
-            domain = table.Identifier.Domain,
-            schema = table.Identifier.Schema,
-            name = table.Identifier.TableName,
-            displayName = table.Table.DisplayName,
-            description = table.Table.Description,
-            protectionClass = (protection?.TableClass ?? ProtectionClass.Confidential).ToCanonicalName(),
-            isActive = table.Table.IsActive,
-            discoveryHidden = table.Table.DiscoveryHidden,
-            samplesDisabled = table.Table.SamplesDisabled,
-            documentationSource = table.Table.DocumentationSource,
-            tags = table.CatalogTags.Concat(table.Table.Tags).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.Ordinal).ToArray(),
-            owners = owners.Where(static o => o.IsActive).Select(static o => $"{o.DisplayName}|{o.Email}").Order(StringComparer.Ordinal).ToArray(),
-            columns = table.Columns
-                .OrderBy(static c => c.ColumnName, StringComparer.OrdinalIgnoreCase)
-                .Select(c => new
-                {
-                    c.ColumnName,
-                    c.DisplayName,
-                    c.DataType,
-                    c.Description,
-                    Classified = ClassificationMetadata.IsColumnSensitive(table, c),
-                    c.DiscoveryHidden,
-                    c.WriteProtected,
-                    masking = DefaultMaskingState(table, c)
-                })
-                .ToArray(),
-            artifactsHash = artifacts?.ContentSha256
-        };
+            using (var writer = new Utf8JsonWriter(buffer))
+            {
+                writer.WriteStartObject();
+                writer.WriteString("objectId", table.Identifier.ToString());
+                writer.WriteString("kind", KindName(table.Table.ObjectKind));
+                writer.WriteString("domain", table.Identifier.Domain);
+                writer.WriteString("schema", table.Identifier.Schema);
+                writer.WriteString("name", table.Identifier.TableName);
+                writer.WriteString("displayName", table.Table.DisplayName);
+                writer.WriteString("description", table.Table.Description);
+                writer.WriteString("protectionClass", (protection?.TableClass ?? ProtectionClass.Confidential).ToCanonicalName());
+                writer.WriteBoolean("isActive", table.Table.IsActive);
+                writer.WriteBoolean("discoveryHidden", table.Table.DiscoveryHidden);
+                writer.WriteBoolean("samplesDisabled", table.Table.SamplesDisabled);
+                writer.WriteString("documentationSource", table.Table.DocumentationSource);
 
-        var json = JsonSerializer.Serialize(payload);
-        var hashBytes = SHA256.HashData(Encoding.UTF8.GetBytes(json));
-        return Convert.ToHexString(hashBytes).ToLowerInvariant();
+                writer.WriteStartArray("tags");
+                foreach (var tag in table.CatalogTags.Concat(table.Table.Tags).Distinct(StringComparer.OrdinalIgnoreCase).Order(StringComparer.Ordinal))
+                {
+                    writer.WriteStringValue(tag);
+                }
+                writer.WriteEndArray();
+
+                writer.WriteStartArray("owners");
+                foreach (var owner in owners.Where(static o => o.IsActive).Select(static o => $"{o.DisplayName}|{o.Email}").Order(StringComparer.Ordinal))
+                {
+                    writer.WriteStringValue(owner);
+                }
+                writer.WriteEndArray();
+
+                writer.WriteStartArray("columns");
+                foreach (var c in table.Columns.OrderBy(static c => c.ColumnName, StringComparer.OrdinalIgnoreCase))
+                {
+                    writer.WriteStartObject();
+                    writer.WriteString("ColumnName", c.ColumnName);
+                    writer.WriteString("DisplayName", c.DisplayName);
+                    writer.WriteString("DataType", c.DataType);
+                    writer.WriteString("Description", c.Description);
+                    writer.WriteBoolean("Classified", ClassificationMetadata.IsColumnSensitive(table, c));
+                    writer.WriteBoolean("DiscoveryHidden", c.DiscoveryHidden);
+                    writer.WriteBoolean("WriteProtected", c.WriteProtected);
+                    writer.WriteString("masking", DefaultMaskingState(table, c));
+                    writer.WriteEndObject();
+                }
+                writer.WriteEndArray();
+
+                writer.WriteString("artifactsHash", artifacts?.ContentSha256);
+                writer.WriteEndObject();
+            }
+
+            Span<byte> hashBytes = stackalloc byte[SHA256.HashSizeInBytes];
+            SHA256.HashData(buffer.WrittenSpan, hashBytes);
+            return Convert.ToHexStringLower(hashBytes);
+        }
+        finally
+        {
+            buffer.ResetWrittenCount();
+            if (buffer.Capacity <= 256 * 1024)
+            {
+                t_hashBuffer = buffer;
+            }
+        }
     }
 
     private Task<IReadOnlyList<TableMetadata>> LoadActiveTablesAsync(CancellationToken ct) =>
@@ -593,7 +626,7 @@ public sealed partial class ExternalCatalogReader(
         bool canSeeHidden,
         CancellationToken ct)
     {
-        var ownersByTable = await _ownershipRepository.GetDataOwnersForTablesAsync([table.Identifier], ct).ConfigureAwait(false);
+        var ownersByTable = await _ownershipRepository.GetDataOwnersForTableMetadataAsync([table], ct).ConfigureAwait(false);
         var owners = ownersByTable.TryGetValue(table.Identifier, out var list) ? list : Array.Empty<ContainerOwnerEntry>();
         var artifacts = _artifactStore is null
             ? null

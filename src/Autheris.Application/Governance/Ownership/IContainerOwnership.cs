@@ -96,6 +96,11 @@ public interface IContainerOwnership
         return false;
     }
 
+    /// <summary>Batch-loads owner entries from preloaded table metadata, falling back to identifier lookup when needed.</summary>
+    Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>> GetDataOwnersForTableMetadataAsync(
+        IReadOnlyCollection<TableMetadata> tables, CancellationToken ct = default) =>
+        GetDataOwnersForTablesAsync(tables.Select(static t => t.Identifier).ToList(), ct);
+
     /// <summary>Batch-checks which SIDs in <paramref name="candidateApproverSids"/> are authorized container approvers per table (#1063 §4a).</summary>
     async Task<IReadOnlyDictionary<TableIdentifier, IReadOnlySet<string>>> FilterAuthorizedApproversForTablesAsync(
         IReadOnlyCollection<TableMetadata> requested, IReadOnlyCollection<string> candidateApproverSids, DateTimeOffset atTime, CancellationToken ct = default)

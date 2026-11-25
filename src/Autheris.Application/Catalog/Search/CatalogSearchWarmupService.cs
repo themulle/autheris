@@ -34,6 +34,7 @@ public sealed class CatalogSearchWarmupService : BackgroundService
     private readonly IEventBus? _eventBus;
     private readonly ICatalogVersionProvider? _versionProvider;
     private readonly TimeProvider _timeProvider;
+    private readonly ICatalogSnapshotProvider? _snapshotProvider;
     private readonly SemaphoreSlim _rebuildLock = new(1, 1);
     private readonly Channel<bool> _changeSignal = Channel.CreateBounded<bool>(
         new BoundedChannelOptions(1) { FullMode = BoundedChannelFullMode.DropOldest });
@@ -74,7 +75,8 @@ public sealed class CatalogSearchWarmupService : BackgroundService
         ILogger<CatalogSearchWarmupService> logger,
         IEventBus? eventBus = null,
         ICatalogVersionProvider? versionProvider = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        ICatalogSnapshotProvider? snapshotProvider = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _searchEngine = searchEngine ?? throw new ArgumentNullException(nameof(searchEngine));
@@ -83,6 +85,7 @@ public sealed class CatalogSearchWarmupService : BackgroundService
         _eventBus = eventBus;
         _versionProvider = versionProvider;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _snapshotProvider = snapshotProvider;
     }
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -108,6 +111,8 @@ public sealed class CatalogSearchWarmupService : BackgroundService
                     return Task.CompletedTask;
                 });
         }
+
+        await Task.Yield();
 
         if (_options.Value.WarmupOnStartup)
         {
@@ -268,7 +273,22 @@ public sealed class CatalogSearchWarmupService : BackgroundService
             if (!updatedViaDelta)
             {
                 _logger.LogInformation("Starting catalog search index rebuild...");
-                var tables = await CatalogTablePageReader.ReadAllAsync(
+                IReadOnlyList<TableMetadata>? tables = null;
+                if (_snapshotProvider != null && (!forceFullRebuild || !_lastIndexedVersion.HasValue))
+                {
+                    try
+                    {
+                        var snapshot = await _snapshotProvider.GetSnapshotAsync(ct).ConfigureAwait(false);
+                        tables = snapshot.Tables;
+                        targetVersion ??= snapshot.Version;
+                    }
+                    catch (Autheris.Domain.Exceptions.CatalogSnapshotNotReadyException)
+                    {
+                        tables = null;
+                    }
+                }
+
+                tables ??= await CatalogTablePageReader.ReadAllAsync(
                     _metadataRepository, new CatalogTableQuery(IncludeInactive: false), ct: ct).ConfigureAwait(false);
                 await _searchEngine.RebuildIndexAsync(tables, ct).ConfigureAwait(false);
                 _lastFullRebuildUtc = _timeProvider.GetUtcNow();

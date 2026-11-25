@@ -38,6 +38,40 @@ public sealed partial class CatalogSchemaModel
         TimeProvider? timeProvider = null,
         string phase = "snapshot")
     {
+        var (finalTables, omittedSnapshot) = BuildModelDataFromSnapshot(
+            snapshot, logger, dialectRegistry, crossSourceEnabled, tableFilter, fingerprintCache: null, timeProvider, phase);
+        return new CatalogSchemaModel(finalTables, omittedSnapshot);
+    }
+
+    internal static async ValueTask<CatalogSchemaModel> BuildFromSnapshotAsync(
+        CatalogSnapshot snapshot,
+        ILogger? logger = null,
+        Autheris.Application.Sql.Dialects.ISqlDialectRegistry? dialectRegistry = null,
+        bool crossSourceEnabled = false,
+        Func<TableMetadata, bool>? tableFilter = null,
+        CatalogTableFingerprintCache? fingerprintCache = null,
+        IEpochValidationService? epochService = null,
+        TimeProvider? timeProvider = null,
+        string phase = "snapshot",
+        CancellationToken ct = default)
+    {
+        var (finalTables, omittedSnapshot) = BuildModelDataFromSnapshot(
+            snapshot, logger, dialectRegistry, crossSourceEnabled, tableFilter, fingerprintCache, timeProvider, phase);
+        var precomputedFingerprint = await ComputeFingerprintIfCachedAsync(
+            fingerprintCache, epochService, finalTables, omittedSnapshot, logger, ct).ConfigureAwait(false);
+        return new CatalogSchemaModel(finalTables, omittedSnapshot, precomputedFingerprint);
+    }
+
+    private static (List<CatalogTableType> FinalTables, CatalogOmittedTable[] OmittedSnapshot) BuildModelDataFromSnapshot(
+        CatalogSnapshot snapshot,
+        ILogger? logger,
+        Autheris.Application.Sql.Dialects.ISqlDialectRegistry? dialectRegistry,
+        bool crossSourceEnabled,
+        Func<TableMetadata, bool>? tableFilter,
+        CatalogTableFingerprintCache? fingerprintCache,
+        TimeProvider? timeProvider,
+        string phase)
+    {
         ArgumentNullException.ThrowIfNull(snapshot);
 
         var registry = dialectRegistry ?? Autheris.Application.Sql.Dialects.ISqlDialectRegistry.Default;
@@ -49,7 +83,7 @@ public sealed partial class CatalogSchemaModel
             snapshot.Tables,
             registry,
             tableFilter,
-            fingerprintCache: null,
+            fingerprintCache,
             logger,
             effectiveTime,
             buildStartTimestamp,
@@ -68,7 +102,7 @@ public sealed partial class CatalogSchemaModel
             list.Add(rel);
         }
 
-        var (finalTables, omittedSnapshot) = AssembleModelData(
+        return AssembleModelData(
             tableBuilders,
             tableMapById,
             relationsByTable,
@@ -80,8 +114,6 @@ public sealed partial class CatalogSchemaModel
             ref lastProgressTimestamp,
             tablesProcessed,
             phase);
-
-        return new CatalogSchemaModel(finalTables, omittedSnapshot);
     }
 
     private static (

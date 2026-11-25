@@ -58,8 +58,8 @@ public sealed partial class ExternalCatalogReader
             pageTables = candidates.GetRange(startIndex, takeCount);
             if (pageTables.Count > 0)
             {
-                var fetched = await _ownershipRepository.GetDataOwnersForTablesAsync(
-                    pageTables.Select(static t => t.Identifier).ToList(), ct).ConfigureAwait(false);
+                var fetched = await _ownershipRepository.GetDataOwnersForTableMetadataAsync(
+                    pageTables, ct).ConfigureAwait(false);
                 foreach (var kv in fetched)
                 {
                     ownersByTable[kv.Key] = kv.Value;
@@ -84,8 +84,8 @@ public sealed partial class ExternalCatalogReader
 
                 var chunkLen = Math.Min(windowSize, candidates.Count - offset);
                 var window = candidates.GetRange(offset, chunkLen);
-                var fetched = await _ownershipRepository.GetDataOwnersForTablesAsync(
-                    window.Select(static t => t.Identifier).ToList(), ct).ConfigureAwait(false);
+                var fetched = await _ownershipRepository.GetDataOwnersForTableMetadataAsync(
+                    window, ct).ConfigureAwait(false);
 
                 for (var i = 0; i < window.Count; i++)
                 {

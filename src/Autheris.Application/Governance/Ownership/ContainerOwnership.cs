@@ -45,10 +45,53 @@ public sealed class ContainerOwnership(
     {
         ArgumentNullException.ThrowIfNull(tables);
         var resolved = await ResolveManyAsync(tables, ct).ConfigureAwait(false);
-        var contacts = new Dictionary<(TenantId, Guid), string?>();
-        var result = new Dictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>();
+        return await MapOwnerEntriesAsync(tables, resolved, ct).ConfigureAwait(false);
+    }
+
+    public async Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>> GetDataOwnersForTableMetadataAsync(
+        IReadOnlyCollection<TableMetadata> tables, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(tables);
+        var distinctActive = new List<TableMetadata>(tables.Count);
+        var seen = new HashSet<TableIdentifier>();
         foreach (var table in tables)
         {
+            if (seen.Add(table.Identifier) && table.Table.IsActive)
+            {
+                distinctActive.Add(table);
+            }
+        }
+
+        var resolved = new Dictionary<TableIdentifier, Resolved>();
+        if (distinctActive.Count > 0)
+        {
+            try
+            {
+                await ResolveFromMetadataAsync(distinctActive, resolved, ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                resolved.Clear();
+            }
+        }
+
+        return await MapOwnerEntriesAsync(tables.Select(static t => t.Identifier), resolved, ct).ConfigureAwait(false);
+    }
+
+    private async Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>> MapOwnerEntriesAsync(
+        IEnumerable<TableIdentifier> tableIds,
+        IReadOnlyDictionary<TableIdentifier, Resolved> resolved,
+        CancellationToken ct)
+    {
+        var contacts = new Dictionary<(TenantId, Guid), string?>();
+        var result = new Dictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>();
+        foreach (var table in tableIds)
+        {
+            if (result.ContainsKey(table))
+            {
+                continue;
+            }
+
             result[table] = resolved.TryGetValue(table, out var r)
                 ? [await OwnerEntryAsync(r, contacts, ct).ConfigureAwait(false)]
                 : [];
@@ -159,18 +202,8 @@ public sealed class ContainerOwnership(
 
         try
         {
-            var unresolved = distinctActive.Where(static m => m.Table.Id == Guid.Empty).Select(static m => m.Identifier).ToList();
-            var fetched = unresolved.Count > 0 ? await tables.GetStructuralTableMetadataBatchAsync(unresolved, ct).ConfigureAwait(false) : [];
-            var byId = Enumerable.Range(0, Math.Min(unresolved.Count, fetched.Count))
-                .Where(i => fetched[i] is { Table.IsActive: true })
-                .ToDictionary(i => unresolved[i], i => fetched[i]!);
-            var active = distinctActive
-                .Select(m => (Key: m.Identifier, Meta: m.Table.Id != Guid.Empty ? m : byId.GetValueOrDefault(m.Identifier)))
-                .Where(static x => x.Meta is not null)
-                .Select(static x => (x.Key, x.Meta!))
-                .ToList();
             var resolved = new Dictionary<TableIdentifier, Resolved>();
-            await ResolveActiveAsync(active, resolved, ct).ConfigureAwait(false);
+            await ResolveFromMetadataAsync(distinctActive, resolved, ct).ConfigureAwait(false);
             var groupsCache = new Dictionary<(TenantId, string), IReadOnlyCollection<string>>();
             var authCache = new Dictionary<(TenantId, string), IReadOnlySet<string>>();
             foreach (var (table, r) in resolved)
@@ -228,6 +261,24 @@ public sealed class ContainerOwnership(
             Email = contact is not null && contact.Contains('@', StringComparison.Ordinal) ? contact : string.Empty,
             IsActive = true
         };
+    }
+
+    private async Task ResolveFromMetadataAsync(
+        IReadOnlyCollection<TableMetadata> distinctActive,
+        Dictionary<TableIdentifier, Resolved> target,
+        CancellationToken ct)
+    {
+        var unresolved = distinctActive.Where(static m => m.Table.Id == Guid.Empty).Select(static m => m.Identifier).ToList();
+        var fetched = unresolved.Count > 0 ? await tables.GetStructuralTableMetadataBatchAsync(unresolved, ct).ConfigureAwait(false) : [];
+        var byId = Enumerable.Range(0, Math.Min(unresolved.Count, fetched.Count))
+            .Where(i => fetched[i] is { Table.IsActive: true })
+            .ToDictionary(i => unresolved[i], i => fetched[i]!);
+        var active = distinctActive
+            .Select(m => (Key: m.Identifier, Meta: m.Table.Id != Guid.Empty ? m : byId.GetValueOrDefault(m.Identifier)))
+            .Where(static x => x.Meta is not null)
+            .Select(static x => (x.Key, x.Meta!))
+            .ToList();
+        await ResolveActiveAsync(active, target, ct).ConfigureAwait(false);
     }
 
     /// <summary>

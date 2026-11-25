@@ -122,12 +122,12 @@ internal static class ConnectionGraphQlTypes
         }));
     }
 
-    public static void AddQueryField(IObjectTypeDescriptor query, CatalogTableType table, CatalogSchemaModel schemaModel)
+    public static IObjectFieldDescriptor AddQueryField(IObjectTypeDescriptor query, CatalogTableType table, CatalogSchemaModel schemaModel)
     {
         var connectionFieldName = $"{table.QueryFieldName}Connection";
         var connectionTypeName = $"{table.TypeName}Connection";
 
-        query.Field(connectionFieldName)
+        return query.Field(connectionFieldName)
             .Description($"Relay-compliant keyset cursor connection for {table.TypeName}. Uses cryptographic HMAC keyset cursors to prevent full sorts on the source.")
             .Type(new NonNullTypeNode(new NamedTypeNode(connectionTypeName)))
             .Argument("first", a => a.Type(new NamedTypeNode("Int")).DefaultValue(100))
