@@ -55,6 +55,19 @@ public sealed class GrantRenewalTests
     }
 
     [Fact]
+    public async Task Secret_grant_renewal_stays_a_single_decision()
+    {
+        // Issue #1121 owner answer 2: four eyes for the first grant on secret data only; a renewal is one decision.
+        var c = Grant();
+        var h = Harness(c, cls: ProtectionClass.Secret);
+        var result = await h.Engine.RenewGrantAsync(Cmd(c, H.Actor("user:dg", "GovernanceAdmin")));
+        h.CreatedConsents.ShouldHaveSingleItem().RenewalCount.ShouldBe(1);
+        result.Capacity.ShouldBe(ApproverCapacity.Governance);
+        h.Audit.Entries.ShouldContain(e => e.EventType == AuditEventTypes.GrantRenewed);
+        h.Audit.Entries.ShouldNotContain(e => e.EventType == AuditEventTypes.PermissionApprovalRecorded);
+    }
+
+    [Fact]
     public async Task Superseded_consent_ended_by_id_even_without_request_id()
     {
         var c = Grant(withRequest: false);

@@ -176,6 +176,52 @@ public sealed class DynamicCoverageTests
         decision.GetEffectiveColumnAccess("id", table).ShouldBe(ColumnAccessLevel.Clear);
     }
 
+    [Theory]
+    [InlineData(true, false)]
+    [InlineData(false, true)]
+    public async Task Pattern_grant_never_covers_a_secret_table(bool secretTable, bool secretColumn)
+    {
+        // Issue #1121: secret data needs two approvals of an explicitly named table, so no pattern (wildcard) grant covers it.
+        var epoch = new FakeCatalogVersionProvider(new CatalogVersion(1, 0));
+        var policy = CreatePolicy(new FakeConsentRepo([BuildPatternGrant("pg.finance.*", ConsentWorkflowMode.External)]), epoch, new FakeOwnershipRepo(), out _);
+        var payroll = BuildTable("pg", "finance", "payroll", col("id"), col("salary"));
+        var ledger = BuildTable("pg", "finance", "ledger", col("id"));
+
+        var secret = await policy.DecideAsync(
+            BuildQuery(payroll) with { Protection = Protection(secretTable ? ProtectionClass.Secret : ProtectionClass.Internal, secretColumn ? "salary" : null) },
+            CancellationToken.None);
+        var ordinary = await policy.DecideAsync(BuildQuery(ledger) with { Protection = Protection(ProtectionClass.Confidential, null) }, CancellationToken.None);
+
+        secret.IsAllowed.ShouldBeFalse();
+        ordinary.IsAllowed.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Unmasked_access_profile_never_lifts_masks_on_a_secret_table()
+    {
+        // Issue #1121: clear text of secret data needs an unmask grant with two approvals; an Unmasked profile is enforced as Default there.
+        var table = BuildTable("pg", "finance", "payroll", col("id"), col("ssn", sensitive: true));
+        var consent = TableAccessDecision.Allowed(table.Identifier, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true);
+        var profile = new AccessProfile { ProfileId = "p-1", TenantId = Tenant, Name = "unmasked", MaskingMode = MaskingPolicyMode.Unmasked, TargetTables = ["pg.finance.*"] };
+
+        var onSecret = TableAccessPolicy.ApplyAccessProfilesCore(consent, [profile], table, null, Protection(ProtectionClass.Secret, null));
+        var onConfidential = TableAccessPolicy.ApplyAccessProfilesCore(consent, [profile], table, null, Protection(ProtectionClass.Confidential, null));
+
+        onSecret.GetEffectiveColumnAccess("ssn", table).ShouldNotBe(ColumnAccessLevel.Clear);
+        onConfidential.GetEffectiveColumnAccess("ssn", table).ShouldBe(ColumnAccessLevel.Clear);
+    }
+
+    private static EffectiveProtection Protection(ProtectionClass tableClass, string? secretColumn)
+    {
+        var columns = new Dictionary<string, ColumnProtection>(StringComparer.OrdinalIgnoreCase);
+        if (secretColumn is not null)
+        {
+            columns[secretColumn] = new ColumnProtection(ProtectionClass.Secret, null);
+        }
+
+        return new EffectiveProtection(new ContainerRef(ContainerKind.Domain, Guid.NewGuid()), null, tableClass, tableClass, null, columns, CatalogVisibilityMode.Open);
+    }
+
     [Fact]
     public async Task Catalog_epoch_in_decision_cache_key()
     {

@@ -52,9 +52,12 @@ internal static class ConsentSqlCore
                                     grant_kind, target_columns, container_kind, container_id, approver_capacity, self_grant, bundle_id, decided_by, decided_at
                                 ) VALUES (@id, @tid, @sid, @gType, @gRef, @just, @status, @reqAt, @reqTo, @tenantId, @reqIds, @ctx, @reqWriteRules, @version, @workflowMode, @externalSystemId, @externalReference, @reqValidFrom, @updatedAt, @requestKind, @profileId, @grantKind, @targetColumns, @containerKind, @containerId, @approverCapacity, @selfGrant, @bundleId, @decidedBy, @decidedAt)";
 
-    public const string SelectApprovalStepsSql = "SELECT step_number, approver_sid, decision, rejection_reason, decided_at FROM APPROVAL_STEPS WHERE consent_request_id = @id ORDER BY step_number ASC";
+    public const string SelectApprovalStepsSql = "SELECT step_number, approver_sid, decision, rejection_reason, decided_at, approver_identifiers_json FROM APPROVAL_STEPS WHERE consent_request_id = @id ORDER BY step_number ASC";
 
     public const string InsertApprovedStepSql = "INSERT INTO APPROVAL_STEPS (id, consent_request_id, step_number, approver_sid, decision, decided_at) VALUES (@id, @reqId, @step, @sid, 'APPROVED', @now)";
+
+    /// <summary>Issue #1121: an approval step of the permission request engine stores the approver's identifier forms with the step.</summary>
+    public const string InsertApprovedStepWithIdentifiersSql = "INSERT INTO APPROVAL_STEPS (id, consent_request_id, step_number, approver_sid, decision, decided_at, approver_identifiers_json) VALUES (@id, @reqId, @step, @sid, 'APPROVED', @now, @ids)";
 
     public const string InsertRejectedStepSql = "INSERT INTO APPROVAL_STEPS (id, consent_request_id, step_number, approver_sid, decision, rejection_reason, decided_at) VALUES (@id, @reqId, (SELECT COALESCE(MAX(step_number), 0) + 1 FROM APPROVAL_STEPS WHERE consent_request_id = @reqId), @sid, 'REJECTED', @reason, @now)";
 
@@ -593,25 +596,34 @@ internal static class ConsentSqlCore
 
         if (req != null && loadSteps)
         {
-            await using var stepCmd = conn.CreateCommand();
-            stepCmd.Transaction = tx;
-            stepCmd.CommandText = SelectApprovalStepsSql;
-            stepCmd.AddBound("@id", requestId.ToString());
-            await using var stepReader = await stepCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await stepReader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                req.ApprovalSteps.Add(new ApprovalStep
-                {
-                    StepNumber = stepReader.GetInt32(0),
-                    ApproverSid = new Sid(stepReader.GetString(1)),
-                    Decision = stepReader.GetString(2),
-                    RejectionReason = stepReader.IsDBNull(3) ? null : stepReader.GetString(3),
-                    DecidedAt = stepReader.IsDBNull(4) ? null : DateTimeOffset.Parse(stepReader.GetString(4))
-                });
-            }
+            await LoadApprovalStepsAsync(conn, tx, req, ct).ConfigureAwait(false);
         }
 
         return req;
+    }
+
+    /// <summary>Appends the stored approval steps of <paramref name="req"/> (in step order) to <see cref="ConsentRequest.ApprovalSteps"/>.</summary>
+    public static async Task LoadApprovalStepsAsync(DbConnection conn, DbTransaction? tx, ConsentRequest req, CancellationToken ct)
+    {
+        await using var stepCmd = conn.CreateCommand();
+        stepCmd.Transaction = tx;
+        stepCmd.CommandText = SelectApprovalStepsSql;
+        stepCmd.AddBound("@id", req.Id.ToString());
+        await using var stepReader = await stepCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await stepReader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var idsJson = stepReader.IsDBNull(5) ? null : stepReader.GetString(5);
+            req.ApprovalSteps.Add(new ApprovalStep
+            {
+                ConsentRequestId = req.Id,
+                StepNumber = stepReader.GetInt32(0),
+                ApproverSid = new Sid(stepReader.GetString(1)),
+                Decision = stepReader.GetString(2),
+                RejectionReason = stepReader.IsDBNull(3) ? null : stepReader.GetString(3),
+                DecidedAt = stepReader.IsDBNull(4) ? null : DateTimeOffset.Parse(stepReader.GetString(4), CultureInfo.InvariantCulture),
+                ApproverIdentifiers = string.IsNullOrWhiteSpace(idsJson) ? [] : JsonSerializer.Deserialize<List<string>>(idsJson) ?? []
+            });
+        }
     }
 
     public static ConsentRequest ReadFullConsentRequestRow(DbDataReader reader)
@@ -737,16 +749,21 @@ internal static class ConsentSqlCore
         return (false, null, sameApprover, nextStepNumber);
     }
 
-    public static async Task InsertApprovedStepAsync(DbConnection conn, DbTransaction tx, Guid stepId, Guid requestId, int stepNumber, Sid approverSid, DateTimeOffset decidedAt, CancellationToken ct)
+    public static async Task InsertApprovedStepAsync(DbConnection conn, DbTransaction tx, Guid stepId, Guid requestId, int stepNumber, Sid approverSid, DateTimeOffset decidedAt, CancellationToken ct, IReadOnlyList<string>? approverIdentifiers = null)
     {
         await using var stepInsert = conn.CreateCommand();
         stepInsert.Transaction = tx;
-        stepInsert.CommandText = InsertApprovedStepSql;
+        stepInsert.CommandText = approverIdentifiers is null ? InsertApprovedStepSql : InsertApprovedStepWithIdentifiersSql;
         stepInsert.AddBound("@id", stepId.ToString());
         stepInsert.AddBound("@reqId", requestId.ToString());
         stepInsert.AddBound("@step", stepNumber);
         stepInsert.AddBound("@sid", approverSid.Value);
         stepInsert.AddBound("@now", decidedAt.ToString("O"));
+        if (approverIdentifiers is not null)
+        {
+            stepInsert.AddBound("@ids", JsonSerializer.Serialize(approverIdentifiers));
+        }
+
         await stepInsert.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
     }
 
