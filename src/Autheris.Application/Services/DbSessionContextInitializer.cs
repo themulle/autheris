@@ -130,6 +130,9 @@ public sealed class DbSessionContextInitializer : IDbSessionContextInitializer
         {
             if (accessMode == AccessMode.ReadOnly)
             {
+                // #1138: no explicit isolation level. Oracle permits exactly one SET TRANSACTION per transaction (ORA-01453), so
+                // the read-only statement below must be the first and only transaction-control statement; READ ONLY already
+                // gives transaction-level read consistency.
                 var tx = await connection.BeginTransactionAsync(ct).ConfigureAwait(false);
                 try
                 {

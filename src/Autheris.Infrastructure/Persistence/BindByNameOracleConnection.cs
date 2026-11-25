@@ -52,8 +52,13 @@ internal sealed class BindByNameOracleConnection : DbConnection
     public override Task CloseAsync() => _inner.CloseAsync();
 
     protected override DbTransaction BeginDbTransaction(IsolationLevel isolationLevel) =>
-        // ODP.NET accepts only ReadCommitted and Serializable; the ADO.NET default (Unspecified) is Oracle's own default, ReadCommitted.
-        new BindByNameOracleTransaction(_inner.BeginTransaction(isolationLevel == IsolationLevel.Unspecified ? IsolationLevel.ReadCommitted : isolationLevel), this);
+        // #1138: the ADO.NET default (Unspecified) maps to the driver's parameterless BeginTransaction (Oracle's own default,
+        // READ COMMITTED) instead of an explicit isolation request the caller never made. ODP.NET sends no SQL statement when a
+        // transaction begins; the server transaction starts with the first statement, so a caller's SET TRANSACTION READ ONLY
+        // stays the first (and only) transaction-control statement. ODP.NET accepts only ReadCommitted and Serializable explicitly.
+        new BindByNameOracleTransaction(
+            isolationLevel == IsolationLevel.Unspecified ? _inner.BeginTransaction() : _inner.BeginTransaction(isolationLevel),
+            this);
 
     protected override DbCommand CreateDbCommand() => new BindByNameOracleCommand(_inner.CreateCommand(), this);
 
