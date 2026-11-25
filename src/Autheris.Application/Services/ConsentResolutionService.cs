@@ -1,3 +1,4 @@
+using System;
 using System.Collections.Generic;
 using System.Linq;
 using Autheris.Application.Common.Interfaces;
@@ -19,10 +20,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
     /// <param name="sqlBuilder">Row filter SQL builder; defaults to <see cref="RowFilterSqlBuilder"/>.</param>
     /// <param name="restrictedScopes">The restricted scopes;<c>null</c> = the secure default (<c>Agent.Read</c>), also for parameterless construction.</param>
     /// <param name="logger">Receives the exception type only when the restriction step fails.</param>
-    /// <param name="timeProvider">
-    /// The clock the validity window of a consent is evaluated against; must be the same clock the caller used to load
-    /// the active consents (one decision, one clock). Defaults to <see cref="TimeProvider.System"/>.
-    /// </param>
+    /// <param name="timeProvider">Clock used for grant validity checks; defaults to <see cref="TimeProvider.System"/>.</param>
     public ConsentResolutionService(
         IRowFilterSqlBuilder? sqlBuilder = null,
         IRestrictedScopePolicy? restrictedScopes = null,
@@ -44,7 +42,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         DatabaseDialect dialect = DatabaseDialect.SqlServer,
         IReadOnlySet<Sid>? allUserSids = null,
         IReadOnlySet<string>? callerScopes = null) =>
-        ResolveAccess(userSid, subjectGroupSids, userRoles, table, activeConsents, dialect, allUserSids, callerScopes, tableMetadata: null);
+        ResolveAccess(userSid, subjectGroupSids, userRoles, table, activeConsents, dialect, allUserSids, callerScopes, tableMetadata: null, nowUtc: null);
 
     public TableAccessDecision ResolveAccess(
         Sid userSid,
@@ -55,9 +53,22 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         DatabaseDialect dialect,
         IReadOnlySet<Sid>? allUserSids,
         IReadOnlySet<string>? callerScopes,
-        TableMetadata? tableMetadata)
+        TableMetadata? tableMetadata) =>
+        ResolveAccess(userSid, subjectGroupSids, userRoles, table, activeConsents, dialect, allUserSids, callerScopes, tableMetadata, nowUtc: null);
+
+    public TableAccessDecision ResolveAccess(
+        Sid userSid,
+        IReadOnlySet<Sid> subjectGroupSids,
+        IReadOnlySet<string> userRoles,
+        TableIdentifier table,
+        IReadOnlyList<Consent> activeConsents,
+        DatabaseDialect dialect,
+        IReadOnlySet<Sid>? allUserSids,
+        IReadOnlySet<string>? callerScopes,
+        TableMetadata? tableMetadata,
+        DateTimeOffset? nowUtc)
     {
-        var now = _timeProvider.GetUtcNow();
+        var now = nowUtc ?? _timeProvider.GetUtcNow();
 
         // 1. Identify applicable active consents for Subject Set S (hidden objects never get Allow from pattern grants)
         bool isHiddenTable = tableMetadata?.Table.DiscoveryHidden == true;
