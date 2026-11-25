@@ -8,8 +8,14 @@ using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Policy.Pdp;
+using Autheris.Application.Sql.Services;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
+using Autheris.Domain.Identity;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 
 public sealed partial class AsyncQueryJobManager
 {
@@ -54,66 +60,135 @@ public sealed partial class AsyncQueryJobManager
         {
             var currentEpoch = await _epochProvider.GetEpochAsync(tenantId, ct).ConfigureAwait(false);
             if (job.SubmittedGovernanceEpoch is null || currentEpoch != job.SubmittedGovernanceEpoch.Value)
-            {
-                await DenyResultAsync(job, tenantId, userSid, "Async job result download denied: governance policy epoch changed since submission.", ct).ConfigureAwait(false);
-                throw new Autheris.Domain.Exceptions.GatewayForbiddenException("Access to async job result is denied because governance policy changed since submission.", "JOB_RESULT_FORBIDDEN");
-            }
+                await FailForbiddenAsync(job, tenantId, userSid, "Async job result download denied: governance policy epoch changed since submission.", "Access to async job result is denied because governance policy changed since submission.", ct).ConfigureAwait(false);
         }
 
         IReadOnlyList<TableIdentifier> tables;
-        try
-        {
-            tables = ResolveTablesForReauthorization(job, sqlEngine);
-        }
+        try { tables = ResolveTablesForReauthorization(job, sqlEngine); }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
-            await DenyResultAsync(job, tenantId, userSid, "Async job referenced tables could not be validated at fetch.", ct).ConfigureAwait(false);
-            throw new Autheris.Domain.Exceptions.GatewayForbiddenException("Access to async job result is denied.", "JOB_RESULT_FORBIDDEN");
+            await FailForbiddenAsync(job, tenantId, userSid, "Async job referenced tables could not be validated at fetch.", "Access to async job result is denied.", ct).ConfigureAwait(false);
+            return;
         }
 
         if (tables.Count == 0)
-        {
-            await DenyResultAsync(job, tenantId, userSid, "Async job has no governed target tables for fetch re-authorization.", ct).ConfigureAwait(false);
-            throw new Autheris.Domain.Exceptions.GatewayForbiddenException("Access to async job result is denied.", "JOB_RESULT_FORBIDDEN");
-        }
+            await FailForbiddenAsync(job, tenantId, userSid, "Async job has no governed target tables for fetch re-authorization.", "Access to async job result is denied.", ct).ConfigureAwait(false);
 
-        var secCtx = Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(user, tenantId);
+        var secCtx = SecurityPrincipalContext.FromPrincipal(user, tenantId);
+        var now = _time.GetUtcNow();
+        if (GroupResolutionClaims.IsMarkedDegraded(user) ||
+            GroupResolutionClaims.IsExpired(user, now) ||
+            (job.SubmittedGroupResolutionComplete && (secCtx.GroupResolutionStatus != GroupResolutionStatus.Complete || (secCtx.GroupsExpireAt is { } exp && exp <= now))))
+            await FailForbiddenAsync(job, tenantId, userSid, "Async job result download denied: caller group resolution degraded or expired.", "Access to async job result is denied because group resolution is degraded or expired.", ct).ConfigureAwait(false);
+
+        if (!AreSubmittedPrincipalAttributesCompatible(job, user, secCtx))
+            await FailForbiddenAsync(job, tenantId, userSid, "Async job result download denied: caller roles, groups, or scopes changed since submission.", "Access to async job result is denied because caller privileges changed since submission.", ct).ConfigureAwait(false);
+
         foreach (var tableId in tables)
         {
-            TableMetadata? meta;
-            try
+            var (meta, decision) = await TryDecideTableReadAsync(secCtx, tableId, decisionPoint, metadataRepository, ct).ConfigureAwait(false);
+            if (meta is null || decision is null)
+                await FailForbiddenAsync(job, tenantId, userSid, $"Async job result download denied: referenced table '{tableId}' is unavailable.", "Access to async job result is denied.", ct).ConfigureAwait(false);
+
+            if (!decision!.IsAllowed)
             {
-                meta = await metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false);
-            }
-            catch (Autheris.Domain.Exceptions.TableMetadataUnavailableException)
-            {
-                meta = null;
+                var denyReason = decision.Reasons.Count > 0 ? decision.Reasons[0].Code : decision.DeniedReasons.FirstOrDefault() ?? "POLICY_DENIED";
+                await FailForbiddenAsync(job, tenantId, userSid, $"Async job result download denied by governance policy ({denyReason}).", "Access to async job result is denied by governance policy.", ct).ConfigureAwait(false);
             }
 
-            if (meta is null || !meta.Table.IsActive)
-            {
-                await DenyResultAsync(job, tenantId, userSid, $"Async job result download denied: referenced table '{tableId}' is unavailable.", ct).ConfigureAwait(false);
-                throw new Autheris.Domain.Exceptions.GatewayForbiddenException("Access to async job result is denied.", "JOB_RESULT_FORBIDDEN");
-            }
-
-            var decision = await decisionPoint.DecideAsync(
-                new Autheris.Application.Policy.Pdp.AccessRequest(
-                    secCtx,
-                    meta,
-                    Autheris.Application.Policy.Pdp.AccessOperation.Read,
-                    Autheris.Application.Policy.Pdp.AccessTransport.WebSql),
-                ct).ConfigureAwait(false);
-
-            if (!decision.IsAllowed)
-            {
-                var denyReason = decision.Reasons.Count > 0
-                    ? decision.Reasons[0].Code
-                    : decision.DeniedReasons.FirstOrDefault() ?? "POLICY_DENIED";
-                await DenyResultAsync(job, tenantId, userSid, $"Async job result download denied by governance policy ({denyReason}).", ct).ConfigureAwait(false);
-                throw new Autheris.Domain.Exceptions.GatewayForbiddenException("Access to async job result is denied by governance policy.", "JOB_RESULT_FORBIDDEN");
-            }
+            if (job.SubmittedTableSnapshots is { Count: > 0 } snapshots &&
+                (!snapshots.TryGetValue(tableId.ToString(), out var snapshot) || !IsPolicySnapshotCompatible(snapshot, decision, meta!)))
+                await FailForbiddenAsync(job, tenantId, userSid, $"Async job result download denied: column masking or row-level policy changed for '{tableId}' since execution.", "Access to async job result is denied because column or row protections changed since execution.", ct).ConfigureAwait(false);
         }
     }
+
+    private async Task FailForbiddenAsync(AsyncJobDescriptor job, TenantId tenantId, string userSid, string auditMessage, string clientMessage, CancellationToken ct)
+    {
+        await DenyResultAsync(job, tenantId, userSid, auditMessage, ct).ConfigureAwait(false);
+        throw new GatewayForbiddenException(clientMessage, "JOB_RESULT_FORBIDDEN");
+    }
+
+    private static async Task<(TableMetadata? Meta, TableAccessDecision? Decision)> TryDecideTableReadAsync(
+        SecurityPrincipalContext secCtx,
+        TableIdentifier tableId,
+        IAccessDecisionPoint decisionPoint,
+        ITableMetadataRepository metadataRepository,
+        CancellationToken ct)
+    {
+        TableMetadata? meta;
+        try { meta = await metadataRepository.GetTableMetadataAsync(tableId, ct).ConfigureAwait(false); }
+        catch (TableMetadataUnavailableException) { meta = null; }
+        if (meta is null || !meta.Table.IsActive) return (null, null);
+
+        var decision = await decisionPoint.DecideAsync(new AccessRequest(secCtx, meta, AccessOperation.Read, AccessTransport.WebSql), ct).ConfigureAwait(false);
+        return (meta, decision);
+    }
+
+    internal async Task<IReadOnlyDictionary<string, AsyncJobTablePolicySnapshot>?> CaptureExecutionSnapshotsAsync(
+        AsyncJobDescriptor job, ClaimsPrincipal user, TenantId tenantId, IAccessDecisionPoint decisionPoint, ITableMetadataRepository metadataRepository, TrinoSqlEngine.ISqlEngine? sqlEngine, CancellationToken ct)
+    {
+        IReadOnlyList<TableIdentifier> tables;
+        try { tables = ResolveTablesForReauthorization(job, sqlEngine ?? TrinoSqlEngine.FastSqlEngine.Default); }
+        catch (Exception ex) when (ex is not OperationCanceledException) { return null; }
+        if (tables.Count == 0) return null;
+
+        var secCtx = SecurityPrincipalContext.FromPrincipal(user, tenantId);
+        var snapshots = new Dictionary<string, AsyncJobTablePolicySnapshot>(StringComparer.OrdinalIgnoreCase);
+        foreach (var tableId in tables)
+        {
+            var (meta, decision) = await TryDecideTableReadAsync(secCtx, tableId, decisionPoint, metadataRepository, ct).ConfigureAwait(false);
+            if (meta is null || decision is null) return null;
+
+            var cols = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
+            foreach (var col in meta.Columns) cols[col.ColumnName] = decision.GetEffectiveColumnAccess(col.ColumnName, meta);
+            foreach (var colKey in decision.ColumnAccess.Keys) cols.TryAdd(colKey, decision.GetEffectiveColumnAccess(colKey, meta));
+            snapshots[tableId.ToString()] = new AsyncJobTablePolicySnapshot(
+                decision.IsAllowed,
+                cols,
+                decision.ColumnMasks?.Fingerprint,
+                decision.CombinedRowFilterSql,
+                decision.RowPolicy?.Fingerprint,
+                decision.MandatoryRowPolicy?.Fingerprint,
+                decision.AppliedVirtualFilters);
+        }
+
+        return snapshots;
+    }
+
+    private static bool AreSubmittedPrincipalAttributesCompatible(AsyncJobDescriptor job, ClaimsPrincipal user, SecurityPrincipalContext secCtx) =>
+        (job.SubmittedByGroupSids is not { } subGroups || SetEquals(subGroups, secCtx.GroupSids.Select(static g => g.Value), StringComparer.Ordinal)) &&
+        (job.SubmittedByRoles is not { } subRoles || SetEquals(subRoles, user.GetUserRoles(), StringComparer.OrdinalIgnoreCase)) &&
+        (job.SubmittedByScopes is not { } subScopes || SetEquals(subScopes, TokenAccessScope.GetScopeSet(user.Claims), StringComparer.Ordinal));
+
+    private static bool SetEquals(IReadOnlyList<string> expected, IEnumerable<string> actual, StringComparer comparer) =>
+        new HashSet<string>(expected, comparer).SetEquals(new HashSet<string>(actual, comparer));
+
+    private static bool IsPolicySnapshotCompatible(AsyncJobTablePolicySnapshot snapshot, TableAccessDecision current, TableMetadata meta)
+    {
+        if (!snapshot.IsAllowed || !current.IsAllowed ||
+            !string.Equals(snapshot.CombinedRowFilterSql ?? string.Empty, current.CombinedRowFilterSql ?? string.Empty, StringComparison.Ordinal) ||
+            !string.Equals(snapshot.RowPolicyFingerprint ?? string.Empty, current.RowPolicy?.Fingerprint ?? string.Empty, StringComparison.Ordinal) ||
+            !string.Equals(snapshot.MandatoryRowPolicyFingerprint ?? string.Empty, current.MandatoryRowPolicy?.Fingerprint ?? string.Empty, StringComparison.Ordinal) ||
+            !SequenceEqualsOrdinal(snapshot.AppliedVirtualFilters, current.AppliedVirtualFilters) ||
+            !string.Equals(snapshot.ColumnMasksFingerprint ?? string.Empty, current.ColumnMasks?.Fingerprint ?? string.Empty, StringComparison.Ordinal))
+        {
+            return false;
+        }
+
+        var columns = new HashSet<string>(snapshot.ColumnAccess.Keys, StringComparer.OrdinalIgnoreCase);
+        foreach (var col in meta.Columns) columns.Add(col.ColumnName);
+        foreach (var col in current.ColumnAccess.Keys) columns.Add(col);
+        foreach (var col in columns)
+        {
+            var prev = snapshot.ColumnAccess.TryGetValue(col, out var lvl) ? lvl : (current.HasUnconstrainedColumnAllow ? ColumnAccessLevel.Clear : ColumnAccessLevel.Mask);
+            if (current.GetEffectiveColumnAccess(col, meta) != prev) return false;
+        }
+
+        return true;
+    }
+
+    private static bool SequenceEqualsOrdinal(IReadOnlyList<string>? left, IReadOnlyList<string>? right) =>
+        (left ?? []).SequenceEqual(right ?? [], StringComparer.Ordinal);
 
     private IReadOnlyList<TableIdentifier> ResolveTablesForReauthorization(AsyncJobDescriptor job, TrinoSqlEngine.ISqlEngine sqlEngine)
     {
@@ -177,14 +252,34 @@ public sealed partial class AsyncQueryJobManager
     private TableIdentifier ParseTargetTable(string rawName)
     {
         var defaultDs = _options?.Value?.WebSql?.DefaultDataSourceName;
-        var defaultDomain = string.IsNullOrWhiteSpace(defaultDs) ? "default" : defaultDs;
+        var defaultDomain = string.IsNullOrWhiteSpace(defaultDs) ? TableIdentifierNormalizer.DefaultDomain : defaultDs;
+        var configuredSchema = _options?.Value is { } gw
+            ? Autheris.Application.Sql.Services.SqlDataSourceResolver.ResolveConnectionOptions(gw, defaultDomain)?.DefaultSchema
+            : null;
+        var defaultSchema = string.IsNullOrWhiteSpace(configuredSchema)
+            ? TableIdentifierNormalizer.DefaultSchema
+            : configuredSchema;
         var parts = rawName.Split('.', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries);
         return parts.Length switch
         {
-            3 => new TableIdentifier(parts[0], parts[1], parts[2]),
-            2 => new TableIdentifier(defaultDomain, parts[0], parts[1]),
-            1 => new TableIdentifier(defaultDomain, "dbo", parts[0]),
+            3 => new TableIdentifier(UnquotePart(parts[0]), UnquotePart(parts[1]), UnquotePart(parts[2])),
+            2 => new TableIdentifier(defaultDomain, UnquotePart(parts[0]), UnquotePart(parts[1])),
+            1 => new TableIdentifier(defaultDomain, defaultSchema, UnquotePart(parts[0])),
             _ => throw new InvalidOperationException($"Unsupported table identifier '{rawName}'.")
         };
+    }
+
+    private static string UnquotePart(string part)
+    {
+        var trimmed = part.Trim();
+        if (trimmed.Length >= 2 &&
+            ((trimmed[0] == '"' && trimmed[^1] == '"') ||
+             (trimmed[0] == '`' && trimmed[^1] == '`') ||
+             (trimmed[0] == '[' && trimmed[^1] == ']')))
+        {
+            return trimmed[1..^1];
+        }
+
+        return trimmed;
     }
 }

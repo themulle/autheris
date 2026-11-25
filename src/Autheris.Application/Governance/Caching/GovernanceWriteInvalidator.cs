@@ -83,10 +83,10 @@ public sealed class GovernanceWriteInvalidator(
             await PublishCatalogChangedAsync(version, ct).ConfigureAwait(false);
         }
 
-        if (tenant is { } t)
-        {
-            await NotifyTenantOrAllAsync(t, 0, null, null, ct).ConfigureAwait(false);
-        }
+        var evt = tenant is { } t
+            ? BuildChangeEvent(t, 0, null, _time.GetUtcNow().ToUniversalTime())
+            : GovernanceChangeEvent.All(_time.GetUtcNow().ToUniversalTime());
+        await BroadcastChangeAsync(evt, ct).ConfigureAwait(false);
     }
 
     public async Task InvalidateWideAsync(

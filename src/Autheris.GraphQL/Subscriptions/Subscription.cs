@@ -135,8 +135,7 @@ public sealed class Subscription
         ILogger? watchLogger = services.GetService<ILogger<Subscription>>();
 
         var epochProvider = services.GetService<Autheris.Application.Governance.Caching.GovernanceEpochProvider>();
-        var tenantClaim = Autheris.Domain.Tenancy.TenantClaimReader.Read(principal);
-        TenantId? subTenant = tenantClaim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid ? (TenantId?)tenantClaim.Tenant : null;
+        TenantId? subTenant = !string.IsNullOrWhiteSpace(callerTenant.Value) && !TenantId.IsReserved(callerTenant) ? (TenantId?)callerTenant : (TenantId?)null;
         long? observedEpoch = epochProvider != null && subTenant is { } validTenant
             ? await epochProvider.GetEpochAsync(validTenant, ct).ConfigureAwait(false)
             : (long?)null;
@@ -144,11 +143,17 @@ public sealed class Subscription
 
         using var epochAdvanceSubscription = epochProvider?.OnTenantEpochAdvanced(changedTenant =>
         {
-            if (subTenant is null || string.Equals(changedTenant, subTenant.Value.Value, StringComparison.OrdinalIgnoreCase))
+            if (string.IsNullOrEmpty(changedTenant) || subTenant is null || string.Equals(changedTenant, subTenant.Value.Value, StringComparison.OrdinalIgnoreCase))
             {
                 _ = RevalidateSubscriptionAccessAsync(guardCts, services, principal, subTenant, tableId, watchLogger);
             }
         });
+
+        if (epochProvider != null && subTenant is { } checkTenant &&
+            await epochProvider.GetEpochAsync(checkTenant, ct).ConfigureAwait(false) != observedEpoch)
+        {
+            await RevalidateSubscriptionAccessAsync(guardCts, services, principal, subTenant, tableId, watchLogger).ConfigureAwait(false);
+        }
 
         var hasGroupExpiry = Autheris.Domain.Identity.GroupResolutionClaims.ReadExpiresAt(principal) is not null;
         using var revocationTimer = (revocation == null && (epochProvider == null || subTenant is null) && !hasGroupExpiry) ? null : timeProvider.CreateTimer(static state =>

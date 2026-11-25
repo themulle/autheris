@@ -46,6 +46,8 @@ public sealed class ConsentCacheService : IConsentCacheService, IGovernanceCache
     private const int L2HeaderLength = 1 + 8 + 32;
     private static readonly byte[] L2MacDomain = "Autheris:ConsentCacheL2:v1"u8.ToArray();
     private static readonly TimeSpan MaxL1PromotionTtl = TimeSpan.FromMinutes(5);
+    private static readonly RedisValue GlobalGenField = (RedisValue)"*";
+    private RedisKey ClusterGenKey => (RedisKey)$"{_prefix}consent:gen";
 
     /// <summary>R-3: the faults of the distributed tier (connection, timeout, frame crypto, serialization) that may degrade to a miss.</summary>
     private static bool IsL2Failure(Exception ex) =>
@@ -141,6 +143,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IGovernanceCache
         }
 
         contextHash = await ResolveEffectiveContextHashAsync(contextHash, ct).ConfigureAwait(false);
+        var (localGlobalBefore, localTenantBefore) = CaptureLocalGenerations(tenant.Value);
         var now = _timeProvider.GetUtcNow();
         var candidateEntries = new Dictionary<TableIdentifier, (string CacheKey, long Epoch, TableAccessDecision Decision, DateTimeOffset ValidUntil, bool FromL2, TimeSpan? L1PromotionTtl, RedisKey? L2Key)>();
         var missingTables = new List<TableIdentifier>();
@@ -184,48 +187,40 @@ public sealed class ConsentCacheService : IConsentCacheService, IGovernanceCache
 
                 await Task.WhenAll(l2Reads).ConfigureAwait(false);
 
+                var decodedL2 = new List<(TableIdentifier Table, string CacheKey, RedisKey L2Key, CachedConsentEnvelope Env, TableAccessDecision Decision, DateTimeOffset ExpiresAt)>();
                 for (var i = 0; i < missingTables.Count; i++)
                 {
                     var table = missingTables[i];
                     var cacheKey = BuildCacheKey(tenant, userSid, table, contextHash);
-                    var l2Key = l2Keys[i];
-                    var rawValue = l2Reads[i].Result;
-                    byte[]? payloadBytes = null;
-                    DateTimeOffset l2ExpiresAt = default;
-                    byte[]? rawBytes = rawValue.IsNullOrEmpty ? null : (byte[]?)rawValue;
-                    if (rawBytes != null && rawBytes.Length > 0)
+                    var decoded = await TryDecodeL2EntryAsync(table, l2Keys[i], l2Reads[i].Result, now).ConfigureAwait(false);
+                    if (decoded is { } entry)
                     {
-                        payloadBytes = UnprotectL2Payload(l2Key.ToString(), rawBytes, out l2ExpiresAt);
-                        if (payloadBytes == null)
-                        {
-                            _logger?.LogWarning("Consent L2 cache entry failed integrity verification and was discarded (table {Table}).", table.ToString());
-                            await _redisDb.KeyDeleteAsync(l2Key).ConfigureAwait(false);
-                        }
-                    }
-
-                    TableAccessDecision? decision = null;
-                    CachedConsentEnvelope? l2Env = null;
-                    if (payloadBytes != null && _serializer.TryDeserialize<CachedConsentEnvelope>(payloadBytes, out l2Env) && l2Env != null && MatchesTable(l2Env, table))
-                    {
-                        decision = l2Env.ToDecision(_restrictionFingerprint, now);
-                        if (decision == null)
-                        {
-                            await _redisDb.KeyDeleteAsync(l2Key).ConfigureAwait(false);
-                        }
-                    }
-
-                    if (decision != null && l2Env != null)
-                    {
-                        var envelopeExpiry = l2ExpiresAt < l2Env.ValidUntil ? l2ExpiresAt : l2Env.ValidUntil;
-                        var remaining = envelopeExpiry - now;
-                        var l1Ttl = remaining < MaxL1PromotionTtl ? remaining : MaxL1PromotionTtl;
-                        candidateEntries[table] = (cacheKey, l2Env.Epoch, decision, l2Env.ValidUntil, true, l1Ttl > TimeSpan.Zero ? l1Ttl : null, l2Key);
+                        decodedL2.Add((table, cacheKey, l2Keys[i], entry.Env, entry.Decision, entry.ExpiresAt));
                     }
                     else
                     {
                         result[table] = null;
                         RecordCacheMiss();
                         RemoveKeyFromTableIndex(table, cacheKey);
+                    }
+                }
+
+                if (decodedL2.Count > 0)
+                {
+                    var (clusterGlobal, clusterTenant) = await GetClusterGenerationsAsync(tenant.Value, ct).ConfigureAwait(false);
+                    foreach (var item in decodedL2)
+                    {
+                        if (item.Env.ClusterGlobalGeneration != clusterGlobal || item.Env.ClusterTenantGeneration != clusterTenant)
+                        {
+                            await _redisDb.KeyDeleteAsync(item.L2Key).ConfigureAwait(false);
+                            result[item.Table] = null;
+                            RecordCacheMiss();
+                            RemoveKeyFromTableIndex(item.Table, item.CacheKey);
+                            continue;
+                        }
+
+                        var l1Ttl = ComputeL1PromotionTtl(item.ExpiresAt, item.Env.ValidUntil, now);
+                        candidateEntries[item.Table] = (item.CacheKey, item.Env.Epoch, item.Decision, item.Env.ValidUntil, true, l1Ttl > TimeSpan.Zero ? l1Ttl : null, item.L2Key);
                     }
                 }
             }
@@ -266,7 +261,8 @@ public sealed class ConsentCacheService : IConsentCacheService, IGovernanceCache
 
         foreach (var (table, candidate) in candidateEntries)
         {
-            bool isValid = validationResults.TryGetValue(table, out var v) && v;
+            bool isValid = validationResults.TryGetValue(table, out var v) && v
+                && IsLocalGenerationUnchanged(tenant.Value, localGlobalBefore, localTenantBefore);
             if (isValid)
             {
                 if (candidate.FromL2 && candidate.L1PromotionTtl.HasValue)
@@ -284,7 +280,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IGovernanceCache
                 {
                     _memoryCache.Remove(candidate.CacheKey);
                 }
-                else if (candidate.L2Key.HasValue && _redisDb != null)
+                else if (candidate.L2Key.HasValue && _redisDb != null && !(validationResults.TryGetValue(table, out var epochOk) && epochOk))
                 {
                     try
                     {
@@ -311,6 +307,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IGovernanceCache
         CancellationToken ct = default)
     {
         contextHash = await ResolveEffectiveContextHashAsync(contextHash, ct).ConfigureAwait(false);
+        var (localGlobalBefore, localTenantBefore) = CaptureLocalGenerations(tenant.Value);
         var now = _timeProvider.GetUtcNow();
         var cacheKey = BuildCacheKey(tenant, userSid, table, contextHash);
         if (_memoryCache.TryGetValue(cacheKey, out CacheEntryEnvelope? envelope) && envelope != null)
@@ -325,7 +322,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IGovernanceCache
 
             // Validate epoch
             var isValid = await _epochValidationService.IsEpochValidAsync(table, envelope.Epoch, ct).ConfigureAwait(false);
-            if (!isValid)
+            if (!isValid || !IsGenerationCurrent(tenant.Value, envelope))
             {
                 RecordCacheMiss();
                 _memoryCache.Remove(cacheKey);
@@ -344,42 +341,22 @@ public sealed class ConsentCacheService : IConsentCacheService, IGovernanceCache
             {
                 var l2Key = (RedisKey)$"{_prefix}consent:l2:{cacheKey}";
                 var rawValue = await _redisDb.StringGetAsync(l2Key).ConfigureAwait(false);
-                byte[]? payloadBytes = null;
-                DateTimeOffset l2ExpiresAt = default;
-                byte[]? rawBytes = rawValue.IsNullOrEmpty ? null : (byte[]?)rawValue;
-                if (rawBytes != null && rawBytes.Length > 0)
+                if (await TryDecodeL2EntryAsync(table, l2Key, rawValue, now).ConfigureAwait(false) is { } entry)
                 {
-                    payloadBytes = UnprotectL2Payload(l2Key.ToString(), rawBytes, out l2ExpiresAt);
-                    if (payloadBytes == null)
+                    var (clusterGlobal, clusterTenant) = await GetClusterGenerationsAsync(tenant.Value, ct).ConfigureAwait(false);
+                    var isClusterCurrent = entry.Env.ClusterGlobalGeneration == clusterGlobal && entry.Env.ClusterTenantGeneration == clusterTenant;
+                    var isL2EpochValid = isClusterCurrent && await _epochValidationService.IsEpochValidAsync(table, entry.Env.Epoch, ct).ConfigureAwait(false);
+                    if (!isClusterCurrent || !isL2EpochValid)
                     {
-                        // SEC H-01: forged, replayed-after-expiry or corrupted L2 entry -> treat as miss and drop it.
-                        _logger?.LogWarning("Consent L2 cache entry failed integrity verification and was discarded (table {Table}).", table.ToString());
                         await _redisDb.KeyDeleteAsync(l2Key).ConfigureAwait(false);
                     }
-                }
-
-                if (payloadBytes != null && _serializer.TryDeserialize<CachedConsentEnvelope>(payloadBytes, out var l2Env) && l2Env != null && MatchesTable(l2Env, table))
-                {
-                    var isL2EpochValid = await _epochValidationService.IsEpochValidAsync(table, l2Env.Epoch, ct).ConfigureAwait(false);
-                    // a legacy, foreign-fingerprint, or expired entry is a miss; L1 promotion only happens after this check.
-                    var decision = isL2EpochValid ? l2Env.ToDecision(_restrictionFingerprint, now) : null;
-                    if (isL2EpochValid && decision != null)
+                    else if (IsLocalGenerationUnchanged(tenant.Value, localGlobalBefore, localTenantBefore))
                     {
-                        // RR-L4-06: never extend the original (security-relevant) TTL on promotion.
-                        var envelopeExpiry = l2ExpiresAt < l2Env.ValidUntil ? l2ExpiresAt : l2Env.ValidUntil;
-                        var remaining = envelopeExpiry - now;
-                        var l1Ttl = remaining < MaxL1PromotionTtl ? remaining : MaxL1PromotionTtl;
+                        var l1Ttl = ComputeL1PromotionTtl(entry.ExpiresAt, entry.Env.ValidUntil, now);
                         if (l1Ttl > TimeSpan.Zero)
-                        {
-                            SetL1Internal(table, cacheKey, new CacheEntryEnvelope(decision, l2Env.Epoch, l2Env.ValidUntil), l1Ttl);
-                        }
-
+                            SetL1Internal(table, cacheKey, new CacheEntryEnvelope(entry.Decision, entry.Env.Epoch, entry.Env.ValidUntil), l1Ttl);
                         RecordCacheHit();
-                        return decision;
-                    }
-                    else
-                    {
-                        await _redisDb.KeyDeleteAsync(l2Key).ConfigureAwait(false);
+                        return entry.Decision;
                     }
                 }
             }
@@ -424,12 +401,14 @@ public sealed class ConsentCacheService : IConsentCacheService, IGovernanceCache
         }
 
         contextHash = await ResolveEffectiveContextHashAsync(contextHash, ct).ConfigureAwait(false);
+        var (localGlobalBefore, localTenantBefore) = CaptureLocalGenerations(tenant.Value);
         var cacheKey = BuildCacheKey(tenant, userSid, table, contextHash);
         var currentEpoch = await _epochValidationService.GetCurrentEpochAsync(table, ct).ConfigureAwait(false);
 
         // RR-L4-06: compare-and-set. If the epoch moved while consents were being loaded (revocation / policy change),
         // the decision may be stale and must not be cached at all.
-        if (epochAtLoad.HasValue && epochAtLoad.Value != currentEpoch)
+        if ((epochAtLoad.HasValue && epochAtLoad.Value != currentEpoch) ||
+            !IsLocalGenerationUnchanged(tenant.Value, localGlobalBefore, localTenantBefore))
         {
             _logger?.LogDebug("Consent decision for table {Table} not cached: epoch changed during evaluation.", table.ToString());
             return;
@@ -447,8 +426,14 @@ public sealed class ConsentCacheService : IConsentCacheService, IGovernanceCache
         {
             try
             {
+                var (clusterGlobal, clusterTenant) = await GetClusterGenerationsAsync(tenant.Value, ct).ConfigureAwait(false);
+                if (!IsLocalGenerationUnchanged(tenant.Value, localGlobalBefore, localTenantBefore))
+                {
+                    return;
+                }
+
                 var l2Key = (RedisKey)$"{_prefix}consent:l2:{cacheKey}";
-                var l2Dto = CachedConsentEnvelope.FromDecision(decision, storedEpoch, _restrictionFingerprint, validUntil);
+                var l2Dto = CachedConsentEnvelope.FromDecision(decision, storedEpoch, _restrictionFingerprint, validUntil, clusterGlobal, clusterTenant);
                 var binaryPayload = _serializer.Serialize(l2Dto);
                 var protectedPayload = ProtectL2Payload(l2Key.ToString(), binaryPayload, validUntil);
                 await _redisDb.StringSetAsync(l2Key, protectedPayload, ttl).ConfigureAwait(false);
@@ -553,6 +538,73 @@ public sealed class ConsentCacheService : IConsentCacheService, IGovernanceCache
         return colonIndex > 0 ? cacheKey[..colonIndex] : string.Empty;
     }
 
+    private async ValueTask<(CachedConsentEnvelope Env, TableAccessDecision Decision, DateTimeOffset ExpiresAt)?> TryDecodeL2EntryAsync(
+        TableIdentifier table, RedisKey l2Key, RedisValue rawValue, DateTimeOffset now)
+    {
+        byte[]? rawBytes = rawValue.IsNullOrEmpty ? null : (byte[]?)rawValue;
+        byte[]? payloadBytes = null;
+        DateTimeOffset expiresAt = default;
+        if (rawBytes is { Length: > 0 })
+        {
+            payloadBytes = UnprotectL2Payload(l2Key.ToString(), rawBytes, out expiresAt);
+            if (payloadBytes == null)
+            {
+                _logger?.LogWarning("Consent L2 cache entry failed integrity verification and was discarded (table {Table}).", table.ToString());
+                await _redisDb!.KeyDeleteAsync(l2Key).ConfigureAwait(false);
+                return null;
+            }
+        }
+
+        if (payloadBytes == null || !_serializer!.TryDeserialize<CachedConsentEnvelope>(payloadBytes, out var l2Env) || l2Env == null || !MatchesTable(l2Env, table))
+            return null;
+
+        if (l2Env.ToDecision(_restrictionFingerprint, now) is not { } decision)
+        {
+            await _redisDb!.KeyDeleteAsync(l2Key).ConfigureAwait(false);
+            return null;
+        }
+
+        return (l2Env, decision, expiresAt);
+    }
+
+    private static TimeSpan ComputeL1PromotionTtl(DateTimeOffset l2ExpiresAt, DateTimeOffset envValidUntil, DateTimeOffset now)
+    {
+        var remaining = (l2ExpiresAt < envValidUntil ? l2ExpiresAt : envValidUntil) - now;
+        return remaining < MaxL1PromotionTtl ? remaining : MaxL1PromotionTtl;
+    }
+
+    private (long Global, long Tenant) CaptureLocalGenerations(string tenantId) =>
+        (Volatile.Read(ref _globalGeneration), _tenantGenerations.GetOrAdd(tenantId, 0));
+
+    private bool IsLocalGenerationUnchanged(string tenantId, long expectedGlobal, long expectedTenant) =>
+        Volatile.Read(ref _globalGeneration) == expectedGlobal && _tenantGenerations.GetOrAdd(tenantId, 0) == expectedTenant;
+
+    private async ValueTask<(long Global, long Tenant)> GetClusterGenerationsAsync(string tenantId, CancellationToken ct)
+    {
+        ct.ThrowIfCancellationRequested();
+        if (_redisDb == null) return (0L, 0L);
+        var values = await _redisDb.HashGetAsync(ClusterGenKey, [GlobalGenField, (RedisValue)tenantId]).ConfigureAwait(false);
+        return values is { Length: >= 2 } ? (ParseGeneration(values[0]), ParseGeneration(values[1])) : (0L, 0L);
+    }
+
+    private static long ParseGeneration(RedisValue value) =>
+        value.IsNullOrEmpty ? 0L : (long.TryParse(value.ToString(), out var parsed) ? parsed : 0L);
+
+    private Task? DispatchClusterGenerationBump(bool global, string? tenantId)
+    {
+        if (_redisDb == null) return null;
+        var field = global || string.IsNullOrWhiteSpace(tenantId) ? GlobalGenField : (RedisValue)tenantId.Trim();
+        try { return _redisDb.HashIncrementAsync(ClusterGenKey, field, 1); }
+        catch (Exception ex) when (IsL2Failure(ex)) { _logger?.LogWarning(ConsentCacheLogEvents.L2WriteFailed, ex, "Consent L2 cluster generation increment failed."); return null; }
+    }
+
+    private async Task ObserveClusterBumpAsync(Task? bumpTask)
+    {
+        if (bumpTask == null) return;
+        try { await bumpTask.ConfigureAwait(false); }
+        catch (Exception ex) when (IsL2Failure(ex)) { _logger?.LogWarning(ConsentCacheLogEvents.L2WriteFailed, ex, "Consent L2 cluster generation increment failed."); }
+    }
+
     public void InvalidateTenant(string tenantId)
     {
         if (string.IsNullOrWhiteSpace(tenantId))
@@ -563,6 +615,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IGovernanceCache
 
         var normalizedTenant = tenantId.Trim();
         _tenantGenerations.AddOrUpdate(normalizedTenant, 1, static (_, gen) => gen + 1);
+        var clusterBump = DispatchClusterGenerationBump(global: false, normalizedTenant);
 
         IReadOnlyList<TableIdentifier> tables = [];
         lock (_syncLock)
@@ -581,6 +634,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IGovernanceCache
             }
         }
 
+        _ = ObserveClusterBumpAsync(clusterBump);
         foreach (var table in tables)
         {
             _ = InvalidateEpochSafeAsync(table);
@@ -591,6 +645,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IGovernanceCache
     {
         Interlocked.Increment(ref _globalGeneration);
         _tenantGenerations.Clear();
+        var clusterBump = DispatchClusterGenerationBump(global: true, tenantId: null);
 
         IReadOnlyList<TableIdentifier> allTables;
         lock (_syncLock)
@@ -616,6 +671,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IGovernanceCache
             _tenantTables.Clear();
         }
 
+        _ = ObserveClusterBumpAsync(clusterBump);
         foreach (var table in allTables)
         {
             _ = InvalidateEpochSafeAsync(table);
@@ -634,10 +690,12 @@ public sealed class ConsentCacheService : IConsentCacheService, IGovernanceCache
         }
     }
 
-    public Task ClearL1CacheAsync(CancellationToken ct = default)
+    public async Task ClearL1CacheAsync(CancellationToken ct = default)
     {
+        ct.ThrowIfCancellationRequested();
         Interlocked.Increment(ref _globalGeneration);
         _tenantGenerations.Clear();
+        var clusterBump = DispatchClusterGenerationBump(global: true, tenantId: null);
         lock (_syncLock)
         {
             if (_memoryCache is MemoryCache mc)
@@ -648,7 +706,7 @@ public sealed class ConsentCacheService : IConsentCacheService, IGovernanceCache
             _tenantCacheKeys.Clear();
             _tenantTables.Clear();
         }
-        return Task.CompletedTask;
+        await ObserveClusterBumpAsync(clusterBump).ConfigureAwait(false);
     }
 
     public int GetTrackedKeyCount(TableIdentifier table)
