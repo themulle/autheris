@@ -31,6 +31,7 @@ src/Autheris.Api/Endpoints/ChangeDetectionEndpoints.cs|/api/v1/data/{domain}/{sc
 src/Autheris.Api/Endpoints/ClassificationAdminEndpoints.cs|ClassificationRoute
 src/Autheris.Api/Endpoints/ClassificationAdminEndpoints.cs|ClassificationRoute + "/mask-rule"
 src/Autheris.Api/Endpoints/ConsentApiEndpoints.Decisions.cs|/api/v1/governance/containers/{kind}/{id:guid}/grants
+src/Autheris.Api/Endpoints/ConsentApiEndpoints.Deputies.cs|/api/v1/governance/deputies
 src/Autheris.Api/Endpoints/ConsentApiEndpoints.Decisions.cs|/inbox
 src/Autheris.Api/Endpoints/ConsentApiEndpoints.Grants.cs|/grant-records/keys
 src/Autheris.Api/Endpoints/ConsentApiEndpoints.Grants.cs|/grant-records/proof

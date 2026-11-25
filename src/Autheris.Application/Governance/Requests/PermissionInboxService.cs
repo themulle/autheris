@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Governance.ConsentRequests;
+using Autheris.Application.Governance.Ownership;
 using Autheris.Application.Governance.Paging;
 using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
@@ -32,7 +33,9 @@ public sealed partial class PermissionInboxService(
     IGovernanceCapabilities capabilities,
     IGovernanceDomainRepository? domains = null,
     TimeProvider? timeProvider = null,
-    ICatalogVisibilityGrantRepository? catalogGrants = null)
+    ICatalogVisibilityGrantRepository? catalogGrants = null,
+    IDeputyAuthority? deputies = null,
+    IDeputyRelationRepository? deputyRelations = null)
 {
     /// <summary>Default and maximum page size of the inbox and the grant overview.</summary>
     public const int MaxPageSize = ConsentPageQuery.MaxPageSize;
@@ -52,6 +55,8 @@ public sealed partial class PermissionInboxService(
     private readonly IGovernanceDomainRepository? _domains = domains;
     private readonly ICatalogVisibilityGrantRepository? _catalogGrants = catalogGrants;
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+    private readonly IDeputyAuthority? _deputies = deputies;
+    private readonly IDeputyRelationRepository? _deputyRelations = deputyRelations;
 
     /// <summary>
     /// Requests of <paramref name="tenant"/> the caller is eligible to decide, newest first (by last update, then id), the
@@ -79,12 +84,21 @@ public sealed partial class PermissionInboxService(
         }
 
         // Bounded scan cost: a caller that can never be an approver neither pays for nor causes a scan.
-        if (!MayHoldAnyDeciderCapacity(caller, tenant))
+        if (IsDegraded(caller))
+        {
+            // ApproverEligibility denies every capacity under degraded resolution.
+            return new PermissionInboxPage([], null);
+        }
+
+        // The caller's active deputy relations are read once per inbox call (issue #1126) and reused for every request of the page.
+        var deputies = _deputies is null ? null : new MemoizedDeputyAuthority(_deputies);
+        if (!MayHoldAnyDeciderCapacity(caller, tenant) &&
+            (deputies is null || (await deputies.GetActiveRelationsAsync(caller, tenant, ct).ConfigureAwait(false)).Count == 0))
         {
             return new PermissionInboxPage([], null);
         }
 
-        var evaluation = new InboxEvaluation(caller, tenant, _capabilities);
+        var evaluation = new InboxEvaluation(caller, tenant, _capabilities, deputies);
         var items = new List<PermissionInboxItem>(size);
         var next = cursor;
         var resume = cursor;
@@ -132,18 +146,10 @@ public sealed partial class PermissionInboxService(
         return new PermissionInboxPage(items, hasMore ? resume : null);
     }
 
-    private bool MayHoldAnyDeciderCapacity(SecurityPrincipalContext caller, TenantId tenant)
-    {
-        if (IsDegraded(caller))
-        {
-            // ApproverEligibility denies every capacity under degraded resolution.
-            return false;
-        }
-
-        return caller.GroupSids is { Count: > 0 } ||
-               _capabilities.IsGovernance(caller.Principal, tenant) ||
-               _capabilities.IsItAdmin(caller.Principal, tenant);
-    }
+    private bool MayHoldAnyDeciderCapacity(SecurityPrincipalContext caller, TenantId tenant) =>
+        caller.GroupSids is { Count: > 0 } ||
+        _capabilities.IsGovernance(caller.Principal, tenant) ||
+        _capabilities.IsItAdmin(caller.Principal, tenant);
 
     private static bool IsDegraded(SecurityPrincipalContext caller) =>
         caller.GroupResolutionStatus != GroupResolutionStatus.Complete ||
@@ -193,14 +199,15 @@ public sealed partial class PermissionInboxService(
         }
     }
 
-    /// <summary>Per-call state: one caller, one tenant, memoized container and owner-membership lookups.</summary>
-    private sealed class InboxEvaluation(SecurityPrincipalContext caller, TenantId tenant, IGovernanceCapabilities capabilities)
+    /// <summary>Per-call state: one caller, one tenant, memoized container, owner-membership and deputyship lookups.</summary>
+    private sealed class InboxEvaluation(
+        SecurityPrincipalContext caller, TenantId tenant, IGovernanceCapabilities capabilities, IDeputyAuthority? deputies)
     {
         public SecurityPrincipalContext Caller { get; } = caller;
 
         public ApproverResolutionCache Resolutions { get; } = new(tenant);
 
-        public ApproverEligibility Eligibility { get; } = new(new OwnerMembershipMemo(capabilities));
+        public ApproverEligibility Eligibility { get; } = new(new OwnerMembershipMemo(capabilities), deputies);
     }
 
     /// <summary>Caches owner-group membership per container for the single caller of one inbox call.</summary>

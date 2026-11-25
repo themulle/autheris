@@ -58,6 +58,7 @@ public static class GatewayPolicies
     public const string EffectiveFilterInspect = "EffectiveFilterInspect";
     public const string ProductAccess = "ProductAccess";
     public const string ProductSync = "ProductSync";
+    public const string DeputySync = "DeputySync";
     public const string OpenApiPublish = "OpenApiPublish";
     public const string ProfileAdmin = "ProfileAdmin";
     public const string ProfileRead = "ProfileRead";
@@ -96,6 +97,7 @@ public static class GatewayPolicies
     public static readonly string[] VirtualFilterSyncApplyRoles = ["FilterSync"];
     public static readonly string[] EffectiveFilterInspectRoles = ["FilterAdmin", "GovernanceAdmin", "SecurityAuditor"];
     public static readonly string[] ProductSyncRoles = ["DataProductSync"];
+    public static readonly string[] DeputySyncRoles = ["DeputySync", "GovernanceAdmin"];
     public static readonly string[] OpenApiPublishRoles = ["GovernanceAdmin", "SchemaPublisher", "TenantAdmin"];
     public static readonly string[] ProfileAdminRoles = ["GovernanceAdmin"];
     public static readonly string[] ProfileReadRoles = ["TenantAdmin", "GovernanceAdmin", "SecurityAuditor"];
@@ -402,6 +404,9 @@ public static class GatewayPolicies
             .RequireAssertion(AllowsProductAccess));
         AddSecurityRolePolicy(options, ProductSync,
             [GatewayRole.DataProductSync]);
+        // Issue #1126: deputy relation reconciliation by the tenant-bound sync identity or Data Governance; never IT administration.
+        AddSecurityRolePolicy(options, DeputySync,
+            [GatewayRole.DeputySync, GatewayRole.GovernanceAdmin]);
 
         AddSecurityRolePolicy(options, OpenApiPublish,
             [GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher, GatewayRole.TenantAdmin]);
@@ -473,6 +478,7 @@ public static class GatewayPolicies
             VirtualFilterSyncApply => VirtualFilterSyncApplyRoles,
             EffectiveFilterInspect => EffectiveFilterInspectRoles,
             ProductSync => ProductSyncRoles,
+            DeputySync => DeputySyncRoles,
             OpenApiPublish => OpenApiPublishRoles,
             ProfileAdmin => ProfileAdminRoles,
             ProfileRead => ProfileReadRoles,

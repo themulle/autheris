@@ -24,6 +24,7 @@ public sealed class GatewayRoleEnumRatchetTests
         "DataProductAdmin",
         "DataProductSync",
         "CatalogArtifactUploader",
+        "DeputySync",
     };
 
     [Fact]

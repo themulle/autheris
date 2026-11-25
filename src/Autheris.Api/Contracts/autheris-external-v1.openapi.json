@@ -357,7 +357,8 @@
                     "patternGrants": { "type": "array", "nullable": true, "items": { "$ref": "#/components/schemas/ConsentGrantDto" } },
                     "patternGrantsTruncated": { "type": "boolean" },
                     "catalogGrants": { "type": "array", "nullable": true, "items": { "$ref": "#/components/schemas/CatalogGrantDto" } },
-                    "catalogGrantsTruncated": { "type": "boolean" }
+                    "catalogGrantsTruncated": { "type": "boolean" },
+                    "deputies": { "type": "array", "nullable": true, "items": { "$ref": "#/components/schemas/DeputyRelationDto" } }
                   }
                 }
               }
@@ -365,6 +366,91 @@
           },
           "400": { "description": "Malformed cursor (INVALID_CURSOR)" },
           "404": { "description": "Container not found or not visible to the caller" },
+          "429": { "description": "Rate limited" }
+        }
+      }
+    },
+    "/api/v1/governance/deputies": {
+      "get": {
+        "operationId": "listDeputyRelations",
+        "parameters": [
+          { "name": "principal", "in": "query", "schema": { "type": "string" } },
+          { "name": "deputy", "in": "query", "schema": { "type": "string" } },
+          { "name": "source", "in": "query", "schema": { "type": "string" } },
+          { "name": "active", "in": "query", "schema": { "type": "boolean" } },
+          { "name": "containerKind", "in": "query", "schema": { "type": "string" } },
+          { "name": "containerId", "in": "query", "schema": { "type": "string", "format": "uuid" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deputy relations: every relation of the tenant for Data Governance and the DeputySync identity; for an owner-group member only the active relations whose principal is an owner-group member of the given container (its effective deputies).",
+            "content": { "application/json": { "schema": { "type": "object", "properties": { "items": { "type": "array", "items": { "$ref": "#/components/schemas/DeputyRelationDto" } } } } } }
+          },
+          "400": { "description": "containerKind and containerId must be given together" },
+          "403": { "description": "The caller may not read these relations" },
+          "429": { "description": "Rate limited" }
+        }
+      }
+    },
+    "/api/v1/governance/deputies/sources/{source}": {
+      "put": {
+        "operationId": "reconcileDeputyRelations",
+        "parameters": [
+          { "name": "source", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "dryRun", "in": "query", "schema": { "type": "boolean" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "type": "object", "properties": { "relations": { "type": "array", "items": { "$ref": "#/components/schemas/DeputyRelationEntryDto" } } } } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Reconciliation diff (dry run or applied); rejected entries are reported per entry and count as absent.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeputyRelationSyncResultDto" } } }
+          },
+          "400": { "description": "Missing relation list" },
+          "403": { "description": "Neither the tenant-bound DeputySync right nor Data Governance" },
+          "409": { "description": "Concurrent change; nothing was applied (DEPUTY_CONCURRENT_CHANGE)" },
+          "422": { "description": "Invalid source or too many entries" },
+          "429": { "description": "Rate limited" }
+        }
+      }
+    },
+    "/api/v1/governance/deputies/sources/{source}/relations/{externalId}": {
+      "put": {
+        "operationId": "upsertDeputyRelation",
+        "parameters": [
+          { "name": "source", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "externalId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeputyRelationEntryDto" } } }
+        },
+        "responses": {
+          "200": {
+            "description": "Reconciliation diff (dry run or applied); rejected entries are reported per entry and count as absent.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeputyRelationSyncResultDto" } } }
+          },
+          "403": { "description": "Neither the tenant-bound DeputySync right nor Data Governance" },
+          "409": { "description": "Concurrent change (DEPUTY_CONCURRENT_CHANGE)" },
+          "422": { "description": "The entry was rejected (identity, window, self relation)" },
+          "429": { "description": "Rate limited" }
+        }
+      },
+      "delete": {
+        "operationId": "endDeputyRelation",
+        "parameters": [
+          { "name": "source", "in": "path", "required": true, "schema": { "type": "string" } },
+          { "name": "externalId", "in": "path", "required": true, "schema": { "type": "string" } }
+        ],
+        "responses": {
+          "200": {
+            "description": "Reconciliation diff (dry run or applied); rejected entries are reported per entry and count as absent.",
+            "content": { "application/json": { "schema": { "$ref": "#/components/schemas/DeputyRelationSyncResultDto" } } }
+          },
+          "403": { "description": "Neither the tenant-bound DeputySync right nor Data Governance" },
+          "404": { "description": "No such relation in the source" },
           "429": { "description": "Rate limited" }
         }
       }
@@ -831,6 +917,43 @@
           "approvers": { "type": "array", "items": { "type": "object" }, "nullable": true },
           "nonce": { "type": "string", "nullable": true },
           "signature": { "type": "string", "nullable": true }
+        }
+      },
+      "DeputyRelationDto": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "format": "uuid" },
+          "source": { "type": "string" },
+          "externalId": { "type": "string" },
+          "principal": { "type": "string", "description": "Realm-qualified identity of the person deputized for (B)" },
+          "deputy": { "type": "string", "description": "Realm-qualified identity of the deputy (A)" },
+          "validFrom": { "type": "string", "format": "date-time" },
+          "validTo": { "type": "string", "format": "date-time" },
+          "createdBy": { "type": "string" },
+          "createdAt": { "type": "string", "format": "date-time" },
+          "updatedBy": { "type": "string", "nullable": true },
+          "updatedAt": { "type": "string", "format": "date-time", "nullable": true }
+        }
+      },
+      "DeputyRelationEntryDto": {
+        "type": "object",
+        "properties": {
+          "externalId": { "type": "string" },
+          "principal": { "type": "string", "description": "Person deputized for (B): realm-qualified identifier, SCIM user id, SID, Entra object id or UPN" },
+          "deputy": { "type": "string", "description": "Deputy (A), same identifier forms" },
+          "validFrom": { "type": "string", "format": "date-time", "nullable": true },
+          "validTo": { "type": "string", "format": "date-time", "description": "Mandatory; the window is at most 90 days" }
+        }
+      },
+      "DeputyRelationSyncResultDto": {
+        "type": "object",
+        "properties": {
+          "dryRun": { "type": "boolean" },
+          "created": { "type": "array", "items": { "$ref": "#/components/schemas/DeputyRelationDto" } },
+          "updated": { "type": "array", "items": { "type": "object", "properties": { "before": { "$ref": "#/components/schemas/DeputyRelationDto" }, "after": { "$ref": "#/components/schemas/DeputyRelationDto" } } } },
+          "ended": { "type": "array", "items": { "$ref": "#/components/schemas/DeputyRelationDto" } },
+          "unchanged": { "type": "integer" },
+          "rejected": { "type": "array", "items": { "type": "object", "properties": { "externalId": { "type": "string", "nullable": true }, "code": { "type": "string" }, "message": { "type": "string" } } } }
         }
       },
       "CatalogGrantDto": {

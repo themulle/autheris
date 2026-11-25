@@ -30,6 +30,10 @@ public sealed record PermissionAuditDetails(
     Guid? ExternalSystemId = null,
     string? ExternalReference = null)
 {
+    /// <summary>The principal a deputy decided for (issue #1126); omitted when the decider acted in its own capacity.</summary>
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public string? OnBehalfOf { get; init; }
+
     public static PermissionAuditActorKind ResolveActorKind(SecurityPrincipalContext? context)
     {
         if (context is null)

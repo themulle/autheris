@@ -62,6 +62,7 @@ public sealed partial class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.MigrationPurgeStore", "governance store: D13 migration purge report, archived head reader, and schema version check (Issue #1009), fixed constant SQL statements with bound parameters, no client text"),
         ("Autheris.Infrastructure.Persistence.CatalogVisibilityGrantStore", "governance store: container-scoped catalog visibility grants (Issue #1009), fixed constant SQL statements with bound parameters, no client text"),
         ("Autheris.Infrastructure.Persistence.ManifestProposalStore", "governance store: declarative manifest proposals (Issue #1009, Amendment 6), fixed constant SQL statements with bound parameters, no client text"),
+        ("Autheris.Infrastructure.Persistence.DeputyRelationStore", "governance store: external deputy relations (Issue #1126), constant SQL fragments plus generated parameter names for key lists, every value bound, no client text"),
         ("Autheris.Infrastructure.Persistence.PermissionRequestStore", "governance store: single-transaction permission decision CAS and query store (Issue #1009), fixed constant SQL statements with bound parameters, no client text"),
     ];
 }

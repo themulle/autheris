@@ -41,6 +41,7 @@ public static partial class ConsentApiEndpoints
         app.MapGet("/api/v1/governance/containers/{kind}/{id:guid}/grants", GetContainerGrantsAsync)
             .RequireAuthorization(GatewayPolicies.AuthenticatedCaller)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
+        MapDeputyEndpoints(app);
     }
 
     internal static async Task<IResult> GetInboxAsync(
@@ -134,7 +135,8 @@ public static partial class ConsentApiEndpoints
             patternGrants = page.PatternGrants?.Select(ToGrantDto).ToArray(),
             patternGrantsTruncated = page.PatternGrantsTruncated,
             catalogGrants = page.CatalogGrants?.Select(ToCatalogGrantDto).ToArray(),
-            catalogGrantsTruncated = page.CatalogGrantsTruncated
+            catalogGrantsTruncated = page.CatalogGrantsTruncated,
+            deputies = page.Deputies?.Select(static d => ToDeputyRelationDto(d.Relation)).ToArray()
         });
     }
 

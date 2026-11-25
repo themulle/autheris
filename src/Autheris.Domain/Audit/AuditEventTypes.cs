@@ -231,6 +231,13 @@ public static class AuditEventTypes
     public const string GrantRenewalRollbackFailed = "GRANT_RENEWAL_ROLLBACK_FAILED";
     public const string GrantRevoked = "GRANT_REVOKED";
     public const string GrantRevokedDeprovisioned = "GRANT_REVOKED_DEPROVISIONED";
+
+    // Externally sourced deputy relations (issue #1126): every create, change and end is audited fail-closed with source, externalId and
+    // before/after.
+    public const string DeputyRelationCreated = "DEPUTY_RELATION_CREATED";
+    public const string DeputyRelationUpdated = "DEPUTY_RELATION_UPDATED";
+    public const string DeputyRelationEnded = "DEPUTY_RELATION_ENDED";
+
     public const string SelfGrant = "SELF_GRANT";
     public const string SelfGrantDenied = "SELF_GRANT_DENIED";
     public const string NotificationChannelChanged = "NOTIFICATION_CHANNEL_CHANGED";

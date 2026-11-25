@@ -67,6 +67,9 @@ route /api/v1/consent/self-grants | governance, consent, ReBAC, FinOps or ext-au
 route /api/v1/consent/catalog-grants/{id:guid}/revoke | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/consent/inbox | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/governance/containers/{kind}/{id:guid}/grants | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/governance/deputies | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/governance/deputies/sources/{source} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
+route /api/v1/governance/deputies/sources/{source}/relations/{externalId} | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/consents/bulk | governance, consent, ReBAC, FinOps or ext-authz route; no C1..C5 choke point
 route /api/v1/docs/apps | catalog integration, lineage, schema-registry, webhook or docs route; metadata only
 route /api/v1/docs/apps/{appId}/bundle | catalog integration, lineage, schema-registry, webhook or docs route; metadata only

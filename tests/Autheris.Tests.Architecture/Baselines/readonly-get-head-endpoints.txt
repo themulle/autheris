@@ -70,6 +70,7 @@
 /api/v1/envoy/export/envoyfilter.yaml|GET|no side effect: exports EnvoyFilter YAML configuration template
 /api/v1/envoy/export/wasmplugin.yaml|GET|no side effect: exports Envoy WasmPlugin YAML configuration template
 /api/v1/governance/containers/{kind}/{id:guid}/grants|GET|no side effect: lists the grants of a container for owner group members and governance
+/api/v1/governance/deputies|GET|no side effect: lists deputy relations for Data Governance, the deputy sync identity and container owners
 /api/v1/governance/audit|GET|no side effect: queries governance audit log entries
 /api/v1/governance/caller-attributes/service-sets|GET|no side effect: lists caller attribute service sets
 /api/v1/governance/caller-attributes/|GET|no side effect: lists caller attribute definitions

@@ -69,7 +69,14 @@ public sealed record PermissionDecisionRecord(
     bool SelfGrant,
     string StepDecision,
     string? Reason,
-    DateTimeOffset ApprovedValidTo);
+    DateTimeOffset ApprovedValidTo)
+{
+    /// <summary>
+    /// The realm-qualified principal the decider acted for when it held the owner capacity only as a deputy (issue #1126); audited.
+    /// Four-eyes (#1121) treats the decider and this principal as one decision authority.
+    /// </summary>
+    public string? OnBehalfOf { get; init; }
+}
 
 public enum DecisionCasOutcome
 {

@@ -48,6 +48,7 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
     private readonly IGrantRevocationService _grantRevocationService;
     private readonly ILogger<IdentityDeprovisioningService>? _logger;
     private readonly TimeProvider _timeProvider;
+    private readonly Autheris.Application.Governance.Ownership.DeputyRelationService? _deputyRelations;
 
     public IdentityDeprovisioningService(
         IIdentityStoreRepository storeRepository,
@@ -59,7 +60,8 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
         Autheris.Application.Events.Interfaces.ICloudEventSubscriptionStore? subscriptionStore = null,
         IGovernanceChangeNotifier? governanceChangeNotifier = null,
         TimeProvider? timeProvider = null,
-        ILogger<IdentityDeprovisioningService>? logger = null)
+        ILogger<IdentityDeprovisioningService>? logger = null,
+        Autheris.Application.Governance.Ownership.DeputyRelationService? deputyRelations = null)
     {
         _storeRepository = storeRepository ?? throw new ArgumentNullException(nameof(storeRepository));
         _tokenRevocationService = tokenRevocationService;
@@ -71,6 +73,7 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
         _timeProvider = timeProvider ?? TimeProvider.System;
         _grantRevocationService = grantRevocationService ?? throw new ArgumentNullException(nameof(grantRevocationService));
         _logger = logger;
+        _deputyRelations = deputyRelations;
     }
 
     public async Task DeprovisionAndLockSubjectAsync(
@@ -168,6 +171,13 @@ public sealed class IdentityDeprovisioningService : IIdentityDeprovisioningServi
         var revocation = new GrantRevocationResult(0, 0, 0, 0, false);
         foreach (var form in await SubjectFormsAsync(tenantId, realmId, userKey, user, ct).ConfigureAwait(false))
         {
+            // Issue #1126: deprovisioning ends every deputy relation in which the user is the deputy or the principal (audited per
+            // relation; a failure fails the call so the deprovisioning is retried idempotently).
+            if (_deputyRelations is not null)
+            {
+                await _deputyRelations.EndAllForSubjectAsync(tenantId, form, reason, ct).ConfigureAwait(false);
+            }
+
             var partial = await _grantRevocationService.RevokeAllForSubjectAsync(tenantId, form, reason, ct).ConfigureAwait(false);
             revocation = new GrantRevocationResult(
                 revocation.GrantsRevoked + partial.GrantsRevoked,

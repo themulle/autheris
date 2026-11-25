@@ -178,11 +178,13 @@ public sealed partial class PermissionRequestEngine
             req.RequestedGranteeRef,
             ct).ConfigureAwait(false);
 
-        var capacity = await _approverEligibility.EvaluateAsync(command.Decider, approverSet, ct).ConfigureAwait(false);
-        if (!capacity.HasValue)
+        var eligibility = await _approverEligibility.EvaluateDetailedAsync(command.Decider, approverSet, ct).ConfigureAwait(false);
+        if (eligibility is not { } eligible)
         {
             throw new ConsentDecisionException("FORBIDDEN", "Decider is not eligible to approve or reject this request.", 403);
         }
+
+        ApproverCapacity? capacity = eligible.Capacity;
 
         var sod = await _sodService.CheckPermissionDecisionAsync(req.TenantId, command.Decider, req, ct).ConfigureAwait(false);
         var selfGrant = sod.Outcome == SodDecisionOutcome.SelfGrant;
@@ -219,7 +221,7 @@ public sealed partial class PermissionRequestEngine
                 SelfGrant: false,
                 StepDecision: "REJECTED",
                 Reason: validatedReason,
-                ApprovedValidTo: req.RequestedValidTo);
+                ApprovedValidTo: req.RequestedValidTo) { OnBehalfOf = eligible.OnBehalfOf };
         }
 
         if (req.RequestKind == ConsentRequestKind.ProfileAssignment && capacity.Value == ApproverCapacity.ItAdmin)
@@ -279,7 +281,7 @@ public sealed partial class PermissionRequestEngine
             SelfGrant: false,
             StepDecision: "APPROVED",
             Reason: validatedReason,
-            ApprovedValidTo: evalValidTo ?? DateTimeOffset.MaxValue);
+            ApprovedValidTo: evalValidTo ?? DateTimeOffset.MaxValue) { OnBehalfOf = eligible.OnBehalfOf };
     }
 
     private async Task<IReadOnlyList<GrantRef>> ApplyDecisionEffectAndAuditAsync(
@@ -345,7 +347,7 @@ public sealed partial class PermissionRequestEngine
                 ActorKind: actorKind,
                 GrantKind: updatedReq.GrantKind.ToSqlString(),
                 ExternalSystemId: command.External?.ExternalSystemId,
-                ExternalReference: command.External?.ExternalReference).ToDetailsJson()
+                ExternalReference: command.External?.ExternalReference) { OnBehalfOf = decision.OnBehalfOf }.ToDetailsJson()
         }, ct).ConfigureAwait(false);
 
         return grants;

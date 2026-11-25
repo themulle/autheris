@@ -25,15 +25,18 @@ public enum GrantRevokeCapacity
     Governance = 2,
 
     /// <summary>The caller is an IT administrator and may decide requests for this target.</summary>
-    ItAdmin = 3
+    ItAdmin = 3,
+
+    /// <summary>The caller acts as an active deputy of an owner-group member of the grant's container (issue #1126); owner-member capacity only.</summary>
+    ContainerDeputy = 4
 }
 
 /// <summary>A revocation the grant revoke authority verified: the capacity to audit and the repository authority to use.</summary>
 public sealed record VerifiedGrantRevocation(GrantRevokeCapacity Capacity, ConsentRevocationAuthority Authority);
 
 /// <summary>
-/// Decides who may revoke a grant: the grantee, an owner group member of the container, Data Governance, or IT
-/// only for grants it may also decide. Unknown or degraded state denies.
+/// Decides who may revoke a grant: the grantee, an owner group member of the container, a deputy acting for an owner group member
+/// (data and unmask grants, issue #1126), Data Governance, or IT only for grants it may also decide. Unknown or degraded state denies.
 /// </summary>
 public sealed class GrantRevokeAuthority(
     ApproverResolver approverResolver,
@@ -100,12 +103,13 @@ public sealed class GrantRevokeAuthority(
                 grant.GranteeSid?.Value ?? string.Empty,
                 ct).ConfigureAwait(false);
 
-            var capacity = await _approverEligibility.EvaluateAsync(caller, set, ct).ConfigureAwait(false);
-            return capacity switch
+            var eligibility = await _approverEligibility.EvaluateDetailedAsync(caller, set, ct).ConfigureAwait(false);
+            return eligibility switch
             {
-                ApproverCapacity.DataOwner => GrantRevokeCapacity.ContainerOwner,
-                ApproverCapacity.Governance => GrantRevokeCapacity.Governance,
-                ApproverCapacity.ItAdmin => GrantRevokeCapacity.ItAdmin,
+                { Capacity: ApproverCapacity.DataOwner, ViaDeputy: true } => GrantRevokeCapacity.ContainerDeputy,
+                { Capacity: ApproverCapacity.DataOwner } => GrantRevokeCapacity.ContainerOwner,
+                { Capacity: ApproverCapacity.Governance } => GrantRevokeCapacity.Governance,
+                { Capacity: ApproverCapacity.ItAdmin } => GrantRevokeCapacity.ItAdmin,
                 _ => null
             };
         }

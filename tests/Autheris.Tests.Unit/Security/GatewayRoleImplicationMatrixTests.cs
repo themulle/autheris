@@ -27,6 +27,7 @@ public sealed class GatewayRoleImplicationMatrixTests
         GatewayRole.DataProductAdmin,
         GatewayRole.DataProductSync,
         GatewayRole.CatalogArtifactUploader,
+        GatewayRole.DeputySync,
     ];
 
     private static bool ExpectedImplies(GatewayRole granted, GatewayRole required)
@@ -93,6 +94,7 @@ public sealed class GatewayRoleImplicationMatrixTests
             GatewayRole.FilterSync,
             GatewayRole.DataProductAdmin,
             GatewayRole.DataProductSync,
+            GatewayRole.DeputySync,
         ];
 
         foreach (var role in nonImpliedByClusterAdmin)
