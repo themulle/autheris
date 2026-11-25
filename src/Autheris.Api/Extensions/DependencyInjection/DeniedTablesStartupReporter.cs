@@ -29,7 +29,8 @@ public sealed class DeniedTablesStartupReporter(
     IAccessProfileRepository? profiles,
     IVirtualFilterRepository? virtualFilters,
     IOptions<GatewayOptions> options,
-    ILogger<DeniedTablesStartupReporter> logger) : BackgroundService
+    ILogger<DeniedTablesStartupReporter> logger,
+    ICatalogSnapshotProvider? snapshotProvider = null) : BackgroundService
 {
     /// <summary>The listing is background work: the host start never waits for the governance store.</summary>
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
@@ -38,7 +39,21 @@ public sealed class DeniedTablesStartupReporter(
         await Task.Yield();
         try
         {
-            var catalog = await CatalogTablePageReader.ReadAllAsync(
+            IReadOnlyList<TableMetadata>? catalog = null;
+            if (snapshotProvider is not null)
+            {
+                try
+                {
+                    var snapshot = await snapshotProvider.GetSnapshotAsync(stoppingToken).ConfigureAwait(false);
+                    catalog = snapshot.Tables.Where(static t => t.Table.IsActive).ToList();
+                }
+                catch (Autheris.Domain.Exceptions.CatalogSnapshotNotReadyException)
+                {
+                    catalog = null;
+                }
+            }
+
+            catalog ??= await CatalogTablePageReader.ReadAllAsync(
                 tables,
                 new CatalogTableQuery(IncludeInactive: false),
                 static t => t.Table.IsActive,

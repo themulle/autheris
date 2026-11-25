@@ -23,8 +23,31 @@ public sealed class SubgraphFieldMaskingTypeInterceptor : TypeInterceptor
     private const string MaskContextKey = "Autheris.GraphQL.Federation.MaskContext";
     private const string MaskAdminKey = "Autheris.GraphQL.Federation.MaskIsAdmin";
 
+    private bool _skipWhenFederationDisabled;
+    private bool _checkedOptions;
+
+    public override void OnBeforeDiscoverTypes() => _checkedOptions = false;
+
+    public override void OnBeforeInitialize(ITypeDiscoveryContext discoveryContext)
+    {
+        if (!_checkedOptions)
+        {
+            ResolveOptions(discoveryContext.Services);
+        }
+    }
+
     public override void OnBeforeCompleteType(ITypeCompletionContext completionContext, TypeSystemConfiguration configuration)
     {
+        if (!_checkedOptions)
+        {
+            ResolveOptions(completionContext.Services);
+        }
+
+        if (_skipWhenFederationDisabled)
+        {
+            return;
+        }
+
         if (configuration is ObjectTypeConfiguration objType)
         {
             if (!string.IsNullOrEmpty(objType.Name) && objType.Name.StartsWith("__", StringComparison.Ordinal))
@@ -111,6 +134,25 @@ public sealed class SubgraphFieldMaskingTypeInterceptor : TypeInterceptor
                 }
             }
         };
+    }
+
+    private void ResolveOptions(IServiceProvider schemaServices)
+    {
+        var options = schemaServices.GetService<IOptions<GatewayOptions>>();
+        if (options is null)
+        {
+            try
+            {
+                options = schemaServices.GetRootServiceProvider().GetService<IOptions<GatewayOptions>>();
+            }
+            catch (InvalidOperationException)
+            {
+                options = null;
+            }
+        }
+
+        _skipWhenFederationDisabled = options?.Value is { } gw && !gw.Federation.Enabled;
+        _checkedOptions = true;
     }
 
     private static ClaimsPrincipal? ResolvePrincipal(IResolverContext context) =>

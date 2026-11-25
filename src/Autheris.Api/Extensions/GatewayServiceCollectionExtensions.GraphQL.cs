@@ -100,7 +100,8 @@ public static partial class GatewayServiceCollectionExtensions
             transportResolver: sp.GetService<Autheris.Application.DataSources.IDataSourceOptionsResolver>(),
             epochService: sp.GetService<IEpochValidationService>(),
             timeProvider: sp.GetService<TimeProvider>(),
-            eventBus: sp.GetService<Autheris.Application.Common.Interfaces.IEventBus>());
+            eventBus: sp.GetService<Autheris.Application.Common.Interfaces.IEventBus>(),
+            snapshotProvider: sp.GetService<IGovernanceRepository>() is null ? null : sp.GetService<Autheris.Application.Catalog.ICatalogSnapshotProvider>());
 
     internal static Autheris.GraphQL.Interceptors.QueryCostAnalyzerRule CreateQueryCostRule(
         GatewayOptions gatewayOptions,
@@ -200,6 +201,7 @@ public static partial class GatewayServiceCollectionExtensions
             .UseRequest<Autheris.GraphQL.Interceptors.MaskedFieldsMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.SlowListsMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.PaginationTruncationMiddleware>()
+            .TryAddTypeInterceptor<Autheris.GraphQL.Catalog.CatalogSchemaBuildProgressTypeInterceptor>()
             .TryAddTypeInterceptor<Autheris.GraphQL.Federation.SubgraphFieldMaskingTypeInterceptor>()
             .UseRequest<Autheris.GraphQL.Catalog.CatalogOperationCleanupMiddleware>()
             .UseOperationCache()

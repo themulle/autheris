@@ -42,6 +42,7 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
     private readonly IGovernanceDomainRepository? _domainRepository;
     private readonly IDataProductRepository? _productRepository;
     private readonly ICatalogVisibilityEvaluator _visibilityEvaluator;
+    private readonly Autheris.Application.Catalog.ICatalogSnapshotProvider? _snapshotProvider;
     private IDisposable? _eventSubscription;
 
     public CatalogChangeIndexerHostedService(
@@ -59,7 +60,8 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
         IProtectionSnapshotProvider? protectionProvider = null,
         IGovernanceDomainRepository? domainRepository = null,
         IDataProductRepository? productRepository = null,
-        ICatalogVisibilityEvaluator? visibilityEvaluator = null)
+        ICatalogVisibilityEvaluator? visibilityEvaluator = null,
+        Autheris.Application.Catalog.ICatalogSnapshotProvider? snapshotProvider = null)
     {
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
@@ -76,6 +78,7 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
         _domainRepository = domainRepository;
         _productRepository = productRepository;
         _visibilityEvaluator = visibilityEvaluator ?? new CatalogVisibilityEvaluator(gatewayOptions, timeProvider: _timeProvider);
+        _snapshotProvider = snapshotProvider;
     }
 
     public override Task StartAsync(CancellationToken cancellationToken)
@@ -103,6 +106,7 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
 
     protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
+        await Task.Yield();
         using var timer = new PeriodicTimer(_interval, _timeProvider);
         while (!stoppingToken.IsCancellationRequested)
         {
@@ -132,7 +136,21 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
 
     public async Task<int> IndexOnceAsync(CancellationToken ct = default)
     {
-        var allTables = await CatalogTablePageReader.ReadAllAsync(
+        IReadOnlyList<TableMetadata>? allTables = null;
+        if (_snapshotProvider is not null)
+        {
+            try
+            {
+                var snapshot = await _snapshotProvider.GetSnapshotAsync(ct).ConfigureAwait(false);
+                allTables = snapshot.Tables.Where(static t => t.Table.IsActive).ToList();
+            }
+            catch (Autheris.Domain.Exceptions.CatalogSnapshotNotReadyException)
+            {
+                allTables = null;
+            }
+        }
+
+        allTables ??= await CatalogTablePageReader.ReadAllAsync(
             _metadataRepository,
             new CatalogTableQuery(IncludeInactive: false),
             static t => t.Table.IsActive,
@@ -172,7 +190,7 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
 
         var existingVersions = await _changeStore.GetObjectVersionsAsync(tenantId, ct).ConfigureAwait(false);
         var ownersByTable = activeTables.Count > 0
-            ? await _ownershipRepository.GetDataOwnersForTablesAsync(activeTables.Select(static t => t.Identifier).ToList(), ct).ConfigureAwait(false)
+            ? await _ownershipRepository.GetDataOwnersForTableMetadataAsync(activeTables, ct).ConfigureAwait(false)
             : new Dictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>();
         var artifactsByTable = _artifactStore is not null && activeTables.Count > 0
             ? await _artifactStore.GetAllForTablesAsync(activeTables.Select(static t => t.Table.Id).ToList(), ct).ConfigureAwait(false)

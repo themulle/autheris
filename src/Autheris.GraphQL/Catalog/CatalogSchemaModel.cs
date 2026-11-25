@@ -290,28 +290,40 @@ public sealed partial class CatalogSchemaModel
             tablesProcessed,
             phase);
 
-        string? precomputedFingerprint = null;
-        if (fingerprintCache is not null)
-        {
-            IReadOnlyDictionary<TableIdentifier, long>? epochs = null;
-            if (epochService is not null && finalTables.Count > 0)
-            {
-                try
-                {
-                    epochs = await epochService.GetCurrentEpochsAsync(
-                        finalTables.Select(static t => t.Identifier),
-                        ct).ConfigureAwait(false);
-                }
-                catch (Exception ex) when (ex is not OperationCanceledException)
-                {
-                    logger?.LogDebug(ex, "GraphQL catalog schema build: batch epoch lookup failed; recomputing table fingerprints.");
-                }
-            }
+        var precomputedFingerprint = await ComputeFingerprintIfCachedAsync(
+            fingerprintCache, epochService, finalTables, omittedSnapshot, logger, ct).ConfigureAwait(false);
+        return new CatalogSchemaModel(finalTables, omittedSnapshot, precomputedFingerprint);
+    }
 
-            precomputedFingerprint = fingerprintCache.ComputeModelFingerprint(finalTables, omittedSnapshot, epochs);
+    internal static async ValueTask<string?> ComputeFingerprintIfCachedAsync(
+        CatalogTableFingerprintCache? fingerprintCache,
+        IEpochValidationService? epochService,
+        IReadOnlyList<CatalogTableType> finalTables,
+        IReadOnlyList<CatalogOmittedTable> omittedSnapshot,
+        Microsoft.Extensions.Logging.ILogger? logger,
+        CancellationToken ct)
+    {
+        if (fingerprintCache is null)
+        {
+            return null;
         }
 
-        return new CatalogSchemaModel(finalTables, omittedSnapshot, precomputedFingerprint);
+        IReadOnlyDictionary<TableIdentifier, long>? epochs = null;
+        if (epochService is not null && finalTables.Count > 0)
+        {
+            try
+            {
+                epochs = await epochService.GetCurrentEpochsAsync(
+                    finalTables.Select(static t => t.Identifier),
+                    ct).ConfigureAwait(false);
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException)
+            {
+                logger?.LogDebug(ex, "GraphQL catalog schema build: batch epoch lookup failed; recomputing table fingerprints.");
+            }
+        }
+
+        return fingerprintCache.ComputeModelFingerprint(finalTables, omittedSnapshot, epochs);
     }
 
     private static readonly TimeSpan BuildProgressLogInterval = TimeSpan.FromSeconds(5);

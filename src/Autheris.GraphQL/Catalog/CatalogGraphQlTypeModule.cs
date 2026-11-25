@@ -137,6 +137,7 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
     private readonly Autheris.Application.DataSources.IDataSourceOptionsResolver? _transportResolver;
     private readonly IEpochValidationService? _epochService;
     private readonly TimeProvider _timeProvider;
+    private readonly Autheris.Application.Catalog.ICatalogSnapshotProvider? _snapshotProvider;
 
     /// <summary>Logical source -> was it visible over GraphQL when the schema was built (issue #447).</summary>
     private System.Collections.Concurrent.ConcurrentDictionary<string, bool> _transportSeen = new(StringComparer.OrdinalIgnoreCase);
@@ -154,11 +155,13 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
         Autheris.Application.DataSources.IDataSourceOptionsResolver? transportResolver = null,
         IEpochValidationService? epochService = null,
         TimeProvider? timeProvider = null,
-        IEventBus? eventBus = null)
+        IEventBus? eventBus = null,
+        Autheris.Application.Catalog.ICatalogSnapshotProvider? snapshotProvider = null)
     {
         _transportResolver = transportResolver;
         _epochService = epochService;
         _timeProvider = timeProvider ?? TimeProvider.System;
+        _snapshotProvider = snapshotProvider;
         _aggregationEnabled = aggregationEnabled;
         _crossSourceEnabled = crossSourceEnabled;
         _metricsEnabled = metricsEnabled;
@@ -325,34 +328,7 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
             }
             else
             {
-                var seen = new System.Collections.Concurrent.ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-                // Issue #802: the version is read before the model, so the recorded version never claims a write the model lacks.
-                Autheris.Application.Catalog.CatalogVersion? catVer = _versionProvider is null
-                    ? null
-                    : await _versionProvider.GetCatalogVersionAsync(cancellationToken).ConfigureAwait(false);
-                schemaModel = await CatalogSchemaModel.BuildAsync(
-                    _metadataRepo,
-                    _relationRepo,
-                    _logger,
-                    dialectRegistry: null,
-                    crossSourceEnabled: _crossSourceEnabled,
-                    tableFilter: GetTableFilter(seen),
-                    fingerprintCache: _tableFingerprintCache,
-                    epochService: _epochService,
-                    timeProvider: _timeProvider,
-                    phase: "rebuild",
-                    ct: cancellationToken).ConfigureAwait(false);
-                _lastFullCheckTimestamp = _timeProvider.GetTimestamp();
-                _transportSeen = seen;
-                _currentSchemaModel = schemaModel;
-                CurrentLookup = GetTableMetadataForField;
-                if (catVer.HasValue)
-                {
-                    Volatile.Write(ref _builtStructureVersion, catVer.Value.StructureVersion);
-                    Volatile.Write(ref _builtContentVersion, catVer.Value.ContentVersion);
-                }
-                publishedVersion = catVer;
-                _built = new BuiltState(schemaModel.Fingerprint(), schemaModel.OmittedTables, schemaModel, catVer, seen);
+                (schemaModel, publishedVersion) = await BuildFreshSchemaModelAsync(cancellationToken).ConfigureAwait(false);
             }
 
             NotifySchemaModelBuilt(schemaModel, publishedVersion);
@@ -451,7 +427,10 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
                     {
                         pk = "id";
                     }
-                    d.Field(table.QueryFieldName)
+                    // Issue #447: every root field of this table names its logical data source, so the transport gate
+                    // middleware can check the whole operation before any resolver runs.
+                    var logicalSource = Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(table.Metadata);
+                    var queryField = d.Field(table.QueryFieldName)
                         .Description($"Query {table.TypeName}. Keyset paging can be performed via where: {{ {pk}: {{ gt: $last{pk} }} }}, orderBy: [{{ {pk}: ASC }}]. {offsetText}")
                         .Type(new NonNullTypeNode(new ListTypeNode(new NonNullTypeNode(new NamedTypeNode(table.TypeName)))))
                         .Argument("where", a => a.Type(new NamedTypeNode(table.FilterTypeName)))
@@ -459,23 +438,16 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
                         .Argument("first", a => a.Type(new NamedTypeNode("Int")).DefaultValue(100))
                         .Argument("offset", a => a.Type(new NamedTypeNode("Int")).DefaultValue(0))
                         .Resolve(async ctx => await ResolveRootQueryAsync(ctx, table, schemaModel).ConfigureAwait(false));
+                    AttachRootFieldFeatures(queryField, logicalSource, table, schemaModel);
 
                     if (_aggregationEnabled)
                     {
-                        AggregateGraphQlTypes.AddQueryField(d, table);
+                        var aggregateField = AggregateGraphQlTypes.AddQueryField(d, table);
+                        AttachRootFieldFeatures(aggregateField, logicalSource, table, schemaModel);
                     }
 
-                    ConnectionGraphQlTypes.AddQueryField(d, table, schemaModel);
-
-                    // Issue #447: every root field of this table names its logical data source, so the transport gate
-                    // middleware can check the whole operation before any resolver runs.
-                    var logicalSource = Autheris.Application.Sql.Services.DataSourceAllowlistGuard.LogicalDataSource(table.Metadata);
-                    AttachRootFieldFeatures(d, table.QueryFieldName, logicalSource, table, schemaModel);
-                    AttachRootFieldFeatures(d, $"{table.QueryFieldName}Connection", logicalSource, table, schemaModel);
-                    if (_aggregationEnabled)
-                    {
-                        AttachRootFieldFeatures(d, AggregateTypeNames.For(table.TypeName).Field, logicalSource, table, schemaModel);
-                    }
+                    var connectionField = ConnectionGraphQlTypes.AddQueryField(d, table, schemaModel);
+                    AttachRootFieldFeatures(connectionField, logicalSource, table, schemaModel);
                 }
             }));
         }
@@ -590,13 +562,12 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
     }
 
     private static void AttachRootFieldFeatures(
-        IObjectTypeDescriptor d,
-        string rootFieldName,
+        IObjectFieldDescriptor field,
         string logicalSource,
         CatalogTableType table,
         CatalogSchemaModel schemaModel)
     {
-        d.Field(rootFieldName).Extend().OnBeforeCreate(
+        field.Extend().OnBeforeCreate(
             definition =>
             {
                 definition.Features.Set(new Autheris.GraphQL.Interceptors.TransportSourceFeature(logicalSource));

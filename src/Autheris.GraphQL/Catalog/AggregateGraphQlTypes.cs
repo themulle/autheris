@@ -171,10 +171,10 @@ internal static class AggregateGraphQlTypes
         }));
     }
 
-    public static void AddQueryField(IObjectTypeDescriptor query, CatalogTableType table)
+    public static IObjectFieldDescriptor AddQueryField(IObjectTypeDescriptor query, CatalogTableType table)
     {
         var names = AggregateTypeNames.For(table.TypeName);
-        query.Field(names.Field)
+        return query.Field(names.Field)
             .Description($"Typed governed aggregation for {table.TypeName} with k-anonymity.")
             .Type(NonNull(names.Result))
             .Argument("groupBy", a => a.Type(new ListTypeNode(NonNull(names.Column))))
