@@ -75,7 +75,7 @@ public sealed class DeclarativeConsentPruneSecurityTests : IDisposable
         var keepConsent = await _repo.CreateConsentAsync(MakeConsent(keepId, _tableKeep, ConsentGrantSource.Declarative));
         var pruneConsent = await _repo.CreateConsentAsync(MakeConsent(pruneId, _tablePrune, ConsentGrantSource.Declarative));
         var reqConsent = await _repo.CreateConsentAsync(MakeConsent(reqId, _tableReq, ConsentGrantSource.ConsentRequest));
-        var unknownConsent = await _repo.CreateConsentAsync(MakeConsent(reqId, _tableReq, ConsentGrantSource.Owner));
+        var unknownConsent = await _repo.CreateConsentAsync(MakeConsent(reqId, _tableReq, ConsentGrantSource.Bulk));
 
         await using (var cmd = _repo.RawConnection().CreateCommand())
         {

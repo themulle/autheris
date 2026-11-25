@@ -80,6 +80,23 @@ public sealed class DeletedFeaturesArchitectureTests
     [InlineData("IProfileAssignmentDecisionHandler")]
     [InlineData("LegacyExternalDecisionGuard")]
     [InlineData("ILegacyExternalDecisionGuard")]
+    [InlineData("DataOwner")]
+    [InlineData("DataOwnerDelegation")]
+    [InlineData("IDataOwnershipRepository")]
+    [InlineData("IDataOwnerAssignmentRepository")]
+    [InlineData("DataOwnerAssignmentRequest")]
+    [InlineData("DataOwnerSpec")]
+    [InlineData("TableOwnerAssignmentSpec")]
+    [InlineData("OwnerGrantService")]
+    [InlineData("IOwnerGrantService")]
+    [InlineData("IOwnerGrantStore")]
+    [InlineData("IProductOwnershipSync")]
+    [InlineData("ProductOwnershipSync")]
+    [InlineData("IProductCatalogOwnerStore")]
+    [InlineData("ProductCatalogOwnerStore")]
+    [InlineData("IDataOwnerIdentityVerifier")]
+    [InlineData("ScimDataOwnerIdentityVerifier")]
+    [InlineData("AssignDataOwnerPayload")]
     public void Deleted_Types_Do_Not_Exist_In_Production_Assemblies(string typeName)
     {
         foreach (var assembly in ProductionAssemblies)

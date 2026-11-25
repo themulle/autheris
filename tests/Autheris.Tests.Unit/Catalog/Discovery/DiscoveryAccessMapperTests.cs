@@ -57,18 +57,16 @@ public sealed class DiscoveryAccessMapperTests
             RowDependentColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "region_note" }
         };
 
-        var activeOwner = new DataOwner
+        var activeOwner = new ContainerOwnerEntry
         {
             AdSid = new Sid("S-OWNER"),
-            AdAccount = "CORP\\alice",
             DisplayName = "Alice Owner",
             Email = "alice@example.com",
             IsActive = true
         };
-        var inactiveOwner = new DataOwner
+        var inactiveOwner = new ContainerOwnerEntry
         {
             AdSid = new Sid("S-OLD"),
-            AdAccount = "CORP\\bob",
             DisplayName = "Bob Former",
             Email = "bob@example.com",
             IsActive = false

@@ -263,23 +263,7 @@ public static class GovernanceClassificationEndpoints
             return result.Success ? Results.Ok(result) : Results.BadRequest(result);
         }).RequireAuthorization().WithAudit(AuditLevel.Full, AuditEventTypes.ClassificationTransitioned);
 
-        // 7. Assign Data Owner to Data Object
-        app.MapPost("/api/governance/classification/assign-owner", async (
-            AssignDataOwnerPayload payload,
-            IClassificationProposalStore store,
-            CancellationToken ct) =>
-        {
-            var tableId = new TableIdentifier(payload.Catalog, payload.Schema, payload.Table);
-            var updated = await store.UpdateDataOwnerAsync(tableId, payload.DataOwnerSid, ct).ConfigureAwait(false);
-            return Results.Ok(new
-            {
-                Table = tableId.ToQualifiedName(),
-                AssignedOwnerSid = payload.DataOwnerSid,
-                ProposalUpdated = updated
-            });
-        }).RequireAuthorization(GatewayPolicies.GovernanceAdmin).WithAudit(AuditLevel.Full, AuditEventTypes.ClassificationTransitioned);
-
-        // 8. Inspect Current Active Governance WORM Configuration Hash
+        // 7. Inspect Current Active Governance WORM Configuration Hash
         app.MapGet("/api/governance/classification/config-hash", (
             IWormConfigurationAuditService auditService) =>
         {
@@ -389,9 +373,3 @@ public sealed record ClassificationRejectionPayload(
     string Reason,
     string? ReviewerRole = null,
     string? ReviewerSid = null);
-
-public sealed record AssignDataOwnerPayload(
-    string Catalog,
-    string Schema,
-    string Table,
-    string DataOwnerSid);

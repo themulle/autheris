@@ -661,75 +661,6 @@ public sealed record ConsentRequestPage(
     IReadOnlyList<ConsentRequest> Items,
     string? NextCursor);
 
-public interface IDataOwnershipRepository
-{
-    Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default);
-    Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default);
-    Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default);
-
-    /// <summary>Batch-loads active data owners keyed by table identifier.</summary>
-    async Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<DataOwner>>> GetDataOwnersForTablesAsync(
-        IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct = default)
-    {
-        var result = new Dictionary<TableIdentifier, IReadOnlyList<DataOwner>>();
-        foreach (var table in tables)
-        {
-            var owners = await GetDataOwnersForTableAsync(table, ct).ConfigureAwait(false);
-            result[table] = owners.Where(static o => o.IsActive).ToList();
-        }
-        return result;
-    }
-
-    /// <summary>
-    /// Returns the subset of <paramref name="tables"/> on which <paramref name="actorSid"/> is an active owner
-    /// or active delegate at <paramref name="atTime"/>.
-    /// </summary>
-    async Task<IReadOnlySet<TableIdentifier>> GetOwnedOrDelegatedTablesAsync(
-        Sid actorSid, IReadOnlyCollection<TableIdentifier> tables, DateTimeOffset atTime, CancellationToken ct = default)
-    {
-        var owned = new HashSet<TableIdentifier>();
-        foreach (var table in tables)
-        {
-            if (await IsAuthorizedApproverForTableAsync(table, actorSid, ct).ConfigureAwait(false))
-            {
-                owned.Add(table);
-            }
-        }
-        return owned;
-    }
-
-    /// <summary>Returns active direct owner and active delegate SIDs for <paramref name="table"/> at <paramref name="atTime"/>.</summary>
-    async Task<IReadOnlySet<string>> GetAuthorizedApproverSidsForTableAsync(
-        TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default)
-    {
-        var owners = await GetDataOwnersForTableAsync(table, ct).ConfigureAwait(false);
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var owner in owners)
-        {
-            if (owner.IsActive && !string.IsNullOrWhiteSpace(owner.AdSid.Value))
-            {
-                set.Add(owner.AdSid.Value);
-            }
-        }
-        return set;
-    }
-
-    /// <summary>Returns true if any SID in <paramref name="ownerSids"/> is currently an active owner or active delegate for <paramref name="table"/>.</summary>
-    async Task<bool> IsAnyApproverAuthorizedForTableAsync(
-        TableIdentifier table, IReadOnlyCollection<string> ownerSids, DateTimeOffset atTime, CancellationToken ct = default)
-    {
-        foreach (var sid in ownerSids)
-        {
-            if (!string.IsNullOrWhiteSpace(sid) &&
-                await IsAuthorizedApproverForTableAsync(table, new Sid(sid), ct).ConfigureAwait(false))
-            {
-                return true;
-            }
-        }
-        return false;
-    }
-}
-
 public interface ITableRelationRepository
 {
     Task<IReadOnlyList<TableRelation>> GetRelationsForTableAsync(TableIdentifier parentTable, CancellationToken ct = default);
@@ -763,7 +694,6 @@ public interface IGovernanceRepository :
     IAuditLogRepository,
     IPolicyEpochRepository,
     IConsentApprovalRepository,
-    IDataOwnershipRepository,
     ITableRelationRepository,
     IConsumerAggregationRepository
 {

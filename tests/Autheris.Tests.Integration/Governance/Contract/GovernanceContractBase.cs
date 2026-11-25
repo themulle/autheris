@@ -98,8 +98,6 @@ public sealed class GovernanceTestStore : IAsyncDisposable
     public IAuditPurgeKeyProvider AuditPurgeKey => Services.GetRequiredService<IAuditPurgeKeyProvider>();
     public IAuditChainAnchorStore AuditAnchorStore => Services.GetRequiredService<IAuditChainAnchorStore>();
     public IPolicyEpochRepository PolicyEpochs => Services.GetRequiredService<IPolicyEpochRepository>();
-    public IDataOwnershipRepository DataOwnership => Services.GetRequiredService<IDataOwnershipRepository>();
-    public IDataOwnerAssignmentRepository DataOwnerAssignments => Services.GetRequiredService<IDataOwnerAssignmentRepository>();
     public ITableRelationRepository TableRelations => Services.GetRequiredService<ITableRelationRepository>();
     public IVirtualFilterRepository VirtualFilters => Services.GetRequiredService<IVirtualFilterRepository>();
     public ICallerAttributeRepository CallerAttributes => Services.GetRequiredService<ICallerAttributeRepository>();

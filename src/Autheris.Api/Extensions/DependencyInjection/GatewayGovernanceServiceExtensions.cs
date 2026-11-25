@@ -240,8 +240,6 @@ public static partial class GatewayGovernanceServiceExtensions
             IAuditLogRepository,
             IPolicyEpochRepository,
             IConsentApprovalRepository,
-            IDataOwnershipRepository,
-            IDataOwnerAssignmentRepository,
             ITableRelationRepository,
             IWebhookOutbox,
             IVirtualFilterRepository,
@@ -263,7 +261,6 @@ public static partial class GatewayGovernanceServiceExtensions
             Autheris.Application.Usage.IUsageRepository,
             Autheris.Application.Catalog.External.ICatalogChangeStore,
             IClassificationRepository,
-            Autheris.Application.Governance.Grants.IOwnerGrantStore,
             Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentStore,
             Autheris.Application.Docs.Interfaces.IDocumentRepository,
             Autheris.Application.Mcp.Interfaces.IGoldenQueryRepository,
@@ -297,8 +294,6 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.ConsentRequests.Events.IConsentEventOutbox>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<Autheris.Application.Governance.Grants.IGrantExpiryStore>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IConsentDescriptionRepository>(sp => sp.GetRequiredService<Autheris.Application.Identity.Attributes.AttributeValidatingConsentRepository>()); // INC1 (same validating decorator instance as IConsentRepository)
-        services.AddSingleton<IDataOwnershipRepository>(sp => sp.GetRequiredService<TRepository>());
-        services.AddSingleton<IDataOwnerAssignmentRepository>(sp => sp.GetRequiredService<TRepository>()); // issue #393 part b: dbt import owner write seam
         services.AddSingleton<ITableRelationRepository>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IWebhookOutbox>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IVirtualFilterRepository>(sp => sp.GetRequiredService<TRepository>());
@@ -307,7 +302,6 @@ public static partial class GatewayGovernanceServiceExtensions
         // every engine persists access profiles; the in-memory repository is a test double only.
         services.AddSingleton<IAccessProfileRepository>(sp => (IAccessProfileRepository)sp.GetRequiredService<TRepository>());
         services.AddSingleton<IIdentityStoreRepository>(sp => (IIdentityStoreRepository)sp.GetRequiredService<TRepository>());
-        services.AddSingleton<Autheris.Application.Governance.Grants.IOwnerGrantStore>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentStore>(sp => sp.GetRequiredService<TRepository>());
         services.AddSingleton<IFunctionalRightRepository>(sp => (IFunctionalRightRepository)sp.GetRequiredService<TRepository>());
         services.AddSingleton<Autheris.Application.Catalog.External.ICatalogChangeStore>(sp => sp.GetRequiredService<TRepository>());

@@ -124,24 +124,8 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
         await using (var conn = new NpgsqlConnection(_db!.ConnectionString))
         {
             await conn.OpenAsync();
-            await using var roleCmd = new NpgsqlCommand(@"
-                INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
-                SELECT @o1, 'S-1-5-21-APP1', 'CORP\\S-1-5-21-APP1', 'Owner 1', 'S-1-5-21-APP1@corp.example', 1
-                WHERE NOT EXISTS (SELECT 1 FROM DATA_OWNERS WHERE ad_sid = 'S-1-5-21-APP1');
-                INSERT INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role)
-                SELECT @to1, @tid, id, 'PRIMARY' FROM DATA_OWNERS WHERE ad_sid = 'S-1-5-21-APP1';
-                INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
-                SELECT @o2, 'S-1-5-21-APP2', 'CORP\\S-1-5-21-APP2', 'Owner 2', 'S-1-5-21-APP2@corp.example', 1
-                WHERE NOT EXISTS (SELECT 1 FROM DATA_OWNERS WHERE ad_sid = 'S-1-5-21-APP2');
-                INSERT INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role)
-                SELECT @to2, @tid, id, 'PRIMARY' FROM DATA_OWNERS WHERE ad_sid = 'S-1-5-21-APP2';
-            ", conn);
-            roleCmd.Parameters.AddWithValue("@o1", Guid.NewGuid().ToString());
-            roleCmd.Parameters.AddWithValue("@to1", Guid.NewGuid().ToString());
-            roleCmd.Parameters.AddWithValue("@o2", Guid.NewGuid().ToString());
-            roleCmd.Parameters.AddWithValue("@to2", Guid.NewGuid().ToString());
-            roleCmd.Parameters.AddWithValue("@tid", meta.Table.Id.ToString());
-            await roleCmd.ExecuteNonQueryAsync();
+            // #1009 D13: the container owner group is the only owner; per-table co-owners no longer exist.
+            await Autheris.Tests.Integration.Governance.ContainerOwnerSeed.SeedAsync(conn, "tenant-pg", meta.Table.Id, approver1.Value);
         }
 
         var step1 = await repo.ApproveConsentRequestStepAsync(request.Id, approver1, requireSecondApprover: true);
@@ -150,8 +134,10 @@ public sealed class PostgreSqlConsentContractTests : IAsyncLifetime
         await Should.ThrowAsync<InvalidOperationException>(() =>
             repo.ApproveConsentRequestStepAsync(request.Id, approver1, requireSecondApprover: true));
 
-        var step2 = await repo.ApproveConsentRequestStepAsync(request.Id, approver2, requireSecondApprover: true);
-        step2.Status.ShouldBe("APPROVED");
+        // A second person outside the owner group cannot complete the request.
+        await Should.ThrowAsync<UnauthorizedAccessException>(() =>
+            repo.ApproveConsentRequestStepAsync(request.Id, approver2, requireSecondApprover: true));
+        (await repo.GetConsentRequestAsync(request.Id))!.Status.ShouldBe("PENDING_SECOND_APPROVAL");
     }
 
     private static async Task<(TableIdentifier Table, Guid TableId)> CreateRevokeTableAsync(PostgreSqlGovernanceRepository repo)

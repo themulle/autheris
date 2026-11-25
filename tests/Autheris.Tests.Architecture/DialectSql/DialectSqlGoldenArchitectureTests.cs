@@ -215,8 +215,11 @@ public sealed class DialectSqlGoldenArchitectureTests
             calls.ShouldNotContain(c => c.Name == "get_LegacySingleTenant", $"{dialect}.{method}");
         }
 
-        // DEF-04 / DEF-SC-06: the approver check runs on the revoke connection and transaction; the connection-opening overload is not used.
-        var approver = Calls(Instructions(dialect, "RevokeConsentInTransactionAsync")).Single(c => c.Name == "IsAuthorizedApproverForTableInternalAsync");
+        // DEF-04 / DEF-SC-06: the (pattern) approver check runs on the revoke connection and transaction. #1009 W3-12b: there is no
+        // per-table owner check any more; owners revoke through the verified grant revoke authority.
+        var revokeCalls = Calls(Instructions(dialect, "RevokeConsentInTransactionAsync")).ToList();
+        revokeCalls.ShouldNotContain(c => c.Name == "IsAuthorizedApproverForTableInternalAsync");
+        var approver = revokeCalls.Single(c => c.Name == "IsAuthorizedApproverForPatternConsentAsync");
         approver.Parameters.Any(p => p.ParameterType.Name.EndsWith("Connection", StringComparison.Ordinal)).ShouldBeTrue();
         approver.Parameters.Any(p => p.ParameterType.Name.Contains("Transaction", StringComparison.Ordinal)).ShouldBeTrue();
     }

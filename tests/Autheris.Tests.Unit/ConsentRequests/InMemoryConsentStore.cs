@@ -331,11 +331,10 @@ internal sealed class InMemoryConsentStore(
     public Task<bool> DeleteTableMetadataAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult(false);
     public Task<TableKeyDefinitionChange?> ReplaceTableKeyDefinitionAsync(TableIdentifier table, IReadOnlyList<string> primaryKey, IReadOnlyList<TableIndexDefinition> indexes, IReadOnlyList<KeyColumnDirection>? primaryKeyDirections = null, CancellationToken ct = default) => Task.FromResult<TableKeyDefinitionChange?>(null);
     public Task DeleteConsentRequestAsync(Guid requestId, CancellationToken ct = default) => Task.CompletedTask;
-    public Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default) => throw new NotImplementedException();
-    public Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<DataOwner>>(Array.Empty<DataOwner>());
+    public Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<ContainerOwnerEntry>>(Array.Empty<ContainerOwnerEntry>());
     public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default) => Task.FromResult(false);
     public Task<IReadOnlyList<TableIdentifier>> GetTablesOwnedOrDelegatedAsync(Sid userSid, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<TableIdentifier>>(Array.Empty<TableIdentifier>());
-    public Task<DataOwner> RegisterDataOwnerAsync(DataOwner owner, CancellationToken ct = default) => throw new NotImplementedException();
+    public Task<ContainerOwnerEntry> RegisterDataOwnerAsync(ContainerOwnerEntry owner, CancellationToken ct = default) => throw new NotImplementedException();
     public Task AssignTableOwnerAsync(TableIdentifier table, Guid ownerId, CancellationToken ct = default) => Task.CompletedTask;
     public Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default) => Task.CompletedTask;
     public Task RecordAuditEventAsync(AuditLogEntry entry, DbTransaction transaction, CancellationToken ct = default) => Task.CompletedTask;

@@ -20,6 +20,7 @@ using Xunit;
 public abstract class ConsentRevokeUnificationContractTestsBase : IAsyncLifetime
 {
     private static readonly TenantId TenantA = new("tenant-a");
+    private static readonly Sid Grantee = new("S-1-5-21-Alice");
     private static readonly Sid Admin = new("S-1-5-21-DEF-ADMIN");
     private static readonly Guid SyncMarker = Guid.Parse("00000000-0000-0000-0000-0000000000b2");
 
@@ -87,13 +88,6 @@ public abstract class ConsentRevokeUnificationContractTestsBase : IAsyncLifetime
             Identifier = _table, Table = table, Columns = [new TableColumn { TableId = table.Id, ColumnName = "id", DataType = "INT" }]
         })).Table.Id;
         await GrantGovernanceAdminAsync(Admin.Value);
-        var ownerId = Guid.NewGuid().ToString();
-        await ScalarAsync(
-            "INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active) VALUES (@id, @sid, @acc, @name, @email, 1)",
-            ("@id", ownerId), ("@sid", Admin.Value), ("@acc", "test\\admin"), ("@name", "Admin"), ("@email", "admin@test.local"));
-        await ScalarAsync(
-            "INSERT INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role) VALUES (@id, @tid, @oid, 'PRIMARY')",
-            ("@id", Guid.NewGuid().ToString()), ("@tid", _tableId.ToString()), ("@oid", ownerId));
     }
 
     public Task DisposeAsync() => DisposeRepositoryAsync();
@@ -118,9 +112,18 @@ public abstract class ConsentRevokeUnificationContractTestsBase : IAsyncLifetime
                 new System.Security.Claims.Claim("tenant_id", tenant.Value)
             ], "test")));
 
+    /// <summary>
+    /// <see cref="Admin"/> stands for a container owner whose revocation the grant revoke authority verified (#1009: the store has no
+    /// per-table owner fallback); every other actor only carries its token authority.
+    /// </summary>
+    private static Autheris.Domain.Security.ConsentRevocationAuthority CallerAuthority(Sid actor, TenantId tenant) =>
+        actor == Admin
+            ? Autheris.Domain.Security.ConsentRevocationAuthority.ForVerifiedRevocation(tenant, "ContainerOwner")
+            : TenantAuthority(actor, tenant);
+
     private Task InvokeAsync(string entry, Guid id, Sid actor)
     {
-        var caller = TenantAuthority(actor, TenantA);
+        var caller = CallerAuthority(actor, TenantA);
         return entry switch
         {
             "RevokeConsentAsync" => Repo.RevokeConsentAsync(id, actor, "r", caller),
@@ -146,7 +149,9 @@ public abstract class ConsentRevokeUnificationContractTestsBase : IAsyncLifetime
             ("@t", rawTenant), ("@r", entry == "RevokeSystemConsentAsync" ? SyncMarker.ToString() : (object)DBNull.Value), ("@id", consent.Id.ToString()));
         var epochBefore = await Repo.GetTableEpochAsync(_table);
 
-        var ex = await Should.ThrowAsync<ConsentTenantIntegrityException>(() => InvokeAsync(entry, consent.Id, Admin));
+        // The grantee may revoke its own grant, so the refusal is caused by the planted tenant alone (#1009: no per-table owner path).
+        var actor = entry == "RevokeSystemConsentAsync" ? Admin : Grantee;
+        var ex = await Should.ThrowAsync<ConsentTenantIntegrityException>(() => InvokeAsync(entry, consent.Id, actor));
 
         ex.ErrorCode.ShouldBe("CONSENT_TENANT_INVALID");
         ex.InnerException.ShouldBeNull();
@@ -155,7 +160,7 @@ public abstract class ConsentRevokeUnificationContractTestsBase : IAsyncLifetime
         (await AuditAsync("CONSENT_REVOKED")).ShouldBeEmpty();
         var refusal = (await AuditAsync(AuditEventTypes.ConsentTenantIntegrityRefused)).ShouldHaveSingleItem();
         refusal.Decision.ShouldBe("DENY");
-        refusal.ActorSid.ShouldBe(Admin);
+        refusal.ActorSid.ShouldBe(actor);
         refusal.DetailsJson!.ShouldContain(consent.Id.ToString());
         refusal.DetailsJson.ShouldContain("CONSENT_TENANT_INVALID");
         if (rawTenant.Trim().Length > 0)
@@ -206,62 +211,6 @@ public abstract class ConsentRevokeUnificationContractTestsBase : IAsyncLifetime
         await InvokeAsync(entry, consent.Id, Admin);
 
         (await AuditAsync("CONSENT_REVOKED")).ShouldHaveSingleItem().Decision.ShouldBe("REVOKED");
-    }
-
-    [Trait("Category", "Security")]
-    [Theory]
-    [InlineData("RevokeConsentAsync")]
-    [InlineData("ReplaceConsentsAsync")]
-    public async Task Revoke_Approver_Demoted_Before_Lock_Is_Rejected(string entry)
-    {
-        // DEF-T-03 / DEF-SC-06: a demotion committed before the revoke runs is seen by the approver check; nothing changes.
-        if (!Available)
-        {
-            return;
-        }
-
-        var consent = await CreateConsentAsync();
-        var epochBefore = await Repo.GetTableEpochAsync(_table);
-        await ScalarAsync("DELETE FROM TABLE_OWNERS WHERE table_id = @tid", ("@tid", _tableId.ToString()));
-
-        await Should.ThrowAsync<ConsentRevocationForbiddenException>(() => InvokeAsync(entry, consent.Id, Admin));
-
-        (await IsRevokedAsync(consent.Id)).ShouldBeFalse();
-        (await Repo.GetTableEpochAsync(_table)).ShouldBe(epochBefore);
-        (await AuditAsync("CONSENT_REVOKED")).ShouldBeEmpty();
-    }
-
-    [Trait("Category", "Security")]
-    [Theory]
-    [InlineData("RevokeConsentAsync")]
-    [InlineData("ReplaceConsentsAsync")]
-    public async Task Revoke_Approver_Demoted_While_Waiting_For_The_Row_Lock_Is_Rejected(string entry)
-    {
-        // DEF-T-03 interleaving: session A holds the consent row lock, B (the revoke) waits for it, A commits the demotion, B resumes and is rejected.
-        if (!Available)
-        {
-            return;
-        }
-
-        var consent = await CreateConsentAsync();
-        var epochBefore = await Repo.GetTableEpochAsync(_table);
-        await using var holder = await HoldConsentRowLockAsync(consent.Id);
-
-        var revoke = InvokeAsync(entry, consent.Id, Admin);
-        var watch = Stopwatch.StartNew();
-        while (await BlockedSessionCountAsync() == 0)
-        {
-            revoke.IsCompleted.ShouldBeFalse("the revoke must wait for the consent row lock");
-            watch.Elapsed.ShouldBeLessThan(TimeSpan.FromSeconds(30), "the revoke never blocked on the row lock");
-            await Task.Yield();
-        }
-
-        await holder.ExecuteAndCommitAsync("DELETE FROM TABLE_OWNERS WHERE table_id = @tid", ("@tid", _tableId.ToString()));
-
-        await Should.ThrowAsync<ConsentRevocationForbiddenException>(() => revoke);
-        (await IsRevokedAsync(consent.Id)).ShouldBeFalse();
-        (await Repo.GetTableEpochAsync(_table)).ShouldBe(epochBefore);
-        (await AuditAsync("CONSENT_REVOKED")).ShouldBeEmpty();
     }
 
     [Trait("Category", "Security")]

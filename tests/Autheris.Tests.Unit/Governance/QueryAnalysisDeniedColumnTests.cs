@@ -148,7 +148,7 @@ public sealed class QueryAnalysisDeniedColumnTests
     private static QueryAnalysisService CreateService(
         TableMetadata[] tables,
         Consent[] consents,
-        InMemoryDataOwnershipRepository? ownership = null)
+        InMemoryContainerOwnership? ownership = null)
     {
         return new QueryAnalysisService(
             new InMemoryTableMetadataRepository(tables),
@@ -428,8 +428,8 @@ public sealed class QueryAnalysisDeniedColumnTests
     [Fact]
     public async Task ReadOnlyToken_AdminAndOwner_DoNotBypassDeniedColumnsOrTableGrant()
     {
-        var ownership = new InMemoryDataOwnershipRepository()
-            .AssignOwner(TableId, new DataOwner { AdSid = new Sid("S-1-OWNER"), DisplayName = "Owner", IsActive = true });
+        var ownership = new InMemoryContainerOwnership()
+            .AssignOwner(TableId, new ContainerOwnerEntry { AdSid = new Sid("S-1-OWNER"), DisplayName = "Owner", IsActive = true });
 
         var service = CreateService(
             [DemoTable()],

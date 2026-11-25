@@ -393,11 +393,10 @@ public partial class GovernanceRepository
             throw new KeyNotFoundException($"Consent with ID '{consentId}' does not exist.");
         }
 
+        // Container owners revoke through the grant revoke authority (verified tenant authority); there is no per-table owner fallback here.
         var isAuthorized = isAdminForTenant
                            || (!requireDeclarativeForPrune && found.IsGranteeSelf)
-                           || (isPattern
-                               ? await IsAuthorizedApproverForPatternConsentAsync(conn, tx, consentId, actor, ct).ConfigureAwait(false)
-                               : await IsAuthorizedApproverForTableInternalAsync(conn, tx, tableId.Value, actor, ct).ConfigureAwait(false));
+                           || (isPattern && await IsAuthorizedApproverForPatternConsentAsync(conn, tx, consentId, actor, ct).ConfigureAwait(false));
         if (!isAuthorized)
         {
             throw new RevocationDenialCaptureException(consentId, denialTenant, tableId.Value);
@@ -453,16 +452,9 @@ public partial class GovernanceRepository
         cmd.CommandText = @"SELECT COUNT(*)
                             FROM CONSENT_APPROVING_OWNERS cao
                             WHERE cao.consent_id = @cid
-                              AND (UPPER(cao.owner_sid) = UPPER(@apprSid)
-                                   OR cao.owner_sid IN (
-                                       SELECT o.ad_sid
-                                       FROM DATA_OWNER_DELEGATIONS del
-                                       JOIN DATA_OWNERS o ON del.data_owner_id = o.id
-                                       WHERE del.delegate_sid = @apprSid AND del.valid_from <= @now AND @now < del.valid_to
-                                   ))";
+                              AND UPPER(cao.owner_sid) = UPPER(@apprSid)";
         cmd.AddBound("@cid", consentId.ToString("D"));
         cmd.AddBound("@apprSid", approverSid.Value);
-        cmd.AddBound("@now", TimeProvider.System.GetUtcNow().ToString("O"));
         var count = Convert.ToInt64(await ExecuteScalarAsync(cmd, "ConsentGrants.CheckPatternApprovers", ct).ConfigureAwait(false));
         return count > 0;
     }
@@ -523,46 +515,6 @@ WHERE c.id = @id";
                 externalSystemId),
             tenant,
             ct).ConfigureAwait(false);
-    }
-
-    internal async Task<bool> IsAuthorizedApproverForTableInternalAsync(
-        DbConnection conn, DbTransaction? tx, TableIdentifier table, Sid approverSid, CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = @"SELECT COUNT(*)
-                            FROM TABLES t
-                            JOIN TABLE_OWNERS tow ON t.id = tow.table_id
-                            JOIN DATA_OWNERS o ON tow.data_owner_id = o.id
-                            WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
-                              AND o.ad_sid = @apprSid
-                              AND o.is_active = 1";
-        cmd.AddBound("@domain", table.Domain);
-        cmd.AddBound("@schema", table.Schema);
-        cmd.AddBound("@table", table.TableName);
-        cmd.AddBound("@apprSid", approverSid.Value);
-
-        var directOwnerCount = Convert.ToInt64(await ExecuteScalarAsync(cmd, "ConsentGrants.CheckDirectOwner", ct).ConfigureAwait(false));
-        if (directOwnerCount > 0) return true;
-
-        await using var delCmd = conn.CreateCommand();
-        delCmd.Transaction = tx;
-        delCmd.CommandText = @"SELECT COUNT(*)
-                               FROM DATA_OWNER_DELEGATIONS d
-                               JOIN DATA_OWNERS o ON d.data_owner_id = o.id
-                               JOIN TABLE_OWNERS tow ON o.id = tow.data_owner_id
-                               JOIN TABLES t ON tow.table_id = t.id
-                               WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
-                                 AND d.delegate_sid = @apprSid
-                                 AND d.valid_from <= @now AND d.valid_to >= @now";
-        delCmd.AddBound("@domain", table.Domain);
-        delCmd.AddBound("@schema", table.Schema);
-        delCmd.AddBound("@table", table.TableName);
-        delCmd.AddBound("@apprSid", approverSid.Value);
-        delCmd.AddBound("@now", TimeProvider.System.GetUtcNow().ToString("O"));
-
-        var delegateCount = Convert.ToInt64(await ExecuteScalarAsync(delCmd, "ConsentGrants.CheckDelegates", ct).ConfigureAwait(false));
-        return delegateCount > 0;
     }
 }
 

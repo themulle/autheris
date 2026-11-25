@@ -281,7 +281,7 @@ public sealed class UsageGrantSecurityTests
             Grants =
             [
                 new DecisionGrantRef("grant-consent-1", GrantSourceKind.ConsentRequest, validFrom1, validUntil1),
-                new DecisionGrantRef("grant-owner-2", GrantSourceKind.Owner, validFrom2, ValidUntil: null)
+                new DecisionGrantRef("grant-owner-2", GrantSourceKind.Declarative, validFrom2, ValidUntil: null)
             ]
         };
 

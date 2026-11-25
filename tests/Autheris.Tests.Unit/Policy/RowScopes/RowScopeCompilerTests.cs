@@ -276,7 +276,7 @@ public sealed class RowScopeCompilerTests
         constrained.AppliedHardPolicies.ShouldBe(["hard_org_policy"]);
 
         // Owner unfiltered grant + hard policy -> hard policy STILL applies.
-        var ownerUnfiltered = new RowScopeGrant("owner-1", ConsentGrantSource.Owner, []);
+        var ownerUnfiltered = new RowScopeGrant("owner-1", ConsentGrantSource.Declarative, []);
         var ownerOutcome = await compiler.CompileAsync(new RowScopeCompileRequest(
             Tenant, UserSid, new HashSet<Sid> { GroupSid }, OrdersTable(), [ownerUnfiltered]));
         ownerOutcome.IsDenied.ShouldBeFalse();
@@ -301,7 +301,7 @@ public sealed class RowScopeCompilerTests
             Bindings = [new FilterBinding { FilterName = "hard_region_policy" }]
         };
         var compiler = CreateCompiler(new VirtualFilterSnapshot(1, [hardPolicy], [denyProfile]));
-        var ownerGrant = new RowScopeGrant("owner-1", ConsentGrantSource.Owner, []);
+        var ownerGrant = new RowScopeGrant("owner-1", ConsentGrantSource.Declarative, []);
 
         var outcome = await compiler.CompileAsync(new RowScopeCompileRequest(
             Tenant, UserSid, new HashSet<Sid>(), OrdersTable(includeRegion: false), [ownerGrant]));

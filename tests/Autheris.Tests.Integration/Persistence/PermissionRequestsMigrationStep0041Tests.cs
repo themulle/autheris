@@ -38,11 +38,11 @@ public sealed class PermissionRequestsMigrationStep0041Tests
         "access_profile_assignments",
         "CONSENT_EVENT_DELIVERIES",
         "CONSENT_EVENTS",
-        "CONSENT_REQUESTS",
-        "DATA_OWNER_DELEGATIONS",
-        "TABLE_OWNERS",
-        "DATA_OWNERS"
+        "CONSENT_REQUESTS"
     ];
+
+    /// <summary>Purged by step 0041 and dropped by step 0045 (<c>drop_table_ownership</c>), so after a run to head they no longer exist.</summary>
+    private static readonly string[] DroppedOwnerTables = ["DATA_OWNER_DELEGATIONS", "TABLE_OWNERS", "DATA_OWNERS"];
 
     [Theory]
     [InlineData("postgresql")]
@@ -146,6 +146,13 @@ public sealed class PermissionRequestsMigrationStep0041Tests
             Convert.ToInt64(await countCmd.ExecuteScalarAsync()).ShouldBe(0, $"Purged table {tbl} should be empty.");
         }
 
+        foreach (var tbl in DroppedOwnerTables)
+        {
+            await using var existsCmd = new NpgsqlCommand("SELECT to_regclass(@t) IS NULL", conn);
+            existsCmd.Parameters.AddWithValue("@t", tbl.ToLowerInvariant());
+            ((bool)(await existsCmd.ExecuteScalarAsync())!).ShouldBeTrue($"{tbl} is dropped by step 0045.");
+        }
+
         await using var auditCmd = new NpgsqlCommand("SELECT COUNT(*) FROM AUDIT_LOG_ENTRIES", conn);
         Convert.ToInt64(await auditCmd.ExecuteScalarAsync()).ShouldBeGreaterThanOrEqualTo(1);
 
@@ -171,6 +178,12 @@ public sealed class PermissionRequestsMigrationStep0041Tests
         {
             await using var countCmd = new SqlCommand($"SELECT COUNT(*) FROM dbo.{tbl.ToUpperInvariant()}", conn);
             Convert.ToInt64(await countCmd.ExecuteScalarAsync()).ShouldBe(0, $"Purged table {tbl} should be empty.");
+        }
+
+        foreach (var tbl in DroppedOwnerTables)
+        {
+            await using var existsCmd = new SqlCommand($"SELECT CASE WHEN OBJECT_ID(N'dbo.{tbl}', N'U') IS NULL THEN 1 ELSE 0 END", conn);
+            Convert.ToInt32(await existsCmd.ExecuteScalarAsync()).ShouldBe(1, $"{tbl} is dropped by step 0045.");
         }
 
         await using var auditCmd = new SqlCommand("SELECT COUNT(*) FROM dbo.AUDIT_LOG_ENTRIES", conn);

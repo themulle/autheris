@@ -28,7 +28,7 @@ public sealed class ContainerOwnership(
 {
     private readonly record struct Resolved(TenantId Tenant, ContainerDefaults Container, Sid OwnerGroup);
 
-    public async Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default)
+    public async Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default)
     {
         var resolved = await ResolveManyAsync([table], ct).ConfigureAwait(false);
         if (!resolved.TryGetValue(table, out var r))
@@ -40,13 +40,13 @@ public sealed class ContainerOwnership(
         return [await OwnerEntryAsync(r, contacts, ct).ConfigureAwait(false)];
     }
 
-    public async Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<DataOwner>>> GetDataOwnersForTablesAsync(
+    public async Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>> GetDataOwnersForTablesAsync(
         IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(tables);
         var resolved = await ResolveManyAsync(tables, ct).ConfigureAwait(false);
         var contacts = new Dictionary<(TenantId, Guid), string?>();
-        var result = new Dictionary<TableIdentifier, IReadOnlyList<DataOwner>>();
+        var result = new Dictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>();
         foreach (var table in tables)
         {
             result[table] = resolved.TryGetValue(table, out var r)
@@ -143,7 +143,7 @@ public sealed class ContainerOwnership(
         return false;
     }
 
-    private async Task<DataOwner> OwnerEntryAsync(Resolved r, Dictionary<(TenantId, Guid), string?> contacts, CancellationToken ct)
+    private async Task<ContainerOwnerEntry> OwnerEntryAsync(Resolved r, Dictionary<(TenantId, Guid), string?> contacts, CancellationToken ct)
     {
         string? contact = null;
         if (r.Container.Container.Kind == ContainerKind.Domain)
@@ -165,7 +165,7 @@ public sealed class ContainerOwnership(
         }
 
         var group = r.OwnerGroup;
-        return new DataOwner
+        return new ContainerOwnerEntry
         {
             AdSid = group,
             DisplayName = string.IsNullOrWhiteSpace(contact) ? group.Value : contact!,

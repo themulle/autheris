@@ -231,16 +231,6 @@ internal static partial class CatalogRowHydrator
         return (columns, maskingRules);
     }
 
-    internal static DataOwner ReadDataOwner(DbDataReader reader, int o = 0) => new()
-    {
-        Id = Guid.Parse(reader.GetString(o)),
-        AdSid = new Sid(reader.GetString(o + 1)),
-        AdAccount = reader.GetString(o + 2),
-        DisplayName = reader.GetString(o + 3),
-        Email = reader.GetString(o + 4),
-        IsActive = reader.GetInt32(o + 5) == 1
-    };
-
     internal static RelationRowData ReadRelationRow(DbDataReader reader, int o = 0) => new(
         reader.GetString(o),
         reader.GetString(o + 1),
@@ -525,110 +515,6 @@ internal static partial class CatalogRowHydrator
         cmd.AddBound("@allowed", allowedValue);
         int rows = await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         return rows > 0;
-    }
-
-    internal static async Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(
-        DbConnection conn,
-        string sql,
-        TableIdentifier table,
-        CancellationToken ct)
-    {
-        var owners = new List<DataOwner>();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = sql;
-        cmd.AddBound("@domain", table.Domain);
-        cmd.AddBound("@schema", table.Schema);
-        cmd.AddBound("@table", table.TableName);
-
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            owners.Add(ReadDataOwner(reader));
-        }
-
-        return owners;
-    }
-
-    internal static async Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<DataOwner>>> GetDataOwnersForTablesAsync(
-        DbConnection conn,
-        string sql,
-        IReadOnlyCollection<TableIdentifier> tables,
-        CancellationToken ct)
-    {
-        var wanted = tables as IReadOnlySet<TableIdentifier> ?? tables.ToHashSet();
-        var grouped = new Dictionary<TableIdentifier, List<DataOwner>>();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = sql;
-
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            var id = new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
-            if (!wanted.Contains(id))
-            {
-                continue;
-            }
-
-            if (!grouped.TryGetValue(id, out var list))
-            {
-                list = [];
-                grouped[id] = list;
-            }
-
-            list.Add(ReadDataOwner(reader, o: 3));
-        }
-
-        return grouped.ToDictionary(kvp => kvp.Key, kvp => (IReadOnlyList<DataOwner>)kvp.Value);
-    }
-
-    internal static async Task<IReadOnlySet<TableIdentifier>> GetOwnedOrDelegatedTablesAsync(
-        DbConnection conn,
-        string sql,
-        Sid actorSid,
-        IReadOnlyCollection<TableIdentifier> tables,
-        DateTimeOffset atTime,
-        CancellationToken ct)
-    {
-        var wanted = tables as IReadOnlySet<TableIdentifier> ?? tables.ToHashSet();
-        var owned = new HashSet<TableIdentifier>();
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = sql;
-        cmd.AddBound("@sid", actorSid.Value);
-        cmd.AddBound("@now", atTime.ToUniversalTime().ToString("O"));
-
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            var id = new TableIdentifier(reader.GetString(0), reader.GetString(1), reader.GetString(2));
-            if (wanted.Contains(id))
-            {
-                owned.Add(id);
-            }
-        }
-
-        return owned;
-    }
-
-    internal static async Task<IReadOnlyCollection<string>> ResolveDataOwnerIdsInternalAsync(
-        DbConnection conn,
-        string sql,
-        IEnumerable<string> identifiers,
-        CancellationToken ct)
-    {
-        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var identifier in identifiers.Where(i => !string.IsNullOrWhiteSpace(i)))
-        {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = sql;
-            cmd.AddBound("@p", identifier);
-            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                ids.Add(reader.GetString(0));
-            }
-        }
-
-        return ids;
     }
 
     internal static async Task<CatalogVersion> GetCatalogVersionAsync(

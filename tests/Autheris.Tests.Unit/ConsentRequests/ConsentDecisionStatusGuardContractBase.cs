@@ -29,8 +29,8 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
     protected abstract Task GrantGovernanceAdminAsync(string sid);
 
     /// <summary>
-    /// Makes <paramref name="sid"/> an active data owner of <paramref name="table"/> (creating the owner row when missing). The repository
-    /// authorizes an approver only as owner or delegate of the table; the admin role is checked by the service in front of it.
+    /// Makes <paramref name="sid"/> the owner group of the container of <paramref name="table"/> (#1009, D13: one owner group per container;
+    /// calling it again for another sid transfers the ownership). The repository authorizes a decider only as that owner group.
     /// </summary>
     protected abstract Task EnsureTableOwnerAsync(string sid, TableIdentifier table);
 
@@ -184,7 +184,9 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
         var first = await NewApproverAsync();
         var second = await NewApproverAsync();
         var req = await NewRequestAsync(fourEyes: true);
+        await EnsureTableOwnerAsync(first, req.TableIdentifier);
         (await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(first), requireSecondApprover: true)).Status.ShouldBe("PENDING_SECOND_APPROVAL");
+        await EnsureTableOwnerAsync(second, req.TableIdentifier);
 
         SetStatusUpdateSeam(ForceStatus(req.Id, "REJECTED"));
         try
@@ -210,6 +212,7 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
         var approver = await NewApproverAsync();
         var other = await NewApproverAsync();
         var req = await NewRequestAsync(fourEyes: false);
+        await EnsureTableOwnerAsync(approver, req.TableIdentifier);
         (await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(approver))).Status.ShouldBe("APPROVED");
 
         await Should.ThrowAsync<ConsentRequestStatusConflictException>(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(other)));
@@ -273,8 +276,9 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
     public async Task W6_ConcurrentApproveAndReject_EndInExactlyOneTerminalOutcome()
     {
         RequireAvailable();
+        // One owner group per container (#1009 D13): the same owner decides twice concurrently.
         var approver = await NewApproverAsync();
-        var rejector = await NewApproverAsync();
+        var rejector = approver;
         var req = await NewRequestAsync(fourEyes: false);
 
         var results = await Task.WhenAll(
@@ -306,22 +310,23 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
     }
 
     [RuntimeSkippableFact]
-    public async Task W9_TwoDifferentApproversConcurrentlyOnTheSecondStep_EndInOneTerminalOutcome()
+    public async Task W9_ConcurrentDecisionsOnTheSecondStep_EndInOneTerminalOutcome()
     {
         RequireAvailable();
         var first = await NewApproverAsync();
-        var secondA = await NewApproverAsync();
-        var secondB = await NewApproverAsync();
+        var second = await NewApproverAsync();
         var req = await NewRequestAsync(fourEyes: true);
+        await EnsureTableOwnerAsync(first, req.TableIdentifier);
         (await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(first), requireSecondApprover: true)).Status.ShouldBe("PENDING_SECOND_APPROVAL");
+        await EnsureTableOwnerAsync(second, req.TableIdentifier);
 
         var results = await Task.WhenAll(
-            Attempt<ConsentRequestStatusConflictException>(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(secondA), requireSecondApprover: true)),
-            Attempt<ConsentRequestStatusConflictException>(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(secondB), requireSecondApprover: true)));
+            Attempt<ConsentRequestStatusConflictException>(() => Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(second), requireSecondApprover: true)),
+            Attempt<ConsentRequestStatusConflictException>(() => Repo.RejectConsentRequestAsync(req.Id, new Sid(second), "Declined")));
 
         results.Count(ok => ok).ShouldBe(1);
         var final = await Repo.GetConsentRequestAsync(req.Id);
-        final!.Status.ShouldBe("APPROVED");
+        final!.Status.ShouldBeOneOf("APPROVED", "REJECTED");
         (await CountApprovalStepsAsync(req.Id)).ShouldBe(2);
     }
 
@@ -386,6 +391,7 @@ public abstract class ConsentDecisionStatusGuardContractBase : IAsyncLifetime
         (await Repo.GetConsentRequestAsync(req.Id))!.Status.ShouldBe("PENDING");
         (await CountApprovalStepsAsync(req.Id)).ShouldBe(0);
 
+        await EnsureTableOwnerAsync(first, req.TableIdentifier);
         (await Repo.ApproveConsentRequestStepAsync(req.Id, new Sid(first), requireSecondApprover: true)).Status.ShouldBe("PENDING_SECOND_APPROVAL");
         var (secondStep, secondConsent) = AtomicApproval(req, second);
         await Repo.ExecuteAtomicApprovalWithConsentAsync(req.Id, secondStep, secondConsent, [], [], requireSecondApprover: true);
