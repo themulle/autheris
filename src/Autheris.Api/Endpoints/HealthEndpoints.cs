@@ -4,6 +4,7 @@ using System;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Mcp.Interfaces;
 using Autheris.Domain.Options;
 using Autheris.Api.Endpoints.Health;
 using Autheris.Api.Extensions;
@@ -58,7 +59,8 @@ public static class HealthEndpoints
             [FromServices] ReadinessProbe? readinessProbe,
             [FromServices] IGraphQlExecutorGate? executorGate,
             [FromServices] IStartupWarmupState? warmupState,
-            CancellationToken ct) => HandleReadyAsync(controller, readinessProbe, executorGate, warmupState, gatewayOptions, environment, ct))
+            [FromServices] IMcpSchemaDiscoveryState? mcpDiscovery,
+            CancellationToken ct) => HandleReadyAsync(controller, readinessProbe, executorGate, warmupState, gatewayOptions, environment, ct, mcpDiscovery))
         .AllowAnonymous().WithHealthProbe().WithAuditExemption("Operational health probe");
 
         return app;
@@ -71,7 +73,8 @@ public static class HealthEndpoints
         IStartupWarmupState? warmupState,
         GatewayOptions gatewayOptions,
         IHostEnvironment environment,
-        CancellationToken ct)
+        CancellationToken ct,
+        IMcpSchemaDiscoveryState? mcpDiscovery = null)
     {
         if (controller.IsDraining)
         {
@@ -110,6 +113,13 @@ public static class HealthEndpoints
             return NotReady(gateState == ExecutorGateState.Pending ? "Warming" : "Unhealthy", gateState, warmupState?.Phase);
         }
 
+        // Issue #1109: the MCP tools are discovered from the built executor in the background; not registered means no MCP.
+        var mcpPhase = mcpDiscovery?.Phase ?? McpSchemaDiscoveryPhase.Ready;
+        if (mcpPhase != McpSchemaDiscoveryPhase.Ready)
+        {
+            return NotReady(mcpPhase == McpSchemaDiscoveryPhase.Pending ? "Warming" : "Unhealthy", gateState, warmupState?.Phase);
+        }
+
         var phase = warmupState?.Phase ?? WarmupPhase.Pending;
         if (phase != WarmupPhase.Ready)
         {
@@ -144,7 +154,8 @@ public static class HealthEndpoints
                     timestamp = DateTimeOffset.UtcNow,
                     securityMode = GetSecurityMode(gatewayOptions),
                     executorGate = gate.ToString(),
-                    warmupPhase = phase?.ToString() ?? "Unknown"
+                    warmupPhase = phase?.ToString() ?? "Unknown",
+                    mcpSchemaDiscovery = mcpDiscovery?.Phase.ToString() ?? "NotRegistered"
                 }, statusCode: StatusCodes.Status503ServiceUnavailable);
             }
 

@@ -661,8 +661,8 @@ public sealed class StartupWarmupExecutorTests
         using var gate = CreateGate(provider, time, logger: logger, timeoutSeconds: 30);
 
         await gate.StartAsync(CancellationToken.None);
-        await called.Task.WaitAsync(Bound);
-        (await time.NextTimerAsync()).ShouldBe(TimeSpan.FromSeconds(30));
+        (await logger.NextAsync()).ShouldContain("build started"); // #1109: progress line, written before the probe
+        (await time.NextTimerAsync()).ShouldBe(TimeSpan.FromSeconds(30)); // the hang watch starts after the probe called GetExecutorAsync
         time.Advance(TimeSpan.FromSeconds(30));
         var message = await logger.NextAsync();
         time.Advance(TimeSpan.FromHours(1));

@@ -66,7 +66,10 @@ public static class GatewayMcpServiceExtensions
         services.AddScoped<IMcpQueryExecutor, GatewayMcpQueryExecutor>();
         GatewayMcpServer.AddGatewayMcpServer(services, gatewayOptions);
         services.AddScoped<IAiDataGuardrailService, AiDataGuardrailService>();
-        services.AddHostedService<McpSchemaDiscoveryService>();
+        // Issue #1109: the discovery waits for the executor build in the background; readiness is gated on its state.
+        services.AddSingleton<McpSchemaDiscoveryService>();
+        services.AddSingleton<IMcpSchemaDiscoveryState>(sp => sp.GetRequiredService<McpSchemaDiscoveryService>());
+        services.AddHostedService(sp => sp.GetRequiredService<McpSchemaDiscoveryService>());
         services.AddSingleton<Autheris.Application.Docs.Services.DocIndexRefreshService>();
         services.AddSingleton<Autheris.Application.Docs.Interfaces.IDocIndexReadiness>(sp => sp.GetRequiredService<Autheris.Application.Docs.Services.DocIndexRefreshService>());
         services.AddHostedService(sp => sp.GetRequiredService<Autheris.Application.Docs.Services.DocIndexRefreshService>());
