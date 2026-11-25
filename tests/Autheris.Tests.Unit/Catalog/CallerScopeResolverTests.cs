@@ -112,4 +112,17 @@ public sealed class CallerScopeResolverTests
         CallerScopeDiagnostics.ReportIfClaimlessAdmin(logger, admin, CallerScope.None, now + System.TimeSpan.FromMinutes(11).Ticks);
         logger.ReceivedCalls().Count(c => c.GetMethodInfo().Name == "Log").ShouldBe(2);
     }
+
+    [Fact]
+    public void Resolve_SupportsTenantPrefixedGovernanceAdmin_AndRejectsWildcardOrCrossTenant()
+    {
+        CallerScopeResolver.Resolve(Wp0.User("a", "tenant-a", ["tenant-a:GovernanceAdmin"]), TenancyShape.Multi.Owner())
+            .ShouldBe(CallerScope.Tenant);
+        CallerScopeResolver.Resolve(Wp0.User("a", "tenant-a", ["tenant-b:GovernanceAdmin"]), TenancyShape.Multi.Owner())
+            .ShouldBe(CallerScope.Subject);
+        CallerScopeResolver.Resolve(Wp0.User("a", "tenant-a", ["*:GovernanceAdmin"]), TenancyShape.Multi.Owner())
+            .ShouldBe(CallerScope.Subject);
+        CallerScopeResolver.Resolve(Wp0.User("a", null, [$"{TenancyShape.Single.Owner()!.Value.Value}:GovernanceAdmin"]), TenancyShape.Single.Owner())
+            .ShouldBe(CallerScope.CatalogOwner);
+    }
 }

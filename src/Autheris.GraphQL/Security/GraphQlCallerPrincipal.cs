@@ -41,7 +41,8 @@ public static class GraphQlCallerPrincipal
     {
         ArgumentNullException.ThrowIfNull(sessionContext);
 
-        var effectiveUserId = !string.IsNullOrWhiteSpace(sessionContext.UserSid)
+        var isAppOnly = sessionContext.IsAppOnly || string.IsNullOrWhiteSpace(sessionContext.UserSid);
+        var effectiveUserId = !isAppOnly
             ? sessionContext.UserSid
             : sessionContext.ServicePrincipalId;
 
@@ -60,7 +61,7 @@ public static class GraphQlCallerPrincipal
             string.Equals(c.Type, "appid", StringComparison.OrdinalIgnoreCase));
 
         if (!string.IsNullOrWhiteSpace(sessionContext.ServicePrincipalId) &&
-            !string.Equals(sessionContext.ServicePrincipalId, effectiveUserId, StringComparison.Ordinal))
+            (isAppOnly || !string.Equals(sessionContext.ServicePrincipalId, effectiveUserId, StringComparison.Ordinal)))
         {
             claims.Add(new Claim("client_id", sessionContext.ServicePrincipalId));
             claims.Add(new Claim("azp", sessionContext.ServicePrincipalId));
@@ -88,8 +89,9 @@ public static class GraphQlCallerPrincipal
             ?? throw new InvalidOperationException("Authenticated caller principal has no subject SID.");
 
         var isAppOnly = principal.Claims.Any(c =>
-            string.Equals(c.Type, McpProtocolHandler.IdentityKindClaimType, StringComparison.Ordinal) &&
-            string.Equals(c.Value, McpProtocolHandler.ApplicationIdentityKind, StringComparison.Ordinal));
+                string.Equals(c.Type, McpProtocolHandler.IdentityKindClaimType, StringComparison.OrdinalIgnoreCase) &&
+                string.Equals(c.Value, McpProtocolHandler.ApplicationIdentityKind, StringComparison.OrdinalIgnoreCase))
+            || Autheris.Application.Catalog.External.AppOnlyPrincipal.Is(principal);
 
         var groupSids = allowGroups && !isAppOnly
             ? principal.GetGroupSids().ToArray()
@@ -263,17 +265,39 @@ public static class GraphQlCallerPrincipal
             return false;
         }
 
+        var claim = TenantClaimReader.Read(principal);
+        if (claim.Kind == ClaimTenantKind.Invalid)
+        {
+            return false;
+        }
+
         if (role == GatewayRole.ClusterAdmin)
         {
             return ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
         }
 
-        if (!ClusterAdminPolicy.IsCanonicalClusterAdmin(principal))
+        var isCanonicalClusterAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        var trimmedTenant = string.IsNullOrWhiteSpace(tenantId) ? null : tenantId.Trim();
+        if (claim.Kind == ClaimTenantKind.Valid &&
+            trimmedTenant is not null &&
+            !string.Equals(claim.Tenant.Value, trimmedTenant, StringComparison.OrdinalIgnoreCase) &&
+            !isCanonicalClusterAdmin)
         {
-            return RoleEvaluator.HasRole(StripClusterAdminRoleClaims(principal), role, tenantId);
+            return false;
         }
 
-        return RoleEvaluator.HasRole(principal, role, tenantId);
+        var effectiveTenant = trimmedTenant ?? (claim.Kind == ClaimTenantKind.Valid ? claim.Tenant.Value : null);
+        var effectivePrincipal = isCanonicalClusterAdmin
+            ? principal
+            : StripClusterAdminRoleClaims(principal);
+
+        if (GatewayRole.GovernanceAdmin.Implies(role) &&
+            GatewayRoleEvaluator.HasTenantBoundRole(effectivePrincipal, nameof(GatewayRole.GovernanceAdmin), effectiveTenant))
+        {
+            return true;
+        }
+
+        return RoleEvaluator.HasRole(effectivePrincipal, role, effectiveTenant);
     }
 
     private static ClaimsPrincipal StripClusterAdminRoleClaims(ClaimsPrincipal principal)

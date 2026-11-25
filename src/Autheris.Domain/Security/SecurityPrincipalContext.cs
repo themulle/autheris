@@ -118,13 +118,17 @@ public sealed record SecurityPrincipalContext
     /// <summary>K-K10: Checks whether the principal satisfies the required GatewayRole with hierarchy semantics.</summary>
     public bool HasRole(GatewayRole role)
     {
+        if (TenantClaimInvalid)
+        {
+            return false;
+        }
+
         // Tenant-scoped-only roles (data products) are conferred by the request tenant's roles alone: never by ClusterAdmin or a global role.
         if (role.IsTenantScopedOnly())
         {
             foreach (var r in TenantRoles)
             {
-                if (!r.Contains(':', StringComparison.Ordinal) &&
-                    GatewayRoleExtensions.TryParseGlobalRole(r, out var tenantRole) && tenantRole == role)
+                if (TryMatchTenantRole(r, out var tenantRole) && tenantRole == role)
                 {
                     return true;
                 }
@@ -158,11 +162,10 @@ public sealed record SecurityPrincipalContext
             return false;
         }
 
-        // Tenant-scoped roles can satisfy tenant/governance roles; ignore prefixed roles containing ':'
+        // Tenant-scoped roles can satisfy tenant/governance roles when unprefixed or matching ResolvedTenant (never '*').
         foreach (var r in TenantRoles)
         {
-            if (r.Contains(':', StringComparison.Ordinal)) continue;
-            if (GatewayRoleExtensions.TryParseGlobalRole(r, out var parsed))
+            if (TryMatchTenantRole(r, out var parsed))
             {
                 if (parsed == GatewayRole.ClusterAdmin)
                 {
@@ -177,6 +180,42 @@ public sealed record SecurityPrincipalContext
         }
 
         return false;
+    }
+
+    private bool TryMatchTenantRole(string rawRole, out GatewayRole parsed)
+    {
+        if (!rawRole.Contains(':', StringComparison.Ordinal))
+        {
+            return GatewayRoleExtensions.TryParseGlobalRole(rawRole, out parsed);
+        }
+
+        if (ResolvedTenant is not { Value: not null } tenant || TenantId.IsReserved(tenant))
+        {
+            parsed = default;
+            return false;
+        }
+
+        if (Principal is not null)
+        {
+            var claim = Autheris.Domain.Tenancy.TenantClaimReader.Read(Principal);
+            if (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Invalid ||
+                (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid &&
+                 !string.Equals(claim.Tenant.Value, tenant.Value, StringComparison.OrdinalIgnoreCase)))
+            {
+                parsed = default;
+                return false;
+            }
+        }
+
+        if (!GatewayRoleExtensions.TryParseTenantScopedRole(rawRole, out var roleTenant, out parsed) ||
+            roleTenant == "*" ||
+            parsed == GatewayRole.ClusterAdmin)
+        {
+            parsed = default;
+            return false;
+        }
+
+        return string.Equals(roleTenant, tenant.Value, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>K-K10: Checks whether the principal satisfies any of the required GatewayRoles.</summary>

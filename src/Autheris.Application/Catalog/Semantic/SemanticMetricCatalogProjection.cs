@@ -33,7 +33,7 @@ public static class SemanticMetricCatalogProjection
     public static bool SeesDefinitionDetails(ClaimsPrincipal? user) =>
         user != null &&
         (Roles.HasRole(user, GatewayRole.GovernanceAdmin) ||
-         CallerScopeResolver.HoldsGovernanceAdminRole(user) ||
+         (!CallerScopeResolver.HasInvalidTenantClaim(user) && CallerScopeResolver.HoldsGovernanceAdminRole(user)) ||
          user.IsInRole("DbtAdmin"));
 
     public static IReadOnlyList<object> Project(IReadOnlyList<DbtMetric> metrics, ClaimsPrincipal? user)

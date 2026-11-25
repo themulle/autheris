@@ -53,6 +53,7 @@ public sealed class IdentityPipeline : IIdentityPipeline
             "autheris:realm",
             "autheris:realm_kind",
             "autheris:subject_kind",
+            Autheris.Application.Mcp.Services.McpProtocolHandler.IdentityKindClaimType,
             RequireFunctionalRightHandler.FunctionalRightClaimType,
             RoleResolutionClaims.ClaimType,
             RoleResolutionClaims.AllowedGatewayRolesClaimType,

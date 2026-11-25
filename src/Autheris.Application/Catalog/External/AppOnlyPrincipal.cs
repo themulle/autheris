@@ -3,6 +3,7 @@ namespace Autheris.Application.Catalog.External;
 using System;
 using System.Collections.Generic;
 using System.Security.Claims;
+using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Security;
 
@@ -39,6 +40,26 @@ public static class AppOnlyPrincipal
         if (principal is null)
         {
             return false;
+        }
+
+        foreach (var identity in principal.Identities)
+        {
+            if ((string.Equals(identity.AuthenticationType, "MCP", StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(identity.AuthenticationType, Autheris.Application.Identity.Attributes.CallerAttributeSchemeGate.McpAuthScheme, StringComparison.OrdinalIgnoreCase)) &&
+                identity.HasClaim(c =>
+                    string.Equals(c.Type, McpProtocolHandler.IdentityKindClaimType, StringComparison.OrdinalIgnoreCase) &&
+                    string.Equals(c.Value, McpProtocolHandler.ApplicationIdentityKind, StringComparison.OrdinalIgnoreCase)))
+            {
+                return true;
+            }
+        }
+
+        if (principal.HasClaim(c =>
+            string.Equals(c.Type, "autheris:subject_kind", StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(c.Issuer, IdentityClaimIssuers.Pipeline, StringComparison.Ordinal) &&
+            string.Equals(c.Value, "sp", StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
         }
 
         if (string.Equals(principal.FindFirst("idtyp")?.Value, "app", StringComparison.OrdinalIgnoreCase))

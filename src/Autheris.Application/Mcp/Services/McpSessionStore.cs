@@ -105,7 +105,8 @@ public sealed class McpSessionStore : IMcpSessionStore
                 isReadOnly,
                 additionalClaims,
                 boundedGroupsExpireAt,
-                groupsDegraded);
+                groupsDegraded,
+                IsAppOnly: string.IsNullOrWhiteSpace(userSid));
             _sessions[sessionId] = session;
         }
 

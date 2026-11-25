@@ -16,7 +16,7 @@ using Autheris.Domain.Security;
 /// <summary>Default <see cref="IOpenApiIngestionUseCase"/>.</summary>
 public sealed class OpenApiIngestionUseCase(IOpenApiIngestionService ingestionService, IAuditWriter auditWriter) : IOpenApiIngestionUseCase
 {
-    private static readonly IGatewayRoleEvaluator Roles = new GatewayRoleEvaluator();
+    private static readonly GatewayRoleEvaluator Roles = new();
 
     public bool HasPublishRole(ClaimsPrincipal user)
     {
@@ -25,6 +25,7 @@ public sealed class OpenApiIngestionUseCase(IOpenApiIngestionService ingestionSe
     }
 
     private static bool HasRole(ClaimsPrincipal user) =>
+        Roles.HasGovernanceAdminRole(user) ||
         Roles.HasAnyRole(user, new[] { GatewayRole.GovernanceAdmin, GatewayRole.SchemaPublisher });
 
     public bool IsAuthorized(ClaimsPrincipal user, TenantId callerTenant, bool isClusterAdmin, string? domain) =>

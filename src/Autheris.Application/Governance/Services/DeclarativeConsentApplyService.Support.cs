@@ -250,7 +250,10 @@ public sealed partial class DeclarativeConsentApplyService
             throw new ConsentApplyForbiddenException();
         }
 
-        if (!_roleEvaluator.HasAnyRole(caller, RequiredApplyRoles, tenantId.Value))
+        var hasApplyRole = _roleEvaluator is GatewayRoleEvaluator concreteEvaluator
+            ? concreteEvaluator.HasGovernanceAdminRole(caller, tenantId.Value)
+            : _roleEvaluator.HasAnyRole(caller, RequiredApplyRoles, tenantId.Value);
+        if (!hasApplyRole)
         {
             throw new ConsentApplyForbiddenException();
         }

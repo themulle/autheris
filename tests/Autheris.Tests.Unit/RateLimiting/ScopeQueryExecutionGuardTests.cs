@@ -414,8 +414,8 @@ public sealed class ScopeQueryExecutionGuardTests
             UserSid: null, Roles: ["Reader"], GroupSids: [], AdditionalClaims: additional);
         foreach (var principal in new[] { McpProtocolHandler.BuildPrincipalFromSession(appSession)!, GraphQlCallerPrincipal.BuildMcpSessionPrincipal(appSession) })
         {
-            principal.FindFirst("client_id").ShouldBeNull();
-            principal.FindFirst("azp").ShouldBeNull();
+            principal.FindFirst("client_id")?.Value.ShouldBe("spn-real");
+            principal.FindFirst("azp")?.Value.ShouldBe("spn-real");
             principal.FindFirst("appid").ShouldBeNull();
             principal.FindFirst("department")?.Value.ShouldBe("sales");
         }

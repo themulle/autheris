@@ -4,6 +4,7 @@ using System.Linq;
 using System.Security.Claims;
 using Autheris.Application.Catalog.External;
 using Autheris.Application.Identity;
+using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
 using Autheris.Domain.Model;
@@ -383,6 +384,13 @@ public static class InternalAudienceResolver
     private static bool IsServicePrincipal(SecurityPrincipalContext subject, IReadOnlyList<Claim> claims)
     {
         if (claims.Any(c =>
+            string.Equals(c.Type, McpProtocolHandler.IdentityKindClaimType, StringComparison.OrdinalIgnoreCase) &&
+            string.Equals(c.Value, McpProtocolHandler.ApplicationIdentityKind, StringComparison.OrdinalIgnoreCase)))
+        {
+            return true;
+        }
+
+        if (claims.Any(c =>
             string.Equals(c.Type, "autheris:subject_kind", StringComparison.OrdinalIgnoreCase) &&
             string.Equals(c.Issuer, IdentityClaimIssuers.Pipeline, StringComparison.Ordinal) &&
             string.Equals(c.Value, "sp", StringComparison.OrdinalIgnoreCase)))
@@ -436,12 +444,24 @@ public static class InternalAudienceResolver
 
         var azp = FindSingleClaimValue(claims, "azp");
         var appid = FindSingleClaimValue(claims, "appid");
-        if (azp is not null && appid is not null && !string.Equals(azp, appid, StringComparison.OrdinalIgnoreCase))
+        var clientIdClaim = FindSingleClaimValue(claims, "client_id");
+        string? clientId = null;
+        foreach (var candidate in new[] { azp, appid, clientIdClaim })
         {
-            return false;
-        }
+            if (candidate is null)
+            {
+                continue;
+            }
 
-        var clientId = azp ?? appid;
+            if (clientId is null)
+            {
+                clientId = candidate;
+            }
+            else if (!string.Equals(clientId, candidate, StringComparison.OrdinalIgnoreCase))
+            {
+                return false;
+            }
+        }
         if (string.IsNullOrWhiteSpace(clientId))
         {
             return false;

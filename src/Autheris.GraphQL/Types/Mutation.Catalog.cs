@@ -113,6 +113,14 @@ public sealed partial class Mutation
 
         // SR-L-23: only the canonical ClusterAdmin (claims-based, never ForwardAuth) or a GovernanceAdmin may synchronise.
         var isClusterAdmin = Autheris.Domain.Security.ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        if (!isClusterAdmin && Autheris.Domain.Tenancy.TenantClaimReader.Read(principal).Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Invalid)
+        {
+            throw new GraphQLException(ErrorBuilder.New()
+                .SetCode("UNAUTHORIZED")
+                .SetMessage("No valid tenant in the authentication token.")
+                .Build());
+        }
+
         if (!isClusterAdmin && !Autheris.GraphQL.Security.GraphQlCallerPrincipal.HasGatewayRole(principal, Autheris.Domain.Security.GatewayRole.GovernanceAdmin))
         {
             throw new GraphQLException(ErrorBuilder.New()

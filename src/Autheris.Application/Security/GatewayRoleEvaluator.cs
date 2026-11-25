@@ -100,6 +100,11 @@ public sealed class GatewayRoleEvaluator(IIdentityRealmRegistry? realmRegistry =
             return false;
         }
 
+        if (!TryValidateTenantScope(principal, tenantId, out var isCanonicalClusterAdmin, out var trimmedTenantId, out var hasCrossTenantMismatch))
+        {
+            return false;
+        }
+
         bool isForwardAuth = IsForwardAuthPrincipal(principal);
         bool hasAllowed = TryGetAllowedGatewayRoles(principal, _realmRegistry, out var allowedRoles);
 
@@ -114,10 +119,18 @@ public sealed class GatewayRoleEvaluator(IIdentityRealmRegistry? realmRegistry =
             {
                 return false;
             }
+
+            if (hasCrossTenantMismatch && (!isCanonicalClusterAdmin || targetRole != GatewayRole.ClusterAdmin))
+            {
+                return false;
+            }
         }
-        else if (hasAllowed)
+        else
         {
-            return false;
+            if (hasAllowed || hasCrossTenantMismatch)
+            {
+                return false;
+            }
         }
 
         var rawRoles = principal.GetUserRoles();
@@ -140,14 +153,25 @@ public sealed class GatewayRoleEvaluator(IIdentityRealmRegistry? realmRegistry =
                 continue;
             }
 
-            var colonIdx = raw.IndexOf(':', StringComparison.Ordinal);
-            if (colonIdx > 0)
+            var firstColon = raw.IndexOf(':', StringComparison.Ordinal);
+            if (firstColon >= 0)
             {
-                var roleTenant = raw[..colonIdx];
-                var name = raw[(colonIdx + 1)..];
+                var lastColon = raw.LastIndexOf(':', StringComparison.Ordinal);
+                if (firstColon == 0 || firstColon != lastColon || firstColon == raw.Length - 1)
+                {
+                    continue;
+                }
 
-                if (!string.IsNullOrEmpty(tenantId) &&
-                    (string.Equals(roleTenant, tenantId, StringComparison.OrdinalIgnoreCase) || roleTenant == "*") &&
+                var roleTenant = raw[..firstColon].Trim();
+                var name = raw[(firstColon + 1)..].Trim();
+                if (roleTenant.Length == 0 || name.Length == 0 || roleTenant == "*")
+                {
+                    continue;
+                }
+
+                if (!hasCrossTenantMismatch &&
+                    !string.IsNullOrEmpty(trimmedTenantId) &&
+                    string.Equals(roleTenant, trimmedTenantId, StringComparison.OrdinalIgnoreCase) &&
                     string.Equals(name, roleName, StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
@@ -155,14 +179,25 @@ public sealed class GatewayRoleEvaluator(IIdentityRealmRegistry? realmRegistry =
             }
             else
             {
-                if (string.Equals(raw, roleName, StringComparison.OrdinalIgnoreCase))
+                if (hasCrossTenantMismatch && !ClusterAdminPolicy.IsClusterAdminRole(raw))
+                {
+                    continue;
+                }
+
+                if (string.Equals(raw.Trim(), roleName, StringComparison.OrdinalIgnoreCase))
                 {
                     return true;
                 }
             }
         }
 
-        return principal.IsInRole(roleName);
+        if (hasCrossTenantMismatch && !GatewayRoleExtensions.TryParseGlobalRole(roleName, out var exactGlobal))
+        {
+            return false;
+        }
+
+        return (!hasCrossTenantMismatch || (GatewayRoleExtensions.TryParseGlobalRole(roleName, out var g) && g == GatewayRole.ClusterAdmin))
+            && principal.IsInRole(roleName);
     }
 
     public bool HasAnyExactRole(ClaimsPrincipal? principal, IEnumerable<string> roleNames, string? tenantId = null)
@@ -192,6 +227,11 @@ public sealed class GatewayRoleEvaluator(IIdentityRealmRegistry? realmRegistry =
             return new HashSet<GatewayRole>();
         }
 
+        if (!TryValidateTenantScope(principal, tenantId, out var isCanonicalClusterAdmin, out var trimmedTenantId, out var hasCrossTenantMismatch))
+        {
+            return new HashSet<GatewayRole>();
+        }
+
         var result = new HashSet<GatewayRole>();
         var rawRoles = principal.GetUserRoles();
         bool isForwardAuth = IsForwardAuthPrincipal(principal);
@@ -207,29 +247,24 @@ public sealed class GatewayRoleEvaluator(IIdentityRealmRegistry? realmRegistry =
             if (raw.Contains(':', StringComparison.Ordinal))
             {
                 // Strict tenant-scoped form "tenant1:Consumer": exactly one colon, non-empty parts, exact role name.
-                // Anything else containing ':' (":ClusterAdmin", "a:b:Consumer", "tenant:") is malformed and grants nothing.
+                // Anything else containing ':' (":ClusterAdmin", "a:b:Consumer", "tenant:", "*:Consumer") grants nothing.
                 if (!GatewayRoleExtensions.TryParseTenantScopedRole(raw, out var roleTenant, out var parsedRole))
                 {
                     continue;
                 }
 
-                // Security Guard: Tenant-scoped roles only apply when evaluating within that specific tenant.
-                // They never satisfy a global (tenantId == null) authorization check unless the role is wildcard (*).
-                if (string.IsNullOrEmpty(tenantId) ||
-                    (!string.Equals(roleTenant, tenantId, StringComparison.OrdinalIgnoreCase) && roleTenant != "*"))
+                // Security Guard: Tenant-scoped roles only apply when evaluating within that specific non-wildcard tenant.
+                if (hasCrossTenantMismatch ||
+                    string.IsNullOrEmpty(trimmedTenantId) ||
+                    roleTenant == "*" ||
+                    !string.Equals(roleTenant, trimmedTenantId, StringComparison.OrdinalIgnoreCase))
                 {
                     continue;
                 }
 
-                // Security Guard: ClusterAdmin and GovernanceAdmin are strictly global platform roles.
-                // They can never be granted via a tenant-scoped prefix (e.g. "tenant-1:ClusterAdmin").
+                // Security Guard: ClusterAdmin and GovernanceAdmin are excluded from GetEffectiveRoles when tenant-prefixed;
+                // callers requiring tenant-bound GovernanceAdmin must evaluate HasTenantBoundRole / HasGovernanceAdminRole.
                 if (parsedRole is GatewayRole.ClusterAdmin or GatewayRole.GovernanceAdmin)
-                {
-                    continue;
-                }
-
-                // Data product roles are bound to one named tenant; the wildcard tenant never confers them.
-                if (parsedRole.IsTenantScopedOnly() && roleTenant == "*")
                 {
                     continue;
                 }
@@ -248,6 +283,11 @@ public sealed class GatewayRoleEvaluator(IIdentityRealmRegistry? realmRegistry =
                     continue;
                 }
 
+                if (hasCrossTenantMismatch && (!isCanonicalClusterAdmin || globalRole != GatewayRole.ClusterAdmin))
+                {
+                    continue;
+                }
+
                 if (hasAllowed && !allowedRoles.Contains(globalRole))
                 {
                     continue;
@@ -259,6 +299,37 @@ public sealed class GatewayRoleEvaluator(IIdentityRealmRegistry? realmRegistry =
         }
 
         return result;
+    }
+
+    public bool HasGovernanceAdminRole(ClaimsPrincipal? principal, string? tenantId = null) =>
+        HasTenantBoundRole(principal, nameof(GatewayRole.GovernanceAdmin), tenantId, _realmRegistry);
+
+    private static bool TryValidateTenantScope(
+        ClaimsPrincipal principal,
+        string? tenantId,
+        out bool isCanonicalClusterAdmin,
+        out string? trimmedTenantId,
+        out bool hasCrossTenantMismatch)
+    {
+        isCanonicalClusterAdmin = ClusterAdminPolicy.IsCanonicalClusterAdmin(principal);
+        trimmedTenantId = string.IsNullOrWhiteSpace(tenantId) ? null : tenantId.Trim();
+        hasCrossTenantMismatch = false;
+
+        var claim = Autheris.Domain.Tenancy.TenantClaimReader.Read(principal);
+        if (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Invalid)
+        {
+            return false;
+        }
+
+        if (claim.Kind == Autheris.Domain.Tenancy.ClaimTenantKind.Valid &&
+            trimmedTenantId is not null &&
+            !string.Equals(claim.Tenant.Value, trimmedTenantId, StringComparison.OrdinalIgnoreCase))
+        {
+            hasCrossTenantMismatch = true;
+            return isCanonicalClusterAdmin;
+        }
+
+        return true;
     }
 
     /// <summary>
