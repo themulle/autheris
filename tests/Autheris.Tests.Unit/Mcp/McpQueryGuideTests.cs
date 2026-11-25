@@ -152,6 +152,53 @@ public sealed class McpQueryGuideTests
     }
 
     [Fact]
+    public void Issue1107_Section5_NamesTheTimeBucketLimitNextToTheRowBudget()
+    {
+        var guide = McpQueryGuideBuilder.Build(SwitchesFrom(), new GraphQLOptions());
+
+        var section5 = guide[guide.IndexOf("## 5.", StringComparison.Ordinal)..];
+        section5 = section5[..section5.IndexOf("```graphql", StringComparison.Ordinal)];
+        section5.ShouldContain("MaxAggregateRowBudget");
+        section5.ShouldContain("`limit` must not exceed `1000`");
+        section5.ShouldContain("AGGREGATION_TIME_BUCKET_LIMIT_EXCEEDED");
+    }
+
+    [Fact]
+    public void Issue1106_Guide_ExplainsRestrictedScopeAndScopeClearRequiredColumns()
+    {
+        var guide = McpQueryGuideBuilder.Build(SwitchesFrom(), new GraphQLOptions());
+
+        guide.ShouldContain("restrictedScope");
+        guide.ShouldContain("scopeClearRequiredColumns");
+        guide.ShouldContain("describe_my_access");
+        guide.ShouldContain("masked only for the restricted scope of this token");
+        guide.ShouldContain("no access request is needed");
+        // #1105: keys over masked columns are listed for planning, but masked columns stay out of where, orderBy and joins.
+        guide.ShouldContain("FILTER_ON_MASKED_COLUMN");
+    }
+
+    [Fact]
+    public void Issue1106_Guide_DoesNotNameDescribeMyAccess_WhenTheToolIsDisabled()
+    {
+        var off = McpQueryGuideBuilder.Build(SwitchesFrom(new GatewayOptions { Mcp = new McpOptions { DisabledTools = ["describe_my_access"] } }), new GraphQLOptions());
+        var nullSwitches = McpQueryGuideBuilder.Build(switches: null, new GraphQLOptions());
+
+        off.ShouldNotContain("describe_my_access");
+        nullSwitches.ShouldNotContain("describe_my_access");
+    }
+
+    [Fact]
+    public void Issue1106_DescribeMyAccessToolDescription_ExplainsRestrictedScopeFields()
+    {
+        var tool = McpDatasetTools.Definitions().Single(t => t.Name == McpDatasetTools.DescribeMyAccess);
+
+        tool.Description.ShouldContain("restrictedScope");
+        tool.Description.ShouldContain("scopeClearRequiredColumns");
+        tool.Description.ShouldContain("masked only for the restricted scope of this token");
+        tool.Description.ShouldContain("no access request is needed");
+    }
+
+    [Fact]
     public async Task McpResourceRegistrationAndRead_ServesDynamicQueryGuide()
     {
         var native = GatewayMcpServer.NativeResourceList();

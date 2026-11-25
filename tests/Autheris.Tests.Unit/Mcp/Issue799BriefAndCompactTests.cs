@@ -144,7 +144,7 @@ public sealed class Issue799BriefAndCompactTests(ITestOutputHelper output)
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task Brief_MaskedKeyColumn_OmitsTheKey_AndReportsMaskAccess()
+    public async Task Brief_MaskedKeyColumn_KeepsTheKey_AndReportsMaskAccess_DeniedKeyColumnOmitsIt()
     {
         var access = WideTable().Columns.ToDictionary(c => c.ColumnName, _ => ColumnAccessLevel.Clear, StringComparer.OrdinalIgnoreCase);
         access["t_col001"] = ColumnAccessLevel.Mask;
@@ -153,12 +153,20 @@ public sealed class Issue799BriefAndCompactTests(ITestOutputHelper output)
 
         var brief = await DescribeWireAsync(catalog, brief: true);
 
+        // #1105: the key (t_col000, t_col001) stays listed although t_col001 is masked.
         using var doc = JsonDocument.Parse(brief);
-        doc.RootElement.TryGetProperty("primaryKeyOrder", out _).ShouldBeFalse();
+        doc.RootElement.GetProperty("primaryKeyOrder").EnumerateArray().Select(k => k.GetProperty("column").GetString()).ShouldBe(["t_col000", "t_col001"]);
         var columns = doc.RootElement.GetProperty("columns").EnumerateArray().ToList();
         columns.ShouldNotContain(c => c.GetProperty("name").GetString() == "t_col003");
-        columns.Single(c => c.GetProperty("name").GetString() == "t_col001").GetProperty("access").GetString().ShouldBe("mask");
-        columns.Any(c => c.TryGetProperty("primaryKey", out _)).ShouldBeFalse();
+        var masked = columns.Single(c => c.GetProperty("name").GetString() == "t_col001");
+        masked.GetProperty("access").GetString().ShouldBe("mask");
+        masked.GetProperty("primaryKey").GetBoolean().ShouldBeTrue();
+
+        // A denied key column omits the whole key; no column carries a key flag.
+        access["t_col001"] = ColumnAccessLevel.Deny;
+        using var deniedDoc = JsonDocument.Parse(await DescribeWireAsync(Catalog(WideTable(), access), brief: true));
+        deniedDoc.RootElement.TryGetProperty("primaryKeyOrder", out _).ShouldBeFalse();
+        deniedDoc.RootElement.GetProperty("columns").EnumerateArray().Any(c => c.TryGetProperty("primaryKey", out _)).ShouldBeFalse();
     }
 
     [Fact]
