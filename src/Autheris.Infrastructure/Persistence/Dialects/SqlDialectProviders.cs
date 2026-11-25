@@ -120,7 +120,7 @@ public sealed class DatabricksDialectProvider : SqlDialectProviderBase
             TargetSqlDialect.Databricks,
             "Databricks",
             ["databricks", "spark", "sparksql"],
-            supportsTreeCompile: false,
+            supportsTreeCompile: true,
             supportsCdc: false,
             maxParameterCount: 1000,
             capabilityProvider)

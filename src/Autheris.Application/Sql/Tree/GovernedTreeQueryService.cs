@@ -417,7 +417,7 @@ public sealed partial class GovernedTreeQueryService : IGovernedTreeQueryService
         }
 
         var connections = _options.DataSources?.Connections;
-        if (connections == null || !connections.TryGetValue(sourceName, out var connOptions) || string.IsNullOrWhiteSpace(connOptions.ConnectionString))
+        if (connections == null || !connections.TryGetValue(sourceName, out var connOptions) || !HasUsableConnection(connOptions))
         {
             // #341: a catalog entry whose data source has no connection (unbacked entry, governance system table) cannot be queried. It
             // answers like a denied table, after the access decision, and the cause stays in the server log only.
@@ -804,8 +804,7 @@ public sealed partial class GovernedTreeQueryService : IGovernedTreeQueryService
             foreach (var (name, value) in compiled.Parameters)
             {
                 var parameter = command.CreateParameter();
-                parameter.ParameterName = name;
-                parameter.Value = ToProviderValue(value, dialect) ?? DBNull.Value;
+                ConfigureCommandParameter(parameter, name, value, dialect);
                 command.Parameters.Add(parameter);
             }
 
