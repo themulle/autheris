@@ -421,4 +421,71 @@ public sealed partial class CatalogGraphQlTypeModule
             Volatile.Read(ref _lastBuiltOmitted),
             elapsedMs);
     }
+
+    private async ValueTask<(CatalogSchemaModel Model, Autheris.Application.Catalog.CatalogVersion? Version)> BuildFreshSchemaModelAsync(
+        CancellationToken cancellationToken)
+    {
+        var seen = new System.Collections.Concurrent.ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
+        Autheris.Application.Catalog.CatalogSnapshot? snapshot = null;
+        if (_snapshotProvider is not null)
+        {
+            try
+            {
+                snapshot = await _snapshotProvider.GetSnapshotAsync(cancellationToken).ConfigureAwait(false);
+            }
+            catch (Autheris.Domain.Exceptions.CatalogSnapshotNotReadyException)
+            {
+                snapshot = null;
+            }
+        }
+
+        Autheris.Application.Catalog.CatalogVersion? catVer;
+        CatalogSchemaModel schemaModel;
+        if (snapshot is not null)
+        {
+            catVer = snapshot.Version;
+            schemaModel = await CatalogSchemaModel.BuildFromSnapshotAsync(
+                snapshot,
+                _logger,
+                dialectRegistry: null,
+                crossSourceEnabled: _crossSourceEnabled,
+                tableFilter: GetTableFilter(seen),
+                fingerprintCache: _tableFingerprintCache,
+                epochService: _epochService,
+                timeProvider: _timeProvider,
+                phase: "rebuild",
+                ct: cancellationToken).ConfigureAwait(false);
+        }
+        else
+        {
+            catVer = _versionProvider is null
+                ? null
+                : await _versionProvider.GetCatalogVersionAsync(cancellationToken).ConfigureAwait(false);
+            schemaModel = await CatalogSchemaModel.BuildAsync(
+                _metadataRepo,
+                _relationRepo,
+                _logger,
+                dialectRegistry: null,
+                crossSourceEnabled: _crossSourceEnabled,
+                tableFilter: GetTableFilter(seen),
+                fingerprintCache: _tableFingerprintCache,
+                epochService: _epochService,
+                timeProvider: _timeProvider,
+                phase: "rebuild",
+                ct: cancellationToken).ConfigureAwait(false);
+        }
+
+        _lastFullCheckTimestamp = _timeProvider.GetTimestamp();
+        _transportSeen = seen;
+        _currentSchemaModel = schemaModel;
+        CurrentLookup = GetTableMetadataForField;
+        if (catVer.HasValue)
+        {
+            Volatile.Write(ref _builtStructureVersion, catVer.Value.StructureVersion);
+            Volatile.Write(ref _builtContentVersion, catVer.Value.ContentVersion);
+        }
+
+        _built = new BuiltState(schemaModel.Fingerprint(), schemaModel.OmittedTables, schemaModel, catVer, seen);
+        return (schemaModel, catVer);
+    }
 }

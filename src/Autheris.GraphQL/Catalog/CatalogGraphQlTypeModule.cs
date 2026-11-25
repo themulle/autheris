@@ -328,67 +328,7 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
             }
             else
             {
-                var seen = new System.Collections.Concurrent.ConcurrentDictionary<string, bool>(StringComparer.OrdinalIgnoreCase);
-                Autheris.Application.Catalog.CatalogSnapshot? snapshot = null;
-                if (_snapshotProvider is not null)
-                {
-                    try
-                    {
-                        snapshot = await _snapshotProvider.GetSnapshotAsync(cancellationToken).ConfigureAwait(false);
-                    }
-                    catch (CatalogSnapshotNotReadyException)
-                    {
-                        snapshot = null;
-                    }
-                }
-
-                Autheris.Application.Catalog.CatalogVersion? catVer;
-                if (snapshot is not null)
-                {
-                    catVer = snapshot.Version;
-                    schemaModel = await CatalogSchemaModel.BuildFromSnapshotAsync(
-                        snapshot,
-                        _logger,
-                        dialectRegistry: null,
-                        crossSourceEnabled: _crossSourceEnabled,
-                        tableFilter: GetTableFilter(seen),
-                        fingerprintCache: _tableFingerprintCache,
-                        epochService: _epochService,
-                        timeProvider: _timeProvider,
-                        phase: "rebuild",
-                        ct: cancellationToken).ConfigureAwait(false);
-                }
-                else
-                {
-                    // Issue #802: the version is read before the model, so the recorded version never claims a write the model lacks.
-                    catVer = _versionProvider is null
-                        ? null
-                        : await _versionProvider.GetCatalogVersionAsync(cancellationToken).ConfigureAwait(false);
-                    schemaModel = await CatalogSchemaModel.BuildAsync(
-                        _metadataRepo,
-                        _relationRepo,
-                        _logger,
-                        dialectRegistry: null,
-                        crossSourceEnabled: _crossSourceEnabled,
-                        tableFilter: GetTableFilter(seen),
-                        fingerprintCache: _tableFingerprintCache,
-                        epochService: _epochService,
-                        timeProvider: _timeProvider,
-                        phase: "rebuild",
-                        ct: cancellationToken).ConfigureAwait(false);
-                }
-
-                _lastFullCheckTimestamp = _timeProvider.GetTimestamp();
-                _transportSeen = seen;
-                _currentSchemaModel = schemaModel;
-                CurrentLookup = GetTableMetadataForField;
-                if (catVer.HasValue)
-                {
-                    Volatile.Write(ref _builtStructureVersion, catVer.Value.StructureVersion);
-                    Volatile.Write(ref _builtContentVersion, catVer.Value.ContentVersion);
-                }
-                publishedVersion = catVer;
-                _built = new BuiltState(schemaModel.Fingerprint(), schemaModel.OmittedTables, schemaModel, catVer, seen);
+                (schemaModel, publishedVersion) = await BuildFreshSchemaModelAsync(cancellationToken).ConfigureAwait(false);
             }
 
             NotifySchemaModelBuilt(schemaModel, publishedVersion);
