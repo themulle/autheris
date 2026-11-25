@@ -603,6 +603,14 @@ internal sealed class InMemoryExternalConsentRepository : IConsentRepository, IC
         return Task.FromResult<IReadOnlyList<Consent>>(list);
     }
 
+    public Task<DateTimeOffset?> GetNextScheduledAllowAsync(IEnumerable<Sid> subjects, DateTimeOffset atTime, TenantId tenantId, CancellationToken ct = default)
+    {
+        var sids = subjects.Select(static s => s.Value).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        return Task.FromResult(Consents.Where(c => !c.IsRevoked && c.Effect == ConsentEffect.Allow && c.GrantKind == PermissionGrantKind.Data &&
+            c.TenantId == tenantId && c.ValidFrom > atTime && c.EffectiveValidTo > c.ValidFrom && c.GranteeSid is { } g && sids.Contains(g.Value))
+            .Select(static c => (DateTimeOffset?)c.ValidFrom).OrderBy(static d => d).FirstOrDefault());
+    }
+
     public Task<ConsentPage> GetConsentPageAsync(ConsentPageQuery query, CancellationToken ct = default)
     {
         var filtered = Consents.Where(c => c.TenantId == query.Tenant && (query.IncludeInactive || !c.IsRevoked)).ToList();
@@ -778,15 +786,7 @@ internal sealed class InMemoryCatalogChangeStore : ICatalogChangeStore
         return Task.FromResult(new CatalogChangesFeedResult(items, headSeq));
     }
 
-    public Task<IReadOnlyList<TenantId>> ListKnownTenantIdsAsync(CancellationToken ct = default)
-    {
-        var set = _versions.Keys
-            .Select(k => k.TenantId)
-            .Concat(ExtraTenantIds)
-            .Distinct(StringComparer.Ordinal)
-            .OrderBy(x => x, StringComparer.Ordinal)
-            .Select(static id => new TenantId(id))
-            .ToList();
-        return Task.FromResult<IReadOnlyList<TenantId>>(set);
-    }
+    public Task<IReadOnlyList<TenantId>> ListKnownTenantIdsAsync(CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<TenantId>>(_versions.Keys.Select(static k => k.TenantId).Concat(ExtraTenantIds)
+            .Distinct(StringComparer.Ordinal).OrderBy(static x => x, StringComparer.Ordinal).Select(static id => new TenantId(id)).ToList());
 }

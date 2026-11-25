@@ -81,6 +81,41 @@ public sealed class AllowOnlyDiscoverDecisionTests
     }
 
     [Fact]
+    public async Task AllowOnly_EqualsTheFullDecision_WhenPerCellCompilationDenies()
+    {
+        var fixture = Fixture.Create();
+        var perCellScoped = fixture.AddMultiSignaturePerCellTable("per_cell_scoped");
+        var invokedForPerCell = false;
+        var compiler = new RowScopeCompiler(
+            new EmptySnapshot(),
+            new StructuredFilterSqlBuilder(),
+            rowPolicyFactory: new RowPolicyFactory(new PolicyPredicateRenderer(), new PolicyExpressionParser(FastSqlEngine.Default)))
+        {
+            PerCellCompileOverrideForTesting = (_, query, _, _) =>
+            {
+                if (query.Metadata.Identifier == perCellScoped.Identifier)
+                {
+                    invokedForPerCell = true;
+                    return RowScopeCompiler.DeniedPerCellForTesting(query.Metadata.Identifier, "Simulated per-cell denial.");
+                }
+
+                return null;
+            }
+        };
+        var pdp = fixture.CreatePdp(rowScopeCompiler: compiler);
+
+        var full = await pdp.DecideManyAsync(Subject(), fixture.Tables, AccessOperation.Discover, AccessTransport.Discovery);
+        var allowOnly = await pdp.DecideAllowedManyAsync(Subject(), fixture.Tables);
+
+        invokedForPerCell.ShouldBeTrue();
+        Describe(fixture.Tables, allowOnly).ShouldBe(Describe(fixture.Tables, full.Select(static d => d.IsAllowed).ToList()));
+        var idx = fixture.Tables.FindIndex(static t => t.Identifier.TableName == "per_cell_scoped");
+        allowOnly[idx].ShouldBeFalse();
+        full[idx].IsAllowed.ShouldBeFalse();
+        allowOnly[fixture.Tables.FindIndex(static t => t.Identifier.TableName == "plain")].ShouldBeTrue();
+    }
+
+    [Fact]
     public async Task AllowOnly_DeniesEverything_WhenGroupResolutionIsDegraded()
     {
         var fixture = Fixture.Create();
@@ -232,7 +267,21 @@ public sealed class AllowOnlyDiscoverDecisionTests
             Add(expired);
         }
 
-        public AccessDecisionPoint CreatePdp(IAuthPluginHost? hooks = null)
+        public TableMetadata AddMultiSignaturePerCellTable(string name)
+        {
+            var t = Table("dbo", name, classify: true);
+            var colsA = new[] { "id", "region", "tier", "email" }
+                .Select(static c => new ConsentColumnRule { ColumnName = c, AccessLevel = ColumnAccessLevel.Clear })
+                .ToList();
+            var colsB = new[] { "id", "region", "tier", "ssn" }
+                .Select(static c => new ConsentColumnRule { ColumnName = c, AccessLevel = ColumnAccessLevel.Clear })
+                .ToList();
+            Add(Consent(t.Identifier, Group, GranteeType.Group, ConsentEffect.Allow, columnRules: colsA, rowFilters: [RowFilter("region", "EU")]));
+            Add(Consent(t.Identifier, User, GranteeType.User, ConsentEffect.Allow, columnRules: colsB, rowFilters: [RowFilter("tier", "VIP")]));
+            return t;
+        }
+
+        public AccessDecisionPoint CreatePdp(IAuthPluginHost? hooks = null, RowScopeCompiler? rowScopeCompiler = null)
         {
             var time = new AdjustableClassificationTimeProvider(Now);
             var options = new GatewayOptions
@@ -254,7 +303,7 @@ public sealed class AllowOnlyDiscoverDecisionTests
                 typedPolicies: typed,
                 authPluginHost: hooks,
                 timeProvider: time,
-                rowScopeCompiler: new RowScopeCompiler(
+                rowScopeCompiler: rowScopeCompiler ?? new RowScopeCompiler(
                     new EmptySnapshot(),
                     new StructuredFilterSqlBuilder(),
                     rowPolicyFactory: new RowPolicyFactory(new PolicyPredicateRenderer(), new PolicyExpressionParser(FastSqlEngine.Default))));

@@ -283,6 +283,13 @@ public sealed partial class CatalogSchemaModel
         int tablesProcessed,
         string phase)
     {
+        // Issue #1099: relation ids are random, so the order of the input (and of the stored rows) must not decide which
+        // relation gets which field name. Sort every parent's relations by a stable, content-based key (O(n log n)).
+        foreach (var parentRelations in relationsByTable.Values)
+        {
+            parentRelations.Sort(RelationNamingOrder.Instance);
+        }
+
         // Reverse index (O(n)): child table -> (parent builder, relation), in tableBuilders order then relation order,
         // so reverse field names, suffixes and ordering are identical to scanning every table per table.
         var reverseByChild = new Dictionary<TableIdentifier, List<(int ParentIndex, TableRelation Relation)>>();
@@ -317,9 +324,12 @@ public sealed partial class CatalogSchemaModel
             var columns = builder.Columns;
             var relations = new List<CatalogRelationField>();
             var usedRelationFieldNames = new HashSet<string>(columns.Select(c => c.FieldName), StringComparer.Ordinal);
+            var nextSuffixByBase = new Dictionary<string, int>(StringComparer.Ordinal);
 
             if (relationsByTable.TryGetValue(meta.Identifier, out var rawRelations))
             {
+                var exposed = new List<(TableRelation Relation, TableBuilder Target, bool DefaultNamed)>(rawRelations.Count);
+                Dictionary<string, int>? defaultNamedPerChild = null;
                 foreach (var rel in rawRelations)
                 {
                     if (!tableMapById.TryGetValue(rel.ChildTableIdentifier, out var targetTable))
@@ -339,8 +349,24 @@ public sealed partial class CatalogSchemaModel
                         continue;
                     }
 
+                    var defaultNamed = RelationNameDefaults.IsDefaultFor(rel.RelationName, meta.Identifier.TableName);
+                    if (defaultNamed)
+                    {
+                        defaultNamedPerChild ??= new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                        var childName = rel.ChildTableIdentifier.TableName;
+                        defaultNamedPerChild[childName] = defaultNamedPerChild.GetValueOrDefault(childName) + 1;
+                    }
+
+                    exposed.Add((rel, targetTable, defaultNamed));
+                }
+
+                foreach (var (rel, targetTable, defaultNamed) in exposed)
+                {
                     var isList = rel.Cardinality == RelationCardinality.OneToMany;
-                    var relFieldName = AllocateRelationFieldName(rel.RelationName, usedRelationFieldNames);
+                    var rawFieldName = defaultNamed
+                        ? DefaultNamedRelationFieldName(rel, defaultNamedPerChild![rel.ChildTableIdentifier.TableName] > 1)
+                        : rel.RelationName;
+                    var relFieldName = AllocateRelationFieldName(rawFieldName, usedRelationFieldNames, nextSuffixByBase);
 
                     relations.Add(new CatalogRelationField(
                         relFieldName,
@@ -372,7 +398,8 @@ public sealed partial class CatalogSchemaModel
                     _ => RelationCardinality.OneToOne
                 };
                 var isList = revCardinality == RelationCardinality.OneToMany;
-                var revFieldName = AllocateRelationFieldName($"{other.Metadata.Identifier.TableName}_by_{rel.RelationName}", usedRelationFieldNames);
+                var revFieldName = AllocateRelationFieldName(
+                    $"{other.Metadata.Identifier.TableName}_by_{rel.RelationName}", usedRelationFieldNames, nextSuffixByBase);
 
                 relations.Add(new CatalogRelationField(
                     revFieldName,
@@ -425,20 +452,126 @@ public sealed partial class CatalogSchemaModel
         return (finalTables, omittedSnapshot);
     }
 
-    private static string AllocateRelationFieldName(string rawName, HashSet<string> usedRelationFieldNames)
+    /// <summary>Issue #1099: upper bound of a relation field name; longer names are cut and get a short stable hash.</summary>
+    internal const int MaxRelationFieldNameLength = 128;
+
+    private const int RelationFieldNameHashLength = 8;
+
+    /// <summary>
+    /// Issue #1099: the parent-side field of a relation that carries the default (parent) name is named after the child table;
+    /// when the parent has several such relations to the same child, the child key columns are appended (<c>{child}_by_{keys}</c>).
+    /// </summary>
+    private static string DefaultNamedRelationFieldName(TableRelation rel, bool ambiguous) =>
+        ambiguous
+            ? $"{rel.ChildTableIdentifier.TableName}_by_{string.Join('_', rel.JoinKeysChild)}"
+            : rel.ChildTableIdentifier.TableName;
+
+    /// <summary>
+    /// Allocates a unique relation field name. A name that collides with a column, an earlier relation field or a filter keyword
+    /// gets <c>_rel</c>; further collisions get <c>_{n}</c> on that base (<c>{base}_rel_2</c>, <c>{base}_rel_3</c>, never chained,
+    /// issue #1099). The next free suffix per base is remembered, so many equal names stay linear.
+    /// </summary>
+    private static string AllocateRelationFieldName(
+        string rawName,
+        HashSet<string> usedRelationFieldNames,
+        Dictionary<string, int> nextSuffixByBase)
     {
-        var fieldName = SanitizeGraphQlName(rawName);
-        if (usedRelationFieldNames.Contains(fieldName) || ReservedFilterKeywords.Contains(fieldName))
+        var baseName = SanitizeGraphQlName(rawName);
+        var candidate = BoundRelationFieldName(baseName);
+        if (usedRelationFieldNames.Contains(candidate) || ReservedFilterKeywords.Contains(candidate))
         {
-            fieldName += "_rel";
+            baseName += "_rel";
+            candidate = BoundRelationFieldName(baseName);
         }
 
-        var suffix = 2;
-        while (!usedRelationFieldNames.Add(fieldName))
+        if (usedRelationFieldNames.Add(candidate))
         {
-            fieldName = $"{fieldName}_{suffix++}";
+            return candidate;
         }
 
-        return fieldName;
+        var suffix = nextSuffixByBase.TryGetValue(baseName, out var next) ? next : 2;
+        do
+        {
+            candidate = BoundRelationFieldName($"{baseName}_{suffix.ToString(System.Globalization.CultureInfo.InvariantCulture)}");
+            suffix++;
+        }
+        while (!usedRelationFieldNames.Add(candidate));
+
+        nextSuffixByBase[baseName] = suffix;
+        return candidate;
+    }
+
+    /// <summary>
+    /// Issue #1099: keeps a (sanitized) field name within <see cref="MaxRelationFieldNameLength"/>: a longer name keeps its
+    /// prefix and ends with <c>_</c> plus the first hex digits of its SHA-256, so the result is deterministic and distinct names stay distinct.
+    /// </summary>
+    internal static string BoundRelationFieldName(string name)
+    {
+        if (name.Length <= MaxRelationFieldNameLength)
+        {
+            return name;
+        }
+
+        Span<byte> hash = stackalloc byte[32];
+        System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(name), hash);
+        var hex = Convert.ToHexStringLower(hash[..(RelationFieldNameHashLength / 2)]);
+        return string.Concat(name.AsSpan(0, MaxRelationFieldNameLength - RelationFieldNameHashLength - 1), "_", hex);
+    }
+
+    /// <summary>
+    /// Issue #1099: stable order of a parent's relations for field name allocation: child table, child key columns, parent key
+    /// columns, relation name, cardinality; the (random) id only breaks ties between otherwise identical relations.
+    /// </summary>
+    internal sealed class RelationNamingOrder : IComparer<TableRelation>
+    {
+        public static readonly RelationNamingOrder Instance = new();
+
+        public int Compare(TableRelation? x, TableRelation? y)
+        {
+            if (ReferenceEquals(x, y))
+            {
+                return 0;
+            }
+
+            if (x is null)
+            {
+                return -1;
+            }
+
+            if (y is null)
+            {
+                return 1;
+            }
+
+            var c = CompareText(x.ChildTableIdentifier.Domain, y.ChildTableIdentifier.Domain);
+            if (c == 0) c = CompareText(x.ChildTableIdentifier.Schema, y.ChildTableIdentifier.Schema);
+            if (c == 0) c = CompareText(x.ChildTableIdentifier.TableName, y.ChildTableIdentifier.TableName);
+            if (c == 0) c = CompareKeys(x.JoinKeysChild, y.JoinKeysChild);
+            if (c == 0) c = CompareKeys(x.JoinKeysParent, y.JoinKeysParent);
+            if (c == 0) c = CompareText(x.RelationName, y.RelationName);
+            if (c == 0) c = x.Cardinality.CompareTo(y.Cardinality);
+            return c != 0 ? c : x.Id.CompareTo(y.Id);
+        }
+
+        private static int CompareKeys(IReadOnlyList<string> x, IReadOnlyList<string> y)
+        {
+            var count = Math.Min(x.Count, y.Count);
+            for (var i = 0; i < count; i++)
+            {
+                var c = CompareText(x[i], y[i]);
+                if (c != 0)
+                {
+                    return c;
+                }
+            }
+
+            return x.Count.CompareTo(y.Count);
+        }
+
+        private static int CompareText(string? x, string? y)
+        {
+            var c = StringComparer.OrdinalIgnoreCase.Compare(x, y);
+            return c != 0 ? c : StringComparer.Ordinal.Compare(x, y);
+        }
     }
 }

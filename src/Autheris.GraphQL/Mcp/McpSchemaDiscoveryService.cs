@@ -19,83 +19,144 @@ using Microsoft.Extensions.Logging;
 /// Hosted background service discovering GraphQL schema fields annotated with @mcpTool
 /// or standard registered query roots, and dynamically registering them in the IMcpToolRegistry.
 /// </summary>
-public sealed class McpSchemaDiscoveryService : IHostedService
+/// <remarks>
+/// Issue #1109: the discovery awaits the GraphQL executor, whose first build can take minutes on a large catalog. It runs
+/// after host start (<see cref="BackgroundService"/>), so Kestrel listens and <c>/health/live</c> answers during the build;
+/// <c>/health/ready</c> stays 503 until <see cref="Phase"/> is <see cref="McpSchemaDiscoveryPhase.Ready"/>. A failure sets
+/// <see cref="McpSchemaDiscoveryPhase.Failed"/> and retries with back-off (5 s doubling, cap 60 s); it never stops the host.
+/// </remarks>
+public sealed partial class McpSchemaDiscoveryService : BackgroundService, IMcpSchemaDiscoveryState
 {
+    internal static readonly TimeSpan InitialBackoff = TimeSpan.FromSeconds(5);
+    internal static readonly TimeSpan MaxBackoff = TimeSpan.FromSeconds(60);
+
     private readonly IRequestExecutorProvider _executorProvider;
     private readonly IMcpToolRegistry _toolRegistry;
     private readonly ILogger<McpSchemaDiscoveryService> _logger;
+    private readonly TimeProvider _timeProvider;
+    private int _phase;
 
     public McpSchemaDiscoveryService(
         IRequestExecutorProvider executorProvider,
         IMcpToolRegistry toolRegistry,
-        ILogger<McpSchemaDiscoveryService> logger)
+        ILogger<McpSchemaDiscoveryService> logger,
+        TimeProvider? timeProvider = null)
     {
         _executorProvider = executorProvider ?? throw new ArgumentNullException(nameof(executorProvider));
         _toolRegistry = toolRegistry ?? throw new ArgumentNullException(nameof(toolRegistry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
-    public async Task StartAsync(CancellationToken cancellationToken)
+    public McpSchemaDiscoveryPhase Phase => (McpSchemaDiscoveryPhase)Volatile.Read(ref _phase);
+
+    protected override async Task ExecuteAsync(CancellationToken stoppingToken)
     {
-        try
-        {
-            var executor = await _executorProvider.GetExecutorAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
-            var schema = executor.Schema;
+        // Return to the host at once: everything below may wait for the full schema build.
+        await Task.Yield();
 
-            if (schema.QueryType is { } queryType)
+        var backoff = InitialBackoff;
+        while (!stoppingToken.IsCancellationRequested)
+        {
+            var start = _timeProvider.GetTimestamp();
+            LogDiscoveryStarted(_logger);
+            try
             {
-                int discoveredCount = 0;
-                foreach (var field in queryType.Fields)
-                {
-                    var directive = field.Directives.FirstOrDefault("mcpTool");
-                    if (directive != null)
-                    {
-                        string? toolName = null;
-                        if (directive.Arguments.TryGetValue("name", out var nameVal) && nameVal is StringValueNode sn)
-                        {
-                            toolName = sn.Value;
-                        }
-                        toolName ??= field.Name;
-
-                        string? description = null;
-                        if (directive.Arguments.TryGetValue("description", out var descVal) && descVal is StringValueNode ds)
-                        {
-                            description = ds.Value;
-                        }
-                        description ??= field.Description ?? $"Executes GraphQL query operation {field.Name}";
-
-                        var inputSchema = BuildInputJsonSchema(field.Arguments);
-                        var targetOp = BuildGraphQLOperation(field);
-
-                        TableIdentifier? targetTable = null;
-                        if (directive.Arguments.TryGetValue("targetTable", out var ttVal) && ttVal is StringValueNode ttn)
-                        {
-                            var parts = ttn.Value.Split('.');
-                            if (parts.Length == 3) targetTable = new TableIdentifier(parts[0], parts[1], parts[2]);
-                        }
-                        // MCP-6: Do NOT guess TargetTable by splitting field names or assuming default.dbo.
-                        // When no explicit targetTable is provided, leave TargetTable null so that
-                        // AiDataGuardrailService and McpGraphQlTableResolver resolve the actual tables from the GraphQL operation AST.
-
-                        var toolDef = new McpToolDefinition(toolName, description, inputSchema, targetOp, targetTable);
-                        _toolRegistry.RegisterTool(toolDef);
-                        discoveredCount++;
-
-                        _logger.LogInformation("Discovered and registered MCP Tool '{ToolName}' (Target: {Table}) from GraphQL field '{FieldName}'.",
-                            toolName, targetTable, field.Name);
-                    }
-                }
-
-                _logger.LogInformation("MCP Schema Discovery completed: {Count} dynamic tools registered.", discoveredCount);
+                var count = await DiscoverAsync(stoppingToken).ConfigureAwait(false);
+                Volatile.Write(ref _phase, (int)McpSchemaDiscoveryPhase.Ready);
+                LogDiscoveryCompleted(_logger, count, (long)_timeProvider.GetElapsedTime(start).TotalMilliseconds);
+                return;
             }
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex, "McpSchemaDiscoveryService encountered an issue during startup schema reflection. Default tools remain active.");
+            catch (OperationCanceledException) when (stoppingToken.IsCancellationRequested)
+            {
+                return;
+            }
+            catch (Exception ex)
+            {
+                Volatile.Write(ref _phase, (int)McpSchemaDiscoveryPhase.Failed);
+                LogDiscoveryFailed(_logger, ex, (int)backoff.TotalSeconds);
+            }
+
+            try
+            {
+                await Task.Delay(backoff, _timeProvider, stoppingToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                return;
+            }
+
+            backoff = TimeSpan.FromTicks(Math.Min(backoff.Ticks * 2, MaxBackoff.Ticks));
         }
     }
 
-    public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+    private async Task<int> DiscoverAsync(CancellationToken cancellationToken)
+    {
+        var executor = await _executorProvider.GetExecutorAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
+        var schema = executor.Schema;
+
+        int discoveredCount = 0;
+        if (schema.QueryType is not { } queryType)
+        {
+            return discoveredCount;
+        }
+
+        foreach (var field in queryType.Fields)
+        {
+            var directive = field.Directives.FirstOrDefault("mcpTool");
+            if (directive == null)
+            {
+                continue;
+            }
+
+            string? toolName = null;
+            if (directive.Arguments.TryGetValue("name", out var nameVal) && nameVal is StringValueNode sn)
+            {
+                toolName = sn.Value;
+            }
+            toolName ??= field.Name;
+
+            string? description = null;
+            if (directive.Arguments.TryGetValue("description", out var descVal) && descVal is StringValueNode ds)
+            {
+                description = ds.Value;
+            }
+            description ??= field.Description ?? $"Executes GraphQL query operation {field.Name}";
+
+            var inputSchema = BuildInputJsonSchema(field.Arguments);
+            var targetOp = BuildGraphQLOperation(field);
+
+            TableIdentifier? targetTable = null;
+            if (directive.Arguments.TryGetValue("targetTable", out var ttVal) && ttVal is StringValueNode ttn)
+            {
+                var parts = ttn.Value.Split('.');
+                if (parts.Length == 3) targetTable = new TableIdentifier(parts[0], parts[1], parts[2]);
+            }
+            // MCP-6: Do NOT guess TargetTable by splitting field names or assuming default.dbo.
+            // When no explicit targetTable is provided, leave TargetTable null so that
+            // AiDataGuardrailService and McpGraphQlTableResolver resolve the actual tables from the GraphQL operation AST.
+
+            var toolDef = new McpToolDefinition(toolName, description, inputSchema, targetOp, targetTable);
+            _toolRegistry.RegisterTool(toolDef);
+            discoveredCount++;
+
+            LogToolRegistered(_logger, toolName, targetTable, field.Name);
+        }
+
+        return discoveredCount;
+    }
+
+    [LoggerMessage(EventId = 15131, Level = LogLevel.Information, Message = "MCP schema discovery started; waiting for the GraphQL executor (readiness stays 503 until it completes)")]
+    private static partial void LogDiscoveryStarted(ILogger logger);
+
+    [LoggerMessage(EventId = 15132, Level = LogLevel.Information, Message = "MCP Schema Discovery completed: {Count} dynamic tools registered in {ElapsedMs} ms.")]
+    private static partial void LogDiscoveryCompleted(ILogger logger, int count, long elapsedMs);
+
+    [LoggerMessage(EventId = 15133, Level = LogLevel.Error, Message = "MCP schema discovery failed; readiness stays 503, retrying in {RetrySeconds} s")]
+    private static partial void LogDiscoveryFailed(ILogger logger, Exception exception, int retrySeconds);
+
+    [LoggerMessage(EventId = 15134, Level = LogLevel.Information, Message = "Discovered and registered MCP Tool '{ToolName}' (Target: {Table}) from GraphQL field '{FieldName}'.")]
+    private static partial void LogToolRegistered(ILogger logger, string toolName, TableIdentifier? table, string fieldName);
 
     private static string BuildInputJsonSchema(IEnumerable<IInputValueDefinition> arguments)
     {

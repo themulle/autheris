@@ -202,8 +202,9 @@ internal sealed record AccessViewEntry(
     ReadGrantCandidates Candidates,
     FrozenDictionary<TableIdentifier, bool> Allowed,
     AccessViewStamp Stamp,
-    DateTimeOffset NotAfter)
+    DateTimeOffset NotAfter,
+    bool HasTransientOmissions = false)
 {
-    // Per decided table the frozen dictionary slot; per candidate the identifier with its own strings (read from the consents).
-    internal long EstimateBytes() => 4096 + (Allowed.Count * 96L) + (Candidates.EstimatedCount * 320L);
+    // Fixed entry + FrozenDictionary overhead, candidate sets with unshared identifier strings (#1063 §4e), and FrozenDictionary slots.
+    internal long EstimateBytes() => 1024L + Candidates.EstimatedBytes + (Allowed.Count * 96L);
 }

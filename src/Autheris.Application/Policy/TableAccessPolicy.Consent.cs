@@ -77,7 +77,7 @@ public sealed partial class TableAccessPolicy
             }
         }
 
-        activeConsents = await FilterApplicablePatternConsentsAsync(activeConsents, query.Metadata, query.Protection, now, ct).ConfigureAwait(false);
+        activeConsents = await FilterApplicablePatternConsentsAsync(activeConsents, query.Metadata, query.Protection, now, query.ConsentPrefetch, ct).ConfigureAwait(false);
 
         var allSids = query.AllUserSids != null && query.AllUserSids.Any(s => s != query.UserSid)
             ? query.AllUserSids
@@ -196,6 +196,7 @@ public sealed partial class TableAccessPolicy
         TableMetadata metadata,
         Autheris.Domain.Model.EffectiveProtection? protection,
         DateTimeOffset now,
+        ConsentBatchPrefetch? consentPrefetch,
         CancellationToken ct)
     {
         if (!activeConsents.Any(static c => c.IsPatternGrant && c.Effect == ConsentEffect.Allow))
@@ -227,12 +228,24 @@ public sealed partial class TableAccessPolicy
                 continue;
             }
 
-            if (consent.ApprovingOwners.Count > 0 &&
-                _ownershipRepository != null &&
-                await _ownershipRepository.IsAnyApproverAuthorizedForTableAsync(
-                    metadata.Identifier, consent.ApprovingOwners, now, ct).ConfigureAwait(false))
+            if (consent.ApprovingOwners.Count > 0 && _ownershipRepository != null)
             {
-                filtered.Add(consent);
+                if (consentPrefetch is not null &&
+                    consentPrefetch.TryIsAnyApproverAuthorized(metadata.Identifier, consent.ApprovingOwners, now, out var prefetchedAuthorized))
+                {
+                    if (prefetchedAuthorized)
+                    {
+                        filtered.Add(consent);
+                    }
+
+                    continue;
+                }
+
+                if (await _ownershipRepository.IsAnyApproverAuthorizedForTableAsync(
+                    metadata.Identifier, consent.ApprovingOwners, now, ct).ConfigureAwait(false))
+                {
+                    filtered.Add(consent);
+                }
             }
         }
 

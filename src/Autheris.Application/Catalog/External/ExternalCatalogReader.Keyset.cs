@@ -243,19 +243,22 @@ public sealed partial class ExternalCatalogReader
                 tenantId,
                 pageTablesList,
                 ct).ConfigureAwait(false);
-            var batchProtections = _protectionProvider is null
+            var missingProtections = _protectionProvider is null
                 ? null
-                : await _protectionProvider.ResolveManyAsync(tenantId, pageTablesList, ct).ConfigureAwait(false);
+                : keysetPage.Items.Where(static i => i.Protection is null).Select(static i => i.Table).ToList();
+            var batchProtections = _protectionProvider is null || missingProtections is not { Count: > 0 }
+                ? null
+                : await _protectionProvider.ResolveManyAsync(tenantId, missingProtections, ct).ConfigureAwait(false);
 
             foreach (var item in keysetPage.Items)
             {
                 pageTables.Add(item.Table);
                 versions.TryGetValue(item.Table.Identifier.ToString(), out var ver);
-                var protection = _protectionProvider is null
+                var protection = item.Protection ?? (_protectionProvider is null
                     ? null
                     : batchProtections is not null && batchProtections.TryGetValue(item.Table.Identifier, out var batchProtection)
                         ? batchProtection
-                        : await _protectionProvider.GetAsync(tenantId, item.Table.Identifier, ct).ConfigureAwait(false);
+                        : await _protectionProvider.GetAsync(tenantId, item.Table.Identifier, ct).ConfigureAwait(false));
                 dtos.Add(MapUserObject(item.Object, item.Table, ver?.Seq, CanViewHiddenColumns(item.Table, pageVisibility), protection));
             }
 

@@ -90,8 +90,9 @@ public sealed partial class ClassificationAccessResolver
         }
 
         var readAt = _timeProvider.GetUtcNow();
+        var catalog = await LoadCatalogAsync(tenantId, ct).ConfigureAwait(false);
         var classifications = await _repository.GetColumnClassificationsBatchAsync(ids, tenantId, ct).ConfigureAwait(false);
         var overrides = await _repository.GetColumnMaskOverridesBatchAsync(ids, tenantId, ct).ConfigureAwait(false);
-        return new ColumnPolicyRowPrefetch(tenantId, readAt, ids, classifications, overrides);
+        return new ColumnPolicyRowPrefetch(tenantId, readAt, ids, classifications, overrides, catalog);
     }
 }

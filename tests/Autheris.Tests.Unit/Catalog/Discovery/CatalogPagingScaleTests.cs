@@ -12,12 +12,17 @@ using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Mcp.Services;
+using Autheris.Application.Policy;
 using Autheris.Application.Policy.Pdp;
+using Autheris.Application.Policy.Services;
 using Autheris.Application.Procedures.Interfaces;
+using Autheris.Application.Services;
+using Autheris.Application.VirtualFilters;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Autheris.Tests.Common;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
@@ -369,5 +374,66 @@ public sealed class CatalogPagingScaleTests
         var session = new McpSessionContext("s-1", "sp-1", "tenant-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-USER");
         var summary = await provider.ReadAsync("autheris://catalog/summary", session);
         summary.Text.ShouldContain("Total Datasets: 250 across 5 business domains.");
+    }
+
+    [Fact]
+    public async Task PatternGrantCaller_10000Tables_BatchesContainerOwnershipLookups()
+    {
+        const int totalTables = 10_000;
+        var tables = MakeTables(totalTables, domainBuckets: 1);
+        var repo = new CountingTableRepository(tables);
+        var snapshot = CatalogSnapshot.Create(new CatalogVersion(1, 1), tables, []);
+        var snapshots = new StubSnapshotProvider(snapshot);
+        var consents = new FakeDiscoveryConsentRepository();
+        consents.Active.Add(new Consent
+        {
+            Id = Guid.NewGuid(),
+            TableId = Guid.Empty,
+            TenantId = new TenantId("tenant-a"),
+            ObjectPattern = "d00.*.*",
+            DataSource = "d00",
+            WorkflowMode = ConsentWorkflowMode.Internal,
+            ApprovingOwners = ["S-OWNER-1"],
+            ColumnSetMode = ColumnSetMode.AllNonHidden,
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid("S-USER"),
+            Effect = ConsentEffect.Allow,
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1)
+        });
+        var ownership = new FakeDiscoveryOwnershipRepository();
+        foreach (var t in tables)
+        {
+            ownership.AuthorizedApproversByTable[t.Identifier] = ["S-OWNER-1"];
+        }
+
+        var options = Options.Create(new GatewayOptions { Tenancy = TenancyShape.Multi.Options() });
+        var pdp = new AccessDecisionPoint(
+            options,
+            new ConsentResolutionService(logger: NullLogger<ConsentResolutionService>.Instance),
+            consents,
+            NullConsentCacheService.Instance,
+            mandatoryFilters: NullMandatoryRowFilterResolver.Instance,
+            ownershipRepository: ownership);
+        var discovery = new DiscoveryService(
+            repo,
+            pdp,
+            consents,
+            new FakeDiscoveryApprovalRepository(),
+            ownership,
+            new FakeDiscoveryArtifactStore(),
+            new FakeAuditWriter(),
+            options,
+            Options.Create(new CatalogDiscoveryOptions()),
+            logger: NullLogger<DiscoveryService>.Instance,
+            snapshotProvider: snapshots);
+
+        var caller = DiscoveryTestBuilder.Caller(DiscoveryTestBuilder.User("S-USER", "tenant-a"));
+        var page = await discovery.ListAsync(new DiscoveryQuery(First: 25, Access: DiscoveryAccessState.Granted), caller);
+
+        page.TotalCount.ShouldBe(totalTables);
+        page.Items.Count.ShouldBe(25);
+        ownership.SingleApproverCalls.ShouldBe(0);
+        ownership.BatchApproverCalls.ShouldBeInRange(1, totalTables / 500 + 1);
     }
 }

@@ -217,6 +217,8 @@ JOIN TABLES tp ON r.parent_table_id = tp.id
 JOIN TABLES tc ON r.child_table_id = tc.id
 WHERE r.id = @id";
 
+        // Issue #1099: relations are read in a content-based order (parent, child, name) instead of by their random id, so the
+        // same catalog yields the same order after a re-import; r.id then k.key_ordinal keep the rows of one relation together.
         public const string RelationsForParentTableSqlPg = @"SELECT r.id, r.parent_table_id, r.child_table_id, r.relation_name, r.cardinality,
        tp.source_name, tp.schema_name, tp.table_name,
        tc.source_name, tc.schema_name, tc.table_name,
@@ -227,7 +229,7 @@ JOIN TABLES tp ON r.parent_table_id = tp.id
 JOIN TABLES tc ON r.child_table_id = tc.id
 LEFT JOIN TABLE_RELATION_KEYS k ON k.relation_id = r.id
 WHERE LOWER(tp.source_name) = LOWER(@pDomain) AND LOWER(tp.schema_name) = LOWER(@pSchema) AND LOWER(tp.table_name) = LOWER(@pTable)
-ORDER BY r.id, k.key_ordinal";
+ORDER BY tp.source_name, tp.schema_name, tp.table_name, tc.source_name, tc.schema_name, tc.table_name, r.relation_name, r.id, k.key_ordinal";
 
         public const string RelationsForParentTableSqlSs = @"SELECT r.id, r.parent_table_id, r.child_table_id, r.relation_name, r.cardinality,
        tp.source_name, tp.schema_name, tp.table_name,
@@ -239,7 +241,7 @@ JOIN TABLES tp ON r.parent_table_id = tp.id
 JOIN TABLES tc ON r.child_table_id = tc.id
 LEFT JOIN TABLE_RELATION_KEYS k ON k.relation_id = r.id
 WHERE LOWER(tp.source_name) = LOWER(@pDomain) AND LOWER(tp.schema_name) = LOWER(@pSchema) AND LOWER(tp.table_name) = LOWER(@pTable)
-ORDER BY r.id, k.key_ordinal";
+ORDER BY tp.source_name, tp.schema_name, tp.table_name, tc.source_name, tc.schema_name, tc.table_name, r.relation_name, r.id, k.key_ordinal";
 
         public const string AllRelationsSqlPg = @"SELECT r.id, r.parent_table_id, r.child_table_id, r.relation_name, r.cardinality,
        COALESCE(tp.source_name, 'default'), tp.schema_name, tp.table_name,
@@ -250,7 +252,7 @@ FROM TABLE_RELATIONS r
 JOIN TABLES tp ON r.parent_table_id = tp.id
 JOIN TABLES tc ON r.child_table_id = tc.id
 LEFT JOIN TABLE_RELATION_KEYS k ON k.relation_id = r.id
-ORDER BY r.id, k.key_ordinal";
+ORDER BY tp.source_name, tp.schema_name, tp.table_name, tc.source_name, tc.schema_name, tc.table_name, r.relation_name, r.id, k.key_ordinal";
 
         public const string AllRelationsSqlSs = @"SELECT r.id, r.parent_table_id, r.child_table_id, r.relation_name, r.cardinality,
        COALESCE(tp.source_name, 'default'), tp.schema_name, tp.table_name,
@@ -261,7 +263,7 @@ FROM TABLE_RELATIONS r
 JOIN TABLES tp ON r.parent_table_id = tp.id
 JOIN TABLES tc ON r.child_table_id = tc.id
 LEFT JOIN TABLE_RELATION_KEYS k ON k.relation_id = r.id
-ORDER BY r.id, k.key_ordinal";
+ORDER BY tp.source_name, tp.schema_name, tp.table_name, tc.source_name, tc.schema_name, tc.table_name, r.relation_name, r.id, k.key_ordinal";
 
         public const string SelectExistingRelationSql = "SELECT cardinality FROM TABLE_RELATIONS WHERE parent_table_id = @pId AND child_table_id = @cId AND relation_name = @relName";
 

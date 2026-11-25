@@ -30,6 +30,27 @@ public sealed class RelationRowAssemblerTests
         relation.AllowCrossDataSource.ShouldBeFalse();
     }
 
+    public static TheoryData<string> RelationReadStatements() =>
+    [
+        GovernanceRepository.CatalogSql.AllRelationsSqlPg,
+        GovernanceRepository.CatalogSql.AllRelationsSqlSs,
+        GovernanceRepository.CatalogSql.RelationsForParentTableSqlPg,
+        GovernanceRepository.CatalogSql.RelationsForParentTableSqlSs
+    ];
+
+    /// <summary>
+    /// Issue #1099: the read statements order by parent, child and relation name (content, stable across re-imports) instead of
+    /// the random relation id; id then key ordinal keep the rows of one relation contiguous, as <see cref="RelationRowAssembler"/> requires.
+    /// </summary>
+    [Theory]
+    [MemberData(nameof(RelationReadStatements))]
+    public void RelationReadStatements_OrderByContentNotByRandomId(string sql)
+    {
+        var orderBy = sql[(sql.LastIndexOf("ORDER BY", StringComparison.Ordinal) + "ORDER BY".Length)..].Trim();
+
+        orderBy.ShouldBe("tp.source_name, tp.schema_name, tp.table_name, tc.source_name, tc.schema_name, tc.table_name, r.relation_name, r.id, k.key_ordinal");
+    }
+
     [Fact]
     public void Assemble_UnknownCardinality_FallsBackToOneToMany()
     {

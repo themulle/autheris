@@ -1,12 +1,16 @@
 namespace Autheris.Tests.Unit.Catalog;
 
 using System;
+using System.Collections.Generic;
+using System.Linq;
 using System.Security.Claims;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Autheris.Api.Security;
 using Autheris.Application.Catalog.External;
 using Autheris.Application.Governance.Paging;
 using Autheris.Domain.Common;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Http;
@@ -284,5 +288,153 @@ public sealed class ExternalCatalogCursorSecurityTests
         var p2 = await harness2.ListObjectsAsync(user, pageSize: 2, cursor: cursor);
         p2.StatusCode.ShouldBe(StatusCodes.Status200OK);
         p2.ReadJson().GetProperty("totalCount").GetInt32().ShouldBe(5);
+    }
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task Cursor_HiddenTableWithActiveConsent_OmittedFromItemsTotalCountAndNextCursor(bool useSnapshot)
+    {
+        await using var harness = ExternalCatalogTestHarness.Create(cursorSigningKey: PersistentSigningKey, catalogSnapshot: useSnapshot);
+        var hiddenStart = harness.AddTable("dom", "a_hidden_consented", hidden: true);
+        var vis1 = harness.AddTable("dom", "b_visible_01", hidden: false);
+        var vis2 = harness.AddTable("dom", "c_visible_02", hidden: false);
+        var hiddenMid = harness.AddTable("dom", "d_hidden_consented", hidden: true);
+        var vis3 = harness.AddTable("dom", "e_visible_03", hidden: false);
+        harness.AddTable("dom", "f_hidden_unconsented", hidden: true);
+        var vis4 = harness.AddTable("dom", "g_visible_04", hidden: false);
+        var hiddenEnd = harness.AddTable("dom", "h_hidden_consented", hidden: true);
+
+        const string userSid = "S-1-5-21-ALICE";
+        var consentedIds = new HashSet<TableIdentifier>
+        {
+            hiddenStart.Identifier,
+            vis1.Identifier,
+            vis2.Identifier,
+            hiddenMid.Identifier,
+            vis3.Identifier,
+            vis4.Identifier,
+            hiddenEnd.Identifier
+        };
+        foreach (var table in harness.Tables.Tables.Where(t => consentedIds.Contains(t.Identifier)))
+        {
+            harness.Consents.Consents.Add(new Consent
+            {
+                Id = Guid.NewGuid(),
+                TableId = table.Table.Id,
+                TableIdentifier = table.Identifier,
+                TenantId = new TenantId("tenant-a"),
+                Effect = ConsentEffect.Allow,
+                GranteeType = GranteeType.User,
+                GranteeSid = new Sid(userSid),
+                ValidFrom = ExternalCatalogTestHarness.FixedNow.AddDays(-1),
+                ValidTo = ExternalCatalogTestHarness.FixedNow.AddDays(1),
+                ColumnRules = [new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear }]
+            });
+        }
+
+        harness.Pdp.Decide = req => consentedIds.Contains(req.Object.Identifier)
+            ? TableAccessDecision.Allowed(
+                req.Object.Identifier,
+                new Dictionary<string, ColumnAccessLevel>(),
+                hasUnconstrainedColumnAllow: true)
+            : TableAccessDecision.Denied(req.Object.Identifier, "Denied");
+
+        var user = User(sid: userSid);
+        string[] expectedIds =
+        [
+            vis1.Identifier.ToString(),
+            vis2.Identifier.ToString(),
+            vis3.Identifier.ToString(),
+            vis4.Identifier.ToString()
+        ];
+
+        foreach (var (accessStatus, q) in new (string? AccessStatus, string? Q)[]
+        {
+            (null, null),
+            ("granted", null),
+            (null, "dom"),
+            ("granted", "dom")
+        })
+        {
+            var p1 = await harness.ListObjectsAsync(user, pageSize: 2, accessStatus: accessStatus, q: q);
+            p1.StatusCode.ShouldBe(StatusCodes.Status200OK);
+            p1.Body.ShouldNotContain("hidden_");
+            var j1 = p1.ReadJson();
+            j1.GetProperty("totalCount").GetInt32().ShouldBe(4);
+            j1.GetProperty("items").EnumerateArray().Select(static i => i.GetProperty("objectId").GetString()!)
+                .ShouldBe(expectedIds[..2]);
+            var cursor = j1.GetProperty("nextCursor").GetString();
+            cursor.ShouldNotBeNullOrWhiteSpace();
+
+            var p2 = await harness.ListObjectsAsync(user, pageSize: 2, cursor: cursor, accessStatus: accessStatus, q: q);
+            p2.StatusCode.ShouldBe(StatusCodes.Status200OK);
+            p2.Body.ShouldNotContain("hidden_");
+            var j2 = p2.ReadJson();
+            j2.GetProperty("totalCount").GetInt32().ShouldBe(4);
+            j2.GetProperty("items").EnumerateArray().Select(static i => i.GetProperty("objectId").GetString()!)
+                .ShouldBe(expectedIds[2..]);
+            (!j2.TryGetProperty("nextCursor", out var next) || next.ValueKind == System.Text.Json.JsonValueKind.Null).ShouldBeTrue();
+        }
+    }
+
+    [Fact]
+    public async Task Cursor_AdminAndOwner_PageOverHiddenTables_WhileUnownedConsentedHiddenStaysOmitted()
+    {
+        await using var harness = ExternalCatalogTestHarness.Create(cursorSigningKey: PersistentSigningKey, catalogSnapshot: true);
+        var hiddenOwned = harness.AddTable("dom", "a_hidden_owned", hidden: true);
+        var hiddenUnownedConsented = harness.AddTable("dom", "b_hidden_unowned_consented", hidden: true);
+        var vis1 = harness.AddTable("dom", "c_visible_01", hidden: false);
+        var vis2 = harness.AddTable("dom", "d_visible_02", hidden: false);
+
+        const string ownerSid = "S-1-5-21-OWNER";
+        harness.Owners.AssignOwner(hiddenOwned.Identifier, ownerSid, "Owner");
+        foreach (var table in new[] { hiddenOwned, hiddenUnownedConsented, vis1, vis2 })
+        {
+            harness.Consents.Consents.Add(new Consent
+            {
+                Id = Guid.NewGuid(),
+                TableId = table.Table.Id,
+                TableIdentifier = table.Identifier,
+                TenantId = new TenantId("tenant-a"),
+                Effect = ConsentEffect.Allow,
+                GranteeType = GranteeType.User,
+                GranteeSid = new Sid(ownerSid),
+                ValidFrom = ExternalCatalogTestHarness.FixedNow.AddDays(-1),
+                ValidTo = ExternalCatalogTestHarness.FixedNow.AddDays(1),
+                ColumnRules = [new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear }]
+            });
+        }
+
+        var owner = User(sid: ownerSid);
+        var ownerPage1 = (await harness.ListObjectsAsync(owner, pageSize: 2)).ReadJson();
+        ownerPage1.GetProperty("totalCount").GetInt32().ShouldBe(3);
+        var ownerItems1 = ownerPage1.GetProperty("items").EnumerateArray().ToList();
+        ownerItems1.Select(static i => i.GetProperty("objectId").GetString()).ShouldBe([hiddenOwned.Identifier.ToString(), vis1.Identifier.ToString()]);
+        ownerItems1[0].GetProperty("hidden").GetBoolean().ShouldBeTrue();
+        ownerItems1[1].GetProperty("hidden").GetBoolean().ShouldBeFalse();
+
+        var ownerCursor = ownerPage1.GetProperty("nextCursor").GetString()!;
+        var ownerPage2 = (await harness.ListObjectsAsync(owner, pageSize: 2, cursor: ownerCursor)).ReadJson();
+        ownerPage2.GetProperty("totalCount").GetInt32().ShouldBe(3);
+        ownerPage2.GetProperty("items").EnumerateArray().Select(static i => i.GetProperty("objectId").GetString()).ShouldBe([vis2.Identifier.ToString()]);
+        (!ownerPage2.TryGetProperty("nextCursor", out var ownerNext) || ownerNext.ValueKind == System.Text.Json.JsonValueKind.Null).ShouldBeTrue();
+
+        var admin = User(sid: "S-1-5-21-ADMIN", role: "GovernanceAdmin");
+        var adminPage1 = (await harness.ListObjectsAsync(admin, pageSize: 2)).ReadJson();
+        adminPage1.GetProperty("totalCount").GetInt32().ShouldBe(4);
+        var adminItems1 = adminPage1.GetProperty("items").EnumerateArray().ToList();
+        adminItems1.Select(static i => i.GetProperty("objectId").GetString())
+            .ShouldBe([hiddenOwned.Identifier.ToString(), hiddenUnownedConsented.Identifier.ToString()]);
+        adminItems1.ShouldAllBe(i => i.GetProperty("hidden").GetBoolean());
+
+        var adminCursor = adminPage1.GetProperty("nextCursor").GetString()!;
+        var adminPage2 = (await harness.ListObjectsAsync(admin, pageSize: 2, cursor: adminCursor)).ReadJson();
+        adminPage2.GetProperty("totalCount").GetInt32().ShouldBe(4);
+        adminPage2.GetProperty("items").EnumerateArray().Select(static i => i.GetProperty("objectId").GetString())
+            .ShouldBe([vis1.Identifier.ToString(), vis2.Identifier.ToString()]);
+        (!adminPage2.TryGetProperty("nextCursor", out var adminNext) || adminNext.ValueKind == System.Text.Json.JsonValueKind.Null).ShouldBeTrue();
+
+        (await harness.ListObjectsAsync(owner, pageSize: 2, cursor: adminCursor)).StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
     }
 }

@@ -140,6 +140,12 @@ public sealed class AttributeValidatingConsentRepository : IConsentRepository, I
     public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default) =>
         _inner.GetAllActiveConsentsForSubjectsAsync(subjects, roles, atTime, tenantId, ct);
 
+    public Task<IReadOnlyList<Consent>> GetAllActiveConsentHeadersForSubjectsAsync(IEnumerable<Sid> subjects, DateTimeOffset? atTime, TenantId tenantId, CancellationToken ct = default) =>
+        _inner.GetAllActiveConsentHeadersForSubjectsAsync(subjects, atTime, tenantId, ct);
+
+    public Task<DateTimeOffset?> GetNextScheduledAllowAsync(IEnumerable<Sid> subjects, DateTimeOffset atTime, TenantId tenantId, CancellationToken ct = default) =>
+        _inner.GetNextScheduledAllowAsync(subjects, atTime, tenantId, ct);
+
     public Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default) => _inner.GetConsentByIdAsync(consentId, ct);
 
     public Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, ConsentRevocationAuthority authority, CancellationToken ct = default) =>

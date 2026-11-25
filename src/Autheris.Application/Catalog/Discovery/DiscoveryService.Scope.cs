@@ -419,7 +419,7 @@ public sealed partial class DiscoveryService
             subjects.UnionWith(principalContext.GroupSids);
         }
 
-        return ReadGrantCandidates.LoadAsync(_consentRepository, subjects, now, tenant, ct, includeWriteOnly: true);
+        return ReadGrantCandidates.LoadAsync(_consentRepository, subjects, now, tenant, ct, includeWriteOnly: true, trackScheduledAllows: false);
     }
 
     private async Task<Dictionary<TableIdentifier, EffectiveProtection>> ResolveProtectionsAsync(

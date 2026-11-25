@@ -29,6 +29,11 @@ public sealed partial class RowScopeCompiler
         ICallerAttributeResolver? callerAttributes,
         CancellationToken ct)
     {
+        if (PerCellCompileOverrideForTesting?.Invoke(baseDecision, query, activeConsents, contributingAllows) is { } overrideResult)
+        {
+            return overrideResult;
+        }
+
         var table = query.Metadata.Identifier;
         var metadata = query.Metadata;
         var dialect = PolicyParameterNamer.ToTargetDialect(metadata.Dialect);
@@ -233,6 +238,9 @@ public sealed partial class RowScopeCompiler
             DenialKind = TableAccessDenialKind.Policy,
             Reasons = [new DecisionReason(outcome.DenyStep ?? DecisionStep.DefaultDeny, outcome.DenyCode ?? "ROW_SCOPE_DENIED", "RowScope", null)]
         }, []);
+
+    internal static PerCellCompileResult DeniedPerCellForTesting(TableIdentifier table, string reason) =>
+        DeniedPerCell(table, RowScopeCompileOutcome.Deny("ROW_SCOPE_DENIED", reason));
 
     private static async Task<(PolicyPredicate Predicate, IReadOnlyList<CallerAttributeAuditEntry> Audit)> ResolveAttributesAsync(
         PolicyPredicate predicate,

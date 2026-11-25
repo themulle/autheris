@@ -182,7 +182,8 @@ public sealed partial class TableAccessPolicy
     private static TableAccessDecision ProtectionUnavailableDecision(TableIdentifier table) =>
         TableAccessDecision.Denied(table, $"{ProtectionUnavailableCode}: Protection classification unavailable (fail-closed).") with
         {
-            Reasons = [new DecisionReason(DecisionStep.Protection, ProtectionUnavailableCode, "Protection", null)]
+            Reasons = [new DecisionReason(DecisionStep.Protection, ProtectionUnavailableCode, "Protection", null)],
+            IsTransientFailure = true
         };
 
     private static Dictionary<string, ColumnAccessLevel> ExtractExplicitColumnConstraints(TableAccessDecision consentDecision)
