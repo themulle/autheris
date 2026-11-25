@@ -56,7 +56,7 @@ public sealed class PermissionRequestStore(
               updated_at = @updatedAt,
               version = version + 1
           WHERE id = @id
-            AND status IN ('PENDING', 'PENDING_EXTERNAL_APPROVAL')
+            AND status IN ('PENDING', 'PENDING_EXTERNAL_APPROVAL', 'PENDING_SECOND_APPROVAL')
             AND version = @expectedVersion";
 
     private const string CasUpdateSsSql =
@@ -66,6 +66,28 @@ public sealed class PermissionRequestStore(
               decided_at = @decidedAt,
               approver_capacity = @capacity,
               self_grant = @selfGrant,
+              requested_valid_to = @approvedValidTo,
+              updated_at = @updatedAt,
+              version = version + 1
+          WHERE id = @id
+            AND status IN ('PENDING', 'PENDING_EXTERNAL_APPROVAL', 'PENDING_SECOND_APPROVAL')
+            AND version = @expectedVersion";
+
+    // Issue #1121: the first of two approvals of a grant on secret data records a step and moves the request to PENDING_SECOND_APPROVAL
+    // under the same version CAS; it records no decider, no capacity and no grant. The approved end date is kept for the second decider.
+    private const string StepCasUpdatePgSql =
+        @"UPDATE CONSENT_REQUESTS
+          SET status = @status,
+              requested_valid_to = @approvedValidTo,
+              updated_at = @updatedAt,
+              version = version + 1
+          WHERE id = @id
+            AND status IN ('PENDING', 'PENDING_EXTERNAL_APPROVAL')
+            AND version = @expectedVersion";
+
+    private const string StepCasUpdateSsSql =
+        @"UPDATE dbo.CONSENT_REQUESTS
+          SET status = @status,
               requested_valid_to = @approvedValidTo,
               updated_at = @updatedAt,
               version = version + 1
@@ -211,13 +233,14 @@ public sealed class PermissionRequestStore(
                 return new DecisionCasResult(DecisionCasOutcome.NotFound);
             }
 
-            if ((!string.Equals(req.Status, "PENDING", StringComparison.OrdinalIgnoreCase)
-                 && !string.Equals(req.Status, "PENDING_EXTERNAL_APPROVAL", StringComparison.OrdinalIgnoreCase))
-                || req.Version != expectedVersion)
+            if (!IsDecidableStatus(req.Status) || req.Version != expectedVersion)
             {
                 await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
                 return new DecisionCasResult(DecisionCasOutcome.AlreadyDecided, Request: req);
             }
+
+            // Issue #1121: the decision reads the recorded approval steps (with the approvers' identifier forms) under the row lock.
+            await ConsentSqlCore.LoadApprovalStepsAsync(conn, tx, req, ct).ConfigureAwait(false);
 
             var decision = await decideInTransaction(govTx, req).ConfigureAwait(false);
 
@@ -225,12 +248,20 @@ public sealed class PermissionRequestStore(
             await using (var casCmd = conn.CreateCommand())
             {
                 casCmd.Transaction = tx;
-                casCmd.CommandText = IsSqlServer ? CasUpdateSsSql : CasUpdatePgSql;
+                if (decision.IsFinal)
+                {
+                    casCmd.CommandText = IsSqlServer ? CasUpdateSsSql : CasUpdatePgSql;
+                    casCmd.AddBound("@decidedBy", decision.DecidedBy.Value);
+                    casCmd.AddBound("@decidedAt", decision.DecidedAt.ToUniversalTime(), DbType.DateTimeOffset);
+                    casCmd.AddBound("@capacity", decision.Capacity.ToSqlString());
+                    casCmd.AddBound("@selfGrant", decision.SelfGrant, DbType.Boolean);
+                }
+                else
+                {
+                    casCmd.CommandText = IsSqlServer ? StepCasUpdateSsSql : StepCasUpdatePgSql;
+                }
+
                 casCmd.AddBound("@status", decision.NewStatus);
-                casCmd.AddBound("@decidedBy", decision.DecidedBy.Value);
-                casCmd.AddBound("@decidedAt", decision.DecidedAt.ToUniversalTime(), DbType.DateTimeOffset);
-                casCmd.AddBound("@capacity", decision.Capacity.ToSqlString());
-                casCmd.AddBound("@selfGrant", decision.SelfGrant, DbType.Boolean);
                 casCmd.AddBound("@approvedValidTo", decision.ApprovedValidTo.ToUniversalTime().ToString("O", CultureInfo.InvariantCulture));
                 casCmd.AddBound("@updatedAt", decision.DecidedAt.ToUniversalTime(), DbType.DateTimeOffset);
                 casCmd.AddBound("@id", requestId.ToString());
@@ -247,7 +278,8 @@ public sealed class PermissionRequestStore(
             if (string.Equals(decision.StepDecision, "APPROVED", StringComparison.OrdinalIgnoreCase))
             {
                 await ConsentSqlCore.InsertApprovedStepAsync(
-                    conn, tx, Guid.NewGuid(), requestId, stepNumber: 1, decision.DecidedBy, decision.DecidedAt, ct)
+                    conn, tx, Guid.NewGuid(), requestId, decision.StepNumber, decision.DecidedBy, decision.DecidedAt, ct,
+                    decision.ApproverIdentifiers ?? [])
                     .ConfigureAwait(false);
             }
             else
@@ -262,13 +294,14 @@ public sealed class PermissionRequestStore(
                 new()
                 {
                     ConsentRequestId = requestId,
-                    StepNumber = 1,
+                    StepNumber = decision.StepNumber,
                     ApproverSid = decision.DecidedBy,
                     Decision = decision.StepDecision,
                     RejectionReason = string.Equals(decision.StepDecision, "REJECTED", StringComparison.OrdinalIgnoreCase)
                         ? decision.Reason
                         : null,
-                    DecidedAt = decision.DecidedAt
+                    DecidedAt = decision.DecidedAt,
+                    ApproverIdentifiers = [.. decision.ApproverIdentifiers ?? []]
                 }
             };
 
@@ -302,15 +335,16 @@ public sealed class PermissionRequestStore(
                 TargetColumns = req.TargetColumns,
                 ContainerKind = req.ContainerKind,
                 ContainerId = req.ContainerId,
-                ApproverCapacity = decision.Capacity,
-                SelfGrant = decision.SelfGrant,
+                ApproverCapacity = decision.IsFinal ? decision.Capacity : req.ApproverCapacity,
+                SelfGrant = decision.IsFinal ? decision.SelfGrant : req.SelfGrant,
                 BundleId = req.BundleId,
-                DecidedBy = decision.DecidedBy,
-                DecidedAt = decision.DecidedAt
+                DecidedBy = decision.IsFinal ? decision.DecidedBy : req.DecidedBy,
+                DecidedAt = decision.IsFinal ? decision.DecidedAt : req.DecidedAt
             };
 
             var createdGrants = await applyEffect(govTx, decision, updatedReq).ConfigureAwait(false);
-            if (string.Equals(decision.StepDecision, "APPROVED", StringComparison.OrdinalIgnoreCase)
+            if (decision.IsFinal
+                && string.Equals(decision.StepDecision, "APPROVED", StringComparison.OrdinalIgnoreCase)
                 && !string.IsNullOrWhiteSpace(updatedReq.TenantId.Value)
                 && !TenantId.IsReserved(updatedReq.TenantId))
             {
@@ -327,6 +361,11 @@ public sealed class PermissionRequestStore(
             throw;
         }
     }
+
+    private static bool IsDecidableStatus(string? status) =>
+        string.Equals(status, "PENDING", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(status, "PENDING_EXTERNAL_APPROVAL", StringComparison.OrdinalIgnoreCase)
+        || string.Equals(status, SecretFourEyesRule.PendingSecondApproval, StringComparison.OrdinalIgnoreCase);
 
     private async Task<ConsentRequest?> ReadLockedRequestAsync(
         DbConnection conn,

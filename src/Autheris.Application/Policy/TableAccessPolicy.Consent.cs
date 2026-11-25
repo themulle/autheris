@@ -77,7 +77,7 @@ public sealed partial class TableAccessPolicy
             }
         }
 
-        activeConsents = await FilterApplicablePatternConsentsAsync(activeConsents, query.Metadata, now, query.ConsentPrefetch, ct).ConfigureAwait(false);
+        activeConsents = await FilterApplicablePatternConsentsAsync(activeConsents, query.Metadata, query.Protection, now, query.ConsentPrefetch, ct).ConfigureAwait(false);
 
         var allSids = query.AllUserSids != null && query.AllUserSids.Any(s => s != query.UserSid)
             ? query.AllUserSids
@@ -194,6 +194,7 @@ public sealed partial class TableAccessPolicy
     private async Task<List<Consent>> FilterApplicablePatternConsentsAsync(
         List<Consent> activeConsents,
         TableMetadata metadata,
+        Autheris.Domain.Model.EffectiveProtection? protection,
         DateTimeOffset now,
         ConsentBatchPrefetch? consentPrefetch,
         CancellationToken ct)
@@ -203,6 +204,10 @@ public sealed partial class TableAccessPolicy
             return activeConsents;
         }
 
+        // Issue #1121: a grant on secret data needs two distinct approvals of an explicitly named table, so a pattern (wildcard) Allow never
+        // covers a table whose maximum effective class is Secret, whoever approved the pattern and whenever the table appeared or was raised.
+        var secretTable = protection is not null &&
+                          Autheris.Application.Governance.Requests.SecretFourEyesRule.MaxEffectiveClass(protection) == Autheris.Domain.Security.ProtectionClass.Secret;
         var filtered = new List<Consent>(activeConsents.Count);
         foreach (var consent in activeConsents)
         {
@@ -212,7 +217,7 @@ public sealed partial class TableAccessPolicy
                 continue;
             }
 
-            if (metadata.Table.DiscoveryHidden)
+            if (metadata.Table.DiscoveryHidden || secretTable)
             {
                 continue;
             }
@@ -534,20 +539,36 @@ public sealed partial class TableAccessPolicy
     /// profile never drops the row restriction of another. An admin predicate that cannot be parsed into a typed policy, or conflicting row
     /// filter parameters, deny the table (fail closed); the denial reason never echoes the predicate text.
     /// </summary>
-    internal TableAccessDecision ApplyAccessProfiles(TableAccessDecision decision, IReadOnlyList<AccessProfile> profiles, TableMetadata metadata) =>
-        ApplyAccessProfilesCore(decision, profiles, metadata, _rowPolicyFactory);
+    internal TableAccessDecision ApplyAccessProfiles(
+        TableAccessDecision decision,
+        IReadOnlyList<AccessProfile> profiles,
+        TableMetadata metadata,
+        Autheris.Domain.Model.EffectiveProtection? protection = null) =>
+        ApplyAccessProfilesCore(decision, profiles, metadata, _rowPolicyFactory, protection);
 
+    /// <param name="protection">
+    /// Issue #1121: on a table whose maximum effective class is Secret an <see cref="MaskingPolicyMode.Unmasked"/> profile is enforced as
+    /// <see cref="MaskingPolicyMode.Default"/>: clear text of secret data needs an unmask grant with two distinct approvals.
+    /// </param>
     internal static TableAccessDecision ApplyAccessProfilesCore(
         TableAccessDecision decision,
         IReadOnlyList<AccessProfile> profiles,
         TableMetadata metadata,
-        RowPolicyFactory? rowPolicyFactory)
+        RowPolicyFactory? rowPolicyFactory,
+        Autheris.Domain.Model.EffectiveProtection? protection = null)
     {
         _ = rowPolicyFactory;
         var table = metadata.Identifier;
         try
         {
-            return ApplyProfileMasking(decision, AccessProfileAssignmentRules.EnforcedMode(profiles[0].MaskingMode), metadata);
+            var mode = AccessProfileAssignmentRules.EnforcedMode(profiles[0].MaskingMode);
+            if (mode == MaskingPolicyMode.Unmasked && protection is not null &&
+                Autheris.Application.Governance.Requests.SecretFourEyesRule.MaxEffectiveClass(protection) == Autheris.Domain.Security.ProtectionClass.Secret)
+            {
+                mode = MaskingPolicyMode.Default;
+            }
+
+            return ApplyProfileMasking(decision, mode, metadata);
         }
         catch (System.Security.SecurityException)
         {

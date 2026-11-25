@@ -35,7 +35,8 @@ public sealed partial class DeclarativeConsentApplyService(
     IOptions<GovernanceTextOptions>? textOptions = null,
     IGatewayRoleEvaluator? roleEvaluator = null,
     IContainerOwnership? dataOwnershipRepository = null,
-    IGrantValidityPolicy? grantValidityPolicy = null) : IDeclarativeConsentApplyService, IDeclarativeManifestPlanner
+    IGrantValidityPolicy? grantValidityPolicy = null,
+    IProtectionSnapshotProvider? protectionProvider = null) : IDeclarativeConsentApplyService, IDeclarativeManifestPlanner
 {
     public const int MaxDeclarativePruneCount = 10_000;
     public const string PrunedByManifestReason = "PRUNED_BY_MANIFEST";
@@ -346,6 +347,18 @@ public sealed partial class DeclarativeConsentApplyService(
             if (!Enum.TryParse<ConsentEffect>(policy.Effect, ignoreCase: true, out var effect))
             {
                 throw new ArgumentException($"Invalid consent effect '{policy.Effect}' for table '{tableId}'. Effect must be explicitly specified (e.g. 'Allow' or 'Deny').", nameof(manifest));
+            }
+
+            // Issue #1121: a grant on secret data needs two distinct approvals. A manifest has one decider (the Data Governance apply or the
+            // one confirmation of an IT proposal), so an Allow on a secret target is refused for the whole manifest (dry-run, proposal submit and
+            // confirm included); such a grant is requested through the permission request engine. A Deny only restricts and stays allowed.
+            if (effect == ConsentEffect.Allow && protectionProvider is not null)
+            {
+                var protection = await protectionProvider.GetAsync(tenantId, metadata.Identifier, ct).ConfigureAwait(false);
+                if (SecretFourEyesRule.MaxEffectiveClass(protection) == ProtectionClass.Secret)
+                {
+                    throw SecretFourEyesRule.DeclarativeRefusal(tableId.ToString());
+                }
             }
 
             Sid? granteeSid = null;

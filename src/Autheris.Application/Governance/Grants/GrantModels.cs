@@ -88,6 +88,9 @@ public static class GrantErrorCodes
     public const string DisabledForRealm = "INDIVIDUAL_GRANT_DISABLED_FOR_REALM";
     public const string JustificationRequired = "INDIVIDUAL_GRANT_REQUIRES_JUSTIFICATION";
     public const string SelfGrantSecretRefused = "SELF_GRANT_SECRET_REFUSED";
+
+    /// <summary>Issue #1121: a declarative or single-actor path cannot grant <c>secret</c> data; two distinct approvals are needed.</summary>
+    public const string SecretRequiresFourEyes = "SECRET_GRANT_REQUIRES_FOUR_EYES";
     public const string SelfGrantExceedsCeiling = "SELF_GRANT_EXCEEDS_CEILING";
     public const string Indeterminate = "INDIVIDUAL_GRANT_INDETERMINATE";
 }

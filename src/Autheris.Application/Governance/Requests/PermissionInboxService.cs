@@ -2,6 +2,7 @@ namespace Autheris.Application.Governance.Requests;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -93,7 +94,8 @@ public sealed partial class PermissionInboxService(
         for (var scanned = 0; ; scanned++)
         {
             var page = await _approvals.QueryTenantConsentRequestsAsync(
-                new ConsentRequestPageQuery(tenant, PendingStatus, Cursor: next, Limit: RepositoryPageSize),
+                new ConsentRequestPageQuery(
+                    tenant, PendingStatus, Cursor: next, Limit: RepositoryPageSize, AdditionalStatus: SecretFourEyesRule.PendingSecondApproval),
                 ct).ConfigureAwait(false);
 
             var index = 0;
@@ -175,6 +177,16 @@ public sealed partial class PermissionInboxService(
             }
 
             var verdict = await _sod.CheckPermissionDecisionAsync(request.TenantId, evaluation.Caller, request, ct).ConfigureAwait(false);
+            if (string.Equals(request.Status, SecretFourEyesRule.PendingSecondApproval, StringComparison.OrdinalIgnoreCase))
+            {
+                // Issue #1121: awaiting the second approval of a grant on secret data. Only an owner-group member or Data Governance who
+                // did not give the first approval can decide it; the steps are read with the request.
+                return verdict.Allowed && SecretFourEyesRule.IsEligibleCapacity(capacity.Value) &&
+                       await MayGiveSecondApprovalAsync(request, evaluation.Caller, ct).ConfigureAwait(false)
+                    ? capacity
+                    : null;
+            }
+
             if (verdict.Allowed)
             {
                 return capacity;
@@ -191,6 +203,20 @@ public sealed partial class PermissionInboxService(
             // A request whose approvers cannot be resolved is never listed as decidable.
             return null;
         }
+    }
+
+    private async Task<bool> MayGiveSecondApprovalAsync(ConsentRequest request, SecurityPrincipalContext caller, CancellationToken ct)
+    {
+        var withSteps = request.ApprovalSteps.Count > 0
+            ? request
+            : await _approvals.GetConsentRequestAsync(request.Id, ct).ConfigureAwait(false);
+        if (withSteps is null)
+        {
+            return false;
+        }
+
+        var identity = SecretFourEyesRule.ApproverIdentity(caller);
+        return !SecretFourEyesRule.RecordedApprovals(withSteps).Any(step => SecretFourEyesRule.IsSameApprover(step, identity));
     }
 
     /// <summary>Per-call state: one caller, one tenant, memoized container and owner-membership lookups.</summary>

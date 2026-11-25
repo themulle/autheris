@@ -60,7 +60,11 @@ public sealed record PermissionDecisionCommand(
 
 /// <summary>
 /// Persisted CAS transition metadata committed together with grant materialization.
+/// A record with <see cref="NewStatus"/> <see cref="SecretFourEyesRule.PendingSecondApproval"/> is the first of two approvals of a grant on
+/// <c>secret</c> data (issue #1121): it records an approval step and creates no grant.
 /// </summary>
+/// <param name="StepNumber">Number of the approval step this decision records (1 for the first decision, 2 for a second approval).</param>
+/// <param name="ApproverIdentifiers">Personal identifier forms of the decider, stored with the step so a later approval by the same person is refused.</param>
 public sealed record PermissionDecisionRecord(
     string NewStatus,
     Sid DecidedBy,
@@ -69,7 +73,13 @@ public sealed record PermissionDecisionRecord(
     bool SelfGrant,
     string StepDecision,
     string? Reason,
-    DateTimeOffset ApprovedValidTo);
+    DateTimeOffset ApprovedValidTo,
+    int StepNumber = 1,
+    IReadOnlyList<string>? ApproverIdentifiers = null)
+{
+    /// <summary>True when the decision ends the request (approval that creates the grant, or rejection); false for a recorded first approval.</summary>
+    public bool IsFinal => !string.Equals(NewStatus, SecretFourEyesRule.PendingSecondApproval, StringComparison.OrdinalIgnoreCase);
+}
 
 public enum DecisionCasOutcome
 {
