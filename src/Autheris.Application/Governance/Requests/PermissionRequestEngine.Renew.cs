@@ -203,11 +203,7 @@ public sealed partial class PermissionRequestEngine
                 throw;
             }
 
-            _cacheInvalidator?.InvalidateTenant(tenant.Value);
-            if (_policyEpochRepository is not null)
-            {
-                await _policyEpochRepository.IncrementTableEpochAsync(consent.TableIdentifier, ct).ConfigureAwait(false);
-            }
+            await InvalidateCommittedDecisionAsync(tenant, consent.TableIdentifier, false, ct).ConfigureAwait(false);
 
             return new GrantRenewalResult(created, consent.Id, capacity);
         }

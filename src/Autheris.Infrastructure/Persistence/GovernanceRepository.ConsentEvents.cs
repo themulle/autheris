@@ -648,13 +648,17 @@ WHERE tenant_id = @tenant AND consent_id = @consentId AND record_type = 'EXPIRED
                 ct).ConfigureAwait(false);
 
             await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
-            return true;
         }
         catch
         {
             await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
             throw;
         }
+
+        await (consent.IsPatternGrant || string.IsNullOrWhiteSpace(consent.TableIdentifier.TableName)
+            ? _writeInvalidator.InvalidateWideAsync(consent.TenantId, ct: ct)
+            : _writeInvalidator.InvalidateTablesAsync(consent.TenantId, [consent.TableIdentifier], metadataInvalidator: InvalidateTableMetadata, ct: ct)).ConfigureAwait(false);
+        return true;
     }
 
     public async Task<IReadOnlyList<ConsentRequest>> GetOpenPendingRequestsAsync(

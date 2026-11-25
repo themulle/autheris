@@ -57,25 +57,8 @@ public partial class GovernanceRepository
         CancellationToken ct) =>
         CatalogRowHydrator.LoadColumnNamesAsync(conn, tx, tableId, ct);
 
-    internal async Task PublishCatalogChangedEventAsync(CatalogVersion version, CancellationToken ct)
-    {
-        _epochValidationService?.InvalidateAllTables(); // issue #1044: before the (asynchronous) event reaches this replica's caches
-        var timestamp = TimeProvider.System.GetUtcNow();
-        if (_eventBus is { } eventBus)
-        {
-            try
-            {
-                await eventBus.PublishAsync(
-                    ICatalogVersionProvider.CatalogChangedEventChannel,
-                    new CatalogChangedEvent(version.StructureVersion, version.ContentVersion, timestamp),
-                    ct).ConfigureAwait(false);
-            }
-            catch (Exception)
-            {
-                LogCatalogNotice("Failed to publish catalog changed event; polling will detect changes.");
-            }
-        }
-    }
+    internal Task PublishCatalogChangedEventAsync(CatalogVersion version, CancellationToken ct) =>
+        _writeInvalidator.PublishCatalogChangedAsync(version, ct);
 
     internal async Task<List<(Guid Id, TableIdentifier Identifier, Table Table)>> LoadActiveTablesAsync(
         DbCommand cmd,

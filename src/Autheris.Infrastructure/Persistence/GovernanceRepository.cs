@@ -7,6 +7,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Governance.Caching;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
@@ -41,6 +42,7 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
     private readonly Action<DbTransaction>? _onTransactionRolledBack;
     private readonly Microsoft.Extensions.Hosting.IHostEnvironment? _environment;
     private readonly Autheris.Application.Governance.Grants.Records.IGrantWriter? _grantWriter;
+    private readonly IGovernanceWriteInvalidator _writeInvalidator;
     private int _initialized;
     private volatile bool _ready;
 
@@ -59,7 +61,8 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
         ILogger<GovernanceRepository>? logger = null,
         IEventBus? eventBus = null,
         Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? materializationGuard = null,
-        Autheris.Application.Governance.Grants.Records.IGrantWriter? grantWriter = null)
+        Autheris.Application.Governance.Grants.Records.IGrantWriter? grantWriter = null,
+        IGovernanceWriteInvalidator? writeInvalidator = null)
         : this(
             ResolveDialectForLegacyCtor(options),
             epochValidationService ?? throw new ArgumentNullException(nameof(epochValidationService)),
@@ -71,7 +74,8 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
             logger,
             eventBus,
             materializationGuard,
-            grantWriter)
+            grantWriter,
+            writeInvalidator)
     {
     }
 
@@ -95,7 +99,8 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
         ILogger<GovernanceRepository>? logger = null,
         IEventBus? eventBus = null,
         Autheris.Application.Identity.Attributes.IConsentMaterializationGuard? materializationGuard = null,
-        Autheris.Application.Governance.Grants.Records.IGrantWriter? grantWriter = null)
+        Autheris.Application.Governance.Grants.Records.IGrantWriter? grantWriter = null,
+        IGovernanceWriteInvalidator? writeInvalidator = null)
         : this(dialect,
                epochValidationService ?? throw new ArgumentNullException(nameof(epochValidationService)),
                options ?? throw new ArgumentNullException(nameof(options)),
@@ -110,7 +115,8 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
                secretProvider ?? throw new ArgumentNullException(nameof(secretProvider)),
                environment ?? throw new ArgumentNullException(nameof(environment)),
                callerContextProvider ?? throw new ArgumentNullException(nameof(callerContextProvider)),
-               grantWriter)
+               grantWriter,
+               writeInvalidator)
     {
     }
 
@@ -129,7 +135,8 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
         IKeyVaultSecretProvider? secretProvider = null,
         Microsoft.Extensions.Hosting.IHostEnvironment? environment = null,
         ICallerContextProvider? callerContextProvider = null,
-        Autheris.Application.Governance.Grants.Records.IGrantWriter? grantWriter = null)
+        Autheris.Application.Governance.Grants.Records.IGrantWriter? grantWriter = null,
+        IGovernanceWriteInvalidator? writeInvalidator = null)
     {
         _dialect = dialect ?? throw new ArgumentNullException(nameof(dialect));
         _eventBus = eventBus;
@@ -146,12 +153,15 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
         _onTransactionRolledBack = onTransactionRolledBack;
         _environment = environment;
         _grantWriter = grantWriter;
+        _writeInvalidator = writeInvalidator ?? new GovernanceWriteInvalidator(epochValidationService, eventBus: eventBus, noticeLogger: LogCatalogNotice);
         _ready = environment == null;
         _cdcCore = CreateCdcCore(dialect);
         InitializeAuditFields(options, auditAnchorStore, secretProvider, environment, callerContextProvider);
     }
 
     internal IGovernanceSqlDialect Dialect => _dialect;
+
+    internal IGovernanceWriteInvalidator WriteInvalidator => _writeInvalidator;
 
     internal ILogger? CatalogLogger => _logger;
 
@@ -507,14 +517,8 @@ public partial class GovernanceRepository : IGovernanceRepository, IConsentDescr
         }
     }
 
-    internal async Task InvalidateTableEpochAsync(TableIdentifier table, CancellationToken ct)
-    {
-        InvalidateTableMetadata(table.ToString().ToLowerInvariant());
-        if (_epochValidationService != null)
-        {
-            await _epochValidationService.InvalidateEpochAsync(table, ct).ConfigureAwait(false);
-        }
-    }
+    internal Task InvalidateTableEpochAsync(TableIdentifier table, CancellationToken ct) =>
+        _writeInvalidator.InvalidateTablesAsync(null, [table], metadataInvalidator: InvalidateTableMetadata, ct: ct);
 }
 
 /// <summary>

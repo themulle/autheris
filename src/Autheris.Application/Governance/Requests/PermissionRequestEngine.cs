@@ -47,9 +47,9 @@ public sealed partial class PermissionRequestEngine : IPermissionRequestEngine
     private readonly IGovernanceNotificationDispatcher? _notificationDispatcher;
     private readonly IConsentRepository? _consentRepository;
     private readonly IGovernanceCapabilities? _capabilities;
-    private readonly IGovernanceCacheInvalidator? _cacheInvalidator;
     private readonly IPolicyEpochRepository? _policyEpochRepository;
     private readonly Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentStore? _assignmentStore;
+    private readonly IGovernanceWriteInvalidator _writeInvalidator;
     private readonly GatewayOptions? _gatewayOptions;
     private readonly CatalogDiscoveryOptions? _discoveryOptions;
     private readonly TimeProvider _time;
@@ -87,7 +87,8 @@ public sealed partial class PermissionRequestEngine : IPermissionRequestEngine
         Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter? workflowRouter = null,
         Autheris.Application.ConsentRequests.Events.IConsentEventOutbox? eventOutbox = null,
         IConsentRepository? consentRepository = null,
-        Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentStore? assignmentStore = null)
+        Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentStore? assignmentStore = null,
+        IGovernanceWriteInvalidator? writeInvalidator = null)
     {
         _approvalRepository = approvalRepository ?? throw new ArgumentNullException(nameof(approvalRepository));
         _auditWriter = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
@@ -110,7 +111,6 @@ public sealed partial class PermissionRequestEngine : IPermissionRequestEngine
         _rateLimiter = rateLimiter;
         _notificationDispatcher = notificationDispatcher;
         _capabilities = capabilities;
-        _cacheInvalidator = cacheInvalidator;
         _policyEpochRepository = policyEpochRepository;
         _gatewayOptions = gatewayOptions?.Value;
         _discoveryOptions = discoveryOptions?.Value;
@@ -120,6 +120,29 @@ public sealed partial class PermissionRequestEngine : IPermissionRequestEngine
         _workflowRouter = workflowRouter;
         _consentRepository = consentRepository;
         _assignmentStore = assignmentStore;
+        _writeInvalidator = writeInvalidator ?? new GovernanceWriteInvalidator(
+            cacheInvalidators: cacheInvalidator is null ? null : () => [cacheInvalidator],
+            timeProvider: timeProvider);
+    }
+
+    private async Task InvalidateCommittedDecisionAsync(
+        Domain.Common.TenantId tenant,
+        Domain.Common.TableIdentifier table,
+        bool invalidateAccessProfiles,
+        CancellationToken ct)
+    {
+        if (!string.IsNullOrWhiteSpace(table.TableName))
+        {
+            if (_policyEpochRepository is not null)
+            {
+                await _policyEpochRepository.IncrementTableEpochAsync(table, ct).ConfigureAwait(false);
+            }
+
+            await _writeInvalidator.InvalidateTablesAsync(tenant, [table], ct: ct).ConfigureAwait(false);
+            return;
+        }
+
+        await _writeInvalidator.InvalidateWideAsync(tenant, invalidateAccessProfiles: invalidateAccessProfiles, ct: ct).ConfigureAwait(false);
     }
 
     private static PermissionGrantKind MapGrantKind(ConsentRequestKind kind) => kind switch

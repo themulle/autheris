@@ -5,8 +5,10 @@ using System.Collections.Generic;
 using System.Data;
 using System.Data.Common;
 using System.Globalization;
+using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog;
 using Autheris.Application.ConsentRequests.ProfileAssignments;
 using Autheris.Application.Governance.Grants;
 using Autheris.Domain.Audit;
@@ -381,12 +383,11 @@ WHERE c.tenant_id = @tenantId
     async Task IProfileAssignmentStore.InvalidateTablesAfterCommitAsync(
         IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct)
     {
-        foreach (var table in tables)
-        {
-            await (string.IsNullOrWhiteSpace(table.TableName)
-                ? PublishCatalogChangedEventAsync(await GetCatalogVersionAsync(ct).ConfigureAwait(false), ct)
-                : InvalidateTableEpochAsync(table, ct)).ConfigureAwait(false);
-        }
+        var specific = tables.Where(static t => !string.IsNullOrWhiteSpace(t.TableName)).ToArray();
+        if (specific.Length < tables.Count)
+            await _writeInvalidator.InvalidateWideAsync(null, await GetCatalogVersionAsync(ct).ConfigureAwait(false), invalidateAccessProfiles: true, ct: ct).ConfigureAwait(false);
+        if (specific.Length > 0)
+            await _writeInvalidator.InvalidateTablesAsync(null, specific, metadataInvalidator: InvalidateTableMetadata, ct: ct).ConfigureAwait(false);
     }
 
     private async Task SyncOwnerGrantsInTransactionAsync(

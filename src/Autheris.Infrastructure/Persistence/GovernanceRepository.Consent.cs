@@ -269,29 +269,27 @@ public partial class GovernanceRepository
 
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        Consent created;
+        Autheris.Application.Catalog.CatalogVersion? patternVersion = null;
         try
         {
-            var created = await InsertConsentCoreAsync(conn, tx, consent, ct).ConfigureAwait(false);
+            created = await InsertConsentCoreAsync(conn, tx, consent, ct).ConfigureAwait(false);
             if (consent.IsPatternGrant)
-            {
-                var newCatalogVersion = await BumpCatalogVersionInternalAsync(conn, tx, 0, 1, ct).ConfigureAwait(false);
-                await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
-                await PublishCatalogChangedEventAsync(newCatalogVersion, ct).ConfigureAwait(false);
-            }
+                patternVersion = await BumpCatalogVersionInternalAsync(conn, tx, 0, 1, ct).ConfigureAwait(false);
             else
-            {
                 await IncrementTableEpochInternalAsync(conn, tx, consent.TableIdentifier, ct).ConfigureAwait(false);
-                await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
-                await InvalidateTableEpochAsync(consent.TableIdentifier, ct).ConfigureAwait(false);
-            }
-
-            return created;
+            await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
         }
         catch
         {
             await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
             throw;
         }
+
+        await (patternVersion is { } v
+            ? _writeInvalidator.InvalidateWideAsync(consent.TenantId, v, ct: ct)
+            : _writeInvalidator.InvalidateTablesAsync(consent.TenantId, [consent.TableIdentifier], metadataInvalidator: InvalidateTableMetadata, ct: ct)).ConfigureAwait(false);
+        return created;
     }
 
     private IGrantWriter RequireGrantWriter() =>
@@ -431,6 +429,7 @@ public partial class GovernanceRepository
     {
         var grantWriter = RequireGrantWriter();
         TableIdentifier? tableId = null;
+        TenantId? revokedTenant = null;
 
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
@@ -446,6 +445,7 @@ public partial class GovernanceRepository
 
             tableId = foundTable;
             var tenant = ConsentGrantSqlCore.ResolveConsentTenant(rawTenant, consentId, tableId.Value.ToString());
+            revokedTenant = tenant;
             TenantScope.RequireTenant(tenant, nameof(GovernanceTable.Consents));
             StoredTenant.RequireWritable(tenant);
 
@@ -496,7 +496,9 @@ public partial class GovernanceRepository
 
         if (tableId.HasValue)
         {
-            await InvalidateTableEpochAsync(tableId.Value, ct).ConfigureAwait(false);
+            await (string.IsNullOrWhiteSpace(tableId.Value.TableName)
+                ? _writeInvalidator.InvalidateWideAsync(revokedTenant, ct: ct)
+                : _writeInvalidator.InvalidateTablesAsync(revokedTenant, [tableId.Value], metadataInvalidator: InvalidateTableMetadata, ct: ct)).ConfigureAwait(false);
         }
 
         return true;
@@ -706,6 +708,7 @@ public partial class GovernanceRepository
 
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        Consent createdConsent;
         try
         {
             string currentStatus = await ConsentSqlCore.ReadRequestStatusOrThrowAsync(conn, tx, SelectRequestStatusForUpdateSql, requestId, ct).ConfigureAwait(false);
@@ -734,18 +737,18 @@ public partial class GovernanceRepository
                 ConsentApprovalPolicy.BuildStepAudit(req, step.ApproverSid, "CONSENT_APPROVAL_STEP", "APPROVED", newStatus, null),
                 tx, ct).ConfigureAwait(false);
 
-            var createdConsent = await InsertConsentCoreAsync(conn, tx, consent, ct).ConfigureAwait(false);
+            createdConsent = await InsertConsentCoreAsync(conn, tx, consent, ct).ConfigureAwait(false);
             await IncrementTableEpochInternalAsync(conn, tx, consent.TableIdentifier, ct).ConfigureAwait(false);
             await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
-
-            await InvalidateTableEpochAsync(consent.TableIdentifier, ct).ConfigureAwait(false);
-            return createdConsent;
         }
         catch
         {
             await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
             throw;
         }
+
+        await _writeInvalidator.InvalidateTablesAsync(consent.TenantId, [consent.TableIdentifier], metadataInvalidator: InvalidateTableMetadata, ct: ct).ConfigureAwait(false);
+        return createdConsent;
     }
 
     private ValueTask EnsureMayMaterializeAsync(TenantId tenant, TableIdentifier table, IReadOnlyList<ConsentRowFilter> filters, CancellationToken ct) =>
@@ -895,6 +898,6 @@ public partial class GovernanceRepository
             throw;
         }
 
-        await InvalidateTableEpochAsync(req.TableIdentifier, ct).ConfigureAwait(false);
+        await _writeInvalidator.InvalidateTablesAsync(req.TenantId, [req.TableIdentifier], metadataInvalidator: InvalidateTableMetadata, ct: ct).ConfigureAwait(false);
     }
 }

@@ -61,18 +61,11 @@ public partial class GovernanceRepository : IDataOwnerAssignmentRepository
             }
 
             await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
-            foreach (var table in result.Changes
-                .Where(static c => c.Kind == DataOwnerChangeKind.OwnerAssigned || c.Kind == DataOwnerChangeKind.OwnerRemoved)
-                .Select(static c => c.Table)
-                .Distinct())
-            {
-                await InvalidateTableEpochAsync(table, ct).ConfigureAwait(false);
-            }
-
-            if (newVersion is { } bumpedVersion)
-            {
-                await PublishCatalogChangedEventAsync(bumpedVersion, ct).ConfigureAwait(false);
-            }
+            var ownerTables = result.Changes.Where(static c => c.Kind is DataOwnerChangeKind.OwnerAssigned or DataOwnerChangeKind.OwnerRemoved).Select(static c => c.Table).Distinct().ToArray();
+            if (ownerTables.Length > 0)
+                await _writeInvalidator.InvalidateTablesAsync(null, ownerTables, newVersion, InvalidateTableMetadata, ct).ConfigureAwait(false);
+            else if (newVersion is { } bumpedVersion)
+                await _writeInvalidator.InvalidateWideAsync(null, bumpedVersion, ct: ct).ConfigureAwait(false);
         }
         else
         {

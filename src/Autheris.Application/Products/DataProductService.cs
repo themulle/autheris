@@ -54,13 +54,16 @@ public sealed partial class DataProductService(
     IProductCatalogStore? catalogStore = null,
     ViewDowngradeGuard? downgradeGuard = null,
     IAccessPolicySettingsProvider? policyProvider = null,
-    IGovernanceCacheInvalidator? cacheInvalidator = null)
+    IGovernanceCacheInvalidator? cacheInvalidator = null,
+    IGovernanceWriteInvalidator? writeInvalidator = null)
 {
     private readonly IProductCatalogStore? _catalogStore = catalogStore;
     private readonly IProductOwnershipSync? _ownershipSync = ownershipSync;
     private readonly ViewDowngradeGuard? _downgradeGuard = downgradeGuard;
     private readonly IAccessPolicySettingsProvider? _policyProvider = policyProvider;
-    private readonly IGovernanceCacheInvalidator? _cacheInvalidator = cacheInvalidator;
+    private readonly IGovernanceWriteInvalidator _writeInvalidator = writeInvalidator ?? new GovernanceWriteInvalidator(
+        cacheInvalidators: cacheInvalidator is null ? null : () => [cacheInvalidator],
+        timeProvider: timeProvider);
     private readonly IDataProductRepository _products = products ?? throw new ArgumentNullException(nameof(products));
     private readonly ProductAuthorityService _authority = authority ?? throw new ArgumentNullException(nameof(authority));
     private readonly IProductCatalogColumns _catalog = catalog ?? throw new ArgumentNullException(nameof(catalog));
@@ -171,7 +174,7 @@ public sealed partial class DataProductService(
             await _ownershipSync.SyncAsync(stored, ct).ConfigureAwait(false);
         }
 
-        _cacheInvalidator?.InvalidateTenant(caller.Tenant.Value);
+        await _writeInvalidator.InvalidateWideAsync(caller.Tenant, ct: ct).ConfigureAwait(false);
         var notified = definitionChanged
             ? await NotifyBaseOwnersAsync(stored, existing is null ? ProductEventTypes.Created : ProductEventTypes.Changed, now, ct).ConfigureAwait(false)
             : 0;
@@ -209,7 +212,7 @@ public sealed partial class DataProductService(
             await _ownershipSync.SyncAsync(retired, ct).ConfigureAwait(false);
         }
 
-        _cacheInvalidator?.InvalidateTenant(caller.Tenant.Value);
+        await _writeInvalidator.InvalidateWideAsync(caller.Tenant, ct: ct).ConfigureAwait(false);
         var notified = await NotifyBaseOwnersAsync(retired, ProductEventTypes.Retired, now, ct).ConfigureAwait(false);
         await AuditAsync(AuditEventTypes.ProductRetired, caller, retired, new { baseOwnersNotified = notified }, now, ct).ConfigureAwait(false);
         return retired;
@@ -241,7 +244,7 @@ public sealed partial class DataProductService(
             await _ownershipSync.SyncAsync(updated, ct).ConfigureAwait(false);
         }
 
-        _cacheInvalidator?.InvalidateTenant(caller.Tenant.Value);
+        await _writeInvalidator.InvalidateWideAsync(caller.Tenant, ct: ct).ConfigureAwait(false);
         await AuditAsync(
             AuditEventTypes.OwnerGroupAssigned,
             caller,
@@ -328,7 +331,7 @@ public sealed partial class DataProductService(
         var now = _time.GetUtcNow();
         var updated = await ReplaceAsync(product with { Columns = columns, UpdatedAt = now, Version = product.Version + 1 }, product.Version, ct).ConfigureAwait(false);
         await PersistCatalogAsync(updated, ct).ConfigureAwait(false);
-        _cacheInvalidator?.InvalidateTenant(caller.Tenant.Value);
+        await _writeInvalidator.InvalidateWideAsync(caller.Tenant, ct: ct).ConfigureAwait(false);
         await AuditAsync(
             AuditEventTypes.ProductColumnClassificationChanged, caller, updated,
             new { column = classifiedColumn.Name, from = existingColumn.Class.ToString(), to = target.ToString(), reason = classifiedColumn.DeclassificationReason }, now, ct).ConfigureAwait(false);

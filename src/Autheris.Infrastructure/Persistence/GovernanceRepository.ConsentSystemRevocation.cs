@@ -96,11 +96,11 @@ public partial class GovernanceRepository
 
         if (publishCatalog)
         {
-            await PublishCatalogChangedEventAsync(newCatalogVersion, ct).ConfigureAwait(false);
+            await _writeInvalidator.InvalidateWideAsync(tenant, newCatalogVersion, ct: ct).ConfigureAwait(false);
         }
         else if (invalidateTable is { } table)
         {
-            await InvalidateTableEpochAsync(table, ct).ConfigureAwait(false);
+            await _writeInvalidator.InvalidateTablesAsync(tenant, [table], metadataInvalidator: InvalidateTableMetadata, ct: ct).ConfigureAwait(false);
         }
 
         return true;

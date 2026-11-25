@@ -6,7 +6,9 @@ using System.Linq;
 using System.Net;
 using System.Net.Http;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -40,6 +42,7 @@ public sealed class ExternalCatalogSurfaceParityIntegrationTests : IClassFixture
     {
         public WebApplicationFactory<Program> Root { get; } = new();
         public WebApplicationFactory<Program> Factory { get; }
+        public SemaphoreSlim Gate { get; } = new(1, 1);
         public bool Seeded { get; set; }
 
         public HostFixture()
@@ -61,6 +64,7 @@ public sealed class ExternalCatalogSurfaceParityIntegrationTests : IClassFixture
         {
             Factory.Dispose();
             Root.Dispose();
+            Gate.Dispose();
             Npgsql.NpgsqlConnection.ClearAllPools();
         }
     }
@@ -71,79 +75,95 @@ public sealed class ExternalCatalogSurfaceParityIntegrationTests : IClassFixture
 
     private async Task EnsureSeededAsync()
     {
-        if (_fixture.Seeded)
+        await _fixture.Gate.WaitAsync();
+        try
         {
-            return;
-        }
-
-        using var scope = _fixture.Factory.Services.CreateScope();
-        var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
-        var now = DateTimeOffset.UtcNow;
-
-        foreach (var (id, hidden, ownerTenant) in new (TableIdentifier Id, bool Hidden, string? OwnerTenant)[]
-        {
-            (OpenTable, false, TenantA),
-            (OnRequestTable, false, TenantA),
-            (GrantedTable, false, TenantA),
-            (HiddenOwnedTable, true, TenantA),
-            (HiddenSecretTable, true, TenantA),
-            (ForeignTable, false, TenantB)
-        })
-        {
-            await repo.UpsertTableMetadataAsync(new TableMetadata
+            if (_fixture.Seeded)
             {
-                Table = new Table
+                return;
+            }
+
+            using var scope = _fixture.Factory.Services.CreateScope();
+            var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
+            var now = DateTimeOffset.UtcNow;
+
+            foreach (var (id, hidden, ownerTenant) in new (TableIdentifier Id, bool Hidden, string? OwnerTenant)[]
+            {
+                (OpenTable, false, TenantA),
+                (OnRequestTable, false, TenantA),
+                (GrantedTable, false, TenantA),
+                (HiddenOwnedTable, true, TenantA),
+                (HiddenSecretTable, true, TenantA),
+                (ForeignTable, false, TenantB)
+            })
+            {
+                await repo.UpsertTableMetadataAsync(new TableMetadata
                 {
-                    Id = Guid.NewGuid(),
-                    DisplayName = id.TableName,
-                    TableName = id.TableName,
-                    SchemaName = id.Schema,
-                    SourceType = "PostgreSql",
-                    SourceName = id.Domain,
-                    DiscoveryHidden = hidden,
-                    IsActive = true
-                },
-                Identifier = id,
-                OwnerTenantId = ownerTenant,
-                Columns = [new TableColumn { ColumnName = "id", DataType = "integer" }]
+                    Table = new Table
+                    {
+                        Id = Guid.NewGuid(),
+                        DisplayName = id.TableName,
+                        TableName = id.TableName,
+                        SchemaName = id.Schema,
+                        SourceType = "PostgreSql",
+                        SourceName = id.Domain,
+                        DiscoveryHidden = hidden,
+                        IsActive = true
+                    },
+                    Identifier = id,
+                    OwnerTenantId = ownerTenant,
+                    Columns = [new TableColumn { ColumnName = "id", DataType = "integer" }]
+                });
+            }
+
+            await OpenDomainSeeder.AssignToOpenDomainAsync(_fixture.Factory.Services, new TenantId(TenantA), OpenTable);
+
+            var grantedMeta = await repo.GetTableMetadataAsync(GrantedTable);
+            await repo.CreateConsentAsync(new Consent
+            {
+                TableId = grantedMeta!.Table.Id,
+                TableIdentifier = GrantedTable,
+                TenantId = new TenantId(TenantA),
+                Effect = ConsentEffect.Allow,
+                GranteeType = GranteeType.User,
+                GranteeSid = new Sid(UserSid),
+                ValidFrom = now.AddDays(-1),
+                ValidTo = now.AddDays(1),
+                ColumnRules = [new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear }]
             });
+
+            var hiddenOwnedMeta = await repo.GetTableMetadataAsync(HiddenOwnedTable);
+            await repo.CreateConsentAsync(new Consent
+            {
+                TableId = hiddenOwnedMeta!.Table.Id,
+                TableIdentifier = HiddenOwnedTable,
+                TenantId = new TenantId(TenantA),
+                Effect = ConsentEffect.Allow,
+                GranteeType = GranteeType.User,
+                GranteeSid = new Sid(UserSid),
+                ValidFrom = now.AddDays(-1),
+                ValidTo = now.AddDays(1),
+                ColumnRules = [new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear }]
+            });
+
+            // Container ownership (#1009): hidden_owned_orders lives in a container whose owner group is the caller.
+            var domains = scope.ServiceProvider.GetRequiredService<IGovernanceDomainRepository>();
+            await CatalogVisibilitySeeding.SeedOnRequestDomainAsync(domains, new TenantId(TenantA), new Sid(UserSid), hiddenOwnedMeta.Table.Id);
+
+            var searchEngine = scope.ServiceProvider.GetRequiredService<ICatalogSearchEngine>();
+            var indexedTables = new List<TableMetadata>(6);
+            foreach (var id in new[] { OpenTable, OnRequestTable, GrantedTable, HiddenOwnedTable, HiddenSecretTable, ForeignTable })
+            {
+                indexedTables.Add((await repo.GetTableMetadataAsync(id))!);
+            }
+            await searchEngine.RebuildIndexAsync(indexedTables);
+
+            _fixture.Seeded = true;
         }
-
-        await OpenDomainSeeder.AssignToOpenDomainAsync(_fixture.Factory.Services, new TenantId(TenantA), OpenTable);
-
-        var grantedMeta = await repo.GetTableMetadataAsync(GrantedTable);
-        await repo.CreateConsentAsync(new Consent
+        finally
         {
-            TableId = grantedMeta!.Table.Id,
-            TableIdentifier = GrantedTable,
-            TenantId = new TenantId(TenantA),
-            Effect = ConsentEffect.Allow,
-            GranteeType = GranteeType.User,
-            GranteeSid = new Sid(UserSid),
-            ValidFrom = now.AddDays(-1),
-            ValidTo = now.AddDays(1),
-            ColumnRules = [new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear }]
-        });
-
-        var hiddenOwnedMeta = await repo.GetTableMetadataAsync(HiddenOwnedTable);
-        await repo.CreateConsentAsync(new Consent
-        {
-            TableId = hiddenOwnedMeta!.Table.Id,
-            TableIdentifier = HiddenOwnedTable,
-            TenantId = new TenantId(TenantA),
-            Effect = ConsentEffect.Allow,
-            GranteeType = GranteeType.User,
-            GranteeSid = new Sid(UserSid),
-            ValidFrom = now.AddDays(-1),
-            ValidTo = now.AddDays(1),
-            ColumnRules = [new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear }]
-        });
-
-        // Container ownership (#1009): hidden_owned_orders lives in a container whose owner group is the caller.
-        var domains = scope.ServiceProvider.GetRequiredService<IGovernanceDomainRepository>();
-        await CatalogVisibilitySeeding.SeedOnRequestDomainAsync(domains, new TenantId(TenantA), new Sid(UserSid), hiddenOwnedMeta.Table.Id);
-
-        _fixture.Seeded = true;
+            _fixture.Gate.Release();
+        }
     }
 
     private HttpClient CreateUserClient()
