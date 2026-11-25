@@ -249,16 +249,16 @@ public sealed class CatalogSchemaModelTests
     [Fact]
     public async Task BuildAsync_TablesOfDialectsWithoutTreeCompiler_AreOmitted()
     {
-        // R-GQL-13: Oracle and Databricks tables were in the schema, but every query failed with NotSupported.
+        // R-GQL-13: Oracle tables lack a tree compiler and are omitted, while PostgreSql and Databricks are exposed.
         var pg = CreateTable(new TableIdentifier("sales", "public", "orders"), dialect: "PostgreSql");
         var oracle = CreateTable(new TableIdentifier("erp", "app", "invoices"), dialect: "Oracle");
         var databricks = CreateTable(new TableIdentifier("lake", "gold", "facts"), dialect: "Databricks");
-        var metaRepo = new AllTablesRepo(pg, oracle, databricks);
-        var relRepo = new InMemoryTableRelationRepository();
+        var model = await CatalogSchemaModel.BuildAsync(
+            new AllTablesRepo(pg, oracle, databricks),
+            new InMemoryTableRelationRepository());
 
-        var model = await CatalogSchemaModel.BuildAsync(metaRepo, relRepo);
-
-        Assert.Equal(pg.Identifier, Assert.Single(model.Tables).Identifier);
+        Assert.Equal([databricks.Identifier, pg.Identifier], model.Tables.Select(t => t.Identifier));
+        Assert.Equal(oracle.Identifier, Assert.Single(model.OmittedTables).Table);
     }
 
     [Fact]

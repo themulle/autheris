@@ -27,39 +27,38 @@ public partial class GovernanceRepository
         await ConsentPatternSql.HydrateApprovingOwnersBatchAsync(conn, consents, ct).ConfigureAwait(false);
     }
 
-    private async Task<IReadOnlyCollection<string>> ResolveDataOwnerIdsInternalAsync(IEnumerable<string> identifiers, CancellationToken ct)
+    /// <summary>
+    /// Owner check of the repository-level request decisions: <paramref name="approverSid"/> must be exactly the owner group of the domain
+    /// the table is explicitly assigned to in <paramref name="tenant"/>. Group membership is not expanded here and the Unassigned domain never
+    /// qualifies, so this is never broader than <c>IContainerOwnership</c> (fail closed).
+    /// </summary>
+    private async Task<bool> IsContainerOwnerGroupInternalAsync(TenantId tenant, TableIdentifier table, Sid approverSid, CancellationToken ct)
     {
-        const string resolveDataOwnerIdsSql = @"SELECT id FROM DATA_OWNERS WHERE LOWER(ad_sid) = LOWER(@p) OR LOWER(ad_account) = LOWER(@p) OR LOWER(email) = LOWER(@p)";
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        var ids = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        foreach (var identifier in identifiers.Where(i => !string.IsNullOrWhiteSpace(i)))
+        if (string.IsNullOrWhiteSpace(tenant.Value) || TenantId.IsReserved(tenant) || string.IsNullOrWhiteSpace(approverSid.Value))
         {
-            await using var cmd = conn.CreateCommand();
-            cmd.CommandText = resolveDataOwnerIdsSql;
-            cmd.AddBound("@p", identifier);
-            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-            while (await reader.ReadAsync(ct).ConfigureAwait(false))
-            {
-                ids.Add(reader.GetString(0));
-            }
-        }
-        return ids;
-    }
-
-    private async Task<IReadOnlyCollection<string>> ResolveRequesterOwnerIdsInternalAsync(ConsentRequest req, CancellationToken ct)
-    {
-        var identifiers = ConsentApprovalPolicy.IdentifierCandidates(req.RequesterSid.Value).ToList();
-        if (req.RequesterIdentifiers != null)
-        {
-            identifiers.AddRange(req.RequesterIdentifiers);
+            return false;
         }
 
-        return await ResolveDataOwnerIdsInternalAsync(identifiers, ct).ConfigureAwait(false);
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = ContainerOwnerGroupForTableSql;
+        cmd.AddBound("@tenantId", tenant.Value);
+        cmd.AddBound("@unassignedId", Guid.Empty.ToString("D"));
+        cmd.AddBound("@domain", table.Domain);
+        cmd.AddBound("@schema", table.Schema);
+        cmd.AddBound("@table", table.TableName);
+        cmd.AddBound("@apprSid", approverSid.Value.Trim());
+        var count = Convert.ToInt64(await ExecuteScalarAsync(cmd, "ConsentSupport.CheckContainerOwnerGroup", ct).ConfigureAwait(false), System.Globalization.CultureInfo.InvariantCulture);
+        return count > 0;
     }
 
-    private async Task<bool> IsAuthorizedApproverForTableInternalAsync(TableIdentifier table, Sid approverSid, CancellationToken ct)
-    {
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        return await IsAuthorizedApproverForTableInternalAsync(conn, null, table, approverSid, ct).ConfigureAwait(false);
-    }
+    private const string ContainerOwnerGroupForTableSql = @"SELECT COUNT(*)
+FROM TABLES t
+INNER JOIN GOVERNANCE_DOMAIN_TABLES dt ON dt.table_id = t.id AND dt.tenant_id = @tenantId
+INNER JOIN GOVERNANCE_DOMAINS d ON d.tenant_id = dt.tenant_id AND d.id = dt.domain_id
+WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
+  AND t.is_active = 1
+  AND d.id <> @unassignedId
+  AND d.owner_group_sid IS NOT NULL
+  AND UPPER(d.owner_group_sid) = UPPER(@apprSid)";
 }

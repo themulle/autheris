@@ -360,15 +360,29 @@ public sealed partial class AccessDecisionPoint
 
         var allUserSids = principal.GetAllUserSids();
         var scopes = TokenAccessScope.GetScopeSet(subject.Claims);
-        var readDecision = _resolutionService.ResolveAccess(
-            subject.UserSid,
-            subject.GroupSids,
-            roles,
-            metadata.Identifier,
-            readRelevant,
-            metadata.Dialect,
-            allUserSids.Any(s => s != subject.UserSid) ? allUserSids : null,
-            scopes is { Count: > 0 } ? scopes : null);
+        var callerScopes = scopes is { Count: > 0 } ? scopes : null;
+        var filteredUserSids = allUserSids.Any(s => s != subject.UserSid) ? allUserSids : null;
+        var readDecision = _resolutionService is ConsentResolutionService concreteResolver
+            ? concreteResolver.ResolveAccess(
+                subject.UserSid,
+                subject.GroupSids,
+                roles,
+                metadata.Identifier,
+                readRelevant,
+                metadata.Dialect,
+                filteredUserSids,
+                callerScopes,
+                tableMetadata: null,
+                nowUtc: _timeProvider.GetUtcNow())
+            : _resolutionService.ResolveAccess(
+                subject.UserSid,
+                subject.GroupSids,
+                roles,
+                metadata.Identifier,
+                readRelevant,
+                metadata.Dialect,
+                filteredUserSids,
+                callerScopes);
 
         return readDecision is { IsAllowed: true }
             ? (readDecision.ColumnAccess, readDecision.HasUnconstrainedColumnAllow)
@@ -393,7 +407,8 @@ public sealed partial class AccessDecisionPoint
                 _accessProfileRepository,
                 _memoryCache,
                 _options.Value,
-                ct).ConfigureAwait(false);
+                ct,
+                _timeProvider).ConfigureAwait(false);
         }
         catch (AccessProfileSourceUnavailableException ex)
         {

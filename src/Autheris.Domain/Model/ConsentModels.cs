@@ -95,11 +95,9 @@ public sealed class Consent
     /// <summary>True when this grant targets objects dynamically via <see cref="ObjectPattern"/> rather than a fixed table.</summary>
     public bool IsPatternGrant => !string.IsNullOrWhiteSpace(ObjectPattern);
 
-    /// <summary>expiry after the read-time clamp of legacy individual grants (never later than<see cref="ValidTo"/>); owner grants end only with ownership.</summary>
+    /// <summary>expiry after the read-time clamp of legacy individual grants (never later than<see cref="ValidTo"/>).</summary>
     public DateTimeOffset EffectiveValidTo =>
-        GrantSource == ConsentGrantSource.Owner
-            ? ValidTo
-            : IndividualGrantLimits.EffectiveConsentValidTo(GranteeType, ValidFrom, ValidTo, Effect);
+        IndividualGrantLimits.EffectiveConsentValidTo(GranteeType, ValidFrom, ValidTo, Effect);
 
     public bool IsActive(DateTimeOffset atTime)
     {

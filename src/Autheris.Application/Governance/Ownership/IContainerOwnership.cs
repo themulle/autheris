@@ -16,7 +16,7 @@ using Autheris.Domain.Model;
 public interface IContainerOwnership
 {
     /// <summary>Owner group (and contact) of the container of <paramref name="table"/> as a single owner entry; empty when none.</summary>
-    Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default);
+    Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default);
 
     /// <summary>
     /// Stable key of the container of <paramref name="table"/> together with its owner group; changes when the table moves to another
@@ -34,10 +34,10 @@ public interface IContainerOwnership
     Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default);
 
     /// <summary>Batch-loads the owner entries keyed by table identifier.</summary>
-    async Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<DataOwner>>> GetDataOwnersForTablesAsync(
+    async Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>> GetDataOwnersForTablesAsync(
         IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct = default)
     {
-        var result = new Dictionary<TableIdentifier, IReadOnlyList<DataOwner>>();
+        var result = new Dictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>();
         foreach (var table in tables)
         {
             var owners = await GetDataOwnersForTableAsync(table, ct).ConfigureAwait(false);

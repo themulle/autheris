@@ -117,7 +117,7 @@ public sealed class PerCellClassificationTests
             timeProvider: time);
 
         var consentRepo = new TestInMemoryConsentRepository(consents, filterWindow: false);
-        var resSvc = new ConsentResolutionService(logger: NullLogger<ConsentResolutionService>.Instance);
+        var resSvc = new ConsentResolutionService(logger: NullLogger<ConsentResolutionService>.Instance, timeProvider: time);
         var policy = new TableAccessPolicy(
             consentRepo,
             resSvc,

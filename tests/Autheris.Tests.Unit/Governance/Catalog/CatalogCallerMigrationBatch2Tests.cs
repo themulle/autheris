@@ -138,9 +138,8 @@ public sealed class CatalogCallerMigrationBatch2Tests
 
     private sealed class StubOwnershipRepo : IContainerOwnership
     {
-        public Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default) => throw new NotSupportedException();
-        public Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<DataOwner>>([new DataOwner { AdSid = new Sid("S-1-5-21-OWNER"), IsActive = true }]);
+        public Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<ContainerOwnerEntry>>([new ContainerOwnerEntry { AdSid = new Sid("S-1-5-21-OWNER"), IsActive = true }]);
         public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default) => Task.FromResult(false);
     }
 

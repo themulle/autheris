@@ -117,38 +117,92 @@ public sealed class GrantRevocationService : IGrantRevocationService
 
         try
         {
-            // The store bounds the read at ceiling+1 and returns only Allow rows, so Deny rows never consume the
-            // ceiling; the per-run cap below then applies to revocable rows only.
-            var grants = await _consents.GetActiveGrantsForSubjectsAsync(tenant, subjects, now, _maxActiveGrantsScanned + 1, token).ConfigureAwait(false);
-            if (grants.Count > _maxActiveGrantsScanned)
-            {
-                truncated = true;
-                _logger?.LogWarning("Deprovisioning revocation scanned more than {Ceiling} active grants; the run is incomplete and will be retried.", _maxActiveGrantsScanned);
-            }
+            // The store bounds each keyset page and returns only Allow rows, so Deny rows never consume the
+            // scan ceiling; seenConsentIds prevents repeating a failing row across pages or broken fakes.
+            const int defaultBatchSize = 200;
+            var scanned = 0;
+            var seenConsentIds = new HashSet<Guid>();
+            Guid? afterId = null;
 
-            foreach (var consent in grants.Where(IsRevocableGrant))
+            while (!token.IsCancellationRequested && handled < maxItems)
             {
-                if (handled++ >= maxItems)
+                var remainingScanBudget = _maxActiveGrantsScanned - scanned;
+                if (remainingScanBudget <= 0)
                 {
                     truncated = true;
                     break;
                 }
 
-                if (await TryRevokeGrantAsync(tenant, subject, consent, reason, token).ConfigureAwait(false))
+                var pageSize = Math.Min(remainingScanBudget + 1, defaultBatchSize);
+                var page = (afterId is null
+                    ? await _consents.GetActiveGrantsForSubjectsAsync(tenant, subjects, now, pageSize, token).ConfigureAwait(false)
+                    : await _consents.GetActiveGrantsForSubjectsAfterAsync(tenant, subjects, now, afterId, pageSize, token).ConfigureAwait(false))
+                    ?? Array.Empty<Consent>();
+
+                if (page.Count == 0)
                 {
-                    revoked++;
+                    break;
                 }
-                else
+
+                scanned += page.Count;
+                if (scanned > _maxActiveGrantsScanned)
                 {
-                    failed++;
+                    truncated = true;
+                    _logger?.LogWarning("Deprovisioning revocation scanned more than {Ceiling} active grants; the run is incomplete and will be retried.", _maxActiveGrantsScanned);
                 }
+
+                var addedNew = false;
+                Guid? lastId = null;
+                foreach (var consent in page)
+                {
+                    lastId = consent.Id;
+                    if (!seenConsentIds.Add(consent.Id))
+                    {
+                        continue;
+                    }
+
+                    addedNew = true;
+                    if (!IsRevocableGrant(consent))
+                    {
+                        continue;
+                    }
+
+                    if (handled++ >= maxItems)
+                    {
+                        truncated = true;
+                        break;
+                    }
+
+                    if (await TryRevokeGrantAsync(tenant, subject, consent, reason, token).ConfigureAwait(false))
+                    {
+                        revoked++;
+                    }
+                    else
+                    {
+                        failed++;
+                    }
+                }
+
+                if (truncated || handled >= maxItems || !addedNew || page.Count < pageSize || lastId == afterId)
+                {
+                    break;
+                }
+
+                afterId = lastId;
             }
 
             if (_catalog is not null && !truncated)
             {
-                var catalogGrants = await _catalog.ListActiveForSubjectsAsync(tenant, subjects, now, token).ConfigureAwait(false);
+                var seenCatalogIds = new HashSet<Guid>();
+                var catalogGrants = await _catalog.ListForDeprovisioningAsync(tenant, subjects, now, token).ConfigureAwait(false)
+                    ?? Array.Empty<CatalogVisibilityGrant>();
                 foreach (var grant in catalogGrants)
                 {
+                    if (grant.IsRevoked || !seenCatalogIds.Add(grant.Id))
+                    {
+                        continue;
+                    }
+
                     if (handled++ >= maxItems)
                     {
                         truncated = true;
@@ -168,9 +222,16 @@ public sealed class GrantRevocationService : IGrantRevocationService
 
             if (!truncated)
             {
-                var pending = await _approvals.GetRequestsByRequesterSidAsync(subject, tenant, "PENDING", token).ConfigureAwait(false);
+                var seenRequestIds = new HashSet<Guid>();
+                var pending = await _approvals.GetPendingRequestsForSubjectAsync(subject, tenant, token).ConfigureAwait(false)
+                    ?? Array.Empty<ConsentRequest>();
                 foreach (var request in pending)
                 {
+                    if (!IsWithdrawableRequestForSubject(request, subject) || !seenRequestIds.Add(request.Id))
+                    {
+                        continue;
+                    }
+
                     if (handled++ >= maxItems)
                     {
                         truncated = true;
@@ -212,19 +273,36 @@ public sealed class GrantRevocationService : IGrantRevocationService
         consent.Effect == ConsentEffect.Allow &&
         consent.GrantKind is PermissionGrantKind.Data or PermissionGrantKind.Unmask;
 
+    private static bool IsWithdrawableRequestForSubject(ConsentRequest request, Sid subject)
+    {
+        if (!string.Equals(request.Status, "PENDING", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(request.Status, "PENDING_SECOND_APPROVAL", StringComparison.OrdinalIgnoreCase) &&
+            !string.Equals(request.Status, "PENDING_EXTERNAL_APPROVAL", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        if (request.RequesterSid == subject)
+        {
+            return true;
+        }
+
+        return request.RequestedGranteeType != GranteeType.Group &&
+               !string.IsNullOrWhiteSpace(request.RequestedGranteeRef) &&
+               new Sid(request.RequestedGranteeRef.Trim()) == subject;
+    }
+
     private async Task<bool> TryRevokeGrantAsync(TenantId tenant, Sid subject, Consent consent, string reason, CancellationToken ct)
     {
         try
         {
-            var done = await _consents.RevokeSystemConsentByIdAsync(tenant, consent.Id, SystemActor, reason, ct).ConfigureAwait(false);
-            if (!done)
-            {
-                return false;
-            }
-
+            var target = !string.IsNullOrWhiteSpace(consent.TableIdentifier.TableName)
+                ? consent.TableIdentifier.ToString()
+                : consent.ObjectPattern ?? consent.Id.ToString("D");
             await AuditItemAsync(
-                AuditEventTypes.GrantRevokedDeprovisioned, tenant, subject, consent.TableIdentifier.ToString(), consent.Id, consent.GrantKind.ToSqlString(), reason, ct).ConfigureAwait(false);
-            return true;
+                AuditEventTypes.GrantRevokedDeprovisioned, tenant, subject, target, consent.Id, consent.GrantKind.ToSqlString(), reason, ct).ConfigureAwait(false);
+            var done = await _consents.RevokeSystemConsentByIdAsync(tenant, consent.Id, SystemActor, reason, ct).ConfigureAwait(false);
+            return done;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -237,15 +315,10 @@ public sealed class GrantRevocationService : IGrantRevocationService
     {
         try
         {
-            var done = await _catalog!.RevokeAsync(tenant, grant.Id, SystemActor, reason, now, null, ct).ConfigureAwait(false);
-            if (!done)
-            {
-                return false;
-            }
-
             await AuditItemAsync(
                 AuditEventTypes.GrantRevokedDeprovisioned, tenant, subject, $"{grant.ContainerKind}:{grant.ContainerId:D}", grant.Id, PermissionGrantKind.Catalog.ToSqlString(), reason, ct).ConfigureAwait(false);
-            return true;
+            var done = await _catalog!.RevokeAsync(tenant, grant.Id, SystemActor, reason, now, null, ct).ConfigureAwait(false);
+            return done;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -258,15 +331,10 @@ public sealed class GrantRevocationService : IGrantRevocationService
     {
         try
         {
-            var done = await _approvals.WithdrawConsentRequestAsync(request.Id, request.RequesterSid, ct).ConfigureAwait(false);
-            if (!done)
-            {
-                return false;
-            }
-
             await AuditItemAsync(
                 AuditEventTypes.ConsentWithdrawn, tenant, subject, request.TableIdentifier.TableName.Length > 0 ? request.TableIdentifier.ToString() : request.Id.ToString("D"), request.Id, request.GrantKind.ToSqlString(), reason, ct).ConfigureAwait(false);
-            return true;
+            var done = await _approvals.WithdrawConsentRequestAsync(request.Id, request.RequesterSid, ct).ConfigureAwait(false);
+            return done;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {

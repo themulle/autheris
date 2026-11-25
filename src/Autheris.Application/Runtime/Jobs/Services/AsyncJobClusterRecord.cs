@@ -26,4 +26,6 @@ public sealed record AsyncJobClusterRecord(
     System.Collections.Generic.IReadOnlyList<string>? SubmittedByRoles = null,
     System.Collections.Generic.IReadOnlyList<string>? SubmittedByScopes = null,
     long? SubmittedGovernanceEpoch = null,
-    System.Collections.Generic.IReadOnlyList<string>? TargetTables = null);
+    System.Collections.Generic.IReadOnlyList<string>? TargetTables = null,
+    bool SubmittedGroupResolutionComplete = false,
+    System.Collections.Generic.IReadOnlyDictionary<string, AsyncJobTablePolicySnapshot>? SubmittedTableSnapshots = null);

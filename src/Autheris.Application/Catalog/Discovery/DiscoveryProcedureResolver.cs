@@ -178,8 +178,8 @@ internal static class DiscoveryProcedureResolver
         var decisionsTask = decisionPoint.DecideManyAsync(
             subject, distinctTables, AccessOperation.Execute, AccessTransport.Discovery, ct).AsTask();
         var ownersTask = ownershipRepository is null
-            ? Task.FromResult<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<DataOwner>>>(
-                new Dictionary<TableIdentifier, IReadOnlyList<DataOwner>>())
+            ? Task.FromResult<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>>(
+                new Dictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>())
             : ownershipRepository.GetDataOwnersForTablesAsync(distinctIds.ToList(), ct);
 
         await Task.WhenAll(decisionsTask, ownersTask).ConfigureAwait(false);
@@ -211,7 +211,7 @@ internal static class DiscoveryProcedureResolver
         RegisteredProcedure proc,
         IReadOnlyList<TableMetadata> governedTables,
         IReadOnlyDictionary<TableIdentifier, TableAccessDecision> decisionById,
-        IReadOnlyDictionary<TableIdentifier, IReadOnlyList<DataOwner>> ownersByTable,
+        IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>> ownersByTable,
         IReadOnlySet<TableIdentifier> pendingTables,
         IReadOnlySet<TableIdentifier> expiredTables,
         IReadOnlyDictionary<TableIdentifier, Autheris.Domain.Security.ProtectionClass>? classesByTable = null)
@@ -289,7 +289,7 @@ internal static class DiscoveryProcedureResolver
 
     private static IReadOnlyList<DiscoveryOwner> CollectOwners(
         IReadOnlyList<TableMetadata> governedTables,
-        IReadOnlyDictionary<TableIdentifier, IReadOnlyList<DataOwner>> ownersByTable)
+        IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>> ownersByTable)
     {
         var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         var owners = new List<DiscoveryOwner>();

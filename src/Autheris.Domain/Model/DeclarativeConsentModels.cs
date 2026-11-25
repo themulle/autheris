@@ -2,15 +2,18 @@ namespace Autheris.Domain.Model;
 
 using System;
 using System.Collections.Generic;
+using System.Text.Json.Serialization;
 
 /// <summary>
 /// Issue #40: Declarative GitOps policy synchronization manifest and rule models.
+/// <c>Name</c> is the manifest scope: a newer proposal for the same tenant and name supersedes a pending one (Amendment 6).
 /// </summary>
 public sealed record DeclarativeConsentManifest(
     string Version,
     IReadOnlyList<DeclarativeConsentPolicy> Policies,
     IReadOnlyList<DeclarativeDatasetCatalog>? Datasets = null,
-    string? TenantId = null);
+    string? TenantId = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Name = null);
 
 /// <summary>
 /// Issue #111: declarative dataset catalog settings. A null field is "unchanged" (never a reset); an empty <c>Tags</c> list

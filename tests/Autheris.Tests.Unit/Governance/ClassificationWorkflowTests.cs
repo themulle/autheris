@@ -179,28 +179,4 @@ public sealed class ClassificationWorkflowTests
         updated.Status.ShouldBe("REJECTED");
     }
 
-    [Fact]
-    public async Task UpdateDataOwner_AssignsOwnerAndAdvancesUnclassifiedStatus()
-    {
-        var store = new InMemoryClassificationProposalStore();
-        var table = new TableIdentifier("sales_db", "orders", "raw_orders");
-
-        var proposal = new TableClassificationProposal(
-            Guid.NewGuid(),
-            table,
-            DataOwnerSid: null,
-            Status: "UNCLASSIFIED",
-            Columns: new List<ColumnClassificationProposal>(),
-            DateTimeOffset.UtcNow);
-
-        await store.SaveProposalAsync(proposal);
-
-        var updated = await store.UpdateDataOwnerAsync(table, "order_steward_sid");
-        updated.ShouldBeTrue();
-
-        var refreshed = await store.GetProposalByIdAsync(proposal.ProposalId);
-        refreshed.ShouldNotBeNull();
-        refreshed.DataOwnerSid.ShouldBe("order_steward_sid");
-        refreshed.Status.ShouldBe("PENDING_OWNER_REVIEW");
-    }
 }

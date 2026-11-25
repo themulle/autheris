@@ -34,7 +34,6 @@ public enum ConsentGrantSource
 {
     ConsentRequest = 0,
     AccessProfile = 1,
-    Owner = 2,
     Bulk = 3,
     Declarative = 4,
     AccessPlan = 5,
@@ -58,7 +57,6 @@ public static class ConsentWorkflowSqlMapping
     {
         ConsentGrantSource.ConsentRequest => "CONSENT_REQUEST",
         ConsentGrantSource.AccessProfile => "ACCESS_PROFILE",
-        ConsentGrantSource.Owner => "OWNER",
         ConsentGrantSource.Bulk => "BULK",
         ConsentGrantSource.Declarative => "DECLARATIVE",
         ConsentGrantSource.AccessPlan => "ACCESS_PLAN",
@@ -75,9 +73,6 @@ public static class ConsentWorkflowSqlMapping
                 return true;
             case "ACCESS_PROFILE":
                 source = ConsentGrantSource.AccessProfile;
-                return true;
-            case "OWNER":
-                source = ConsentGrantSource.Owner;
                 return true;
             case "BULK":
                 source = ConsentGrantSource.Bulk;

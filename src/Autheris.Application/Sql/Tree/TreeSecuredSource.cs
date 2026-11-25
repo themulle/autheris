@@ -154,6 +154,35 @@ internal static class TreeSecuredSourceMarkers
                     i = end;
                     continue;
                 }
+                case ':' when dialect == TargetSqlDialect.Databricks:
+                {
+                    if (i + 1 < sql.Length && sql[i + 1] == ':')
+                    {
+                        sb.Append("::");
+                        i += 2;
+                        continue;
+                    }
+
+                    var end = TokenEnd(sql, i + 1);
+                    if (end == i + 1)
+                    {
+                        throw Denied();
+                    }
+
+                    var token = sql[i..end];
+                    if (map.TryGetValue(token, out var name))
+                    {
+                        sb.Append(name);
+                        seen.Add(token);
+                    }
+                    else
+                    {
+                        throw Denied();
+                    }
+
+                    i = end;
+                    continue;
+                }
                 default:
                     sb.Append(c);
                     i++;

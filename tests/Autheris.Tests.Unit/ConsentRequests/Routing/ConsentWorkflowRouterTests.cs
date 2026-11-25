@@ -48,7 +48,7 @@ public sealed class ConsentWorkflowRouterTests
     {
         var adminRepo = Substitute.For<IConsentWorkflowAdminRepository>();
         adminRepo.GetRoutingInputsForTableAsync(Tenant, Table, Arg.Any<CancellationToken>())
-            .Returns(new ConsentWorkflowTableInputs(routes, new HashSet<string>(["owner-1"])));
+            .Returns(new ConsentWorkflowTableInputs(routes));
         return new ConsentWorkflowRouter(
             auditRepository: Substitute.For<IAuditLogRepository>(),
             adminRepository: adminRepo,
@@ -123,7 +123,7 @@ public sealed class ConsentWorkflowRouterTests
     {
         var adminRepo = Substitute.For<IConsentWorkflowAdminRepository>();
         adminRepo.GetRoutingInputsForTableAsync(Tenant, Table, Arg.Any<CancellationToken>())
-            .Returns(new ConsentWorkflowTableInputs([], new HashSet<string>()));
+            .Returns(new ConsentWorkflowTableInputs([]));
 
         var router = new ConsentWorkflowRouter(
             auditRepository: Substitute.For<IAuditLogRepository>(),

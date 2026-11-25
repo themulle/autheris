@@ -143,7 +143,7 @@ public sealed class LatentFailClosedGuardsSecurityTests
     {
         var auditRepo = new RecordingAuditRepo();
         var service = new GdprDisclosureReportService(
-            new InMemoryDataOwnershipRepository(),
+            new InMemoryContainerOwnership(),
             auditRepo,
             new InMemoryTableMetadataRepository());
 

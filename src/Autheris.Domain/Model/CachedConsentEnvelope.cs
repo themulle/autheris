@@ -45,11 +45,17 @@ public partial class CachedConsentEnvelope
     /// <summary>Absolute UTC expiry of the cached grant/decision. Appended last (MemoryPack layout).</summary>
     public DateTimeOffset ValidUntil { get; set; }
 
+    public long ClusterGlobalGeneration { get; set; }
+
+    public long ClusterTenantGeneration { get; set; }
+
     public static CachedConsentEnvelope FromDecision(
         TableAccessDecision decision,
         long epoch,
         string? restrictionFingerprint = null,
-        DateTimeOffset validUntil = default)
+        DateTimeOffset validUntil = default,
+        long clusterGlobalGeneration = 0,
+        long clusterTenantGeneration = 0)
     {
         ArgumentNullException.ThrowIfNull(decision);
 
@@ -69,7 +75,9 @@ public partial class CachedConsentEnvelope
             RestrictionFingerprint = restrictionFingerprint ?? RestrictedScopePolicy.Default.Fingerprint,
             RestrictedScopesHeld = decision.ScopeClearance is { } clearance ? [.. clearance.RestrictedScopesHeld] : null,
             ScopeClearedColumns = decision.ScopeClearance is { } cleared ? [.. cleared.ClearedColumns] : null,
-            ValidUntil = validUntil
+            ValidUntil = validUntil,
+            ClusterGlobalGeneration = clusterGlobalGeneration,
+            ClusterTenantGeneration = clusterTenantGeneration
         };
 
         foreach (var (col, level) in decision.ColumnAccess)

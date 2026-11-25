@@ -87,6 +87,13 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Governance.Interfaces.IDeclarativeConsentApplyService, Autheris.Application.Governance.Services.DeclarativeConsentApplyService>();
         services.AddSingleton<Autheris.Application.Governance.Interfaces.IDeclarativeManifestPlanner>(sp =>
             (Autheris.Application.Governance.Interfaces.IDeclarativeManifestPlanner)sp.GetRequiredService<Autheris.Application.Governance.Interfaces.IDeclarativeConsentApplyService>());
+        services.AddSingleton<Autheris.Application.Governance.Declarative.ManifestProposalService>(sp => new Autheris.Application.Governance.Declarative.ManifestProposalService(
+            sp.GetRequiredService<Autheris.Application.Governance.Interfaces.IDeclarativeManifestPlanner>(),
+            sp.GetRequiredService<Autheris.Application.Governance.Declarative.IManifestProposalRepository>(),
+            sp.GetRequiredService<Autheris.Application.Audit.IAuditWriter>(),
+            sp.GetService<Autheris.Application.Common.Interfaces.IGatewayRoleEvaluator>(),
+            sp.GetService<Autheris.Application.Governance.Notifications.IGovernanceNotificationDispatcher>(),
+            sp.GetService<TimeProvider>()));
         services.AddScoped<Autheris.Application.Audit.AuditReadService>();
     }
 

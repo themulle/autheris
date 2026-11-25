@@ -114,31 +114,41 @@ public sealed class CatalogGrantedAccessScaleTests : IClassFixture<CatalogGrante
         client.DefaultRequestHeaders.Add("X-Test-Tenant", Tenant);
         client.DefaultRequestHeaders.Add("X-Test-Scope", "Autheris.Catalog.Read");
 
-        using var counter = new StatementCounter();
+        // Only the statements of this request count: the request carries its own W3C trace, so statements of the host's background
+        // services (catalog snapshot poll, webhook dispatcher, usage flush) and of other hosts still alive in the test process, which
+        // the process-wide listener also sees, are reported separately and never charged to the budget.
+        var traceId = ActivityTraceId.CreateRandom();
+        using var request = new HttpRequestMessage(HttpMethod.Get, path);
+        request.Headers.Add("traceparent", $"00-{traceId.ToHexString()}-{ActivitySpanId.CreateRandom().ToHexString()}-01");
+
+        using var counter = new StatementCounter(traceId);
         var sw = Stopwatch.StartNew();
-        var response = await client.GetAsync(path);
+        using var response = await client.SendAsync(request);
         var body = await response.Content.ReadAsStringAsync();
         sw.Stop();
 
-        _output.WriteLine($"{path}: {(int)response.StatusCode} in {sw.ElapsedMilliseconds} ms, {counter.Count} statements ({counter.TotalMilliseconds:F0} ms in the database), {TableCount} granted tables");
+        _output.WriteLine($"{path}: {(int)response.StatusCode} in {sw.ElapsedMilliseconds} ms, {counter.Count} statements ({counter.TotalMilliseconds:F0} ms in the database), {TableCount} granted tables; {counter.OtherCount} statements of other work in the process meanwhile");
         foreach (var (statement, count, ms) in counter.Top(12))
         {
             _output.WriteLine($"  {count,7} x {ms,8:F1} ms  {statement}");
         }
 
+        // Fail closed on the measurement itself: a request whose trace did not reach the server would count nothing.
+        counter.Count.ShouldBeGreaterThan(0, $"no statement of {path} carried the request trace");
         return new Measurement(response.StatusCode, body, counter.Count, sw.Elapsed);
     }
 
     private sealed record Measurement(HttpStatusCode Status, string Body, int Statements, TimeSpan Elapsed);
 
-    /// <summary>Counts the Npgsql command activities of the current process while it is alive.</summary>
+    /// <summary>Counts the Npgsql command activities of one request trace while it is alive.</summary>
     private sealed class StatementCounter : IDisposable
     {
         private readonly ActivityListener _listener;
         private readonly ConcurrentDictionary<string, (int Count, double Milliseconds)> _byStatement = new(StringComparer.Ordinal);
         private int _count;
+        private int _otherCount;
 
-        public StatementCounter()
+        public StatementCounter(ActivityTraceId traceId)
         {
             _listener = new ActivityListener
             {
@@ -152,6 +162,12 @@ public sealed class CatalogGrantedAccessScaleTests : IClassFixture<CatalogGrante
                         return; // connection open, physical open, copy etc.
                     }
 
+                    if (activity.TraceId != traceId)
+                    {
+                        Interlocked.Increment(ref _otherCount);
+                        return;
+                    }
+
                     Interlocked.Increment(ref _count);
                     var key = string.Join(' ', text.Split((char[]?)null, StringSplitOptions.RemoveEmptyEntries));
                     key = key.Length > 110 ? key[..110] : key;
@@ -163,6 +179,8 @@ public sealed class CatalogGrantedAccessScaleTests : IClassFixture<CatalogGrante
         }
 
         public int Count => Volatile.Read(ref _count);
+
+        public int OtherCount => Volatile.Read(ref _otherCount);
 
         public double TotalMilliseconds => _byStatement.Values.Sum(static v => v.Milliseconds);
 

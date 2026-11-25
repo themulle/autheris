@@ -16,7 +16,7 @@ public sealed class GovernanceDomainStore(
     IGovernanceSqlDialect dialect,
     TimeProvider? timeProvider = null,
     IGovernanceChangeNotifier? changeNotifier = null,
-    IGovernanceWriteInvalidator? writeInvalidator = null) : IGovernanceDomainRepository, IGovernanceEpochStore
+    IGovernanceWriteInvalidator? writeInvalidator = null) : IGovernanceDomainRepository, IAtomicGovernanceDomainRepository, IGovernanceEpochStore
 {
     private const string UnassignedName = "Unassigned";
     private const string UnassignedCreatedBy = "system:governance-domain-store";
@@ -72,7 +72,62 @@ public sealed class GovernanceDomainStore(
     private readonly IGovernanceSqlDialect _dialect = dialect ?? throw new ArgumentNullException(nameof(dialect));
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
     private readonly IGovernanceWriteInvalidator _writeInvalidator = writeInvalidator ?? new GovernanceWriteInvalidator(changeNotifier: changeNotifier, timeProvider: timeProvider);
+    private readonly AsyncLocal<AmbientTxState?> _ambientTx = new();
     private bool IsSqlServer => _dialect is SqlServerGovernanceDialect;
+
+    private sealed class AmbientTxState(DbConnection conn, DbTransaction tx)
+    {
+        public DbConnection Conn { get; } = conn;
+        public DbTransaction Tx { get; } = tx;
+        public bool RollbackRequested { get; set; }
+        public List<(string TenantId, long Epoch, Guid? TableId, DateTimeOffset OccurredAtUtc)> Notifications { get; } = [];
+    }
+
+    public async Task ExecuteInTransactionAsync(Func<CancellationToken, Task> action, CancellationToken ct = default)
+    {
+        ArgumentNullException.ThrowIfNull(action);
+        if (_ambientTx.Value is not null)
+        {
+            await action(ct).ConfigureAwait(false);
+            return;
+        }
+
+        await using var conn = await OpenAsync(ct).ConfigureAwait(false);
+        await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
+        var state = new AmbientTxState(conn, tx);
+        _ambientTx.Value = state;
+        List<(string TenantId, long Epoch, Guid? TableId, DateTimeOffset OccurredAtUtc)>? pendingNotifications = null;
+        try
+        {
+            await action(ct).ConfigureAwait(false);
+            if (state.RollbackRequested)
+            {
+                await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
+            }
+            else
+            {
+                await tx.CommitAsync(ct).ConfigureAwait(false);
+                pendingNotifications = state.Notifications;
+            }
+        }
+        catch
+        {
+            await TransactionRollback.RollbackAsync(tx).ConfigureAwait(false);
+            throw;
+        }
+        finally
+        {
+            _ambientTx.Value = null;
+        }
+
+        if (pendingNotifications is { Count: > 0 })
+        {
+            foreach (var n in pendingNotifications)
+            {
+                await BroadcastChangeAsync(n.TenantId, n.Epoch, n.TableId, n.OccurredAtUtc).ConfigureAwait(false);
+            }
+        }
+    }
 
     public async Task<IReadOnlyList<GovernanceDomain>> ListAsync(TenantId tenant, int limit = 100, int offset = 0, CancellationToken ct = default)
     {
@@ -91,11 +146,10 @@ public sealed class GovernanceDomainStore(
         return items;
     }
 
-    public async Task<GovernanceDomain?> GetAsync(TenantId tenant, Guid domainId, CancellationToken ct = default)
+    public Task<GovernanceDomain?> GetAsync(TenantId tenant, Guid domainId, CancellationToken ct = default)
     {
         var tenantId = RequireTenant(tenant, GovernanceTable.GovernanceDomains);
-        await using var conn = await OpenAsync(ct).ConfigureAwait(false);
-        return await ReadByIdAsync(conn, null, tenantId, tenant, domainId, ct).ConfigureAwait(false);
+        return RunWithReadConnAsync((conn, tx) => ReadByIdAsync(conn, tx, tenantId, tenant, domainId, ct), ct);
     }
 
     public async Task<GovernanceDomainUpsertResult> UpsertAsync(GovernanceDomain domain, int expectedVersion, Sid actor, CancellationToken ct = default)
@@ -271,19 +325,21 @@ public sealed class GovernanceDomainStore(
         }
     }
 
-    public async Task<(ObjectProtection? Table, IReadOnlyDictionary<string, ObjectProtection> Columns)> GetProtectionAsync(TenantId tenant, Guid tableId, CancellationToken ct = default)
+    public Task<(ObjectProtection? Table, IReadOnlyDictionary<string, ObjectProtection> Columns)> GetProtectionAsync(TenantId tenant, Guid tableId, CancellationToken ct = default)
     {
         var tenantId = RequireTableScope(tenant, tableId, GovernanceTable.ObjectProtection);
-        await using var conn = await OpenAsync(ct).ConfigureAwait(false);
-        await using var cmd = Cmd(conn, null, GetProtectionSql, tenantId, ("@tableId", tableId.ToString("D"), null));
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        var acc = new ProtectionAccumulator();
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        return RunWithReadConnAsync(async (conn, tx) =>
         {
-            acc.Add(reader, 0);
-        }
+            await using var cmd = Cmd(conn, tx, GetProtectionSql, tenantId, ("@tableId", tableId.ToString("D"), null));
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            var acc = new ProtectionAccumulator();
+            while (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                acc.Add(reader, 0);
+            }
 
-        return acc.Result();
+            return acc.Result();
+        }, ct);
     }
 
     public async Task<IReadOnlyDictionary<Guid, (ObjectProtection? Table, IReadOnlyDictionary<string, ObjectProtection> Columns)>> GetProtectionBatchAsync(
@@ -376,13 +432,15 @@ public sealed class GovernanceDomainStore(
         return count is not null and not DBNull && Convert.ToInt64(count, CultureInfo.InvariantCulture) > 0;
     }
 
-    public async Task<ContainerDefaults> GetContainerForTableAsync(TenantId tenant, Guid tableId, CancellationToken ct = default)
+    public Task<ContainerDefaults> GetContainerForTableAsync(TenantId tenant, Guid tableId, CancellationToken ct = default)
     {
         var tenantId = RequireTableScope(tenant, tableId, GovernanceTable.GovernanceDomainTables);
-        await using var conn = await OpenAsync(ct).ConfigureAwait(false);
-        await using var cmd = Cmd(conn, null, GetContainerForTableSql, tenantId, ("@tableId", tableId.ToString("D"), null), ("@unassignedId", UnassignedId, null));
-        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-        return await reader.ReadAsync(ct).ConfigureAwait(false) ? ReadContainer(reader, 0) : ContainerDefaults.Unassigned;
+        return RunWithReadConnAsync(async (conn, tx) =>
+        {
+            await using var cmd = Cmd(conn, tx, GetContainerForTableSql, tenantId, ("@tableId", tableId.ToString("D"), null), ("@unassignedId", UnassignedId, null));
+            await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+            return await reader.ReadAsync(ct).ConfigureAwait(false) ? ReadContainer(reader, 0) : ContainerDefaults.Unassigned;
+        }, ct);
     }
 
     /// <summary>
@@ -571,13 +629,35 @@ public sealed class GovernanceDomainStore(
         return Convert.ToInt64(scalar, CultureInfo.InvariantCulture);
     }
 
-    private Task NotifyChangedAsync(string tenantId, long epoch, Guid? tableId, DateTimeOffset occurredAtUtc) =>
+    private Task NotifyChangedAsync(string tenantId, long epoch, Guid? tableId, DateTimeOffset occurredAtUtc)
+    {
+        if (_ambientTx.Value is { } state)
+        {
+            state.Notifications.Add((tenantId, epoch, tableId, occurredAtUtc));
+            return Task.CompletedTask;
+        }
+
+        return BroadcastChangeAsync(tenantId, epoch, tableId, occurredAtUtc);
+    }
+
+    private Task BroadcastChangeAsync(string tenantId, long epoch, Guid? tableId, DateTimeOffset occurredAtUtc) =>
         _writeInvalidator.InvalidateWideAsync(
             TenantId.TryParse(tenantId, out var parsed) ? parsed : (TenantId?)null,
             governanceEpoch: epoch,
             tableId: tableId,
             occurredAtUtc: occurredAtUtc,
             ct: CancellationToken.None);
+
+    private async Task<T> RunWithReadConnAsync<T>(Func<DbConnection, DbTransaction?, Task<T>> work, CancellationToken ct)
+    {
+        if (_ambientTx.Value is { } state)
+        {
+            return await work(state.Conn, state.Tx).ConfigureAwait(false);
+        }
+
+        await using var conn = await OpenAsync(ct).ConfigureAwait(false);
+        return await work(conn, null).ConfigureAwait(false);
+    }
 
     private async Task<DbConnection> OpenAsync(CancellationToken ct)
     {
@@ -588,6 +668,17 @@ public sealed class GovernanceDomainStore(
 
     private async Task<T> RunInTxAsync<T>(Func<DbConnection, DbTransaction, Task<(bool Commit, T Result)>> work, CancellationToken ct)
     {
+        if (_ambientTx.Value is { } state)
+        {
+            var (commit, result) = await work(state.Conn, state.Tx).ConfigureAwait(false);
+            if (!commit)
+            {
+                state.RollbackRequested = true;
+            }
+
+            return result;
+        }
+
         await using var conn = await OpenAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try

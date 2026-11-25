@@ -75,9 +75,7 @@ public sealed class GrantWriter(IGrantRecordStore store, IGrantRecordSigner sign
         if (string.IsNullOrWhiteSpace(objectId) || string.IsNullOrWhiteSpace(granteeType) || string.IsNullOrWhiteSpace(granteeRef))
             throw new ArgumentException("ObjectId, GranteeType, and GranteeRef are required.", nameof(input));
         var validUntil = input?.ValidUntil
-            ?? (consent is not null && !(consent.GrantSource == ConsentGrantSource.Owner && consent.ValidTo == DateTimeOffset.MaxValue)
-                ? consent.ValidTo
-                : (DateTimeOffset?)null);
+            ?? consent?.ValidTo;
         return new GrantRecord(tenantId, 0, Guid.CreateVersion7(), recordType, consent?.Id, input?.RequestId ?? consent?.ConsentRequestId,
             input?.GrantSource ?? consent?.GrantSource ?? ConsentGrantSource.ConsentRequest, input?.ProfileAssignmentId ?? consent?.ProfileAssignmentId,
             granteeType, granteeRef, objectId, string.IsNullOrWhiteSpace(input?.ScopeJson) ? "{}" : input.ScopeJson,

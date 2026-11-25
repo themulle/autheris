@@ -351,7 +351,7 @@ public sealed partial class DiscoveryService
         var uncachedIds = uncachedTables.Select(static t => t.Identifier).ToList();
 
         var ownersTask = _ownershipRepository is null
-            ? Task.FromResult<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<DataOwner>>>(new Dictionary<TableIdentifier, IReadOnlyList<DataOwner>>())
+            ? Task.FromResult<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>>(new Dictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>())
             : _ownershipRepository.GetDataOwnersForTablesAsync(uncachedIds, ct);
 
         var subject = SecurityPrincipalContext.FromPrincipal(caller.Principal!, caller.Tenant);
@@ -415,7 +415,7 @@ public sealed partial class DiscoveryService
         {
             var (targetIdx, table) = uncached[i];
             var decision = decisions[i];
-            var owners = ownersByTable.TryGetValue(table.Identifier, out var list) ? list : Array.Empty<DataOwner>();
+            var owners = ownersByTable.TryGetValue(table.Identifier, out var list) ? list : Array.Empty<ContainerOwnerEntry>();
             var isPending = !decision.IsAllowed && pendingTables.Contains(table.Identifier);
             var isExpired = !decision.IsAllowed && !isPending && expiredTables.Contains(table.Identifier);
             IReadOnlyList<DiscoveryArtifacts> allArtifacts = artifactsByTableId is not null &&

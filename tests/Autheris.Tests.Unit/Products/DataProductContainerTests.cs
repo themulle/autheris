@@ -130,7 +130,7 @@ public sealed class DataProductContainerTests
         var domainId = Guid.NewGuid();
         var ordersGuid = Guid.NewGuid();
         var tableRepo = new InMemoryTableMetadataRepository(new TableMetadata { Identifier = OrdersTable, Table = new Table { Id = ordersGuid, IsActive = true } });
-        var ownershipRepo = new InMemoryDataOwnershipRepository();
+        var ownershipRepo = new InMemoryContainerOwnership();
         var audit = new RecordingAuditWriter();
         domainRepo.GetContainerForTableAsync(TenantA, ordersGuid, Arg.Any<CancellationToken>())
             .Returns(new ContainerDefaults(new ContainerRef(ContainerKind.Domain, domainId), DomainOwnerGroup, ProtectionClass.Confidential, CatalogVisibilityMode.OnRequest, IsValid: true));
@@ -219,7 +219,7 @@ public sealed class DataProductContainerTests
         var ordersGuid = Guid.NewGuid();
         var domainRepo = new StubDomainRepo(domainId, ordersGuid);
         var tableRepo = new InMemoryTableMetadataRepository(new TableMetadata { Identifier = OrdersTable, Table = new Table { Id = ordersGuid, IsActive = true } });
-        var ownershipRepo = new InMemoryDataOwnershipRepository();
+        var ownershipRepo = new InMemoryContainerOwnership();
         var audit = new RecordingAuditWriter();
         var caps = new GovernanceCapabilities(domainRepository: domainRepo, productRepository: store);
         var authority = new ProductAuthorityService(ownershipRepo, store, new FakeTimeProvider(T0), caps, domainRepo, tableRepo);

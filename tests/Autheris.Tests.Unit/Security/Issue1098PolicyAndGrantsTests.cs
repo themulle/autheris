@@ -648,8 +648,8 @@ public sealed class Issue1098PolicyAndGrantsTests
     private sealed class DomainRestrictedOwnership(params string[] authorizedOwners) : IContainerOwnership
     {
         private readonly HashSet<string> _owners = authorizedOwners.ToHashSet(StringComparer.OrdinalIgnoreCase);
-        public Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<DataOwner>>([]);
+        public Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<ContainerOwnerEntry>>([]);
         public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default) =>
             Task.FromResult(_owners.Contains(approverSid.Value));
     }

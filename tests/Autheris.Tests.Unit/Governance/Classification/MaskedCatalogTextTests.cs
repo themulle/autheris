@@ -151,7 +151,7 @@ public sealed class MaskedCatalogTextTests
         var rowFactory = new RowPolicyFactory(new PolicyPredicateRenderer());
         var policy = new TableAccessPolicy(
             new TestInMemoryConsentRepository(consents, filterWindow: false),
-            new ConsentResolutionService(logger: NullLogger<ConsentResolutionService>.Instance),
+            new ConsentResolutionService(logger: NullLogger<ConsentResolutionService>.Instance, timeProvider: time),
             new TestNoOpConsentCache(),
             options,
             new NoOpMandatoryRowFilterResolver(),
@@ -383,7 +383,8 @@ public sealed class MaskedCatalogTextTests
             Options.Create(options),
             Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(tables, consentRepo, options),
             consentRepository: consentRepo,
-            classificationRepository: classStore);
+            classificationRepository: classStore,
+            timeProvider: new AdjustableClassificationTimeProvider(FixedNow));
         var principal = DiscoveryTestBuilder.User(UserSid.Value, Tenant.Value);
 
         var detail = await service.GetDatasetDetailAsync(CustomersId, new RequestContext(Tenant, UserSid, User: principal));

@@ -41,7 +41,6 @@ public sealed class GovernanceWriteAuthorizationTests
         yield return ["PUT /api/v1/governance/classifications/{code}", GatewayPolicies.GovernanceAdmin];
         yield return ["PUT /api/v1/governance/classifications/{code}/mask-rule", GatewayPolicies.GovernanceAdmin];
         yield return ["POST /api/governance/classification/classify-table", GatewayPolicies.GovernanceAdmin];
-        yield return ["POST /api/governance/classification/assign-owner", GatewayPolicies.GovernanceAdmin];
         // Access-profile assignments and profile deletion are declarative grants: governance capacity only.
         yield return ["POST /api/v1/consents/bulk", GatewayPolicies.ProfileAdmin];
         yield return ["DELETE /api/v1/profiles/{id}", GatewayPolicies.ProfileAdmin];

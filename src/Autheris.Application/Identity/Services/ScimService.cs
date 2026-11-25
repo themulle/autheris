@@ -128,7 +128,7 @@ public sealed partial class ScimService : IScimService
             UserPrincipalName: ScimRequestValidator.NormalizeUpn(user.ResolvedUserPrincipalName),
             EntraObjectId: ScimRequestValidator.NormalizeEntraObjectId(user.ResolvedEntraObjectId));
 
-        if (existing.Active && !updated.Active)
+        if (!updated.Active)
         {
             await EnsureMassChangeAllowedAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false);
             await RecordRequiredScimAuditAsync(
@@ -197,7 +197,7 @@ public sealed partial class ScimService : IScimService
 
         ScimRequestValidator.ValidateUserCorrelationFields(objectSid, immutableId, upn, entraObjectId);
 
-        if (existing.Active && !activeStatus)
+        if (!activeStatus)
         {
             await EnsureMassChangeAllowedAsync(tenantId, realmId, userKey, ct).ConfigureAwait(false);
             await RecordRequiredScimAuditAsync(

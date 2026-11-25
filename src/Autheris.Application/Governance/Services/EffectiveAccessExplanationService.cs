@@ -25,7 +25,8 @@ public sealed class EffectiveAccessExplanationService(
     IConsentResolutionService resolutionService,
     IContainerOwnership? ownershipRepository = null,
     IOptions<GatewayOptions>? gatewayOptions = null,
-    IOptions<GovernanceTextOptions>? textOptions = null) : IEffectiveAccessExplanationService
+    IOptions<GovernanceTextOptions>? textOptions = null,
+    TimeProvider? timeProvider = null) : IEffectiveAccessExplanationService
 {
     private int DescriptionMaxLength => (textOptions?.Value ?? new GovernanceTextOptions()).ConsentDescriptionMaxLength;
 
@@ -87,7 +88,7 @@ public sealed class EffectiveAccessExplanationService(
             .Distinct()
             .ToList();
 
-        var now = DateTimeOffset.UtcNow;
+        var now = (timeProvider ?? TimeProvider.System).GetUtcNow();
         var activeConsents = (await consentRepository.GetActiveConsentsForSubjectsAsync(subjects, table, now, tenantId, ct).ConfigureAwait(false))
             .Where(c => c.TenantId == tenantId)
             .ToList();

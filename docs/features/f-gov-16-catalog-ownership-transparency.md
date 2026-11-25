@@ -34,7 +34,7 @@ flowchart TD
         MetaRepo["ITableMetadataRepository"]
         ConsentRepo["IConsentRepository"]
         ApprovalRepo["IConsentApprovalRepository"]
-        OwnerRepo["IDataOwnershipRepository"]
+        OwnerRepo["IContainerOwnership"]
     end
 
     McpAgent -->|list_datasets(tag) / describe_dataset| McpCatalog
@@ -58,7 +58,7 @@ flowchart TD
 
 - **`McpDatasetCatalog` & `McpDatasetTools`:**
   - `list_datasets(search, domain, tag, offset, limit)`: Filters datasets by tag (case-insensitive substring/equality), populates `tags` on `McpDatasetSummary`, and attaches dynamic `accessStatus` (`GRANTED`, `PENDING`, `NONE`).
-  - `describe_dataset(dataset)`: Resolves table data owners and delegates from `IDataOwnershipRepository`, populating `dataOwner` (formatted as `DisplayName <email>` or account) and `dataOwnerDelegates`. Returns `accessStatus` and `tags`.
+  - `describe_dataset(dataset)`: Resolves the owner of the table from its container (`IContainerOwnership`: the owner group, shown with the container contact), populating `dataOwner` (formatted as `DisplayName <email>` or the owner group). Returns `accessStatus` and `tags`.
 - **`CatalogVisibility` Service:**
   - `ComputeAccessStatus(table, activeConsents, pendingRequests, isAdmin)`: Determines the caller's relationship to the table:
     - `"GRANTED"`: Caller has active Allow consent (and no unconditional Deny) or is GovernanceAdmin/ClusterAdmin.

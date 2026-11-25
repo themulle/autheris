@@ -247,7 +247,7 @@ public sealed class AllowOnlyDiscoverDecisionTests
                 ClassificationResolver: new ClassificationAccessResolver(masking, Classifications, time));
             return new AccessDecisionPoint(
                 Options.Create(options),
-                resolutionService: new ConsentResolutionService(logger: NullLogger<ConsentResolutionService>.Instance),
+                resolutionService: new ConsentResolutionService(logger: NullLogger<ConsentResolutionService>.Instance, timeProvider: time),
                 consentRepository: Consents,
                 cacheService: NullConsentCacheService.Instance,
                 mandatoryFilters: NullMandatoryRowFilterResolver.Instance,

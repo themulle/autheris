@@ -55,24 +55,11 @@ public sealed partial class GovernanceDomainService
             return delegatedError;
         }
 
-        await _domains.SetTableProtectionAsync(
-            tenant,
-            meta.Table.Id,
-            tableChange.NormalizedTableProtection,
-            tableChange.ClearedRedundantColumns,
-            caller.UserSid,
-            ct).ConfigureAwait(false);
-
         var afterEffective = candidateEffective;
-
-        await AuditTableProtectionChangeAsync(
-            tenant,
-            caller.UserSid,
-            meta,
-            container,
-            beforeEffective,
-            afterEffective,
-            tableChange,
+        await RunAuditedProtectionAsync(
+            () => _domains.SetTableProtectionAsync(tenant, meta.Table.Id, tableChange.NormalizedTableProtection, tableChange.ClearedRedundantColumns, caller.UserSid, ct),
+            c => _domains.SetTableProtectionAsync(tenant, meta.Table.Id, tableChange.NormalizedTableProtection, tableChange.ClearedRedundantColumns, caller.UserSid, c),
+            c => AuditTableProtectionChangeAsync(tenant, caller.UserSid, meta, container, beforeEffective, afterEffective, tableChange, c),
             ct).ConfigureAwait(false);
 
         await _writeInvalidator.InvalidateWideAsync(tenant, ct: ct).ConfigureAwait(false);
@@ -134,25 +121,38 @@ public sealed partial class GovernanceDomainService
             return delegatedError;
         }
 
-        await _domains.SetProtectionAsync(tenant, meta.Table.Id, canonicalColumn, validation.NormalizedProtection, caller.UserSid, ct).ConfigureAwait(false);
-
         var coveringGrants = afterEffective.TableClass > beforeEffective.TableClass
             ? await CountCoveringTableGrantsAsync(tenant, meta.Identifier, canonicalColumn, ct).ConfigureAwait(false)
             : 0;
 
-        await AuditColumnProtectionChangeAsync(
-            tenant,
-            caller.UserSid,
-            meta,
-            container,
-            canonicalColumn,
-            beforeEffective,
-            afterEffective,
-            coveringGrants,
+        await RunAuditedProtectionAsync(
+            () => _domains.SetProtectionAsync(tenant, meta.Table.Id, canonicalColumn, validation.NormalizedProtection, caller.UserSid, ct),
+            c => _domains.SetProtectionAsync(tenant, meta.Table.Id, canonicalColumn, validation.NormalizedProtection, caller.UserSid, c),
+            c => AuditColumnProtectionChangeAsync(tenant, caller.UserSid, meta, container, canonicalColumn, beforeEffective, afterEffective, coveringGrants, c),
             ct).ConfigureAwait(false);
 
         await _writeInvalidator.InvalidateWideAsync(tenant, ct: ct).ConfigureAwait(false);
         return Ok(new ProtectionWriteOutcome(meta.Identifier.ToString(), meta.Table.Id, canonicalColumn, afterEffective, coveringGrants));
+    }
+
+    private async Task RunAuditedProtectionAsync(
+        Func<Task> writeDirect,
+        Func<CancellationToken, Task> writeAtomic,
+        Func<CancellationToken, Task> writeAudit,
+        CancellationToken ct)
+    {
+        if (_domains is IAtomicGovernanceDomainRepository)
+        {
+            await RunAtomicAsync(async innerCt =>
+            {
+                await writeAtomic(innerCt).ConfigureAwait(false);
+                await writeAudit(innerCt).ConfigureAwait(false);
+            }, ct).ConfigureAwait(false);
+            return;
+        }
+
+        await writeAudit(ct).ConfigureAwait(false);
+        await writeDirect().ConfigureAwait(false);
     }
 
     private async Task<ContainerDefaults> ResolveContainerForTableAsync(TenantId tenant, TableMetadata meta, CancellationToken ct)
@@ -201,9 +201,7 @@ public sealed partial class GovernanceDomainService
     }
 
     private static bool IsVisibleInTenant(TableMetadata meta, TenantId tenant) =>
-        meta.Table.IsActive &&
-        (string.IsNullOrWhiteSpace(meta.OwnerTenantId) ||
-         string.Equals(meta.OwnerTenantId, tenant.Value, StringComparison.OrdinalIgnoreCase));
+        CatalogTenantOwnership.IsEligibleTargetInTenant(meta, tenant, allowDiscoveryHidden: true);
 
     private async Task<int> CountCoveringTableGrantsAsync(TenantId tenant, TableIdentifier table, string column, CancellationToken ct)
     {

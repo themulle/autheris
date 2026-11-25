@@ -17,6 +17,15 @@ public sealed record AsyncQueryJobRequest(
     int MaxRows = 100_000,
     TimeSpan? Timeout = null);
 
+public sealed record AsyncJobTablePolicySnapshot(
+    bool IsAllowed,
+    System.Collections.Generic.IReadOnlyDictionary<string, Interfaces.ColumnAccessLevel> ColumnAccess,
+    string? ColumnMasksFingerprint,
+    string? CombinedRowFilterSql,
+    string? RowPolicyFingerprint = null,
+    string? MandatoryRowPolicyFingerprint = null,
+    System.Collections.Generic.IReadOnlyList<string>? AppliedVirtualFilters = null);
+
 public sealed record AsyncJobDescriptor(
     string JobId,
     string TenantId,
@@ -35,7 +44,9 @@ public sealed record AsyncJobDescriptor(
     System.Collections.Generic.IReadOnlyList<string>? SubmittedByRoles = null,
     System.Collections.Generic.IReadOnlyList<string>? SubmittedByScopes = null,
     long? SubmittedGovernanceEpoch = null,
-    System.Collections.Generic.IReadOnlyList<string>? TargetTables = null);
+    System.Collections.Generic.IReadOnlyList<string>? TargetTables = null,
+    bool SubmittedGroupResolutionComplete = false,
+    System.Collections.Generic.IReadOnlyDictionary<string, AsyncJobTablePolicySnapshot>? SubmittedTableSnapshots = null);
 
 public sealed record AsyncJobStatusResponse(
     string JobId,

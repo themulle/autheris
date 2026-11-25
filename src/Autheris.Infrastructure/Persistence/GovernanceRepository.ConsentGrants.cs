@@ -137,6 +137,20 @@ public partial class GovernanceRepository
 
         var tables = new Dictionary<string, TableIdentifier>(StringComparer.OrdinalIgnoreCase);
         Autheris.Application.Catalog.CatalogVersion? patternVersion = null;
+        TenantId? touchedTenant = null;
+        var multipleTenants = false;
+        void RecordTenant(TenantId tenant)
+        {
+            if (touchedTenant is null)
+            {
+                touchedTenant = tenant;
+            }
+            else if (touchedTenant.Value != tenant)
+            {
+                multipleTenants = true;
+            }
+        }
+
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
@@ -154,15 +168,17 @@ public partial class GovernanceRepository
                     effectiveAuthority,
                     requireDeclarativeForPrune: isPruned,
                     ct).ConfigureAwait(false);
-                if (revoked != null)
+                if (revoked is { } r)
                 {
-                    tables[revoked.Value.ToString().ToLowerInvariant()] = revoked.Value;
+                    RecordTenant(r.Tenant);
+                    tables[r.Table.ToString().ToLowerInvariant()] = r.Table;
                 }
             }
 
             foreach (var c in create)
             {
                 await InsertConsentCoreAsync(conn, tx, c, ct).ConfigureAwait(false);
+                RecordTenant(c.TenantId);
                 tables[c.TableIdentifier.ToString().ToLowerInvariant()] = c.TableIdentifier;
             }
 
@@ -200,7 +216,7 @@ public partial class GovernanceRepository
             throw;
         }
 
-        var notifyTenant = create.Count > 0 && create.All(c => c.TenantId == create[0].TenantId) ? create[0].TenantId : (TenantId?)null;
+        var notifyTenant = multipleTenants ? null : touchedTenant;
         if (patternVersion is { } version)
             await _writeInvalidator.InvalidateWideAsync(notifyTenant, version, ct: ct).ConfigureAwait(false);
         if (tables.Count > 0)
@@ -253,18 +269,18 @@ public partial class GovernanceRepository
 
         var effectiveAuthority = authority ?? ConsentRevocationAuthority.FromPrincipal(null);
 
-        TableIdentifier? revoked;
+        (TableIdentifier Table, TenantId Tenant)? revoked;
         Autheris.Application.Catalog.CatalogVersion? patternVersion = null;
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
             revoked = await RevokeConsentInTransactionAsync(conn, tx, consentId, revokedBySid, reason, effectiveAuthority, requireDeclarativeForPrune: false, ct).ConfigureAwait(false);
-            if (revoked is { } table)
+            if (revoked is { } target)
             {
                 // A pattern grant has no table epoch: like its creation, its revoke advances the catalog version (part of every cached decision).
-                patternVersion = string.IsNullOrWhiteSpace(table.TableName) ? await BumpCatalogVersionInternalAsync(conn, tx, 0, 1, ct).ConfigureAwait(false) : null;
-                await (patternVersion is null ? IncrementTableEpochInternalAsync(conn, tx, table, ct) : Task.CompletedTask).ConfigureAwait(false);
+                patternVersion = string.IsNullOrWhiteSpace(target.Table.TableName) ? await BumpCatalogVersionInternalAsync(conn, tx, 0, 1, ct).ConfigureAwait(false) : null;
+                await (patternVersion is null ? IncrementTableEpochInternalAsync(conn, tx, target.Table, ct) : Task.CompletedTask).ConfigureAwait(false);
             }
 
             await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
@@ -276,9 +292,9 @@ public partial class GovernanceRepository
         }
 
         if (patternVersion is { } version)
-            await _writeInvalidator.InvalidateWideAsync(null, version, ct: ct).ConfigureAwait(false);
+            await _writeInvalidator.InvalidateWideAsync(revoked?.Tenant, version, ct: ct).ConfigureAwait(false);
         else if (revoked is { } committed)
-            await _writeInvalidator.InvalidateTablesAsync(null, [committed], metadataInvalidator: InvalidateTableMetadata, ct: ct).ConfigureAwait(false);
+            await _writeInvalidator.InvalidateTablesAsync(committed.Tenant, [committed.Table], metadataInvalidator: InvalidateTableMetadata, ct: ct).ConfigureAwait(false);
     }
 
     /// <summary>
@@ -353,7 +369,7 @@ public partial class GovernanceRepository
         }
     }
 
-    private async Task<TableIdentifier?> RevokeConsentInTransactionAsync(
+    private async Task<(TableIdentifier Table, TenantId Tenant)?> RevokeConsentInTransactionAsync(
         DbConnection conn, DbTransaction tx, Guid consentId, Sid actor, string reason, ConsentRevocationAuthority authority, bool requireDeclarativeForPrune, CancellationToken ct)
     {
         var grantWriter = RequireGrantWriter();
@@ -377,11 +393,10 @@ public partial class GovernanceRepository
             throw new KeyNotFoundException($"Consent with ID '{consentId}' does not exist.");
         }
 
+        // Container owners revoke through the grant revoke authority (verified tenant authority); there is no per-table owner fallback here.
         var isAuthorized = isAdminForTenant
                            || (!requireDeclarativeForPrune && found.IsGranteeSelf)
-                           || (isPattern
-                               ? await IsAuthorizedApproverForPatternConsentAsync(conn, tx, consentId, actor, ct).ConfigureAwait(false)
-                               : await IsAuthorizedApproverForTableInternalAsync(conn, tx, tableId.Value, actor, ct).ConfigureAwait(false));
+                           || (isPattern && await IsAuthorizedApproverForPatternConsentAsync(conn, tx, consentId, actor, ct).ConfigureAwait(false));
         if (!isAuthorized)
         {
             throw new RevocationDenialCaptureException(consentId, denialTenant, tableId.Value);
@@ -426,7 +441,7 @@ public partial class GovernanceRepository
 
         await EmitGrantRevokedEventInTransactionAsync(conn, tx, consentId, tenant, tableId.Value, now, ct).ConfigureAwait(false);
 
-        return tableId;
+        return (tableId.Value, tenant);
     }
 
     private async Task<bool> IsAuthorizedApproverForPatternConsentAsync(
@@ -437,16 +452,9 @@ public partial class GovernanceRepository
         cmd.CommandText = @"SELECT COUNT(*)
                             FROM CONSENT_APPROVING_OWNERS cao
                             WHERE cao.consent_id = @cid
-                              AND (UPPER(cao.owner_sid) = UPPER(@apprSid)
-                                   OR cao.owner_sid IN (
-                                       SELECT o.ad_sid
-                                       FROM DATA_OWNER_DELEGATIONS del
-                                       JOIN DATA_OWNERS o ON del.data_owner_id = o.id
-                                       WHERE del.delegate_sid = @apprSid AND del.valid_from <= @now AND @now < del.valid_to
-                                   ))";
+                              AND UPPER(cao.owner_sid) = UPPER(@apprSid)";
         cmd.AddBound("@cid", consentId.ToString("D"));
         cmd.AddBound("@apprSid", approverSid.Value);
-        cmd.AddBound("@now", TimeProvider.System.GetUtcNow().ToString("O"));
         var count = Convert.ToInt64(await ExecuteScalarAsync(cmd, "ConsentGrants.CheckPatternApprovers", ct).ConfigureAwait(false));
         return count > 0;
     }
@@ -507,46 +515,6 @@ WHERE c.id = @id";
                 externalSystemId),
             tenant,
             ct).ConfigureAwait(false);
-    }
-
-    internal async Task<bool> IsAuthorizedApproverForTableInternalAsync(
-        DbConnection conn, DbTransaction? tx, TableIdentifier table, Sid approverSid, CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.Transaction = tx;
-        cmd.CommandText = @"SELECT COUNT(*)
-                            FROM TABLES t
-                            JOIN TABLE_OWNERS tow ON t.id = tow.table_id
-                            JOIN DATA_OWNERS o ON tow.data_owner_id = o.id
-                            WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
-                              AND o.ad_sid = @apprSid
-                              AND o.is_active = 1";
-        cmd.AddBound("@domain", table.Domain);
-        cmd.AddBound("@schema", table.Schema);
-        cmd.AddBound("@table", table.TableName);
-        cmd.AddBound("@apprSid", approverSid.Value);
-
-        var directOwnerCount = Convert.ToInt64(await ExecuteScalarAsync(cmd, "ConsentGrants.CheckDirectOwner", ct).ConfigureAwait(false));
-        if (directOwnerCount > 0) return true;
-
-        await using var delCmd = conn.CreateCommand();
-        delCmd.Transaction = tx;
-        delCmd.CommandText = @"SELECT COUNT(*)
-                               FROM DATA_OWNER_DELEGATIONS d
-                               JOIN DATA_OWNERS o ON d.data_owner_id = o.id
-                               JOIN TABLE_OWNERS tow ON o.id = tow.data_owner_id
-                               JOIN TABLES t ON tow.table_id = t.id
-                               WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table)
-                                 AND d.delegate_sid = @apprSid
-                                 AND d.valid_from <= @now AND d.valid_to >= @now";
-        delCmd.AddBound("@domain", table.Domain);
-        delCmd.AddBound("@schema", table.Schema);
-        delCmd.AddBound("@table", table.TableName);
-        delCmd.AddBound("@apprSid", approverSid.Value);
-        delCmd.AddBound("@now", TimeProvider.System.GetUtcNow().ToString("O"));
-
-        var delegateCount = Convert.ToInt64(await ExecuteScalarAsync(delCmd, "ConsentGrants.CheckDelegates", ct).ConfigureAwait(false));
-        return delegateCount > 0;
     }
 }
 

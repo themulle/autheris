@@ -541,8 +541,8 @@ public sealed class EffectiveAccessReportTests
         var auditWriter = new FakeAuditWriter();
         var snapshotProvider = new FakeSnapshotProvider(snapshot);
 
-        var rowScopeCompiler = new RowScopeCompiler(snapshotProvider, catalog: tableRepo);
-        var resolution = new ConsentResolutionService();
+        var rowScopeCompiler = new RowScopeCompiler(snapshotProvider, catalog: tableRepo, timeProvider: time);
+        var resolution = new ConsentResolutionService(timeProvider: time);
         var pdp = new AccessDecisionPoint(
             Options.Create(new GatewayOptions()),
             resolution,
@@ -731,13 +731,12 @@ public sealed class EffectiveAccessReportTests
 
     private sealed class FakeOwnershipRepo : IContainerOwnership
     {
-        private readonly Dictionary<TableIdentifier, List<DataOwner>> _owners = [];
+        private readonly Dictionary<TableIdentifier, List<ContainerOwnerEntry>> _owners = [];
         public void SetOwners(TableIdentifier table, params Sid[] sids) =>
-            _owners[table] = sids.Select(s => new DataOwner { AdSid = s, IsActive = true }).ToList();
+            _owners[table] = sids.Select(s => new ContainerOwnerEntry { AdSid = s, IsActive = true }).ToList();
 
-        public Task<DataOwnerDelegation> DelegateDataOwnershipAsync(DataOwnerDelegation delegation, CancellationToken ct = default) => throw new NotImplementedException();
-        public Task<IReadOnlyList<DataOwner>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<DataOwner>>(_owners.TryGetValue(table, out var list) ? list : []);
+        public Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<ContainerOwnerEntry>>(_owners.TryGetValue(table, out var list) ? list : []);
         public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default) =>
             Task.FromResult(_owners.TryGetValue(table, out var list) && list.Any(o => o.IsActive && o.AdSid == approverSid));
     }

@@ -160,6 +160,10 @@ public sealed class AttributeValidatingConsentRepository : IConsentRepository, I
     public Task<IReadOnlyList<Consent>> GetActiveGrantsForSubjectsAsync(TenantId tenantId, IReadOnlyCollection<Sid> subjects, DateTimeOffset atTime, int maxResults, CancellationToken ct = default) =>
         _inner.GetActiveGrantsForSubjectsAsync(tenantId, subjects, atTime, maxResults, ct);
 
+    public Task<IReadOnlyList<Consent>> GetActiveGrantsForSubjectsAfterAsync(
+        TenantId tenantId, IReadOnlyCollection<Sid> subjects, DateTimeOffset atTime, Guid? afterId, int maxResults, CancellationToken ct = default) =>
+        _inner.GetActiveGrantsForSubjectsAfterAsync(tenantId, subjects, atTime, afterId, maxResults, ct);
+
     public Task<IReadOnlyList<TableIdentifier>> GetTablesWithConsentsForTenantAsync(TenantId tenantId, CancellationToken ct = default) =>
         _inner.GetTablesWithConsentsForTenantAsync(tenantId, ct);
 

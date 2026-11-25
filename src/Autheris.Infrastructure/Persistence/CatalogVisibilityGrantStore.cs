@@ -65,6 +65,12 @@ public sealed class CatalogVisibilityGrantStore(
     private const string ListActivePrefixSsSql =
         SelectColumns + SsTable + " WHERE tenant_id = @tenantId AND is_revoked = 0 AND valid_from <= @atTime AND (valid_to IS NULL OR valid_to > @atTime) AND grantee_sid_norm IN (";
 
+    private const string ListDeprovisionPrefixPgSql =
+        SelectColumns + PgTable + " WHERE tenant_id = @tenantId AND is_revoked = FALSE AND (valid_to IS NULL OR valid_to > @atTime) AND grantee_sid_norm IN (";
+
+    private const string ListDeprovisionPrefixSsSql =
+        SelectColumns + SsTable + " WHERE tenant_id = @tenantId AND is_revoked = 0 AND (valid_to IS NULL OR valid_to > @atTime) AND grantee_sid_norm IN (";
+
     private const string ListByContainerPgSql =
         SelectColumns + PgTable + " WHERE tenant_id = @tenantId AND container_kind = @containerKind AND container_id = @containerId";
 
@@ -274,11 +280,26 @@ public sealed class CatalogVisibilityGrantStore(
         return totalRevoked;
     }
 
-    public async Task<IReadOnlyList<CatalogVisibilityGrant>> ListActiveForSubjectsAsync(
+    public Task<IReadOnlyList<CatalogVisibilityGrant>> ListActiveForSubjectsAsync(
         TenantId tenantId,
         IReadOnlyCollection<Sid> subjects,
         DateTimeOffset atTime,
-        CancellationToken ct = default)
+        CancellationToken ct = default) =>
+        ListForSubjectsCoreAsync(tenantId, subjects, atTime, includeFuture: false, ct);
+
+    public Task<IReadOnlyList<CatalogVisibilityGrant>> ListForDeprovisioningAsync(
+        TenantId tenantId,
+        IReadOnlyCollection<Sid> subjects,
+        DateTimeOffset atTime,
+        CancellationToken ct = default) =>
+        ListForSubjectsCoreAsync(tenantId, subjects, atTime, includeFuture: true, ct);
+
+    private async Task<IReadOnlyList<CatalogVisibilityGrant>> ListForSubjectsCoreAsync(
+        TenantId tenantId,
+        IReadOnlyCollection<Sid> subjects,
+        DateTimeOffset atTime,
+        bool includeFuture,
+        CancellationToken ct)
     {
         var tenantIdStr = RequireTenant(tenantId);
         ArgumentNullException.ThrowIfNull(subjects);
@@ -291,20 +312,30 @@ public sealed class CatalogVisibilityGrantStore(
         var utcAt = atTime.ToUniversalTime();
         var results = new List<CatalogVisibilityGrant>();
         var seen = new HashSet<Guid>();
+        var prefix = (IsSqlServer, includeFuture) switch
+        {
+            (true, true) => ListDeprovisionPrefixSsSql,
+            (true, false) => ListActivePrefixSsSql,
+            (false, true) => ListDeprovisionPrefixPgSql,
+            (false, false) => ListActivePrefixPgSql
+        };
         await using var conn = await OpenAsync(ct).ConfigureAwait(false);
         for (var offset = 0; offset < normalized.Count; offset += SubjectBatchSize)
         {
             var batch = normalized.Skip(offset).Take(SubjectBatchSize).ToList();
             await using var cmd = conn.CreateCommand();
             var inClause = BindSubjectInClause(cmd, batch);
-            cmd.CommandText = (IsSqlServer ? ListActivePrefixSsSql : ListActivePrefixPgSql) + inClause + ") ORDER BY created_at DESC, id";
+            cmd.CommandText = prefix + inClause + ") ORDER BY created_at DESC, id";
             cmd.AddBound("@tenantId", tenantIdStr);
             cmd.AddBound("@atTime", utcAt, DbType.DateTimeOffset);
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
                 var row = ReadRow(reader);
-                if (row.IsActive(utcAt) && seen.Add(row.Id))
+                var activeOrScheduled = !row.IsRevoked &&
+                                        (row.ValidTo is null || utcAt < row.ValidTo) &&
+                                        (includeFuture || row.ValidFrom <= utcAt);
+                if (activeOrScheduled && seen.Add(row.Id))
                 {
                     results.Add(row);
                 }

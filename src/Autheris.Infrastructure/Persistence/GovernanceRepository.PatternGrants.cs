@@ -9,21 +9,6 @@ namespace Autheris.Infrastructure.Persistence;
 
 public partial class GovernanceRepository
 {
-    private const string SelectActiveDirectOwnersForTableSql =
-        "SELECT o.ad_sid FROM TABLES t " +
-        "JOIN TABLE_OWNERS tow ON t.id = tow.table_id " +
-        "JOIN DATA_OWNERS o ON tow.data_owner_id = o.id " +
-        "WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table) " +
-        "AND o.is_active = 1";
-
-    private const string SelectActiveDelegatesForTableSql =
-        "SELECT d.delegate_sid FROM DATA_OWNER_DELEGATIONS d " +
-        "JOIN DATA_OWNERS o ON d.data_owner_id = o.id " +
-        "JOIN TABLE_OWNERS tow ON o.id = tow.data_owner_id " +
-        "JOIN TABLES t ON tow.table_id = t.id " +
-        "WHERE LOWER(t.source_name) = LOWER(@domain) AND LOWER(t.schema_name) = LOWER(@schema) AND LOWER(t.table_name) = LOWER(@table) " +
-        "AND o.is_active = 1 AND d.valid_from <= @now AND d.valid_to >= @now";
-
     public Task<IReadOnlyList<Consent>> GetActivePatternConsentsAsync(TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default) =>
         ReadAndHydratePatternConsentsAsync(TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents)), subjectSet: null, atTime, c => !c.IsActive(atTime), ct);
 
@@ -66,60 +51,6 @@ public partial class GovernanceRepository
         consents.RemoveAll(exclude);
         await HydrateConsentsBatchAsync(conn, consents, ct).ConfigureAwait(false);
         return consents;
-    }
-
-    public async Task<IReadOnlySet<string>> GetAuthorizedApproverSidsForTableAsync(TableIdentifier table, DateTimeOffset atTime, CancellationToken ct = default)
-    {
-        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
-        var set = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        await ReadApproverSidsAsync(conn, SelectActiveDirectOwnersForTableSql, "PatternGrants.ReadDirectOwners", table, atTime: null, set, ct).ConfigureAwait(false);
-        await ReadApproverSidsAsync(conn, SelectActiveDelegatesForTableSql, "PatternGrants.ReadDelegates", table, atTime, set, ct).ConfigureAwait(false);
-        return set;
-    }
-
-    private async Task ReadApproverSidsAsync(DbConnection conn, string sql, string operationName, TableIdentifier table, DateTimeOffset? atTime, HashSet<string> target, CancellationToken ct)
-    {
-        await using var cmd = conn.CreateCommand();
-        cmd.CommandText = sql;
-        cmd.AddBound("@domain", table.Domain);
-        cmd.AddBound("@schema", table.Schema);
-        cmd.AddBound("@table", table.TableName);
-        if (atTime is { } at)
-        {
-            cmd.AddBound("@now", at.ToString("O"));
-        }
-
-        await using var reader = await ExecuteReaderAsync(cmd, operationName, ct).ConfigureAwait(false);
-        while (await reader.ReadAsync(ct).ConfigureAwait(false))
-        {
-            if (!reader.IsDBNull(0) && reader.GetString(0) is { } sid && !string.IsNullOrWhiteSpace(sid))
-            {
-                target.Add(sid);
-            }
-        }
-    }
-
-    public async Task<bool> IsAnyApproverAuthorizedForTableAsync(
-        TableIdentifier table,
-        IReadOnlyCollection<string> ownerSids,
-        DateTimeOffset atTime,
-        CancellationToken ct = default)
-    {
-        if (ownerSids.Count == 0)
-        {
-            return false;
-        }
-
-        var authorized = await GetAuthorizedApproverSidsForTableAsync(table, atTime, ct).ConfigureAwait(false);
-        foreach (var candidate in ownerSids)
-        {
-            if (!string.IsNullOrWhiteSpace(candidate) && authorized.Contains(candidate.Trim()))
-            {
-                return true;
-            }
-        }
-
-        return false;
     }
 
     /// <summary>Constant parameterized SQL helpers for pattern grants on <c>CONSENTS</c> and <c>CONSENT_APPROVING_OWNERS</c>.</summary>
@@ -244,7 +175,10 @@ public partial class GovernanceRepository
             HashSet<Sid>? subjectSet,
             HashSet<Guid> seen,
             List<Consent> consents,
-            CancellationToken ct)
+            CancellationToken ct,
+            bool includeFuture = false,
+            Guid? afterId = null,
+            bool allowOnly = false)
         {
             var baseSql = (tenantId != null, !string.IsNullOrWhiteSpace(domain)) switch
             {
@@ -256,7 +190,7 @@ public partial class GovernanceRepository
 
             if (subjectSet == null)
             {
-                await ReadActivePatternConsentsChunkAsync(conn, baseSql, domain, tenantId, atTime, subjectSet: null, subjectChunk: null, seen, consents, ct).ConfigureAwait(false);
+                await ReadActivePatternConsentsChunkAsync(conn, baseSql, domain, tenantId, atTime, subjectSet: null, subjectChunk: null, seen, consents, includeFuture, afterId, allowOnly, ct).ConfigureAwait(false);
                 return;
             }
 
@@ -269,7 +203,7 @@ public partial class GovernanceRepository
             foreach (var chunk in ConsentSubjectFilter.Chunks(normalized))
             {
                 var sql = baseSql + ConsentSubjectFilter.InListPredicate(chunk.Count);
-                await ReadActivePatternConsentsChunkAsync(conn, sql, domain, tenantId, atTime, subjectSet, chunk, seen, consents, ct).ConfigureAwait(false);
+                await ReadActivePatternConsentsChunkAsync(conn, sql, domain, tenantId, atTime, subjectSet, chunk, seen, consents, includeFuture, afterId, allowOnly, ct).ConfigureAwait(false);
             }
         }
 
@@ -283,6 +217,9 @@ public partial class GovernanceRepository
             ArraySegment<string>? subjectChunk,
             HashSet<Guid> seen,
             List<Consent> consents,
+            bool includeFuture,
+            Guid? afterId,
+            bool allowOnly,
             CancellationToken ct)
         {
             await using var cmd = conn.CreateCommand();
@@ -306,6 +243,7 @@ public partial class GovernanceRepository
                 }
             }
 
+            var afterStr = afterId?.ToString("D");
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             while (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
@@ -317,7 +255,12 @@ public partial class GovernanceRepository
                 }
 
                 var effect = Enum.Parse<ConsentEffect>(reader.GetString(3), ignoreCase: true);
-                if (atTime < validFrom && effect != ConsentEffect.Deny)
+                if (!includeFuture && atTime < validFrom && effect != ConsentEffect.Deny)
+                {
+                    continue;
+                }
+
+                if (allowOnly && effect != ConsentEffect.Allow)
                 {
                     continue;
                 }
@@ -331,6 +274,11 @@ public partial class GovernanceRepository
                 }
 
                 var id = Guid.Parse(reader.GetString(0));
+                if (afterStr is not null && string.Compare(id.ToString("D"), afterStr, StringComparison.Ordinal) <= 0)
+                {
+                    continue;
+                }
+
                 if (!seen.Add(id))
                 {
                     continue;

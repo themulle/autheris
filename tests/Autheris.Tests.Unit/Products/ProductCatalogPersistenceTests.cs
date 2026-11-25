@@ -114,11 +114,9 @@ public sealed class ProductCatalogPersistenceTests
     {
         var product = await CreateAsync();
         _h.CatalogObjects.Objects[ProductObject].Table.IsActive.ShouldBeTrue();
-        _h.OwnerLinks.Owners[ProductObject].ShouldBe(ProductHarness.Bob);
 
         await _h.Service.SetOwnerGroupAsync(_h.Caller(ProductHarness.Admin, admin: true), product.Schema, product.Name, ProductHarness.Carol);
-
-        _h.OwnerLinks.Owners[ProductObject].ShouldBe(ProductHarness.Carol);
+        (await _h.Store.GetProductAsync(product.Tenant, product.Schema, product.Name))!.OwnerGroupSid.ShouldBe(ProductHarness.Carol);
         _h.CatalogObjects.Objects[ProductObject].Table.IsActive.ShouldBeTrue();
     }
 
@@ -130,7 +128,6 @@ public sealed class ProductCatalogPersistenceTests
         await _h.Service.RetireAsync(_h.Caller(ProductHarness.Bob), "sales", "orders_view");
 
         _h.CatalogObjects.Objects[ProductObject].Table.IsActive.ShouldBeFalse("a retired product is no longer decidable");
-        _h.OwnerLinks.Owners[ProductObject].ShouldBeNull();
     }
 
     [Fact]
@@ -141,6 +138,5 @@ public sealed class ProductCatalogPersistenceTests
         var ex = await Should.ThrowAsync<ProductException>(() => CreateAsync());
 
         ex.Code.ShouldBe(ProductErrorCodes.CatalogPersistFailed);
-        _h.OwnerLinks.Calls.ShouldBe(0, "the owner link follows the catalog object, never precedes it");
     }
 }

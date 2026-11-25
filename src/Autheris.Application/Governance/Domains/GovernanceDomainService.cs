@@ -93,6 +93,25 @@ public sealed partial class GovernanceDomainService(
     private readonly IDataProductRepository? _products = products;
     private readonly GatewayOptions? _gatewayOptions = gatewayOptions?.Value;
 
+    internal IAtomicGovernanceDomainRepository? AtomicRepository => _domains as IAtomicGovernanceDomainRepository;
+
+    private Task RunAtomicAsync(Func<CancellationToken, Task> action, CancellationToken ct) =>
+        _domains is IAtomicGovernanceDomainRepository atomic ? atomic.ExecuteInTransactionAsync(action, ct) : action(ct);
+
+    private async Task<DomainServiceResult<T>> RunAtomicWriteAsync<T>(
+        Func<CancellationToken, Task<(DomainServiceResult<T> Result, Func<CancellationToken, Task>? Audit)>> work,
+        CancellationToken ct)
+    {
+        DomainServiceResult<T> outcome = default!;
+        await RunAtomicAsync(async innerCt =>
+        {
+            var (res, audit) = await work(innerCt).ConfigureAwait(false);
+            outcome = res;
+            if (audit is not null) await audit(innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
+        return outcome;
+    }
+
     public async Task<DomainServiceResult<IReadOnlyList<GovernanceDomain>>> ListDomainsAsync(
         SecurityPrincipalContext caller,
         TenantId tenant,
@@ -182,23 +201,23 @@ public sealed partial class GovernanceDomainService(
             CreatedAt: _time.GetUtcNow().ToUniversalTime(),
             UpdatedAt: _time.GetUtcNow().ToUniversalTime());
 
-        var result = await _domains.UpsertAsync(domain, expectedVersion: 0, caller.UserSid, ct).ConfigureAwait(false);
-        if (!result.Succeeded || result.Domain is null)
+        var outcome = await RunAtomicWriteAsync<GovernanceDomain>(async innerCt =>
         {
-            return new DomainServiceResult<GovernanceDomain>(
-                DomainServiceStatus.Conflict,
-                ErrorCode: "DOMAIN_CONFLICT",
-                ErrorMessage: "A governance domain with that name already exists.");
-        }
+            var result = await _domains.UpsertAsync(domain, expectedVersion: 0, caller.UserSid, innerCt).ConfigureAwait(false);
+            if (!result.Succeeded || result.Domain is null)
+                return (new(DomainServiceStatus.Conflict, ErrorCode: "DOMAIN_CONFLICT", ErrorMessage: "A governance domain with that name already exists."), null);
+            var created = result.Domain;
+            return (new(DomainServiceStatus.Created, created), async c =>
+            {
+                await RecordDomainAuditAsync(tenant, caller.UserSid, created.Id, "created", null, created, c).ConfigureAwait(false);
+                if (created.OwnerGroupSid is { } assignedSid)
+                    await RecordOwnerGroupAuditAsync(tenant, caller.UserSid, created, null, assignedSid, c).ConfigureAwait(false);
+            });
+        }, ct).ConfigureAwait(false);
 
-        await RecordDomainAuditAsync(tenant, caller.UserSid, result.Domain.Id, "created", null, result.Domain, ct).ConfigureAwait(false);
-        if (result.Domain.OwnerGroupSid is { } assignedSid)
-        {
-            await RecordOwnerGroupAuditAsync(tenant, caller.UserSid, result.Domain, null, assignedSid, ct).ConfigureAwait(false);
-        }
-
-        await _writeInvalidator.InvalidateWideAsync(tenant, ct: ct).ConfigureAwait(false);
-        return new DomainServiceResult<GovernanceDomain>(DomainServiceStatus.Created, result.Domain);
+        if (outcome.Status == DomainServiceStatus.Created)
+            await _writeInvalidator.InvalidateWideAsync(tenant, ct: ct).ConfigureAwait(false);
+        return outcome;
     }
 
     public async Task<DomainServiceResult<GovernanceDomain>> UpdateDomainAsync(
@@ -262,32 +281,26 @@ public sealed partial class GovernanceDomainService(
             return delegatedError;
         }
 
-        var result = await _domains.UpsertAsync(updatedModel, expectedVersion, caller.UserSid, ct).ConfigureAwait(false);
-        if (result.Status == GovernanceDomainWriteStatus.NotFound)
+        var outcome = await RunAtomicWriteAsync<GovernanceDomain>(async innerCt =>
         {
-            return NotFound<GovernanceDomain>("DOMAIN_NOT_FOUND", "Governance domain was not found.");
-        }
-
-        if (!result.Succeeded || result.Domain is null)
-        {
-            var current = await _domains.GetAsync(tenant, domainId, ct).ConfigureAwait(false);
-            if (current is not null && current.Version != expectedVersion)
+            var result = await _domains.UpsertAsync(updatedModel, expectedVersion, caller.UserSid, innerCt).ConfigureAwait(false);
+            if (result.Status == GovernanceDomainWriteStatus.NotFound)
+                return (NotFound<GovernanceDomain>("DOMAIN_NOT_FOUND", "Governance domain was not found."), null);
+            if (!result.Succeeded || result.Domain is null)
             {
-                return new DomainServiceResult<GovernanceDomain>(
-                    DomainServiceStatus.VersionMismatch,
-                    ErrorCode: "VERSION_MISMATCH",
-                    ErrorMessage: "Governance domain version does not match If-Match.");
+                var current = await _domains.GetAsync(tenant, domainId, innerCt).ConfigureAwait(false);
+                return current is not null && current.Version != expectedVersion
+                    ? (new(DomainServiceStatus.VersionMismatch, ErrorCode: "VERSION_MISMATCH", ErrorMessage: "Governance domain version does not match If-Match."), null)
+                    : (new(DomainServiceStatus.Conflict, ErrorCode: "DOMAIN_CONFLICT", ErrorMessage: "A governance domain with that name already exists."), null);
             }
 
-            return new DomainServiceResult<GovernanceDomain>(
-                DomainServiceStatus.Conflict,
-                ErrorCode: "DOMAIN_CONFLICT",
-                ErrorMessage: "A governance domain with that name already exists.");
-        }
+            var updated = result.Domain;
+            return (Ok(updated), c => RecordDomainAuditAsync(tenant, caller.UserSid, updated.Id, "updated", before, updated, c));
+        }, ct).ConfigureAwait(false);
 
-        await RecordDomainAuditAsync(tenant, caller.UserSid, result.Domain.Id, "updated", before, result.Domain, ct).ConfigureAwait(false);
-        await _writeInvalidator.InvalidateWideAsync(tenant, ct: ct).ConfigureAwait(false);
-        return Ok(result.Domain);
+        if (outcome.Status == DomainServiceStatus.Ok)
+            await _writeInvalidator.InvalidateWideAsync(tenant, ct: ct).ConfigureAwait(false);
+        return outcome;
     }
 
     public async Task<DomainServiceResult<bool>> DeleteDomainAsync(
@@ -326,18 +339,16 @@ public sealed partial class GovernanceDomainService(
                 ErrorMessage: "Governance domain version does not match If-Match.");
         }
 
-        var deleted = await _domains.DeleteAsync(tenant, domainId, expectedVersion, ct).ConfigureAwait(false);
-        if (!deleted)
+        var outcome = await RunAtomicWriteAsync<bool>(async innerCt =>
         {
-            return new DomainServiceResult<bool>(
-                DomainServiceStatus.VersionMismatch,
-                ErrorCode: "VERSION_MISMATCH",
-                ErrorMessage: "Governance domain version does not match If-Match.");
-        }
+            if (!await _domains.DeleteAsync(tenant, domainId, expectedVersion, innerCt).ConfigureAwait(false))
+                return (new(DomainServiceStatus.VersionMismatch, ErrorCode: "VERSION_MISMATCH", ErrorMessage: "Governance domain version does not match If-Match."), null);
+            return (new(DomainServiceStatus.Deleted, true), c => RecordDomainAuditAsync(tenant, caller.UserSid, domainId, "deleted", before, null, c));
+        }, ct).ConfigureAwait(false);
 
-        await RecordDomainAuditAsync(tenant, caller.UserSid, domainId, "deleted", before, null, ct).ConfigureAwait(false);
-        await _writeInvalidator.InvalidateWideAsync(tenant, ct: ct).ConfigureAwait(false);
-        return new DomainServiceResult<bool>(DomainServiceStatus.Deleted, true);
+        if (outcome.Status == DomainServiceStatus.Deleted)
+            await _writeInvalidator.InvalidateWideAsync(tenant, ct: ct).ConfigureAwait(false);
+        return outcome;
     }
 
     public async Task<DomainServiceResult<GovernanceDomain>> AssignOwnerGroupAsync(
@@ -378,23 +389,20 @@ public sealed partial class GovernanceDomainService(
                 ErrorMessage: "Governance domain version does not match If-Match.");
         }
 
-        var result = await _domains.UpsertAsync(before with { OwnerGroupSid = ownerGroupSid }, targetVersion, caller.UserSid, ct).ConfigureAwait(false);
-        if (result.Status == GovernanceDomainWriteStatus.NotFound)
+        var outcome = await RunAtomicWriteAsync<GovernanceDomain>(async innerCt =>
         {
-            return NotFound<GovernanceDomain>("DOMAIN_NOT_FOUND", "Governance domain was not found.");
-        }
+            var result = await _domains.UpsertAsync(before with { OwnerGroupSid = ownerGroupSid }, targetVersion, caller.UserSid, innerCt).ConfigureAwait(false);
+            if (result.Status == GovernanceDomainWriteStatus.NotFound)
+                return (NotFound<GovernanceDomain>("DOMAIN_NOT_FOUND", "Governance domain was not found."), null);
+            if (!result.Succeeded || result.Domain is null)
+                return (new(DomainServiceStatus.VersionMismatch, ErrorCode: "VERSION_MISMATCH", ErrorMessage: "Governance domain version conflict while assigning owner group."), null);
+            var assigned = result.Domain;
+            return (Ok(assigned), c => RecordOwnerGroupAuditAsync(tenant, caller.UserSid, assigned, before.OwnerGroupSid, ownerGroupSid, c));
+        }, ct).ConfigureAwait(false);
 
-        if (!result.Succeeded || result.Domain is null)
-        {
-            return new DomainServiceResult<GovernanceDomain>(
-                DomainServiceStatus.VersionMismatch,
-                ErrorCode: "VERSION_MISMATCH",
-                ErrorMessage: "Governance domain version conflict while assigning owner group.");
-        }
-
-        await RecordOwnerGroupAuditAsync(tenant, caller.UserSid, result.Domain, before.OwnerGroupSid, ownerGroupSid, ct).ConfigureAwait(false);
-        await _writeInvalidator.InvalidateWideAsync(tenant, ct: ct).ConfigureAwait(false);
-        return Ok(result.Domain);
+        if (outcome.Status == DomainServiceStatus.Ok)
+            await _writeInvalidator.InvalidateWideAsync(tenant, ct: ct).ConfigureAwait(false);
+        return outcome;
     }
 
     public async Task<DomainServiceResult<int>> AssignTablesAsync(
@@ -460,8 +468,11 @@ public sealed partial class GovernanceDomainService(
             }
         }
 
-        await _domains.AssignTablesAsync(tenant, domainId, distinct, caller.UserSid, ct).ConfigureAwait(false);
-        await RecordTableAssignmentAuditAsync(tenant, caller.UserSid, domain, distinct, ct).ConfigureAwait(false);
+        await RunAtomicAsync(async innerCt =>
+        {
+            await _domains.AssignTablesAsync(tenant, domainId, distinct, caller.UserSid, innerCt).ConfigureAwait(false);
+            await RecordTableAssignmentAuditAsync(tenant, caller.UserSid, domain, distinct, innerCt).ConfigureAwait(false);
+        }, ct).ConfigureAwait(false);
         await _writeInvalidator.InvalidateWideAsync(tenant, ct: ct).ConfigureAwait(false);
         return Ok(distinct.Count);
     }
@@ -659,10 +670,10 @@ public sealed partial class GovernanceDomainService(
         }
 
         var trimmed = raw.Trim();
-        if (trimmed.Length == 0 || !SidFormat.IsCanonical(trimmed))
+        if (trimmed.Length == 0 || !SidFormat.IsGroupOrRealmGroupIdentifier(trimmed))
         {
             sid = null;
-            error = "Owner group SID must be a canonical SID (S-1-...).";
+            error = "Owner group SID must be a canonical SID (S-1-...) or realm group key (realm:...).";
             return false;
         }
 

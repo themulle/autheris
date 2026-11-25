@@ -31,8 +31,8 @@ public sealed class ExternalCatalogObjectsQueryTests
             GranteeType = GranteeType.User,
             GranteeSid = new Sid(UserSid),
             TenantId = new TenantId("tenant-a"),
-            ValidFrom = DateTimeOffset.UtcNow.AddYears(-1),
-            ValidTo = DateTimeOffset.UtcNow.AddYears(1)
+            ValidFrom = ExternalCatalogTestHarness.FixedNow.AddYears(-1),
+            ValidTo = ExternalCatalogTestHarness.FixedNow.AddYears(1)
         });
 
     private static List<string?> Ids(JsonElement page) =>

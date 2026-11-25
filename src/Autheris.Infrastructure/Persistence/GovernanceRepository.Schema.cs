@@ -34,92 +34,6 @@ public partial class GovernanceRepository
         using var trans = conn.BeginTransaction();
         try
         {
-            var ownerSid = "S-1-5-21-1000-1000-1000-1001";
-            var ownerId = Guid.NewGuid().ToString();
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.Transaction = trans;
-                cmd.CommandText = @"INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
-                                    VALUES (@id, @sid, @account, @name, @email, 1)
-                                    ON CONFLICT DO NOTHING;";
-                cmd.AddBound("@id", ownerId);
-                cmd.AddBound("@sid", ownerSid);
-                cmd.AddBound("@account", "CORP\\dataowner");
-                cmd.AddBound("@name", "Chief Finance Data Owner");
-                cmd.AddBound("@email", "dataowner@corp.local");
-                cmd.ExecuteNonQuery();
-            }
-
-            var salesOwnerSid = "S-1-5-21-DATAOWNER-APPROVER";
-            var salesOwnerId = Guid.NewGuid().ToString();
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.Transaction = trans;
-                cmd.CommandText = @"INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
-                                    VALUES (@id, @sid, @account, @name, @email, 1)
-                                    ON CONFLICT DO NOTHING;";
-                cmd.AddBound("@id", salesOwnerId);
-                cmd.AddBound("@sid", salesOwnerSid);
-                cmd.AddBound("@account", "CORP\\salesowner");
-                cmd.AddBound("@name", "Chief Sales Data Owner");
-                cmd.AddBound("@email", "salesowner@corp.local");
-                cmd.ExecuteNonQuery();
-            }
-
-            var approverSid = "S-1-5-21-APPROVER";
-            var approverId = Guid.NewGuid().ToString();
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.Transaction = trans;
-                cmd.CommandText = @"INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
-                                    VALUES (@id, @sid, @account, @name, @email, 1)
-                                    ON CONFLICT DO NOTHING;";
-                cmd.AddBound("@id", approverId);
-                cmd.AddBound("@sid", approverSid);
-                cmd.AddBound("@account", "CORP\\approver");
-                cmd.AddBound("@name", "Finance Approver");
-                cmd.AddBound("@email", "approver@corp.local");
-                cmd.ExecuteNonQuery();
-            }
-
-            var approverASid = "S-1-5-21-1000-1000-1000-1002";
-            var approverAId = Guid.NewGuid().ToString();
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.Transaction = trans;
-                cmd.CommandText = @"INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
-                                    VALUES (@id, @sid, @account, @name, @email, 1)
-                                    ON CONFLICT DO NOTHING;";
-                cmd.AddBound("@id", approverAId);
-                cmd.AddBound("@sid", approverASid);
-                cmd.AddBound("@account", "CORP\\approver-a");
-                cmd.AddBound("@name", "Finance Approver A");
-                cmd.AddBound("@email", "approver-a@corp.local");
-                cmd.ExecuteNonQuery();
-            }
-
-            var approverBSid = "S-1-5-21-1000-1000-1000-1003";
-            var approverBId = Guid.NewGuid().ToString();
-            using (var cmd = conn.CreateCommand())
-            {
-                cmd.Transaction = trans;
-                cmd.CommandText = @"INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
-                                    VALUES (@id, @sid, @account, @name, @email, 1)
-                                    ON CONFLICT DO NOTHING;";
-                cmd.AddBound("@id", approverBId);
-                cmd.AddBound("@sid", approverBSid);
-                cmd.AddBound("@account", "CORP\\approver-b");
-                cmd.AddBound("@name", "Finance Approver B");
-                cmd.AddBound("@email", "approver-b@corp.local");
-                cmd.ExecuteNonQuery();
-            }
-
-            ownerId = ResolveOwnerIdPostgreSql(conn, trans, ownerSid, ownerId);
-            salesOwnerId = ResolveOwnerIdPostgreSql(conn, trans, salesOwnerSid, salesOwnerId);
-            approverId = ResolveOwnerIdPostgreSql(conn, trans, approverSid, approverId);
-            approverAId = ResolveOwnerIdPostgreSql(conn, trans, approverASid, approverAId);
-            approverBId = ResolveOwnerIdPostgreSql(conn, trans, approverBSid, approverBId);
-
             foreach (var domain in domains)
             {
                 for (int t = 1; t <= 10; t++)
@@ -154,52 +68,6 @@ public partial class GovernanceRepository
                         {
                             tableId = actualId;
                         }
-                    }
-
-                    if (domain == "finance" && t == 1)
-                    {
-                        using var towCmd = conn.CreateCommand();
-                        towCmd.Transaction = trans;
-                        towCmd.CommandText = @"INSERT INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role)
-                                              VALUES (@id1, @tid, @oid1, 'PRIMARY'),
-                                                     (@id2, @tid, @oid2, 'DELEGATE')
-                                              ON CONFLICT DO NOTHING;";
-                        towCmd.AddBound("@id1", Guid.NewGuid().ToString());
-                        towCmd.AddBound("@oid1", ownerId);
-                        towCmd.AddBound("@id2", Guid.NewGuid().ToString());
-                        towCmd.AddBound("@oid2", approverId);
-                        towCmd.AddBound("@tid", tableId);
-                        towCmd.ExecuteNonQuery();
-                    }
-                    else if (domain == "finance" && t == 5)
-                    {
-                        using var towCmd = conn.CreateCommand();
-                        towCmd.Transaction = trans;
-                        towCmd.CommandText = @"INSERT INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role)
-                                              VALUES (@id1, @tid, @oid1, 'PRIMARY'),
-                                                     (@id2, @tid, @oid2, 'DELEGATE'),
-                                                     (@id3, @tid, @oid3, 'DELEGATE')
-                                              ON CONFLICT DO NOTHING;";
-                        towCmd.AddBound("@id1", Guid.NewGuid().ToString());
-                        towCmd.AddBound("@oid1", ownerId);
-                        towCmd.AddBound("@id2", Guid.NewGuid().ToString());
-                        towCmd.AddBound("@oid2", approverAId);
-                        towCmd.AddBound("@id3", Guid.NewGuid().ToString());
-                        towCmd.AddBound("@oid3", approverBId);
-                        towCmd.AddBound("@tid", tableId);
-                        towCmd.ExecuteNonQuery();
-                    }
-                    else if (domain == "sales" && (t == 1 || t == 5))
-                    {
-                        using var towCmd = conn.CreateCommand();
-                        towCmd.Transaction = trans;
-                        towCmd.CommandText = @"INSERT INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role)
-                                              VALUES (@id, @tid, @oid, 'PRIMARY')
-                                              ON CONFLICT DO NOTHING;";
-                        towCmd.AddBound("@id", Guid.NewGuid().ToString());
-                        towCmd.AddBound("@tid", tableId);
-                        towCmd.AddBound("@oid", salesOwnerId);
-                        towCmd.ExecuteNonQuery();
                     }
 
                     using (var cmd = conn.CreateCommand())
@@ -375,16 +243,6 @@ public partial class GovernanceRepository
         }
     }
 
-    private static string ResolveOwnerIdPostgreSql(DbConnection conn, DbTransaction trans, string sid, string fallbackId)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.Transaction = trans;
-        cmd.CommandText = "SELECT id FROM DATA_OWNERS WHERE ad_sid = @sid LIMIT 1";
-        cmd.AddBound("@sid", sid);
-        var existing = cmd.ExecuteScalar()?.ToString();
-        return !string.IsNullOrEmpty(existing) ? existing : fallbackId;
-    }
-
     private void SeedInitialCatalogSqlServer()
     {
         var domains = new[]
@@ -397,29 +255,6 @@ public partial class GovernanceRepository
         using var trans = conn.BeginTransaction();
         try
         {
-            // Idempotent on the natural keys (ad_sid, ...): a restart must not abort the seed on a unique violation.
-            string EnsureOwner(string sid, string account, string name, string email)
-            {
-                using var cmd = conn.CreateCommand();
-                cmd.Transaction = trans;
-                cmd.CommandText = @"INSERT INTO DATA_OWNERS (id, ad_sid, ad_account, display_name, email, is_active)
-                                    SELECT @id, @sid, @account, @name, @email, 1
-                                    WHERE NOT EXISTS (SELECT 1 FROM DATA_OWNERS WHERE ad_sid = @sid);";
-                cmd.AddBound("@id", Guid.NewGuid().ToString());
-                cmd.AddBound("@sid", sid);
-                cmd.AddBound("@account", account);
-                cmd.AddBound("@name", name);
-                cmd.AddBound("@email", email);
-                cmd.ExecuteNonQuery();
-                return ResolveOwnerIdSqlServer(conn, trans, sid, string.Empty);
-            }
-
-            var ownerId = EnsureOwner("S-1-5-21-1000-1000-1000-1001", "CORP\\dataowner", "Chief Finance Data Owner", "dataowner@corp.local");
-            var salesOwnerId = EnsureOwner("S-1-5-21-DATAOWNER-APPROVER", "CORP\\salesowner", "Chief Sales Data Owner", "salesowner@corp.local");
-            var approverId = EnsureOwner("S-1-5-21-APPROVER", "CORP\\approver", "Finance Approver", "approver@corp.local");
-            var approverAId = EnsureOwner("S-1-5-21-1000-1000-1000-1002", "CORP\\approver-a", "Finance Approver A", "approver-a@corp.local");
-            var approverBId = EnsureOwner("S-1-5-21-1000-1000-1000-1003", "CORP\\approver-b", "Finance Approver B", "approver-b@corp.local");
-
             foreach (var domain in domains)
             {
                 for (int t = 1; t <= 10; t++)
@@ -454,22 +289,6 @@ public partial class GovernanceRepository
                         {
                             tableId = actualId;
                         }
-                    }
-
-                    if (domain == "finance" && t == 1)
-                    {
-                        EnsureTableOwner(conn, trans, tableId, ownerId, "PRIMARY");
-                        EnsureTableOwner(conn, trans, tableId, approverId, "DELEGATE");
-                    }
-                    else if (domain == "finance" && t == 5)
-                    {
-                        EnsureTableOwner(conn, trans, tableId, ownerId, "PRIMARY");
-                        EnsureTableOwner(conn, trans, tableId, approverAId, "DELEGATE");
-                        EnsureTableOwner(conn, trans, tableId, approverBId, "DELEGATE");
-                    }
-                    else if (domain == "sales" && (t == 1 || t == 5))
-                    {
-                        EnsureTableOwner(conn, trans, tableId, salesOwnerId, "PRIMARY");
                     }
 
                     using (var cmd = conn.CreateCommand())
@@ -536,29 +355,5 @@ public partial class GovernanceRepository
             trans.Rollback();
             LogCatalogNotice("Failed to seed demo data into the governance database; skipping.");
         }
-    }
-
-    private static void EnsureTableOwner(DbConnection conn, DbTransaction trans, string tableId, string ownerId, string role)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.Transaction = trans;
-        cmd.CommandText = @"INSERT INTO TABLE_OWNERS (id, table_id, data_owner_id, owner_role)
-                            SELECT @id, @tid, @oid, @role
-                            WHERE NOT EXISTS (SELECT 1 FROM TABLE_OWNERS WHERE table_id = @tid AND data_owner_id = @oid AND owner_role = @role);";
-        cmd.AddBound("@id", Guid.NewGuid().ToString());
-        cmd.AddBound("@tid", tableId);
-        cmd.AddBound("@oid", ownerId);
-        cmd.AddBound("@role", role);
-        cmd.ExecuteNonQuery();
-    }
-
-    private static string ResolveOwnerIdSqlServer(DbConnection conn, DbTransaction trans, string sid, string fallbackId)
-    {
-        using var cmd = conn.CreateCommand();
-        cmd.Transaction = trans;
-        cmd.CommandText = "SELECT TOP (1) id FROM DATA_OWNERS WHERE ad_sid = @sid";
-        cmd.AddBound("@sid", sid);
-        var existing = cmd.ExecuteScalar()?.ToString();
-        return !string.IsNullOrEmpty(existing) ? existing : fallbackId;
     }
 }
