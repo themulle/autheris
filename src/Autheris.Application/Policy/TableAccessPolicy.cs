@@ -207,12 +207,16 @@ public sealed partial class TableAccessPolicy
         return await _classificationResolver.PrefetchColumnRowsAsync(tables, tenant.Value, ct).ConfigureAwait(false);
     }
 
-    public async Task<TableAccessDecision> DecideAsync(TableAccessQuery query, CancellationToken ct)
+    public Task<TableAccessDecision> DecideAsync(TableAccessQuery query, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(query);
-        var decision = await DecideCoreAsync(query, ct).ConfigureAwait(false);
-        return AttachTypedMasks(decision, query);
+        return DecideCoreAsyncInternal(query, ct);
     }
+
+    internal IContainerOwnership? OwnershipRepository => _ownershipRepository;
+
+    private async Task<TableAccessDecision> DecideCoreAsyncInternal(TableAccessQuery query, CancellationToken ct) =>
+        AttachTypedMasks(await DecideCoreAsync(query, ct).ConfigureAwait(false), query);
 
     /// <summary>
     /// The typed masks come from the final column levels, with the catalog rules of the same
@@ -270,7 +274,10 @@ public sealed partial class TableAccessPolicy
         // evaluated reliably. Deny the data request instead of treating the caller as a member of no group (fail closed).
         if (IsGroupResolutionUnavailable(query))
         {
-            return TableAccessDecision.Denied(table, "identity.groups_unresolved: Group resolution unavailable (fail-closed).");
+            return TableAccessDecision.Denied(table, "identity.groups_unresolved: Group resolution unavailable (fail-closed).") with
+            {
+                IsTransientFailure = true
+            };
         }
 
         var consentBypassed = _options?.IsConsentBypassed == true;
@@ -299,7 +306,10 @@ public sealed partial class TableAccessPolicy
         }
         catch (Autheris.Application.Policy.Exceptions.AccessProfileSourceUnavailableException ex)
         {
-            return TableAccessDecision.Denied(table, $"Access profile source unavailable (fail-closed): {ex.Message}");
+            return TableAccessDecision.Denied(table, $"Access profile source unavailable (fail-closed): {ex.Message}") with
+            {
+                IsTransientFailure = true
+            };
         }
 
         // Baseline and consent evaluation; deny consents and protection gates always decide before narrowing layers run.
@@ -335,7 +345,7 @@ public sealed partial class TableAccessPolicy
         {
             // Most restrictive masking mode of the matched profiles; the row filters of all of them are AND-ed. An invalid profile row
             // filter or conflicting parameters deny the table (fail closed).
-            decision = ApplyAccessProfiles(decision, profiles, query.Metadata);
+            decision = ApplyAccessProfiles(decision, profiles, query.Metadata, query.Protection);
             if (!decision.IsAllowed)
             {
                 return decision;

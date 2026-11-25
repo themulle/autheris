@@ -28,7 +28,9 @@ public sealed record PermissionAuditDetails(
     string? ErrorCode = null,
     int? ExpectedVersion = null,
     Guid? ExternalSystemId = null,
-    string? ExternalReference = null)
+    string? ExternalReference = null,
+    int? ApprovalStep = null,
+    int? RequiredApprovals = null)
 {
     /// <summary>The principal a deputy decided for (issue #1126); omitted when the decider acted in its own capacity.</summary>
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]

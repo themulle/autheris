@@ -175,7 +175,9 @@ public sealed partial class ClassificationAccessResolver
         ArgumentNullException.ThrowIfNull(metadata);
         ArgumentNullException.ThrowIfNull(allowGrants);
 
-        var catalog = preloadedCatalog ?? await LoadCatalogAsync(tenant.Value, ct).ConfigureAwait(false);
+        var catalog = preloadedCatalog
+            ?? columnRowPrefetch?.CatalogFor(tenant.Value, _timeProvider.GetUtcNow())
+            ?? await LoadCatalogAsync(tenant.Value, ct).ConfigureAwait(false);
         var dialect = PolicyParameterNamer.ToTargetDialect(metadata.Dialect);
 
         var colClassifications = await LoadEffectiveColumnClassificationsAsync(metadata, tenant.Value, columnRowPrefetch, ct).ConfigureAwait(false);

@@ -230,6 +230,36 @@ public abstract class TableRelationContract : GovernanceContractBase
         (await RelationCountAsync()).ShouldBe(0);
     }
 
+    /// <summary>
+    /// Issue #1099: relations are read in a content-based order (parent, child, name), not by their random id, so GraphQL field
+    /// names do not move between imports; the key rows of a composite relation stay together and in ordinal order.
+    /// </summary>
+    [RequiresContainerRuntimeFact]
+    public async Task GetRelations_AreOrderedByChildAndName_NotByRandomId()
+    {
+        if (!Store.IsAvailable) return;
+        var parent = NewTable("parent");
+        var childA = NewTable("ra");
+        var childB = NewTable("rb");
+        var childC = NewTable("rc");
+        foreach (var t in new[] { parent, childA, childB, childC })
+        {
+            await SeedTableAsync(t);
+        }
+
+        // Inserted out of order; each relation gets a fresh random id.
+        await Relations.CreateRelationAsync(Rel(parent, childC, ["a"], ["a"], "link"));
+        await Relations.CreateRelationAsync(Rel(parent, childB, ["a", "b"], ["c", "d"], "zeta"));
+        await Relations.CreateRelationAsync(Rel(parent, childA, ["a"], ["b"], "link"));
+        await Relations.CreateRelationAsync(Rel(parent, childB, ["a"], ["a"], "alpha"));
+
+        static string Key(TableRelation r) => $"{r.ChildTableIdentifier.TableName[..2]}:{r.RelationName}:{string.Join(',', r.JoinKeysChild)}";
+        string[] expected = ["ra:link:b", "rb:alpha:a", "rb:zeta:c,d", "rc:link:a"];
+
+        (await Relations.GetRelationsForTableAsync(parent)).Select(Key).ShouldBe(expected);
+        (await Relations.GetAllRelationsAsync()).Where(r => r.ParentTableIdentifier == parent).Select(Key).ShouldBe(expected);
+    }
+
     [RequiresContainerRuntimeFact]
     public async Task CreateRelation_ResolvesTableIdsFromIdentifiers()
     {

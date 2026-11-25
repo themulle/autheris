@@ -135,6 +135,13 @@ public sealed class DeputyAuthority(
         }
     }
 
+    /// <summary>Every identifier form of B the relation knows (issue #1126; four-eyes compares them with the recorded approvers).</summary>
+    public static IReadOnlyList<string> PrincipalIdentifierForms(DeputyRelation relation)
+    {
+        ArgumentNullException.ThrowIfNull(relation);
+        return PrincipalForms(relation).Distinct(StringComparer.OrdinalIgnoreCase).ToArray();
+    }
+
     /// <summary>Every identifier form of B the relation knows: the realm-qualified reference, the bare user key and the directory id.</summary>
     private static IEnumerable<string> PrincipalForms(DeputyRelation relation)
     {

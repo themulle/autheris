@@ -110,8 +110,10 @@ internal static class DeputyTestSupport
         ISet<string>? ownerMembers = null,
         ISet<string>? locked = null,
         IReadOnlyCollection<Person>? users = null,
-        ISet<string>? inactive = null)
+        ISet<string>? inactive = null,
+        Sid? ownerGroup = null)
     {
+        var group = (ownerGroup ?? OwnerGroupSid).Value;
         ownerMembers ??= new HashSet<string>(StringComparer.Ordinal) { Bob.UserKey, Carol.UserKey };
         locked ??= new HashSet<string>(StringComparer.Ordinal);
         inactive ??= new HashSet<string>(StringComparer.Ordinal);
@@ -124,7 +126,7 @@ internal static class DeputyTestSupport
         {
             nameof(IScimGroupStore.GetEffectiveGroupSidsForUserAsync) => Task.FromResult(new EffectiveScimGroupsResult(
                 ownerMembers.Contains((string)args![2]!)
-                    ? new HashSet<string>(StringComparer.OrdinalIgnoreCase) { OwnerGroupSid.Value }
+                    ? new HashSet<string>(StringComparer.OrdinalIgnoreCase) { group }
                     : new HashSet<string>(StringComparer.OrdinalIgnoreCase),
                 MaxDepthExceeded: false)),
             nameof(IScimProvisioningStore.IsSubjectLockedAsync) => Task.FromResult(locked.Contains((string)args![2]!)),

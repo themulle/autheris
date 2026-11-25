@@ -31,8 +31,9 @@ using Shouldly;
 using Xunit;
 
 /// <summary>
-/// Issue #404 (leak fix): a key or an index over a masked, denied or unresolved column is omitted whole from describe_dataset, the REST
-/// catalog detail and the OpenAPI document; no surface emits an index name.
+/// Issue #404 (leak fix) as relaxed by #1105: a key or an index over a denied, discovery-hidden or unresolved column is omitted whole from
+/// describe_dataset, the REST catalog detail and the OpenAPI document; a key or index over a masked column is kept (the caller sees the column
+/// name in the same answer, and filtering, ordering and joining on it stay refused). No surface emits an index name.
 /// </summary>
 [Trait("Category", "Security")]
 public sealed class DatasetIndexVisibilityLeakTests
@@ -62,7 +63,7 @@ public sealed class DatasetIndexVisibilityLeakTests
     private static readonly IOpenApiIngestionService UnusedIngestion = Substitute.For<IOpenApiIngestionService>();
     private static readonly ICatalogSearchEngine UnusedSearch = Substitute.For<ICatalogSearchEngine>();
 
-    private static McpDatasetCatalog Mcp(TableMetadata table, IConsentResolutionService? resolution = null)
+    private static McpDatasetCatalog Mcp(TableMetadata table, IConsentResolutionService? resolution = null, ColumnAccessLevel emailLevel = ColumnAccessLevel.Mask)
     {
         var metadata = new InMemoryTableMetadataRepository(table);
         var consents = new InMemoryConsentRepository(
@@ -78,7 +79,7 @@ public sealed class DatasetIndexVisibilityLeakTests
                 [
                     new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear },
                     new ConsentColumnRule { ColumnName = "amount", AccessLevel = ColumnAccessLevel.Clear },
-                    new ConsentColumnRule { ColumnName = "email", AccessLevel = ColumnAccessLevel.Mask }
+                    new ConsentColumnRule { ColumnName = "email", AccessLevel = emailLevel }
                 ]
             });
         return new McpDatasetCatalog(metadata, consents, new StubGatewayExecutionService(), StubGoldenQueryService.Instance,
@@ -112,19 +113,18 @@ public sealed class DatasetIndexVisibilityLeakTests
         string.Join("|", (indexes ?? []).Select(i => string.Join(",", i.Columns)));
 
     [Fact]
-    public async Task I404_T_SL1_MaskedColumn_WholeIndexOmitted_Mcp_Rest_GraphQl()
+    public async Task I1105_T_MaskedColumn_KeysAndIndexesKept_Mcp_Rest_GraphQl()
     {
         var mcp = await Mcp(Table()).DescribeDatasetAsync(User(), "sales.public.orders");
         var rest = await Rest(Table()).GetDatasetDetailAsync(Orders, Admin());
 
         // GraphQL: the MCP GraphQL tool answers through the same DescribeDatasetAsync path (GatewayMcpQueryExecutor), so the
         // describe assertions below cover it; there is no separate GraphQL projection.
-        // Parity (I404-SC-L5): both surfaces answer with the single whole, clear-only index.
-        Columns(mcp.Indexes).ShouldBe("id,amount");
-        Columns(rest!.Indexes).ShouldBe("id,amount");
-        // The GraphQL access block of describe_dataset is built from the same description: no key flag over a masked column.
-        mcp.Columns.ShouldAllBe(c => !c.PrimaryKey);
-        mcp.Indexes!.ShouldAllBe(i => !i.Columns.Contains("email"));
+        // Parity (I404-SC-L5): both surfaces answer with the same whole indexes, unique first; "email" is masked, not denied.
+        mcp.Columns.Single(c => c.Name == "email").Access.ShouldBe("mask");
+        Columns(mcp.Indexes).ShouldBe("id,email|email|id,amount");
+        Columns(rest!.Indexes).ShouldBe("id,email|email|id,amount");
+        mcp.Columns.Where(c => c.PrimaryKey).Select(c => c.Name).ShouldBe(new[] { "id", "email" });
     }
 
     [Fact]
@@ -172,14 +172,15 @@ public sealed class DatasetIndexVisibilityLeakTests
     }
 
     [Fact]
-    public async Task I404_T_SL4_PrimaryKeyOrder_OmittedWhenAnyPkColumnMasked_AllSurfaces()
+    public async Task I1105_T_PrimaryKeyOrder_KeptWhenPkColumnMasked_OmittedWhenNotVisible_AllSurfaces()
     {
         var mcp = await Mcp(Table()).DescribeDatasetAsync(User(), "sales.public.orders");
         var rest = await Rest(Table()).GetDatasetDetailAsync(Orders, Admin());
 
-        mcp.Columns.ShouldAllBe(c => !c.PrimaryKey);
-        rest!.PrimaryKeys.ShouldBeEmpty();
-        rest.Columns.ShouldAllBe(c => !c.IsPrimaryKey);
+        mcp.PrimaryKeyOrder!.Select(k => k.Column).ShouldBe(new[] { "id", "email" });
+        rest!.PrimaryKeys.ShouldBe(new[] { "id", "email" });
+        rest.Columns.Where(c => c.IsPrimaryKey).Select(c => c.Name).ShouldBe(new[] { "id", "email" });
+        // The visible set (Clear or Mask) decides: a key column outside it omits the whole key.
         DatasetIndexProjection.Project(Table(), new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id" }).PrimaryKeyColumns.ShouldBeEmpty();
         DatasetIndexProjection.Project(Table(), new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id", "email" })
             .PrimaryKeyColumns.ShouldBe(new[] { "id", "email" });
@@ -273,16 +274,157 @@ public sealed class DatasetIndexVisibilityLeakTests
     }
 
     [Theory]
-    [InlineData(ColumnAccessLevel.Mask)]
     [InlineData(ColumnAccessLevel.Deny)]
     public async Task I404_T_SL1_Rest_NonAdmin_ConsentLowersBaselineClearColumn_IndexAndPkOmitted(ColumnAccessLevel level)
     {
         var view = await RestAsUserAsync(level);
 
-        // "amount" is baseline-clear in the catalog; the caller's consent lowers it, so only the index over "id" survives.
+        // "amount" is baseline-clear in the catalog; the caller's consent denies it, so only the index over "id" survives.
         view.Indexes.ShouldBe("id");
         view.PrimaryKeys.ShouldBe(0);
         view.AnyPkFlag.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task I1105_T_Rest_NonAdmin_ConsentMasksKeyColumn_IndexAndPkKept()
+    {
+        var view = await RestAsUserAsync(ColumnAccessLevel.Mask);
+
+        // #1105: "amount" is masked for this caller, not denied; its key and index stay listed (unique first).
+        view.Indexes.ShouldBe("id|amount");
+        view.PrimaryKeys.ShouldBe(2);
+        view.AnyPkFlag.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task I1105_S01_DeniedKeyColumn_KeyAndIndexesOmittedWhole_Mcp()
+    {
+        var mcp = await Mcp(Table(), emailLevel: ColumnAccessLevel.Deny).DescribeDatasetAsync(User(), "sales.public.orders");
+
+        // "email" is denied: the primary key (id, email), the unique index (id, email) and the index (email) are omitted whole; no subset.
+        Columns(mcp.Indexes).ShouldBe("id,amount");
+        mcp.PrimaryKeyOrder.ShouldBeNull();
+        mcp.Columns.ShouldAllBe(c => !c.PrimaryKey);
+        DatasetIndexProjection.VisibleSet(new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Deny }).ShouldBeEmpty();
+        DatasetIndexProjection.VisibleSet(null).ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task I1105_S02_DiscoveryHiddenKeyColumn_KeyAndIndexesOmittedWhole_EvenWhenClear()
+    {
+        var hidden = Table() with
+        {
+            Columns =
+            [
+                new TableColumn { ColumnName = "id", DataType = "int" },
+                new TableColumn { ColumnName = "amount", DataType = "decimal" },
+                new TableColumn { ColumnName = "email", DataType = "varchar", DiscoveryHidden = true }
+            ]
+        };
+
+        // Even a caller for whom the hidden column is Clear gets no key or index that names it.
+        var projected = DatasetIndexProjection.Project(hidden, new HashSet<string>(["id", "amount", "email"], StringComparer.OrdinalIgnoreCase));
+        projected.PrimaryKeyColumns.ShouldBeEmpty();
+        Columns(projected.Indexes).ShouldBe("id,amount");
+
+        var mcp = await Mcp(hidden, emailLevel: ColumnAccessLevel.Clear).DescribeDatasetAsync(User(), "sales.public.orders");
+        (mcp.Indexes ?? []).ShouldAllBe(i => !i.Columns.Contains("email"));
+        mcp.PrimaryKeyOrder.ShouldBeNull();
+        mcp.Columns.ShouldAllBe(c => !c.PrimaryKey);
+    }
+
+    [Fact]
+    public void I1105_S03_MaskedKeyColumn_FilterOrderAndJoinStillRefused_FilterOnMaskedColumn()
+    {
+        var table = Table();
+        // The key (id, email) is listed for this caller (email masked) ...
+        DatasetIndexProjection.Project(table, DatasetIndexProjection.VisibleSet(new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["id"] = ColumnAccessLevel.Clear,
+            ["amount"] = ColumnAccessLevel.Clear,
+            ["email"] = ColumnAccessLevel.Mask
+        })).PrimaryKeyColumns.ShouldBe(new[] { "id", "email" });
+
+        // ... but the masked key column still cannot be filtered on, ordered by or joined on, so the key order is no ranking oracle.
+        var meta = table with
+        {
+            Table = new Table { SourceName = "sales", SchemaName = "public", TableName = "orders", SourceType = "PostgreSql" },
+            ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["email"] = new MaskingRule { RuleType = "REDACT", Replacement = "***" } }
+        };
+        var decision = TableAccessDecision.Allowed(Orders,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase) { ["email"] = ColumnAccessLevel.Mask },
+            hasUnconstrainedColumnAllow: true);
+        var access = new Dictionary<TableIdentifier, Autheris.Application.Sql.Tree.TreeTableAccess> { [Orders] = new(meta, decision) };
+
+        var filtered = new Autheris.Application.Sql.Tree.TreeQueryNode(Orders, ["id"])
+        {
+            Where = new Autheris.Application.Sql.Tree.TreeComparison("email", Autheris.Application.Sql.Tree.TreeFilterOperator.Eq, "a@b.c")
+        };
+        var sorted = new Autheris.Application.Sql.Tree.TreeQueryNode(Orders, ["id"]) { OrderBy = [new Autheris.Application.Sql.Tree.TreeOrder("email")] };
+        var joined = new Autheris.Application.Sql.Tree.TreeQueryNode(Orders, ["id"])
+        {
+            Relations = [new Autheris.Application.Sql.Tree.TreeRelationNode("self", ParentColumns: ["email"], ChildColumns: ["email"], IsList: true,
+                new Autheris.Application.Sql.Tree.TreeQueryNode(Orders, ["id"]))]
+        };
+
+        foreach (var node in new[] { filtered, sorted, joined })
+        {
+            var ex = Should.Throw<Autheris.Domain.Exceptions.FilterOnMaskedColumnException>(() =>
+                Autheris.Application.Sql.Tree.TreeSqlCompiler.Compile(node, access, Autheris.Domain.Common.DatabaseDialect.PostgreSql));
+            ex.ErrorCode.ShouldBe("FILTER_ON_MASKED_COLUMN");
+        }
+    }
+
+    [Fact]
+    public void I1105_S04_RestrictedScope_DiscoveryKeepsKeysOfScopeMaskedColumns_OmitsDenied_AndOffersNoUnmaskRequest()
+    {
+        var series = new TableMetadata
+        {
+            Identifier = Orders,
+            Table = new Table { TableName = "orders", SchemaName = "public", IsActive = true },
+            PrimaryKeyColumns = ["client_id", "ts"],
+            Indexes = [new TableIndexDefinition("ix_ts", ["ts"], false)],
+            Columns =
+            [
+                new TableColumn { ColumnName = "client_id", DataType = "int" },
+                new TableColumn { ColumnName = "ts", DataType = "datetime2" },
+                new TableColumn { ColumnName = "latitude", DataType = "float" }
+            ]
+        }.WithPii("client_id", "ts", "latitude");
+
+        // The person's base rule is Clear on every column; the restricted token scope (Agent.Read) has no scope-specific Clear.
+        TableAccessDecision Decision(ColumnAccessLevel tsLevel) => new(
+            Orders,
+            IsAllowed: true,
+            ColumnAccess: new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["client_id"] = ColumnAccessLevel.Clear,
+                ["ts"] = tsLevel,
+                ["latitude"] = ColumnAccessLevel.Clear
+            },
+            CombinedRowFilterSql: null,
+            DeniedReasons: [])
+        {
+            ScopeClearance = new RestrictedScopeClearance(
+                new HashSet<string>(["Agent.Read"], StringComparer.OrdinalIgnoreCase),
+                new HashSet<string>(StringComparer.OrdinalIgnoreCase))
+        };
+
+        var masked = Autheris.Application.Catalog.Discovery.DiscoveryAccessMapper.Map(
+            series, Decision(ColumnAccessLevel.Clear), [], isPendingRequest: false, isRecentlyExpired: false, artifacts: null, language: null, isHidden: false);
+
+        masked.Columns.ShouldAllBe(c => c.State == DiscoveryColumnState.Masked);
+        masked.QueryShape!.PrimaryKeyColumns.ShouldBe(new[] { "client_id", "ts" });
+        Columns(masked.QueryShape.Indexes).ShouldBe("ts");
+        // #1106: masked only by the token scope; the same person reads the columns in clear, so no unmask request is offered.
+        masked.Columns.ShouldAllBe(c => c.ClearRequestable.Count == 0);
+
+        var denied = Autheris.Application.Catalog.Discovery.DiscoveryAccessMapper.Map(
+            series, Decision(ColumnAccessLevel.Deny), [], isPendingRequest: false, isRecentlyExpired: false, artifacts: null, language: null, isHidden: false);
+
+        denied.Columns.Single(c => c.Name == "ts").State.ShouldBe(DiscoveryColumnState.NoAccess);
+        denied.QueryShape!.PrimaryKeyColumns.ShouldBeEmpty();
+        denied.QueryShape.Indexes.ShouldBeEmpty();
     }
 
     [Fact]

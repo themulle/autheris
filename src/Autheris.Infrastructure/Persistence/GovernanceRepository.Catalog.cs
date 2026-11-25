@@ -225,6 +225,36 @@ public partial class GovernanceRepository
         return await ApplyDatasetCatalogOverlayAsync(result, ct).ConfigureAwait(false);
     }
 
+    public async Task<IReadOnlyList<(TableIdentifier Identifier, string SourceName, string CurrentSourceType)>> GetUnparseableSqlSourceTypesAsync(CancellationToken ct = default)
+    {
+        var unparseable = new List<(TableIdentifier Identifier, string SourceName, string CurrentSourceType)>();
+        await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = CatalogSql.SelectActiveSqlSourceTypesSql;
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            var sourceType = reader.IsDBNull(0) ? string.Empty : reader.GetString(0);
+            if (DatabaseDialectExtensions.TryParseDialect(sourceType, out _))
+            {
+                continue;
+            }
+
+            var sourceName = reader.IsDBNull(1) ? string.Empty : reader.GetString(1);
+            var schemaName = reader.IsDBNull(2) ? string.Empty : reader.GetString(2);
+            var tableName = reader.IsDBNull(3) ? string.Empty : reader.GetString(3);
+            if (!TableIdentifier.TryCreate(sourceName, schemaName, tableName, out var identifier))
+            {
+                LogCatalogNotice("Catalog table has an invalid identifier and was skipped.");
+                continue;
+            }
+
+            unparseable.Add((identifier, sourceName, sourceType));
+        }
+
+        return unparseable;
+    }
+
     public Task<IReadOnlyList<TableIdentifier>> GetTablesChangedSinceAsync(long sinceVersion, CancellationToken ct = default)
         => CatalogDeltaQueryHelper.GetTablesChangedSinceAsync(this, sinceVersion, ct);
 

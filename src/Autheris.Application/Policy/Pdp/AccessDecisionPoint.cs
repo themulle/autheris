@@ -57,6 +57,9 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
     private readonly Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? _accessPolicySettings;
     private readonly Autheris.Application.Identity.IIdentityRealmRegistry? _realmRegistry;
 
+    internal Autheris.Application.Policy.Classification.ColumnPolicyRowPrefetch? LastColumnRowPrefetch { get; private set; }
+    internal Autheris.Application.Policy.ProtectionBatchPrefetch? LastProtectionPrefetch { get; private set; }
+
     public AccessDecisionPoint(
         IOptions<GatewayOptions> options,
         IConsentResolutionService? resolutionService = null,
@@ -179,7 +182,10 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
             || (subject.GroupsExpireAt is { } expiresAt && expiresAt <= now)
             || (subject.Principal != null && GroupResolutionClaims.IsExpired(subject.Principal, now)))
         {
-            return PreconditionDenied(table, "GROUPS_DEGRADED", "Identity", null, "identity.groups_unresolved: Group resolution unavailable (fail-closed).");
+            return PreconditionDenied(table, "GROUPS_DEGRADED", "Identity", null, "identity.groups_unresolved: Group resolution unavailable (fail-closed).") with
+            {
+                IsTransientFailure = true
+            };
         }
 
         if (!metadata.Table.IsActive)
@@ -329,6 +335,7 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         return TableAccessDecision.Denied(table, $"Access to table '{table.ToQualifiedName()}' denied by policy (policy services unavailable).") with
         {
             Reasons = [new DecisionReason(DecisionStep.DefaultDeny, "POLICY_UNAVAILABLE", "Policy", null)],
+            IsTransientFailure = true,
             EvaluatedByPdp = true
         };
     }
@@ -507,11 +514,18 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         ArgumentNullException.ThrowIfNull(objects);
         ArgumentNullException.ThrowIfNull(operations);
 
+        LastColumnRowPrefetch = null;
+        LastProtectionPrefetch = null;
         var results = operations.Select(_ => new List<TableAccessDecision>(objects.Count)).ToList();
         for (var offset = 0; offset < objects.Count; offset += PrefetchBlockSize)
         {
             var block = objects.Skip(offset).Take(PrefetchBlockSize).ToList();
             var (rowPrefetch, consentPrefetch, policyPrefetch, protectionPrefetch) = await PrefetchBlockAsync(subject, block, operations, ct).ConfigureAwait(false);
+            if (objects.Count <= PrefetchBlockSize)
+            {
+                LastColumnRowPrefetch = rowPrefetch;
+                LastProtectionPrefetch = protectionPrefetch;
+            }
             for (var op = 0; op < operations.Count; op++)
             {
                 foreach (var obj in block)
@@ -583,11 +597,21 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         SecurityPrincipalContext subject,
         IReadOnlyList<TableMetadata> objects,
         CancellationToken ct = default)
+        => (await DecideAllowedManyWithTransientAsync(subject, objects, ct).ConfigureAwait(false)).Select(static d => d.IsAllowed).ToList();
+
+    /// <summary>
+    /// Like <see cref="DecideAllowedManyAsync"/>, returning each decision's transient-failure flag (#1063 §4c) while reusing the same
+    /// bounded batch prefetches across the candidate objects.
+    /// </summary>
+    public async ValueTask<IReadOnlyList<AllowOnlyDecision>> DecideAllowedManyWithTransientAsync(
+        SecurityPrincipalContext subject,
+        IReadOnlyList<TableMetadata> objects,
+        CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(subject);
         ArgumentNullException.ThrowIfNull(objects);
 
-        var allowed = new List<bool>(objects.Count);
+        var allowed = new List<AllowOnlyDecision>(objects.Count);
         Autheris.Application.Policy.ConsentBatchPrefetch? consents = null;
         Autheris.Application.Policy.TenantPolicyPrefetch? policyPrefetch = null;
         Autheris.Application.Policy.ProtectionBatchPrefetch? protectionPrefetch = null;
@@ -630,7 +654,8 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
                 ProtectionPrefetch = protectionPrefetch,
                 AllowOnly = true
             };
-            allowed.Add((await DecideAsync(request, ct).ConfigureAwait(false)).IsAllowed);
+            var decision = await DecideAsync(request, ct).ConfigureAwait(false);
+            allowed.Add(new AllowOnlyDecision(decision.IsAllowed, !decision.IsAllowed && decision.IsTransientFailure));
         }
 
         return allowed;
@@ -697,7 +722,14 @@ public sealed partial class AccessDecisionPoint : IAccessDecisionPoint
         var subjects = new HashSet<Sid>(subject.Principal?.GetAllUserSids() ?? []) { subject.UserSid };
         subjects.UnionWith(subject.GroupSids);
         return await Autheris.Application.Policy.ConsentBatchPrefetch.LoadAsync(
-            _consentRepository, subjects, objects.Select(static o => o.Identifier).ToList(), subject.TenantId, _timeProvider.GetUtcNow(), ct).ConfigureAwait(false);
+            _consentRepository,
+            subjects,
+            objects.Select(static o => o.Identifier).ToList(),
+            subject.TenantId,
+            _timeProvider.GetUtcNow(),
+            ct,
+            _policy?.OwnershipRepository ?? _ownershipRepository,
+            objects).ConfigureAwait(false);
     }
 
     public async ValueTask<AccessExplanation> ExplainAsync(AccessRequest request, CancellationToken ct = default)

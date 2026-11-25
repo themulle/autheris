@@ -689,4 +689,71 @@ public sealed class DbtSyncTableCreationTests
         await h.Service.IngestManifestStreamAsync(new MemoryStream(Encoding.UTF8.GetBytes(asTable)), caller);
         h.Store["warehouse.public.v1"].Table.ObjectKind.ShouldBe(DiscoveryObjectKind.View);
     }
+
+    [Fact]
+    public async Task Sync_ExistingModelWithLegacyUnparseableSourceType_HealsToConfiguredDialect()
+    {
+        var h = new Harness(Options(connections: [("kostentransparenz_dbx", "Databricks")]));
+        var id = new TableIdentifier("kostentransparenz_dbx", "controlling", "dim_date");
+        var tableGuid = Guid.NewGuid();
+        var colGuid = Guid.NewGuid();
+        h.Store[id.ToString()] = new TableMetadata
+        {
+            Identifier = id,
+            Table = new Table
+            {
+                Id = tableGuid,
+                SourceName = "kostentransparenz_dbx",
+                SchemaName = "controlling",
+                TableName = "dim_date",
+                SourceType = "kostentransparenz_dbx",
+                IsActive = true,
+                DataSourceType = DataSourceType.Sql
+            },
+            Columns = [new TableColumn { Id = colGuid, TableId = tableGuid, ColumnName = "Year", DataType = "int" }],
+            ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["Year"] = new MaskingRule { TableColumnId = colGuid, RuleType = "REDACT", Replacement = "***" }
+            }
+        }.WithPii("Year");
+
+        var result = await Sync(h.Service, Manifest(new Item("kostentransparenz_dbx", "controlling", "dim_date", Columns: [new Col("Year", "int")])));
+
+        result.Success.ShouldBeTrue();
+        var stored = h.Store[id.ToString()];
+        stored.Table.SourceType.ShouldBe("Databricks");
+        stored.Table.Dialect.ShouldBe(DatabaseDialect.Databricks);
+        stored.Table.IsActive.ShouldBeTrue();
+        stored.ColumnMaskingRules.ShouldContainKey("Year");
+        ClassificationMetadata.IsTableSensitive(stored).ShouldBeTrue();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Sync_ExistingModelWithUnsupportedOrUnconfiguredProvider_LeavesLegacySourceTypeUntouched()
+    {
+        var h = new Harness(Options(connections: [("other_conn", "PostgreSql")]));
+        var id = new TableIdentifier("kostentransparenz_dbx", "controlling", "dim_date");
+        var tableGuid = Guid.NewGuid();
+        h.Store[id.ToString()] = new TableMetadata
+        {
+            Identifier = id,
+            Table = new Table
+            {
+                Id = tableGuid,
+                SourceName = "kostentransparenz_dbx",
+                SchemaName = "controlling",
+                TableName = "dim_date",
+                SourceType = "kostentransparenz_dbx",
+                IsActive = true,
+                DataSourceType = DataSourceType.Sql
+            },
+            Columns = [new TableColumn { Id = Guid.NewGuid(), TableId = tableGuid, ColumnName = "Year", DataType = "int" }]
+        };
+
+        var result = await Sync(h.Service, Manifest(new Item("kostentransparenz_dbx", "controlling", "dim_date", Columns: [new Col("Year", "int")])));
+
+        result.Success.ShouldBeTrue();
+        h.Store[id.ToString()].Table.SourceType.ShouldBe("kostentransparenz_dbx");
+    }
 }

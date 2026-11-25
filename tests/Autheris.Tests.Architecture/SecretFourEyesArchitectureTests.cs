@@ -9,8 +9,13 @@ using Xunit;
 
 namespace Autheris.Tests.Architecture;
 
+/// <summary>
+/// Issue #1121 (partially reversing #1009 D8): a second approval exists for grants on <c>secret</c> data only, and only through
+/// <see cref="SecretFourEyesRule"/>. The legacy four-eyes switches (<c>requireSecondApprover</c>, sensitivity-based <c>RequiresFourEyes</c>,
+/// approver counting) stay out of the engine and its store, and the declarative single-decider paths refuse <c>secret</c> targets.
+/// </summary>
 [Trait("Category", "Security")]
-public sealed class FourEyesRemovalArchitectureTests
+public sealed class SecretFourEyesArchitectureTests
 {
     private static readonly string[] ScannedSourceSuffixes =
     [
@@ -25,8 +30,14 @@ public sealed class FourEyesRemovalArchitectureTests
         "Persistence/PermissionRequestStore.cs"
     ];
 
+    private static readonly string[] SingleDeciderPathSuffixes =
+    [
+        "Governance/Services/DeclarativeConsentApplyService.cs",
+        "Governance/Services/AccessPlanningService.cs"
+    ];
+
     [Fact]
-    public void No_second_approver_path()
+    public void Second_approval_only_through_the_secret_rule()
     {
         var checkedFiles = 0;
         var violations = new List<string>();
@@ -50,16 +61,32 @@ public sealed class FourEyesRemovalArchitectureTests
                     violations.Add($"{file.RelativePath}:{i + 1}: {line.Trim()}");
                 }
 
-                if (norm.EndsWith("Decide.cs", StringComparison.OrdinalIgnoreCase)
+                // The engine produces the second-approval status only through the rule's constant.
+                if (norm.Contains("/Governance/Requests/", StringComparison.OrdinalIgnoreCase)
                     && line.Contains("PENDING_SECOND_APPROVAL", StringComparison.Ordinal))
                 {
                     violations.Add($"{file.RelativePath}:{i + 1}: {line.Trim()}");
                 }
             }
+
+            if (norm.EndsWith("PermissionRequestEngine.Decide.cs", StringComparison.OrdinalIgnoreCase))
+            {
+                file.Text.ShouldContain("SecretFourEyesRule.Applies(", customMessage: "the decision path evaluates the secret four-eyes rule");
+                file.Text.ShouldContain("SecretFourEyesRule.IsSameApprover(", customMessage: "the decision path refuses a second approval by the same person");
+            }
         }
 
         checkedFiles.ShouldBe(ScannedSourceSuffixes.Length);
         violations.ShouldBeEmpty();
+
+        var singleDecider = RepositoryScan.ProductionFiles
+            .Where(f => SingleDeciderPathSuffixes.Any(s => f.RelativePath.Replace('\\', '/').EndsWith(s, StringComparison.OrdinalIgnoreCase)))
+            .ToList();
+        singleDecider.Count.ShouldBe(SingleDeciderPathSuffixes.Length);
+        singleDecider.ShouldAllBe(f => f.Text.Contains("SecretFourEyesRule.DeclarativeRefusal(", StringComparison.Ordinal));
+
+        SecretFourEyesRule.PendingSecondApproval.ShouldBe("PENDING_SECOND_APPROVAL");
+        SecretFourEyesRule.RequiredApprovals.ShouldBe(2);
 
         typeof(PermissionRequestEngine)
             .GetMethods(BindingFlags.Public | BindingFlags.NonPublic | BindingFlags.Instance)

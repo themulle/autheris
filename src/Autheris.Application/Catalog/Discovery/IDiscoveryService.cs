@@ -66,7 +66,8 @@ public sealed record DiscoveryKeysetQuery(
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Naming", "CA1720:Identifier contains type name", Justification = "Catalog discovery keyset item contract uses Object for the projected discovery object.")]
 public sealed record DiscoveryKeysetItem(
     DiscoveryObject Object,
-    TableMetadata Table);
+    TableMetadata Table,
+    EffectiveProtection? Protection = null);
 
 public sealed record DiscoveryKeysetPage(
     IReadOnlyList<DiscoveryKeysetItem> Items,

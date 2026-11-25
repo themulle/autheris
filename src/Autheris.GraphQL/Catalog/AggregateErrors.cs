@@ -59,6 +59,11 @@ internal static class AggregateErrors
 
     public const string TimeBucketUnsupportedMessage = "Time bucketing is not supported for this column.";
 
+    /// <summary>#1107: fixed text naming the bound (<c>AggregationOptions.MaxTimeBucketedLimit</c>); never echoes the requested value.</summary>
+    public const string TimeBucketLimitExceededMessage = "Time-bucketed aggregation queries cannot exceed a limit of 1000 groups. Lower limit to 1000 or less.";
+
+    public static GraphQLException TimeBucketLimitExceeded() => Create(AggregationErrorCodes.TimeBucketLimitExceeded, TimeBucketLimitExceededMessage);
+
     public static GraphQLException TimeBucketUnsupported(string? field = null, string? bucket = null)
     {
         var builder = ErrorBuilder.New()

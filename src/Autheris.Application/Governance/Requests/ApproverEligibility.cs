@@ -1,6 +1,7 @@
 namespace Autheris.Application.Governance.Requests;
 
 using System;
+using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
@@ -96,7 +97,10 @@ public sealed class ApproverEligibility(IGovernanceCapabilities capabilities, ID
 
                 if (await ActingForAsync(decider!, set, ct).ConfigureAwait(false) is { } principal)
                 {
-                    return new ApproverEligibilityResult(ApproverCapacity.DataOwner, OnBehalfOf: principal);
+                    return new ApproverEligibilityResult(ApproverCapacity.DataOwner, OnBehalfOf: principal.PrincipalRef)
+                    {
+                        OnBehalfOfIdentifiers = DeputyAuthority.PrincipalIdentifierForms(principal)
+                    };
                 }
             }
         }
@@ -127,7 +131,7 @@ public sealed class ApproverEligibility(IGovernanceCapabilities capabilities, ID
     /// container and is neither the requester nor a beneficiary. Data and unmask requests only; catalog visibility and profile
     /// assignments stay with the owner group, Data Governance and IT. Null when there is none.
     /// </summary>
-    private async ValueTask<string?> ActingForAsync(SecurityPrincipalContext decider, ApproverSet set, CancellationToken ct)
+    private async ValueTask<DeputyRelation?> ActingForAsync(SecurityPrincipalContext decider, ApproverSet set, CancellationToken ct)
     {
         if (_deputies is null || set.Kind is not (ConsentRequestKind.Data or ConsentRequestKind.Unmask) ||
             set.OwnerGroupSid is not { } ownerGroup || string.IsNullOrWhiteSpace(ownerGroup.Value))
@@ -141,7 +145,7 @@ public sealed class ApproverEligibility(IGovernanceCapabilities capabilities, ID
                 !await _deputies.IsPrincipalSubjectAsync(set.Tenant, relation, set.RequesterRef, ct).ConfigureAwait(false) &&
                 !await _deputies.IsPrincipalSubjectAsync(set.Tenant, relation, set.GranteeRef, ct).ConfigureAwait(false))
             {
-                return relation.PrincipalRef;
+                return relation;
             }
         }
 
@@ -205,4 +209,7 @@ public sealed class ApproverEligibility(IGovernanceCapabilities capabilities, ID
 public readonly record struct ApproverEligibilityResult(ApproverCapacity Capacity, string? OnBehalfOf = null)
 {
     public bool ViaDeputy => OnBehalfOf is not null;
+
+    /// <summary>Every identifier form of the principal acted for (four-eyes compares them with the recorded approvers, #1121).</summary>
+    public IReadOnlyList<string>? OnBehalfOfIdentifiers { get; init; }
 }

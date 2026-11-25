@@ -175,31 +175,6 @@ public sealed class FirstDecisionWinsTests
         audit.Entries.ShouldContain(e => e.EventType == AuditEventTypes.PermissionDecisionConflict);
     }
 
-    [Fact]
-    public async Task Secret_request_single_approver()
-    {
-        var protection = new StubProtectionProvider(() => new EffectiveProtection(
-            new ContainerRef(ContainerKind.Domain, Guid.NewGuid()),
-            null,
-            ProtectionClass.Secret,
-            ProtectionClass.Secret,
-            null,
-            new Dictionary<string, ColumnProtection>(),
-            CatalogVisibilityMode.Open));
-
-        var (engine, repo, _, consents) = CreateHarness(protection);
-        var result = await engine.DecideAsync(new PermissionDecisionCommand(repo.Current.Id, 1, Approver("user:dg-1"), Approve: true));
-        result.Request.Status.ShouldBe("APPROVED");
-        result.Request.ApprovalSteps.Count.ShouldBe(1);
-        consents.Count.ShouldBe(1);
-    }
-
-    private sealed class StubProtectionProvider(Func<EffectiveProtection> get) : IProtectionSnapshotProvider
-    {
-        public ValueTask<EffectiveProtection> GetAsync(TenantId tenant, TableIdentifier table, CancellationToken ct = default) =>
-            ValueTask.FromResult(get());
-    }
-
     private sealed class DummyDbTransaction : DbTransaction
     {
         public override System.Data.IsolationLevel IsolationLevel => System.Data.IsolationLevel.ReadCommitted;

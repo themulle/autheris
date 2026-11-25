@@ -224,6 +224,9 @@ public static class AuditEventTypes
     public const string PermissionApproved = "PERMISSION_APPROVED";
     public const string PermissionRejected = "PERMISSION_REJECTED";
     public const string PermissionDecisionConflict = "PERMISSION_DECISION_CONFLICT";
+
+    /// <summary>Issue #1121: the first of two approvals of a grant on secret data was recorded; the request awaits a second, different approver.</summary>
+    public const string PermissionApprovalRecorded = "PERMISSION_APPROVAL_RECORDED";
     public const string CatalogGrantCreated = "CATALOG_GRANT_CREATED";
     public const string CatalogGrantRevoked = "CATALOG_GRANT_REVOKED";
     public const string UnmaskGrantCreated = "UNMASK_GRANT_CREATED";

@@ -235,7 +235,16 @@ public static partial class GatewayServiceCollectionExtensions
             // HotChocolate 16 adds the types __SchemaDefinition/__SearchResult (semantic introspection) to the schema.
             // Their names start with "__", which GraphQL reserves for introspection; graphql-js based clients (GraphiQL,
             // Apollo, codegen) reject the whole schema because of them. Autheris does not use the semantic search.
-            .ModifyOptions(opt => opt.EnableSemanticIntrospection = false)
+            // Issue #1109: HotChocolate's own warm-up hosted service would await the full executor build inside the host
+            // start, so Kestrel (and /health/live) would only listen after it. The build is started in the background by
+            // GraphQlExecutorGate and McpSchemaDiscoveryService instead; /health/ready stays 503 (Warming) until both are done,
+            // and a request that arrives earlier waits for the same build (no partial schema). Warm-up tasks still run on
+            // every executor creation.
+            .ModifyOptions(opt =>
+            {
+                opt.EnableSemanticIntrospection = false;
+                opt.LazyInitialization = true;
+            })
             .ModifyRequestOptions(opt =>
             {
                 opt.ExecutionTimeout = TimeSpan.FromSeconds(gatewayOptions.HighAvailability.QueryTimeoutSeconds);

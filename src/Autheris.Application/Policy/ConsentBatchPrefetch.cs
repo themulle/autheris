@@ -27,19 +27,25 @@ public sealed class ConsentBatchPrefetch
     private readonly HashSet<Sid> _subjects;
     private readonly IReadOnlyDictionary<TableIdentifier, IReadOnlyList<Consent>> _byTable;
     private readonly IReadOnlyList<Consent> _tenantPatterns;
+    private readonly HashSet<string>? _prefetchedCandidateApprovers;
+    private readonly IReadOnlyDictionary<TableIdentifier, IReadOnlySet<string>>? _authorizedApproversByTable;
 
     private ConsentBatchPrefetch(
         TenantId tenant,
         HashSet<Sid> subjects,
         DateTimeOffset readAt,
         IReadOnlyDictionary<TableIdentifier, IReadOnlyList<Consent>> byTable,
-        IReadOnlyList<Consent> tenantPatterns)
+        IReadOnlyList<Consent> tenantPatterns,
+        HashSet<string>? prefetchedCandidateApprovers = null,
+        IReadOnlyDictionary<TableIdentifier, IReadOnlySet<string>>? authorizedApproversByTable = null)
     {
         Tenant = tenant;
         _subjects = subjects;
         ReadAt = readAt;
         _byTable = byTable;
         _tenantPatterns = tenantPatterns;
+        _prefetchedCandidateApprovers = prefetchedCandidateApprovers;
+        _authorizedApproversByTable = authorizedApproversByTable;
     }
 
     /// <summary>The longest time after <see cref="ReadAt"/> a decision may use the prefetch.</summary>
@@ -56,7 +62,9 @@ public sealed class ConsentBatchPrefetch
         IReadOnlyCollection<TableIdentifier> tables,
         TenantId tenant,
         DateTimeOffset readAt,
-        CancellationToken ct)
+        CancellationToken ct,
+        Autheris.Application.Governance.Ownership.IContainerOwnership? ownershipRepository = null,
+        IReadOnlyCollection<TableMetadata>? tableMetadata = null)
     {
         ArgumentNullException.ThrowIfNull(repository);
         ArgumentNullException.ThrowIfNull(subjects);
@@ -64,7 +72,46 @@ public sealed class ConsentBatchPrefetch
         var subjectSet = subjects.ToHashSet();
         var byTable = await repository.GetActiveConsentsForSubjectsBatchAsync(subjectSet, tables, readAt, tenant, ct).ConfigureAwait(false);
         var patterns = await repository.GetPatternConsentsWithPendingDeniesAsync(tenant, readAt, ct).ConfigureAwait(false);
-        return new ConsentBatchPrefetch(tenant, subjectSet, readAt, byTable, patterns);
+
+        HashSet<string>? candidateApprovers = null;
+        IReadOnlyDictionary<TableIdentifier, IReadOnlySet<string>>? authorizedByTable = null;
+        if (ownershipRepository is not null && tables.Count > 0)
+        {
+            foreach (var c in patterns.Concat(byTable.Values.SelectMany(static x => x)))
+            {
+                if (c.IsPatternGrant && c.Effect == ConsentEffect.Allow && c.WorkflowMode != ConsentWorkflowMode.External && c.ApprovingOwners.Count > 0)
+                    foreach (var sid in c.ApprovingOwners)
+                        if (!string.IsNullOrWhiteSpace(sid)) (candidateApprovers ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase)).Add(sid.Trim());
+            }
+
+            if (candidateApprovers is { Count: > 0 })
+            {
+                var metas = tableMetadata ?? tables.Select(static t => new TableMetadata
+                {
+                    Identifier = t,
+                    Table = new Table { Id = Guid.Empty, IsActive = true, SourceName = t.Domain, SchemaName = t.Schema, TableName = t.TableName }
+                }).ToList();
+                authorizedByTable = await ownershipRepository.FilterAuthorizedApproversForTablesAsync(metas, candidateApprovers, readAt, ct).ConfigureAwait(false);
+            }
+        }
+
+        return new ConsentBatchPrefetch(tenant, subjectSet, readAt, byTable, patterns, candidateApprovers, authorizedByTable);
+    }
+
+    internal bool TryIsAnyApproverAuthorized(TableIdentifier table, IReadOnlyCollection<string> ownerSids, DateTimeOffset now, out bool authorized)
+    {
+        authorized = false;
+        if (_authorizedApproversByTable is null || _prefetchedCandidateApprovers is null || !IsFresh(now) || !_authorizedApproversByTable.TryGetValue(table, out var allowed))
+            return false;
+
+        foreach (var sid in ownerSids)
+        {
+            if (string.IsNullOrWhiteSpace(sid)) continue;
+            var trimmed = sid.Trim();
+            if (!_prefetchedCandidateApprovers.Contains(trimmed)) return false;
+            if (allowed.Contains(trimmed)) authorized = true;
+        }
+        return true;
     }
 
     /// <summary>

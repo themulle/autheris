@@ -128,7 +128,9 @@ internal sealed class InMemoryConsentStore(
         var filtered = Requests.Where(r => r.TenantId == query.TenantId
             && (!query.ExternalSystemId.HasValue || r.ExternalSystemId == query.ExternalSystemId)
             && (string.IsNullOrWhiteSpace(query.RequesterSid) || r.RequesterSid.Value == query.RequesterSid)
-            && (string.IsNullOrWhiteSpace(query.Status) || string.Equals(r.Status, query.Status, StringComparison.OrdinalIgnoreCase))).ToList();
+            && (string.IsNullOrWhiteSpace(query.Status)
+                || string.Equals(r.Status, query.Status, StringComparison.OrdinalIgnoreCase)
+                || (!string.IsNullOrWhiteSpace(query.AdditionalStatus) && string.Equals(r.Status, query.AdditionalStatus, StringComparison.OrdinalIgnoreCase)))).ToList();
         return Task.FromResult(new ConsentRequestPage(filtered, null));
     }
 

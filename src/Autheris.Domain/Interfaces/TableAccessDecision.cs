@@ -61,6 +61,13 @@ public sealed record TableAccessDecision(
     /// <summary>MISC-06: why a denied decision was denied. <see cref="TableAccessDenialKind.None"/> on an allowed decision.</summary>
     public TableAccessDenialKind DenialKind { get; init; }
 
+    /// <summary>
+    /// True when a fail-closed denial was caused by a transient infrastructure outage (such as an unavailable protection or access-profile
+    /// source or degraded group resolution). Must still deny the active request, but must not be persisted into cross-request discovery
+    /// views (#1063 §4c).
+    /// </summary>
+    public bool IsTransientFailure { get; init; }
+
     /// <summary>Structured trace of reasons that produced this decision (OD-30).</summary>
     public IReadOnlyList<DecisionReason> Reasons { get; init; } = [];
 

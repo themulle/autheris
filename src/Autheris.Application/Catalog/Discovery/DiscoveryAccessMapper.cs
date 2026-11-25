@@ -63,6 +63,13 @@ public static class DiscoveryAccessMapper
             repoColumnClassifications?.TryGetValue(col.ColumnName, out overrideRows);
             var (pii, clearSep, classifications, clearRequestable) = ResolveColumnClassifications(
                 table, col, isHidden, tenantId, defs, overrideRows);
+            if (clearRequestable.Count > 0 && decision.IsMaskedByScopeRestriction(col.ColumnName, table))
+            {
+                // #1106: the column is masked only by the caller's restricted token scope; the same person reads it as the base rule says, so an
+                // unmask request would change nothing and is not offered (describe_my_access lists it in scopeClearRequiredColumns).
+                clearRequestable = [];
+            }
+
             var colLocalized = !hideText && !string.IsNullOrWhiteSpace(language) ? col.Texts.Resolve(language) : null;
             var colDisplayName = hideText ? null : DiscoveryTextSanitizer.SanitizeText(
                 colLocalized?.Title ?? col.DisplayName,
@@ -188,8 +195,8 @@ public static class DiscoveryAccessMapper
     }
 
     /// <summary>
-    /// Issues #805/#807: keys and indexes over the listed columns whose state is <see cref="DiscoveryColumnState.Clear"/>
-    /// (the shared <see cref="DatasetIndexProjection"/> rule), required filters over the listed columns the caller has any access to.
+    /// Issues #805/#807/#1105: keys, indexes and required filters over the listed columns the caller has any access to (state
+    /// <see cref="DiscoveryColumnState.Clear"/> or <see cref="DiscoveryColumnState.Masked"/>, the shared <see cref="DatasetIndexProjection"/> rule).
     /// <paramref name="columns"/> holds only columns that are not discovery-hidden; a caller without access to any column gets nothing.
     /// </summary>
     private static DiscoveryQueryShape MapQueryShape(TableMetadata table, IReadOnlyList<DiscoveryColumn> columns)
@@ -203,29 +210,23 @@ public static class DiscoveryAccessMapper
         }
 
         HashSet<string>? listed = null;
-        HashSet<string>? clear = null;
         foreach (var column in columns)
         {
-            if (hasFilters && DiscoveryColumnVisibility.IsVisible(column.State))
+            if (DiscoveryColumnVisibility.IsVisible(column.State))
             {
                 (listed ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase)).Add(column.Name);
             }
-
-            if (hasKeys && column.State == DiscoveryColumnState.Clear)
-            {
-                (clear ??= new HashSet<string>(StringComparer.OrdinalIgnoreCase)).Add(column.Name);
-            }
         }
 
-        if (listed is null && clear is null)
+        if (listed is null)
         {
             return DiscoveryQueryShape.Empty;
         }
 
-        var keys = clear is null ? DatasetKeyProjection.Empty : DatasetIndexProjection.Project(table, clear);
+        var keys = hasKeys ? DatasetIndexProjection.Project(table, listed) : DatasetKeyProjection.Empty;
         IReadOnlyList<string> requiredColumns = [];
         IReadOnlyList<IReadOnlyList<string>> requiredGroups = [];
-        if (listed is not null)
+        if (hasFilters)
         {
             (requiredColumns, requiredGroups) = RequiredFilterColumnProjection.Project(table, listed);
         }

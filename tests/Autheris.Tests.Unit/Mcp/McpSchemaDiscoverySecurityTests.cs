@@ -60,6 +60,7 @@ public sealed class McpSchemaDiscoverySecurityTests
             NullLogger<McpSchemaDiscoveryService>.Instance);
 
         await service.StartAsync(CancellationToken.None);
+        await service.ExecuteTask!.WaitAsync(TimeSpan.FromSeconds(30));
 
         var discoveredLookup = toolRegistry.FindTool("lookup_customer_orders");
         discoveredLookup.ShouldNotBeNull();

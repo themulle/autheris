@@ -243,8 +243,13 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
         var effectiveLimit = Math.Clamp(query.Limit, 1, 200);
         var (cursorUpdatedAt, cursorId) = DecodeConsentRequestCursor(query.Cursor);
         var normalizedStatus = string.IsNullOrWhiteSpace(query.Status) ? null : query.Status.Trim().ToUpperInvariant();
+        var normalizedAdditionalStatus = normalizedStatus is null || string.IsNullOrWhiteSpace(query.AdditionalStatus)
+            ? null
+            : query.AdditionalStatus.Trim().ToUpperInvariant();
         var externalSystemStr = query.ExternalSystemId?.ToString("D");
 
+        // PostgreSQL: updated_at is TIMESTAMPTZ NOT NULL (step 0015) and requested_at is text, so COALESCE over both cannot be typed;
+        // the page orders by updated_at alone, which is what the COALESCE yields for every row.
         const string selectTenantConsentRequestsPgSql =
             @"SELECT r.id, r.table_id, r.requester_sid, r.requested_grantee_type, r.requested_grantee_ref,
                      r.business_justification, r.status, r.requested_at, r.requested_valid_to,
@@ -254,15 +259,15 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
               FROM CONSENT_REQUESTS r
               LEFT JOIN TABLES t ON r.table_id = t.id
               WHERE r.tenant_id = @tenantId
-                AND (@status IS NULL OR UPPER(r.status) = @status)
+                AND (@status IS NULL OR UPPER(r.status) = @status OR UPPER(r.status) = @additionalStatus)
                 AND (@externalSystemId IS NULL OR r.external_system_id = @externalSystemId)
-                AND (@updatedSince IS NULL OR COALESCE(r.updated_at, r.requested_at) >= @updatedSince)
+                AND (@updatedSince IS NULL OR r.updated_at >= @updatedSince)
                 AND (@domain IS NULL OR LOWER(t.source_name) = LOWER(@domain))
                 AND (@schema IS NULL OR LOWER(t.schema_name) = LOWER(@schema))
                 AND (@tableName IS NULL OR LOWER(t.table_name) = LOWER(@tableName))
                 AND (@requesterSid IS NULL OR r.requester_sid = @requesterSid)
-                AND (@cursorUpdatedAt IS NULL OR COALESCE(r.updated_at, r.requested_at) < @cursorUpdatedAt OR (COALESCE(r.updated_at, r.requested_at) = @cursorUpdatedAt AND r.id < @cursorId))
-              ORDER BY COALESCE(r.updated_at, r.requested_at) DESC, r.id DESC
+                AND (@cursorUpdatedAt IS NULL OR r.updated_at < @cursorUpdatedAt OR (r.updated_at = @cursorUpdatedAt AND r.id < @cursorId))
+              ORDER BY r.updated_at DESC, r.id DESC
               LIMIT @take";
 
         const string selectTenantConsentRequestsSqlServerSql =
@@ -274,7 +279,7 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
               FROM CONSENT_REQUESTS r
               LEFT JOIN TABLES t ON r.table_id = t.id
               WHERE r.tenant_id = @tenantId
-                AND (@status IS NULL OR UPPER(r.status) = @status)
+                AND (@status IS NULL OR UPPER(r.status) = @status OR UPPER(r.status) = @additionalStatus)
                 AND (@externalSystemId IS NULL OR r.external_system_id = @externalSystemId)
                 AND (@updatedSince IS NULL OR COALESCE(r.updated_at, r.requested_at) >= @updatedSince)
                 AND (@domain IS NULL OR LOWER(t.source_name) = LOWER(@domain))
@@ -293,6 +298,7 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
 
         cmd.AddBound("@tenantId", query.TenantId.Value);
         cmd.AddBound("@status", (object?)normalizedStatus ?? DBNull.Value, System.Data.DbType.String);
+        cmd.AddBound("@additionalStatus", (object?)normalizedAdditionalStatus ?? DBNull.Value, System.Data.DbType.String);
         cmd.AddBound("@externalSystemId", (object?)externalSystemStr ?? DBNull.Value, System.Data.DbType.String);
         cmd.AddBound("@updatedSince", query.UpdatedSince.HasValue ? query.UpdatedSince.Value.ToUniversalTime() : (object)DBNull.Value, System.Data.DbType.DateTimeOffset);
         cmd.AddBound("@domain", string.IsNullOrWhiteSpace(query.Domain) ? (object)DBNull.Value : query.Domain.Trim(), System.Data.DbType.String);

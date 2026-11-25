@@ -44,9 +44,10 @@ internal static class AggregateArgumentParser
         var order = ParseOrderBy(orderBy, columns, groupColumns, parsedAggregates, options, variable);
         var parsedLimit = ParseLimit(limit, variable);
 
-        if (timeBucketSpecs.Count > 0 && parsedLimit > 1000)
+        // #1107: its own code, so a client can tell "lower limit" from the cost analyzer's QUERY_TOO_COMPLEX.
+        if (timeBucketSpecs.Count > 0 && parsedLimit > AggregationOptions.MaxTimeBucketedLimit)
         {
-            throw AggregateErrors.Create("QUERY_TOO_COMPLEX", "Time-bucketed aggregation queries cannot exceed a limit of 1000 groups.");
+            throw AggregateErrors.TimeBucketLimitExceeded();
         }
 
         return new ParsedAggregateArguments(groupColumns, parsedAggregates, order, parsedLimit, timeBucketSpecs.Count > 0 ? timeBucketSpecs : null);
