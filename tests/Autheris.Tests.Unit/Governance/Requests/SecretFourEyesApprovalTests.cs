@@ -28,7 +28,7 @@ namespace Autheris.Tests.Unit.Governance.Requests;
 
 /// <summary>Issue #1121: four-eyes approval for grants on secret data through the permission request engine.</summary>
 [Trait("Category", "Security")]
-public sealed class SecretFourEyesApprovalTests
+public sealed partial class SecretFourEyesApprovalTests
 {
     private static readonly TenantId Tenant = new("tenant-a");
     private static readonly TableIdentifier Orders = new("sales", "dbo", "orders");
@@ -489,6 +489,7 @@ public sealed class SecretFourEyesApprovalTests
         private readonly IConsentApprovalRepository _approvals;
         private readonly OwnerGroupCapabilities _capabilities = new();
         private readonly ApproverResolver _resolver;
+        private readonly Autheris.Application.Governance.Ownership.IDeputyAuthority? _deputies;
 
         public Harness(
             ProtectionClass tableClass,
@@ -500,8 +501,10 @@ public sealed class SecretFourEyesApprovalTests
             AccessProfile? profile = null,
             Guid? profileId = null,
             bool withTable = true,
-            Exception? auditFailure = null)
+            Exception? auditFailure = null,
+            Autheris.Application.Governance.Ownership.IDeputyAuthority? deputies = null)
         {
+            _deputies = deputies;
             var columns = new Dictionary<string, ColumnProtection>(StringComparer.OrdinalIgnoreCase);
             if (columnClass is { } cc)
             {
@@ -551,7 +554,7 @@ public sealed class SecretFourEyesApprovalTests
                 _approvals,
                 Audit,
                 _resolver,
-                new ApproverEligibility(_capabilities),
+                new ApproverEligibility(_capabilities, _deputies),
                 new SeparationOfDutiesService(),
                 new GrantPolicy(),
                 GrantValidityPolicy.CreateDefault(),
@@ -594,9 +597,10 @@ public sealed class SecretFourEyesApprovalTests
             _approvals,
             NullFake.Create<IConsentRepository>(),
             _resolver,
-            new ApproverEligibility(_capabilities),
+            new ApproverEligibility(_capabilities, _deputies),
             new SeparationOfDutiesService(),
-            _capabilities);
+            _capabilities,
+            deputies: _deputies);
 
         private ConsentRequestPage Page(ConsentRequestPageQuery query)
         {

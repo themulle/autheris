@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Governance.Ownership;
 using Autheris.Application.Governance.Paging;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -21,7 +22,11 @@ public sealed record ContainerGrantsPage(
     IReadOnlyList<Consent>? PatternGrants = null,
     bool PatternGrantsTruncated = false,
     IReadOnlyList<CatalogVisibilityGrant>? CatalogGrants = null,
-    bool CatalogGrantsTruncated = false);
+    bool CatalogGrantsTruncated = false,
+    IReadOnlyList<EffectiveContainerDeputy>? Deputies = null);
+
+/// <summary>A deputy (A) who currently decides for the container because it acts for an owner-group member (B) (issue #1126).</summary>
+public sealed record EffectiveContainerDeputy(DeputyRelation Relation);
 
 public sealed partial class PermissionInboxService
 {
@@ -32,8 +37,9 @@ public sealed partial class PermissionInboxService
     public const int MaxPatternMatchTables = 1000;
 
     /// <summary>
-    /// Grants (including self-grants) of a container for owner group members and Data Governance;
-    /// <see langword="null"/> when the container is not visible to the caller.
+    /// Grants (including self-grants) of a container for owner group members, deputies currently acting for an owner group member
+    /// (issue #1126) and Data Governance; <see langword="null"/> when the container is not visible to the caller. The first page also lists
+    /// the container's effective deputies: active relations whose principal is an owner group member of the container.
     /// </summary>
     public async Task<ContainerGrantsPage?> GetContainerGrantsAsync(
         SecurityPrincipalContext caller,
@@ -59,13 +65,13 @@ public sealed partial class PermissionInboxService
 
         var allowed = _capabilities.IsGovernance(caller.Principal, tenant) ||
                       await _capabilities.IsOwnerMemberAsync(caller, container, ct).ConfigureAwait(false);
-        if (!allowed)
+        var domain = await _domains.GetAsync(tenant, container.Id, ct).ConfigureAwait(false);
+        if (domain is null)
         {
             return null;
         }
 
-        var domain = await _domains.GetAsync(tenant, container.Id, ct).ConfigureAwait(false);
-        if (domain is null)
+        if (!allowed && !await ActsForOwnerMemberAsync(caller, tenant, domain.OwnerGroupSid, ct).ConfigureAwait(false))
         {
             return null;
         }
@@ -88,7 +94,53 @@ public sealed partial class PermissionInboxService
 
         var (patternGrants, patternTruncated) = await ListPatternGrantsAsync(tenant, container.Id, includeInactive, ct).ConfigureAwait(false);
         var (catalog, catalogTruncated) = await ListCatalogGrantsAsync(tenant, container, includeInactive, ct).ConfigureAwait(false);
-        return new ContainerGrantsPage(page.Items, nextCursor, patternGrants, patternTruncated, catalog, catalogTruncated);
+        var deputies = await ListEffectiveDeputiesAsync(tenant, domain.OwnerGroupSid, ct).ConfigureAwait(false);
+        return new ContainerGrantsPage(page.Items, nextCursor, patternGrants, patternTruncated, catalog, catalogTruncated, deputies);
+    }
+
+    /// <summary>Upper bound of active deputy relations of a tenant inspected for the effective deputies of one container.</summary>
+    public const int MaxDeputyRelationsScanned = 1000;
+
+    /// <summary>True when the caller acts, under an active relation, for an owner group member of the container (issue #1126).</summary>
+    private async Task<bool> ActsForOwnerMemberAsync(SecurityPrincipalContext caller, TenantId tenant, Sid? ownerGroup, CancellationToken ct)
+    {
+        if (_deputies is null || ownerGroup is not { } group || string.IsNullOrWhiteSpace(group.Value))
+        {
+            return false;
+        }
+
+        foreach (var relation in await _deputies.GetActiveRelationsAsync(caller, tenant, ct).ConfigureAwait(false))
+        {
+            if (await _deputies.IsPrincipalOwnerMemberAsync(tenant, relation, group, ct).ConfigureAwait(false))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>Active relations of the tenant whose principal is an owner group member of the container: its effective deputies.</summary>
+    private async Task<IReadOnlyList<EffectiveContainerDeputy>> ListEffectiveDeputiesAsync(TenantId tenant, Sid? ownerGroup, CancellationToken ct)
+    {
+        if (_deputyRelations is null || _deputies is null || ownerGroup is not { } group || string.IsNullOrWhiteSpace(group.Value))
+        {
+            return [];
+        }
+
+        var now = _time.GetUtcNow();
+        var relations = await _deputyRelations.ListAsync(tenant, new DeputyRelationFilter(ActiveAt: now), MaxDeputyRelationsScanned, ct).ConfigureAwait(false) ?? [];
+        var effective = new List<EffectiveContainerDeputy>();
+        foreach (var relation in relations)
+        {
+            if (relation.TenantId == tenant && relation.IsActiveAt(now) &&
+                await _deputies.IsPrincipalOwnerMemberAsync(tenant, relation, group, ct).ConfigureAwait(false))
+            {
+                effective.Add(new EffectiveContainerDeputy(relation));
+            }
+        }
+
+        return effective;
     }
 
     /// <summary>Pattern grants of the tenant whose pattern matches at least one table of the domain.</summary>

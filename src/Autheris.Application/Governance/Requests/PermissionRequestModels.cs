@@ -77,6 +77,12 @@ public sealed record PermissionDecisionRecord(
     int StepNumber = 1,
     IReadOnlyList<string>? ApproverIdentifiers = null)
 {
+    /// <summary>
+    /// The realm-qualified principal the decider acted for when it held the owner capacity only as a deputy (issue #1126); audited.
+    /// Four-eyes (#1121) treats the decider and this principal as one decision authority (see <see cref="ApproverIdentifiers"/>).
+    /// </summary>
+    public string? OnBehalfOf { get; init; }
+
     /// <summary>True when the decision ends the request (approval that creates the grant, or rejection); false for a recorded first approval.</summary>
     public bool IsFinal => !string.Equals(NewStatus, SecretFourEyesRule.PendingSecondApproval, StringComparison.OrdinalIgnoreCase);
 }

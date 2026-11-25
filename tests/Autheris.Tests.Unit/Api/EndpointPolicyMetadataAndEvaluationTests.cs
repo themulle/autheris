@@ -248,6 +248,7 @@ public sealed class EndpointPolicyMetadataAndEvaluationTests
     [InlineData(GatewayPolicies.VirtualFilterSyncApply, new[] { "FilterSync" }, "ClusterAdmin")]
     [InlineData(GatewayPolicies.EffectiveFilterInspect, new[] { "FilterAdmin", "GovernanceAdmin", "SecurityAuditor" }, "Consumer")]
     [InlineData(GatewayPolicies.ProductSync, new[] { "DataProductSync" }, "ClusterAdmin")]
+    [InlineData(GatewayPolicies.DeputySync, new[] { "DeputySync", "GovernanceAdmin" }, "ClusterAdmin")]
     [InlineData(GatewayPolicies.OpenApiPublish, new[] { "GovernanceAdmin", "SchemaPublisher", "TenantAdmin" }, "Consumer")]
     [InlineData(GatewayPolicies.ProfileAdmin, new[] { "GovernanceAdmin" }, "TenantAdmin")]
     [InlineData(GatewayPolicies.ProfileRead, new[] { "TenantAdmin", "GovernanceAdmin", "SecurityAuditor" }, "Consumer")]

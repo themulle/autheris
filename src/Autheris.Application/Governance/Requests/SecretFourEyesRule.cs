@@ -69,6 +69,27 @@ public static class SecretFourEyesRule
     }
 
     /// <summary>
+    /// The decision authority of a decider (issue #1126): its own personal identifier forms plus, when it acts as a deputy, every identifier
+    /// form of the principal it acts for, so the deputy and that principal never count as two distinct approvers.
+    /// </summary>
+    public static IReadOnlyList<string> ApproverIdentity(SecurityPrincipalContext decider, IReadOnlyCollection<string>? onBehalfOfIdentifiers)
+    {
+        var own = ApproverIdentity(decider);
+        if (onBehalfOfIdentifiers is not { Count: > 0 })
+        {
+            return own;
+        }
+
+        var forms = new HashSet<string>(own, StringComparer.OrdinalIgnoreCase);
+        foreach (var form in onBehalfOfIdentifiers)
+        {
+            SeparationOfDutiesService.AddIdentifierForms(forms, form);
+        }
+
+        return forms.OrderBy(f => f, StringComparer.Ordinal).ToArray();
+    }
+
+    /// <summary>
     /// True when <paramref name="currentIdentity"/> is the person who recorded <paramref name="step"/>: any shared identifier form counts,
     /// so a second approval under another identifier form of the same principal is detected. A step without stored forms is compared by its SID.
     /// </summary>

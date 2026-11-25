@@ -97,7 +97,31 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<Autheris.Application.Governance.Requests.IConsentExtrasWriter>(sp =>
             sp.GetRequiredService<Autheris.Infrastructure.Persistence.PermissionRequestStore>());
         services.AddSingleton<Autheris.Application.Governance.Requests.ApproverResolver>();
-        services.AddSingleton<Autheris.Application.Governance.Requests.ApproverEligibility>();
+        // Issue #1126: the deputy seam of decider eligibility, the identity resolution of external relations and their reconciliation.
+        services.AddSingleton<Autheris.Application.Governance.Ownership.IDeputyAuthority>(sp =>
+            new Autheris.Application.Governance.Ownership.DeputyAuthority(
+                sp.GetRequiredService<Autheris.Application.Governance.Ownership.IDeputyRelationRepository>(),
+                sp.GetService<Autheris.Domain.Interfaces.IScimGroupStore>(),
+                sp.GetService<TimeProvider>()));
+        services.AddSingleton<Autheris.Application.Governance.Ownership.IDeputyIdentityResolver>(sp =>
+            new Autheris.Application.Governance.Ownership.ScimDeputyIdentityResolver(
+                sp.GetService<Autheris.Domain.Interfaces.IScimUserStore>(),
+                sp.GetService<Autheris.Application.Identity.IIdentityRealmRegistry>(),
+                sp.GetService<Autheris.Domain.Interfaces.IScimProvisioningStore>()));
+        services.AddSingleton<Autheris.Application.Governance.Ownership.DeputyRelationService>(sp =>
+            new Autheris.Application.Governance.Ownership.DeputyRelationService(
+                sp.GetRequiredService<Autheris.Application.Governance.Ownership.IDeputyRelationRepository>(),
+                sp.GetRequiredService<Autheris.Application.Governance.Ownership.IDeputyIdentityResolver>(),
+                sp.GetRequiredService<Autheris.Application.Common.Interfaces.IGovernanceCapabilities>(),
+                sp.GetRequiredService<Autheris.Application.Governance.Ownership.IDeputyAuthority>(),
+                sp.GetService<Autheris.Application.Common.Interfaces.IGovernanceDomainRepository>(),
+                sp.GetService<Autheris.Application.Products.IDataProductRepository>(),
+                sp.GetService<Autheris.Application.Governance.Caching.IGovernanceWriteInvalidator>(),
+                sp.GetService<TimeProvider>()));
+        services.AddSingleton<Autheris.Application.Governance.Requests.ApproverEligibility>(sp =>
+            new Autheris.Application.Governance.Requests.ApproverEligibility(
+                sp.GetRequiredService<Autheris.Application.Common.Interfaces.IGovernanceCapabilities>(),
+                sp.GetService<Autheris.Application.Governance.Ownership.IDeputyAuthority>()));
         services.AddSingleton<Autheris.Application.Governance.Requests.IGrantEffectApplier, Autheris.Application.Governance.Requests.DataGrantApplier>();
         services.AddSingleton<Autheris.Application.Governance.Requests.IGrantEffectApplier, Autheris.Application.Governance.Requests.UnmaskGrantApplier>();
         services.AddSingleton<Autheris.Application.Governance.Requests.IGrantEffectApplier, Autheris.Application.Governance.Requests.CatalogGrantApplier>();
@@ -131,7 +155,9 @@ public static partial class GatewayGovernanceServiceExtensions
                 sp.GetRequiredService<Autheris.Application.Common.Interfaces.IGovernanceCapabilities>(),
                 sp.GetService<Autheris.Application.Common.Interfaces.IGovernanceDomainRepository>(),
                 sp.GetService<TimeProvider>(),
-                sp.GetService<Autheris.Application.Common.Interfaces.ICatalogVisibilityGrantRepository>()));
+                sp.GetService<Autheris.Application.Common.Interfaces.ICatalogVisibilityGrantRepository>(),
+                sp.GetService<Autheris.Application.Governance.Ownership.IDeputyAuthority>(),
+                sp.GetService<Autheris.Application.Governance.Ownership.IDeputyRelationRepository>()));
         services.AddSingleton<Autheris.Application.Governance.Grants.IGrantRevocationService>(sp => new Autheris.Application.Governance.Grants.GrantRevocationService(
             sp.GetRequiredService<Autheris.Application.Common.Interfaces.IConsentRepository>(),
             sp.GetRequiredService<Autheris.Application.Common.Interfaces.IConsentApprovalRepository>(),

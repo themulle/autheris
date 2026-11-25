@@ -24,7 +24,7 @@ public sealed partial class AuthPluginRoleEscalationGuard
         // GatewayRole
         "ClusterAdmin", "TenantAdmin", "GovernanceAdmin", "SecurityAuditor", "SchemaPublisher",
         "FilterAdmin", "FilterSync", "CallerAttributeApprover", "CallerAttributeInspector",
-        "CatalogArtifactUploader", "DataProductAdmin", "DataProductSync",
+        "CatalogArtifactUploader", "DataProductAdmin", "DataProductSync", "DeputySync",
 
         // Privileged operational and service roles
         "MetricsScraper", "SCIM_PROVISIONER",

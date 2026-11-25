@@ -33,7 +33,11 @@ public enum GatewayRole
     // Data products: creating products over any objects can expose data base owners would not release, and the Git sync identity
     // creates products from a repository. Both are tenant-scoped only and implied by NO role, ClusterAdmin included.
     DataProductAdmin = 35,
-    DataProductSync = 36
+    DataProductSync = 36,
+
+    // Deputy relations (issue #1126): the identity of an external absence/HR system that reconciles person-to-person deputy relations.
+    // Tenant-scoped only and implied by NO role, ClusterAdmin and TenantAdmin included.
+    DeputySync = 37
 }
 
 public static class GatewayRoleExtensions
@@ -52,7 +56,8 @@ public static class GatewayRoleExtensions
         ["CallerAttributeInspector"] = GatewayRole.CallerAttributeInspector,
         ["CatalogArtifactUploader"] = GatewayRole.CatalogArtifactUploader,
         ["DataProductAdmin"] = GatewayRole.DataProductAdmin,
-        ["DataProductSync"] = GatewayRole.DataProductSync
+        ["DataProductSync"] = GatewayRole.DataProductSync,
+        ["DeputySync"] = GatewayRole.DeputySync
     };
 
     /// <summary>
@@ -184,7 +189,7 @@ public static class GatewayRoleExtensions
     /// confers them and <see cref="Implies"/> never derives them (not even from ClusterAdmin).
     /// </summary>
     public static bool IsTenantScopedOnly(this GatewayRole role) =>
-        role is GatewayRole.DataProductAdmin or GatewayRole.DataProductSync;
+        role is GatewayRole.DataProductAdmin or GatewayRole.DataProductSync or GatewayRole.DeputySync;
 
     /// <summary>
     /// Checks role hierarchy: returns true if the granted role satisfies the required role.
@@ -196,7 +201,7 @@ public static class GatewayRoleExtensions
             return true;
         }
 
-        // Data products: the product roles can expose data, so no role implies them, ClusterAdmin included.
+        // Data products and deputy sync: these roles can expose data or decider capacity, so no role implies them, ClusterAdmin included.
         if (required.IsTenantScopedOnly())
         {
             return false;

@@ -322,6 +322,11 @@ public static partial class GatewayGovernanceServiceExtensions
         services.AddSingleton<ICatalogVisibilityGrantRepository>(sp => sp.GetRequiredService<CatalogVisibilityGrantStore>());
         services.AddSingleton<Autheris.Application.Governance.Declarative.IManifestProposalRepository>(sp =>
             new ManifestProposalStore(sp.GetRequiredService<IGovernanceSqlDialect>()));
+        // Issue #1126: externally sourced deputy relations (writes carry their audit in the governance transaction).
+        services.AddSingleton<Autheris.Application.Governance.Ownership.IDeputyRelationRepository>(sp =>
+            sp.GetRequiredService<TRepository>() is GovernanceRepository governanceRepository
+                ? new DeputyRelationStore(governanceRepository, sp.GetRequiredService<IGovernanceSqlDialect>())
+                : Autheris.Application.Governance.Ownership.EmptyDeputyRelationRepository.Instance);
         services.AddSingleton<ICatalogGrantRevocationWriter>(sp => new CatalogGrantRevocationWriter(
             sp.GetRequiredService<TRepository>() as GovernanceRepository
                 ?? throw new InvalidOperationException("Catalog grant revocation needs the SQL governance repository for its audit transaction."),

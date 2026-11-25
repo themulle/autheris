@@ -15,7 +15,8 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 
 /// <summary>
-/// Resolved eligible approver groups and capacities for a permission request target.
+/// Resolved eligible approver groups and capacities for a permission request target. <see cref="RequesterRef"/> and
+/// <see cref="GranteeRef"/> carry the request subjects so a deputy never acts for a principal on that principal's own request (issue #1126).
 /// </summary>
 public sealed record ApproverSet(
     TenantId Tenant,
@@ -26,7 +27,9 @@ public sealed record ApproverSet(
     bool GovernanceEligible,
     bool ItAdminEligible,
     bool A7GovernanceFallback = false,
-    bool RouteInertFallback = false);
+    bool RouteInertFallback = false,
+    string? RequesterRef = null,
+    string? GranteeRef = null);
 
 /// <summary>
 /// Resolves container ownership and eligible approver capacities for a permission request.
@@ -140,7 +143,9 @@ public sealed class ApproverResolver(
             OwnerGroupAssigned: true,
             GovernanceEligible: a7Fallback,
             ItAdminEligible: false,
-            A7GovernanceFallback: a7Fallback);
+            A7GovernanceFallback: a7Fallback,
+            RequesterRef: requester.Value,
+            GranteeRef: granteeRef);
     }
 
     private async ValueTask<(ContainerRef? Container, Sid? OwnerGroupSid)> ResolveContainerCachedAsync(

@@ -186,11 +186,13 @@ public sealed partial class PermissionRequestEngine
             req.RequestedGranteeRef,
             ct).ConfigureAwait(false);
 
-        var capacity = await _approverEligibility.EvaluateAsync(command.Decider, approverSet, ct).ConfigureAwait(false);
-        if (!capacity.HasValue)
+        var eligibility = await _approverEligibility.EvaluateDetailedAsync(command.Decider, approverSet, ct).ConfigureAwait(false);
+        if (eligibility is not { } eligible)
         {
             throw new ConsentDecisionException("FORBIDDEN", "Decider is not eligible to approve or reject this request.", 403);
         }
+
+        ApproverCapacity? capacity = eligible.Capacity;
 
         var sod = await _sodService.CheckPermissionDecisionAsync(req.TenantId, command.Decider, req, ct).ConfigureAwait(false);
         var selfGrant = sod.Outcome == SodDecisionOutcome.SelfGrant;
@@ -230,7 +232,7 @@ public sealed partial class PermissionRequestEngine
                 StepDecision: "REJECTED",
                 Reason: validatedReason,
                 ApprovedValidTo: req.RequestedValidTo,
-                StepNumber: nextStepNumber);
+                StepNumber: nextStepNumber) { OnBehalfOf = eligible.OnBehalfOf };
         }
 
         if (req.RequestKind == ConsentRequestKind.ProfileAssignment && capacity.Value == ApproverCapacity.ItAdmin)
@@ -263,7 +265,9 @@ public sealed partial class PermissionRequestEngine
             : protectionClass;
         var fourEyes = SecretFourEyesRule.Applies(req.RequestKind, fourEyesClass);
         var priorApprovals = SecretFourEyesRule.RecordedApprovals(req);
-        var approverIdentity = SecretFourEyesRule.ApproverIdentity(command.Decider);
+        // Issue #1126: a deputy acting for a principal carries that principal's identifier forms too, so the deputy and the principal are
+        // one decision authority (A-for-B plus B never makes two distinct approvals; A-for-B plus a third person does).
+        var approverIdentity = SecretFourEyesRule.ApproverIdentity(command.Decider, eligible.OnBehalfOfIdentifiers);
         if (fourEyes && !SecretFourEyesRule.IsEligibleCapacity(capacity.Value))
         {
             throw new ConsentDecisionException("FORBIDDEN", "Grants on secret data are decided by owner-group members or Data Governance only.", 403);
@@ -322,7 +326,7 @@ public sealed partial class PermissionRequestEngine
             Reason: validatedReason,
             ApprovedValidTo: evalValidTo ?? DateTimeOffset.MaxValue,
             StepNumber: nextStepNumber,
-            ApproverIdentifiers: approverIdentity);
+            ApproverIdentifiers: approverIdentity) { OnBehalfOf = eligible.OnBehalfOf };
     }
 
     /// <summary>
@@ -462,7 +466,7 @@ public sealed partial class PermissionRequestEngine
                 ExternalSystemId: command.External?.ExternalSystemId,
                 ExternalReference: command.External?.ExternalReference,
                 ApprovalStep: fourEyesStep ? decision.StepNumber : null,
-                RequiredApprovals: fourEyesStep ? SecretFourEyesRule.RequiredApprovals : null).ToDetailsJson()
+                RequiredApprovals: fourEyesStep ? SecretFourEyesRule.RequiredApprovals : null) { OnBehalfOf = decision.OnBehalfOf }.ToDetailsJson()
         }, ct).ConfigureAwait(false);
 
         return grants;
