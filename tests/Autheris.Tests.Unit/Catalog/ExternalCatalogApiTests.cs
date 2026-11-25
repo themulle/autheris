@@ -146,8 +146,7 @@ public sealed class ExternalCatalogApiTests
         var feed = await harness.GetChangesAsync(person, since: 0);
         feed.StatusCode.Should().Be(StatusCodes.Status200OK);
         var changes = feed.ReadJson().GetProperty("changes").EnumerateArray().ToList();
-        changes.Should().ContainSingle();
-        changes[0].GetProperty("kind").GetString().Should().Be("removed");
+        changes.Should().BeEmpty();
     }
 
     [Fact]
@@ -426,9 +425,7 @@ public sealed class ExternalCatalogApiTests
         deltaFeed.StatusCode.Should().Be(StatusCodes.Status200OK);
         var deltaJson = deltaFeed.ReadJson();
         var deltaItems = deltaJson.GetProperty("changes").EnumerateArray().ToList();
-        deltaItems.Should().ContainSingle();
-        deltaItems[0].GetProperty("kind").GetString().Should().Be("removed");
-        deltaItems[0].GetProperty("objectId").GetString().Should().Be(table.Identifier.ToString());
+        deltaItems.Should().BeEmpty();
         deltaJson.GetProperty("nextSince").GetInt64().Should().BeGreaterThan(seqAfterCreate);
 
         // No-op re-index should emit nothing new

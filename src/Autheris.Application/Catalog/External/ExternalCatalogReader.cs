@@ -13,6 +13,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Catalog.Discovery;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
+using Autheris.Application.Catalog.Visibility;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.Governance;
@@ -45,7 +46,8 @@ public sealed partial class ExternalCatalogReader(
     IConfiguration? configuration = null,
     IProtectionSnapshotProvider? protectionProvider = null,
     ICatalogSnapshotProvider? snapshotProvider = null,
-    ICatalogVisibilityEvaluator? visibilityEvaluator = null)
+    ICatalogVisibilityEvaluator? visibilityEvaluator = null,
+    IContainerVisibilitySnapshotProvider? containerVisibility = null)
 {
     public const int DefaultPageSize = 50;
     public const int MaxPageSize = 200;
@@ -71,6 +73,7 @@ public sealed partial class ExternalCatalogReader(
         configuration);
     private readonly int _descriptionMaxLength = (textOptions?.Value ?? new GovernanceTextOptions()).ConsentDescriptionMaxLength;
     private readonly IProtectionSnapshotProvider? _protectionProvider = protectionProvider;
+    private readonly IContainerVisibilitySnapshotProvider? _containerVisibility = containerVisibility;
     private readonly ICatalogVisibilityEvaluator _visibilityEvaluator =
         visibilityEvaluator ?? new CatalogVisibilityEvaluator(
             gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions)),
@@ -240,6 +243,11 @@ public sealed partial class ExternalCatalogReader(
 
         if (visibility.IsServicePrincipal)
         {
+            if (!await IsAppTableContainerVisibleAsync(user, tenantId, matchedTable.Identifier, ct).ConfigureAwait(false))
+            {
+                return ExternalCatalogResult.Fail<ExternalCatalogObjectDto>(404, "OBJECT_NOT_FOUND", "Catalog object was not found.");
+            }
+
             var dto = await MapSingleAppObjectAsync(tenantId, matchedTable, versions, CanViewHiddenColumns(matchedTable, visibility), ct)
                 .ConfigureAwait(false);
             return ExternalCatalogResult.Ok(dto);
@@ -290,21 +298,76 @@ public sealed partial class ExternalCatalogReader(
             }
         }
 
-        var visibility = await ResolveCallerVisibilityAsync(user, tenantId, referencedTables, ct).ConfigureAwait(false);
+        var inScopeTables = await FilterInScopeTablesAsync(referencedTables, tenantId, ct).ConfigureAwait(false);
+        if (_containerVisibility is not null)
+        {
+            var protectionsByTable = await ResolveProtectionsAsync(tenantId, inScopeTables, ct).ConfigureAwait(false);
+            inScopeTables = await FilterContainerVisibleTablesAsync(user, tenantId, inScopeTables, protectionsByTable, ct).ConfigureAwait(false);
+        }
+
+        var visibleActiveIds = inScopeTables.Select(static t => t.Identifier).ToHashSet();
+        var visibility = await ResolveCallerVisibilityAsync(user, tenantId, inScopeTables, ct).ConfigureAwait(false);
+        ContainerVisibilitySnapshot? removalSnapshot = null;
 
         var items = new List<ExternalCatalogChangeDto>(feed.Changes.Count);
         foreach (var ch in feed.Changes)
         {
             var effectiveKind = NormalizeChangeKind(ch.Kind);
-            if (!string.Equals(effectiveKind, "removed", StringComparison.Ordinal)
-                && byObjectId.TryGetValue(ch.ObjectId, out var table)
-                && table.Table.DiscoveryHidden
-                && !CanViewHiddenTable(table, visibility))
+            if (byObjectId.TryGetValue(ch.ObjectId, out var table))
             {
-                effectiveKind = "removed";
+                if (!visibleActiveIds.Contains(table.Identifier) || !CanViewHiddenTable(table, visibility))
+                {
+                    continue;
+                }
+
+                items.Add(new ExternalCatalogChangeDto(ch.ObjectId, effectiveKind, ch.Seq, ch.ChangedAt));
+                continue;
             }
 
-            items.Add(new ExternalCatalogChangeDto(ch.ObjectId, effectiveKind, ch.Seq, ch.ChangedAt));
+            if (!string.Equals(effectiveKind, "removed", StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (TryParseTableIdentifier(ch.ObjectId, out var removedId))
+            {
+                var inactive = await _metadataRepository.GetTableMetadataAsync(removedId, ct).ConfigureAwait(false);
+                if (inactive is not null)
+                {
+                    if (!await IsTableInTenantScopeAsync(inactive, tenantId, ct).ConfigureAwait(false))
+                    {
+                        continue;
+                    }
+
+                    var inactiveVis = await ResolveCallerVisibilityAsync(user, tenantId, [inactive], ct).ConfigureAwait(false);
+                    if (!CanViewHiddenTable(inactive, inactiveVis))
+                    {
+                        continue;
+                    }
+                }
+            }
+
+            if (_containerVisibility is not null)
+            {
+                if (_protectionProvider is null || !TryParseTableIdentifier(ch.ObjectId, out var removedTableId))
+                {
+                    continue;
+                }
+
+                removalSnapshot ??= await _containerVisibility.GetAsync(tenantId, user, ct).ConfigureAwait(false);
+                if (!removalSnapshot.IsAvailable)
+                {
+                    continue;
+                }
+
+                var removedProt = await _protectionProvider.GetAsync(tenantId, removedTableId, ct).ConfigureAwait(false);
+                if (!IsTableVisibleInContainer(removalSnapshot, removedTableId, removedProt))
+                {
+                    continue;
+                }
+            }
+
+            items.Add(new ExternalCatalogChangeDto(ch.ObjectId, "removed", ch.Seq, ch.ChangedAt));
         }
 
         return ExternalCatalogResult.Ok(

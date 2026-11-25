@@ -115,14 +115,25 @@ public sealed class ContainerVisibilitySnapshotProvider : IContainerVisibilitySn
             return ContainerVisibilitySnapshot.Unavailable();
         }
 
-        if (string.IsNullOrWhiteSpace(tenant.Value) || principal.GetUserSid() is not { } userSid)
+        var isAppOnly = Autheris.Application.Catalog.External.AppOnlyPrincipal.Is(principal);
+        if (isAppOnly)
+        {
+            isGovernance = false;
+            isItAdmin = false;
+        }
+
+        var userSid = principal.GetUserSid();
+        if (string.IsNullOrWhiteSpace(tenant.Value) || (userSid is null && !isAppOnly))
         {
             return ContainerVisibilitySnapshot.Unavailable(isGovernance, isItAdmin);
         }
 
-        var groupsComplete = GroupResolutionClaims.Read(principal, _time.GetUtcNow()) == GroupResolutionStatus.Complete;
-        var subjects = new List<Sid>(principal.GetGroupSids()) { userSid };
-        var subjectKey = BuildSubjectKey(subjects);
+        var groupsComplete = userSid is not null
+            && GroupResolutionClaims.Read(principal, _time.GetUtcNow()) == GroupResolutionStatus.Complete;
+        var subjects = userSid is { } sid
+            ? new List<Sid>(principal.GetGroupSids()) { sid }
+            : [];
+        var subjectKey = userSid is null ? "app-only-unbound" : BuildSubjectKey(subjects);
 
         try
         {

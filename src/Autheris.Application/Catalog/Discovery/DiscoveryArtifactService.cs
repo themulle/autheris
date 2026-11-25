@@ -41,6 +41,7 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
     private readonly IRateLimiterService? _rateLimiter;
     private readonly TimeProvider _timeProvider;
     private readonly IAccessDecisionPoint? _decisionPoint;
+    private readonly IRestrictedScopePolicy _restrictedScopes;
     private readonly ICatalogVisibilityService? _catalogVisibility;
     private readonly Autheris.Application.Governance.Policy.IAccessPolicySettingsProvider? _accessPolicySettings;
     private readonly IProtectionSnapshotProvider? _protectionProvider;
@@ -73,7 +74,7 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
         _rateLimiter = rateLimiter;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _decisionPoint = decisionPoint;
-        _ = restrictedScopes;
+        _restrictedScopes = restrictedScopes ?? RestrictedScopePolicy.Default;
         _catalogVisibility = catalogVisibility;
         _accessPolicySettings = accessPolicySettings;
         _protectionProvider = protectionProvider;
@@ -282,8 +283,50 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
         var maxRows = Math.Clamp(settings.MaxSampleRows, 1, CatalogDiscoverySettings.HardMaxSampleRows);
         var take = limit is > 0 ? Math.Min(limit.Value, maxRows) : maxRows;
 
+        TableAccessDecision? decision = null;
+        if (_decisionPoint is not null && (dataArtifact is not null || importArtifact is not null))
+        {
+            var subject = SecurityPrincipalContext.FromPrincipal(principal, resolution.Tenant!.Value);
+            decision = await _decisionPoint.DecideAsync(
+                new AccessRequest(subject, table, AccessOperation.Discover, AccessTransport.Discovery),
+                ct).ConfigureAwait(false);
+        }
+
+        if (dataArtifact is not null && decision is { IsAllowed: true })
+        {
+            var visible = _catalogVisibility is null
+                ? table
+                : (await _catalogVisibility.FindVisibleAsync(caller, id, ct).ConfigureAwait(false))?.Table;
+            if (visible is null)
+            {
+                return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
+            }
+
+            var (protOk, protection) = await TryLoadProtectionAsync(resolution.Tenant!.Value, id, ct).ConfigureAwait(false);
+            if (!protOk)
+            {
+                return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
+            }
+
+            var projected = ProjectVisibleSamples(dataArtifact.SamplesJson!, visible, take, decision, protection);
+            if (projected.Count == 0)
+            {
+                return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
+            }
+
+            await RecordSampleReadAuditBestEffortAsync(resolution.Tenant!.Value, actorSid, id.ToString(), projected.Count, surface, ct).ConfigureAwait(false);
+            return new DiscoverySamplesReadResult(
+                DiscoveryArtifactOutcome.Ok,
+                new DiscoverySamplesResponse(Available: true, Samples: projected));
+        }
+
         if (importArtifact is not null)
         {
+            if (decision is { IsAllowed: false, DenialKind: TableAccessDenialKind.ConsentDeny })
+            {
+                return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
+            }
+
             var policy = _accessPolicySettings is null
                 ? null
                 : await TryGetPolicyAsync(resolution.Tenant!.Value, ct).ConfigureAwait(false);
@@ -304,7 +347,15 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
                     return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
                 }
 
-                var importProjected = ProjectUnmaskedSamples(importArtifact.SamplesJson!, visible, take);
+                var (protOk, protection) = await TryLoadProtectionAsync(resolution.Tenant!.Value, id, ct).ConfigureAwait(false);
+                if (!protOk)
+                {
+                    return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
+                }
+
+                var importProjected = decision is { IsAllowed: true }
+                    ? ProjectVisibleSamples(importArtifact.SamplesJson!, visible, take, decision, protection)
+                    : ProjectCatalogImportSamples(importArtifact.SamplesJson!, visible, take, principal, decision, protection);
                 if (importProjected.Count > 0)
                 {
                     await RecordSampleReadAuditBestEffortAsync(resolution.Tenant!.Value, actorSid, id.ToString(), importProjected.Count, surface, ct).ConfigureAwait(false);
@@ -315,44 +366,27 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
             }
         }
 
-        if (dataArtifact is null || _decisionPoint is null)
+        return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
+    }
+
+    private async Task<(bool Ok, EffectiveProtection? Protection)> TryLoadProtectionAsync(
+        TenantId tenantId,
+        TableIdentifier id,
+        CancellationToken ct)
+    {
+        if (_protectionProvider is null)
         {
-            return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
+            return (true, null);
         }
 
-        var subject = SecurityPrincipalContext.FromPrincipal(principal, resolution.Tenant!.Value);
-        var decision = await _decisionPoint.DecideAsync(
-            new AccessRequest(subject, table, AccessOperation.Discover, AccessTransport.Discovery),
-            ct).ConfigureAwait(false);
-        if (!decision.IsAllowed)
+        try
         {
-            return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
+            return (true, await _protectionProvider.GetAsync(tenantId, id, ct).ConfigureAwait(false));
         }
-
-        EffectiveProtection? protection = null;
-        if (_protectionProvider is not null)
+        catch (Exception) when (!ct.IsCancellationRequested)
         {
-            try
-            {
-                protection = await _protectionProvider.GetAsync(resolution.Tenant!.Value, id, ct).ConfigureAwait(false);
-            }
-            catch (Exception) when (!ct.IsCancellationRequested)
-            {
-                return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
-            }
+            return (false, null);
         }
-
-        var projected = ProjectVisibleSamples(dataArtifact.SamplesJson!, table, take, decision, protection);
-        if (projected.Count == 0)
-        {
-            return new DiscoverySamplesReadResult(DiscoveryArtifactOutcome.Ok, unavailablePayload);
-        }
-
-        await RecordSampleReadAuditBestEffortAsync(resolution.Tenant!.Value, actorSid, id.ToString(), projected.Count, surface, ct).ConfigureAwait(false);
-
-        return new DiscoverySamplesReadResult(
-            DiscoveryArtifactOutcome.Ok,
-            new DiscoverySamplesResponse(Available: true, Samples: projected));
     }
 
     private async Task<TenantAccessPolicy?> TryGetPolicyAsync(TenantId tenant, CancellationToken ct)
@@ -471,17 +505,42 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
         return CallerScopeResolver.IsOwner(callerTenant, catalogOwner) || sharedTables.Contains(table.Identifier);
     }
 
-    private IReadOnlyList<IReadOnlyDictionary<string, object?>> ProjectUnmaskedSamples(
+    private IReadOnlyList<IReadOnlyDictionary<string, object?>> ProjectCatalogImportSamples(
         string samplesJson,
         TableMetadata table,
-        int maxRows)
+        int maxRows,
+        ClaimsPrincipal principal,
+        TableAccessDecision? decision,
+        EffectiveProtection? protection)
     {
+        var restrictedCaller = _restrictedScopes.HeldBy(TokenAccessScope.GetScopeSet(principal.Claims)).Count > 0;
+        var explicitConstraints = ExtractExplicitColumnConstraints(decision);
         var visibleColumns = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        var maskColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         foreach (var col in table.Columns)
         {
-            if (!col.DiscoveryHidden)
+            if (col.DiscoveryHidden)
             {
-                visibleColumns.TryAdd(col.ColumnName, col.ColumnName);
+                continue;
+            }
+
+            ColumnAccessLevel? explicitLevel = explicitConstraints.TryGetValue(col.ColumnName, out var lvl) ? lvl : null;
+            if (explicitLevel == ColumnAccessLevel.Deny
+                || (table.ColumnMaskingRules.TryGetValue(col.ColumnName, out var rule)
+                    && string.Equals(rule.RuleType, "DENY", StringComparison.OrdinalIgnoreCase)))
+            {
+                continue;
+            }
+
+            if (restrictedCaller && IsRestrictedImportColumn(table, col, explicitLevel, protection))
+            {
+                continue;
+            }
+
+            visibleColumns.TryAdd(col.ColumnName, col.ColumnName);
+            if (explicitLevel == ColumnAccessLevel.Mask)
+            {
+                maskColumns.Add(col.ColumnName);
             }
         }
 
@@ -490,7 +549,79 @@ public sealed class DiscoveryArtifactService : IDiscoveryArtifactService
             return [];
         }
 
-        return ExtractProjectedRows(samplesJson, maxRows, visibleColumns, maskColumns: null, table);
+        return ExtractProjectedRows(samplesJson, maxRows, visibleColumns, maskColumns.Count > 0 ? maskColumns : null, table);
+    }
+
+    private static Dictionary<string, ColumnAccessLevel> ExtractExplicitColumnConstraints(TableAccessDecision? decision)
+    {
+        var result = new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase);
+        if (decision is null)
+        {
+            return result;
+        }
+
+        foreach (var reason in decision.Reasons)
+        {
+            if (reason.Step != DecisionStep.ExplicitDeny || string.IsNullOrWhiteSpace(reason.Column))
+            {
+                continue;
+            }
+
+            if (string.Equals(reason.Code, "COLUMN_DENY", StringComparison.Ordinal))
+            {
+                result[reason.Column] = ColumnAccessLevel.Deny;
+            }
+            else if (string.Equals(reason.Code, "COLUMN_MASK", StringComparison.Ordinal)
+                     && (!result.TryGetValue(reason.Column, out var existing) || existing != ColumnAccessLevel.Deny))
+            {
+                result[reason.Column] = ColumnAccessLevel.Mask;
+            }
+        }
+
+        if (!decision.IsAllowed && decision.Grants.Count == 0)
+        {
+            foreach (var (column, level) in decision.ColumnAccess)
+            {
+                if (level == ColumnAccessLevel.Deny)
+                {
+                    result[column] = ColumnAccessLevel.Deny;
+                }
+                else if (level == ColumnAccessLevel.Mask
+                         && (!result.TryGetValue(column, out var existing) || existing != ColumnAccessLevel.Deny))
+                {
+                    result[column] = ColumnAccessLevel.Mask;
+                }
+            }
+        }
+
+        return result;
+    }
+
+    private static bool IsRestrictedImportColumn(
+        TableMetadata table,
+        TableColumn col,
+        ColumnAccessLevel? explicitLevel,
+        EffectiveProtection? protection)
+    {
+        if (explicitLevel == ColumnAccessLevel.Mask
+            || ClassificationMetadata.IsColumnSensitive(table, col)
+            || table.ColumnMaskingRules.ContainsKey(col.ColumnName))
+        {
+            return true;
+        }
+
+        if (protection is null)
+        {
+            return false;
+        }
+
+        if (protection.Columns.TryGetValue(col.ColumnName, out var cp))
+        {
+            return !string.IsNullOrWhiteSpace(cp.EffectiveMaskCategory)
+                || cp.EffectiveClass >= ProtectionClass.Confidential;
+        }
+
+        return !string.IsNullOrWhiteSpace(protection.TableMaskCategory);
     }
 
     private IReadOnlyList<IReadOnlyDictionary<string, object?>> ProjectVisibleSamples(

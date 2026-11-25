@@ -336,6 +336,272 @@ public sealed class DiscoveryArtifactProvenanceServingTests
         emailStats.TopValues.ShouldBeNull();
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Upload_and_import_coexist_data_authorized_serves_upload_not_import()
+    {
+        var pdp = new FakeAccessDecisionPoint(req => TableAccessDecision.Allowed(
+            req.Object.Identifier,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["id"] = ColumnAccessLevel.Clear,
+                ["email"] = ColumnAccessLevel.Mask,
+                ["ssn"] = ColumnAccessLevel.Deny
+            }));
+
+        var (artifacts, _, _, store, table) = CreateHarness(pdp);
+        await store.UpsertAsync(new DiscoveryArtifacts(
+            table.Table.Id,
+            Tenant.Value,
+            """[{"id": 10, "email": "synthetic@example.invalid", "ssn": "000-00-0000"}]""",
+            StatisticsJson: null,
+            "sha-imp",
+            "dbt-ingestion",
+            DateTimeOffset.UtcNow,
+            1,
+            ArtifactProvenance.Import), new Sid("S-1-5-21-SYS-1"));
+
+        await store.UpsertAsync(new DiscoveryArtifacts(
+            table.Table.Id,
+            Tenant.Value,
+            """[{"id": 99, "email": "real.user@corp.test", "ssn": "123-45-6789"}]""",
+            StatisticsJson: null,
+            "sha-up",
+            "uploader",
+            DateTimeOffset.UtcNow,
+            2,
+            ArtifactProvenance.Upload), new Sid("S-1-5-21-U2"));
+
+        var user = DiscoveryTestBuilder.User("S-1-5-21-U1", Tenant.Value);
+        var res = await artifacts.GetSamplesAsync(user, table.Identifier.ToString());
+
+        res.Outcome.ShouldBe(DiscoveryArtifactOutcome.Ok);
+        res.Payload!.Available.ShouldBeTrue();
+        res.Payload.Samples.Count.ShouldBe(1);
+        res.Payload.Samples[0]["id"].ShouldBe(99L);
+        res.Payload.Samples[0].ContainsKey("ssn").ShouldBeFalse();
+        var maskedEmail = res.Payload.Samples[0]["email"]?.ToString();
+        maskedEmail.ShouldNotBeNullOrWhiteSpace();
+        maskedEmail.ShouldNotBe("real.user@corp.test");
+        maskedEmail.ShouldNotBe("synthetic@example.invalid");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Upload_and_import_coexist_catalog_only_does_not_serve_upload()
+    {
+        var (artifacts, _, _, store, table) = CreateHarness(FakeAccessDecisionPoint.DenyAll());
+        await store.UpsertAsync(new DiscoveryArtifacts(
+            table.Table.Id,
+            Tenant.Value,
+            """[{"id": 10, "email": "synthetic@example.invalid", "ssn": "000-00-0000"}]""",
+            StatisticsJson: null,
+            "sha-imp",
+            "dbt-ingestion",
+            DateTimeOffset.UtcNow,
+            1,
+            ArtifactProvenance.Import), new Sid("S-1-5-21-SYS-1"));
+
+        await store.UpsertAsync(new DiscoveryArtifacts(
+            table.Table.Id,
+            Tenant.Value,
+            """[{"id": 99, "email": "real.user@corp.test", "ssn": "123-45-6789"}]""",
+            StatisticsJson: null,
+            "sha-up",
+            "uploader",
+            DateTimeOffset.UtcNow,
+            2,
+            ArtifactProvenance.Upload), new Sid("S-1-5-21-U2"));
+
+        var user = DiscoveryTestBuilder.User("S-1-5-21-U1", Tenant.Value);
+        var res = await artifacts.GetSamplesAsync(user, table.Identifier.ToString());
+
+        res.Outcome.ShouldBe(DiscoveryArtifactOutcome.Ok);
+        res.Payload!.Available.ShouldBeTrue();
+        res.Payload.Samples.Count.ShouldBe(1);
+        res.Payload.Samples[0]["id"].ShouldBe(10L);
+        res.Payload.Samples[0]["email"]?.ToString().ShouldBe("synthetic@example.invalid");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Upload_all_columns_denied_does_not_fall_back_to_import()
+    {
+        var pdp = new FakeAccessDecisionPoint(req => TableAccessDecision.Allowed(
+            req.Object.Identifier,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["id"] = ColumnAccessLevel.Deny,
+                ["email"] = ColumnAccessLevel.Deny,
+                ["ssn"] = ColumnAccessLevel.Deny
+            }));
+
+        var (artifacts, _, _, store, table) = CreateHarness(pdp);
+        await store.UpsertAsync(new DiscoveryArtifacts(
+            table.Table.Id,
+            Tenant.Value,
+            """[{"id": 10, "email": "synthetic@example.invalid", "ssn": "000-00-0000"}]""",
+            StatisticsJson: null,
+            "sha-imp",
+            "dbt-ingestion",
+            DateTimeOffset.UtcNow,
+            1,
+            ArtifactProvenance.Import), new Sid("S-1-5-21-SYS-1"));
+
+        await store.UpsertAsync(new DiscoveryArtifacts(
+            table.Table.Id,
+            Tenant.Value,
+            """[{"id": 99, "email": "real.user@corp.test", "ssn": "123-45-6789"}]""",
+            StatisticsJson: null,
+            "sha-up",
+            "uploader",
+            DateTimeOffset.UtcNow,
+            2,
+            ArtifactProvenance.Upload), new Sid("S-1-5-21-U2"));
+
+        var user = DiscoveryTestBuilder.User("S-1-5-21-U1", Tenant.Value);
+        var res = await artifacts.GetSamplesAsync(user, table.Identifier.ToString());
+
+        res.Outcome.ShouldBe(DiscoveryArtifactOutcome.Ok);
+        res.Payload!.Available.ShouldBeFalse();
+        res.Payload.Samples.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Import_with_consent_deny_returns_unavailable()
+    {
+        var pdp = new FakeAccessDecisionPoint(req =>
+            TableAccessDecision.Denied(req.Object.Identifier, "Consent denied") with
+            {
+                DenialKind = TableAccessDenialKind.ConsentDeny
+            });
+
+        var (artifacts, _, _, store, table) = CreateHarness(pdp);
+        await store.UpsertAsync(new DiscoveryArtifacts(
+            table.Table.Id,
+            Tenant.Value,
+            """[{"id": 10, "email": "synthetic@example.invalid", "ssn": "000-00-0000"}]""",
+            StatisticsJson: null,
+            "sha-imp",
+            "dbt-ingestion",
+            DateTimeOffset.UtcNow,
+            1,
+            ArtifactProvenance.Import), new Sid("S-1-5-21-SYS-1"));
+
+        var user = DiscoveryTestBuilder.User("S-1-5-21-U1", Tenant.Value);
+        var res = await artifacts.GetSamplesAsync(user, table.Identifier.ToString());
+
+        res.Outcome.ShouldBe(DiscoveryArtifactOutcome.Ok);
+        res.Payload!.Available.ShouldBeFalse();
+        res.Payload.Samples.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Import_strips_hidden_and_denied_columns_and_masks_explicitly_masked_columns()
+    {
+        var pdp = new FakeAccessDecisionPoint(req =>
+            TableAccessDecision.Denied(req.Object.Identifier, "Catalog only") with
+            {
+                DenialKind = TableAccessDenialKind.Policy,
+                Reasons =
+                [
+                    new DecisionReason(DecisionStep.ExplicitDeny, "COLUMN_DENY", "Consent", null, "ssn"),
+                    new DecisionReason(DecisionStep.ExplicitDeny, "COLUMN_MASK", "Consent", null, "email")
+                ]
+            });
+
+        var (artifacts, _, _, store, table) = CreateHarness(pdp);
+        await store.UpsertAsync(new DiscoveryArtifacts(
+            table.Table.Id,
+            Tenant.Value,
+            """[{"id": 10, "email": "synthetic@example.invalid", "ssn": "000-00-0000"}]""",
+            StatisticsJson: null,
+            "sha-imp",
+            "dbt-ingestion",
+            DateTimeOffset.UtcNow,
+            1,
+            ArtifactProvenance.Import), new Sid("S-1-5-21-SYS-1"));
+
+        var user = DiscoveryTestBuilder.User("S-1-5-21-U1", Tenant.Value);
+        var res = await artifacts.GetSamplesAsync(user, table.Identifier.ToString());
+
+        res.Outcome.ShouldBe(DiscoveryArtifactOutcome.Ok);
+        res.Payload!.Available.ShouldBeTrue();
+        res.Payload.Samples.Count.ShouldBe(1);
+        res.Payload.Samples[0]["id"].ShouldBe(10L);
+        res.Payload.Samples[0].ContainsKey("ssn").ShouldBeFalse();
+        var email = res.Payload.Samples[0]["email"]?.ToString();
+        email.ShouldNotBeNullOrWhiteSpace();
+        email.ShouldNotBe("synthetic@example.invalid");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Import_data_authorized_applies_pdp_and_effective_protection_redaction()
+    {
+        var pdp = new FakeAccessDecisionPoint(req => TableAccessDecision.Allowed(
+            req.Object.Identifier,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["id"] = ColumnAccessLevel.Clear,
+                ["email"] = ColumnAccessLevel.Clear,
+                ["ssn"] = ColumnAccessLevel.Deny
+            }));
+
+        var (artifacts, _, _, store, table) = CreateHarness(pdp);
+        await store.UpsertAsync(new DiscoveryArtifacts(
+            table.Table.Id,
+            Tenant.Value,
+            """[{"id": 10, "email": "synthetic@example.invalid", "ssn": "000-00-0000"}]""",
+            StatisticsJson: null,
+            "sha-imp",
+            "dbt-ingestion",
+            DateTimeOffset.UtcNow,
+            1,
+            ArtifactProvenance.Import), new Sid("S-1-5-21-SYS-1"));
+
+        var user = DiscoveryTestBuilder.User("S-1-5-21-U1", Tenant.Value);
+        var res = await artifacts.GetSamplesAsync(user, table.Identifier.ToString());
+
+        res.Outcome.ShouldBe(DiscoveryArtifactOutcome.Ok);
+        res.Payload!.Available.ShouldBeTrue();
+        res.Payload.Samples.Count.ShouldBe(1);
+        res.Payload.Samples[0]["id"].ShouldBe(10L);
+        res.Payload.Samples[0].ContainsKey("ssn").ShouldBeFalse();
+        var email = res.Payload.Samples[0]["email"]?.ToString();
+        email.ShouldNotBeNullOrWhiteSpace();
+        email.ShouldNotBe("synthetic@example.invalid");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Import_catalog_only_with_restricted_scope_excludes_sensitive_columns()
+    {
+        var (artifacts, _, _, store, table) = CreateHarness(FakeAccessDecisionPoint.DenyAll());
+        await store.UpsertAsync(new DiscoveryArtifacts(
+            table.Table.Id,
+            Tenant.Value,
+            """[{"id": 10, "email": "synthetic@example.invalid", "ssn": "000-00-0000"}]""",
+            StatisticsJson: null,
+            "sha-imp",
+            "dbt-ingestion",
+            DateTimeOffset.UtcNow,
+            1,
+            ArtifactProvenance.Import), new Sid("S-1-5-21-SYS-1"));
+
+        var agentCaller = DiscoveryTestBuilder.User("S-1-5-21-U1", Tenant.Value, scopes: "Agent.Read");
+        var res = await artifacts.GetSamplesAsync(agentCaller, table.Identifier.ToString());
+
+        res.Outcome.ShouldBe(DiscoveryArtifactOutcome.Ok);
+        res.Payload!.Available.ShouldBeTrue();
+        res.Payload.Samples.Count.ShouldBe(1);
+        res.Payload.Samples[0]["id"].ShouldBe(10L);
+        res.Payload.Samples[0].ContainsKey("email").ShouldBeFalse();
+        res.Payload.Samples[0].ContainsKey("ssn").ShouldBeFalse();
+    }
+
     private sealed class StubProtectionProvider(Func<TableIdentifier, EffectiveProtection> factory) : IProtectionSnapshotProvider
     {
         public ValueTask<EffectiveProtection> GetAsync(TenantId tenant, TableIdentifier table, CancellationToken ct = default)
