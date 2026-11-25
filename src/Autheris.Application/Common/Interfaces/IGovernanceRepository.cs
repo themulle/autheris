@@ -8,6 +8,18 @@ public interface ITableMetadataRepository : Autheris.Application.Catalog.ICatalo
     Task<TableMetadata?> GetTableMetadataAsync(TableIdentifier table, CancellationToken ct = default);
     Task<IReadOnlyList<TableMetadata>> GetAllTablesAsync(CancellationToken ct = default);
 
+    /// <summary>Returns active SQL tables whose stored <c>SourceType</c> is not a supported SQL dialect, avoiding full metadata hydration when healthy.</summary>
+    async Task<IReadOnlyList<(TableIdentifier Identifier, string SourceName, string CurrentSourceType)>> GetUnparseableSqlSourceTypesAsync(CancellationToken ct = default)
+    {
+        var page = await Autheris.Application.Catalog.CatalogTablePageReader.ReadAllAsync(
+            this,
+            new Autheris.Application.Catalog.CatalogTableQuery(IncludeInactive: false),
+            static t => t.Table.DataSourceType == DataSourceType.Sql &&
+                !Autheris.Domain.Common.DatabaseDialectExtensions.TryParseDialect(t.Table.SourceType, out _),
+            ct: ct).ConfigureAwait(false);
+        return page.Select(static t => (t.Identifier, t.Table.SourceName, t.Table.SourceType)).ToList();
+    }
+
     /// <summary>
     /// Issue #1043: the table, its columns, masking rules and global classifications (the epoch-validated structural metadata) without
     /// the dataset catalog overlay (tags, discovery visibility, group size, non-personal flag). For readers that need none of the overlay,

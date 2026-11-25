@@ -56,8 +56,24 @@ public sealed class VirtualSystemTablesHostedService : IHostedService
             var repository = scope.ServiceProvider.GetService<ITableMetadataRepository>();
             if (repository != null)
             {
-                await VirtualSystemTables.RegisterSystemTablesAsync(repository, scope.ServiceProvider.GetService<Autheris.Application.Catalog.ICatalogWriteScopeFactory>(), cancellationToken).ConfigureAwait(false);
+                var writeScopeFactory = scope.ServiceProvider.GetService<Autheris.Application.Catalog.ICatalogWriteScopeFactory>();
+                await VirtualSystemTables.RegisterSystemTablesAsync(repository, writeScopeFactory, cancellationToken).ConfigureAwait(false);
                 _logger.LogInformation("Successfully registered virtual system tables (governance.system.*) in metadata repository.");
+
+                var gatewayOptions = scope.ServiceProvider.GetService<Microsoft.Extensions.Options.IOptions<GatewayOptions>>()?.Value;
+                if (gatewayOptions != null)
+                {
+                    var healed = await Autheris.Application.Catalog.Services.CatalogLegacySourceTypeHealer.HealConfiguredSqlTablesAsync(
+                        repository,
+                        gatewayOptions,
+                        writeScopeFactory,
+                        _logger,
+                        cancellationToken).ConfigureAwait(false);
+                    if (healed > 0 && scope.ServiceProvider.GetService<Autheris.Application.Catalog.ICatalogSnapshotProvider>() is { } snapshotProvider)
+                    {
+                        await snapshotProvider.RefreshAsync(cancellationToken).ConfigureAwait(false);
+                    }
+                }
             }
         }
         catch (Exception ex)

@@ -14,6 +14,7 @@ Autheris.Application.Catalog.Search.CatalogSearchWarmupService::RebuildSafeAsync
 Autheris.Application.Catalog.Services.CatalogVisibilityService::GetVisibleAsync | Explicit fallback when no ICatalogSnapshotProvider is injected.
 Autheris.Application.Common.Interfaces.ITableMetadataRepository::GetActiveTableIdentifierByIdAsync | Interface default single-id lookup fallback.
 Autheris.Application.Common.Interfaces.ITableMetadataRepository::GetTablesAsync | Interface default batch lookup fallback.
+Autheris.Application.Common.Interfaces.ITableMetadataRepository::GetUnparseableSqlSourceTypesAsync | Interface default fallback when repository does not override lightweight SQL source-type query.
 Autheris.Application.Common.Interfaces.ITableMetadataRepository::QueryTablesAsync | Interface default keyset query fallback.
 Autheris.Application.DataSources.Connectors.Adapters.LegacyDataSourceExecutorAdapter/LegacyConnectorMetadata::ListSchemasAsync | Legacy connector adapter schema enumeration fallback.
 Autheris.Application.DataSources.Connectors.Adapters.LegacyDataSourceExecutorAdapter/LegacyConnectorMetadata::ListTablesAsync | Legacy connector adapter table enumeration fallback.

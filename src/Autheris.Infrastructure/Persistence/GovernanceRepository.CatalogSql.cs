@@ -42,6 +42,8 @@ WHERE LOWER(source_name) = LOWER(@domain) AND LOWER(schema_name) = LOWER(@schema
 
         public const string SelectActiveTableSummariesSql = "SELECT id, source_name, schema_name, table_name FROM TABLES WHERE is_active = 1";
 
+        public const string SelectActiveSqlSourceTypesSql = "SELECT source_type, source_name, schema_name, table_name FROM TABLES WHERE is_active = 1 AND data_source_type = 0";
+
         public const string SelectActiveTableEntitiesSql = @"SELECT id, source_type, source_name, schema_name, table_name,
        display_name, is_active,
        data_source_type, http_endpoint_json, plugin_name,
