@@ -670,10 +670,10 @@ public sealed partial class GovernanceDomainService(
         }
 
         var trimmed = raw.Trim();
-        if (trimmed.Length == 0 || !SidFormat.IsCanonical(trimmed))
+        if (trimmed.Length == 0 || !SidFormat.IsGroupOrRealmGroupIdentifier(trimmed))
         {
             sid = null;
-            error = "Owner group SID must be a canonical SID (S-1-...).";
+            error = "Owner group SID must be a canonical SID (S-1-...) or realm group key (realm:...).";
             return false;
         }
 

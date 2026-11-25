@@ -498,7 +498,7 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         }
 
         var candidates = CatalogVisibility.DropForeignVirtualTables(
-            rows.Where(r => !already.Contains(r.Identifier) && !IsOwnedByAnotherTenant(r, context.Tenant)).ToList(), context.Tenant);
+            rows.Where(r => !already.Contains(r.Identifier) && !CatalogTenantOwnership.IsOwnedByAnotherTenant(r, context.Tenant)).ToList(), context.Tenant);
         var maxCandidates = Math.Max(0, _options?.Governance.AccessPolicy.MaxTablesPerAssignment ?? DefaultMaxVisibilityCandidates);
         if (candidates.Count > maxCandidates)
         {
@@ -613,10 +613,8 @@ public sealed class CatalogVisibilityService : ICatalogVisibilityService
         && snapshot.Containers.TryGetValue(container, out var info)
         && !info.IsSystemUnassigned;
 
-    /// <summary>A table owned by another tenant is outside the caller's tenant scope; a container of the caller never re-admits it.</summary>
     private static bool IsOwnedByAnotherTenant(TableMetadata table, TenantId tenant) =>
-        !string.IsNullOrWhiteSpace(table.OwnerTenantId)
-        && !string.Equals(table.OwnerTenantId, tenant.Value, StringComparison.OrdinalIgnoreCase);
+        CatalogTenantOwnership.IsOwnedByAnotherTenant(table, tenant);
 
     private async ValueTask<bool> HasUnmaskGrantAsync(
         Context context, List<Sid> subjects, ContainerVisibilitySnapshot snapshot, EffectiveProtection protection, TableMetadata row, CancellationToken ct)

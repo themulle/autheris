@@ -460,11 +460,8 @@ public sealed class GroupSidResolver : IGroupSidResolver
     }
 
     private static bool IsValidScimGroupSidForRealm(string value, IdentityRealm realm) =>
-        SidFormat.UsesWorkforceAdSids(realm.Kind)
-            ? SidFormat.IsGroupSid(value)
-              && (!SidFormat.IsEntraCloudSid(value) || SidFormat.HasTenantBoundEntraIssuers(realm))
-              && (!SidFormat.IsRealmGroupKey(value) || SidFormat.MatchesRealmGroupKey(value, realm.Id))
-            : SidFormat.MatchesRealmGroupKey(value, realm.Id);
+        SidFormat.IsValidGroupIdentifierForRealm(
+            value, realm.Kind, realm.Id, SidFormat.HasTenantBoundEntraIssuers(realm));
 
     private async ValueTask<Outcome> ResolveFromChainAsync(ClaimsPrincipal principal, IdentityRealm realm, TenantId tenant, string? correlatedUserKey = null, CancellationToken ct = default)
     {

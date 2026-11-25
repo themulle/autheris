@@ -10,6 +10,7 @@ using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Identity;
 using Autheris.Application.Products;
 using Autheris.Domain.Common;
+using Autheris.Domain.Identity;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 
@@ -256,22 +257,34 @@ public sealed class ApproverResolver(
 
         foreach (var candidate in candidates.Distinct(StringComparer.OrdinalIgnoreCase))
         {
-            var realmId = ResolveRealmId(candidate);
-            var lookupKey = StripRealmPrefix(candidate, realmId);
+            if (!TryResolveRealmAndKey(candidate, out var realm, out var realmId, out var lookupKey))
+            {
+                continue;
+            }
+
             try
             {
                 var effective = await _groupStore.GetEffectiveGroupSidsForUserAsync(tenant, realmId, lookupKey, ct: ct).ConfigureAwait(false);
-                if (effective is not null && !effective.MaxDepthExceeded && !effective.HasNonCanonicalSid &&
-                    effective.GroupObjectSids.Any(g => SeparationOfDutiesService.IdentifiersOverlap(g, ownerGroupSid.Value)))
+                if (effective is not null && !effective.MaxDepthExceeded && !effective.HasNonCanonicalSid)
                 {
-                    return true;
+                    if (effective.GroupObjectSids.Any(g =>
+                            IsGroupValidForRealm(g, realm, realmId) &&
+                            SeparationOfDutiesService.IdentifiersOverlap(g, ownerGroupSid.Value)))
+                    {
+                        return true;
+                    }
+
+                    if (effective.GroupIds is not null && effective.GroupIds.Any(id =>
+                            SidFormat.TryFormatRealmGroupKey(realmId, id, out var qualified) &&
+                            IsGroupValidForRealm(qualified, realm, realmId) &&
+                            SeparationOfDutiesService.IdentifiersOverlap(qualified, ownerGroupSid.Value)))
+                    {
+                        return true;
+                    }
                 }
 
                 var direct = await _groupStore.GetGroupMembershipsForUserAsync(tenant, realmId, lookupKey, ct).ConfigureAwait(false);
-                if (direct is not null && direct.Any(g =>
-                        SeparationOfDutiesService.IdentifiersOverlap(g, ownerGroupSid.Value) ||
-                        (!SidFormat.IsGroupSid(g) && SidFormat.TryFormatRealmGroupKey(realmId, g, out var qualified) &&
-                         SeparationOfDutiesService.IdentifiersOverlap(qualified, ownerGroupSid.Value))))
+                if (direct is not null && direct.Any(g => IsValidDirectGroupMatch(g, realm, realmId, ownerGroupSid.Value)))
                 {
                     return true;
                 }
@@ -285,16 +298,63 @@ public sealed class ApproverResolver(
         return false;
     }
 
-    private string ResolveRealmId(string identifier)
-    {
-        var sep = identifier.IndexOf('|', StringComparison.Ordinal);
-        return sep > 0 ? identifier[..sep].Trim() : _realmRegistry?.GetDefaultRealm()?.Id ?? "default";
-    }
+    private static bool IsGroupValidForRealm(string rawGroup, IdentityRealm? realm, string realmId) =>
+        realm is not null
+            ? SidFormat.IsValidGroupIdentifierForRealm(rawGroup, realm.Kind, realmId, SidFormat.HasTenantBoundEntraIssuers(realm))
+            : !SidFormat.IsRealmGroupKey(rawGroup) || SidFormat.MatchesRealmGroupKey(rawGroup, realmId);
 
-    private static string StripRealmPrefix(string identifier, string realmId) =>
-        identifier.StartsWith($"{realmId}|", StringComparison.OrdinalIgnoreCase) && identifier.Length > realmId.Length + 1
-            ? identifier[(realmId.Length + 1)..]
-            : identifier;
+    private static bool IsValidDirectGroupMatch(
+        string rawGroup, IdentityRealm? realm, string realmId, string ownerGroupSid) =>
+        (IsGroupValidForRealm(rawGroup, realm, realmId) &&
+         SeparationOfDutiesService.IdentifiersOverlap(rawGroup, ownerGroupSid)) ||
+        (!SidFormat.IsGroupSid(rawGroup) &&
+         SidFormat.TryFormatRealmGroupKey(realmId, rawGroup, out var qualified) &&
+         IsGroupValidForRealm(qualified, realm, realmId) &&
+         SeparationOfDutiesService.IdentifiersOverlap(qualified, ownerGroupSid));
+
+    private bool TryResolveRealmAndKey(string identifier, out IdentityRealm? realm, out string realmId, out string lookupKey)
+    {
+        realm = null;
+        realmId = string.Empty;
+        lookupKey = string.Empty;
+
+        var trimmed = identifier.Trim();
+        var sep = trimmed.IndexOf('|', StringComparison.Ordinal);
+        if (sep > 0)
+        {
+            var prefix = trimmed[..sep].Trim();
+            var bare = trimmed[(sep + 1)..].Trim();
+            if (prefix.Length == 0 || bare.Length == 0) return false;
+            if (_realmRegistry is not null)
+            {
+                if (!_realmRegistry.TryGetRealm(prefix, out var resolved) || resolved is null) return false;
+                realm = resolved;
+                realmId = resolved.Id;
+            }
+            else
+            {
+                realmId = prefix;
+            }
+
+            lookupKey = bare;
+            return true;
+        }
+
+        if (trimmed.Length == 0) return false;
+        lookupKey = trimmed;
+        if (_realmRegistry is null)
+        {
+            realmId = "default";
+            return true;
+        }
+
+        // Unqualified identifiers are ambiguous when more or fewer than one realm exist; never guess or fall back to a default realm.
+        var realms = _realmRegistry.GetAllRealms();
+        if (realms.Count != 1) return false;
+        realm = realms[0];
+        realmId = realm.Id;
+        return true;
+    }
 }
 
 /// <summary>

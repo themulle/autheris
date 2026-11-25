@@ -201,9 +201,7 @@ public sealed partial class GovernanceDomainService
     }
 
     private static bool IsVisibleInTenant(TableMetadata meta, TenantId tenant) =>
-        meta.Table.IsActive &&
-        (string.IsNullOrWhiteSpace(meta.OwnerTenantId) ||
-         string.Equals(meta.OwnerTenantId, tenant.Value, StringComparison.OrdinalIgnoreCase));
+        CatalogTenantOwnership.IsEligibleTargetInTenant(meta, tenant, allowDiscoveryHidden: true);
 
     private async Task<int> CountCoveringTableGrantsAsync(TenantId tenant, TableIdentifier table, string column, CancellationToken ct)
     {
