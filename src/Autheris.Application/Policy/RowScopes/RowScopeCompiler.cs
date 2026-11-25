@@ -39,6 +39,11 @@ public sealed partial class RowScopeCompiler
     private readonly Autheris.Application.Policy.Classification.ClassificationAccessResolver? _classificationResolver;
     private readonly TimeProvider _timeProvider;
 
+    /// <summary>
+    /// Internal test seam allowing unit tests to exercise per-cell compilation denials on the allow-only path (#1063 §4f).
+    /// </summary>
+    internal Func<TableAccessDecision, TableAccessQuery, IReadOnlyList<Consent>, IReadOnlyList<Consent>, PerCellCompileResult?>? PerCellCompileOverrideForTesting { get; init; }
+
     public RowScopeCompiler(
         IVirtualFilterSnapshotProvider? snapshots = null,
         IVirtualFilterPredicateBuilder? predicates = null,

@@ -19,13 +19,15 @@ public sealed class ColumnPolicyRowPrefetch
     private readonly HashSet<string> _covered;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>> _classifications;
     private readonly IReadOnlyDictionary<string, IReadOnlyList<ColumnMaskOverride>> _overrides;
+    private readonly ClassificationPolicyCatalog? _catalog;
 
     public ColumnPolicyRowPrefetch(
         string tenantId,
         DateTimeOffset readAt,
         IReadOnlyCollection<string> coveredColumnIds,
         IReadOnlyDictionary<string, IReadOnlyList<ColumnClassification>> classifications,
-        IReadOnlyDictionary<string, IReadOnlyList<ColumnMaskOverride>> overrides)
+        IReadOnlyDictionary<string, IReadOnlyList<ColumnMaskOverride>> overrides,
+        ClassificationPolicyCatalog? catalog = null)
     {
         ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
         ArgumentNullException.ThrowIfNull(coveredColumnIds);
@@ -34,11 +36,20 @@ public sealed class ColumnPolicyRowPrefetch
         _covered = new HashSet<string>(coveredColumnIds, StringComparer.OrdinalIgnoreCase);
         _classifications = classifications ?? throw new ArgumentNullException(nameof(classifications));
         _overrides = overrides ?? throw new ArgumentNullException(nameof(overrides));
+        _catalog = catalog;
     }
 
     public string TenantId { get; }
 
     public DateTimeOffset ReadAt { get; }
+
+    /// <summary>Returns the tenant classification catalog captured for this prefetch while it covers <paramref name="tenantId"/> and is fresh at <paramref name="now"/>.</summary>
+    public ClassificationPolicyCatalog? CatalogFor(string tenantId, DateTimeOffset now) =>
+        _catalog is not null &&
+        string.Equals(TenantId, tenantId, StringComparison.Ordinal) &&
+        now >= ReadAt && now - ReadAt <= Autheris.Application.Policy.ConsentBatchPrefetch.MaxAge
+            ? _catalog
+            : null;
 
     /// <summary>True when the prefetch was read for <paramref name="tenantId"/>, is fresh at <paramref name="now"/> and covers every one of <paramref name="columnIds"/>.</summary>
     public bool Covers(string tenantId, IReadOnlyCollection<string> columnIds, DateTimeOffset now)

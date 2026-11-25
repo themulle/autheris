@@ -119,8 +119,21 @@ public interface IAccessDecisionPoint
     /// </summary>
     async ValueTask<IReadOnlyList<bool>> DecideAllowedManyAsync(SecurityPrincipalContext subject, IReadOnlyList<TableMetadata> objects, CancellationToken ct = default)
         => (await DecideManyAsync(subject, objects, AccessOperation.Discover, AccessTransport.Discovery, ct).ConfigureAwait(false)).Select(static d => d.IsAllowed).ToList();
+
+    /// <summary>
+    /// Like <see cref="DecideAllowedManyAsync"/>, plus whether a fail-closed denial came from a transient infrastructure failure
+    /// (#1063 §4c) so callers can still deny now without persisting transient outages into long-lived view caches.
+    /// </summary>
+    async ValueTask<IReadOnlyList<AllowOnlyDecision>> DecideAllowedManyWithTransientAsync(
+        SecurityPrincipalContext subject, IReadOnlyList<TableMetadata> objects, CancellationToken ct = default)
+        => (await DecideManyAsync(subject, objects, AccessOperation.Discover, AccessTransport.Discovery, ct).ConfigureAwait(false))
+            .Select(static d => new AllowOnlyDecision(d.IsAllowed, !d.IsAllowed && d.IsTransientFailure)).ToList();
+
     ValueTask<AccessExplanation> ExplainAsync(AccessRequest request, CancellationToken ct = default);
 }
+
+/// <summary>Allow bit and transient-failure classification for an allow-only discovery check.</summary>
+public readonly record struct AllowOnlyDecision(bool IsAllowed, bool IsTransientFailure);
 
 public sealed record ColumnStateExplanation(string ColumnName, ColumnAccessLevel Level, string? MaskType = null);
 

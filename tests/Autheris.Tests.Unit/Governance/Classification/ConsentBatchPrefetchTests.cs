@@ -118,4 +118,116 @@ public sealed class ConsentBatchPrefetchTests
         prefetch.TryGetActiveConsents([User], Orders, ReadAt + ConsentBatchPrefetch.MaxAge + TimeSpan.FromMilliseconds(1), Tenant, out _).ShouldBeFalse();
         prefetch.TryGetActivePatternConsents(Tenant, ReadAt + ConsentBatchPrefetch.MaxAge + TimeSpan.FromMilliseconds(1), out _).ShouldBeFalse();
     }
+
+    [Fact]
+    public async Task InternalPatternAllow_PrefetchesApproversInOneBatch_AndKeepsApproversIsolated()
+    {
+        var ownerA = "S-1-5-21-999-1";
+        var ownerB = "S-1-5-21-999-2";
+        var grantA = new Consent
+        {
+            Id = Guid.NewGuid(),
+            TableId = Guid.Empty,
+            TenantId = Tenant,
+            ObjectPattern = "sales.*.*",
+            DataSource = "sales",
+            WorkflowMode = ConsentWorkflowMode.Internal,
+            ApprovingOwners = [ownerA],
+            GranteeType = GranteeType.User,
+            GranteeSid = User,
+            Effect = ConsentEffect.Allow,
+            ValidFrom = ReadAt.AddDays(-1),
+            ValidTo = ReadAt.AddDays(1)
+        };
+        var grantB = new Consent
+        {
+            Id = Guid.NewGuid(),
+            TableId = Guid.Empty,
+            TenantId = Tenant,
+            ObjectPattern = "sales.*.*",
+            DataSource = "sales",
+            WorkflowMode = ConsentWorkflowMode.Internal,
+            ApprovingOwners = [ownerB],
+            GranteeType = GranteeType.User,
+            GranteeSid = User,
+            Effect = ConsentEffect.Allow,
+            ValidFrom = ReadAt.AddDays(-1),
+            ValidTo = ReadAt.AddDays(1)
+        };
+        var ownership = new CountingOwnership(new Dictionary<TableIdentifier, HashSet<string>>
+        {
+            [Orders] = [ownerA],
+            [Invoices] = [ownerB]
+        });
+
+        var prefetch = await ConsentBatchPrefetch.LoadAsync(
+            new TestInMemoryConsentRepository([grantA, grantB]),
+            [User],
+            [Orders, Invoices],
+            Tenant,
+            ReadAt,
+            default,
+            ownership);
+
+        ownership.BatchCalls.ShouldBe(1);
+        ownership.SingleCalls.ShouldBe(0);
+        prefetch.TryIsAnyApproverAuthorized(Orders, [ownerA], ReadAt, out var ordA).ShouldBeTrue();
+        ordA.ShouldBeTrue();
+        prefetch.TryIsAnyApproverAuthorized(Orders, [ownerB], ReadAt, out var ordB).ShouldBeTrue();
+        ordB.ShouldBeFalse();
+        prefetch.TryIsAnyApproverAuthorized(Invoices, [ownerB], ReadAt, out var invB).ShouldBeTrue();
+        invB.ShouldBeTrue();
+        prefetch.TryIsAnyApproverAuthorized(Orders, ["S-1-5-21-999-UNPREFETCHED"], ReadAt, out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task DirectGrantsOnly_SkipsContainerOwnershipBatchLookup()
+    {
+        var ownership = new CountingOwnership(new Dictionary<TableIdentifier, HashSet<string>>());
+        await ConsentBatchPrefetch.LoadAsync(
+            new TestInMemoryConsentRepository([Grant(Orders, User, ReadAt.AddDays(-1), ReadAt.AddDays(1))]),
+            [User],
+            [Orders, Invoices],
+            Tenant,
+            ReadAt,
+            default,
+            ownership);
+
+        ownership.BatchCalls.ShouldBe(0);
+        ownership.SingleCalls.ShouldBe(0);
+    }
+
+    private sealed class CountingOwnership(Dictionary<TableIdentifier, HashSet<string>> byTable)
+        : Autheris.Application.Governance.Ownership.IContainerOwnership
+    {
+        public int BatchCalls { get; private set; }
+        public int SingleCalls { get; private set; }
+
+        public Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableAsync(TableIdentifier table, System.Threading.CancellationToken ct = default) =>
+            Task.FromResult<IReadOnlyList<ContainerOwnerEntry>>([]);
+
+        public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, System.Threading.CancellationToken ct = default)
+        {
+            SingleCalls++;
+            return Task.FromResult(byTable.TryGetValue(table, out var set) && set.Contains(approverSid.Value));
+        }
+
+        public Task<IReadOnlyDictionary<TableIdentifier, IReadOnlySet<string>>> FilterAuthorizedApproversForTablesAsync(
+            IReadOnlyCollection<TableMetadata> requested,
+            IReadOnlyCollection<string> candidateApproverSids,
+            DateTimeOffset atTime,
+            System.Threading.CancellationToken ct = default)
+        {
+            BatchCalls++;
+            IReadOnlyDictionary<TableIdentifier, IReadOnlySet<string>> res = requested
+                .Select(static t => t.Identifier)
+                .Distinct()
+                .ToDictionary(
+                    t => t,
+                    t => (IReadOnlySet<string>)(byTable.TryGetValue(t, out var set)
+                        ? candidateApproverSids.Where(set.Contains).ToHashSet(StringComparer.OrdinalIgnoreCase)
+                        : System.Collections.Frozen.FrozenSet<string>.Empty));
+            return Task.FromResult(res);
+        }
+    }
 }

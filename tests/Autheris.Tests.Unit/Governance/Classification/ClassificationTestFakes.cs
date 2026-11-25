@@ -80,14 +80,35 @@ internal sealed class TestInMemoryConsentRepository(IReadOnlyList<Consent> conse
 
         var sids = subjects.ToHashSet();
         return Task.FromResult<IReadOnlyList<Consent>>(consents.Where(c =>
-            !c.IsRevoked && c.TableIdentifier.Equals(table) &&
+            !c.IsRevoked && (c.IsPatternGrant || c.TableIdentifier.Equals(table)) &&
             c.ValidFrom <= atTime && c.EffectiveValidTo > atTime &&
             (tenantId is null || c.TenantId == tenantId.Value) &&
             (c.GranteeSid is null || sids.Contains(c.GranteeSid.Value))).ToList());
     }
 
+    public Task<IReadOnlyList<Consent>> GetActivePatternConsentsAsync(TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<Consent>>(consents.Where(c => c.IsPatternGrant && c.TenantId == tenantId && c.IsActive(atTime)).ToList());
+
+    public Task<IReadOnlyList<Consent>> GetPatternConsentsWithPendingDeniesAsync(TenantId tenantId, DateTimeOffset atTime, CancellationToken ct = default) =>
+        Task.FromResult<IReadOnlyList<Consent>>(consents.Where(c =>
+            c.IsPatternGrant && c.TenantId == tenantId &&
+            (c.IsActive(atTime) || (c.Effect == ConsentEffect.Deny && c.ValidFrom > atTime))).ToList());
+
     public Task<IReadOnlyList<Consent>> GetAllActiveConsentsForSubjectsAsync(IEnumerable<Sid> subjects, IEnumerable<string>? roles, DateTimeOffset? atTime, TenantId? tenantId, CancellationToken ct = default) =>
         Task.FromResult(consents);
+
+    public Task<DateTimeOffset?> GetNextScheduledAllowAsync(IEnumerable<Sid> subjects, DateTimeOffset atTime, TenantId tenantId, CancellationToken ct = default)
+    {
+        var sids = subjects.ToHashSet();
+        var next = consents
+            .Where(c => !c.IsRevoked && c.Effect == ConsentEffect.Allow && c.GrantKind == PermissionGrantKind.Data &&
+                        c.TenantId == tenantId && c.ValidFrom > atTime && c.EffectiveValidTo > c.ValidFrom &&
+                        c.GranteeSid is { } g && sids.Contains(g))
+            .Select(static c => (DateTimeOffset?)c.ValidFrom)
+            .OrderBy(static d => d)
+            .FirstOrDefault();
+        return Task.FromResult(next);
+    }
     public Task<Consent> CreateConsentAsync(Consent consent, CancellationToken ct = default) => Task.FromResult(consent);
     public Task<Consent?> GetConsentByIdAsync(Guid consentId, CancellationToken ct = default) => Task.FromResult(consents.FirstOrDefault(c => c.Id == consentId));
     public Task RevokeConsentAsync(Guid consentId, Sid revokedBySid, string reason, ConsentRevocationAuthority authority, CancellationToken ct = default) => Task.CompletedTask;

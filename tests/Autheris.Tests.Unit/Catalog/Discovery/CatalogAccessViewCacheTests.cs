@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Catalog.Discovery;
 
 using System.Collections.Frozen;
+using System.Runtime.CompilerServices;
 using System.Security.Claims;
 using Autheris.Application.Catalog;
 using Autheris.Application.Catalog.Discovery;
@@ -345,6 +346,55 @@ public sealed class CatalogAccessViewCacheTests
         log.InvalidatedSince(1).ShouldBeNull("the range fell out of the ring");
     }
 
+    [Fact]
+    public async Task TransientFailClosedDenial_FailsClosedOnInitialLoad_AndIsNotCached()
+    {
+        var f = new Fixture(count: 10, granted: [3, 7]);
+        f.Pdp.TransientDeny.Add(7);
+
+        (await f.GrantedNamesAsync(Caller)).ShouldBe(["t003"], "transient outage must still fail closed on the active request");
+        (await f.FacetsAsync(Caller)).TotalCount.ShouldBe(1);
+
+        // Once healthy again (with no epoch bump or TTL expiry), the omitted table is re-decided and appears immediately.
+        f.Pdp.TransientDeny.Clear();
+        (await f.GrantedNamesAsync(Caller)).ShouldBe(["t003", "t007"]);
+        f.LastFilterDiscoverDecisions.ShouldBe(1, "only the omitted candidate should be re-decided after recovery");
+        (await f.FacetsAsync(Caller)).TotalCount.ShouldBe(2);
+        f.LastFilterDiscoverDecisions.ShouldBe(0, "now healthy view serves fast cache hits");
+    }
+
+    [Fact]
+    public async Task TransientFailClosedDenial_DuringIncrementalRevalidation_HealsOnNextRequest()
+    {
+        var f = new Fixture(count: 10, granted: [3, 7]);
+        (await f.FacetsAsync(Caller)).TotalCount.ShouldBe(2);
+
+        // Invalidate t007 while transient fault is active: current request fails closed; healthy t003 stays cached.
+        f.Pdp.TransientDeny.Add(7);
+        await f.Epochs.InvalidateEpochAsync(f.Tables[7].Identifier);
+        (await f.GrantedNamesAsync(Caller)).ShouldBe(["t003"]);
+        f.LastFilterDiscoverDecisions.ShouldBe(1);
+
+        // Recover without any new invalidation: t007 heals while t003 is still not re-decided.
+        f.Pdp.TransientDeny.Clear();
+        (await f.GrantedNamesAsync(Caller)).ShouldBe(["t003", "t007"]);
+        f.LastFilterDiscoverDecisions.ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task ScheduledFutureAllow_ClampsNotAfter_SoGrantedTableAppearsAtValidFrom()
+    {
+        var f = new Fixture(count: 10, granted: [3]);
+        f.Consents.Active.Add(Fixture.Allow(Caller, f.Tables[7].Identifier, validFrom: Now.AddSeconds(10), validTo: Now.AddDays(1)));
+
+        (await f.GrantedNamesAsync(Caller)).ShouldBe(["t003"]);
+        (await f.FacetsAsync(Caller)).TotalCount.ShouldBe(1);
+        f.LastFilterDiscoverDecisions.ShouldBe(0, "before ValidFrom the clamped view still serves cache hits");
+
+        f.Time.Advance(TimeSpan.FromSeconds(11));
+        (await f.GrantedNamesAsync(Caller)).ShouldBe(["t003", "t007"]);
+    }
+
     private static AccessViewEntry Entry(AccessViewStamp stamp, int tables) => new(
         ReadGrantCandidates.All,
         Enumerable.Range(0, tables).ToFrozenDictionary(static i => new TableIdentifier("d", "s", $"t{i}"), static _ => true),
@@ -460,12 +510,13 @@ public sealed class CatalogAccessViewCacheTests
     }
 
     /// <summary>
-    /// Zero trust as the real decision point: allows a table only for a grant of the requesting user or group; <see cref="Deny"/> and
-    /// <see cref="DenyFrom"/> deny on top. Counts the Discover decisions of the access filter (allow-only batches).
+    /// Zero trust as the real decision point: allows a table only for a grant of the requesting user or group; <see cref="Deny"/>,
+    /// <see cref="TransientDeny"/>, and <see cref="DenyFrom"/> deny on top. Counts the Discover decisions of the access filter (allow-only batches).
     /// </summary>
     private sealed class PolicyPdp(Fixture f) : IAccessDecisionPoint
     {
         public HashSet<int> Deny { get; } = [];
+        public HashSet<int> TransientDeny { get; } = [];
         public Dictionary<int, DateTimeOffset> DenyFrom { get; } = [];
         public int FilterDecisions { get; private set; }
         public Action? OnDecide { get; set; }
@@ -474,6 +525,16 @@ public sealed class CatalogAccessViewCacheTests
 
         public ValueTask<IReadOnlyList<TableAccessDecision>> DecideManyAsync(Autheris.Domain.Security.SecurityPrincipalContext subject, IReadOnlyList<TableMetadata> objects, AccessOperation operation, AccessTransport transport, CancellationToken ct = default) =>
             ValueTask.FromResult<IReadOnlyList<TableAccessDecision>>(objects.Select(o => operation == AccessOperation.Discover ? Decide(subject, o) : TableAccessDecision.Denied(o.Identifier, "no write")).ToList());
+
+        public ValueTask<IReadOnlyList<AllowOnlyDecision>> DecideAllowedManyWithTransientAsync(Autheris.Domain.Security.SecurityPrincipalContext subject, IReadOnlyList<TableMetadata> objects, CancellationToken ct = default)
+        {
+            FilterDecisions += objects.Count;
+            var decisions = objects.Select(o => Decide(subject, o))
+                .Select(static d => new AllowOnlyDecision(d.IsAllowed, !d.IsAllowed && d.IsTransientFailure))
+                .ToList();
+            OnDecide?.Invoke(); // a change right after the decisions were made, before the view is stored
+            return ValueTask.FromResult<IReadOnlyList<AllowOnlyDecision>>(decisions);
+        }
 
         public ValueTask<IReadOnlyList<bool>> DecideAllowedManyAsync(Autheris.Domain.Security.SecurityPrincipalContext subject, IReadOnlyList<TableMetadata> objects, CancellationToken ct = default)
         {
@@ -488,6 +549,11 @@ public sealed class CatalogAccessViewCacheTests
         private TableAccessDecision Decide(Autheris.Domain.Security.SecurityPrincipalContext subject, TableMetadata table)
         {
             var index = f.Tables.IndexOf(table);
+            if (TransientDeny.Contains(index))
+            {
+                return TableAccessDecision.Denied(table.Identifier, "Access profile source unavailable (fail-closed).") with { IsTransientFailure = true };
+            }
+
             var now = f.Time.GetUtcNow();
             var granted = f.Consents.Active.Any(c =>
                 c.Effect == ConsentEffect.Allow && c.TableIdentifier == table.Identifier && c.TenantId == subject.TenantId && c.IsActive(now) &&
@@ -540,5 +606,78 @@ public sealed class CatalogAccessViewCacheTests
         public CatalogVersion Version { get; set; } = new(1, 1);
         public ValueTask<CatalogVersion> GetCatalogVersionAsync(CancellationToken ct = default) => ValueTask.FromResult(Version);
         public Task<string> GetVersionAsync(CancellationToken ct = default) => Task.FromResult($"{Version.StructureVersion}.{Version.ContentVersion}");
+    }
+}
+
+[CollectionDefinition(Name, DisableParallelization = true)]
+public sealed class AccessViewHeapMeasurementCollection
+{
+    public const string Name = "AccessViewHeapMeasurement";
+}
+
+[Trait("Category", "Security")]
+[Collection(AccessViewHeapMeasurementCollection.Name)]
+public sealed class CatalogAccessViewHeapEstimateTests
+{
+    private const string Caller = "S-1-5-21-1044-1044-1044-1001";
+    private static readonly DateTimeOffset Now = new(2026, 6, 15, 12, 0, 0, TimeSpan.Zero);
+
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public void EstimateBytes_DoesNotUnderestimateUnsharedCandidateIdentifiers(bool populateAllowed)
+    {
+        const int copies = 16;
+        const int count = 2_000;
+        var stamp = new AccessViewStamp(1, new CatalogVersion(1, 1), 0, 1);
+
+        _ = BuildUnsharedEntry(64, stamp, -1, populateAllowed);
+
+        var entries = new AccessViewEntry[copies];
+        var before = GC.GetTotalMemory(forceFullCollection: true);
+        for (var i = 0; i < copies; i++)
+        {
+            entries[i] = BuildUnsharedEntry(count, stamp, i, populateAllowed);
+        }
+
+        var retainedPerEntry = (GC.GetTotalMemory(forceFullCollection: true) - before) / copies;
+        GC.KeepAlive(entries);
+
+        var estimated = entries[0].EstimateBytes();
+        estimated.ShouldBeGreaterThanOrEqualTo((long)(retainedPerEntry * 0.95));
+        estimated.ShouldBeLessThanOrEqualTo((long)(retainedPerEntry * 1.35));
+    }
+
+    [MethodImpl(MethodImplOptions.NoInlining)]
+    private static AccessViewEntry BuildUnsharedEntry(int count, AccessViewStamp stamp, int copySeed, bool populateAllowed)
+    {
+        var ids = new TableIdentifier[count];
+        for (var i = 0; i < count; i++)
+        {
+            ids[i] = new TableIdentifier(
+                string.Create(System.Globalization.CultureInfo.InvariantCulture, $"cand_domain_{copySeed:D4}_{i:D21}"),
+                string.Create(System.Globalization.CultureInfo.InvariantCulture, $"cand_schema_{copySeed:D4}_{i:D19}"),
+                string.Create(System.Globalization.CultureInfo.InvariantCulture, $"cand_table_{copySeed:D4}_{i:D19}"));
+        }
+
+        var consents = Enumerable.Range(0, count)
+            .Select(i => new Consent
+            {
+                TableIdentifier = ids[i],
+                Effect = ConsentEffect.Allow,
+                GrantKind = PermissionGrantKind.Data,
+                GranteeType = GranteeType.User,
+                GranteeSid = new Sid(Caller),
+                TenantId = new TenantId("tenant-a"),
+                ValidFrom = Now.AddDays(-1),
+                ValidTo = Now.AddDays(30)
+            })
+            .ToArray();
+        var repo = new TestInMemoryConsentRepository(consents, filterWindow: false);
+
+        var candidates = ReadGrantCandidates.LoadAsync(repo, [new Sid(Caller)], Now, new TenantId("tenant-a"), CancellationToken.None)
+            .GetAwaiter().GetResult();
+        var allowed = populateAllowed ? ids.ToFrozenDictionary(static k => k, static _ => true) : FrozenDictionary<TableIdentifier, bool>.Empty;
+        return new AccessViewEntry(candidates, allowed, stamp, Now.AddMinutes(5));
     }
 }
