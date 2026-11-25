@@ -360,6 +360,7 @@ public sealed partial class AccessDecisionPoint
                 _accessProfileRepository,
                 _memoryCache,
                 _options.Value,
+                _timeProvider,
                 ct).ConfigureAwait(false);
         }
         catch (AccessProfileSourceUnavailableException ex)

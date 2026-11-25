@@ -584,7 +584,7 @@ public sealed partial class TableAccessPolicy
     /// empty when none applies.
     /// </summary>
     internal Task<IReadOnlyList<AccessProfile>> ResolveActiveAccessProfilesAsync(TableAccessQuery query, CancellationToken ct) =>
-        ResolveActiveAccessProfilesCoreAsync(query, _accessProfileCache, _accessProfileRepository, _memoryCache, _options, ct);
+        ResolveActiveAccessProfilesCoreAsync(query, _accessProfileCache, _accessProfileRepository, _memoryCache, _options, _timeProvider, ct);
 
     internal static async Task<IReadOnlyList<AccessProfile>> ResolveActiveAccessProfilesCoreAsync(
         TableAccessQuery query,
@@ -592,6 +592,7 @@ public sealed partial class TableAccessPolicy
         IAccessProfileRepository? accessProfileRepository,
         Microsoft.Extensions.Caching.Memory.IMemoryCache? memoryCache,
         GatewayOptions? options,
+        TimeProvider timeProvider,
         CancellationToken ct)
     {
         if (accessProfileCache == null && accessProfileRepository == null)
@@ -632,7 +633,7 @@ public sealed partial class TableAccessPolicy
         }
 
         var table = query.Metadata.Identifier;
-        var now = TimeProvider.System.GetUtcNow();
+        var now = timeProvider.GetUtcNow();
         return AccessProfileAssignmentRules.Order(profiles.Where(p => p.IsActive(now) && p.MatchesTable(table)));
     }
 }

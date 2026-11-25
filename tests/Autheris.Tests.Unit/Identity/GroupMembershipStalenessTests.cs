@@ -243,14 +243,14 @@ public sealed class GroupMembershipStalenessTests
         var consentCacheStub = new InMemoryConsentCacheService();
         var policy = new TableAccessPolicy(
             consentRepo,
-            new ConsentResolutionService(),
+            new ConsentResolutionService(timeProvider: time),
             consentCacheStub,
             gatewayOptions,
             NullMandatoryRowFilterResolver.Instance,
             timeProvider: time);
         var pdp = new AccessDecisionPoint(
             opts,
-            new ConsentResolutionService(),
+            new ConsentResolutionService(timeProvider: time),
             consentRepo,
             consentCacheStub,
             mandatoryFilters: NullMandatoryRowFilterResolver.Instance,

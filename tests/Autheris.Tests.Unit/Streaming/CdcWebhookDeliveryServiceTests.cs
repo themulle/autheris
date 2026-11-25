@@ -646,7 +646,7 @@ public sealed partial class CdcWebhookDeliveryServiceTests
     {
         var f = new Fixture();
         await f.AddSubscription();
-        f.EnforcerOverride = RealEnforcer(withConsent: true);
+        f.EnforcerOverride = RealEnforcer(withConsent: true, f.Time);
 
         await f.Create().ProcessEventAsync(Event(), default);
 
@@ -660,14 +660,14 @@ public sealed partial class CdcWebhookDeliveryServiceTests
     {
         var f = new Fixture();
         await f.AddSubscription();
-        f.EnforcerOverride = RealEnforcer(withConsent: false);
+        f.EnforcerOverride = RealEnforcer(withConsent: false, f.Time);
 
         await f.Create().ProcessEventAsync(Event(), default);
 
         f.Outbox.Rows.ShouldBeEmpty();
     }
 
-    private static IStreamRlsPolicyEnforcer RealEnforcer(bool withConsent)
+    private static IStreamRlsPolicyEnforcer RealEnforcer(bool withConsent, TimeProvider time)
     {
         var metadataRepo = Substitute.For<ITableMetadataRepository>();
         metadataRepo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(Task.FromResult<TableMetadata?>(new TableMetadata
@@ -685,7 +685,7 @@ public sealed partial class CdcWebhookDeliveryServiceTests
                 {
                     TableIdentifier = Orders, Effect = ConsentEffect.Allow, GranteeType = GranteeType.User,
                     GranteeSid = new Sid("S-1-5-21-CREATOR"), TenantId = new TenantId("tenant-a"),
-                    ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(30),
+                    ValidFrom = Now.AddDays(-1), ValidTo = Now.AddDays(30),
                     ColumnRules =
                     [
                         new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear },
@@ -710,7 +710,7 @@ public sealed partial class CdcWebhookDeliveryServiceTests
         }));
         return Autheris.Tests.Unit.TestDoubles.StreamRlsPolicyEnforcerTestFactory.Create(
             policy, metadataRepo, masking, epoch, consentRepo,
-            new Autheris.Application.Services.ConsentResolutionService(), cache);
+            new Autheris.Application.Services.ConsentResolutionService(timeProvider: time), cache, time: time);
     }
 
     private sealed class CapturingLogger : Microsoft.Extensions.Logging.ILogger<CdcWebhookDeliveryService>

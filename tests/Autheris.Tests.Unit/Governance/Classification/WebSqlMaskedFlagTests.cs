@@ -96,7 +96,7 @@ public sealed class WebSqlMaskedFlagTests
         var rowFactory = new RowPolicyFactory(new PolicyPredicateRenderer());
         var policy = new TableAccessPolicy(
             new TestInMemoryConsentRepository([grant], filterWindow: false),
-            new ConsentResolutionService(logger: NullLogger<ConsentResolutionService>.Instance),
+            new ConsentResolutionService(logger: NullLogger<ConsentResolutionService>.Instance, timeProvider: time),
             new TestNoOpConsentCache(),
             gwOpts,
             new NoOpMandatoryRowFilterResolver(),

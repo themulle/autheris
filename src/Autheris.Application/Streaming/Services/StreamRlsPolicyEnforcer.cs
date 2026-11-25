@@ -438,7 +438,7 @@ public sealed class StreamRlsPolicyEnforcer : IStreamRlsPolicyEnforcer
             return cached;
         }
 
-        var now = DateTimeOffset.UtcNow;
+        var now = _time.GetUtcNow();
         var allSubjects = groupSids.Append(userSid).ToList();
         // RR-L4-06: epoch snapshot BEFORE loading consents (compare-and-set on cache write)
         var epochAtLoad = await _cacheService.GetEpochSnapshotAsync(table, ct).ConfigureAwait(false);

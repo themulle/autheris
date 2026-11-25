@@ -14,18 +14,25 @@ public sealed class ConsentResolutionService : IConsentResolutionService
     private readonly IRowFilterSqlBuilder _sqlBuilder;
     private readonly IRestrictedScopePolicy _restrictedScopes;
     private readonly ILogger<ConsentResolutionService>? _logger;
+    private readonly TimeProvider _timeProvider;
 
     /// <param name="sqlBuilder">Row filter SQL builder; defaults to <see cref="RowFilterSqlBuilder"/>.</param>
     /// <param name="restrictedScopes">The restricted scopes;<c>null</c> = the secure default (<c>Agent.Read</c>), also for parameterless construction.</param>
     /// <param name="logger">Receives the exception type only when the restriction step fails.</param>
+    /// <param name="timeProvider">
+    /// The clock the validity window of a consent is evaluated against; must be the same clock the caller used to load
+    /// the active consents (one decision, one clock). Defaults to <see cref="TimeProvider.System"/>.
+    /// </param>
     public ConsentResolutionService(
         IRowFilterSqlBuilder? sqlBuilder = null,
         IRestrictedScopePolicy? restrictedScopes = null,
-        ILogger<ConsentResolutionService>? logger = null)
+        ILogger<ConsentResolutionService>? logger = null,
+        TimeProvider? timeProvider = null)
     {
         _sqlBuilder = sqlBuilder ?? new RowFilterSqlBuilder();
         _restrictedScopes = restrictedScopes ?? RestrictedScopePolicy.Default;
         _logger = logger;
+        _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
     public TableAccessDecision ResolveAccess(
@@ -50,7 +57,7 @@ public sealed class ConsentResolutionService : IConsentResolutionService
         IReadOnlySet<string>? callerScopes,
         TableMetadata? tableMetadata)
     {
-        var now = DateTimeOffset.UtcNow;
+        var now = _timeProvider.GetUtcNow();
 
         // 1. Identify applicable active consents for Subject Set S (hidden objects never get Allow from pattern grants)
         bool isHiddenTable = tableMetadata?.Table.DiscoveryHidden == true;

@@ -572,7 +572,7 @@ public sealed class ClassificationAccessResolverTests
         var masks = new ColumnMaskPolicyFactory(new SqlDataMaskingProvider(Options.Create(new GatewayOptions()), timeProvider: timeProvider));
         var rows = new RowPolicyFactory(new PolicyPredicateRenderer());
         var typed = new TypedPolicySources(rows, masks, ClassificationResolver: resolver);
-        var res = new ConsentResolutionService(logger: NullLogger<ConsentResolutionService>.Instance);
+        var res = new ConsentResolutionService(logger: NullLogger<ConsentResolutionService>.Instance, timeProvider: timeProvider);
         return new AccessDecisionPoint(
             Options.Create(new GatewayOptions()),
             resolutionService: res,

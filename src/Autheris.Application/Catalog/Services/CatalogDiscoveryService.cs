@@ -257,7 +257,7 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
         {
             var principal = context.User;
             var scope = CallerScopeResolver.Resolve(principal, CatalogOwner);
-            var resolution = _consentResolution ?? new ConsentResolutionService();
+            var resolution = _consentResolution ?? new ConsentResolutionService(timeProvider: _timeProvider);
             if (CallerScopeResolver.IsAdminView(scope))
             {
                 return CatalogCallerColumnLevels.Resolve(resolution, principal, metadata, [], isAdmin: true, isGranted: false, bypass: false, _logger);
