@@ -275,6 +275,18 @@ public sealed class PermissionRequestStore(
                 return new DecisionCasResult(DecisionCasOutcome.AlreadyDecided, Request: req);
             }
 
+            // Lock order of a decision: request row, tenant governance epoch, grant writes, and the tenant consent event lock last
+            // (the event is appended at the end of the effect). A catalog grant bumps the same epoch row inside the effect, so the
+            // epoch must be taken before the effect, never after the event lock.
+            if (decision.IsFinal
+                && string.Equals(decision.StepDecision, "APPROVED", StringComparison.OrdinalIgnoreCase)
+                && !string.IsNullOrWhiteSpace(req.TenantId.Value)
+                && !TenantId.IsReserved(req.TenantId))
+            {
+                await BumpGovernanceEpochInTxAsync(conn, tx, req.TenantId.Value, decision.DecidedAt, ct)
+                    .ConfigureAwait(false);
+            }
+
             if (string.Equals(decision.StepDecision, "APPROVED", StringComparison.OrdinalIgnoreCase))
             {
                 await ConsentSqlCore.InsertApprovedStepAsync(
@@ -343,15 +355,6 @@ public sealed class PermissionRequestStore(
             };
 
             var createdGrants = await applyEffect(govTx, decision, updatedReq).ConfigureAwait(false);
-            if (decision.IsFinal
-                && string.Equals(decision.StepDecision, "APPROVED", StringComparison.OrdinalIgnoreCase)
-                && !string.IsNullOrWhiteSpace(updatedReq.TenantId.Value)
-                && !TenantId.IsReserved(updatedReq.TenantId))
-            {
-                await BumpGovernanceEpochInTxAsync(conn, tx, updatedReq.TenantId.Value, decision.DecidedAt, ct)
-                    .ConfigureAwait(false);
-            }
-
             await tx.CommitAsync(ct).ConfigureAwait(false);
             return new DecisionCasResult(DecisionCasOutcome.Applied, updatedReq, createdGrants);
         }

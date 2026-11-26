@@ -472,6 +472,13 @@ public sealed partial class PermissionRequestEngine
 
         // Issue #1165: event consumers learn about the decision (request.decided) or a recorded first approval on secret data
         // (request.updated) from a thin event appended in the decision transaction: it commits with the decision or not at all.
+        // It is the last write of the effect, so the tenant event lock is the last lock the decision takes. Without a database
+        // transaction the outbox would append on a connection of its own, so the decision fails closed instead.
+        if (_eventOutbox is not null && tx.Transaction is null)
+        {
+            throw new InvalidOperationException("The decision transaction carries no database transaction; the consent event cannot be appended atomically.");
+        }
+
         await AppendRequestEventAsync(
             decision.IsFinal ? ConsentEventTypes.RequestDecided : ConsentEventTypes.RequestUpdated,
             updatedReq,

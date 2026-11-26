@@ -212,8 +212,8 @@ public sealed class ConsentRevocationAuthorityTests
         var deniedId = Guid.NewGuid();
         // First revoke target: self-revokable in TenantA
         conn.EnqueueReader(RevokeTargetRows(("Sales", "Crm", "Orders", TenantA.Value, "User", Actor.Value, 0)));
-        // Event metadata lookup for first revoked consent (empty -> Internal workflow, no external system)
-        conn.EnqueueReader(new DataTable());
+        // grant.revoked events are appended at the end of the transaction (the event lock is the last lock), so the denial of the
+        // second target comes before any event metadata lookup
         // Second revoke target: owned by someone else in TenantA; owner/delegate scalar checks both return 0
         conn.EnqueueReader(RevokeTargetRows(("Sales", "Crm", "Secrets", TenantA.Value, "User", Other.Value, 0)));
 

@@ -570,6 +570,7 @@ WHERE r.tenant_id = @tenant
         }
 
         var reroutedIds = new List<Guid>(candidates.Count);
+        var rerouted = new List<(Guid RequestId, TableIdentifier Table, string Status, int Version, ConsentWorkflowMode CurrentMode, Guid? CurrentSystemId)>(candidates.Count);
         var newStatus = targetMode == ConsentWorkflowMode.External ? "PENDING_EXTERNAL_APPROVAL" : "PENDING";
         var effectiveSystemId = targetMode == ConsentWorkflowMode.External ? targetSystemId : null;
 
@@ -599,6 +600,7 @@ WHERE id = @id AND tenant_id = @tenant AND status = @expectedStatus";
             }
 
             reroutedIds.Add(candidate.RequestId);
+            rerouted.Add(candidate);
 
             await RecordAuditEventAsync(new AuditLogEntry
             {
@@ -617,7 +619,12 @@ WHERE id = @id AND tenant_id = @tenant AND status = @expectedStatus";
                     targetSystemId = effectiveSystemId
                 })
             }, tx, ct).ConfigureAwait(false);
+        }
 
+        // The events follow all row updates: the tenant event lock is the last lock of the transaction, as in a decision (request
+        // row, then the event lock), so a reroute never holds the event lock while it waits for a request row a decider holds.
+        foreach (var candidate in rerouted)
+        {
             var payload = new ConsentThinEventPayload(
                 tenantId.Value,
                 candidate.RequestId,

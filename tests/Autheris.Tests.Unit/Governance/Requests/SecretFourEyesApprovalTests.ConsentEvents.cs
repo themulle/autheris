@@ -15,6 +15,7 @@ namespace Autheris.Tests.Unit.Governance.Requests;
 /// Issue #1165: every committed decision appends one thin consent event in the decision transaction (request.decided for a final
 /// decision, request.updated for a recorded first approval on secret data); refused and conflicting decisions append none.
 /// </summary>
+[Trait("Category", "Security")]
 public sealed partial class SecretFourEyesApprovalTests
 {
     [Fact]

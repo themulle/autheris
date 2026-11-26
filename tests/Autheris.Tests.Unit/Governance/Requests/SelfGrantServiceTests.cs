@@ -180,7 +180,7 @@ public sealed class SelfGrantServiceTests
         entry.EventType.ShouldBe(Autheris.Application.ConsentRequests.Events.ConsentEventTypes.RequestDecided);
         entry.SubjectId.ShouldBe(result.Request.Id.ToString("D"));
         entry.ExternalSystemId.ShouldBeNull();
-        transaction.ShouldBeNull("the harness decision transaction carries no database transaction");
+        transaction.ShouldBeSameAs(h.Transaction);
         RecordingConsentEventOutbox.ReadThinRequestPayload(entry).ShouldBe(("APPROVED", 2, "INTERNAL"));
         entry.PayloadJson.ShouldNotContain("production incident");
     }

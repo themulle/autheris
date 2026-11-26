@@ -5,7 +5,6 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.ConsentRequests;
-using Autheris.Application.ConsentRequests.Events;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -59,28 +58,8 @@ public sealed partial class PermissionRequestEngine
             throw new ConsentRequestException("INVALID_STATE", "The consent request could not be withdrawn.");
         }
 
-        await AppendWithdrawnEventAsync(req, ct).ConfigureAwait(false);
+        // Issue #1165: the request.updated event of the withdrawal is appended by the repository in the withdrawal transaction.
         return true;
-    }
-
-    /// <summary>
-    /// Issue #1165: event consumers learn about a withdrawal from request.updated. The withdrawal commits in its own repository
-    /// transaction, so the event follows the commit (like request.created) and carries the stored row: status WITHDRAWN and the
-    /// version after the change. A withdrawn request is final, so the row read after the commit is the withdrawn one.
-    /// </summary>
-    private async Task AppendWithdrawnEventAsync(ConsentRequest pending, CancellationToken ct)
-    {
-        if (_eventOutbox is null)
-        {
-            return;
-        }
-
-        var now = _time.GetUtcNow().ToUniversalTime();
-        var stored = await _approvalRepository.GetConsentRequestAsync(pending.Id, ct).ConfigureAwait(false);
-        var payload = stored is { Status: "WITHDRAWN" } && stored.Id == pending.Id
-            ? ConsentEventPayloads.ForRequest(stored, now)
-            : ConsentEventPayloads.ForRequest(pending, now) with { Status = "WITHDRAWN", Version = pending.Version + 1 };
-        await AppendRequestEventAsync(ConsentEventTypes.RequestUpdated, pending, payload, transaction: null, ct).ConfigureAwait(false);
     }
 
     private Task RecordWithdrawAuditAsync(ConsentRequest req, SecurityPrincipalContext callerCtx, string decision, CancellationToken ct) =>

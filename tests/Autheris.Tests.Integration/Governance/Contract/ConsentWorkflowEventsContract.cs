@@ -439,12 +439,46 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
         feed.Events.Where(e => e.SubjectId == withdrawnId.ToString("D")).Select(e => e.Type).Should()
             .Equal(ConsentEventTypes.RequestCreated, ConsentEventTypes.RequestUpdated);
 
-        var decidedEvent = feed.Events.Single(e => e.Type == ConsentEventTypes.RequestDecided);
+        var decidedEvent = feed.Events.Single(e => e.SubjectId == approvedId.ToString("D") && e.Type == ConsentEventTypes.RequestDecided);
         ReadStatusAndVersion(decidedEvent.PayloadJson).Should().Be(("APPROVED", 2));
-        var withdrawnEvent = feed.Events.Single(e => e.Type == ConsentEventTypes.RequestUpdated);
+        var withdrawnEvent = feed.Events.Single(e => e.SubjectId == withdrawnId.ToString("D") && e.Type == ConsentEventTypes.RequestUpdated);
         ReadStatusAndVersion(withdrawnEvent.PayloadJson).Should().Be(("WITHDRAWN", 2));
         withdrawnEvent.PayloadJson.Should().NotContain("Quarterly order reconciliation");
         (await Store.ConsentApprovals.GetConsentRequestAsync(withdrawnId))!.Version.Should().Be(2);
+    }
+
+    /// <summary>
+    /// Issue #1165: a withdrawal through the repository (the requester's withdrawal and the deprovisioning withdrawal share it) appends
+    /// request.updated in the withdrawal transaction, read on the same connection (no self-blocking read on SQL Server), routed to the
+    /// request's workflow system and fanned out to observers; a refused withdrawal appends nothing.
+    /// </summary>
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task Repository_withdrawal_appends_request_updated_in_its_transaction()
+    {
+        if (!Store.IsAvailable) return;
+
+        var observer = NewSystem(Store.TenantA.Value, "observer-withdraw", ExternalWorkflowSystemRole.Observer);
+        await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(observer);
+        var requestId = await SeedPendingRequestAsync(Store.TenantA, "orders_withdraw_" + Guid.NewGuid().ToString("N")[..8]);
+
+        (await Store.ConsentApprovals.WithdrawConsentRequestAsync(requestId, new Sid("S-1-5-21-OTHER-REQ"))).Should().BeFalse();
+        (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 50, observer.Id)).Events
+            .Should().NotContain(e => e.SubjectId == requestId.ToString("D"));
+
+        (await Store.ConsentApprovals.WithdrawConsentRequestAsync(requestId, new Sid("S-1-5-21-OBSERVER-REQ"))).Should().BeTrue();
+
+        var stored = await Store.ConsentApprovals.GetConsentRequestAsync(requestId);
+        stored!.Status.Should().Be("WITHDRAWN");
+        stored.Version.Should().Be(2);
+        var withdrawn = (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 50, observer.Id)).Events
+            .Where(e => e.SubjectId == requestId.ToString("D")).Should().ContainSingle().Which;
+        withdrawn.Type.Should().Be(ConsentEventTypes.RequestUpdated);
+        ReadStatusAndVersion(withdrawn.PayloadJson).Should().Be(("WITHDRAWN", 2));
+
+        (await Store.ConsentApprovals.WithdrawConsentRequestAsync(requestId, new Sid("S-1-5-21-OBSERVER-REQ"))).Should().BeFalse();
+        (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 50, observer.Id)).Events
+            .Count(e => e.SubjectId == requestId.ToString("D")).Should().Be(1);
     }
 
     private static (string? Status, int Version) ReadStatusAndVersion(string payloadJson)

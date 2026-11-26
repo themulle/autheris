@@ -79,6 +79,7 @@ internal sealed class SelfGrantHarness
     public Func<Guid, bool>? FailRevokeConsent { get; set; }
     public Func<Guid, Consent?>? ConsentLookup { get; set; }
     public RecordingConsentEventOutbox Events { get; } = new();
+    public System.Data.Common.DbTransaction Transaction { get; } = new StubDbTransaction();
     public PermissionRequestEngine Engine { get; }
     public SelfGrantService Service { get; }
 
@@ -127,7 +128,8 @@ internal sealed class SelfGrantHarness
                     return Task.Run(async () =>
                     {
                         var req = Created.Find(r => r.Id == id)!;
-                        var tx = NullFake.Create<IGovernanceTransaction>();
+                        var tx = NullFake.Create<IGovernanceTransaction>((tm, _) =>
+                            tm.Name == "get_" + nameof(IGovernanceTransaction.Transaction) ? Transaction : NullFake.UseDefault);
                         var record = await decide(tx, req);
                         var updated = Decided(req, record);
                         var grants = await apply(tx, record, updated);
