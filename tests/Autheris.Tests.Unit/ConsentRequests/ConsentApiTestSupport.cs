@@ -142,8 +142,9 @@ internal sealed class ConsentApiTestHarness : IAsyncDisposable
         return new ConsentApiTestHarness(services.BuildServiceProvider(), store, denials, systemId, "servicenow-prod");
     }
 
-    public Guid RegisterExternalSystem(string tenantId, string clientId, bool enabled) =>
-        Store.RegisterExternalSystem(tenantId, clientId, enabled);
+    public Guid RegisterExternalSystem(
+        string tenantId, string clientId, bool enabled, ExternalWorkflowSystemRole role = ExternalWorkflowSystemRole.Workflow) =>
+        Store.RegisterExternalSystem(tenantId, clientId, enabled, role);
 
     public ConsentRequest SeedExternalRequest(string tenantId, Guid externalSystemId, string externalRef) =>
         Store.SeedExternalRequest(tenantId, externalSystemId, externalRef);

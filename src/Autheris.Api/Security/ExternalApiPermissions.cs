@@ -19,6 +19,12 @@ public static class ExternalApiPermissions
     public const string GrantsRevoke = "Autheris.Grants.Revoke";
     public const string GrantsVerify = "Autheris.Grants.Verify";
 
+    /// <summary>
+    /// App role an observer system's service principal needs, in addition to <see cref="ConsentRead"/>, for tenant-wide request and event
+    /// reads (issue #1161). Registration as an observer alone is not enough.
+    /// </summary>
+    public const string ConsentObserve = "Autheris.Consent.Observe";
+
     private static readonly IReadOnlyList<string> PersonIdClaimTypes = AppOnlyPrincipal.PersonIdClaimTypes;
 
     private static readonly string[] InteractiveReadConsentRoles =

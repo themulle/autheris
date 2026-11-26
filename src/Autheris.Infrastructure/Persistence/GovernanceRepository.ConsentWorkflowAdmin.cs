@@ -242,20 +242,26 @@ WHERE tenant_id = @tenant AND scope_kind = @scopeKind AND scope_ref = @scopeRef"
                 }
             }
 
+            if (system.Role == ExternalWorkflowSystemRole.Observer)
+            {
+                await EnsureObserverRoleIsFreeAsync(conn, tx, system, ct).ConfigureAwait(false);
+            }
+
             if (isPg)
             {
                 await using var cmd = conn.CreateCommand();
                 cmd.Transaction = tx;
                 cmd.CommandText = @"INSERT INTO EXTERNAL_WORKFLOW_SYSTEMS
-(id, tenant_id, name, client_id, webhook_url, webhook_secret_protected, enabled, created_by, created_at, disabled_at)
-VALUES (@id, @tenant, @name, @clientId, @webhookUrl, @secret, @enabled, @createdBy, @createdAt, @disabledAt)
+(id, tenant_id, name, client_id, webhook_url, webhook_secret_protected, enabled, created_by, created_at, disabled_at, system_role)
+VALUES (@id, @tenant, @name, @clientId, @webhookUrl, @secret, @enabled, @createdBy, @createdAt, @disabledAt, @systemRole)
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     client_id = EXCLUDED.client_id,
     webhook_url = EXCLUDED.webhook_url,
     webhook_secret_protected = EXCLUDED.webhook_secret_protected,
     enabled = EXCLUDED.enabled,
-    disabled_at = EXCLUDED.disabled_at";
+    disabled_at = EXCLUDED.disabled_at,
+    system_role = EXCLUDED.system_role";
                 BindExternalSystemParameters(cmd, system);
                 await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
@@ -269,7 +275,8 @@ SET name = @name,
     webhook_url = @webhookUrl,
     webhook_secret_protected = @secret,
     enabled = @enabled,
-    disabled_at = @disabledAt
+    disabled_at = @disabledAt,
+    system_role = @systemRole
 WHERE id = @id AND tenant_id = @tenant";
                 BindExternalSystemParameters(updateCmd, system);
                 var updated = await updateCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
@@ -278,8 +285,8 @@ WHERE id = @id AND tenant_id = @tenant";
                     await using var insertCmd = conn.CreateCommand();
                     insertCmd.Transaction = tx;
                     insertCmd.CommandText = @"INSERT INTO dbo.EXTERNAL_WORKFLOW_SYSTEMS
-(id, tenant_id, name, client_id, webhook_url, webhook_secret_protected, enabled, created_by, created_at, disabled_at)
-VALUES (@id, @tenant, @name, @clientId, @webhookUrl, @secret, @enabled, @createdBy, @createdAt, @disabledAt)";
+(id, tenant_id, name, client_id, webhook_url, webhook_secret_protected, enabled, created_by, created_at, disabled_at, system_role)
+VALUES (@id, @tenant, @name, @clientId, @webhookUrl, @secret, @enabled, @createdBy, @createdAt, @disabledAt, @systemRole)";
                     BindExternalSystemParameters(insertCmd, system);
                     await insertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
                 }
@@ -298,7 +305,8 @@ VALUES (@id, @tenant, @name, @clientId, @webhookUrl, @secret, @enabled, @created
                     systemId = system.Id,
                     name = system.Name,
                     clientId = system.ClientId,
-                    enabled = system.Enabled
+                    enabled = system.Enabled,
+                    role = system.Role.ToSqlString()
                 })
             }, tx, ct).ConfigureAwait(false);
 
@@ -648,6 +656,30 @@ WHERE id = @id AND tenant_id = @tenant AND status = @expectedStatus";
         cmd.AddBound("@updatedAt", route.UpdatedAt.ToUniversalTime(), System.Data.DbType.DateTimeOffset);
     }
 
+    /// <summary>
+    /// Issue #1161: an observer is never a route target and never the system of a pending request. Saving a system as an
+    /// observer is refused while a route or a pending request references it, inside the upsert transaction.
+    /// </summary>
+    private static async Task EnsureObserverRoleIsFreeAsync(DbConnection conn, DbTransaction tx, ExternalWorkflowSystem system, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = @"SELECT
+    (SELECT COUNT(*) FROM CONSENT_WORKFLOW_ROUTES WHERE tenant_id = @tenant AND external_system_id = @id)
+  + (SELECT COUNT(*) FROM CONSENT_REQUESTS WHERE tenant_id = @tenant AND external_system_id = @id
+       AND status IN ('PENDING', 'PENDING_SECOND_APPROVAL', 'PENDING_EXTERNAL_APPROVAL'))";
+        cmd.AddBound("@tenant", system.TenantId);
+        cmd.AddBound("@id", system.Id.ToString("D"));
+        var references = Convert.ToInt64(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false), CultureInfo.InvariantCulture);
+        if (references > 0)
+        {
+            throw new ConsentDecisionException(
+                ConsentDecisionErrorCodes.ExternalSystemRoleConflict,
+                "The external workflow system is referenced by a route or a pending request and cannot become an observer.",
+                409);
+        }
+    }
+
     private static void BindExternalSystemParameters(DbCommand cmd, ExternalWorkflowSystem system)
     {
         cmd.AddBound("@id", system.Id.ToString("D"));
@@ -660,5 +692,6 @@ WHERE id = @id AND tenant_id = @tenant AND status = @expectedStatus";
         cmd.AddBound("@createdBy", system.CreatedBy);
         cmd.AddBound("@createdAt", system.CreatedAt.ToUniversalTime(), System.Data.DbType.DateTimeOffset);
         cmd.AddBound("@disabledAt", system.DisabledAt.HasValue ? system.DisabledAt.Value.ToUniversalTime() : DBNull.Value, System.Data.DbType.DateTimeOffset);
+        cmd.AddBound("@systemRole", system.Role.ToSqlString());
     }
 }

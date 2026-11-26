@@ -1,0 +1,6 @@
+{
+  "ops": [
+    { "op": "addColumn", "table": "external_workflow_systems", "column": { "name": "system_role", "type": "CHARACTER VARYING(16)", "family": "string", "nullable": false } },
+    { "op": "addIndex", "table": "external_workflow_systems", "name": "ix_external_workflow_systems_tenant_role", "unique": false, "columns": ["tenant_id", "system_role", "enabled"] }
+  ]
+}

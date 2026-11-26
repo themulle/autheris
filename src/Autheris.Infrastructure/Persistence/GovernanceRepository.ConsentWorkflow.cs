@@ -148,7 +148,7 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
         }
 
         const string selectByClientIdSql =
-            @"SELECT id, tenant_id, name, client_id, webhook_url, webhook_secret_protected, enabled, created_by, created_at, disabled_at
+            @"SELECT id, tenant_id, name, client_id, webhook_url, webhook_secret_protected, enabled, created_by, created_at, disabled_at, system_role
               FROM EXTERNAL_WORKFLOW_SYSTEMS
               WHERE tenant_id = @tenant AND LOWER(client_id) = LOWER(@clientId)";
 
@@ -274,6 +274,7 @@ public partial class GovernanceRepository : IConsentWorkflowConfigRepository, IC
             Convert.ToInt32(reader.GetValue(6), CultureInfo.InvariantCulture) == 1,
             reader.GetString(7),
             ConsentWorkflowSql.ReadOptionalTimestamp(reader, 8) ?? TimeProvider.System.GetUtcNow(),
-            ConsentWorkflowSql.ReadOptionalTimestamp(reader, 9));
+            ConsentWorkflowSql.ReadOptionalTimestamp(reader, 9),
+            ExternalWorkflowSystemRoleMapping.FromSqlString(reader.IsDBNull(10) ? null : reader.GetString(10)));
 
 }

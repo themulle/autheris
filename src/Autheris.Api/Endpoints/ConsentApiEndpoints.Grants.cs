@@ -226,6 +226,12 @@ public static partial class ConsentApiEndpoints
             {
                 return ApiProblems.NotFound(ConsentDecisionErrorCodes.GrantNotFound, $"Consent grant '{id}' was not found.", context);
             }
+
+            // Issue #1161: an observer never revokes.
+            if (callerSystem.Role != ExternalWorkflowSystemRole.Workflow)
+            {
+                return ObserverNotPermitted(context);
+            }
         }
 
         if (!TryExtractIdempotencyKey(context, out var idempotencyKey, out var keyError))
@@ -371,6 +377,12 @@ public static partial class ConsentApiEndpoints
             if (callerSystem is null)
             {
                 return ApiProblems.NotFound(ConsentDecisionErrorCodes.GrantNotFound, $"Profile assignment '{id}' was not found.", context);
+            }
+
+            // Issue #1161: an observer never revokes.
+            if (callerSystem.Role != ExternalWorkflowSystemRole.Workflow)
+            {
+                return ObserverNotPermitted(context);
             }
         }
 

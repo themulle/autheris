@@ -90,7 +90,7 @@ public partial class GovernanceRepository
               WHERE tenant_id = @tenant";
 
         public const string SelectExternalWorkflowSystemByIdSql =
-            @"SELECT id, tenant_id, name, client_id, webhook_url, webhook_secret_protected, enabled, created_by, created_at, disabled_at
+            @"SELECT id, tenant_id, name, client_id, webhook_url, webhook_secret_protected, enabled, created_by, created_at, disabled_at, system_role
               FROM EXTERNAL_WORKFLOW_SYSTEMS
               WHERE id = @id AND tenant_id = @tenant";
 

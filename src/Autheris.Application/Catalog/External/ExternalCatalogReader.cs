@@ -524,7 +524,8 @@ public sealed partial class ExternalCatalogReader(
 
             var system = await _workflowConfigRepository.GetExternalWorkflowSystemByClientIdAsync(tenantId, clientId, ct)
                 .ConfigureAwait(false);
-            bool allowed = system is { Enabled: true } && system.TenantId == tenantId;
+            // Issue #1161: a system with an unrecognised role is treated like a missing one.
+            bool allowed = system is not null && (system.IsActiveWorkflow || system.IsActiveObserver) && system.TenantId == tenantId;
             return new CallerVisibility(true, allowed, new HashSet<TableIdentifier>());
         }
 

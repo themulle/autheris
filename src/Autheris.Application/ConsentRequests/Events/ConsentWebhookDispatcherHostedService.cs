@@ -183,7 +183,8 @@ public sealed class ConsentWebhookDispatcherHostedService : BackgroundService
             return;
         }
 
-        if (!system.Enabled)
+        // Issue #1161: a disabled system or one with an unrecognised role receives nothing.
+        if (!system.IsActiveWorkflow && !system.IsActiveObserver)
         {
             await DeadLetterAsync(item, leaseOwner, WebhookDeliveryErrorCodes.SubscriptionInactive, ct).ConfigureAwait(false);
             return;
