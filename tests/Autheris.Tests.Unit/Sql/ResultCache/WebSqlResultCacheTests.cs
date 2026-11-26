@@ -248,7 +248,6 @@ public sealed class WebSqlResultCacheTests
         using var h = new CacheHarness();
         using var leader = await LookupAsync(h, CacheHarness.Key());
         var followers = Enumerable.Range(0, 6).Select(_ => LookupAsync(h, CacheHarness.Key())).ToArray();
-        await Task.Delay(50);
         followers.ShouldAllBe(t => !t.IsCompleted);
 
         (await h.Cache.TryCommitAsync(leader, ResultCacheFixtures.Result(), Ttl, "default", null, default)).ShouldBeTrue();
@@ -266,7 +265,6 @@ public sealed class WebSqlResultCacheTests
         using var h = new CacheHarness();
         var leader = await LookupAsync(h, CacheHarness.Key());
         var follower = LookupAsync(h, CacheHarness.Key());
-        await Task.Delay(50);
 
         leader.Dispose();
         using var result = await follower;
@@ -285,7 +283,6 @@ public sealed class WebSqlResultCacheTests
         using var h = new CacheHarness();
         using var leader = await LookupAsync(h, CacheHarness.Key());
         var follower = LookupAsync(h, CacheHarness.Key());
-        await Task.Delay(50);
         (await h.Cache.TryCommitAsync(leader, ResultCacheFixtures.Result(), Ttl, "default", null, default)).ShouldBeTrue();
 
         h.BumpGovernance();
@@ -329,7 +326,6 @@ public sealed class WebSqlResultCacheTests
         using var leader = await LookupAsync(h, CacheHarness.Key());
         using var cts = new CancellationTokenSource();
         var follower = h.Cache.LookupAsync(CacheHarness.Key(), false, Wait, cts.Token).AsTask();
-        await Task.Delay(30);
 
         await cts.CancelAsync();
 

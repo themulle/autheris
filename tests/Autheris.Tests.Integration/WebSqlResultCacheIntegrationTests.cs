@@ -11,6 +11,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
+using Autheris.Tests.Common;
 using Autheris.Tests.Common.Hosting;
 using Autheris.Tests.Integration.Governance;
 using Microsoft.Extensions.Configuration;
@@ -108,18 +109,26 @@ public sealed class WebSqlResultCacheIntegrationTests : IClassFixture<WebSqlResu
     private async Task<(HttpResponseMessage Response, string Body)?> PostUntilHitAsync(string sid, string sql = Sql)
     {
         await PostAsync(sid, sql);
-        for (var attempt = 0; attempt < 6; attempt++)
+        (HttpResponseMessage Response, string Body)? hit = null;
+        try
         {
-            var next = await PostAsync(sid, sql);
-            if (CacheStatus(next.Body) == "hit")
+            await WaitHelper.WaitUntil(async () =>
             {
-                return next;
-            }
+                var next = await PostAsync(sid, sql);
+                if (CacheStatus(next.Body) != "hit")
+                {
+                    return false;
+                }
 
-            await Task.Delay(TimeSpan.FromSeconds(1));
+                hit = next;
+                return true;
+            }, TimeSpan.FromSeconds(10), "resultCache.status=hit", TimeSpan.FromMilliseconds(200));
+        }
+        catch (TimeoutException)
+        {
         }
 
-        return null;
+        return hit;
     }
 
     [Fact]
@@ -199,7 +208,7 @@ public sealed class WebSqlResultCacheIntegrationTests : IClassFixture<WebSqlResu
         hit.ShouldNotBeNull("the single-node host is expected to reach the cache");
 
         AuditLogEntry? marked = null;
-        for (var attempt = 0; attempt < 10 && marked == null; attempt++)
+        await WaitHelper.WaitUntil(async () =>
         {
             using var scope = _factory.Services.CreateScope();
             var repo = scope.ServiceProvider.GetRequiredService<IAuditLogRepository>();
@@ -209,11 +218,8 @@ public sealed class WebSqlResultCacheIntegrationTests : IClassFixture<WebSqlResu
                 e.ActorSid.Value == SidA &&
                 e.DetailsJson != null &&
                 e.DetailsJson.Contains("\"resultCache\":\"hit\"", StringComparison.Ordinal));
-            if (marked == null)
-            {
-                await Task.Delay(TimeSpan.FromSeconds(1));
-            }
-        }
+            return marked != null;
+        }, TimeSpan.FromSeconds(10), "audit entry with resultCache hit", TimeSpan.FromMilliseconds(200));
 
         marked.ShouldNotBeNull();
     }

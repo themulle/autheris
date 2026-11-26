@@ -133,7 +133,7 @@ public sealed partial class CallerAttributeArchitectureTests
     [Fact]
     public void BC_129_16_TheReservedPrefix_IsRefusedForClientParametersOfTheWebSqlBinder()
     {
-        var executor = File.ReadAllText(Path.Combine(Root(), "src/Autheris.Application/Sql/Services/GovernedSqlExecutor.cs"));
+        var executor = File.ReadAllText(Path.Combine(Root(), "src/Autheris.Application/Sql/Services/GovernedSqlExecutor.ClientValues.cs"));
         executor.ShouldContain("CallerAttributeParameterName.IsReserved(trimmed)");
     }
 
@@ -236,7 +236,7 @@ public sealed partial class CallerAttributeArchitectureTests
                     offenders.Add($"{path}: reads .DetailsJson");
                 }
 
-                bool writer = path.EndsWith("GovernedSqlExecutor.cs", StringComparison.Ordinal) || path.Contains("/Identity/Attributes/", StringComparison.Ordinal);
+                bool writer = path.EndsWith("GovernedSqlExecutor.ClientValues.cs", StringComparison.Ordinal) || path.Contains("/Identity/Attributes/", StringComparison.Ordinal);
                 if (!writer && (text.Contains("\"caller_attributes\"", StringComparison.Ordinal) || text.Contains("\"caller_attribute_binds\"", StringComparison.Ordinal)))
                 {
                     offenders.Add($"{path}: names a caller attribute audit field");
