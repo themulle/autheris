@@ -18,7 +18,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Infrastructure.Persistence.Dialects;
 
-/// <summary>System revocation by id (grant.revoked for deprovisioning, none for renewal) and the kind-complete grant enumeration used by deprovisioning and grant renewal.</summary>
+/// <summary>System revocation by id (grant.revoked for deprovisioning, grant.renewed for a renewal supersede, grant.revoked for an announced renewal rollback) and the kind-complete grant enumeration used by deprovisioning and grant renewal.</summary>
 public partial class GovernanceRepository
 {
     private const string SelectPendingRequestsForSubjectSql =
@@ -75,9 +75,17 @@ public partial class GovernanceRepository
         return list;
     }
 
+    /// <summary>
+    /// <see cref="SystemRevocationKind.Revoked"/> appends grant.revoked. <see cref="SystemRevocationKind.Renewal"/> supersedes the grant and
+    /// appends grant.renewed for the verified renewed grant (same tenant, distinct id) as the last write; nothing is appended for the
+    /// superseded grant. <see cref="SystemRevocationKind.RenewalRollback"/> appends grant.revoked only when a committed grant.renewed
+    /// exists for the grant, decided from persisted state before any write. If the grant.renewed row was already pruned by event
+    /// retention, the compensation stays silent (accepted). Arguments are validated before a connection opens.
+    /// </summary>
     public async Task<bool> RevokeSystemConsentByIdAsync(
-        TenantId tenantId, Guid consentId, Sid revokedBySid, string reason, SystemRevocationKind kind = SystemRevocationKind.Revoked, CancellationToken ct = default)
+        TenantId tenantId, Guid consentId, Sid revokedBySid, string reason, SystemRevocationKind kind = SystemRevocationKind.Revoked, Guid? renewedConsentId = null, CancellationToken ct = default)
     {
+        ValidateRevocationKind(consentId, kind, renewedConsentId);
         var tenant = TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents));
         StoredTenant.RequireWritable(tenant);
         ArgumentException.ThrowIfNullOrWhiteSpace(revokedBySid.Value);
@@ -100,6 +108,19 @@ public partial class GovernanceRepository
                 return false;
             }
 
+            if (kind == SystemRevocationKind.Renewal)
+            {
+                var renewed = await ConsentGrantSqlCore.ReadRevokeTargetAsync(conn, tx, RevokeTargetSql, renewedConsentId!.Value, revokedBySid, ct).ConfigureAwait(false);
+                if (renewed is not { } renewedRow
+                    || !TenantId.TryParse(renewedRow.TenantRaw, out var renewedTenant)
+                    || renewedTenant != tenant)
+                {
+                    throw new InvalidOperationException("The renewed grant was not found for the tenant.");
+                }
+            }
+
+            var announced = kind == SystemRevocationKind.RenewalRollback
+                && await HasCommittedGrantRenewedEventAsync(conn, tx, tenant, consentId, ct).ConfigureAwait(false);
             var isPattern = !string.IsNullOrWhiteSpace(found.ObjectPattern);
             var scopeLabel = isPattern ? found.ObjectPattern! : found.Table.ToString();
             var now = TimeProvider.System.GetUtcNow();
@@ -133,11 +154,21 @@ public partial class GovernanceRepository
             }
 
             // Deprovisioning ends access like a person's revocation: grant.revoked commits with it, event lock last. A renewal
-            // replaces the grant (or rolls a renewed one back) while access continues, so it emits no grant.revoked.
-            if (kind == SystemRevocationKind.Revoked)
+            // supersede announces the renewed grant; a rollback is announced only when its grant.renewed was committed.
+            switch (kind)
             {
-                await EmitGrantRevokedEventsInTransactionAsync(conn, tx, [new PendingGrantRevokedEvent(consentId, tenant, found.Table, now)], ct)
-                    .ConfigureAwait(false);
+                case SystemRevocationKind.Revoked:
+                    await EmitGrantRevokedEventsInTransactionAsync(conn, tx, [new PendingGrantRevokedEvent(consentId, tenant, found.Table, now)], ct)
+                        .ConfigureAwait(false);
+                    break;
+                case SystemRevocationKind.Renewal:
+                    await EmitGrantRenewedEventInTransactionAsync(conn, tx, renewedConsentId!.Value, consentId, tenant, found.Table, now, ct)
+                        .ConfigureAwait(false);
+                    break;
+                case SystemRevocationKind.RenewalRollback when announced:
+                    await EmitGrantRevokedEventsInTransactionAsync(
+                        conn, tx, [new PendingGrantRevokedEvent(consentId, tenant, found.Table, now)], ct, requireRoutingRow: true).ConfigureAwait(false);
+                    break;
             }
 
             await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
@@ -158,6 +189,41 @@ public partial class GovernanceRepository
         }
 
         return true;
+    }
+
+    private static void ValidateRevocationKind(Guid consentId, SystemRevocationKind kind, Guid? renewedConsentId)
+    {
+        if (!Enum.IsDefined(kind))
+        {
+            throw new ArgumentOutOfRangeException(nameof(kind));
+        }
+
+        if (kind == SystemRevocationKind.Renewal)
+        {
+            if (renewedConsentId is not { } renewed || renewed == Guid.Empty || renewed == consentId)
+            {
+                throw new ArgumentException("A renewal requires a renewed grant id that differs from the superseded grant.", nameof(renewedConsentId));
+            }
+        }
+        else if (renewedConsentId is not null)
+        {
+            throw new ArgumentException("Only a renewal takes a renewed grant id.", nameof(renewedConsentId));
+        }
+    }
+
+    private const string GrantRenewedExistsSql = @"SELECT CASE WHEN EXISTS (SELECT 1 FROM CONSENT_EVENTS
+    WHERE tenant_id = @tenant AND type = @type AND subject_id = @subjectId) THEN 1 ELSE 0 END";
+
+    private static async Task<bool> HasCommittedGrantRenewedEventAsync(DbConnection conn, DbTransaction tx, TenantId tenant, Guid consentId, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = GrantRenewedExistsSql;
+        cmd.AddBound("@tenant", tenant.Value);
+        cmd.AddBound("@type", Autheris.Application.ConsentRequests.Events.ConsentEventTypes.GrantRenewed);
+        cmd.AddBound("@subjectId", consentId.ToString("D"));
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        return await reader.ReadAsync(ct).ConfigureAwait(false) && Convert.ToInt64(reader.GetValue(0), CultureInfo.InvariantCulture) == 1;
     }
 
     private const string MarkRevokedForTenant = @"UPDATE CONSENTS SET is_revoked = 1, revoked_by_sid = @by, revoked_at = @now, revoke_reason = @reason

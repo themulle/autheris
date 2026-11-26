@@ -78,6 +78,10 @@ internal sealed class SelfGrantHarness
     public List<TenantId> RevokedForTenants { get; } = [];
     public Func<Guid, bool>? FailRevokeConsent { get; set; }
     public List<SystemRevocationKind> RevocationKinds { get; } = [];
+    public List<Guid?> RenewedConsentIds { get; } = [];
+
+    /// <summary>Revokes through <see cref="RevokeThrough"/> and then throws for these ids, simulating a failure after the revocation committed.</summary>
+    public Func<Guid, bool>? ThrowAfterRevokeThrough { get; set; }
 
     /// <summary>When set, a system revocation that neither fails nor returns false runs against this repository.</summary>
     public IConsentRepository? RevokeThrough { get; set; }
@@ -171,10 +175,25 @@ internal sealed class SelfGrantHarness
                     RevokedConsents.Add((Guid)args![1]!);
                     RevokedForTenants.Add((TenantId)args[0]!);
                     RevocationKinds.Add((SystemRevocationKind)args[4]!);
-                    return RevokeThrough is null
-                        ? Task.FromResult(true)
-                        : RevokeThrough.RevokeSystemConsentByIdAsync(
-                            (TenantId)args[0]!, (Guid)args[1]!, (Sid)args[2]!, (string)args[3]!, (SystemRevocationKind)args[4]!, (CancellationToken)args[5]!);
+                    RenewedConsentIds.Add((Guid?)args[5]);
+                    if (RevokeThrough is null)
+                    {
+                        return Task.FromResult(true);
+                    }
+
+                    var revokedId = (Guid)args[1]!;
+                    var through = RevokeThrough.RevokeSystemConsentByIdAsync(
+                        (TenantId)args[0]!, revokedId, (Sid)args[2]!, (string)args[3]!, (SystemRevocationKind)args[4]!, (Guid?)args[5], (CancellationToken)args[6]!);
+                    if (ThrowAfterRevokeThrough is null || !ThrowAfterRevokeThrough(revokedId))
+                    {
+                        return through;
+                    }
+
+                    return Task.Run<bool>(async () =>
+                    {
+                        await through;
+                        throw new InvalidOperationException("failed after the revocation committed");
+                    });
                 default:
                     return NullFake.UseDefault;
             }

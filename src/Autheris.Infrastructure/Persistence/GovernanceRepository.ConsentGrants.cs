@@ -9,6 +9,7 @@ using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.ConsentRequests.Events;
 using Autheris.Application.Governance.Grants.Records;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -461,16 +462,39 @@ public partial class GovernanceRepository
     /// <summary>
     /// Appends the grant.revoked events of a revoke transaction after all its other writes (grant ledger, table epochs, catalog
     /// version): the tenant consent event lock is the last lock of every transaction that appends an event, as in a decision, so a
-    /// revoke and a decision on the same table never wait on each other in opposite order.
+    /// revoke and a decision on the same table never wait on each other in opposite order. Two phases: every routing read happens
+    /// before the first append, so no read follows the event lock. With <paramref name="requireRoutingRow"/> a consent that is not
+    /// found for its tenant throws (the transaction rolls back) instead of degrading to an internal event.
     /// </summary>
     private async Task EmitGrantRevokedEventsInTransactionAsync(
-        DbConnection conn, DbTransaction tx, IReadOnlyList<PendingGrantRevokedEvent> revokedEvents, CancellationToken ct)
+        DbConnection conn, DbTransaction tx, IReadOnlyList<PendingGrantRevokedEvent> revokedEvents, CancellationToken ct, bool requireRoutingRow = false)
     {
+        var writes = new List<ConsentEventWrite>(revokedEvents.Count);
         foreach (var revoked in revokedEvents)
         {
-            await EmitGrantRevokedEventInTransactionAsync(conn, tx, revoked.ConsentId, revoked.Tenant, revoked.Table, revoked.OccurredAt, ct)
-                .ConfigureAwait(false);
+            writes.Add(await BuildGrantEventWriteAsync(
+                conn, tx, ConsentEventTypes.GrantRevoked, "REVOKED", revoked.ConsentId, revoked.ConsentId, revoked.Tenant, revoked.Table,
+                revoked.OccurredAt, previousGrantId: null, requireRoutingRow, ct).ConfigureAwait(false));
         }
+
+        for (var i = 0; i < writes.Count; i++)
+        {
+            await AppendConsentEventInTransactionAsync(conn, tx, writes[i], revokedEvents[i].Tenant, ct).ConfigureAwait(false);
+        }
+    }
+
+    /// <summary>
+    /// Appends grant.renewed for the renewed grant as the last writes of the supersede transaction. Routing comes from the superseded
+    /// grant's origin request (the renewed row may carry none); a missing routing row throws so the supersede rolls back.
+    /// </summary>
+    private async Task EmitGrantRenewedEventInTransactionAsync(
+        DbConnection conn, DbTransaction tx, Guid renewedConsentId, Guid supersededConsentId, TenantId tenant, TableIdentifier tableId,
+        DateTimeOffset occurredAt, CancellationToken ct)
+    {
+        var write = await BuildGrantEventWriteAsync(
+            conn, tx, ConsentEventTypes.GrantRenewed, "ACTIVE", renewedConsentId, supersededConsentId, tenant, tableId, occurredAt,
+            previousGrantId: supersededConsentId, requireRoutingRow: true, ct).ConfigureAwait(false);
+        await AppendConsentEventInTransactionAsync(conn, tx, write, tenant, ct).ConfigureAwait(false);
     }
 
     private async Task<bool> IsAuthorizedApproverForPatternConsentAsync(
@@ -488,62 +512,71 @@ public partial class GovernanceRepository
         return count > 0;
     }
 
-    private async Task EmitGrantRevokedEventInTransactionAsync(
+    private static async Task<ConsentEventWrite> BuildGrantEventWriteAsync(
         DbConnection conn,
         DbTransaction tx,
-        Guid consentId,
+        string eventType,
+        string status,
+        Guid grantId,
+        Guid routingConsentId,
         TenantId tenant,
         TableIdentifier tableId,
         DateTimeOffset occurredAt,
+        Guid? previousGrantId,
+        bool requireRoutingRow,
         CancellationToken ct)
     {
         Guid? requestId = null;
         var workflowMode = ConsentWorkflowMode.Internal;
         Guid? externalSystemId = null;
+        var found = false;
 
         await using (var cmd = conn.CreateCommand())
         {
             cmd.Transaction = tx;
             cmd.CommandText = @"SELECT r.id, r.workflow_mode, r.external_system_id
 FROM CONSENTS c
-LEFT JOIN CONSENT_REQUESTS r ON r.id = c.consent_request_id
-WHERE c.id = @id";
-            cmd.AddBound("@id", consentId.ToString("D"));
+LEFT JOIN CONSENT_REQUESTS r ON r.id = c.consent_request_id AND r.tenant_id = c.tenant_id
+WHERE c.id = @id AND c.tenant_id = @tenant";
+            cmd.AddBound("@id", routingConsentId.ToString("D"));
+            cmd.AddBound("@tenant", tenant.Value);
             await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
             if (await reader.ReadAsync(ct).ConfigureAwait(false))
             {
+                found = true;
                 requestId = ConsentWorkflowSql.ReadOptionalGuid(reader, 0);
                 workflowMode = ConsentWorkflowSql.ReadWorkflowMode(reader, 1);
                 externalSystemId = ConsentWorkflowSql.ReadOptionalGuid(reader, 2);
             }
         }
 
-        var payload = new Autheris.Application.ConsentRequests.Events.ConsentThinEventPayload(
+        if (!found && requireRoutingRow)
+        {
+            throw new InvalidOperationException("The consent event routing row was not found for the tenant.");
+        }
+
+        var payload = new ConsentThinEventPayload(
             tenant.Value,
             requestId,
-            consentId,
+            grantId,
             tableId.ToString(),
-            "REVOKED",
+            status,
             1,
             workflowMode.ToSqlString(),
             occurredAt,
-            new Autheris.Application.ConsentRequests.Events.ConsentEventLinks(
-                $"/api/v1/consent/grants/{consentId}",
-                "/api/v1/consent/events"));
+            new ConsentEventLinks(
+                $"/api/v1/consent/grants/{grantId}",
+                "/api/v1/consent/events"),
+            PreviousGrantId: previousGrantId);
 
-        await AppendConsentEventInTransactionAsync(
-            conn,
-            tx,
-            new Autheris.Application.ConsentRequests.Events.ConsentEventWrite(
-                tenant.Value,
-                Guid.NewGuid(),
-                Autheris.Application.ConsentRequests.Events.ConsentEventTypes.GrantRevoked,
-                consentId.ToString("D"),
-                Autheris.Application.ConsentRequests.Events.ConsentEventPayloads.Serialize(payload),
-                occurredAt,
-                externalSystemId),
-            tenant,
-            ct).ConfigureAwait(false);
+        return new ConsentEventWrite(
+            tenant.Value,
+            Guid.NewGuid(),
+            eventType,
+            grantId.ToString("D"),
+            ConsentEventPayloads.Serialize(payload),
+            occurredAt,
+            externalSystemId);
     }
 }
 

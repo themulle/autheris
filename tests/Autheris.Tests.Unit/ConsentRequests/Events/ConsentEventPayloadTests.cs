@@ -83,6 +83,52 @@ public sealed class ConsentEventPayloadTests
         root.GetProperty("links").GetProperty("self").GetString().ShouldBe($"/api/v1/consent/requests/{request.Id}");
     }
 
+    private static ConsentThinEventPayload GrantPayload(string status, Guid? previousGrantId = null) => new(
+        Tenant.Value,
+        Guid.NewGuid(),
+        Guid.NewGuid(),
+        "erp.dbo.salaries",
+        status,
+        1,
+        "INTERNAL",
+        FixedNow,
+        new ConsentEventLinks("/api/v1/consent/grants/x", "/api/v1/consent/events"),
+        PreviousGrantId: previousGrantId);
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Grant_renewed_type_is_reverse_dns()
+    {
+        ConsentEventTypes.GrantRenewed.ShouldBe("com.autheris.consent.grant.renewed");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Previous_grant_id_is_omitted_when_null_for_every_other_event_type()
+    {
+        using var doc = JsonDocument.Parse(ConsentEventPayloads.Serialize(GrantPayload("REVOKED")));
+        doc.RootElement.EnumerateObject().Select(p => p.Name).Order().ShouldBe(
+            new[] { "grantId", "links", "objectId", "occurredAt", "requestId", "status", "tenantId", "version", "workflowMode" }.Order());
+        doc.RootElement.TryGetProperty("previousGrantId", out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Previous_grant_id_is_serialized_when_set()
+    {
+        var previous = Guid.NewGuid();
+        using var doc = JsonDocument.Parse(ConsentEventPayloads.Serialize(GrantPayload("ACTIVE", previous)));
+        doc.RootElement.GetProperty("previousGrantId").GetGuid().ShouldBe(previous);
+        doc.RootElement.EnumerateObject().Count().ShouldBe(10);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Grant_revoked_payload_has_no_previous_grant_id_key()
+    {
+        ConsentEventPayloads.Serialize(GrantPayload("REVOKED")).ShouldNotContain("previousGrantId", Case.Insensitive);
+    }
+
     [Fact]
     [Trait("Category", "Security")]
     public async Task Signature_Uses_SystemSecret_AndTimestamp()

@@ -176,7 +176,7 @@ public sealed partial class PermissionRequestEngine
                 // consent is rolled back as well, so BOTH grants end up revoked (no silent extension, access lost).
                 // The superseded consent always ends at renewal; if it cannot be ended the renewal is rolled back.
                 var ended = await _consentRepository.RevokeSystemConsentByIdAsync(
-                    tenant, consent.Id, renewer.UserSid, "Renewed by approver.", SystemRevocationKind.Renewal, ct).ConfigureAwait(false);
+                    tenant, consent.Id, renewer.UserSid, "Renewed by approver.", SystemRevocationKind.Renewal, created.Id, ct).ConfigureAwait(false);
                 if (!ended)
                 {
                     throw new InvalidOperationException("The superseded grant could not be ended during renewal.");
@@ -232,7 +232,7 @@ public sealed partial class PermissionRequestEngine
         try
         {
             var done = await _consentRepository!.RevokeSystemConsentByIdAsync(
-                tenant, created.Id, actor, "Renewal rolled back.", SystemRevocationKind.Renewal, CancellationToken.None).ConfigureAwait(false);
+                tenant, created.Id, actor, "Renewal rolled back.", SystemRevocationKind.RenewalRollback, renewedConsentId: null, CancellationToken.None).ConfigureAwait(false);
             if (done)
             {
                 return;

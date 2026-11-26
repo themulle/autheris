@@ -1,6 +1,7 @@
 using System;
 using System.Linq;
 using System.Threading.Tasks;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.Governance.Requests;
 using Autheris.Domain.Audit;
@@ -52,6 +53,28 @@ public sealed class GrantRenewalTests
         result.Capacity.ShouldBe(ApproverCapacity.Governance);
         h.RevokedConsents.ShouldContain(c.Id);
         h.Audit.Entries.ShouldContain(e => e.EventType == AuditEventTypes.GrantRenewed);
+    }
+
+    [Fact]
+    public async Task Renewal_supersedes_with_the_renewed_grant_id()
+    {
+        var c = Grant();
+        var h = Harness(c);
+        await h.Engine.RenewGrantAsync(Cmd(c, H.Actor("user:dg", "GovernanceAdmin")));
+        var created = h.CreatedConsents.ShouldHaveSingleItem();
+        h.RevocationKinds.ShouldBe([SystemRevocationKind.Renewal]);
+        h.RenewedConsentIds.ShouldBe([created.Id]);
+    }
+
+    [Fact]
+    public async Task Rollback_uses_the_renewal_rollback_kind_without_a_renewed_grant_id()
+    {
+        var c = Grant();
+        var h = Harness(c);
+        h.FailRevokeConsent = id => id == c.Id;
+        await Should.ThrowAsync<InvalidOperationException>(() => h.Engine.RenewGrantAsync(Cmd(c, H.Actor("user:dg", "GovernanceAdmin"))));
+        h.RevocationKinds.ShouldBe([SystemRevocationKind.RenewalRollback]);
+        h.RenewedConsentIds.ShouldBe([null]);
     }
 
     [Fact]

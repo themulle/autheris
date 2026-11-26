@@ -7,8 +7,14 @@ public enum SystemRevocationKind
     Revoked = 0,
 
     /// <summary>
-    /// Part of a grant renewal: the superseded grant is replaced by the renewed one, or a renewed grant is rolled back while the
-    /// original stays active. Access does not end, so no grant.revoked is appended.
+    /// Supersedes a grant during a renewal: the superseded grant ends without a grant.revoked, and a grant.renewed is appended for the
+    /// renewed grant (identified by the renewed consent id). Access continues through the renewed grant.
     /// </summary>
-    Renewal = 1
+    Renewal = 1,
+
+    /// <summary>
+    /// Compensation of a renewal that did not complete: the renewed grant is revoked. A grant.revoked is appended only when a grant.renewed
+    /// for that grant was committed, so consumers never see a revoke for a grant they were not told about.
+    /// </summary>
+    RenewalRollback = 2
 }
