@@ -627,25 +627,46 @@ public sealed class CatalogAccessViewHeapEstimateTests
     [InlineData(true)]
     public void EstimateBytes_DoesNotUnderestimateUnsharedCandidateIdentifiers(bool populateAllowed)
     {
+        const int rounds = 5;
         const int copies = 16;
         const int count = 2_000;
         var stamp = new AccessViewStamp(1, new CatalogVersion(1, 1), 0, 1);
 
         _ = BuildUnsharedEntry(64, stamp, -1, populateAllowed);
 
+        var retained = new long[rounds];
+        var estimated = new long[rounds];
         var entries = new AccessViewEntry[copies];
-        var before = GC.GetTotalMemory(forceFullCollection: true);
-        for (var i = 0; i < copies; i++)
+        for (var r = 0; r < rounds; r++)
         {
-            entries[i] = BuildUnsharedEntry(count, stamp, i, populateAllowed);
+            CleanCollect();
+            var before = GC.GetTotalMemory(forceFullCollection: true);
+            for (var i = 0; i < copies; i++)
+            {
+                entries[i] = BuildUnsharedEntry(count, stamp, (r * copies) + i, populateAllowed);
+            }
+
+            CleanCollect();
+            var after = GC.GetTotalMemory(forceFullCollection: true);
+            retained[r] = (after - before) / copies;
+            estimated[r] = entries[0].EstimateBytes();
+            GC.KeepAlive(entries);
+            Array.Clear(entries);
         }
 
-        var retainedPerEntry = (GC.GetTotalMemory(forceFullCollection: true) - before) / copies;
-        GC.KeepAlive(entries);
+        estimated.Distinct().Count().ShouldBe(1);
+        var estimate = estimated[0];
+        var median = retained.OrderBy(static v => v).ElementAt(rounds / 2);
+        var message = $"populateAllowed={populateAllowed} estimate={estimate} median={median} samples=[{string.Join(",", retained)}]";
+        estimate.ShouldBeGreaterThanOrEqualTo((long)(median * 0.95), message);
+        estimate.ShouldBeLessThanOrEqualTo((long)(median * 1.35), message);
+    }
 
-        var estimated = entries[0].EstimateBytes();
-        estimated.ShouldBeGreaterThanOrEqualTo((long)(retainedPerEntry * 0.95));
-        estimated.ShouldBeLessThanOrEqualTo((long)(retainedPerEntry * 1.35));
+    private static void CleanCollect()
+    {
+        GC.Collect();
+        GC.WaitForPendingFinalizers();
+        GC.Collect();
     }
 
     [MethodImpl(MethodImplOptions.NoInlining)]
