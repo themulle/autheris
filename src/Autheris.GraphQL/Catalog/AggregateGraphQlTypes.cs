@@ -161,7 +161,7 @@ internal static class AggregateGraphQlTypes
             d.Name(names.Result);
             d.Description("Governed aggregation result with k-anonymity metadata.");
             d.Field("groups").Type(NonNullList(names.Group)).Resolve(ctx => ctx.Parent<AggregateResultDto>().Groups);
-            d.Field("count").Type(NonNull("Long")).Resolve(ctx => ctx.Parent<AggregateResultDto>().Count);
+            d.Field("count").Description("Number of source rows covered by the returned groups (the sum of their rowCount); not the number of groups.").Type(NonNull("Long")).Resolve(ctx => ctx.Parent<AggregateResultDto>().Count);
             d.Field("suppressed").Type(NonNull("Boolean")).Resolve(ctx => ctx.Parent<AggregateResultDto>().Suppressed);
             d.Field("suppressedGroupsCount").Type(NonNull("Int")).Resolve(ctx => ctx.Parent<AggregateResultDto>().SuppressedGroupsCount);
             d.Field("minimumGroupSize").Type(NonNull("Int")).Resolve(ctx => ctx.Parent<AggregateResultDto>().MinimumGroupSize);

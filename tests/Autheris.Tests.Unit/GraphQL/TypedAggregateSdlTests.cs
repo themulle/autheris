@@ -40,6 +40,16 @@ public sealed class TypedAggregateSdlTests
     }
 
     [Fact]
+    public async Task AggregateResultCount_HasDescriptionStatingSourceRowSemantics()
+    {
+        var sdl = await SdlAsync();
+
+        var block = TypeBlock(sdl, "sales_dbo_orders_aggregate_result");
+        block.ShouldContain("Number of source rows covered by the returned groups");
+        block.ShouldContain("count: Long!");
+    }
+
+    [Fact]
     public async Task OldUntypedResult_IsGone()
     {
         var sdl = await SdlAsync();

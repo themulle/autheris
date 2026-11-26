@@ -86,7 +86,13 @@ public sealed class AggregationPlannerRoutingTests
 
     private sealed class NullAudit : IAuditLogRepository
     {
-        public Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default) => Task.CompletedTask;
+        public List<AuditLogEntry> Entries { get; } = [];
+
+        public Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default)
+        {
+            Entries.Add(entry);
+            return Task.CompletedTask;
+        }
 
         public Task RecordAuditEventAsync(AuditLogEntry entry, System.Data.Common.DbTransaction existingTx, CancellationToken ct = default) => Task.CompletedTask;
 
@@ -107,7 +113,9 @@ public sealed class AggregationPlannerRoutingTests
         DataSourceType type = DataSourceType.Sql,
         string sourceType = "PostgreSQL",
         string deptType = "varchar",
-        int minGroupSize = 1)
+        int minGroupSize = 1,
+        bool truncated = false,
+        NullAudit? audit = null)
     {
         var metaRepo = Substitute.For<ITableMetadataRepository>();
         metaRepo.GetTableMetadataAsync(TableId, Arg.Any<CancellationToken>()).Returns(Metadata(type, sourceType, deptType));
@@ -117,11 +125,11 @@ public sealed class AggregationPlannerRoutingTests
             .Returns(call =>
             {
                 requests.Add(call.Arg<GovernedSqlQueryRequest>());
-                return new GovernedSqlResult("select", [], sqlRows, sqlRows.Count, 1);
+                return new GovernedSqlResult("select", [], sqlRows, sqlRows.Count, 1, Truncated: truncated);
             });
         var service = new GovernedAggregationService(
             metaRepo,
-            new NullAudit(),
+            audit ?? new NullAudit(),
             Autheris.Tests.Unit.TestSupport.AccessDecisionPointStubs.Denying(),
             sqlExecutionService: sql,
             dataSourceExecutors: [executor],
@@ -190,6 +198,103 @@ public sealed class AggregationPlannerRoutingTests
         result.Metadata.Truncated.ShouldBeFalse();
         result.Groups.Count.ShouldBe(2);
         requests.Single().Sql.ShouldEndWith("LIMIT 3");
+    }
+
+    private static IReadOnlyDictionary<string, object?> RawRow(string dept, decimal amount) => new Dictionary<string, object?>
+    {
+        ["department"] = dept,
+        ["amount"] = amount
+    };
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Aggregation_SqlResultTruncatedWithinLimit_SetsMetadataTruncated()
+    {
+        var executor = new CountingExecutor(0, DataSourceType.Sql);
+        var (service, _, _) = Create([SqlRow("A", 5), SqlRow("B", 4)], executor, maxGroups: 1000, truncated: true);
+
+        var result = await service.ExecuteAggregationAsync(Principal(), Query());
+
+        result.Metadata.Truncated.ShouldBeTrue();
+        result.Groups.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Aggregation_SqlResultTruncatedAndSurplusRow_ReturnsAtMostLimitGroupsAndTruncated()
+    {
+        var executor = new CountingExecutor(0, DataSourceType.Sql);
+        var (service, _, _) = Create([SqlRow("A", 5), SqlRow("B", 4), SqlRow("C", 3)], executor, maxGroups: 2, truncated: true);
+
+        var result = await service.ExecuteAggregationAsync(Principal(), Query());
+
+        result.Metadata.Truncated.ShouldBeTrue();
+        result.Groups.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Aggregation_SqlResultNotTruncatedExactLimit_IsNotTruncated()
+    {
+        var executor = new CountingExecutor(0, DataSourceType.Sql);
+        var (service, _, _) = Create([SqlRow("A", 5), SqlRow("B", 4)], executor, maxGroups: 2, truncated: false);
+
+        var result = await service.ExecuteAggregationAsync(Principal(), Query());
+
+        result.Metadata.Truncated.ShouldBeFalse();
+        result.Groups.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Aggregation_FallbackRowsSqlResultTruncated_ThrowsRowCapExceeded()
+    {
+        var executor = new CountingExecutor(0, DataSourceType.Sql);
+        var (service, _, _) = Create([RawRow("A", 1m), RawRow("B", 2m)], executor, truncated: true);
+
+        var ex = await Should.ThrowAsync<AggregationRowCapExceededException>(() => service.ExecuteAggregationAsync(Principal(), Query()));
+
+        ex.Message.ShouldBe(AggregationRowCapExceededException.FixedMessage);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Aggregation_FallbackRowsSqlResultNotTruncated_StillAggregates()
+    {
+        var executor = new CountingExecutor(0, DataSourceType.Sql);
+        var (service, _, _) = Create([RawRow("A", 1m), RawRow("A", 2m), RawRow("B", 3m)], executor, truncated: false);
+
+        var result = await service.ExecuteAggregationAsync(Principal(), Query());
+
+        result.Metadata.Truncated.ShouldBeFalse();
+        result.Groups.Count.ShouldBe(2);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Aggregation_TruncatedSourceWithSmallGroups_DoesNotWeakenSuppression()
+    {
+        var executor = new CountingExecutor(0, DataSourceType.Sql);
+        var (service, _, _) = Create([SqlRow("A", 50), SqlRow("B", 1), SqlRow("C", 2)], executor, minGroupSize: 5, truncated: true);
+
+        var result = await service.ExecuteAggregationAsync(Principal(), Query());
+
+        result.Metadata.Truncated.ShouldBeTrue();
+        (result.Metadata.Suppressed || result.Metadata.MergedIntoOther).ShouldBeTrue();
+        result.Groups.ShouldNotContain(g => Equals(g.GroupKey.GetValueOrDefault("department"), "B") && !g.IsMergedOther);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Aggregation_FallbackTruncated_DoesNotRecordAllowedAudit()
+    {
+        var executor = new CountingExecutor(0, DataSourceType.Sql);
+        var audit = new NullAudit();
+        var (service, _, _) = Create([RawRow("A", 1m)], executor, truncated: true, audit: audit);
+
+        await Should.ThrowAsync<AggregationRowCapExceededException>(() => service.ExecuteAggregationAsync(Principal(), Query()));
+
+        audit.Entries.ShouldBeEmpty();
     }
 
     [Fact]
