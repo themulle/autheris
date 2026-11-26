@@ -114,8 +114,9 @@ public sealed class ExternalDecisionGuard(
             throw Invalid("External evidence contains invalid characters or exceeds a length limit.");
         }
 
-        // Only the registered, enabled system of this tenant can be authenticated at all (its secret is needed to verify).
-        if (system is null || !system.Enabled || system.Id != envelope.ExternalSystemId ||
+        // Only the registered, enabled workflow system of this tenant can be authenticated at all (its secret is needed to verify);
+        // an observer never decides (issue #1161).
+        if (system is null || !system.IsActiveWorkflow || system.Id != envelope.ExternalSystemId ||
             !string.Equals(system.TenantId, request.TenantId.Value, StringComparison.OrdinalIgnoreCase))
         {
             throw NotAuthorized("The external workflow system is missing, disabled or belongs to another tenant.");

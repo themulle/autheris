@@ -248,7 +248,10 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
             .Select(e => e.SubjectId).Should().BeEquivalentTo(["other-tenant-request"]);
     }
 
-    /// <summary>Issue #1161: an event that names an observer as its system is still delivered to that observer exactly once.</summary>
+    /// <summary>
+    /// Issue #1161: an event that names an observer as its system gets no routed delivery (the routed insert only targets workflow
+    /// systems); the observer fan-out alone delivers it, exactly once.
+    /// </summary>
     [RequiresContainerRuntimeFact]
     [Trait("Category", "Security")]
     public async Task An_event_naming_an_observer_is_delivered_once()
@@ -289,6 +292,108 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
         await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(free with { Role = ExternalWorkflowSystemRole.Observer });
         (await Store.ConsentWorkflowConfig.GetExternalWorkflowSystemAsync(Store.TenantA, free.Id))!.Role
             .Should().Be(ExternalWorkflowSystemRole.Observer);
+    }
+
+    /// <summary>
+    /// Issue #1161: inside the repository transaction, open requests are never rerouted to an observer and a route never targets one;
+    /// a workflow system that holds a pending request cannot become an observer.
+    /// </summary>
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task Observers_never_receive_open_requests_or_routes()
+    {
+        if (!Store.IsAvailable) return;
+
+        var workflow = NewSystem(Store.TenantA.Value, "workflow-pending", ExternalWorkflowSystemRole.Workflow);
+        var observer = NewSystem(Store.TenantA.Value, "observer-target", ExternalWorkflowSystemRole.Observer);
+        await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(workflow);
+        await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(observer);
+        var requestId = await SeedPendingRequestAsync(Store.TenantA, "observer_target");
+
+        var rerouteToObserver = () => Store.ConsentWorkflowAdmin.RerouteOpenRequestsAsync(
+            Store.TenantA, null, null, ConsentWorkflowMode.External, observer.Id, "admin", FixedNow);
+        (await rerouteToObserver.Should().ThrowAsync<ConsentDecisionException>()).Which.StatusCode.Should().Be(409);
+        (await Store.ConsentApprovals.GetConsentRequestAsync(requestId))!.ExternalSystemId.Should().BeNull();
+
+        var routeToObserver = () => Store.ConsentWorkflowAdmin.UpsertWorkflowRouteAsync(new ConsentWorkflowRoute(
+            Store.TenantA.Value, WorkflowRouteScopeKind.Tenant, "*", ConsentWorkflowMode.External, observer.Id, 30, 14, true, "admin",
+            FixedNow));
+        (await routeToObserver.Should().ThrowAsync<ConsentDecisionException>()).Which.StatusCode.Should().Be(409);
+        (await Store.ConsentWorkflowAdmin.GetWorkflowRouteAsync(Store.TenantA, WorkflowRouteScopeKind.Tenant, "*")).Should().BeNull();
+
+        var rerouted = await Store.ConsentWorkflowAdmin.RerouteOpenRequestsAsync(
+            Store.TenantA, null, null, ConsentWorkflowMode.External, workflow.Id, "admin", FixedNow);
+        rerouted.ReroutedRequestIds.Should().Contain(requestId);
+
+        var switchPending = () => Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(
+            workflow with { Role = ExternalWorkflowSystemRole.Observer });
+        (await switchPending.Should().ThrowAsync<ConsentDecisionException>()).Which.StatusCode.Should().Be(409);
+        (await Store.ConsentWorkflowConfig.GetExternalWorkflowSystemAsync(Store.TenantA, workflow.Id))!.Role
+            .Should().Be(ExternalWorkflowSystemRole.Workflow);
+    }
+
+    /// <summary>
+    /// Issue #1161: a system that stops being an observer loses the tenant-wide feed it received as an observer and receives no
+    /// further fan-out.
+    /// </summary>
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task Leaving_the_observer_role_drops_the_tenant_wide_deliveries()
+    {
+        if (!Store.IsAvailable) return;
+
+        var observer = NewSystem(Store.TenantA.Value, "observer-leaving", ExternalWorkflowSystemRole.Observer);
+        await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(observer);
+        await AppendAsync(Store.TenantA.Value, "seen-as-observer", null);
+        (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 50, observer.Id)).Events.Should().ContainSingle();
+
+        await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(observer with { Role = ExternalWorkflowSystemRole.Workflow });
+        await AppendAsync(Store.TenantA.Value, "after-the-switch", null);
+
+        (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 50, observer.Id)).Events.Should().BeEmpty();
+    }
+
+    /// <summary>Issue #1161: disabling an observer reports and keeps its role.</summary>
+    [RequiresContainerRuntimeFact]
+    public async Task Disabling_an_observer_keeps_its_role()
+    {
+        if (!Store.IsAvailable) return;
+
+        var observer = NewSystem(Store.TenantA.Value, "observer-disable", ExternalWorkflowSystemRole.Observer);
+        await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(observer);
+
+        var (disabled, _) = await Store.ConsentWorkflowAdmin.DisableExternalWorkflowSystemAsync(
+            Store.TenantA, observer.Id, "admin", FixedNow);
+
+        disabled!.Role.Should().Be(ExternalWorkflowSystemRole.Observer);
+        disabled.Enabled.Should().BeFalse();
+        (await Store.ConsentWorkflowConfig.GetExternalWorkflowSystemAsync(Store.TenantA, observer.Id))!.Role
+            .Should().Be(ExternalWorkflowSystemRole.Observer);
+    }
+
+    private async Task<Guid> SeedPendingRequestAsync(TenantId tenant, string tableName)
+    {
+        var table = new TableIdentifier("sales", "dbo", tableName);
+        var meta = await Store.Repository.UpsertTableMetadataAsync(new TableMetadata
+        {
+            Identifier = table,
+            OwnerTenantId = tenant.Value,
+            Table = new Table { Id = Guid.NewGuid(), SourceName = table.Domain, SchemaName = table.Schema, TableName = table.TableName, IsActive = true }
+        });
+
+        var request = await Store.Repository.CreateConsentRequestAsync(new ConsentRequest
+        {
+            TableId = meta.Table.Id,
+            TableIdentifier = table,
+            RequesterSid = new Sid("S-1-5-21-OBSERVER-REQ"),
+            RequestedGranteeType = GranteeType.User,
+            RequestedGranteeRef = "S-1-5-21-OBSERVER-REQ",
+            BusinessJustification = "Observer role contract test request.",
+            RequestedValidTo = FixedNow.AddDays(14),
+            Status = "PENDING",
+            TenantId = tenant
+        });
+        return request.Id;
     }
 }
 

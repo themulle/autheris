@@ -321,13 +321,14 @@ public static class ExternalWorkflowSystemRoleMapping
     /// <summary>Parses an API value (<c>Workflow</c> or <c>Observer</c>, case-insensitive); returns false for anything else.</summary>
     public static bool TryParseApi(string? value, out ExternalWorkflowSystemRole role)
     {
-        if (string.Equals(value?.Trim(), "Workflow", StringComparison.OrdinalIgnoreCase))
+        var trimmed = value?.Trim();
+        if (string.Equals(trimmed, WorkflowApi, StringComparison.OrdinalIgnoreCase))
         {
             role = ExternalWorkflowSystemRole.Workflow;
             return true;
         }
 
-        if (string.Equals(value?.Trim(), "Observer", StringComparison.OrdinalIgnoreCase))
+        if (string.Equals(trimmed, ObserverApi, StringComparison.OrdinalIgnoreCase))
         {
             role = ExternalWorkflowSystemRole.Observer;
             return true;
@@ -336,6 +337,17 @@ public static class ExternalWorkflowSystemRoleMapping
         role = ExternalWorkflowSystemRole.Unknown;
         return false;
     }
+
+    public const string WorkflowApi = "Workflow";
+    public const string ObserverApi = "Observer";
+
+    /// <summary>The API value of a role; an unrecognised stored role is reported as <c>Unknown</c>.</summary>
+    public static string ToApiString(this ExternalWorkflowSystemRole role) => role switch
+    {
+        ExternalWorkflowSystemRole.Workflow => WorkflowApi,
+        ExternalWorkflowSystemRole.Observer => ObserverApi,
+        _ => "Unknown"
+    };
 }
 
 public sealed record ExternalWorkflowSystem(

@@ -164,7 +164,16 @@ public static partial class ConsentWorkflowAdminEndpoints
             actorSid,
             now);
 
-        var saved = await adminRepo.UpsertWorkflowRouteAsync(route, ct).ConfigureAwait(false);
+        ConsentWorkflowRoute saved;
+        try
+        {
+            saved = await adminRepo.UpsertWorkflowRouteAsync(route, ct).ConfigureAwait(false);
+        }
+        catch (ConsentDecisionException ex) when (ex.ErrorCode == ConsentDecisionErrorCodes.ExternalSystemRoleConflict)
+        {
+            return SafeErrorResults.Problem(StatusCodes.Status409Conflict, ex.ErrorCode, RouteTargetConflictDetail, context);
+        }
+
         return Results.Ok(ToRouteResponse(saved));
     }
 
@@ -399,6 +408,16 @@ public static partial class ConsentWorkflowAdminEndpoints
                     "Target external workflow system was not found or is disabled.",
                     context);
             }
+
+            // Issue #1161: open requests are never handed to an observer (or a system with an unrecognised role).
+            if (targetSystem.Role != ExternalWorkflowSystemRole.Workflow)
+            {
+                return SafeErrorResults.Problem(
+                    StatusCodes.Status422UnprocessableEntity,
+                    ApiErrorCodes.BadRequest,
+                    "Target external workflow system is not a workflow system.",
+                    context);
+            }
         }
 
         try
@@ -500,8 +519,11 @@ public static partial class ConsentWorkflowAdminEndpoints
         createdBy = system.CreatedBy,
         createdAt = system.CreatedAt,
         disabledAt = system.DisabledAt,
-        role = system.Role == ExternalWorkflowSystemRole.Observer ? "Observer" : system.Role == ExternalWorkflowSystemRole.Workflow ? "Workflow" : "Unknown"
+        role = system.Role.ToApiString()
     };
+
+    private const string RouteTargetConflictDetail =
+        "The referenced external workflow system changed concurrently and is no longer an enabled workflow system.";
 
     private const string ExternalSystemRoleConflictDetail =
         "The role of the external workflow system cannot be changed: it is referenced by a route or a pending request, "

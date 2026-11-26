@@ -94,8 +94,6 @@ public static partial class ConsentApiEndpoints
                 {
                     return Results.Ok(new { items = Array.Empty<ConsentRequestDto>(), nextCursor = (string?)null });
                 }
-
-                effectiveExternalSystemId = externalSystemId;
             }
             else if (callerSystem is null || (externalSystemId.HasValue && externalSystemId.Value != callerSystem.Id))
             {

@@ -437,7 +437,8 @@ internal sealed class ConsentApiTestHarness : IAsyncDisposable
             sp.GetService<IConsentEventOutbox>(),
             sp.GetService<IRateLimiterService>(),
             sp.GetService<IOptions<GovernanceOptions>>(),
-            sp.GetService<TimeProvider>());
+            sp.GetService<TimeProvider>(),
+            denialRecorder: sp.GetService<IConsentDecisionDenialRecorder>());
         return await ExecuteResultAsync(ctx, result);
     }
 

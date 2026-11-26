@@ -113,6 +113,7 @@ public sealed class ObserverEndpointSecurityTests
         var revoke = await harness.RevokeGrantAsync(observer, grantId, "Observer must not revoke", "rev-observer-1");
         revoke.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
         revoke.Body.ShouldContain(ConsentDecisionErrorCodes.ObserverNotPermitted);
+        harness.Denials.Denials.ShouldContain(d => d.Reason == ConsentDecisionDenialReasons.Observer);
     }
 
     [Fact]
