@@ -11,13 +11,16 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests.Events;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Grants.Records;
+using Autheris.Application.Governance.Requests;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Autheris.Domain.Security;
 using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Dialects;
 using Autheris.Tests.Common.Fakes;
+using Autheris.Tests.Unit.Governance.Requests;
 using Autheris.Tests.Unit.Persistence.DialectSql;
 using Autheris.Tests.Unit.Security;
 using Microsoft.Extensions.Logging.Abstractions;
@@ -27,8 +30,9 @@ using Shouldly;
 using Xunit;
 
 /// <summary>
-/// Issue #1170: system revocations (deprovisioning, renewal and the external-system revoke) append one grant.revoked per revoked grant
-/// in the revocation transaction, after every other write, with the thin payload and routing of the person revocation.
+/// Issue #1170: system revocations that end access (deprovisioning and the external-system revoke) append one grant.revoked per revoked
+/// grant in the revocation transaction, after every other write, with the thin payload and routing of the person revocation. The
+/// revocations of a grant renewal (superseded grant, compensation of a failed renewal) append none.
 /// </summary>
 [Trait("Category", "Security")]
 public sealed class SystemRevocationConsentEventTests
@@ -62,7 +66,8 @@ public sealed class SystemRevocationConsentEventTests
         {
             nameof(IConsentRepository.GetActiveGrantsForSubjectsAsync) => Task.FromResult<IReadOnlyList<Consent>>([data, unmask]),
             nameof(IConsentRepository.RevokeSystemConsentByIdAsync) =>
-                repo.RevokeSystemConsentByIdAsync((TenantId)args![0]!, (Guid)args[1]!, (Sid)args[2]!, (string)args[3]!, (CancellationToken)args[4]!),
+                repo.RevokeSystemConsentByIdAsync(
+                    (TenantId)args![0]!, (Guid)args[1]!, (Sid)args[2]!, (string)args[3]!, (SystemRevocationKind)args[4]!, (CancellationToken)args[5]!),
             _ => NullFake.UseDefault
         });
         var sut = new GrantRevocationService(
@@ -148,6 +153,52 @@ public sealed class SystemRevocationConsentEventTests
         appended.Parameters.Select(p => p.Value as string ?? string.Empty).ShouldNotContain(v => v.Contains("Access no longer needed", StringComparison.Ordinal));
         AssertEventAppendedLast(conn, dialect, revocations: 1, expectEpochBump: false);
     }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task Renewal_appends_no_grant_revoked_for_the_superseded_or_the_rolled_back_grant(string dialect)
+    {
+        var conn = DialectKit.Of(dialect).NewConnection();
+        await using var repo = CreateRepo(dialect, conn, []);
+        var renewer = SelfGrantHarness.Actor("user:dg", "GovernanceAdmin");
+
+        // Successful renewal: the superseded grant is revoked through the real repository.
+        var renewed = RenewableGrant();
+        var success = new SelfGrantHarness(ProtectionClass.Internal) { Existing = renewed, RevokeThrough = repo };
+        conn.EnqueueReader(RevokeTargetRow(SelfGrantHarness.Tenant.Value, isRevoked: false, renewed.ConsentRequestId));
+        await success.Engine.RenewGrantAsync(RenewCommand(renewed, renewer));
+        success.RevokedConsents.ShouldBe([renewed.Id]);
+
+        // Failed renewal: ending the original grant fails, the compensation revokes the renewed grant through the real repository.
+        var original = RenewableGrant();
+        var failed = new SelfGrantHarness(ProtectionClass.Internal) { Existing = original, RevokeThrough = repo, FailRevokeConsent = id => id == original.Id };
+        conn.EnqueueReader(RevokeTargetRow(SelfGrantHarness.Tenant.Value, isRevoked: false, original.ConsentRequestId));
+        await Should.ThrowAsync<InvalidOperationException>(() => failed.Engine.RenewGrantAsync(RenewCommand(original, renewer)));
+        failed.RevokedConsents.ShouldBe([failed.CreatedConsents.ShouldHaveSingleItem().Id]);
+
+        success.RevocationKinds.Concat(failed.RevocationKinds).ShouldAllBe(k => k == SystemRevocationKind.Renewal);
+        conn.Commands.Count(c => c.CommandText.TrimStart().StartsWith("UPDATE CONSENTS", StringComparison.Ordinal)).ShouldBe(2, dialect);
+        conn.Commands.ShouldNotContain(c => c.CommandText.Contains("CONSENT_EVENT", StringComparison.Ordinal) || IsEventLock(c));
+    }
+
+    private static Consent RenewableGrant() => new()
+    {
+        Id = Guid.NewGuid(),
+        TableId = Guid.NewGuid(),
+        TableIdentifier = SelfGrantHarness.Orders,
+        ConsentRequestId = Guid.NewGuid(),
+        TenantId = SelfGrantHarness.Tenant,
+        GranteeType = GranteeType.User,
+        GranteeSid = new Sid("user:alice"),
+        Effect = ConsentEffect.Allow,
+        ValidFrom = SelfGrantHarness.Now.AddDays(-20),
+        ValidTo = SelfGrantHarness.Now.AddDays(10),
+        GrantKind = PermissionGrantKind.Data,
+        GrantSource = ConsentGrantSource.ConsentRequest
+    };
+
+    private static GrantRenewalCommand RenewCommand(Consent grant, SecurityPrincipalContext renewer) =>
+        new(grant.Id, renewer, SelfGrantHarness.Now.AddDays(90), "Quarterly renewal after access review.");
 
     private static List<RecordedCommand> EventInserts(RecordingDbConnection conn) =>
         conn.Commands.Where(c => c.CommandText.Contains("INSERT INTO CONSENT_EVENTS ", StringComparison.Ordinal)).ToList();

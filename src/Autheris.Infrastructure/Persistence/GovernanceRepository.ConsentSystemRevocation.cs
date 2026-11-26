@@ -18,7 +18,7 @@ using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Infrastructure.Persistence.Dialects;
 
-/// <summary>System revocation by id (with its grant.revoked event) and the kind-complete grant enumeration used by deprovisioning and grant renewal.</summary>
+/// <summary>System revocation by id (grant.revoked for deprovisioning, none for renewal) and the kind-complete grant enumeration used by deprovisioning and grant renewal.</summary>
 public partial class GovernanceRepository
 {
     private const string SelectPendingRequestsForSubjectSql =
@@ -75,7 +75,8 @@ public partial class GovernanceRepository
         return list;
     }
 
-    public async Task<bool> RevokeSystemConsentByIdAsync(TenantId tenantId, Guid consentId, Sid revokedBySid, string reason, CancellationToken ct = default)
+    public async Task<bool> RevokeSystemConsentByIdAsync(
+        TenantId tenantId, Guid consentId, Sid revokedBySid, string reason, SystemRevocationKind kind = SystemRevocationKind.Revoked, CancellationToken ct = default)
     {
         var tenant = TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents));
         StoredTenant.RequireWritable(tenant);
@@ -131,9 +132,14 @@ public partial class GovernanceRepository
                 invalidateTable = found.Table;
             }
 
-            // Deprovisioning and renewal revoke like a person does: grant.revoked commits with the revocation, event lock last.
-            await EmitGrantRevokedEventsInTransactionAsync(conn, tx, [new PendingGrantRevokedEvent(consentId, tenant, found.Table, now)], ct)
-                .ConfigureAwait(false);
+            // Deprovisioning ends access like a person's revocation: grant.revoked commits with it, event lock last. A renewal
+            // replaces the grant (or rolls a renewed one back) while access continues, so it emits no grant.revoked.
+            if (kind == SystemRevocationKind.Revoked)
+            {
+                await EmitGrantRevokedEventsInTransactionAsync(conn, tx, [new PendingGrantRevokedEvent(consentId, tenant, found.Table, now)], ct)
+                    .ConfigureAwait(false);
+            }
+
             await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
         }
         catch

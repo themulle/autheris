@@ -77,6 +77,10 @@ internal sealed class SelfGrantHarness
     public Func<Guid, bool>? RevokeReturnsFalse { get; set; }
     public List<TenantId> RevokedForTenants { get; } = [];
     public Func<Guid, bool>? FailRevokeConsent { get; set; }
+    public List<SystemRevocationKind> RevocationKinds { get; } = [];
+
+    /// <summary>When set, a system revocation that neither fails nor returns false runs against this repository.</summary>
+    public IConsentRepository? RevokeThrough { get; set; }
     public Func<Guid, Consent?>? ConsentLookup { get; set; }
     public RecordingConsentEventOutbox Events { get; } = new();
     public System.Data.Common.DbTransaction Transaction { get; } = new StubDbTransaction();
@@ -166,7 +170,11 @@ internal sealed class SelfGrantHarness
 
                     RevokedConsents.Add((Guid)args![1]!);
                     RevokedForTenants.Add((TenantId)args[0]!);
-                    return Task.FromResult(true);
+                    RevocationKinds.Add((SystemRevocationKind)args[4]!);
+                    return RevokeThrough is null
+                        ? Task.FromResult(true)
+                        : RevokeThrough.RevokeSystemConsentByIdAsync(
+                            (TenantId)args[0]!, (Guid)args[1]!, (Sid)args[2]!, (string)args[3]!, (SystemRevocationKind)args[4]!, (CancellationToken)args[5]!);
                 default:
                     return NullFake.UseDefault;
             }
