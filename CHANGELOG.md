@@ -6,6 +6,13 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.1.1] - 2026-11-26
+
+Patch release on top of 2.1.0. Ships the `autheris-full` container image and the signed module archive (including the dbt module) with this version.
+
+### Fixed
+- Windows builds no longer skip every governance migration step after the frozen baseline. Embedded step resources are matched independently of the platform path separator, and SQL Server batches are joined with `\n` so the executed text matches the LF-normalised, checksummed step text on every platform (#1166, #1167).
+
 ## [2.1.0] - 2026-11-26
 
 ### Added
