@@ -6,6 +6,27 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.1.0] - 2026-11-26
+
+### Added
+- Explicit table-level write policies (`TableWritePolicy`, PostgreSQL and SQL Server migration `0049_table_write_policies`, `TableWritePolicyStore`, `TableWritePolicyService`, admin endpoints, and `TARGET_NOT_WRITABLE` enforcement in `WriteGrantEvaluator`, `AccessDecisionPoint`, and `PermissionRequestEngine`) (#1154, #1157).
+- Bounded single-table DML (`INSERT`, `UPDATE`, `DELETE`) on Databricks reusing existing `SELECT` row-level security predicates via `PreExecutionRowCheck` (SQL 3VL check prior to database execution), `BoundedPkPredicateValidator`, `DmlWritePermit`, `GovernedSqlCompiler`, and `DatabricksCheckedDmlExecutor` (#1155, #1157).
+- Typed GraphQL row-write API (`insertDatasetRow`, `upsertDatasetRow`, `updateDatasetRowByPk`, `deleteDatasetRowByPk`, `setTableWritePolicy`) backed by `BoundedRowWriteService` and catalog-quoted parameterized `BoundedWriteSqlBuilder` (`MERGE` on Databricks/SQL Server, `INSERT ... ON CONFLICT DO UPDATE` on PostgreSQL) (#1156, #1157).
+- Externally sourced deputy relations as eligible deciders in governance approval workflows (#1126, #1131) and four-eyes approval for grants on secret data (#1130).
+
+### Changed
+- Removed legacy multi-step approval API (#1132, #1143) and raised the PR net-LOC ceiling to 4000 lines (#1157).
+- Improved startup, catalog, and GraphQL performance: reused catalog snapshot at startup, skipped disabled federation interceptor, avoided blocking host start on GraphQL schema build, registered transport ingress field middleware as a delegate, and completed PDP/access-view cache consolidations (#1063, #1089, #1117, #1129, #1135, #1136).
+
+### Fixed
+- Enforced classification masks on baseline and explain paths and allowed open-domain `describe_dataset` with `accessStatus: "REQUEST_ACCESS"` while keeping `get_table_schema` grant-gated (#1144, #1150, #1151).
+- Accepted datasets on domain table assignment, exposed domain tables and containers, resolved domain owners in the caller tenant (#1153), fixed PostgreSQL consent error handling, exposed unmask grants, and refused duplicate unmask requests (#1152).
+- Streamed string cells in `DatabricksDataReader.GetChars` (#1142), kept `SET TRANSACTION READ ONLY` as the sole transaction-control statement on Oracle governed reads (#1141), stabilized flat/child-derived GraphQL relation field names (#1127), self-healed legacy SQL `source_type` on startup and dbt re-ingestion (#1128, #1134), and preserved keys over masked columns with restricted-scope explanations and dedicated time-bucket limit error codes (#1125).
+- Used injected `TimeProvider` for consent validity in `ConsentResolutionService` (#1118) and expanded discovery/hidden-object surface parity and served GraphQL schema pinning test coverage (#1123, #1124, #1133, #1137).
+
+### Security
+- Enforced group SIDs, pattern ownership, write masking, fresh renewal IDs, and batch SQL filters across policy and grant evaluation (#1098, #1113).
+
 ## [2.0.0] - 2026-11-25
 
 ### BREAKING
