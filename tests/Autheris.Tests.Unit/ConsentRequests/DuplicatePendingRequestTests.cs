@@ -12,6 +12,7 @@ using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Grants;
 using Autheris.Tests.Common.Fakes;
 using Autheris.Tests.Unit.Catalog;
+using Autheris.Tests.Unit.Security;
 using Autheris.Application.Governance.Requests;
 using Autheris.Application.Security;
 using Autheris.Domain.Common;
@@ -21,7 +22,6 @@ using Autheris.Tests.Common;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Options;
-using NSubstitute;
 using Shouldly;
 using Xunit;
 
@@ -211,9 +211,7 @@ public sealed class DuplicatePendingRequestTests
     {
         // The harness engine has no rate limiter, so this runs at engine level with a repository that holds a matching open request.
         var pendingId = Guid.NewGuid();
-        var approvals = Substitute.For<IConsentApprovalRepository>();
-        approvals.GetRequestsByRequesterSidAsync(Arg.Any<Sid>(), Arg.Any<TenantId>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(new List<ConsentRequest>
+        var openRequests = new List<ConsentRequest>
             {
                 new()
                 {
@@ -226,10 +224,15 @@ public sealed class DuplicatePendingRequestTests
                     Status = "PENDING",
                     TenantId = new TenantId("tenant-a")
                 }
-            });
-        var limiter = Substitute.For<IRateLimiterService>();
-        limiter.CheckCostQuotaAsync(Arg.Any<string>(), Arg.Any<int>(), Arg.Any<ClientQuotaPolicy>(), Arg.Any<CancellationToken>())
-            .Returns(new CostQuotaResult(false, 0, 90));
+            };
+        var approvals = NullFake.Create<IConsentApprovalRepository>((m, _) =>
+            m.Name == nameof(IConsentApprovalRepository.GetRequestsByRequesterSidAsync)
+                ? Task.FromResult<IReadOnlyList<ConsentRequest>>(openRequests)
+                : NullFake.UseDefault);
+        var limiter = NullFake.Create<IRateLimiterService>((m, _) =>
+            m.Name == nameof(IRateLimiterService.CheckCostQuotaAsync)
+                ? Task.FromResult(new CostQuotaResult(false, 0, 90))
+                : NullFake.UseDefault);
         var engine = new PermissionRequestEngine(
             approvals,
             new InMemoryAuditWriter(),
