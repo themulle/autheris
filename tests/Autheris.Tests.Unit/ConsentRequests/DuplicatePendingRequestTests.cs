@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
+using Autheris.Api.Errors;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.Governance.ConsentRequests;
@@ -151,17 +152,58 @@ public sealed class DuplicatePendingRequestTests
     }
 
     [Fact]
-    public async Task CreateRequest_PolicyDeniedRequest_WithMatchingPendingRequest_ReturnsPolicyErrorNotDuplicate()
+    public async Task CreateRequest_ValidityPolicyDenied_WithMatchingPendingRequest_ReturnsValidityErrorNotDuplicate()
     {
         await using var harness = ConsentApiTestHarness.Create();
         var existing = Seed(harness);
 
+        // 36500 days exceeds the default validity maximum, which is checked before the grant policy and the duplicate lookup.
         var response = await harness.CreateRequestAsync(Caller(), Body(days: 36500));
 
-        response.StatusCode.ShouldNotBe(StatusCodes.Status409Conflict);
-        response.StatusCode.ShouldBeGreaterThanOrEqualTo(400);
+        response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+        response.ReadJson().GetProperty("code").GetString().ShouldBe("BAD_REQUEST");
         response.Body.ShouldNotContain("DUPLICATE_PENDING_REQUEST");
+        response.Body.ShouldNotContain("requestId");
         response.Body.ShouldNotContain(existing.Id.ToString("D"));
+    }
+
+    [Fact]
+    public async Task CreateRequest_PolicyDeniedRequest_WithMatchingPendingRequest_ReturnsPolicyErrorNotDuplicate()
+    {
+        await using var harness = ConsentApiTestHarness.Create();
+        var existing = Seed(harness);
+        // The deployment ceiling for a data owner is 10 days: 30 days pass validity resolution and are denied by the grant policy.
+        var engine = new PermissionRequestEngine(
+            harness.Store,
+            new InMemoryAuditWriter(),
+            new ApproverResolver(),
+            new ApproverEligibility(new GovernanceCapabilities()),
+            new SeparationOfDutiesService(),
+            new GrantPolicy(accessPolicyOptions: Options.Create(new AccessPolicyOptions { MaxDataOwnerDays = 10 })),
+            GrantValidityPolicy.CreateDefault(),
+            Array.Empty<IGrantEffectApplier>(),
+            metadataRepository: harness.Store,
+            timeProvider: new Microsoft.Extensions.Time.Testing.FakeTimeProvider(ConsentApiTestHarness.FixedNow));
+
+        var thrown = await Should.ThrowAsync<ConsentRequestException>(() => engine.SubmitAsync(
+            new PermissionRequestSubmission(
+                Caller(), TenantA, ConsentRequestKind.Data, PermissionTarget.ForTable(OrdersTable),
+                GranteeType.User, CallerSid, Justification, DurationDays: 30)));
+        thrown.Code.ShouldBe(GrantErrorCodes.ExceedsApproverLimit);
+        thrown.PendingRequestId.ShouldBeNull();
+
+        var context = new DefaultHttpContext { User = Caller() };
+        context.RequestServices = new ServiceCollection().AddLogging().AddOptions().AddProblemDetails().BuildServiceProvider();
+        context.Response.Body = new System.IO.MemoryStream();
+        var result = await ConsentApiEndpoints.CreateRequestAsync(Body(days: 30), context, engine);
+        await result.ExecuteAsync(context);
+
+        context.Response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+        context.Response.Body.Position = 0;
+        var body = new System.IO.StreamReader(context.Response.Body).ReadToEnd();
+        body.ShouldContain("\"code\":\"BAD_REQUEST\"");
+        body.ShouldNotContain("requestId");
+        body.ShouldNotContain(existing.Id.ToString("D"));
     }
 
     [Fact]
@@ -225,6 +267,9 @@ public sealed class DuplicatePendingRequestTests
             new CreateConsentRequestBody(Domain: "pg", Schema: "public", TableName: "orders", Justification: "", DurationDays: 7));
 
         response.StatusCode.ShouldBe(StatusCodes.Status400BadRequest);
+        var problem = response.ReadJson();
+        problem.GetProperty("code").GetString().ShouldBe(ApiErrorCodes.BadRequest);
+        problem.GetProperty("detail").GetString().ShouldBe("Consent request payload is invalid.");
         response.Body.ShouldNotContain("requestId");
     }
 }

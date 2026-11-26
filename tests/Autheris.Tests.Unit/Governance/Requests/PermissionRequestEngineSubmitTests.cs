@@ -402,6 +402,67 @@ public sealed class PermissionRequestEngineSubmitTests
     }
 
     [Fact]
+    public async Task Submit_DuplicatePendingCatalog_ExceptionCarriesPendingRequestId()
+    {
+        var seededId = Guid.NewGuid();
+        var containerId = Guid.NewGuid();
+        var approvals = PendingApprovals(new ConsentRequest
+        {
+            Id = seededId,
+            RequesterSid = new Sid("user:alice"),
+            RequestedGranteeType = GranteeType.User,
+            RequestedGranteeRef = "user:alice",
+            RequestKind = ConsentRequestKind.Catalog,
+            ContainerKind = ContainerKind.Domain,
+            ContainerId = containerId,
+            Status = "PENDING",
+            TenantId = TenantA
+        });
+        var engine = CreateEngine(approvals);
+
+        var ex = await Should.ThrowAsync<ConsentRequestException>(() => engine.SubmitAsync(
+            new PermissionRequestSubmission(
+                UserPrincipal(), TenantA, ConsentRequestKind.Catalog, PermissionTarget.ForContainer(ContainerKind.Domain, containerId),
+                GranteeType.User, "user:alice", "Need catalog visibility for the domain.", ValidTo: Now.AddDays(30))));
+
+        ex.Code.ShouldBe("DUPLICATE_PENDING_REQUEST");
+        ex.PendingRequestId.ShouldBe(seededId);
+    }
+
+    [Fact]
+    public async Task Submit_DuplicatePendingProfileAssignment_ExceptionCarriesPendingRequestId()
+    {
+        var seededId = Guid.NewGuid();
+        var profileId = Guid.NewGuid();
+        var approvals = PendingApprovals(new ConsentRequest
+        {
+            Id = seededId,
+            RequesterSid = new Sid("user:alice"),
+            RequestedGranteeType = GranteeType.User,
+            RequestedGranteeRef = "user:alice",
+            RequestKind = ConsentRequestKind.ProfileAssignment,
+            ProfileId = profileId,
+            Status = "PENDING",
+            TenantId = TenantA
+        });
+        var engine = CreateEngine(approvals);
+
+        var ex = await Should.ThrowAsync<ConsentRequestException>(() => engine.SubmitAsync(
+            new PermissionRequestSubmission(
+                UserPrincipal(), TenantA, ConsentRequestKind.ProfileAssignment, PermissionTarget.ForProfile(profileId),
+                GranteeType.User, "user:alice", "Need the analyst profile for reporting.", ValidTo: Now.AddDays(30))));
+
+        ex.Code.ShouldBe("DUPLICATE_PENDING_REQUEST");
+        ex.PendingRequestId.ShouldBe(seededId);
+    }
+
+    private static IConsentApprovalRepository PendingApprovals(ConsentRequest seeded) =>
+        NullFake.Create<IConsentApprovalRepository>((m, _) =>
+            m.Name == nameof(IConsentApprovalRepository.GetRequestsByRequesterSidAsync)
+                ? Task.FromResult<IReadOnlyList<ConsentRequest>>([seeded])
+                : NullFake.UseDefault);
+
+    [Fact]
     public async Task Bundle_items_routed_individually()
     {
         var created = new List<ConsentRequest>();
