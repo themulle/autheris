@@ -1,0 +1,6 @@
+{
+  "ops": [
+    { "op": "addColumn", "table": "EXTERNAL_WORKFLOW_SYSTEMS", "column": { "name": "system_role", "type": "NVARCHAR", "family": "string", "nullable": false } },
+    { "op": "addIndex", "table": "EXTERNAL_WORKFLOW_SYSTEMS", "name": "IX_EXTERNAL_WORKFLOW_SYSTEMS_TENANT_ROLE", "unique": false, "columns": ["tenant_id", "system_role", "enabled"] }
+  ]
+}

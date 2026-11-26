@@ -87,6 +87,11 @@ WHERE tenant_id = @tenant AND scope_kind = @scopeKind AND scope_ref = @scopeRef"
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
+            if (route.Mode == ConsentWorkflowMode.External && route.ExternalSystemId is { } targetSystemId)
+            {
+                await EnsureActiveWorkflowTargetAsync(conn, tx, routeTenant, targetSystemId, ct).ConfigureAwait(false);
+            }
+
             if (isPg)
             {
                 await using var cmd = conn.CreateCommand();
@@ -230,16 +235,41 @@ WHERE tenant_id = @tenant AND scope_kind = @scopeKind AND scope_ref = @scopeRef"
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
+            // The row lock serialises a role change against route upserts and reroutes that lock the same row.
+            string? storedRole = null;
             await using (var ownerCheck = conn.CreateCommand())
             {
                 ownerCheck.Transaction = tx;
-                ownerCheck.CommandText = "SELECT tenant_id FROM EXTERNAL_WORKFLOW_SYSTEMS WHERE id = @id";
+                ownerCheck.CommandText = isPg
+                    ? "SELECT tenant_id, system_role FROM EXTERNAL_WORKFLOW_SYSTEMS WHERE id = @id FOR UPDATE"
+                    : "SELECT tenant_id, system_role FROM dbo.EXTERNAL_WORKFLOW_SYSTEMS WITH (UPDLOCK, ROWLOCK) WHERE id = @id";
                 ownerCheck.AddBound("@id", system.Id.ToString("D"));
-                var existingTenant = await ownerCheck.ExecuteScalarAsync(ct).ConfigureAwait(false) as string;
-                if (!string.IsNullOrEmpty(existingTenant) && !string.Equals(existingTenant, system.TenantId, StringComparison.Ordinal))
+                await using var reader = await ownerCheck.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                if (await reader.ReadAsync(ct).ConfigureAwait(false))
                 {
-                    throw new UnauthorizedAccessException($"External workflow system '{system.Id}' belongs to another tenant.");
+                    var existingTenant = reader.GetString(0);
+                    if (!string.Equals(existingTenant, system.TenantId, StringComparison.Ordinal))
+                    {
+                        throw new UnauthorizedAccessException($"External workflow system '{system.Id}' belongs to another tenant.");
+                    }
+
+                    storedRole = reader.IsDBNull(1) ? null : reader.GetString(1);
                 }
+            }
+
+            if (system.Role == ExternalWorkflowSystemRole.Observer)
+            {
+                await EnsureObserverRoleIsFreeAsync(conn, tx, system, ct).ConfigureAwait(false);
+            }
+            else if (storedRole is not null && ExternalWorkflowSystemRoleMapping.FromSqlString(storedRole) != ExternalWorkflowSystemRole.Workflow)
+            {
+                // A system that stops being an observer loses the tenant-wide feed: the feed of a workflow system is the set of its
+                // delivery rows, so the rows fanned out while it was an observer are dropped with the role.
+                await using var dropDeliveries = conn.CreateCommand();
+                dropDeliveries.Transaction = tx;
+                dropDeliveries.CommandText = "DELETE FROM CONSENT_EVENT_DELIVERIES WHERE external_system_id = @id";
+                dropDeliveries.AddBound("@id", system.Id.ToString("D"));
+                await dropDeliveries.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
 
             if (isPg)
@@ -247,15 +277,16 @@ WHERE tenant_id = @tenant AND scope_kind = @scopeKind AND scope_ref = @scopeRef"
                 await using var cmd = conn.CreateCommand();
                 cmd.Transaction = tx;
                 cmd.CommandText = @"INSERT INTO EXTERNAL_WORKFLOW_SYSTEMS
-(id, tenant_id, name, client_id, webhook_url, webhook_secret_protected, enabled, created_by, created_at, disabled_at)
-VALUES (@id, @tenant, @name, @clientId, @webhookUrl, @secret, @enabled, @createdBy, @createdAt, @disabledAt)
+(id, tenant_id, name, client_id, webhook_url, webhook_secret_protected, enabled, created_by, created_at, disabled_at, system_role)
+VALUES (@id, @tenant, @name, @clientId, @webhookUrl, @secret, @enabled, @createdBy, @createdAt, @disabledAt, @systemRole)
 ON CONFLICT (id) DO UPDATE
 SET name = EXCLUDED.name,
     client_id = EXCLUDED.client_id,
     webhook_url = EXCLUDED.webhook_url,
     webhook_secret_protected = EXCLUDED.webhook_secret_protected,
     enabled = EXCLUDED.enabled,
-    disabled_at = EXCLUDED.disabled_at";
+    disabled_at = EXCLUDED.disabled_at,
+    system_role = EXCLUDED.system_role";
                 BindExternalSystemParameters(cmd, system);
                 await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
             }
@@ -269,7 +300,8 @@ SET name = @name,
     webhook_url = @webhookUrl,
     webhook_secret_protected = @secret,
     enabled = @enabled,
-    disabled_at = @disabledAt
+    disabled_at = @disabledAt,
+    system_role = @systemRole
 WHERE id = @id AND tenant_id = @tenant";
                 BindExternalSystemParameters(updateCmd, system);
                 var updated = await updateCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
@@ -278,8 +310,8 @@ WHERE id = @id AND tenant_id = @tenant";
                     await using var insertCmd = conn.CreateCommand();
                     insertCmd.Transaction = tx;
                     insertCmd.CommandText = @"INSERT INTO dbo.EXTERNAL_WORKFLOW_SYSTEMS
-(id, tenant_id, name, client_id, webhook_url, webhook_secret_protected, enabled, created_by, created_at, disabled_at)
-VALUES (@id, @tenant, @name, @clientId, @webhookUrl, @secret, @enabled, @createdBy, @createdAt, @disabledAt)";
+(id, tenant_id, name, client_id, webhook_url, webhook_secret_protected, enabled, created_by, created_at, disabled_at, system_role)
+VALUES (@id, @tenant, @name, @clientId, @webhookUrl, @secret, @enabled, @createdBy, @createdAt, @disabledAt, @systemRole)";
                     BindExternalSystemParameters(insertCmd, system);
                     await insertCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
                 }
@@ -298,7 +330,8 @@ VALUES (@id, @tenant, @name, @clientId, @webhookUrl, @secret, @enabled, @created
                     systemId = system.Id,
                     name = system.Name,
                     clientId = system.ClientId,
-                    enabled = system.Enabled
+                    enabled = system.Enabled,
+                    role = system.Role.ToSqlString()
                 })
             }, tx, ct).ConfigureAwait(false);
 
@@ -458,6 +491,11 @@ WHERE id = @id AND tenant_id = @tenant";
         bool rejectInternalWithStep,
         CancellationToken ct)
     {
+        if (targetMode == ConsentWorkflowMode.External && targetSystemId is { } externalTargetId)
+        {
+            await EnsureActiveWorkflowTargetAsync(conn, tx, tenantId, externalTargetId, ct).ConfigureAwait(false);
+        }
+
         var filterSet = requestIds is { Count: > 0 } ? requestIds.ToHashSet() : null;
         var candidates = new List<(Guid RequestId, TableIdentifier Table, string Status, int Version, ConsentWorkflowMode CurrentMode, Guid? CurrentSystemId)>();
 
@@ -632,7 +670,8 @@ WHERE id = @id AND tenant_id = @tenant AND status = @expectedStatus";
             Convert.ToInt32(reader.GetValue(6), CultureInfo.InvariantCulture) == 1,
             reader.GetString(7),
             ConsentWorkflowSql.ReadOptionalTimestamp(reader, 8) ?? DateTimeOffset.UnixEpoch,
-            ConsentWorkflowSql.ReadOptionalTimestamp(reader, 9));
+            ConsentWorkflowSql.ReadOptionalTimestamp(reader, 9),
+            ExternalWorkflowSystemRoleMapping.FromSqlString(reader.IsDBNull(10) ? null : reader.GetString(10)));
 
     private static void BindWorkflowRouteParameters(DbCommand cmd, ConsentWorkflowRoute route)
     {
@@ -648,6 +687,65 @@ WHERE id = @id AND tenant_id = @tenant AND status = @expectedStatus";
         cmd.AddBound("@updatedAt", route.UpdatedAt.ToUniversalTime(), System.Data.DbType.DateTimeOffset);
     }
 
+    /// <summary>
+    /// Issue #1161: an observer is never a route target and never the system of a pending request. Saving a system as an
+    /// observer is refused while a route or a pending request references it, inside the upsert transaction.
+    /// </summary>
+    private static async Task EnsureObserverRoleIsFreeAsync(DbConnection conn, DbTransaction tx, ExternalWorkflowSystem system, CancellationToken ct)
+    {
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = @"SELECT
+    (SELECT COUNT(*) FROM CONSENT_WORKFLOW_ROUTES WHERE tenant_id = @tenant AND external_system_id = @id)
+  + (SELECT COUNT(*) FROM CONSENT_REQUESTS WHERE tenant_id = @tenant AND external_system_id = @id
+       AND status IN ('PENDING', 'PENDING_SECOND_APPROVAL', 'PENDING_EXTERNAL_APPROVAL'))";
+        cmd.AddBound("@tenant", system.TenantId);
+        cmd.AddBound("@id", system.Id.ToString("D"));
+        var references = Convert.ToInt64(await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false), CultureInfo.InvariantCulture);
+        if (references > 0)
+        {
+            throw new ConsentDecisionException(
+                ConsentDecisionErrorCodes.ExternalSystemRoleConflict,
+                "The external workflow system is referenced by a route or a pending request and cannot become an observer.",
+                409);
+        }
+    }
+
+    /// <summary>
+    /// Issue #1161: a route or a reroute may only target an enabled workflow system. The check locks the system row inside the
+    /// caller's transaction, so a concurrent role change to observer either waits for this transaction or is seen here.
+    /// </summary>
+    private async Task EnsureActiveWorkflowTargetAsync(DbConnection conn, DbTransaction tx, TenantId tenantId, Guid systemId, CancellationToken ct)
+    {
+        var isPg = _dialect is PostgreSqlGovernanceDialect;
+        await using var cmd = conn.CreateCommand();
+        cmd.Transaction = tx;
+        cmd.CommandText = isPg
+            ? "SELECT enabled, system_role FROM EXTERNAL_WORKFLOW_SYSTEMS WHERE id = @id AND tenant_id = @tenant FOR UPDATE"
+            : "SELECT enabled, system_role FROM dbo.EXTERNAL_WORKFLOW_SYSTEMS WITH (UPDLOCK, ROWLOCK) WHERE id = @id AND tenant_id = @tenant";
+        cmd.AddBound("@id", systemId.ToString("D"));
+        cmd.AddBound("@tenant", tenantId.Value);
+
+        var isActiveWorkflow = false;
+        await using (var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false))
+        {
+            if (await reader.ReadAsync(ct).ConfigureAwait(false))
+            {
+                var enabled = Convert.ToInt32(reader.GetValue(0), CultureInfo.InvariantCulture) == 1;
+                var role = ExternalWorkflowSystemRoleMapping.FromSqlString(reader.IsDBNull(1) ? null : reader.GetString(1));
+                isActiveWorkflow = enabled && role == ExternalWorkflowSystemRole.Workflow;
+            }
+        }
+
+        if (!isActiveWorkflow)
+        {
+            throw new ConsentDecisionException(
+                ConsentDecisionErrorCodes.ExternalSystemRoleConflict,
+                "The target external workflow system is missing, disabled, or not a workflow system.",
+                409);
+        }
+    }
+
     private static void BindExternalSystemParameters(DbCommand cmd, ExternalWorkflowSystem system)
     {
         cmd.AddBound("@id", system.Id.ToString("D"));
@@ -660,5 +758,6 @@ WHERE id = @id AND tenant_id = @tenant AND status = @expectedStatus";
         cmd.AddBound("@createdBy", system.CreatedBy);
         cmd.AddBound("@createdAt", system.CreatedAt.ToUniversalTime(), System.Data.DbType.DateTimeOffset);
         cmd.AddBound("@disabledAt", system.DisabledAt.HasValue ? system.DisabledAt.Value.ToUniversalTime() : DBNull.Value, System.Data.DbType.DateTimeOffset);
+        cmd.AddBound("@systemRole", system.Role.ToSqlString());
     }
 }

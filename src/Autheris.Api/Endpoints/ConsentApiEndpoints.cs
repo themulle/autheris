@@ -126,8 +126,28 @@ public static partial class ConsentApiEndpoints
         }
 
         var system = await workflowConfigRepo.GetExternalWorkflowSystemByClientIdAsync(tenantId, clientId, ct).ConfigureAwait(false);
-        return system is { Enabled: true } ? system : null;
+
+        // Issue #1161: a system with an unrecognised role is treated like a missing one.
+        return system is not null && (system.IsActiveWorkflow || system.IsActiveObserver) ? system : null;
     }
+
+    /// <summary>
+    /// Issue #1161: tenant-wide reads need an enabled observer system AND a service-principal caller holding both the
+    /// <c>Autheris.Consent.Read</c> and the <c>Autheris.Consent.Observe</c> app roles. Anything else is not an authorized observer.
+    /// </summary>
+    internal static bool IsAuthorizedObserver(ExternalWorkflowSystem? system, ClaimsPrincipal? caller) =>
+        system is { IsActiveObserver: true }
+        && ExternalApiPermissions.IsServicePrincipal(caller)
+        && ExternalApiPermissions.HasAppRole(caller, ExternalApiPermissions.ConsentRead)
+        && ExternalApiPermissions.HasAppRole(caller, ExternalApiPermissions.ConsentObserve);
+
+    /// <summary>Issue #1161: the refusal every acting endpoint returns to an observer system.</summary>
+    internal static IResult ObserverNotPermitted(HttpContext context) =>
+        ApiProblems.Problem(
+            StatusCodes.Status403Forbidden,
+            ConsentDecisionErrorCodes.ObserverNotPermitted,
+            "An observer system cannot perform this operation.",
+            context);
 
     internal static bool CanReadRequest(
         ConsentRequest req,
@@ -136,7 +156,8 @@ public static partial class ConsentApiEndpoints
         ExternalWorkflowSystem? callerSystem,
         bool isServicePrincipal,
         bool isCrossTenantAdmin,
-        bool isPrivReader)
+        bool isPrivReader,
+        bool isAuthorizedObserver = false)
     {
         if (!isCrossTenantAdmin && req.TenantId != callerTenantId)
         {
@@ -145,7 +166,13 @@ public static partial class ConsentApiEndpoints
 
         if (isServicePrincipal)
         {
-            return callerSystem is { Enabled: true } && req.ExternalSystemId == callerSystem.Id;
+            // Issue #1161: an authorized observer reads every request of its tenant; a workflow system only the requests routed to it.
+            if (isAuthorizedObserver)
+            {
+                return callerSystem is { IsActiveObserver: true } && string.Equals(callerSystem.TenantId, req.TenantId.Value, StringComparison.Ordinal);
+            }
+
+            return callerSystem is { IsActiveWorkflow: true } && req.ExternalSystemId == callerSystem.Id;
         }
 
         if (isPrivReader)

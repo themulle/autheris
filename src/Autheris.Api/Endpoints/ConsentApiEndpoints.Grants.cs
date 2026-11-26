@@ -14,6 +14,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.ConsentRequests.Events;
 using Autheris.Application.ConsentRequests.ProfileAssignments;
+using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Grants.Records;
 using Autheris.Application.Governance.Requests;
 using Autheris.Application.Governance.Paging;
@@ -210,6 +211,7 @@ public static partial class ConsentApiEndpoints
         TimeProvider? timeProvider = null,
         [FromServices] GrantRevokeAuthority? revokeAuthority = null,
         IAuditWriter? auditWriter = null,
+        IConsentDecisionDenialRecorder? denialRecorder = null,
         CancellationToken ct = default)
     {
         if (await EnforceRateLimitAsync(context, rateLimiter, governanceOptions, ConsentApiRateLimitBucket.DecisionsAndRevokes, ct).ConfigureAwait(false) is { } limited)
@@ -225,6 +227,17 @@ public static partial class ConsentApiEndpoints
             if (callerSystem is null)
             {
                 return ApiProblems.NotFound(ConsentDecisionErrorCodes.GrantNotFound, $"Consent grant '{id}' was not found.", context);
+            }
+
+            // Issue #1161: an observer never revokes; the refusal is recorded like a refused decision.
+            if (callerSystem.Role != ExternalWorkflowSystemRole.Workflow)
+            {
+                if (denialRecorder is not null)
+                {
+                    await denialRecorder.RecordAsync(context.User, ConsentDecisionDenialReasons.Observer, tenantId, ct).ConfigureAwait(false);
+                }
+
+                return ObserverNotPermitted(context);
             }
         }
 
@@ -356,6 +369,7 @@ public static partial class ConsentApiEndpoints
         IRateLimiterService? rateLimiter = null,
         IOptions<GovernanceOptions>? governanceOptions = null,
         TimeProvider? timeProvider = null,
+        IConsentDecisionDenialRecorder? denialRecorder = null,
         CancellationToken ct = default)
     {
         if (await EnforceRateLimitAsync(context, rateLimiter, governanceOptions, ConsentApiRateLimitBucket.DecisionsAndRevokes, ct).ConfigureAwait(false) is { } limited)
@@ -371,6 +385,17 @@ public static partial class ConsentApiEndpoints
             if (callerSystem is null)
             {
                 return ApiProblems.NotFound(ConsentDecisionErrorCodes.GrantNotFound, $"Profile assignment '{id}' was not found.", context);
+            }
+
+            // Issue #1161: an observer never revokes; the refusal is recorded like a refused decision.
+            if (callerSystem.Role != ExternalWorkflowSystemRole.Workflow)
+            {
+                if (denialRecorder is not null)
+                {
+                    await denialRecorder.RecordAsync(context.User, ConsentDecisionDenialReasons.Observer, tenantId, ct).ConfigureAwait(false);
+                }
+
+                return ObserverNotPermitted(context);
             }
         }
 

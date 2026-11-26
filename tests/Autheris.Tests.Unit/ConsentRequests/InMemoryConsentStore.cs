@@ -76,10 +76,10 @@ internal sealed class InMemoryConsentStore(
     public List<GrantRecord> GrantRecords { get; } = new();
     public List<ConsentEventRecord> Events { get; } = new();
 
-    public Guid RegisterExternalSystem(string tenantId, string clientId, bool enabled)
+    public Guid RegisterExternalSystem(string tenantId, string clientId, bool enabled, ExternalWorkflowSystemRole role = ExternalWorkflowSystemRole.Workflow)
     {
         var id = Guid.NewGuid();
-        Systems.Add(new ExternalWorkflowSystem(id, tenantId, clientId, clientId, "https://example.invalid/hook", "secret-ref", enabled, "admin", clock.GetUtcNow(), enabled ? null : clock.GetUtcNow()));
+        Systems.Add(new ExternalWorkflowSystem(id, tenantId, clientId, clientId, "https://example.invalid/hook", "secret-ref", enabled, "admin", clock.GetUtcNow(), enabled ? null : clock.GetUtcNow(), role));
         return id;
     }
 
@@ -114,7 +114,7 @@ internal sealed class InMemoryConsentStore(
 
     public Task<ConsentWorkflowRoute?> ResolveWorkflowRouteAsync(TenantId tenantId, TableIdentifier table, CancellationToken ct = default)
     {
-        var sys = Systems.FirstOrDefault(s => s.TenantId == tenantId && s.Enabled);
+        var sys = Systems.FirstOrDefault(s => s.TenantId == tenantId && s.IsActiveWorkflow);
         return Task.FromResult<ConsentWorkflowRoute?>(sys is null ? null : new ConsentWorkflowRoute(tenantId.Value, WorkflowRouteScopeKind.Tenant, "*", ConsentWorkflowMode.External, sys.Id, 90, 30, false, "admin", clock.GetUtcNow()));
     }
 

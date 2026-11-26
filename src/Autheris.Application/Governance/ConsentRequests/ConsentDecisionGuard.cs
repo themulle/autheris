@@ -27,6 +27,9 @@ public static class ConsentDecisionDenialReasons
     public const string Unauthenticated = "unauthenticated";
     public const string ReadOnly = "read-only";
     public const string NotPerson = "not-person";
+
+    /// <summary>The caller is an observer system (issue #1161), which never decides.</summary>
+    public const string Observer = "observer";
 }
 
 /// <summary>

@@ -29,6 +29,12 @@ public static class ConsentDecisionErrorCodes
     public const string RerouteNotAllowed = "REROUTE_NOT_ALLOWED";
     public const string GrantNotFound = "GRANT_NOT_FOUND";
     public const string DecisionExceedsRequest = "DECISION_EXCEEDS_REQUEST";
+
+    /// <summary>A workflow system cannot become an observer while a route or a pending request references it (issue #1161).</summary>
+    public const string ExternalSystemRoleConflict = "EXTERNAL_SYSTEM_ROLE_CONFLICT";
+
+    /// <summary>An observer system never decides, withdraws, renews, self-grants or revokes (issue #1161).</summary>
+    public const string ObserverNotPermitted = "OBSERVER_NOT_PERMITTED";
 }
 
 public enum ConsentDecisionKind

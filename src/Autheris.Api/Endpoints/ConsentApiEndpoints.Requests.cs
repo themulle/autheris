@@ -87,12 +87,22 @@ public static partial class ConsentApiEndpoints
         if (isServicePrincipal)
         {
             var callerSystem = await ResolveAuthorizedExternalSystemAsync(tenantId, clientId, workflowConfigRepo, ct).ConfigureAwait(false);
-            if (callerSystem is null || (externalSystemId.HasValue && externalSystemId.Value != callerSystem.Id))
+            if (callerSystem is { Role: ExternalWorkflowSystemRole.Observer })
+            {
+                // Issue #1161: an authorized observer lists every request of its tenant (the externalSystemId filter is honoured).
+                if (!IsAuthorizedObserver(callerSystem, context.User))
+                {
+                    return Results.Ok(new { items = Array.Empty<ConsentRequestDto>(), nextCursor = (string?)null });
+                }
+            }
+            else if (callerSystem is null || (externalSystemId.HasValue && externalSystemId.Value != callerSystem.Id))
             {
                 return Results.Ok(new { items = Array.Empty<ConsentRequestDto>(), nextCursor = (string?)null });
             }
-
-            effectiveExternalSystemId = callerSystem.Id;
+            else
+            {
+                effectiveExternalSystemId = callerSystem.Id;
+            }
         }
         else if (!isPrivReader)
         {
@@ -154,7 +164,9 @@ public static partial class ConsentApiEndpoints
             callerSystem = await ResolveAuthorizedExternalSystemAsync(req.TenantId, clientId, workflowConfigRepo, ct).ConfigureAwait(false);
         }
 
-        bool canRead = CanReadRequest(req, tenantId, userSid, callerSystem, isServicePrincipal, isClusterAdmin, isPrivReader);
+        bool canRead = CanReadRequest(
+            req, tenantId, userSid, callerSystem, isServicePrincipal, isClusterAdmin, isPrivReader,
+            isAuthorizedObserver: isServicePrincipal && IsAuthorizedObserver(callerSystem, context.User));
         if (!canRead && !isServicePrincipal && userSid.HasValue &&
             req.RequestKind == ConsentRequestKind.ProfileAssignment &&
             (isClusterAdmin || req.TenantId == tenantId) &&
@@ -290,6 +302,17 @@ public static partial class ConsentApiEndpoints
                 }
 
                 return ApiProblems.NotFound(ConsentDecisionErrorCodes.RequestNotFound, $"Consent request '{id}' was not found.", context);
+            }
+
+            // Issue #1161: an observer never decides, whatever app roles its service principal holds.
+            if (callerSystem.Role != ExternalWorkflowSystemRole.Workflow)
+            {
+                if (denialRecorder is not null)
+                {
+                    await denialRecorder.RecordAsync(context.User, ConsentDecisionDenialReasons.Observer, tenantId, ct).ConfigureAwait(false);
+                }
+
+                return ObserverNotPermitted(context);
             }
         }
 
@@ -517,7 +540,9 @@ public static partial class ConsentApiEndpoints
         if (isServicePrincipal)
         {
             var system = await ResolveAuthorizedExternalSystemAsync(tenantId, clientId, workflowConfigRepo, ct).ConfigureAwait(false);
-            if (system is null)
+
+            // Issue #1161: an observer reads its (tenant-wide) feed only with both app roles.
+            if (system is null || (system.Role == ExternalWorkflowSystemRole.Observer && !IsAuthorizedObserver(system, context.User)))
             {
                 return ApiProblems.NotFound(ConsentDecisionErrorCodes.RequestNotFound, "Registered external system not found for caller.", context);
             }

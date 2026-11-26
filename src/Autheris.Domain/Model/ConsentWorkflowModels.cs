@@ -286,6 +286,70 @@ public sealed record ConsentWorkflowRoute(
     string UpdatedBy,
     DateTimeOffset UpdatedAt);
 
+/// <summary>
+/// Role of an external workflow system (issue #1161). <see cref="Workflow"/> systems can be route targets and decide routed requests;
+/// <see cref="Observer"/> systems receive every consent event of their tenant and read requests, but never decide or act.
+/// <see cref="Unknown"/> is what an unrecognised stored value parses to; such a system receives nothing and reads nothing (fail closed).
+/// </summary>
+public enum ExternalWorkflowSystemRole
+{
+    Unknown = -1,
+    Workflow = 0,
+    Observer = 1
+}
+
+public static class ExternalWorkflowSystemRoleMapping
+{
+    public const string WorkflowSql = "WORKFLOW";
+    public const string ObserverSql = "OBSERVER";
+
+    public static string ToSqlString(this ExternalWorkflowSystemRole role) => role switch
+    {
+        ExternalWorkflowSystemRole.Workflow => WorkflowSql,
+        ExternalWorkflowSystemRole.Observer => ObserverSql,
+        _ => throw new ArgumentOutOfRangeException(nameof(role), role, "Only known roles can be stored.")
+    };
+
+    /// <summary>Parses a stored value; anything but the two known values (case-sensitive, as written) is <see cref="ExternalWorkflowSystemRole.Unknown"/>.</summary>
+    public static ExternalWorkflowSystemRole FromSqlString(string? value) => value switch
+    {
+        WorkflowSql => ExternalWorkflowSystemRole.Workflow,
+        ObserverSql => ExternalWorkflowSystemRole.Observer,
+        _ => ExternalWorkflowSystemRole.Unknown
+    };
+
+    /// <summary>Parses an API value (<c>Workflow</c> or <c>Observer</c>, case-insensitive); returns false for anything else.</summary>
+    public static bool TryParseApi(string? value, out ExternalWorkflowSystemRole role)
+    {
+        var trimmed = value?.Trim();
+        if (string.Equals(trimmed, WorkflowApi, StringComparison.OrdinalIgnoreCase))
+        {
+            role = ExternalWorkflowSystemRole.Workflow;
+            return true;
+        }
+
+        if (string.Equals(trimmed, ObserverApi, StringComparison.OrdinalIgnoreCase))
+        {
+            role = ExternalWorkflowSystemRole.Observer;
+            return true;
+        }
+
+        role = ExternalWorkflowSystemRole.Unknown;
+        return false;
+    }
+
+    public const string WorkflowApi = "Workflow";
+    public const string ObserverApi = "Observer";
+
+    /// <summary>The API value of a role; an unrecognised stored role is reported as <c>Unknown</c>.</summary>
+    public static string ToApiString(this ExternalWorkflowSystemRole role) => role switch
+    {
+        ExternalWorkflowSystemRole.Workflow => WorkflowApi,
+        ExternalWorkflowSystemRole.Observer => ObserverApi,
+        _ => "Unknown"
+    };
+}
+
 public sealed record ExternalWorkflowSystem(
     Guid Id,
     string TenantId,
@@ -296,7 +360,15 @@ public sealed record ExternalWorkflowSystem(
     bool Enabled,
     string CreatedBy,
     DateTimeOffset CreatedAt,
-    DateTimeOffset? DisabledAt);
+    DateTimeOffset? DisabledAt,
+    ExternalWorkflowSystemRole Role = ExternalWorkflowSystemRole.Workflow)
+{
+    /// <summary>True for an enabled observer (issue #1161).</summary>
+    public bool IsActiveObserver => Enabled && Role == ExternalWorkflowSystemRole.Observer;
+
+    /// <summary>True for an enabled workflow system; an observer or an unknown role never acts as a workflow system.</summary>
+    public bool IsActiveWorkflow => Enabled && Role == ExternalWorkflowSystemRole.Workflow;
+}
 
 public sealed record AssertedApprover(
     string Subject,

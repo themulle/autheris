@@ -93,18 +93,40 @@ VALUES (@tenant, @seq, @id, @type, @subjectId, @payload, @createdAt)";
                 ? @"INSERT INTO CONSENT_EVENT_DELIVERIES (event_id, external_system_id, attempts, next_attempt_at)
 SELECT @eventId, s.id, 0, @nextAttemptAt
 FROM EXTERNAL_WORKFLOW_SYSTEMS s
-WHERE s.id = @externalSystemId AND s.tenant_id = @tenant AND s.enabled = TRUE
+WHERE s.id = @externalSystemId AND s.tenant_id = @tenant AND s.enabled = TRUE AND s.system_role = 'WORKFLOW'
 ON CONFLICT (event_id, external_system_id) DO NOTHING"
                 : @"INSERT INTO CONSENT_EVENT_DELIVERIES (event_id, external_system_id, attempts, next_attempt_at)
 SELECT @eventId, s.id, 0, @nextAttemptAt
 FROM EXTERNAL_WORKFLOW_SYSTEMS s
-WHERE s.id = @externalSystemId AND s.tenant_id = @tenant AND s.enabled = 1
+WHERE s.id = @externalSystemId AND s.tenant_id = @tenant AND s.enabled = 1 AND s.system_role = 'WORKFLOW'
   AND NOT EXISTS (SELECT 1 FROM CONSENT_EVENT_DELIVERIES d WHERE d.event_id = @eventId AND d.external_system_id = s.id)";
             deliveryCmd.AddBound("@eventId", entry.EventId.ToString("D"));
             deliveryCmd.AddBound("@externalSystemId", externalSystemId.ToString("D"));
             deliveryCmd.AddBound("@tenant", tenantId.Value);
             deliveryCmd.AddBound("@nextAttemptAt", entry.CreatedAt.ToUniversalTime(), DbType.DateTimeOffset);
             await deliveryCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+        }
+
+        // Issue #1161: every enabled observer of the event's tenant gets a delivery, whatever the workflow mode and
+        // whether the event is routed to a workflow system, in the same transaction as the event row.
+        await using (var observerCmd = conn.CreateCommand())
+        {
+            observerCmd.Transaction = tx;
+            observerCmd.CommandText = isPg
+                ? @"INSERT INTO CONSENT_EVENT_DELIVERIES (event_id, external_system_id, attempts, next_attempt_at)
+SELECT @eventId, s.id, 0, @nextAttemptAt
+FROM EXTERNAL_WORKFLOW_SYSTEMS s
+WHERE s.tenant_id = @tenant AND s.enabled = TRUE AND s.system_role = 'OBSERVER'
+ON CONFLICT (event_id, external_system_id) DO NOTHING"
+                : @"INSERT INTO CONSENT_EVENT_DELIVERIES (event_id, external_system_id, attempts, next_attempt_at)
+SELECT @eventId, s.id, 0, @nextAttemptAt
+FROM EXTERNAL_WORKFLOW_SYSTEMS s
+WHERE s.tenant_id = @tenant AND s.enabled = 1 AND s.system_role = 'OBSERVER'
+  AND NOT EXISTS (SELECT 1 FROM CONSENT_EVENT_DELIVERIES d WHERE d.event_id = @eventId AND d.external_system_id = s.id)";
+            observerCmd.AddBound("@eventId", entry.EventId.ToString("D"));
+            observerCmd.AddBound("@tenant", tenantId.Value);
+            observerCmd.AddBound("@nextAttemptAt", entry.CreatedAt.ToUniversalTime(), DbType.DateTimeOffset);
+            await observerCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
         }
 
         return nextSeq;

@@ -125,6 +125,16 @@ public static partial class ConsentWorkflowAdminEndpoints
                     "Referenced external workflow system was not found or is disabled.",
                     context);
             }
+
+            // Issue #1161: an observer (or a system with an unrecognised role) is never a route target.
+            if (system.Role != ExternalWorkflowSystemRole.Workflow)
+            {
+                return SafeErrorResults.Problem(
+                    StatusCodes.Status422UnprocessableEntity,
+                    ApiErrorCodes.BadRequest,
+                    "Referenced external workflow system is not a workflow system.",
+                    context);
+            }
         }
 
         if (parsedScope == WorkflowRouteScopeKind.Domain)
@@ -154,7 +164,16 @@ public static partial class ConsentWorkflowAdminEndpoints
             actorSid,
             now);
 
-        var saved = await adminRepo.UpsertWorkflowRouteAsync(route, ct).ConfigureAwait(false);
+        ConsentWorkflowRoute saved;
+        try
+        {
+            saved = await adminRepo.UpsertWorkflowRouteAsync(route, ct).ConfigureAwait(false);
+        }
+        catch (ConsentDecisionException ex) when (ex.ErrorCode == ConsentDecisionErrorCodes.ExternalSystemRoleConflict)
+        {
+            return SafeErrorResults.Problem(StatusCodes.Status409Conflict, ex.ErrorCode, RouteTargetConflictDetail, context);
+        }
+
         return Results.Ok(ToRouteResponse(saved));
     }
 
@@ -234,6 +253,17 @@ public static partial class ConsentWorkflowAdminEndpoints
                 context);
         }
 
+        var requestedRole = (ExternalWorkflowSystemRole?)null;
+        if (body.Role is not null)
+        {
+            if (!ExternalWorkflowSystemRoleMapping.TryParseApi(body.Role, out var parsedRole))
+            {
+                return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "role must be 'Workflow' or 'Observer'.");
+            }
+
+            requestedRole = parsedRole;
+        }
+
         var (tenantId, actorSid) = ResolveTenantAndActor(context);
         var existing = await configRepo.GetExternalWorkflowSystemAsync(tenantId, id, ct).ConfigureAwait(false);
 
@@ -261,6 +291,16 @@ public static partial class ConsentWorkflowAdminEndpoints
             return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "webhookSecret is required when creating a new external workflow system.");
         }
 
+        ExternalWorkflowSystemRole role;
+        try
+        {
+            role = ResolveRole(requestedRole, existing);
+        }
+        catch (ConsentDecisionException ex) when (ex.ErrorCode == ConsentDecisionErrorCodes.ExternalSystemRoleConflict)
+        {
+            return SafeErrorResults.Problem(StatusCodes.Status409Conflict, ex.ErrorCode, ExternalSystemRoleConflictDetail, context);
+        }
+
         var now = (timeProvider ?? TimeProvider.System).GetUtcNow();
         var system = new ExternalWorkflowSystem(
             id,
@@ -272,9 +312,19 @@ public static partial class ConsentWorkflowAdminEndpoints
             body.Enabled ?? true,
             existing?.CreatedBy ?? actorSid,
             existing?.CreatedAt ?? now,
-            (body.Enabled ?? true) ? null : existing?.DisabledAt ?? now);
+            (body.Enabled ?? true) ? null : existing?.DisabledAt ?? now,
+            role);
 
-        var saved = await adminRepo.UpsertExternalWorkflowSystemAsync(system, ct).ConfigureAwait(false);
+        ExternalWorkflowSystem saved;
+        try
+        {
+            saved = await adminRepo.UpsertExternalWorkflowSystemAsync(system, ct).ConfigureAwait(false);
+        }
+        catch (ConsentDecisionException ex) when (ex.ErrorCode == ConsentDecisionErrorCodes.ExternalSystemRoleConflict)
+        {
+            return SafeErrorResults.Problem(StatusCodes.Status409Conflict, ex.ErrorCode, ExternalSystemRoleConflictDetail, context);
+        }
+
         return Results.Ok(ToExternalSystemResponse(saved));
     }
 
@@ -356,6 +406,16 @@ public static partial class ConsentWorkflowAdminEndpoints
                     StatusCodes.Status422UnprocessableEntity,
                     ApiErrorCodes.BadRequest,
                     "Target external workflow system was not found or is disabled.",
+                    context);
+            }
+
+            // Issue #1161: open requests are never handed to an observer (or a system with an unrecognised role).
+            if (targetSystem.Role != ExternalWorkflowSystemRole.Workflow)
+            {
+                return SafeErrorResults.Problem(
+                    StatusCodes.Status422UnprocessableEntity,
+                    ApiErrorCodes.BadRequest,
+                    "Target external workflow system is not a workflow system.",
                     context);
             }
         }
@@ -458,8 +518,39 @@ public static partial class ConsentWorkflowAdminEndpoints
         enabled = system.Enabled,
         createdBy = system.CreatedBy,
         createdAt = system.CreatedAt,
-        disabledAt = system.DisabledAt
+        disabledAt = system.DisabledAt,
+        role = system.Role.ToApiString()
     };
+
+    private const string RouteTargetConflictDetail =
+        "The referenced external workflow system changed concurrently and is no longer an enabled workflow system.";
+
+    private const string ExternalSystemRoleConflictDetail =
+        "The role of the external workflow system cannot be changed: it is referenced by a route or a pending request, "
+        + "or its stored role is not recognised.";
+
+    /// <summary>
+    /// The role a saved system gets (issue #1161): the requested one; without a request the existing role is kept (an update never flips an
+    /// observer back to a workflow system); a new system defaults to <see cref="ExternalWorkflowSystemRole.Workflow"/>. An unrecognised
+    /// stored role is never carried over silently: the caller must state the role.
+    /// </summary>
+    internal static ExternalWorkflowSystemRole ResolveRole(ExternalWorkflowSystemRole? requested, ExternalWorkflowSystem? existing)
+    {
+        if (requested is { } explicitRole)
+        {
+            return explicitRole;
+        }
+
+        if (existing is null)
+        {
+            return ExternalWorkflowSystemRole.Workflow;
+        }
+
+        return existing.Role == ExternalWorkflowSystemRole.Unknown
+            ? throw new ConsentDecisionException(
+                ConsentDecisionErrorCodes.ExternalSystemRoleConflict, "The stored role is not recognised; state the role explicitly.", 409)
+            : existing.Role;
+    }
 
     public sealed record UpsertWorkflowRouteRequest(
         string Mode,
@@ -473,7 +564,8 @@ public static partial class ConsentWorkflowAdminEndpoints
         string ClientId,
         string WebhookUrl,
         string? WebhookSecret,
-        bool? Enabled = true);
+        bool? Enabled = true,
+        string? Role = null);
 
     public sealed record RerouteRequestsBody(
         string TargetMode,
