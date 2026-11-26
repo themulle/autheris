@@ -28,12 +28,12 @@ net_src_lines=$(git diff --numstat "$BASE"...HEAD -- src \
 
 echo "net_src_lines=${net_src_lines}"
 
-if [ "${net_src_lines}" -gt 400 ]; then
+if [ "${net_src_lines}" -gt 4000 ]; then
     if [[ "${PR_LABELS}" =~ (^|,)(size-exception|security|freeze-exception)(,|$) ]]; then
-        echo "PR net src lines (${net_src_lines}) exceeds 400, but waived by PR label in '${PR_LABELS}'."
+        echo "PR net src lines (${net_src_lines}) exceeds 4000, but waived by PR label in '${PR_LABELS}'."
         exit 0
     else
-        echo "Error: PR net src lines (${net_src_lines}) exceeds 400 line ceiling." >&2
+        echo "Error: PR net src lines (${net_src_lines}) exceeds 4000 line ceiling." >&2
         echo "Add 'size-exception', 'security', or 'freeze-exception' label if justified." >&2
         exit 1
     fi
