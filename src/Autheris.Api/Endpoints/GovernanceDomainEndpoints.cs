@@ -121,11 +121,19 @@ public static class GovernanceDomainEndpoints
         }
 
         var result = await service.GetDomainAsync(sec, sec.TenantId, id, ct).ConfigureAwait(false);
-        return ToResult(result, http, d =>
+        if (result.Status is not (DomainServiceStatus.Ok or DomainServiceStatus.Created or DomainServiceStatus.Deleted) || result.Value is null)
         {
-            http.Response.Headers.ETag = FormatETag(d.Version);
-            return Results.Ok(ToDomainDto(d));
-        });
+            return ToResult(result, http, _ => Results.Ok());
+        }
+
+        var tablesResult = await service.ListDomainTablesAsync(sec, sec.TenantId, id, ct: ct).ConfigureAwait(false);
+        var (tables, truncated) = tablesResult.Status == DomainServiceStatus.Ok
+            ? tablesResult.Value
+            : ((IReadOnlyList<string>)Array.Empty<string>(), false);
+
+        var d = result.Value;
+        http.Response.Headers.ETag = FormatETag(d.Version);
+        return Results.Ok(ToDomainDetailDto(d, tables, truncated));
     }
 
     internal static async Task<IResult> CreateDomainAsync(
@@ -274,7 +282,7 @@ public static class GovernanceDomainEndpoints
             return Results.Unauthorized();
         }
 
-        var result = await service.AssignTablesAsync(sec, sec.TenantId, id, request?.TableIds, ct).ConfigureAwait(false);
+        var result = await service.AssignTablesAsync(sec, sec.TenantId, id, request?.TableIds, request?.Datasets, ct).ConfigureAwait(false);
         return ToResult(result, http, count => Results.Ok(new { domainId = id, assignedCount = count }));
     }
 
@@ -438,6 +446,24 @@ public static class GovernanceDomainEndpoints
         updatedAt = d.UpdatedAt
     };
 
+    private static object ToDomainDetailDto(GovernanceDomain d, IReadOnlyList<string> tables, bool tablesTruncated) => new
+    {
+        id = d.Id,
+        tenantId = d.Tenant.Value,
+        name = d.Name,
+        description = d.Description,
+        contact = d.Contact,
+        ownerGroupSid = d.OwnerGroupSid?.Value,
+        defaultClass = d.DefaultClass?.ToCanonicalName(),
+        visibility = d.Visibility.ToCanonicalName(),
+        isSystemUnassigned = d.IsSystemUnassigned,
+        version = d.Version,
+        createdAt = d.CreatedAt,
+        updatedAt = d.UpdatedAt,
+        tables,
+        tablesTruncated
+    };
+
     private static object ToProtectionDto(ProtectionWriteOutcome o) => new
     {
         datasetId = o.DatasetId,
@@ -481,6 +507,6 @@ public static class GovernanceDomainEndpoints
         string? Visibility = null);
 
     public sealed record AssignOwnerGroupRequest(string? OwnerGroupSid = null);
-    public sealed record AssignTablesRequest(IReadOnlyList<Guid>? TableIds = null);
+    public sealed record AssignTablesRequest(IReadOnlyList<Guid>? TableIds = null, IReadOnlyList<string>? Datasets = null);
     public sealed record SetProtectionRequest(string? ProtectionClass = null, string? MaskCategory = null);
 }

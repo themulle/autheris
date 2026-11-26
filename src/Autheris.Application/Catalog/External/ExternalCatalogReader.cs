@@ -626,7 +626,7 @@ public sealed partial class ExternalCatalogReader(
         bool canSeeHidden,
         CancellationToken ct)
     {
-        var ownersByTable = await _ownershipRepository.GetDataOwnersForTableMetadataAsync([table], ct).ConfigureAwait(false);
+        var ownersByTable = await _ownershipRepository.GetDataOwnersForTableMetadataInTenantAsync([table], tenantId, ct).ConfigureAwait(false);
         var owners = ownersByTable.TryGetValue(table.Identifier, out var list) ? list : Array.Empty<ContainerOwnerEntry>();
         var artifacts = _artifactStore is null
             ? null
@@ -683,7 +683,9 @@ public sealed partial class ExternalCatalogReader(
             Hidden: baseObj.IsHidden,
             CallerState: null,
             Columns: cols,
-            ChangeSeq: changeSeq);
+            ChangeSeq: changeSeq,
+            TableId: table.Table.Id == Guid.Empty ? null : table.Table.Id,
+            Container: protection is null ? null : new ExternalCatalogContainerDto(protection.Container.Kind.ToString(), protection.Container.Id));
     }
 
     private static ExternalCatalogObjectDto MapUserObject(
@@ -718,7 +720,9 @@ public sealed partial class ExternalCatalogReader(
             Hidden: obj.IsHidden,
             CallerState: callerState,
             Columns: cols,
-            ChangeSeq: changeSeq);
+            ChangeSeq: changeSeq,
+            TableId: table.Table.Id == Guid.Empty ? null : table.Table.Id,
+            Container: protection is null ? null : new ExternalCatalogContainerDto(protection.Container.Kind.ToString(), protection.Container.Id));
     }
 
     private static string ResolveTableProtectionClass(string? fallbackSensitivity, EffectiveProtection? protection)

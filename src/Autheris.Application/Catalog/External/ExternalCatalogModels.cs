@@ -124,6 +124,10 @@ public sealed record ExternalCatalogColumnDto(
     IReadOnlyList<string>? ClearRequestable = null,
     string? Role = null);
 
+public sealed record ExternalCatalogContainerDto(
+    string Kind,
+    Guid Id);
+
 public sealed record ExternalCatalogObjectDto(
     string ObjectId,
     string Kind,
@@ -143,7 +147,9 @@ public sealed record ExternalCatalogObjectDto(
     bool Hidden,
     ExternalCatalogCallerStateDto? CallerState,
     IReadOnlyList<ExternalCatalogColumnDto> Columns,
-    long? ChangeSeq);
+    long? ChangeSeq,
+    Guid? TableId = null,
+    ExternalCatalogContainerDto? Container = null);
 
 public sealed record ExternalCatalogPageDto(
     IReadOnlyList<ExternalCatalogObjectDto> Items,

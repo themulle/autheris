@@ -24,13 +24,19 @@ public sealed class ContainerOwnership(
     IGovernanceDomainRepository domains,
     IScimGroupStore? groupStore = null,
     IIdentityRealmRegistry? realmRegistry = null,
-    TenantId? catalogOwnerTenant = null) : IContainerOwnership
+    TenantId? catalogOwnerTenant = null) : IContainerOwnership, ITenantScopedContainerOwnership
 {
     private readonly record struct Resolved(TenantId Tenant, ContainerDefaults Container, Sid OwnerGroup);
 
-    public async Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default)
+    public Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableAsync(TableIdentifier table, CancellationToken ct = default) =>
+        GetDataOwnersForTableCoreAsync(table, callerTenant: null, ct);
+
+    public Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableAsync(TableIdentifier table, TenantId tenant, CancellationToken ct = default) =>
+        GetDataOwnersForTableCoreAsync(table, callerTenant: tenant, ct);
+
+    private async Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableCoreAsync(TableIdentifier table, TenantId? callerTenant, CancellationToken ct)
     {
-        var resolved = await ResolveManyAsync([table], ct).ConfigureAwait(false);
+        var resolved = await ResolveManyAsync([table], callerTenant, ct).ConfigureAwait(false);
         if (!resolved.TryGetValue(table, out var r))
         {
             return [];
@@ -40,16 +46,32 @@ public sealed class ContainerOwnership(
         return [await OwnerEntryAsync(r, contacts, ct).ConfigureAwait(false)];
     }
 
-    public async Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>> GetDataOwnersForTablesAsync(
-        IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct = default)
+    public Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>> GetDataOwnersForTablesAsync(
+        IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct = default) =>
+        GetDataOwnersForTablesCoreAsync(tables, callerTenant: null, ct);
+
+    public Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>> GetDataOwnersForTablesAsync(
+        IReadOnlyCollection<TableIdentifier> tables, TenantId tenant, CancellationToken ct = default) =>
+        GetDataOwnersForTablesCoreAsync(tables, callerTenant: tenant, ct);
+
+    private async Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>> GetDataOwnersForTablesCoreAsync(
+        IReadOnlyCollection<TableIdentifier> tables, TenantId? callerTenant, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(tables);
-        var resolved = await ResolveManyAsync(tables, ct).ConfigureAwait(false);
+        var resolved = await ResolveManyAsync(tables, callerTenant, ct).ConfigureAwait(false);
         return await MapOwnerEntriesAsync(tables, resolved, ct).ConfigureAwait(false);
     }
 
-    public async Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>> GetDataOwnersForTableMetadataAsync(
-        IReadOnlyCollection<TableMetadata> tables, CancellationToken ct = default)
+    public Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>> GetDataOwnersForTableMetadataAsync(
+        IReadOnlyCollection<TableMetadata> tables, CancellationToken ct = default) =>
+        GetDataOwnersForTableMetadataCoreAsync(tables, callerTenant: null, ct);
+
+    public Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>> GetDataOwnersForTableMetadataAsync(
+        IReadOnlyCollection<TableMetadata> tables, TenantId tenant, CancellationToken ct = default) =>
+        GetDataOwnersForTableMetadataCoreAsync(tables, callerTenant: tenant, ct);
+
+    private async Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>> GetDataOwnersForTableMetadataCoreAsync(
+        IReadOnlyCollection<TableMetadata> tables, TenantId? callerTenant, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(tables);
         var distinctActive = new List<TableMetadata>(tables.Count);
@@ -67,7 +89,7 @@ public sealed class ContainerOwnership(
         {
             try
             {
-                await ResolveFromMetadataAsync(distinctActive, resolved, ct).ConfigureAwait(false);
+                await ResolveFromMetadataAsync(distinctActive, resolved, callerTenant, ct).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException)
             {
@@ -102,29 +124,36 @@ public sealed class ContainerOwnership(
 
     public async Task<string?> GetContainerKeyForTableAsync(TableIdentifier table, CancellationToken ct = default)
     {
-        var resolved = await ResolveManyAsync([table], ct).ConfigureAwait(false);
+        var resolved = await ResolveManyAsync([table], callerTenant: null, ct).ConfigureAwait(false);
         return resolved.TryGetValue(table, out var r)
             ? string.Create(System.Globalization.CultureInfo.InvariantCulture, $"{r.Container.Container.Kind}:{r.Container.Container.Id}:{r.OwnerGroup.Value}")
             : null;
     }
 
-    public async Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default)
+    public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, CancellationToken ct = default) =>
+        IsAuthorizedApproverForTableCoreAsync(table, approverSid, callerTenant: null, ct);
+
+    public Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, TenantId tenant, CancellationToken ct = default) =>
+        IsAuthorizedApproverForTableCoreAsync(table, approverSid, callerTenant: tenant, ct);
+
+    private async Task<bool> IsAuthorizedApproverForTableCoreAsync(TableIdentifier table, Sid approverSid, TenantId? callerTenant, CancellationToken ct)
     {
         if (string.IsNullOrWhiteSpace(approverSid.Value))
         {
             return false;
         }
 
-        var owned = await OwnedTablesAsync(approverSid, [table], ct).ConfigureAwait(false);
+        var owned = await OwnedTablesAsync(approverSid, [table], callerTenant, ct).ConfigureAwait(false);
         return owned.Contains(table);
     }
 
     /// <remarks>Container ownership has no validity period; <paramref name="atTime"/> does not change the result.</remarks>
     public Task<IReadOnlySet<TableIdentifier>> GetOwnedOrDelegatedTablesAsync(
         Sid actorSid, IReadOnlyCollection<TableIdentifier> tables, DateTimeOffset atTime, CancellationToken ct = default) =>
-        OwnedTablesAsync(actorSid, tables, ct);
+        OwnedTablesAsync(actorSid, tables, callerTenant: null, ct);
 
-    private async Task<IReadOnlySet<TableIdentifier>> OwnedTablesAsync(Sid actorSid, IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct)
+    private async Task<IReadOnlySet<TableIdentifier>> OwnedTablesAsync(
+        Sid actorSid, IReadOnlyCollection<TableIdentifier> tables, TenantId? callerTenant, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(tables);
         var owned = new HashSet<TableIdentifier>();
@@ -133,7 +162,7 @@ public sealed class ContainerOwnership(
             return owned;
         }
 
-        var resolved = await ResolveManyAsync(tables, ct).ConfigureAwait(false);
+        var resolved = await ResolveManyAsync(tables, callerTenant, ct).ConfigureAwait(false);
         var groupsByTenant = new Dictionary<TenantId, IReadOnlyCollection<string>>();
         foreach (var (table, r) in resolved)
         {
@@ -163,7 +192,7 @@ public sealed class ContainerOwnership(
         TableIdentifier table, IReadOnlyCollection<string> ownerSids, DateTimeOffset atTime, CancellationToken ct = default)
     {
         ArgumentNullException.ThrowIfNull(ownerSids);
-        var resolved = await ResolveManyAsync([table], ct).ConfigureAwait(false);
+        var resolved = await ResolveManyAsync([table], callerTenant: null, ct).ConfigureAwait(false);
         if (!resolved.TryGetValue(table, out var r))
         {
             return false;
@@ -203,7 +232,7 @@ public sealed class ContainerOwnership(
         try
         {
             var resolved = new Dictionary<TableIdentifier, Resolved>();
-            await ResolveFromMetadataAsync(distinctActive, resolved, ct).ConfigureAwait(false);
+            await ResolveFromMetadataAsync(distinctActive, resolved, callerTenant: null, ct).ConfigureAwait(false);
             var groupsCache = new Dictionary<(TenantId, string), IReadOnlyCollection<string>>();
             var authCache = new Dictionary<(TenantId, string), IReadOnlySet<string>>();
             foreach (var (table, r) in resolved)
@@ -266,6 +295,7 @@ public sealed class ContainerOwnership(
     private async Task ResolveFromMetadataAsync(
         IReadOnlyCollection<TableMetadata> distinctActive,
         Dictionary<TableIdentifier, Resolved> target,
+        TenantId? callerTenant,
         CancellationToken ct)
     {
         var unresolved = distinctActive.Where(static m => m.Table.Id == Guid.Empty).Select(static m => m.Identifier).ToList();
@@ -278,14 +308,15 @@ public sealed class ContainerOwnership(
             .Where(static x => x.Meta is not null)
             .Select(static x => (x.Key, x.Meta!))
             .ToList();
-        await ResolveActiveAsync(active, target, ct).ConfigureAwait(false);
+        await ResolveActiveAsync(active, target, callerTenant, ct).ConfigureAwait(false);
     }
 
     /// <summary>
     /// Resolves the owner of every table set-based: one structural catalog read (ownership needs no dataset catalog overlay), one
     /// container read per tenant. Unresolvable tables are absent.
     /// </summary>
-    private async Task<Dictionary<TableIdentifier, Resolved>> ResolveManyAsync(IReadOnlyCollection<TableIdentifier> requested, CancellationToken ct)
+    private async Task<Dictionary<TableIdentifier, Resolved>> ResolveManyAsync(
+        IReadOnlyCollection<TableIdentifier> requested, TenantId? callerTenant, CancellationToken ct)
     {
         var result = new Dictionary<TableIdentifier, Resolved>();
         var distinct = requested.Distinct().ToList();
@@ -306,7 +337,7 @@ public sealed class ContainerOwnership(
                 }
             }
 
-            await ResolveActiveAsync(active, result, ct).ConfigureAwait(false);
+            await ResolveActiveAsync(active, result, callerTenant, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
@@ -320,12 +351,13 @@ public sealed class ContainerOwnership(
     private async Task ResolveActiveAsync(
         IReadOnlyList<(TableIdentifier Key, TableMetadata Meta)> active,
         Dictionary<TableIdentifier, Resolved> target,
+        TenantId? callerTenant,
         CancellationToken ct)
     {
         var byTenant = new Dictionary<TenantId, List<(TableIdentifier Table, Guid TableId)>>();
         foreach (var (key, meta) in active)
         {
-            if (!meta.Table.IsActive || OwnerTenantOf(meta) is not { } tenant)
+            if (!meta.Table.IsActive || OwnerTenantOf(meta, callerTenant) is not { } tenant)
             {
                 continue;
             }
@@ -352,19 +384,39 @@ public sealed class ContainerOwnership(
     }
 
     /// <summary>
-    /// The owner tenant of the table; a table without one belongs to the configured catalog owner tenant (as discovery scopes it). A
-    /// malformed or reserved owner tenant, or a missing one without a configured catalog owner, has no tenant and therefore no owner.
+    /// The owner tenant of the table; a table without one resolves against the caller's tenant when supplied, else the configured
+    /// catalog owner tenant. A table with an explicit owner tenant never resolves for a different caller tenant, and a malformed or
+    /// reserved tenant resolves to no owner.
     /// </summary>
-    private TenantId? OwnerTenantOf(TableMetadata meta)
+    private TenantId? OwnerTenantOf(TableMetadata meta, TenantId? callerTenant)
     {
+        var validCaller = callerTenant is { } ct && !string.IsNullOrWhiteSpace(ct.Value) && !TenantId.IsReserved(ct)
+            ? (TenantId?)ct
+            : null;
+
         if (string.IsNullOrWhiteSpace(meta.OwnerTenantId))
         {
-            return catalogOwnerTenant is { } owner && !string.IsNullOrWhiteSpace(owner.Value) && !TenantId.IsReserved(owner) ? owner : (TenantId?)null;
+            if (validCaller is { } resolvedCaller)
+            {
+                return resolvedCaller;
+            }
+
+            return catalogOwnerTenant is { } owner && !string.IsNullOrWhiteSpace(owner.Value) && !TenantId.IsReserved(owner)
+                ? owner
+                : (TenantId?)null;
         }
 
-        return TenantId.TryParse(meta.OwnerTenantId, out var tenant) && !string.IsNullOrWhiteSpace(tenant.Value) && !TenantId.IsReserved(tenant)
-            ? (TenantId?)tenant
-            : null;
+        if (!TenantId.TryParse(meta.OwnerTenantId, out var tenant) || string.IsNullOrWhiteSpace(tenant.Value) || TenantId.IsReserved(tenant))
+        {
+            return null;
+        }
+
+        if (validCaller is { } expected && tenant != expected)
+        {
+            return null;
+        }
+
+        return tenant;
     }
 
     /// <summary>The effective groups of <paramref name="identifier"/>; empty when unknown, degraded or not resolvable to exactly one realm.</summary>

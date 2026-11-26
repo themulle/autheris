@@ -119,3 +119,47 @@ public interface IContainerOwnership
         return result;
     }
 }
+
+/// <summary>
+/// Optional tenant-scoped resolution implemented by <see cref="ContainerOwnership"/> so tables without an explicit owner tenant
+/// resolve their governance domain in the caller's tenant even when no catalog default tenant is configured.
+/// </summary>
+public interface ITenantScopedContainerOwnership
+{
+    Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableAsync(TableIdentifier table, TenantId tenant, CancellationToken ct = default);
+
+    Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>> GetDataOwnersForTablesAsync(
+        IReadOnlyCollection<TableIdentifier> tables, TenantId tenant, CancellationToken ct = default);
+
+    Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>> GetDataOwnersForTableMetadataAsync(
+        IReadOnlyCollection<TableMetadata> tables, TenantId tenant, CancellationToken ct = default);
+
+    Task<bool> IsAuthorizedApproverForTableAsync(TableIdentifier table, Sid approverSid, TenantId tenant, CancellationToken ct = default);
+}
+
+public static class ContainerOwnershipExtensions
+{
+    public static Task<IReadOnlyList<ContainerOwnerEntry>> GetDataOwnersForTableInTenantAsync(
+        this IContainerOwnership ownership, TableIdentifier table, TenantId tenant, CancellationToken ct = default) =>
+        ownership is ITenantScopedContainerOwnership scoped
+            ? scoped.GetDataOwnersForTableAsync(table, tenant, ct)
+            : ownership.GetDataOwnersForTableAsync(table, ct);
+
+    public static Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>> GetDataOwnersForTablesInTenantAsync(
+        this IContainerOwnership ownership, IReadOnlyCollection<TableIdentifier> tables, TenantId tenant, CancellationToken ct = default) =>
+        ownership is ITenantScopedContainerOwnership scoped
+            ? scoped.GetDataOwnersForTablesAsync(tables, tenant, ct)
+            : ownership.GetDataOwnersForTablesAsync(tables, ct);
+
+    public static Task<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>> GetDataOwnersForTableMetadataInTenantAsync(
+        this IContainerOwnership ownership, IReadOnlyCollection<TableMetadata> tables, TenantId tenant, CancellationToken ct = default) =>
+        ownership is ITenantScopedContainerOwnership scoped
+            ? scoped.GetDataOwnersForTableMetadataAsync(tables, tenant, ct)
+            : ownership.GetDataOwnersForTableMetadataAsync(tables, ct);
+
+    public static Task<bool> IsAuthorizedApproverForTableInTenantAsync(
+        this IContainerOwnership ownership, TableIdentifier table, Sid approverSid, TenantId tenant, CancellationToken ct = default) =>
+        ownership is ITenantScopedContainerOwnership scoped
+            ? scoped.IsAuthorizedApproverForTableAsync(table, approverSid, tenant, ct)
+            : ownership.IsAuthorizedApproverForTableAsync(table, approverSid, ct);
+}

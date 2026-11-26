@@ -180,7 +180,7 @@ internal static class DiscoveryProcedureResolver
         var ownersTask = ownershipRepository is null
             ? Task.FromResult<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>>(
                 new Dictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>())
-            : ownershipRepository.GetDataOwnersForTablesAsync(distinctIds.ToList(), ct);
+            : ownershipRepository.GetDataOwnersForTablesInTenantAsync(distinctIds.ToList(), subject.TenantId, ct);
 
         await Task.WhenAll(decisionsTask, ownersTask).ConfigureAwait(false);
 
