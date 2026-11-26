@@ -301,7 +301,7 @@ public sealed class GrantRevocationService : IGrantRevocationService
                 : consent.ObjectPattern ?? consent.Id.ToString("D");
             await AuditItemAsync(
                 AuditEventTypes.GrantRevokedDeprovisioned, tenant, subject, target, consent.Id, consent.GrantKind.ToSqlString(), reason, ct).ConfigureAwait(false);
-            var done = await _consents.RevokeSystemConsentByIdAsync(tenant, consent.Id, SystemActor, reason, ct).ConfigureAwait(false);
+            var done = await _consents.RevokeSystemConsentByIdAsync(tenant, consent.Id, SystemActor, reason, SystemRevocationKind.Revoked, ct).ConfigureAwait(false);
             return done;
         }
         catch (Exception ex) when (ex is not OperationCanceledException)
