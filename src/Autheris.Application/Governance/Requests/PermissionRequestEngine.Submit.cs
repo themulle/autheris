@@ -686,6 +686,9 @@ public sealed partial class PermissionRequestEngine
             submission.RequestedDuration).ToUniversalTime();
     }
 
+    private static ConsentRequestException DuplicatePending(Guid requestId) =>
+        new("DUPLICATE_PENDING_REQUEST", "A duplicate pending permission request already exists.", pendingRequestId: requestId);
+
     private async Task EnsureNoDuplicatePendingAsync(
         TenantId tenant,
         Sid requesterSid,
@@ -733,24 +736,24 @@ public sealed partial class PermissionRequestEngine
                     : null;
                 if (colSet is null && reqCols is null)
                 {
-                    throw new ConsentRequestException("DUPLICATE_PENDING_REQUEST", "A duplicate pending permission request already exists.");
+                    throw DuplicatePending(req.Id);
                 }
 
                 if (colSet is not null && reqCols is not null && colSet.SetEquals(reqCols))
                 {
-                    throw new ConsentRequestException("DUPLICATE_PENDING_REQUEST", "A duplicate pending permission request already exists.");
+                    throw DuplicatePending(req.Id);
                 }
             }
             else if (submission.RequestKind == ConsentRequestKind.Catalog)
             {
                 if (req.ContainerKind == containerKind && req.ContainerId == containerId)
                 {
-                    throw new ConsentRequestException("DUPLICATE_PENDING_REQUEST", "A duplicate pending permission request already exists.");
+                    throw DuplicatePending(req.Id);
                 }
             }
             else if (submission.RequestKind == ConsentRequestKind.ProfileAssignment && req.ProfileId == profileId)
             {
-                throw new ConsentRequestException("DUPLICATE_PENDING_REQUEST", "A duplicate pending permission request already exists.");
+                throw DuplicatePending(req.Id);
             }
         }
     }

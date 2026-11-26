@@ -705,6 +705,13 @@ public static partial class ConsentApiEndpoints
                 extraExtensions: ex.CoveringGrantId is { } gid
                     ? new Dictionary<string, object?> { ["grantId"] = gid.ToString("D") }
                     : null),
+            "DUPLICATE_PENDING_REQUEST" => ApiProblems.Conflict(
+                ApiErrorCodes.DuplicatePendingRequest,
+                "An identical permission request is already pending.",
+                context,
+                extraExtensions: ex.PendingRequestId is { } pendingId
+                    ? new Dictionary<string, object?> { ["requestId"] = pendingId.ToString("D") }
+                    : null),
             AccessProfileAssignmentRules.RoleSubjectUnsupported => ApiProblems.BadRequest(AccessProfileAssignmentRules.RoleSubjectUnsupported, "Access profiles cannot be assigned directly to Role subjects.", context),
             _ => ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Consent request payload is invalid.", context)
         };

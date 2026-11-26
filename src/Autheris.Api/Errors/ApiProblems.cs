@@ -199,7 +199,9 @@ public static class ApiProblems
         // Safe non-raising expression remediation hint
         "hint",
         // Existing active grant covering a duplicate unmask request
-        "grantId"
+        "grantId",
+        // Caller's own open request that an identical submission duplicates
+        "requestId"
     };
 
     private static void AddAllowedExtensions(IDictionary<string, object?> target, IEnumerable<KeyValuePair<string, object?>>? source)

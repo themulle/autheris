@@ -73,6 +73,8 @@ public sealed class ApiProblemsHardeningTests
             ["sunsetDate"] = "2027-01-01",
             ["replacement"] = "/v2/x",
             ["discardedEvents"] = 3,
+            ["requestId"] = "11111111-1111-1111-1111-111111111111",
+            ["grantId"] = "22222222-2222-2222-2222-222222222222",
             ["error"] = "legacy",
             ["traceId"] = "forged",
             ["code"] = "FORGED",
@@ -86,6 +88,8 @@ public sealed class ApiProblemsHardeningTests
         problem.Extensions["retryAfterSeconds"].ShouldBe(5);
         problem.Extensions["limit"].ShouldBe(100);
         problem.Extensions["discardedEvents"].ShouldBe(3);
+        problem.Extensions["requestId"].ShouldBe("11111111-1111-1111-1111-111111111111");
+        problem.Extensions["grantId"].ShouldBe("22222222-2222-2222-2222-222222222222");
         foreach (var dropped in new[] { "error", "message", "nested", "list" })
         {
             problem.Extensions.ContainsKey(dropped).ShouldBeFalse(dropped);
