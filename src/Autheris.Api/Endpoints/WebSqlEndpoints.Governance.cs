@@ -163,6 +163,12 @@ public static partial class WebSqlEndpoints
                 {
                     ["type"] = "string",
                     ["description"] = $"Data source to run on. Default: {dataSource}."
+                },
+                ["resultCache"] = new Dictionary<string, object>
+                {
+                    ["type"] = "string",
+                    ["enum"] = new[] { "default", "bypass" },
+                    ["description"] = "Result cache use (only effective when the gateway result cache is enabled). 'bypass' skips the lookup and refreshes the caller's own entry."
                 }
             }
         };
@@ -195,6 +201,22 @@ public static partial class WebSqlEndpoints
                     ["items"] = new Dictionary<string, object> { ["type"] = "object", ["additionalProperties"] = true }
                 },
                 ["rowCount"] = new Dictionary<string, object> { ["type"] = "integer" },
+                ["resultCache"] = new Dictionary<string, object>
+                {
+                    ["type"] = "object",
+                    ["description"] = "Present only when the gateway result cache is enabled and took part in the request.",
+                    ["properties"] = new Dictionary<string, object>
+                    {
+                        ["status"] = new Dictionary<string, object>
+                        {
+                            ["type"] = "string",
+                            ["enum"] = new[] { "hit", "miss", "store", "bypass", "ineligible" }
+                        },
+                        ["ageSeconds"] = new Dictionary<string, object> { ["type"] = "integer" },
+                        ["reason"] = new Dictionary<string, object> { ["type"] = "string" }
+                    },
+                    ["required"] = new[] { "status" }
+                },
                 ["indexHints"] = new Dictionary<string, object>
                 {
                     ["type"] = "array",

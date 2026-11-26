@@ -85,8 +85,10 @@ public sealed partial class GovernedSqlExecutor
         Autheris.Application.Sql.Paging.IWebSqlPageTokenCodec? pageTokenCodec = null,
         Autheris.Application.Policy.WriteGrants.IWriteBudgetStore? writeBudgetStore = null,
         Autheris.Application.Common.Quota.IScopeQueryExecutionGuard? scopeGuard = null,
-        Autheris.Application.Common.Interfaces.IClientIpResolver? clientIpResolver = null)
+        Autheris.Application.Common.Interfaces.IClientIpResolver? clientIpResolver = null,
+        Autheris.Application.Sql.ResultCache.IWebSqlResultCache? resultCache = null)
     {
+        _resultCache = resultCache;
         _costQuota = costQuota;
         _writeBudgetStore = writeBudgetStore;
         _scopeGuard = scopeGuard ?? Autheris.Application.Common.Quota.NullScopeQueryExecutionGuard.Instance;
@@ -187,7 +189,7 @@ public sealed partial class GovernedSqlExecutor
                     rows.Add(row);
                 }
 
-                isTruncated = reader is RowLimitedDataReader { HasMoreRows: true };
+                isTruncated = reader is IRowLimitProbe { HasMoreRows: true };
             },
             ct).ConfigureAwait(false);
 
@@ -379,13 +381,14 @@ public sealed partial class GovernedSqlExecutor
         var dmlContext = new DmlAuditContext();
         GovernedRewrite rewrite;
         IReadOnlyDictionary<string, object?> clientValues;
+        ClientListShapes shapes;
         try
         {
             // Scalars, and lists on the transports that may carry them; an object is a 400. The binder reads a client
             // value only by the name the statement uses. A list the statement does not reference is dropped here.
             var referenced = referencedNames as IReadOnlySet<string> ?? new HashSet<string>(referencedNames, StringComparer.OrdinalIgnoreCase);
             clientValues = BuildClientValues(request, referenced);
-            var shapes = ClientListParameters.Shapes(clientValues, referenced);
+            shapes = ClientListParameters.Shapes(clientValues, referenced);
             rewrite = await _rewriter.RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct, request.RowLimit, probeExtraRow: true, plannedTableRead: request.PlannedTableRead, gatewayLikePatternParameters: GovernedSqlExecutionService.GatewayParameterAliases(request.GatewayParameters), clientLists: shapes, page: request.Page, readOnlyRequired: request.ReadOnlyRequired, transport: request.Transport).ConfigureAwait(false);
         }
         catch (Exception policyEx) when (IsAuditedRejection(policyEx, ct))
@@ -445,7 +448,8 @@ public sealed partial class GovernedSqlExecutor
             throw;
         }
 
-        var result = await ExecuteRewrittenAsync(request, user, tenantId, rewrite, dmlContext, clientValues, rowWriter, ct).ConfigureAwait(false);
+        var cachePlan = await PlanResultCacheAsync(request, user, tenantId, rewrite, dmlContext, clientValues, sqlForRewrite, requestedDs, shapes, ct).ConfigureAwait(false);
+        var result = await ExecuteRewrittenAsync(request, user, tenantId, rewrite, dmlContext, clientValues, rowWriter, ct, cachePlan).ConfigureAwait(false);
         return (result, null, null);
     }
 
@@ -472,15 +476,18 @@ public sealed partial class GovernedSqlExecutor
         DmlAuditContext dmlContext,
         IReadOnlyDictionary<string, object?> clientValues,
         Func<DbDataReader, GovernedResultInfo, CancellationToken, Task> rowWriter,
-        CancellationToken ct)
+        CancellationToken ct,
+        ResultCachePlan? cachePlan = null)
     {
         var compiled = rewrite.Compiled;
         string dsName = rewrite.DataSourceName;
 
-        var admission = request.Admission;
+        var admission = request.Admission ?? cachePlan?.Admission;
         var executionSw = Stopwatch.StartNew();
         long deliveredOrAffectedRows = 0;
         bool executionFailed = false;
+        bool servedFromCache = false;
+        ResultCacheFill? cacheFill = null;
 
         try
         {
@@ -495,6 +502,10 @@ public sealed partial class GovernedSqlExecutor
             }
 
             var connOptions = _dataSourceResolver.ResolveConnectionOptions(dsName);
+
+            cacheFill = await LookupResultCacheAsync(cachePlan, dsName, ct).ConfigureAwait(false);
+            rewrite = ResultCacheExecutionRewrite(rewrite, cachePlan, cacheFill);
+            compiled = rewrite.Compiled;
 
             if (!dmlContext.IsDml)
             {
@@ -522,6 +533,7 @@ public sealed partial class GovernedSqlExecutor
                 }
                 AddCallerAttributeAuditFields(fields, rewrite, compiled);
                 AddCompiledAuditFields(fields, compiled, clientValues);
+                AddResultCacheAuditFields(fields, cachePlan, cacheFill);
                 if (rewrite.MaskedColumnsAudit is { Count: > 0 })
                 {
                     fields["masked_columns"] = rewrite.MaskedColumnsAudit;
@@ -537,6 +549,12 @@ public sealed partial class GovernedSqlExecutor
                     DetailsJson = System.Text.Json.JsonSerializer.Serialize(fields)
                 }, ct).ConfigureAwait(false);
             }
+
+        if (await TryServeResultCacheAsync(request, user, tenantId, rewrite, cachePlan, cacheFill, rowWriter, ct).ConfigureAwait(false))
+        {
+            servedFromCache = true;
+            return compiled.Sql;
+        }
 
         if (connOptions == null || (string.IsNullOrWhiteSpace(connOptions.ConnectionString) && !DataSourceProvider.Is(connOptions.Provider, DatabaseDialect.Databricks)) || _connectionFactory == null)
         {
@@ -597,33 +615,7 @@ public sealed partial class GovernedSqlExecutor
             await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, AuditEventTypes.WebSqlDmlIntent, "ALLOW", compiled, affectedRows: null, reason: null, synthetic: false, clientValues: clientValues).ConfigureAwait(false);
         }
 
-        var maxConcurrentReads = _options.Value.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
-        List<IDisposable>? leases = null;
-        if (_concurrencyGate != null && maxConcurrentReads > 0 && rewrite.AccessedTables.Count > 0)
-        {
-            var userSid = user.FindFirst(ClaimTypes.PrimarySid)?.Value
-                          ?? user.FindFirst("sub")?.Value
-                          ?? "anonymous";
-            leases = new List<IDisposable>(rewrite.AccessedTables.Count);
-            try
-            {
-                foreach (var table in rewrite.AccessedTables)
-                {
-                    var key = $"{tenantId.Value}|{userSid}|{table.ToQualifiedName()}".ToLowerInvariant();
-                    var lease = _concurrencyGate.TryEnter(key, maxConcurrentReads)
-                                ?? throw new GatewayThrottledException(ThrottledRetryAfterSeconds);
-                    leases.Add(lease);
-                }
-            }
-            catch
-            {
-                foreach (var lease in leases)
-                {
-                    lease.Dispose();
-                }
-                throw;
-            }
-        }
+        var leases = AcquireReadLeases(user, tenantId, rewrite);
 
         try
         {
@@ -748,23 +740,23 @@ public sealed partial class GovernedSqlExecutor
                                 throw new GovernedSqlException(GovernedSqlErrorCodes.CompilerInvariant, compiled.Dialect);
                             }
                             var info = new GovernedResultInfo(columns, reader.FieldCount == 0 ? ImmutableArray<bool>.Empty : maskArray);
-                            if (rewrite.DeliveredRowLimit > 0)
+                            var limitedReader = rewrite.DeliveredRowLimit > 0 ? new RowLimitedDataReader(reader, rewrite.DeliveredRowLimit) : null;
+                            var toWrite = cacheFill is { IsLeader: true } ? await PrepareResultCacheReaderAsync(cacheFill, limitedReader ?? reader, info, ct).ConfigureAwait(false) : limitedReader ?? reader;
+                            await rowWriter(toWrite, info, ct).ConfigureAwait(false);
+                            if (limitedReader != null)
                             {
-                                var limitedReader = new RowLimitedDataReader(reader, rewrite.DeliveredRowLimit);
-                                await rowWriter(limitedReader, info, ct).ConfigureAwait(false);
                                 deliveredOrAffectedRows = limitedReader.DeliveredRows;
                                 isTruncated = limitedReader.HasMoreRows;
                             }
-                            else
-                            {
-                                await rowWriter(reader, info, ct).ConfigureAwait(false);
-                            }
+
+                            isTruncated = cacheFill?.WindowHasMoreRows ?? isTruncated;
                         }
 
                         return true;
                     },
                     ct).ConfigureAwait(false);
 
+                await CommitResultCacheAsync(cacheFill, dsName, ct).ConfigureAwait(false);
                 NotifyPageOutcome(request, user, tenantId, rewrite, isTruncated);
                 if (command is Autheris.Application.Usage.ISourceExecutionStatsProvider statsProvider &&
                     statsProvider.LastExecutionStats is { } sourceStats)
@@ -879,114 +871,8 @@ public sealed partial class GovernedSqlExecutor
         finally
         {
             executionSw.Stop();
-            await SettleCostAsync(admission, deliveredOrAffectedRows, executionSw.Elapsed.TotalSeconds, executionFailed).ConfigureAwait(false);
+            cacheFill?.Dispose();
+            await SettleCostAsync(admission, deliveredOrAffectedRows, executionSw.Elapsed.TotalSeconds, executionFailed, servedFromCache || cacheFill is { Served: true }).ConfigureAwait(false);
         }
-    }
-
-    private IReadOnlyDictionary<string, object?> BuildClientValues(GovernedSqlQueryRequest request, IReadOnlySet<string> referenced)
-    {
-        var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
-        var parameters = request.Parameters;
-        if (parameters != null)
-        {
-            AddClientValues(request, parameters, referenced, values);
-        }
-
-        // Issue #280: gateway-generated parameters of a planned read (typed scalars, validated by MergeGatewayParameters). Add, not the
-        // indexer: a duplicate name throws instead of overwriting a client value.
-        if (request.GatewayParameters is { } gatewayParameters)
-        {
-            foreach (var (name, value) in gatewayParameters)
-            {
-                values.Add(GovernedSqlExecutionService.GatewayParameterAlias(name), value);
-            }
-        }
-
-        return values;
-    }
-
-    private void AddClientValues(
-        GovernedSqlQueryRequest request,
-        IReadOnlyDictionary<string, object?> parameters,
-        IReadOnlySet<string> referenced,
-        Dictionary<string, object?> values)
-    {
-        var limits = ListParameterLimits.From(_options.Value.WebSql);
-        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
-        int lists = 0;
-        foreach (var (name, value) in parameters)
-        {
-            // The first spelling wins when two names differ only by case (as before).
-            string trimmed = name.TrimStart('@');
-            if (Autheris.Application.Identity.Attributes.CallerAttributeParameterName.IsReserved(trimmed))
-            {
-                // 129 (BC-129-16, ST-129-14): a client parameter never uses the reserved name of a caller attribute slot (any case).
-                throw new ArgumentException("A client parameter must not use a reserved gateway parameter name.");
-            }
-
-            if (!seen.Add(trimmed))
-            {
-                continue;
-            }
-
-            if (value is not ClientListValue && !ListParameterNormalizer.IsListCandidate(value))
-            {
-                values.Add(trimmed, WebSqlParameterValues.Normalize(value));
-                continue;
-            }
-
-            // admission by allowlist, before any element is read.
-            AdmitList(request, value);
-            if (++lists > limits.MaxListParameters)
-            {
-                throw new ClientListException(GovernedSqlErrorCodes.ListParamTooLarge);
-            }
-
-            if (!referenced.Contains(trimmed))
-            {
-                continue;   // dropped: it neither enters the cache key nor costs a normalization
-            }
-
-            values.Add(trimmed, value switch
-            {
-                // An endpoint-built value is not trusted: the configured maximum applies again (its elements were validated by Create).
-                ClientListValue list when list.Count > limits.ConfiguredMaxValues => throw new ClientListException(GovernedSqlErrorCodes.ListParamTooLarge),
-                ClientListValue list => list,
-                _ => ListParameterNormalizer.Normalize(value!, limits, null)
-            });
-        }
-    }
-
-    /// <summary>
-    /// a list value is admitted only on WebSql and Trino (a JSON array) or SqlEndpoints (an already normalized
-    /// <see cref="ClientListValue"/>), never on a planned table read, never with another transport or none, never as a loose collection.
-    /// </summary>
-    private static void AdmitList(GovernedSqlQueryRequest request, object? value)
-    {
-        string? transport = request.Transport;
-        bool admitted = !request.PlannedTableRead && value switch
-        {
-            JsonElement => transport is SqlTransports.WebSql or SqlTransports.Trino,
-            ClientListValue => transport is SqlTransports.SqlEndpoints,
-            _ => false
-        };
-        if (!admitted)
-        {
-            throw new ClientListException(GovernedSqlErrorCodes.ListParamPosition);
-        }
-    }
-
-    private static void AddCallerAttributeAuditFields(Dictionary<string, object?> fields, GovernedRewrite rewrite, CompiledSql compiled)
-    {
-        if (rewrite.CallerAttributes is not { Count: > 0 } attributes)
-        {
-            return;
-        }
-
-        fields["caller_attributes"] = attributes.ToDictionary(
-            p => p.Key,
-            p => p.Value.Select(a => new Dictionary<string, object?> { ["id"] = a.Id, ["outcome"] = a.Outcome, ["reason"] = a.Reason }).ToList(),
-            StringComparer.OrdinalIgnoreCase);
-        fields["caller_attribute_binds"] = compiled.Parameters.Count(p => p.Origin == ParameterOrigin.Policy && p.SourceName != null && Autheris.Application.Identity.Attributes.CallerAttributeParameterName.IsReserved(p.SourceName));
     }
 }

@@ -38,6 +38,18 @@ public sealed class DataSourceConnectionOptions
     public string ConnectionString { get; init; } = string.Empty;
 
     /// <summary>
+    /// WebSQL result cache: time to live in seconds of cached results of this data source (0..3600). 0 (default) switches the cache off
+    /// for the source. Needs <c>WebSql:ResultCacheMaxMegabytes</c> greater than 0 and <c>EnforcementMode</c> AutherisEnforced.
+    /// </summary>
+    public int ResultCacheTtlSeconds { get; init; } = 0;
+
+    /// <summary>
+    /// WebSQL result cache: tables (<c>schema.table</c>, case-insensitive) of this data source whose results may be cached. Empty means all
+    /// tables of the source; a statement that reads any other table is not cached.
+    /// </summary>
+    public IReadOnlyList<string> ResultCacheTables { get; init; } = [];
+
+    /// <summary>
     /// Dedicated connection string used exclusively for governed DML write statements. Read queries never use this connection string.
     /// </summary>
     public string? WriteConnectionString { get; init; }
@@ -156,7 +168,9 @@ public sealed class DataSourceConnectionOptions
             DefaultSchema = DefaultSchema,
             RequireDefaultSchema = RequireDefaultSchema,
             Databricks = Databricks,
-            WindowsAuth = WindowsAuth
+            WindowsAuth = WindowsAuth,
+            ResultCacheTtlSeconds = ResultCacheTtlSeconds,
+            ResultCacheTables = ResultCacheTables
         };
     }
 }

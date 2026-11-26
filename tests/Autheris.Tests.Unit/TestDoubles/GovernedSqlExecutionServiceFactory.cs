@@ -56,12 +56,14 @@ public static class GovernedSqlExecutionServiceFactory
         Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? timeZoneState = null,
         Autheris.Application.Sql.Paging.IWebSqlPageTokenCodec? pageTokenCodec = null,
         Autheris.Application.Policy.Pdp.IAccessDecisionPoint? accessDecisionPoint = null,
-        Autheris.Application.Policy.WriteGrants.IWriteBudgetStore? writeBudgetStore = null)
+        Autheris.Application.Policy.WriteGrants.IWriteBudgetStore? writeBudgetStore = null,
+        Autheris.Application.Sql.ResultCache.IWebSqlResultCache? resultCache = null,
+        Autheris.Application.Common.Quota.IQueryCostQuota? costQuota = null)
     {
         var rewrite = new GovernedSqlRewriteDependencies( consentResolution, tableRepository, clientIpResolver, consentRepository, sqlEngine, policyFactory,
             sqlSecurityValidator, consentCache, mandatoryFilters, contractManager, accessProfileRepository,
             memoryCache, typedPolicies, timeZoneState, accessDecisionPoint);
-        var execution = new GovernedSqlExecutionDependencies(connectionFactory, environment, concurrencyGate, sessionInitializer, secretProvider, auditDigester, PageTokenCodec: pageTokenCodec, WriteBudgetStore: writeBudgetStore);
+        var execution = new GovernedSqlExecutionDependencies(connectionFactory, environment, concurrencyGate, sessionInitializer, secretProvider, auditDigester, PageTokenCodec: pageTokenCodec, CostQuota: costQuota, WriteBudgetStore: writeBudgetStore, ResultCache: resultCache);
         var lazyFederated = federatedExecutionService is null ? null : new Lazy<IFederatedQueryExecutionService>(() => federatedExecutionService);
         return new GovernedSqlExecutionService(options, auditWriter ?? new AuditWriter(auditLogRepository, NullLogger<AuditWriter>.Instance), executionGuard, rewrite, execution, lazyFederated, logger);
     }

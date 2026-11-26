@@ -119,6 +119,9 @@ public sealed record GovernedSqlQueryRequest(
     public Action<Autheris.Application.Usage.SourceExecutionStats>? OnSourceStats { get; init; }
     public int? PageOffset { get; init; }
     public bool IsPaged { get; init; }
+
+    /// <summary>WebSQL result cache participation. <c>null</c> means the request does not use the cache (every caller except WebSQL).</summary>
+    public Autheris.Application.Sql.ResultCache.WebSqlResultCacheRequest? ResultCache { get; init; }
 }
 
 public sealed record GovernedSqlResult(

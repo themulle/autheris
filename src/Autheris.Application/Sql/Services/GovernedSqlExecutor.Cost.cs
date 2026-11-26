@@ -113,7 +113,8 @@ public sealed partial class GovernedSqlExecutor
         QueryCostAdmission? admission,
         long rowsDeliveredOrAffected,
         double elapsedSeconds,
-        bool isFailureOrAbort)
+        bool isFailureOrAbort,
+        bool servedFromCache = false)
     {
         if (admission == null || _costQuota == null)
         {
@@ -125,12 +126,15 @@ public sealed partial class GovernedSqlExecutor
             var costOpts = _options.Value.QueryCost ?? new QueryCostOptions();
             var webSqlCost = _options.Value.WebSql?.Cost ?? new WebSqlCostOptions();
 
-            int cAct = SqlStatementCostEstimator.CalculateSettlementCost(
-                rowsDeliveredOrAffected,
-                elapsedSeconds,
-                costOpts,
-                webSqlCost,
-                isFailureOrAbort);
+            // A result served from the cache read nothing from the source, so it settles at zero.
+            int cAct = servedFromCache
+                ? 0
+                : SqlStatementCostEstimator.CalculateSettlementCost(
+                    rowsDeliveredOrAffected,
+                    elapsedSeconds,
+                    costOpts,
+                    webSqlCost,
+                    isFailureOrAbort);
 
             await _costQuota.SettleAsync(admission, cAct, CancellationToken.None).ConfigureAwait(false);
         }

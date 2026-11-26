@@ -7,13 +7,20 @@ using System.Data.Common;
 using System.Threading;
 using System.Threading.Tasks;
 
+/// <summary>Reports whether the result held more rows than were delivered, so a response can say it was truncated.</summary>
+public interface IRowLimitProbe
+{
+    /// <summary>True when rows beyond the delivered ones exist.</summary>
+    bool HasMoreRows { get; }
+}
+
 /// <summary>
 /// WebSQL findings 2.4: delivers at most <c>limit</c> rows of a reader whose statement was limited to <c>limit + 1</c>
 /// rows. The extra (probe) row is never handed out; it only sets <see cref="HasMoreRows"/>, so "truncated" means that
 /// rows were actually cut, not that the limit was reached. A limit of 0 or less delivers every row.
 /// </summary>
 [System.Diagnostics.CodeAnalysis.SuppressMessage("Design", "CA1010", Justification = "A DbDataReader enumerates records as non-generic IEnumerable by contract.")]
-public sealed class RowLimitedDataReader : DbDataReader, IDbColumnSchemaGenerator
+public sealed class RowLimitedDataReader : DbDataReader, IDbColumnSchemaGenerator, IRowLimitProbe
 {
     private readonly DbDataReader _inner;
     private readonly long _limit;

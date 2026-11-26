@@ -40,4 +40,5 @@ public sealed record GovernedSqlExecutionDependencies(
     Autheris.Application.Common.Quota.IQueryCostQuota? CostQuota = null,
     Autheris.Application.Sql.Paging.IWebSqlPageTokenCodec? PageTokenCodec = null,
     Autheris.Application.Policy.WriteGrants.IWriteBudgetStore? WriteBudgetStore = null,
-    Autheris.Application.Common.Quota.IScopeQueryExecutionGuard? ScopeGuard = null);
+    Autheris.Application.Common.Quota.IScopeQueryExecutionGuard? ScopeGuard = null,
+    Autheris.Application.Sql.ResultCache.IWebSqlResultCache? ResultCache = null);
