@@ -26,8 +26,9 @@ using Xunit;
 /// <summary>
 /// #1063 §1, #1088: end-to-end visibility parity of one Reader of the catalog owner tenant across every external catalog surface: REST
 /// <c>/api/v1/catalog/objects</c>, <c>/datasets</c>, <c>/search</c>, <c>/objects/facets</c>, <c>/objects/{id}</c>, <c>/datasets/{id}</c>,
-/// GraphQL <c>catalog</c> / <c>catalogObject</c> and the MCP tools <c>list_datasets</c> and <c>search_catalog</c>; the MCP schema tools
-/// <c>describe_dataset</c> and <c>get_table_schema</c> additionally need a data grant and never describe a catalog-invisible table. The hidden flag is set through the dataset catalog admin endpoint (the only writer of discovery flags, persisted in
+/// GraphQL <c>catalog</c> / <c>catalogObject</c> and the MCP tools <c>list_datasets</c> and <c>search_catalog</c>; <c>describe_dataset</c>
+/// describes every catalog-visible table (withholding value-bearing metadata without a data grant, issue #1150) while <c>get_table_schema</c>
+/// additionally needs a data grant, and neither ever describes a catalog-invisible table. The hidden flag is set through the dataset catalog admin endpoint (the only writer of discovery flags, persisted in
 /// <c>TABLE_CATALOG_SETTINGS</c>) and ownership through container assignment (the container owner group), so the hidden-object and owner paths
 /// are exercised for real rather than through a data grant.
 /// </summary>
@@ -89,10 +90,11 @@ public sealed class ExternalCatalogSurfaceParityIntegrationTests : IClassFixture
             .ToArray();
 
     /// <summary>
-    /// The MCP schema tools (<c>describe_dataset</c>, <c>get_table_schema</c>) are decided by the Access Decision Point like every data tool:
-    /// they need a data grant in addition to catalog visibility, so they show a subset of the catalog: the visible tables with a data grant.
+    /// <c>get_table_schema</c> is decided by the Access Decision Point like every data tool and needs a data grant in addition to catalog
+    /// visibility, so it shows only the visible tables with a data grant. <c>describe_dataset</c> describes every catalog-visible table
+    /// (<see cref="ExpectedVisible"/>), reporting <c>REQUEST_ACCESS</c> and withholding value-bearing metadata when no data grant is held (#1150).
     /// </summary>
-    private static readonly string[] ExpectedDescribable = [ConsentTable.TableName];
+    private static readonly string[] ExpectedSchemaGrantOnly = [ConsentTable.TableName];
 
     private const string NotVisibleAnswer = "\"error\":{\"code\":\"NOT_FOUND\",\"message\":\"Dataset not found or not visible.\"}";
 
@@ -166,6 +168,12 @@ public sealed class ExternalCatalogSurfaceParityIntegrationTests : IClassFixture
                 if (IsDescribed(tool, table, isError, text))
                 {
                     described.Add(table.TableName);
+                    if (tool == "describe_dataset")
+                    {
+                        using var doc = JsonDocument.Parse(text);
+                        var expectedStatus = table.Equals(ConsentTable) ? "GRANTED" : "REQUEST_ACCESS";
+                        doc.RootElement.GetProperty("accessStatus").GetString().ShouldBe(expectedStatus, table.ToString());
+                    }
                 }
 
                 if (!ExpectedVisible.Contains(table.TableName, StringComparer.Ordinal))
@@ -181,7 +189,8 @@ public sealed class ExternalCatalogSurfaceParityIntegrationTests : IClassFixture
                 }
             }
 
-            Names(described).ShouldBe(ExpectedDescribable, tool);
+            var expected = tool == "describe_dataset" ? ExpectedVisible : ExpectedSchemaGrantOnly;
+            Names(described).ShouldBe(expected, tool);
         }
     }
 
