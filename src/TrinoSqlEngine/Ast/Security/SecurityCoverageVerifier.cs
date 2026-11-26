@@ -77,6 +77,7 @@ public sealed partial class SecurityCoverageVerifier
     private readonly string? _tenantParameterName;
     private readonly DialectCapabilities? _capabilities;
     private readonly DmlWritePermit? _writePermit;
+    private readonly PreExecutionRowCheck? _preExecutionRowCheck;
 
     public SecurityCoverageVerifier(
         Func<SqlQualifiedName, TableCoverageRequirement?> requirementOf,
@@ -86,7 +87,8 @@ public sealed partial class SecurityCoverageVerifier
         DmlGuardOptions? dml = null,
         string? tenantParameterName = null,
         DialectCapabilities? capabilities = null,
-        DmlWritePermit? writePermit = null)
+        DmlWritePermit? writePermit = null,
+        PreExecutionRowCheck? preExecutionRowCheck = null)
     {
         _capabilities = capabilities;
         _dml = dml ?? DmlGuardOptions.Strict;
@@ -96,6 +98,7 @@ public sealed partial class SecurityCoverageVerifier
         _maxSecuredTableReferences = maxSecuredTableReferences;
         _maxAstDepth = maxAstDepth;
         _writePermit = writePermit;
+        _preExecutionRowCheck = preExecutionRowCheck;
     }
 
     /// <summary>Verifies <paramref name="statement"/> and returns the root predicate ids found.</summary>

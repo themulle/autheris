@@ -1,0 +1,6 @@
+{
+  "ops": [
+    {"op": "addTable", "table": "table_write_policies", "newTable": {"name": "table_write_policies", "columns": [{"name": "tenant_id", "type": "CHARACTER VARYING(128)", "family": "string", "nullable": false}, {"name": "table_id", "type": "CHARACTER VARYING(36)", "family": "string", "nullable": false}, {"name": "mode", "type": "CHARACTER VARYING(32)", "family": "string", "nullable": false}, {"name": "allowed_operations_json", "type": "TEXT", "family": "string", "nullable": false}, {"name": "writable_columns_json", "type": "TEXT", "family": "string", "nullable": true}, {"name": "require_pk_predicate", "type": "BOOLEAN", "family": "boolean", "nullable": false}, {"name": "require_row_filter", "type": "BOOLEAN", "family": "boolean", "nullable": false}, {"name": "max_rows_per_statement", "type": "BIGINT", "family": "integer", "nullable": true}, {"name": "server_stamped_columns_json", "type": "TEXT", "family": "string", "nullable": true}, {"name": "updated_by", "type": "CHARACTER VARYING(256)", "family": "string", "nullable": false}, {"name": "updated_at", "type": "TIMESTAMP WITH TIME ZONE", "family": "datetime", "nullable": false}], "primaryKey": ["tenant_id", "table_id"], "indexes": []}},
+    {"op": "addIndex", "table": "table_write_policies", "name": "ix_table_write_policies_tenant_mode", "unique": false, "columns": ["tenant_id", "mode"]}
+  ]
+}

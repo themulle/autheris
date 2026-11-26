@@ -39,6 +39,15 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     /// </summary>
     public ImmutableArray<bool> OutputColumnMasks { get; private set; } = ImmutableArray<bool>.Empty;
 
+    /// <summary>True when the visited DML statement passed static single-table row-bound validation.</summary>
+    public bool IsPreBoundedDml { get; private set; }
+
+    /// <summary>Static upper bound on rows affected by a bounded single-table DML statement.</summary>
+    public long? PreBoundedMaxRows { get; private set; }
+
+    /// <summary>Compiled value-free SELECT-RLS check for bounded INSERT on dialects without INSERT row counts.</summary>
+    public PreExecutionRowCheck? PreExecutionRowCheck { get; private set; }
+
     /// <summary>CTE names are compared by ordinal bytes: a delimited physical name that differs in case is not the CTE (INV-11).</summary>
     private static StringComparer CteScopeComparer =>
         CompilerHooks.IsDisabled(SecurityControl.CteCaseInsensitiveScope) ? StringComparer.OrdinalIgnoreCase :

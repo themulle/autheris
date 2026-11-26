@@ -45,7 +45,10 @@ public sealed record CompiledSqlTemplate(
     ImmutableArray<TableDependency> Dependencies,
     int? ExpectedAffectedRows = null,
     bool HasRecursiveCte = false,
-    ImmutableArray<bool> OutputColumnMasks = default)
+    ImmutableArray<bool> OutputColumnMasks = default,
+    bool IsPreBoundedDml = false,
+    long? PreBoundedMaxRows = null,
+    Ast.Security.PreExecutionRowCheck? PreExecutionRowCheck = null)
 {
     public static CompiledSqlTemplate From(string keyMaterial, CompiledSql compiled, ImmutableArray<TableDependency> dependencies) =>
         new(
@@ -59,7 +62,10 @@ public sealed record CompiledSqlTemplate(
             dependencies,
             compiled.ExpectedAffectedRows,
             compiled.HasRecursiveCte,
-            compiled.OutputColumnMasks);
+            compiled.OutputColumnMasks,
+            compiled.IsPreBoundedDml,
+            compiled.PreBoundedMaxRows,
+            compiled.PreExecutionRowCheck);
 
     private static ImmutableArray<SqlSlot> ToSlots(ImmutableArray<BoundParameter> parameters)
     {
@@ -136,7 +142,13 @@ public sealed record CompiledSqlTemplate(
         {
             ExpectedAffectedRows = ExpectedAffectedRows,
             HasRecursiveCte = HasRecursiveCte,
-            OutputColumnMasks = OutputColumnMasks.IsDefault ? ImmutableArray<bool>.Empty : OutputColumnMasks
+            OutputColumnMasks = OutputColumnMasks.IsDefault ? ImmutableArray<bool>.Empty : OutputColumnMasks,
+            IsPreBoundedDml = IsPreBoundedDml,
+            PreBoundedMaxRows = PreBoundedMaxRows,
+            PreExecutionRowCheck = PreExecutionRowCheck,
+            PreExecutionPolicyValues = PreExecutionRowCheck is not null
+                ? policyValues.ToImmutableDictionary(StringComparer.Ordinal)
+                : ImmutableDictionary<string, PolicyValue>.Empty
         };
     }
 }

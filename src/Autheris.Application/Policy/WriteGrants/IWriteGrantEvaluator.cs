@@ -27,17 +27,19 @@ public sealed record WriteGrantDecision(
     IReadOnlySet<string> WritableColumns,
     long? MaxRowsPerStatement,
     IReadOnlyList<string> GrantIds,
-    string? DenyCode)
+    string? DenyCode,
+    TableWritePolicy? Policy = null)
 {
     public static WriteGrantDecision Denied(string denyCode) =>
-        new(false, WriteRowScope.OwnRows, ImmutableHashSet<string>.Empty, null, Array.Empty<string>(), denyCode);
+        new(false, WriteRowScope.OwnRows, ImmutableHashSet<string>.Empty, null, Array.Empty<string>(), denyCode, null);
 
     public static WriteGrantDecision Allowed(
         WriteRowScope rowScope,
         IReadOnlySet<string> writableColumns,
         long? maxRowsPerStatement,
-        IReadOnlyList<string> grantIds) =>
-        new(true, rowScope, writableColumns, maxRowsPerStatement, grantIds, null);
+        IReadOnlyList<string> grantIds,
+        TableWritePolicy? policy = null) =>
+        new(true, rowScope, writableColumns, maxRowsPerStatement, grantIds, null, policy);
 }
 
 public interface IWriteGrantEvaluator

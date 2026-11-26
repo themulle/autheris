@@ -42,8 +42,9 @@ public static class AdminWritePrivilegesEndpoints
                     ITableMetadataRepository tableRepository,
                     IConsentRepository consentRepository,
                     TimeProvider? timeProvider,
+                    ITableWritePolicyRepository? writePolicyRepository,
                     CancellationToken ct) =>
-                    GetAsync(name, httpContext, options, tableRepository, consentRepository, timeProvider, ct))
+                    GetAsync(name, httpContext, options, tableRepository, consentRepository, timeProvider, writePolicyRepository, ct))
             .RequireAuthorization(GatewayPolicies.GovernanceAdmin)
             .WithIngressTransport(DataSourceTransportFlags.Rest)
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
@@ -58,6 +59,7 @@ public static class AdminWritePrivilegesEndpoints
         ITableMetadataRepository tableRepository,
         IConsentRepository consentRepository,
         TimeProvider? timeProvider = null,
+        ITableWritePolicyRepository? writePolicyRepository = null,
         CancellationToken ct = default)
     {
         if (!GatewayPolicies.HasRequestRole(httpContext, GatewayRole.GovernanceAdmin))
@@ -117,8 +119,66 @@ public static class AdminWritePrivilegesEndpoints
             : await tableRepository.GetTablesAsync(consentedTables, ct).ConfigureAwait(false);
         var metadataByTable = loadedTables.ToDictionary(t => t.Identifier);
 
+        if (writePolicyRepository is not null && activeWriteConsents.Count > 0)
+        {
+            var policiesByTableId = (await writePolicyRepository.ListAsync(tenantId, ct).ConfigureAwait(false))
+                .ToDictionary(static p => p.TableId);
+            activeWriteConsents = FilterConsentsByWritePolicy(activeWriteConsents, metadataByTable, policiesByTableId);
+        }
+
         var report = BuildPrivilegesReport(matchedName, dialect, tenantId, activeWriteConsents, metadataByTable);
         return Results.Ok(report);
+    }
+
+    private static List<Consent> FilterConsentsByWritePolicy(
+        List<Consent> consents,
+        Dictionary<TableIdentifier, TableMetadata> metadataByTable,
+        Dictionary<Guid, TableWritePolicy> policiesByTableId)
+    {
+        var filtered = new List<Consent>(consents.Count);
+        foreach (var consent in consents)
+        {
+            if (!metadataByTable.TryGetValue(consent.TableIdentifier, out var meta)
+                || !policiesByTableId.TryGetValue(meta.Table.Id, out var policy))
+            {
+                filtered.Add(consent);
+                continue;
+            }
+
+            if (!policy.AllowsWrites)
+            {
+                continue;
+            }
+
+            var allowedRules = consent.WriteRules
+                .Where(r => r.Operation == WriteOperation.ExecuteWrite || policy.AllowsOperation(r.Operation))
+                .ToList();
+            if (allowedRules.Count == 0)
+            {
+                continue;
+            }
+
+            filtered.Add(allowedRules.Count == consent.WriteRules.Count
+                ? consent
+                : new Consent
+                {
+                    Id = consent.Id,
+                    TableId = consent.TableId,
+                    TableIdentifier = consent.TableIdentifier,
+                    ConsentRequestId = consent.ConsentRequestId,
+                    Effect = consent.Effect,
+                    GranteeType = consent.GranteeType,
+                    GranteeSid = consent.GranteeSid,
+                    ValidFrom = consent.ValidFrom,
+                    ValidTo = consent.ValidTo,
+                    IsRevoked = consent.IsRevoked,
+                    TenantId = consent.TenantId,
+                    GrantKind = consent.GrantKind,
+                    WriteRules = allowedRules
+                });
+        }
+
+        return filtered;
     }
 
     private static async Task<List<Consent>> LoadActiveWriteConsentsForDataSourceAsync(

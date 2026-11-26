@@ -123,6 +123,8 @@ public sealed class GovernanceTestStore : IAsyncDisposable
         Services.GetRequiredService<Autheris.Application.Governance.Declarative.IManifestProposalRepository>();
     public Autheris.Application.Governance.Ownership.IDeputyRelationRepository DeputyRelations =>
         Services.GetRequiredService<Autheris.Application.Governance.Ownership.IDeputyRelationRepository>();
+    public ITableWritePolicyRepository TableWritePolicies =>
+        Services.GetRequiredService<ITableWritePolicyRepository>();
 
     /// <summary>
     /// Builds a real PDP over the store's governance services (the API-level PDP registration lives in the gateway

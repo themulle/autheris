@@ -66,6 +66,26 @@ public sealed record CompiledSql(
     public bool HasRecursiveCte { get; init; }
 
     /// <summary>
+    /// True when the compiler proved a static affected-row upper bound (<see cref="PreBoundedMaxRows"/>) on a bounded single-table
+    /// DML statement (INSERT VALUES or PK-constrained UPDATE/DELETE). Internal-init so callers outside the engine cannot forge it.
+    /// </summary>
+    public bool IsPreBoundedDml { get; internal init; }
+
+    /// <summary>Static upper bound on rows affected by a pre-bounded DML statement, when <see cref="IsPreBoundedDml"/> is true.</summary>
+    public long? PreBoundedMaxRows { get; internal init; }
+
+    /// <summary>
+    /// Value-free pre-execution SELECT-RLS check compiled for bounded single-table INSERT on dialects without INSERT row counts
+    /// (such as Databricks Delta). Evaluated by the checked DML executor before any database command is executed.
+    /// </summary>
+    public Ast.Security.PreExecutionRowCheck? PreExecutionRowCheck { get; internal init; }
+
+    /// <summary>
+    /// Current request's rebound policy values for <see cref="PreExecutionRowCheck"/>. Never stored in <see cref="CompiledSqlTemplate"/>.
+    /// </summary>
+    public ImmutableDictionary<string, PolicyValue> PreExecutionPolicyValues { get; internal init; } = ImmutableDictionary<string, PolicyValue>.Empty;
+
+    /// <summary>
     /// CR-ADG-35: true for an INSERT with check-option semantics. The executor must run the statement inside a transaction and call
     /// <see cref="DmlCheckOption.Enforce"/> with the affected row count before it commits; a difference rolls the transaction back.
     /// </summary>

@@ -206,12 +206,23 @@ public sealed class TypedPolicyContext
     /// A verifier whose expectations come from the providers, independent of the injector (plan 3.2): every table needs its
     /// tenant predicate (when it has a tenant column) and its policy predicate (when the provider says one applies).
     /// </summary>
-    public SecurityCoverageVerifier CreateVerifier(TargetSqlDialect dialect = TargetSqlDialect.SqlServer, int maxSecuredTableReferences = 256)
+    public SecurityCoverageVerifier CreateVerifier(
+        TargetSqlDialect dialect = TargetSqlDialect.SqlServer,
+        int maxSecuredTableReferences = 256,
+        PreExecutionRowCheck? preExecutionRowCheck = null)
     {
         // The verifier keeps its own per-entry cache (never shared with the injector, so it stays an independent check): the requirement of
         // a catalog entry is derived from the providers once per verification instead of once per table reference.
         var requirements = new Dictionary<TableCatalogEntry, TableCoverageRequirement>(ReferenceEqualityComparer.Instance);
-        return new SecurityCoverageVerifier(name => RequirementOf(name, requirements), dialect, maxSecuredTableReferences, dml: Dml, tenantParameterName: Tenant.ParameterName, capabilities: Capabilities, writePermit: Write);
+        return new SecurityCoverageVerifier(
+            name => RequirementOf(name, requirements),
+            dialect,
+            maxSecuredTableReferences,
+            dml: Dml,
+            tenantParameterName: Tenant.ParameterName,
+            capabilities: Capabilities,
+            writePermit: Write,
+            preExecutionRowCheck: preExecutionRowCheck);
     }
 
     /// <summary>Catalog type by canonical column name; an ambiguous (duplicate) name has no type, so a check that needs it fails closed.</summary>

@@ -245,7 +245,7 @@ internal sealed class GovernedSqlCompiler
         Pass("verify");
         var applied = CompilerHooks.IsDisabled(SecurityControl.CoverageVerifier)
             ? System.Collections.Immutable.ImmutableArray<SecurityPredicateId>.Empty
-            : typed.CreateVerifier(request.TargetDialect).Verify(secured, token);
+            : typed.CreateVerifier(request.TargetDialect, preExecutionRowCheck: visitor.PreExecutionRowCheck).Verify(secured, token);
 
         // 8. dialect capabilities
         Pass("capabilities");
@@ -262,7 +262,13 @@ internal sealed class GovernedSqlCompiler
             {
                 AppliedPredicates = applied,
                 ExpectedAffectedRows = Ast.Security.InsertCheckOption.ExpectedRows(secured),
-                OutputColumnMasks = visitor.OutputColumnMasks
+                OutputColumnMasks = visitor.OutputColumnMasks,
+                IsPreBoundedDml = visitor.IsPreBoundedDml,
+                PreBoundedMaxRows = visitor.PreBoundedMaxRows,
+                PreExecutionRowCheck = visitor.PreExecutionRowCheck,
+                PreExecutionPolicyValues = visitor.PreExecutionRowCheck is not null
+                    ? System.Collections.Immutable.ImmutableDictionary.ToImmutableDictionary(typed.PolicyValues, StringComparer.Ordinal)
+                    : System.Collections.Immutable.ImmutableDictionary<string, PolicyValue>.Empty
             };
 
         // 10. output budget

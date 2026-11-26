@@ -124,7 +124,18 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "UNAUTHENTICATED",
         "INVALID_TENANT",
         "INVALID_COLUMNS",
-        "COLUMN_METADATA_UNAVAILABLE"
+        "COLUMN_METADATA_UNAVAILABLE",
+        // Bounded single-table DML & table write policy errors; fixed messages only.
+        "TARGET_NOT_WRITABLE",
+        "WRITE_POLICY_INVALID",
+        "ROW_CHECK_VIOLATION",
+        "IDEMPOTENCY_KEY_REQUIRED",
+        "IDEMPOTENCY_CONFLICT",
+        "SERVER_STAMPED_COLUMN_REJECTED",
+        "REQUIRED_ROW_FILTER_MISSING",
+        "PRIMARY_KEY_REQUIRED",
+        "DML_WRITE_CONNECTION_MISSING",
+        "WRITE_BUDGET_EXHAUSTED"
     };
 
     /// <summary>
@@ -195,7 +206,17 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         ["SYNC_FAILED"] = "The synchronization failed.",
         ["GDPR_SUBJECT_SCOPE_UNRESOLVED"] = "The report scope cannot be resolved: name the table that holds the data subject's data.",
         ["ROW_POLICY_EXPRESSION_NOT_ALLOWED"] = "The statement uses an expression that is not permitted on a table with a row policy. Use non-raising forms such as TRY_CAST or NULLIF instead.",
-        ["SCOPE_CONCURRENCY_EXCEEDED"] = "Too many concurrent queries are active for this client scope. Retry later."
+        ["SCOPE_CONCURRENCY_EXCEEDED"] = "Too many concurrent queries are active for this client scope. Retry later.",
+        ["TARGET_NOT_WRITABLE"] = "The target table does not allow the requested write operation.",
+        ["WRITE_POLICY_INVALID"] = "The table write policy configuration is invalid.",
+        ["ROW_CHECK_VIOLATION"] = "The written row does not satisfy the row-level security policy for the caller.",
+        ["IDEMPOTENCY_KEY_REQUIRED"] = "An idempotency key is required for this write operation.",
+        ["IDEMPOTENCY_CONFLICT"] = "The idempotency key was already used with a different request payload.",
+        ["SERVER_STAMPED_COLUMN_REJECTED"] = "A server-stamped column cannot be supplied by the client.",
+        ["REQUIRED_ROW_FILTER_MISSING"] = "This table requires an active row-level security filter before writes are permitted.",
+        ["PRIMARY_KEY_REQUIRED"] = "Primary key columns are required for this write operation.",
+        ["DML_WRITE_CONNECTION_MISSING"] = "The data source does not have a dedicated write connection configured.",
+        ["WRITE_BUDGET_EXHAUSTED"] = "The write rate or row budget has been exceeded. Retry later."
     };
 
     internal const string MaskedCode = "MASKED";

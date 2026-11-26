@@ -245,8 +245,30 @@ public sealed partial class SecurityCoverageVerifier
             Body(insert.Source, ImmutableHashSet<string>.Empty, policyScope: false);
             if (policyIds.Count > 0)
             {
-                // CR-ADG-35: a table with a row policy accepts only the check-option shape, with the policy over the inserted values.
-                VerifyCheckOptionSource(insert.Source, insert.Columns!, tenantIndex, policyIds, requirement);
+                if (Owner._preExecutionRowCheck is { } preCheck &&
+                    Owner._writePermit is { BoundedSingleTable: true } &&
+                    Owner._capabilities is { ReportsInsertRowCount: false } &&
+                    insert.Source is ValuesQueryBody values)
+                {
+                    // Bounded single-table INSERT on dialects without INSERT row counts (e.g. Databricks Delta):
+                    // verify VALUES shape, bound tenant, and complete SELECT-RLS pre-execution check coverage.
+                    VerifyInsertSourceShape(insert.Source, insert.Columns!.Count, tenantIndex);
+                    if (Owner._writePermit.BoundedMaxRows is { } cap && values.Rows.Count > cap)
+                    {
+                        throw new SecurityCoverageException("A bounded single-table INSERT exceeds its maximum row bound.");
+                    }
+
+                    if (!preCheck.Covers(requirement.PolicyColumns, insert.Columns!, values))
+                    {
+                        throw new SecurityCoverageException("An INSERT into a table with a row policy is missing complete pre-execution row-check coverage.");
+                    }
+                }
+                else
+                {
+                    // CR-ADG-35: a table with a row policy accepts only the check-option shape, with the policy over the inserted values.
+                    VerifyCheckOptionSource(insert.Source, insert.Columns!, tenantIndex, policyIds, requirement);
+                }
+
                 foreach (var id in policyIds)
                 {
                     if (!Applied.Contains(id)) Applied.Add(id);

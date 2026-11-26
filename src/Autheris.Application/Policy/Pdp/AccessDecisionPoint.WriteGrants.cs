@@ -31,7 +31,7 @@ public sealed partial class AccessDecisionPoint
             return PreconditionDenied(table, "IDENTITY_INCOMPLETE", "Identity", null, "Access denied: write operations require an authenticated caller.");
         }
 
-        if (request.Transport is not (AccessTransport.WebSql or AccessTransport.Discovery))
+        if (request.Transport is not (AccessTransport.WebSql or AccessTransport.Discovery or AccessTransport.GraphQl))
         {
             return PreconditionDenied(
                 table,
@@ -159,7 +159,18 @@ public sealed partial class AccessDecisionPoint
                     grantDecision.WritableColumns,
                     grantDecision.MaxRowsPerStatement,
                     grantDecision.GrantIds,
-                    grantDecision.DenyCode),
+                    grantDecision.DenyCode,
+                    grantDecision.Policy),
+                EvaluatedByPdp = true
+            };
+        }
+
+        if (request.Transport == AccessTransport.GraphQl && grantDecision.Policy is not { AllowsWrites: true })
+        {
+            return TableAccessDecision.Denied(table, $"Write access to table '{table.ToQualifiedName()}' via GraphQL requires an explicit table write policy.") with
+            {
+                DenialKind = TableAccessDenialKind.Policy,
+                Reasons = [new DecisionReason(DecisionStep.DefaultDeny, "target_not_writable", "WritePolicy", null)],
                 EvaluatedByPdp = true
             };
         }
@@ -250,6 +261,16 @@ public sealed partial class AccessDecisionPoint
             return decision with { EvaluatedByPdp = true };
         }
 
+        if (grantDecision.Policy is { RequireRowFilter: true } && (!decision.HasRowFilter || !groupsComplete))
+        {
+            return TableAccessDecision.Denied(table, $"Write access to table '{table.ToQualifiedName()}' requires an active row-level filter and complete identity group resolution.") with
+            {
+                DenialKind = TableAccessDenialKind.Policy,
+                Reasons = [new DecisionReason(DecisionStep.DefaultDeny, "REQUIRED_ROW_FILTER_MISSING", "WritePolicy", null)],
+                EvaluatedByPdp = true
+            };
+        }
+
         var authOpt = _options.Value.Plugins?.Auth;
         if (authOpt?.Enabled == true
             && authOpt.AllowAuthorizationHooks
@@ -301,7 +322,8 @@ public sealed partial class AccessDecisionPoint
                 grantDecision.RowScope,
                 writableColumns,
                 grantDecision.MaxRowsPerStatement,
-                grantDecision.GrantIds),
+                grantDecision.GrantIds,
+                Policy: grantDecision.Policy),
             Grants = grantRefs,
             Reasons = grantReasons,
             EvaluatedByPdp = true

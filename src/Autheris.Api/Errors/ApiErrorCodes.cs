@@ -151,6 +151,7 @@ public static class ApiErrorCodes
     public const string VersionMismatch = "VERSION_MISMATCH";
     public const string ZipBombDetected = "ZIP_BOMB_DETECTED";
     public const string ZipSlipAttempt = "ZIP_SLIP_ATTEMPT";
+    public const string TargetNotWritable = "TARGET_NOT_WRITABLE";
 
     private static readonly Regex CodeFormat = new("^[A-Z][A-Z0-9_]{2,63}$", RegexOptions.CultureInvariant | RegexOptions.Compiled, TimeSpan.FromMilliseconds(50));
 
