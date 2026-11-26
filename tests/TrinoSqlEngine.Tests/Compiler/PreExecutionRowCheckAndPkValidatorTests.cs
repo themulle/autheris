@@ -11,6 +11,7 @@ using TrinoSqlEngine.Ast.Security;
 using TrinoSqlEngine.Governance;
 using Xunit;
 
+[Trait("Category", "SqlGate")]
 public sealed class PreExecutionRowCheckAndPkValidatorTests
 {
     private static readonly TableCatalogEntry ParamsEntry = new(

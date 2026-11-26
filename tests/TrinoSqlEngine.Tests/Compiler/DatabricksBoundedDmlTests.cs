@@ -17,6 +17,7 @@ using TrinoSqlEngine.Ast.Security;
 using TrinoSqlEngine.Governance;
 using Xunit;
 
+[Trait("Category", "SqlGate")]
 public sealed class DatabricksBoundedDmlTests
 {
     private static readonly TableIdentity ParamsTableId = new("main", "report_params");
