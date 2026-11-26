@@ -86,6 +86,7 @@ public interface IProfileAssignmentStore
     /// <summary>Returns true only when the conditional update matched an active consent.</summary>
     Task<bool> MarkConsentRevokedInTransactionAsync(
         DbTransaction transaction,
+        TenantId tenantId,
         Guid consentId,
         Sid actorSid,
         string reason,

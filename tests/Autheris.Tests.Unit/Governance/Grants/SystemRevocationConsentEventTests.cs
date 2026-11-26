@@ -364,6 +364,26 @@ public sealed class SystemRevocationConsentEventTests
 
     [Theory]
     [MemberData(nameof(Dialects))]
+    public async Task Renewal_supersede_of_an_already_revoked_renewed_grant_throws_and_appends_no_event(string dialect)
+    {
+        var conn = DialectKit.Of(dialect).NewConnection();
+        await using var repo = CreateRepo(dialect, conn, []);
+        var actor = new Sid("user:dg");
+
+        conn.EnqueueReader(RevokeTargetRow(Tenant.Value, isRevoked: false, requestId: null));
+        conn.EnqueueReader(RevokeTargetRow(Tenant.Value, isRevoked: true, requestId: null));
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() =>
+            repo.RevokeSystemConsentByIdAsync(Tenant, Guid.NewGuid(), actor, "Renewed by approver.", SystemRevocationKind.Renewal, Guid.NewGuid()));
+
+        ex.Message.ShouldNotContain("Renewed by approver");
+        conn.Commands.ShouldNotContain(c =>
+            c.CommandText.TrimStart().StartsWith("UPDATE CONSENTS", StringComparison.Ordinal)
+            || c.CommandText.Contains("INSERT INTO CONSENT_EVENTS", StringComparison.Ordinal)
+            || IsEventLock(c));
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
     public async Task Renewal_kind_requires_a_distinct_renewed_grant_id_and_other_kinds_reject_one(string dialect)
     {
         var conn = DialectKit.Of(dialect).NewConnection();
@@ -476,9 +496,14 @@ public sealed class SystemRevocationConsentEventTests
         await using var tx = await conn.BeginTransactionAsync();
 
         conn.NonQueryResult = 1;
-        (await store.MarkConsentRevokedInTransactionAsync(tx, Guid.NewGuid(), Leaver, "reason", Now)).ShouldBeTrue(dialect);
+        (await store.MarkConsentRevokedInTransactionAsync(tx, Tenant, Guid.NewGuid(), Leaver, "reason", Now)).ShouldBeTrue(dialect);
         conn.NonQueryResult = 0;
-        (await store.MarkConsentRevokedInTransactionAsync(tx, Guid.NewGuid(), Leaver, "reason", Now)).ShouldBeFalse(dialect);
+        (await store.MarkConsentRevokedInTransactionAsync(tx, Tenant, Guid.NewGuid(), Leaver, "reason", Now)).ShouldBeFalse(dialect);
+
+        var updates = conn.Commands.Where(c => c.CommandText.TrimStart().StartsWith("UPDATE CONSENTS", StringComparison.Ordinal)).ToList();
+        updates.Count.ShouldBe(2, dialect);
+        updates.ShouldAllBe(u => u.CommandText.Contains("tenant_id", StringComparison.Ordinal), dialect);
+        updates.ShouldAllBe(u => u.Parameters.Any(p => (p.Value as string) == Tenant.Value), dialect);
     }
 
     [Theory]

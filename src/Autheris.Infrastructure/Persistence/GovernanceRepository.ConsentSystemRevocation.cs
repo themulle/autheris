@@ -112,6 +112,7 @@ public partial class GovernanceRepository
             {
                 var renewed = await ConsentGrantSqlCore.ReadRevokeTargetAsync(conn, tx, RevokeTargetSql, renewedConsentId!.Value, revokedBySid, ct).ConfigureAwait(false);
                 if (renewed is not { } renewedRow
+                    || renewedRow.AlreadyRevoked
                     || !TenantId.TryParse(renewedRow.TenantRaw, out var renewedTenant)
                     || renewedTenant != tenant)
                 {

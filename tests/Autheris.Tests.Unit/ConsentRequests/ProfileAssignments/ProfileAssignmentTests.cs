@@ -375,7 +375,7 @@ public sealed class ProfileAssignmentTests
         public Exception? AppendFailure { get; set; }
         public List<string> CallLog { get; } = [];
         public int CommitCount { get; private set; }
-        public Task<bool> MarkConsentRevokedInTransactionAsync(DbTransaction transaction, Guid consentId, Sid actorSid, string reason, DateTimeOffset now, CancellationToken ct = default)
+        public Task<bool> MarkConsentRevokedInTransactionAsync(DbTransaction transaction, TenantId tenantId, Guid consentId, Sid actorSid, string reason, DateTimeOffset now, CancellationToken ct = default)
         {
             if (LoseRevokeRace.Contains(consentId))
             {

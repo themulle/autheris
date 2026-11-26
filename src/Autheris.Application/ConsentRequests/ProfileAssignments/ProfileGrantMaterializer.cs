@@ -355,7 +355,7 @@ public sealed class ProfileGrantMaterializer(
                 }
 
                 // A consent revoked concurrently no longer matches the conditional update: no ledger, epoch, audit or event for it.
-                if (!await _store.MarkConsentRevokedInTransactionAsync(tx.Transaction, consent.Id, actorSid, normalizedReason, now, ct)
+                if (!await _store.MarkConsentRevokedInTransactionAsync(tx.Transaction, tenantId, consent.Id, actorSid, normalizedReason, now, ct)
                         .ConfigureAwait(false))
                 {
                     continue;

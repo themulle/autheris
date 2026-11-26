@@ -268,10 +268,10 @@ WHERE c.tenant_id = @tenantId
         GetConsentByIdAsync(consentId, ct);
 
     async Task<bool> IProfileAssignmentStore.MarkConsentRevokedInTransactionAsync(
-        DbTransaction transaction, Guid consentId, Sid actorSid, string reason, DateTimeOffset now, CancellationToken ct)
+        DbTransaction transaction, TenantId tenantId, Guid consentId, Sid actorSid, string reason, DateTimeOffset now, CancellationToken ct)
     {
         var conn = transaction.Connection ?? throw new InvalidOperationException("Transaction connection unavailable.");
-        return await ConsentGrantSqlCore.MarkRevokedAsync(conn, transaction, consentId, actorSid, reason, now, ct).ConfigureAwait(false);
+        return await MarkRevokedForTenantAsync(conn, transaction, consentId, tenantId, actorSid, reason, now, ct).ConfigureAwait(false);
     }
 
     async Task IProfileAssignmentStore.AppendGrantRevokedEventsInTransactionAsync(
