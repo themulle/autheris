@@ -74,6 +74,8 @@ public static class GatewaySqlEngineServiceExtensions
         // L-A1: one key resolution for the process (singleton), shared by the governed and the federated executors.
         services.AddSingleton<CompiledSqlAuditDigester>();
         services.AddSingleton<Autheris.Application.Sql.Paging.IWebSqlPageTokenCodec, Autheris.Application.Sql.Paging.WebSqlPageTokenCodec>();
+        // Off by default (WebSql:ResultCacheMaxMegabytes = 0); without the epoch services the cache never serves a result.
+        services.AddSingleton<Autheris.Application.Sql.ResultCache.IWebSqlResultCache, Autheris.Application.Sql.ResultCache.WebSqlResultCache>();
         services.AddScoped<GovernedSqlRewriteDependencies>();
         services.AddScoped<GovernedSqlExecutionDependencies>();
         services.TryAddSingleton<Autheris.Application.Policy.WriteGrants.IWriteBudgetStore, Autheris.Infrastructure.RateLimiting.InMemoryWriteBudgetStore>();
