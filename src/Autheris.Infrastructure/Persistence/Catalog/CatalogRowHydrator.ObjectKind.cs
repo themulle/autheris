@@ -3,22 +3,55 @@ namespace Autheris.Infrastructure.Persistence.Catalog;
 using System;
 using System.Data.Common;
 using Autheris.Domain.Model;
+using Microsoft.Extensions.Logging;
 
 internal static partial class CatalogRowHydrator
 {
-    internal static DiscoveryObjectKind ParseObjectKind(DbDataReader reader, int ordinal)
+    private const int MaxLoggedObjectKindLength = 64;
+
+    internal static DiscoveryObjectKind ParseObjectKind(DbDataReader reader, int ordinal, ILogger? logger = null)
     {
         if (reader.FieldCount <= ordinal || reader.IsDBNull(ordinal))
         {
             return DiscoveryObjectKind.Table;
         }
 
-        return reader.GetString(ordinal) switch
+        var stored = reader.GetString(ordinal);
+        if (stored.Equals("table", StringComparison.OrdinalIgnoreCase))
         {
-            "view" => DiscoveryObjectKind.View,
-            "metric_view" => DiscoveryObjectKind.MetricView,
-            _ => DiscoveryObjectKind.Table
-        };
+            return DiscoveryObjectKind.Table;
+        }
+
+        if (stored.Equals("view", StringComparison.OrdinalIgnoreCase))
+        {
+            return DiscoveryObjectKind.View;
+        }
+
+        if (stored.Equals("procedure", StringComparison.OrdinalIgnoreCase))
+        {
+            return DiscoveryObjectKind.Procedure;
+        }
+
+        if (stored.Equals("metric_view", StringComparison.OrdinalIgnoreCase))
+        {
+            return DiscoveryObjectKind.MetricView;
+        }
+
+        var safe = SanitizeForLog(stored);
+        logger?.LogWarning("A catalog row in TABLES has the unknown object kind {ObjectKind} and was not loaded.", safe);
+        throw new UnknownCatalogObjectKindException(safe);
+    }
+
+    private static string SanitizeForLog(string value)
+    {
+        var length = Math.Min(value.Length, MaxLoggedObjectKindLength);
+        return string.Create(length, value, static (span, source) =>
+        {
+            for (var i = 0; i < span.Length; i++)
+            {
+                span[i] = char.IsControl(source[i]) ? '?' : source[i];
+            }
+        });
     }
 
     internal static MetricViewColumnRole? ParseColumnRole(DbDataReader reader, int ordinal)

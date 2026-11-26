@@ -1,8 +1,10 @@
 using System.Data;
 using Autheris.Domain.Model;
+using Autheris.Infrastructure.Persistence;
 using Autheris.Infrastructure.Persistence.Catalog;
 using Autheris.Infrastructure.Persistence.Migrations;
 using Autheris.Infrastructure.Persistence.Migrations.Shape;
+using Autheris.Tests.Unit.Sql;
 using Shouldly;
 using Xunit;
 
@@ -44,19 +46,76 @@ public sealed class TableObjectKindMigration0030Tests
     }
 
     [Theory]
-    [InlineData("view", DiscoveryObjectKind.View)]
     [InlineData("table", DiscoveryObjectKind.Table)]
-    [InlineData("VIEW", DiscoveryObjectKind.Table)]
-    [InlineData("procedure", DiscoveryObjectKind.Table)]
-    [InlineData("materialized_view", DiscoveryObjectKind.Table)]
-    [InlineData("", DiscoveryObjectKind.Table)]
+    [InlineData("view", DiscoveryObjectKind.View)]
+    [InlineData("procedure", DiscoveryObjectKind.Procedure)]
+    [InlineData("metric_view", DiscoveryObjectKind.MetricView)]
+    [InlineData("VIEW", DiscoveryObjectKind.View)]
+    [InlineData("Procedure", DiscoveryObjectKind.Procedure)]
     [InlineData(null, DiscoveryObjectKind.Table)]
-    public void Hydrator_MapsOnlyAStoredViewToViewAndEverythingElseToTable(string? stored, DiscoveryObjectKind expected)
+    public void Hydrator_MapsEachKnownWireNameToItsKind(string? stored, DiscoveryObjectKind expected)
     {
         using var reader = RowWith(stored).CreateDataReader();
         reader.Read().ShouldBeTrue();
 
         CatalogRowHydrator.ReadTableEntity(reader).ObjectKind.ShouldBe(expected);
+    }
+
+    [Fact]
+    public void Hydrator_RoundTripsEveryKindThroughItsWireName()
+    {
+        foreach (var kind in Enum.GetValues<DiscoveryObjectKind>())
+        {
+            using var reader = RowWith(kind.ToWireName()).CreateDataReader();
+            reader.Read().ShouldBeTrue();
+
+            CatalogRowHydrator.ReadTableEntity(reader).ObjectKind.ShouldBe(kind);
+        }
+    }
+
+    [Theory]
+    [InlineData("materialized_view")]
+    [InlineData("")]
+    [InlineData(" view")]
+    [InlineData("tbl'; --")]
+    public void Hydrator_UnknownKind_ThrowsAndLogsOnlyTheKindValue(string stored)
+    {
+        var table = RowWith(stored);
+        table.Rows[0]["schema_name"] = "secret_schema";
+        table.Rows[0]["table_name"] = "secret_table";
+        var logger = new ListCapturingLogger<GovernanceRepository>();
+        using var reader = table.CreateDataReader();
+        reader.Read().ShouldBeTrue();
+
+        var ex = Should.Throw<UnknownCatalogObjectKindException>(() => CatalogRowHydrator.ReadTableEntity(reader, logger));
+
+        ex.Message.ShouldBe("The stored catalog object kind is unknown.");
+        logger.Entries.Count.ShouldBe(1);
+        logger.Entries[0].ShouldContain(stored);
+        logger.Entries[0].ShouldNotContain("secret_schema");
+        logger.Entries[0].ShouldNotContain("secret_table");
+    }
+
+    [Fact]
+    public void Hydrator_UnknownKind_LogValueIsTruncatedAndControlCharsReplaced()
+    {
+        var logger = new ListCapturingLogger<GovernanceRepository>();
+
+        using (var longReader = RowWith(new string('x', 500) + "\n").CreateDataReader())
+        {
+            longReader.Read().ShouldBeTrue();
+            var ex = Should.Throw<UnknownCatalogObjectKindException>(() => CatalogRowHydrator.ReadTableEntity(longReader, logger));
+            ex.ObjectKind.Length.ShouldBe(64);
+        }
+
+        using (var forgedReader = RowWith("bad\r\nFake entry").CreateDataReader())
+        {
+            forgedReader.Read().ShouldBeTrue();
+            var ex = Should.Throw<UnknownCatalogObjectKindException>(() => CatalogRowHydrator.ReadTableEntity(forgedReader, logger));
+            ex.ObjectKind.ShouldBe("bad??Fake entry");
+        }
+
+        logger.Entries.ShouldAllBe(e => !e.Contains('\n') && !e.Contains('\r'));
     }
 
     [Fact]
@@ -70,7 +129,7 @@ public sealed class TableObjectKindMigration0030Tests
         CatalogRowHydrator.ReadTableEntity(reader).ObjectKind.ShouldBe(DiscoveryObjectKind.Table);
     }
 
-    private static DataTable RowWith(string? kind)
+    internal static DataTable RowWith(string? kind)
     {
         var table = new DataTable();
         (string Name, Type Type)[] columns =

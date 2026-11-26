@@ -47,7 +47,8 @@ public sealed class GovernedCatalogProviderTests
     }
 
     private static (GovernedCatalogProvider Provider, Clock Clock, IGovernanceRepository Governance) Build(
-        string provider, TableColumn[] columns, int ttl = 300, IGovernanceRepository? governance = null, string? tenantColumn = null)
+        string provider, TableColumn[] columns, int ttl = 300, IGovernanceRepository? governance = null, string? tenantColumn = null,
+        DiscoveryObjectKind objectKind = DiscoveryObjectKind.Table)
     {
         var gateway = new GatewayOptions
         {
@@ -62,7 +63,7 @@ public sealed class GovernedCatalogProviderTests
         {
             repo.GetTableMetadataAsync(Orders, Arg.Any<CancellationToken>()).Returns(new TableMetadata
             {
-                Table = new Table { SourceType = provider, SourceName = Source, SchemaName = "dbo", TableName = "orders", DataSourceType = DataSourceType.Sql },
+                Table = new Table { SourceType = provider, SourceName = Source, SchemaName = "dbo", TableName = "orders", DataSourceType = DataSourceType.Sql, ObjectKind = objectKind },
                 Identifier = Orders,
                 Columns = columns,
                 TenantColumnName = tenantColumn
@@ -76,6 +77,30 @@ public sealed class GovernedCatalogProviderTests
 
     private static TableCatalogEntry? Resolve(ITableCatalog catalog) =>
         catalog.Resolve(new SqlQualifiedName(new[] { new SqlIdentifier("dbo"), new SqlIdentifier("orders") }));
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ProcedureKind_IsNotResolvable()
+    {
+        var (sut, _, _) = Build("SqlServer", new[] { Col("id", "int") }, objectKind: DiscoveryObjectKind.Procedure);
+
+        var catalog = await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None);
+
+        Resolve(catalog).ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task MetricViewKind_StillResolvesWithFlag()
+    {
+        var (sut, _, _) = Build("SqlServer", new[] { Col("id", "int") }, objectKind: DiscoveryObjectKind.MetricView);
+
+        var catalog = await sut.GetCatalogAsync(Source, new[] { Orders }, CancellationToken.None);
+
+        var entry = Resolve(catalog);
+        entry.ShouldNotBeNull();
+        entry.IsMetricView.ShouldBeTrue();
+    }
 
     [Fact]
     [Trait("Category", "Security")]

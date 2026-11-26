@@ -78,8 +78,16 @@ public partial class GovernanceRepository
                 await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
                 if (await reader.ReadAsync(ct).ConfigureAwait(false))
                 {
-                    tableEntity = CatalogRowHydrator.ReadTableEntity(reader, _logger);
-                    tableId = tableEntity.Id;
+                    try
+                    {
+                        tableEntity = CatalogRowHydrator.ReadTableEntity(reader, _logger);
+                        tableId = tableEntity.Id;
+                    }
+                    catch (UnknownCatalogObjectKindException)
+                    {
+                        tableEntity = null;
+                        tableId = null;
+                    }
                 }
             }
 
