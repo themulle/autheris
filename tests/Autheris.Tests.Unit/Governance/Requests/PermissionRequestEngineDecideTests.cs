@@ -288,6 +288,128 @@ public sealed class PermissionRequestEngineDecideTests
         audit.Entries.Select(e => e.Decision).ShouldBe(["WITHDRAWN", "WITHDRAW_FAILED"]);
     }
 
+    /// <summary>Withdrawal fake: the stored row turns WITHDRAWN with the version after the change once the withdrawal commits.</summary>
+    private static (PermissionRequestEngine Engine, RecordingConsentEventOutbox Events) WithdrawEventEngine(ConsentRequest req, bool withdrawSucceeds = true)
+    {
+        var stored = req;
+        var events = new RecordingConsentEventOutbox();
+        var approvals = NullFake.Create<IConsentApprovalRepository>((m, _) =>
+        {
+            if (m.Name == nameof(IConsentApprovalRepository.GetConsentRequestAsync))
+            {
+                return Task.FromResult<ConsentRequest?>(stored);
+            }
+
+            if (m.Name == nameof(IConsentApprovalRepository.WithdrawConsentRequestAsync))
+            {
+                if (withdrawSucceeds)
+                {
+                    stored = new ConsentRequest
+                    {
+                        Id = req.Id,
+                        TableId = req.TableId,
+                        TableIdentifier = req.TableIdentifier,
+                        RequesterSid = req.RequesterSid,
+                        RequestedGranteeType = req.RequestedGranteeType,
+                        RequestedGranteeRef = req.RequestedGranteeRef,
+                        BusinessJustification = req.BusinessJustification,
+                        Status = "WITHDRAWN",
+                        RequestedAt = req.RequestedAt,
+                        RequestedValidTo = req.RequestedValidTo,
+                        TenantId = req.TenantId,
+                        Version = req.Version + 1,
+                        WorkflowMode = req.WorkflowMode,
+                        ExternalSystemId = req.ExternalSystemId,
+                        RequestKind = req.RequestKind,
+                        GrantKind = req.GrantKind
+                    };
+                }
+
+                return Task.FromResult(withdrawSucceeds);
+            }
+
+            return NullFake.UseDefault;
+        });
+        var engine = new PermissionRequestEngine(
+            approvals,
+            new InMemoryAuditWriter(),
+            new ApproverResolver(),
+            new ApproverEligibility(new GovernanceCapabilities()),
+            new SeparationOfDutiesService(),
+            new GrantPolicy(),
+            GrantValidityPolicy.CreateDefault(),
+            Array.Empty<IGrantEffectApplier>(),
+            timeProvider: new FakeTimeProvider(Now),
+            eventOutbox: events);
+        return (engine, events);
+    }
+
+    private static ClaimsPrincipal RequesterAlice() => new(new ClaimsIdentity(
+        [new Claim(ClaimTypes.PrimarySid, "user:alice"), new Claim("tenant_id", TenantA.Value)], "Bearer"));
+
+    [Theory]
+    [InlineData("PENDING")]
+    [InlineData("PENDING_SECOND_APPROVAL")]
+    [InlineData("PENDING_EXTERNAL_APPROVAL")]
+    public async Task Withdrawal_appends_one_request_updated_event_with_the_version_after_the_change(string status)
+    {
+        // Issue #1165: consumers learn about a withdrawal from request.updated (status WITHDRAWN), routed like the request's other events.
+        var systemId = status == "PENDING_EXTERNAL_APPROVAL" ? Guid.NewGuid() : (Guid?)null;
+        var req = new ConsentRequest
+        {
+            Id = Guid.NewGuid(),
+            TableId = Guid.NewGuid(),
+            TableIdentifier = OrdersTable,
+            RequesterSid = new Sid("user:alice"),
+            RequestedGranteeType = GranteeType.User,
+            RequestedGranteeRef = "user:alice",
+            BusinessJustification = "Quarterly financial order audit.",
+            Status = status,
+            RequestedAt = Now.AddHours(-1),
+            RequestedValidTo = Now.AddDays(30),
+            TenantId = TenantA,
+            Version = 2,
+            WorkflowMode = systemId is null ? ConsentWorkflowMode.Internal : ConsentWorkflowMode.External,
+            ExternalSystemId = systemId,
+            RequestKind = ConsentRequestKind.Data,
+            GrantKind = PermissionGrantKind.Data
+        };
+        var (engine, events) = WithdrawEventEngine(req);
+
+        (await engine.WithdrawAsync(req.Id, RequesterAlice())).ShouldBeTrue();
+
+        var (entry, transaction) = events.Appended.ShouldHaveSingleItem();
+        entry.EventType.ShouldBe(Autheris.Application.ConsentRequests.Events.ConsentEventTypes.RequestUpdated);
+        entry.SubjectId.ShouldBe(req.Id.ToString("D"));
+        entry.TenantId.ShouldBe(TenantA.Value);
+        entry.ExternalSystemId.ShouldBe(systemId);
+        transaction.ShouldBeNull("the withdrawal committed in its own repository transaction before the event is appended");
+        RecordingConsentEventOutbox.ReadThinRequestPayload(entry).ShouldBe(("WITHDRAWN", 3, systemId is null ? "INTERNAL" : "EXTERNAL"));
+        entry.PayloadJson.ShouldNotContain("Quarterly financial");
+    }
+
+    [Fact]
+    public async Task Refused_or_lost_withdrawals_append_no_event()
+    {
+        var decided = PendingRequest();
+        decided.Status = "APPROVED";
+        var (refusedEngine, refusedEvents) = WithdrawEventEngine(decided);
+        await Should.ThrowAsync<ConsentRequestException>(() => refusedEngine.WithdrawAsync(decided.Id, RequesterAlice()));
+        refusedEvents.Appended.ShouldBeEmpty();
+
+        var foreign = PendingRequest();
+        var (foreignEngine, foreignEvents) = WithdrawEventEngine(foreign);
+        var mallory = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.PrimarySid, "user:mallory"), new Claim("tenant_id", TenantA.Value)], "Bearer"));
+        await Should.ThrowAsync<ConsentRequestException>(() => foreignEngine.WithdrawAsync(foreign.Id, mallory));
+        foreignEvents.Appended.ShouldBeEmpty();
+
+        var raced = PendingRequest();
+        var (racedEngine, racedEvents) = WithdrawEventEngine(raced, withdrawSucceeds: false);
+        await Should.ThrowAsync<ConsentRequestException>(() => racedEngine.WithdrawAsync(raced.Id, RequesterAlice()));
+        racedEvents.Appended.ShouldBeEmpty();
+    }
+
     [Fact]
     public async Task Denied_attempt_audited()
     {

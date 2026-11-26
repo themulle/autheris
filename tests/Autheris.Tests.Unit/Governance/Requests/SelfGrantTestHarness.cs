@@ -78,6 +78,7 @@ internal sealed class SelfGrantHarness
     public List<TenantId> RevokedForTenants { get; } = [];
     public Func<Guid, bool>? FailRevokeConsent { get; set; }
     public Func<Guid, Consent?>? ConsentLookup { get; set; }
+    public RecordingConsentEventOutbox Events { get; } = new();
     public PermissionRequestEngine Engine { get; }
     public SelfGrantService Service { get; }
 
@@ -128,8 +129,9 @@ internal sealed class SelfGrantHarness
                         var req = Created.Find(r => r.Id == id)!;
                         var tx = NullFake.Create<IGovernanceTransaction>();
                         var record = await decide(tx, req);
-                        var grants = await apply(tx, record, req);
-                        return new DecisionCasResult(DecisionCasOutcome.Applied, req, grants);
+                        var updated = Decided(req, record);
+                        var grants = await apply(tx, record, updated);
+                        return new DecisionCasResult(DecisionCasOutcome.Applied, updated, grants);
                     });
                 default:
                     return NullFake.UseDefault;
@@ -182,9 +184,41 @@ internal sealed class SelfGrantHarness
             notificationDispatcher: Notifications,
             capabilities: capabilities,
             timeProvider: new FakeTimeProvider(Now),
-            consentRepository: consentRepo);
+            consentRepository: consentRepo,
+            eventOutbox: Events);
         Service = new SelfGrantService(Engine, Audit, new FakeTimeProvider(Now));
     }
+
+    /// <summary>The request row as the decision CAS leaves it: the decided status and the version after the change.</summary>
+    private static ConsentRequest Decided(ConsentRequest r, PermissionDecisionRecord record) => new()
+    {
+        Id = r.Id,
+        TableId = r.TableId,
+        TableIdentifier = r.TableIdentifier,
+        RequesterSid = r.RequesterSid,
+        RequesterIdentifiers = r.RequesterIdentifiers,
+        RequestedGranteeType = r.RequestedGranteeType,
+        RequestedGranteeRef = r.RequestedGranteeRef,
+        BusinessJustification = r.BusinessJustification,
+        Status = record.NewStatus,
+        RequestedAt = r.RequestedAt,
+        RequestedValidFrom = r.RequestedValidFrom,
+        RequestedValidTo = record.ApprovedValidTo,
+        UpdatedAt = record.DecidedAt,
+        TenantId = r.TenantId,
+        Version = r.Version + 1,
+        WorkflowMode = r.WorkflowMode,
+        ExternalSystemId = r.ExternalSystemId,
+        RequestKind = r.RequestKind,
+        GrantKind = r.GrantKind,
+        TargetColumns = r.TargetColumns,
+        ContainerKind = r.ContainerKind,
+        ContainerId = r.ContainerId,
+        ApproverCapacity = record.Capacity,
+        SelfGrant = record.SelfGrant,
+        DecidedBy = record.DecidedBy,
+        DecidedAt = record.DecidedAt
+    };
 
     public static SecurityPrincipalContext Actor(string sid, string role = "TenantAdmin", IEnumerable<string>? groups = null, bool servicePrincipal = false)
     {
