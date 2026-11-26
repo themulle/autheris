@@ -218,7 +218,8 @@ public sealed class StepSqlLintTests
                 (45, "drop_table_ownership"),
                 (46, "manifest_proposals"),
                 (47, "approval_step_identifiers"),
-                (48, "deputy_relations")
+                (48, "deputy_relations"),
+                (49, "table_write_policies")
             ]);
         }
     }

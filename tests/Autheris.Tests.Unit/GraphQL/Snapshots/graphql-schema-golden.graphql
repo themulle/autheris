@@ -82,6 +82,29 @@ type Mutation {
   ): ConsentRequestPayload! @cost(weight: "10")
   withdrawAccessRequest(requestId: UUID!): ConsentRequestPayload!
     @cost(weight: "10")
+  insertDatasetRow(
+    dataset: String!
+    row: [RowFieldInput!]!
+    idempotencyKey: String!
+  ): RowWritePayload! @cost(weight: "10")
+  upsertDatasetRow(
+    dataset: String!
+    row: [RowFieldInput!]!
+    idempotencyKey: String!
+  ): RowWritePayload! @cost(weight: "10")
+  updateDatasetRowByPk(
+    dataset: String!
+    key: [RowFieldInput!]!
+    patch: [RowFieldInput!]!
+    idempotencyKey: String!
+  ): RowWritePayload! @cost(weight: "10")
+  deleteDatasetRowByPk(
+    dataset: String!
+    key: [RowFieldInput!]!
+    idempotencyKey: String!
+  ): RowWritePayload! @cost(weight: "10")
+  setTableWritePolicy(input: SetTableWritePolicyInput!): TableWritePolicyPayload!
+    @cost(weight: "10")
 }
 
 type AffectedEntity {
@@ -322,6 +345,14 @@ type RejectionBreakdown {
   total: Long!
 }
 
+type RowWritePayload {
+  dataset: String!
+  operation: String!
+  affectedRows: Int!
+  replayed: Boolean!
+  idempotencyKey: String!
+}
+
 type RuntimeConsumerSummary {
   actorSid: String!
   queryCount: Int!
@@ -376,6 +407,17 @@ type TableRecordPayload {
   jsonRows: [String!]!
 }
 
+type TableWritePolicyPayload {
+  dataset: String!
+  mode: String!
+  allowedOperations: [String!]!
+  requirePrimaryKeyPredicate: Boolean!
+  requireRowFilter: Boolean!
+  maxRowsPerStatement: Long
+  writableColumns: [String!]
+  updatedAtUtc: DateTime!
+}
+
 input AccessRequestContextInput {
   application: String
   tool: String
@@ -389,6 +431,31 @@ input ConsentWriteRuleInput {
   columns: [String!]!
   rowScope: WriteRowScope!
   maxRowsPerStatement: Long
+}
+
+input RowFieldInput {
+  column: String!
+  stringValue: String
+  intValue: Long
+  floatValue: Float
+  boolValue: Boolean
+  isNull: Boolean! = false
+}
+
+input ServerStampedColumnInput {
+  column: String!
+  stampKind: String!
+}
+
+input SetTableWritePolicyInput {
+  dataset: String!
+  mode: String!
+  allowedOperations: [String!]
+  requirePrimaryKeyPredicate: Boolean! = true
+  requireRowFilter: Boolean! = false
+  maxRowsPerStatement: Long = 100
+  writableColumns: [String!]
+  serverStampedColumns: [ServerStampedColumnInput!]
 }
 
 enum DiscoveryAccessState {

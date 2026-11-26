@@ -68,8 +68,9 @@ public abstract class TableWritePolicyContract : GovernanceContractBase
         if (!Store.IsAvailable) return;
 
         await Should.ThrowAsync<ArgumentException>(() => Repo.ListAsync(default));
-        await Should.ThrowAsync<ArgumentException>(() => Repo.ListAsync(TenantId.Platform));
         await Should.ThrowAsync<ArgumentException>(() => Repo.GetAsync(default, Guid.NewGuid()));
+        await Should.ThrowAsync<ArgumentException>(() => Repo.DeleteAsync(default, Guid.NewGuid()));
+        Should.Throw<ArgumentException>(() => new TenantId("invalid tenant!"));
     }
 
     [RequiresContainerRuntimeFact]

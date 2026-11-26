@@ -73,39 +73,6 @@ public sealed class WriteGrantEvaluator : IWriteGrantEvaluator
             return WriteGrantDecision.Denied("write_grant_policy_dependency");
         }
 
-        TableWritePolicy? tablePolicy = null;
-        if (_writePolicies is not null && query.Table.Table.Id != Guid.Empty)
-        {
-            tablePolicy = await _writePolicies.GetAsync(query.Tenant, query.Table.Table.Id, ct).ConfigureAwait(false);
-        }
-
-        if (tablePolicy is not null)
-        {
-            if (!tablePolicy.AllowsOperation(query.Operation))
-            {
-                return WriteGrantDecision.Denied("target_not_writable");
-            }
-
-            if (query.Operation == WriteOperation.Update
-                && tablePolicy.ServerStampedColumns is { Count: > 0 }
-                && query.WrittenColumns is { Count: > 0 }
-                && query.WrittenColumns.Any(wc => tablePolicy.ServerStampedColumns.ContainsKey(wc)))
-            {
-                return WriteGrantDecision.Denied("write_protected_column");
-            }
-
-            if (tablePolicy.WritableColumns is { Count: > 0 }
-                && query.WrittenColumns is { Count: > 0 }
-                && query.WrittenColumns.Any(wc => !tablePolicy.WritableColumns.Contains(wc, StringComparer.OrdinalIgnoreCase)))
-            {
-                return WriteGrantDecision.Denied("unauthorized_column");
-            }
-        }
-        else if (_requireTableWritePolicy)
-        {
-            return WriteGrantDecision.Denied("target_not_writable");
-        }
-
         if (query.WrittenColumns is { Count: > 0 } &&
             query.Table.Columns.Any(c => c.WriteProtected && query.WrittenColumns.Any(wc => string.Equals(wc, c.ColumnName, StringComparison.OrdinalIgnoreCase))))
         {
@@ -165,6 +132,39 @@ public sealed class WriteGrantEvaluator : IWriteGrantEvaluator
         if (opRulesWithGrant.Count == 0)
         {
             return WriteGrantDecision.Denied("no_write_grant");
+        }
+
+        TableWritePolicy? tablePolicy = null;
+        if (_writePolicies is not null && query.Table.Table.Id != Guid.Empty)
+        {
+            tablePolicy = await _writePolicies.GetAsync(query.Tenant, query.Table.Table.Id, ct).ConfigureAwait(false);
+        }
+
+        if (tablePolicy is not null)
+        {
+            if (!tablePolicy.AllowsOperation(query.Operation))
+            {
+                return WriteGrantDecision.Denied("target_not_writable");
+            }
+
+            if (query.Operation == WriteOperation.Update
+                && tablePolicy.ServerStampedColumns is { Count: > 0 }
+                && query.WrittenColumns is { Count: > 0 }
+                && query.WrittenColumns.Any(wc => tablePolicy.ServerStampedColumns.ContainsKey(wc)))
+            {
+                return WriteGrantDecision.Denied("write_protected_column");
+            }
+
+            if (tablePolicy.WritableColumns is { Count: > 0 }
+                && query.WrittenColumns is { Count: > 0 }
+                && query.WrittenColumns.Any(wc => !tablePolicy.WritableColumns.Contains(wc, StringComparer.OrdinalIgnoreCase)))
+            {
+                return WriteGrantDecision.Denied("unauthorized_column");
+            }
+        }
+        else if (_requireTableWritePolicy)
+        {
+            return WriteGrantDecision.Denied("target_not_writable");
         }
 
         if (query.Operation == WriteOperation.Delete)

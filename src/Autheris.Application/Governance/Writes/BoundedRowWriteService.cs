@@ -792,14 +792,10 @@ public sealed class BoundedRowWriteService : IBoundedRowWriteService
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(json)));
     }
 
-    private static TargetSqlDialect MapToEngineDialect(DatabaseDialect dialect) => dialect switch
-    {
-        DatabaseDialect.PostgreSql => TargetSqlDialect.PostgreSql,
-        DatabaseDialect.SqlServer => TargetSqlDialect.SqlServer,
-        DatabaseDialect.Oracle => TargetSqlDialect.Oracle,
-        DatabaseDialect.Databricks => TargetSqlDialect.Databricks,
-        _ => throw new BoundedRowWriteException("NOT_IMPLEMENTED", "Unsupported target database dialect.")
-    };
+    private static TargetSqlDialect MapToEngineDialect(DatabaseDialect dialect) =>
+        Autheris.Application.Sql.SqlDialectMapper.TryToTargetDialect(dialect, out var target)
+            ? target
+            : throw new BoundedRowWriteException("NOT_IMPLEMENTED", "Unsupported target database dialect.");
 
     private async Task RecordWriteAuditAsync(
         TenantId tenantId,
