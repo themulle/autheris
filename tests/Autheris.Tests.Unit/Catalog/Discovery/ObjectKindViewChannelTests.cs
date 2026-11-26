@@ -203,7 +203,7 @@ public sealed class ObjectKindViewChannelTests
     [InlineData(DiscoveryObjectKind.Procedure)]
     public async Task GraphQl_NonRelationKind_NotExposed(DiscoveryObjectKind kind)
     {
-        var mv = MakeMetricView() with { };
+        var mv = MakeMetricView();
         mv = mv with { Table = mv.Table with { ObjectKind = kind } };
         var repo = new FakeDiscoveryTableRepository();
         repo.Tables.Add(mv);

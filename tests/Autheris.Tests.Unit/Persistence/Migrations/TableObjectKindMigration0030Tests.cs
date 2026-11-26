@@ -90,6 +90,7 @@ public sealed class TableObjectKindMigration0030Tests
         var ex = Should.Throw<UnknownCatalogObjectKindException>(() => CatalogRowHydrator.ReadTableEntity(reader, logger));
 
         ex.Message.ShouldBe("The stored catalog object kind is unknown.");
+        ex.ObjectKind.ShouldBe(stored);
         logger.Entries.Count.ShouldBe(1);
         logger.Entries[0].ShouldContain(stored);
         logger.Entries[0].ShouldNotContain("secret_schema");
