@@ -405,11 +405,60 @@ public sealed partial class GovernanceDomainService(
         return outcome;
     }
 
+    public const int MaxListedDomainTables = 1000;
+
+    public async Task<DomainServiceResult<(IReadOnlyList<string> Tables, bool Truncated)>> ListDomainTablesAsync(
+        SecurityPrincipalContext caller,
+        TenantId tenant,
+        Guid domainId,
+        int? limit = null,
+        CancellationToken ct = default)
+    {
+        if (!_capabilities.IsGovernance(caller.Principal, tenant))
+        {
+            return Forbidden<(IReadOnlyList<string> Tables, bool Truncated)>("Only Data Governance administrators can read governance domain tables.");
+        }
+
+        if (limit is <= 0)
+        {
+            return Invalid<(IReadOnlyList<string> Tables, bool Truncated)>("INVALID_PAGING", "Limit must be positive.");
+        }
+
+        if (domainId == Guid.Empty)
+        {
+            await _domains.EnsureUnassignedAsync(tenant, ct).ConfigureAwait(false);
+        }
+
+        var domain = await _domains.GetAsync(tenant, domainId, ct).ConfigureAwait(false);
+        if (domain is null)
+        {
+            return NotFound<(IReadOnlyList<string> Tables, bool Truncated)>("DOMAIN_NOT_FOUND", "Governance domain was not found.");
+        }
+
+        var effectiveLimit = Math.Min(limit ?? MaxListedDomainTables, MaxListedDomainTables);
+        var tables = await _domains.ListDomainTablesAsync(tenant, domainId, effectiveLimit + 1, ct).ConfigureAwait(false) ?? [];
+        var truncated = tables.Count > effectiveLimit;
+        var names = (truncated ? tables.Take(effectiveLimit) : tables)
+            .Select(static t => t.ToString())
+            .OrderBy(static n => n, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+        return Ok<(IReadOnlyList<string> Tables, bool Truncated)>((names, truncated));
+    }
+
+    public Task<DomainServiceResult<int>> AssignTablesAsync(
+        SecurityPrincipalContext caller,
+        TenantId tenant,
+        Guid domainId,
+        IReadOnlyList<Guid>? tableIds,
+        CancellationToken ct = default) =>
+        AssignTablesAsync(caller, tenant, domainId, tableIds, datasets: null, ct);
+
     public async Task<DomainServiceResult<int>> AssignTablesAsync(
         SecurityPrincipalContext caller,
         TenantId tenant,
         Guid domainId,
         IReadOnlyList<Guid>? tableIds,
+        IReadOnlyList<string>? datasets,
         CancellationToken ct = default)
     {
         if (!_capabilities.IsGovernance(caller.Principal, tenant))
@@ -417,20 +466,34 @@ public sealed partial class GovernanceDomainService(
             return Forbidden<int>("Only Data Governance administrators can assign tables to domains.");
         }
 
-        if (tableIds is null)
+        if (tableIds is null && datasets is null)
         {
-            return Invalid<int>("INVALID_TABLE", "TableIds list is required.");
+            return Invalid<int>("INVALID_TABLE", "TableIds or datasets list is required.");
         }
 
+        var rawIds = tableIds ?? [];
+        var rawDatasets = datasets ?? [];
+
         var maxTables = await ResolveMaxTablesPerAssignmentAsync(tenant, ct).ConfigureAwait(false);
-        if (tableIds.Count > maxTables)
+        if (rawIds.Count + rawDatasets.Count > maxTables)
         {
             return Invalid<int>("TABLE_ASSIGNMENT_LIMIT_EXCEEDED", $"At most {maxTables} tables may be assigned per request.");
         }
 
-        if (tableIds.Any(id => id == Guid.Empty))
+        if (rawIds.Any(id => id == Guid.Empty))
         {
             return Invalid<int>("INVALID_TABLE", "Table identifiers must not be empty.");
+        }
+
+        var parsedDatasets = new List<TableIdentifier>(rawDatasets.Count);
+        foreach (var rawDataset in rawDatasets)
+        {
+            if (string.IsNullOrWhiteSpace(rawDataset) || !TableIdentifier.TryParse(rawDataset.Trim(), out var parsedId))
+            {
+                return Invalid<int>("INVALID_TABLE", "Dataset identifiers must use 'domain.schema.table' format.");
+            }
+
+            parsedDatasets.Add(parsedId);
         }
 
         if (domainId == Guid.Empty)
@@ -444,30 +507,45 @@ public sealed partial class GovernanceDomainService(
             return NotFound<int>("DOMAIN_NOT_FOUND", "Governance domain was not found.");
         }
 
-        var distinct = tableIds.Distinct().ToList();
-        if (distinct.Count > 0)
+        var distinctIds = rawIds.Distinct().ToList();
+        var distinctDatasets = parsedDatasets.Distinct().ToList();
+        var resolvedIds = new List<Guid>(distinctIds.Count + distinctDatasets.Count);
+        if (distinctIds.Count > 0 || distinctDatasets.Count > 0)
         {
-            var wanted = distinct.ToHashSet();
+            var wantedIds = distinctIds.ToHashSet();
+            var wantedDatasets = distinctDatasets.ToHashSet();
             var matched = await CatalogTablePageReader.ReadAllAsync(
                 _tables,
                 new CatalogTableQuery(IncludeInactive: true),
-                t => wanted.Contains(t.Table.Id),
+                t => wantedIds.Contains(t.Table.Id) || wantedDatasets.Contains(t.Identifier),
                 ct: ct).ConfigureAwait(false);
-            var visibleIds = matched
-                .Where(meta => IsVisibleInTenant(meta, tenant))
-                .Select(meta => meta.Table.Id)
-                .ToHashSet();
-            if (distinct.Any(id => !visibleIds.Contains(id)))
+            var visibleMatched = matched.Where(meta => IsVisibleInTenant(meta, tenant)).ToList();
+            var visibleIds = visibleMatched.Select(static meta => meta.Table.Id).ToHashSet();
+            var visibleByDataset = new Dictionary<TableIdentifier, Guid>();
+            foreach (var meta in visibleMatched)
+            {
+                visibleByDataset.TryAdd(meta.Identifier, meta.Table.Id);
+            }
+
+            if (distinctIds.Any(id => !visibleIds.Contains(id))
+                || distinctDatasets.Any(ds => !visibleByDataset.ContainsKey(ds)))
             {
                 return NotFound<int>("RESOURCE_NOT_FOUND", "One or more requested tables were not found.");
             }
 
-            if (await ValidateDelegatedTableAssignmentsAsync(tenant, domain, matched, ct).ConfigureAwait(false) is { } delegatedError)
+            if (await ValidateDelegatedTableAssignmentsAsync(tenant, domain, visibleMatched, ct).ConfigureAwait(false) is { } delegatedError)
             {
                 return delegatedError;
             }
+
+            resolvedIds.AddRange(distinctIds);
+            foreach (var ds in distinctDatasets)
+            {
+                resolvedIds.Add(visibleByDataset[ds]);
+            }
         }
 
+        var distinct = resolvedIds.Distinct().ToList();
         await RunAtomicAsync(async innerCt =>
         {
             await _domains.AssignTablesAsync(tenant, domainId, distinct, caller.UserSid, innerCt).ConfigureAwait(false);

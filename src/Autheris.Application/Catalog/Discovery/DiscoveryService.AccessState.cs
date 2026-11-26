@@ -16,6 +16,7 @@ using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Search;
 using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Governance.Ownership;
 using Autheris.Application.Policy;
 using Autheris.Application.Policy.Classification;
 using Autheris.Application.Policy.Pdp;
@@ -368,7 +369,7 @@ public sealed partial class DiscoveryService
 
         var ownersTask = _ownershipRepository is null
             ? Task.FromResult<IReadOnlyDictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>>(new Dictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>())
-            : _ownershipRepository.GetDataOwnersForTablesAsync(uncachedIds, ct);
+            : _ownershipRepository.GetDataOwnersForTablesInTenantAsync(uncachedIds, caller.Tenant, ct);
 
         var subject = SecurityPrincipalContext.FromPrincipal(caller.Principal!, caller.Tenant);
 

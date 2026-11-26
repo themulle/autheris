@@ -190,7 +190,7 @@ public sealed class CatalogChangeIndexerHostedService : BackgroundService
 
         var existingVersions = await _changeStore.GetObjectVersionsAsync(tenantId, ct).ConfigureAwait(false);
         var ownersByTable = activeTables.Count > 0
-            ? await _ownershipRepository.GetDataOwnersForTableMetadataAsync(activeTables, ct).ConfigureAwait(false)
+            ? await _ownershipRepository.GetDataOwnersForTableMetadataInTenantAsync(activeTables, tenantId, ct).ConfigureAwait(false)
             : new Dictionary<TableIdentifier, IReadOnlyList<ContainerOwnerEntry>>();
         var artifactsByTable = _artifactStore is not null && activeTables.Count > 0
             ? await _artifactStore.GetAllForTablesAsync(activeTables.Select(static t => t.Table.Id).ToList(), ct).ConfigureAwait(false)

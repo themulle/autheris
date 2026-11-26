@@ -754,7 +754,16 @@
           "hidden": { "type": "boolean" },
           "callerState": { "$ref": "#/components/schemas/ExternalCatalogCallerStateDto", "nullable": true },
           "columns": { "type": "array", "items": { "$ref": "#/components/schemas/ExternalCatalogColumnDto" } },
-          "changeSeq": { "type": "integer", "format": "int64", "nullable": true }
+          "changeSeq": { "type": "integer", "format": "int64", "nullable": true },
+          "tableId": { "type": "string", "format": "uuid", "nullable": true },
+          "container": {
+            "type": "object",
+            "nullable": true,
+            "properties": {
+              "kind": { "type": "string" },
+              "id": { "type": "string", "format": "uuid" }
+            }
+          }
         }
       },
       "ExternalCatalogPageDto": {

@@ -628,7 +628,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             examplesMs = (long)Stopwatch.GetElapsedTime(examplesStart).TotalMilliseconds;
         }
 
-        var (dataOwner, dataOwnerDelegates) = await LoadOwnersAsync(id, displayNameOnly: false, ct).ConfigureAwait(false);
+        var (dataOwner, dataOwnerDelegates) = await LoadOwnersAsync(principal, id, displayNameOnly: false, ct).ConfigureAwait(false);
 
         long graphQlMs = 0;
         McpGraphQlAccess? graphQlAccess = null;
@@ -683,7 +683,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     /// Active owners of a dataset. <paramref name="displayNameOnly"/> (the <c>Summary</c> view, BC-14) reports display names only, never
     /// SIDs, e-mail addresses or accounts; an owner without a display name is omitted.
     /// </summary>
-    private async Task<(string? DataOwner, IReadOnlyList<string>? Delegates)> LoadOwnersAsync(TableIdentifier id, bool displayNameOnly, CancellationToken ct)
+    private async Task<(string? DataOwner, IReadOnlyList<string>? Delegates)> LoadOwnersAsync(ClaimsPrincipal principal, TableIdentifier id, bool displayNameOnly, CancellationToken ct)
     {
         if (dataOwnershipRepository == null)
         {
@@ -692,7 +692,10 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
 
         try
         {
-            var owners = await dataOwnershipRepository.GetDataOwnersForTableAsync(id, ct).ConfigureAwait(false);
+            var tenant = McpCatalogVisibility.SafeTenantId(principal);
+            var owners = !string.IsNullOrWhiteSpace(tenant.Value) && !TenantId.IsReserved(tenant)
+                ? await dataOwnershipRepository.GetDataOwnersForTableInTenantAsync(id, tenant, ct).ConfigureAwait(false)
+                : await dataOwnershipRepository.GetDataOwnersForTableAsync(id, ct).ConfigureAwait(false);
             var activeOwners = owners.Where(o => o.IsActive).ToList();
             if (displayNameOnly)
             {

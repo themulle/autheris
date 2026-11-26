@@ -9,6 +9,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Catalog.Discovery;
 using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Catalog.Services;
+using Autheris.Application.Governance.Ownership;
 using Autheris.Application.Tenancy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -58,8 +59,8 @@ public sealed partial class ExternalCatalogReader
             pageTables = candidates.GetRange(startIndex, takeCount);
             if (pageTables.Count > 0)
             {
-                var fetched = await _ownershipRepository.GetDataOwnersForTableMetadataAsync(
-                    pageTables, ct).ConfigureAwait(false);
+                var fetched = await _ownershipRepository.GetDataOwnersForTableMetadataInTenantAsync(
+                    pageTables, tenantId, ct).ConfigureAwait(false);
                 foreach (var kv in fetched)
                 {
                     ownersByTable[kv.Key] = kv.Value;
@@ -84,8 +85,8 @@ public sealed partial class ExternalCatalogReader
 
                 var chunkLen = Math.Min(windowSize, candidates.Count - offset);
                 var window = candidates.GetRange(offset, chunkLen);
-                var fetched = await _ownershipRepository.GetDataOwnersForTableMetadataAsync(
-                    window, ct).ConfigureAwait(false);
+                var fetched = await _ownershipRepository.GetDataOwnersForTableMetadataInTenantAsync(
+                    window, tenantId, ct).ConfigureAwait(false);
 
                 for (var i = 0; i < window.Count; i++)
                 {

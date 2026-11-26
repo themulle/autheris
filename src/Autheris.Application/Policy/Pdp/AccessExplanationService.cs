@@ -282,7 +282,7 @@ public sealed class AccessExplanationService(
     private async Task<bool> IsPrivilegedAsync(SecurityPrincipalContext caller, TableIdentifier table, CancellationToken ct)
         => caller.HasRole(GatewayRole.GovernanceAdmin)
            || caller.HasRole(GatewayRole.SecurityAuditor)
-           || await owners.IsAuthorizedApproverForTableAsync(table, caller.UserSid, ct).ConfigureAwait(false);
+           || await owners.IsAuthorizedApproverForTableInTenantAsync(table, caller.UserSid, caller.TenantId, ct).ConfigureAwait(false);
 
     private static GrantRecordView ToView(Consent c)
     {
