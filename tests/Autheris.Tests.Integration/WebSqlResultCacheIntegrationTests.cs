@@ -140,19 +140,26 @@ public sealed class WebSqlResultCacheIntegrationTests : IClassFixture<WebSqlResu
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task Table_registration_change_after_store_gives_no_stale_rows()
+    public async Task Catalog_change_after_store_never_serves_rows_the_governed_pipeline_would_not_serve()
     {
         await RegisterAsync();
         await PostUntilHitAsync(SidA);
 
-        // The host bypasses consent checks, so the closest feasible revocation is the column the statement needs leaving the catalog.
+        // The catalog column list is not an access control in this host, so the fresh governed answer is the reference.
         await RegisterAsync(null, "id", "secret", "tenant_id");
-        var (response, body) = await PostAsync(SidA);
-        body.ShouldNotContain("Ada");
-        if (response.StatusCode == HttpStatusCode.OK)
+        var (freshResponse, freshBody) = await PostAsync(SidA, Sql, "bypass");
+        var (cachedResponse, cachedBody) = await PostAsync(SidA);
+
+        cachedResponse.StatusCode.ShouldBe(freshResponse.StatusCode, cachedBody);
+        if (freshResponse.StatusCode != HttpStatusCode.OK)
         {
-            CacheStatus(body).ShouldNotBe("hit");
+            cachedBody.ShouldNotContain("Ada");
+            return;
         }
+
+        using var fresh = JsonDocument.Parse(freshBody);
+        using var cached = JsonDocument.Parse(cachedBody);
+        cached.RootElement.GetProperty("rows").GetRawText().ShouldBe(fresh.RootElement.GetProperty("rows").GetRawText());
     }
 
     [Fact]
