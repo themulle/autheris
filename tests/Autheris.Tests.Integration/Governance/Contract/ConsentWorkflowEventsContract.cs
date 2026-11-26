@@ -501,20 +501,30 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
         var workflow = NewSystem(Store.TenantA.Value, "workflow-deprovision", ExternalWorkflowSystemRole.Workflow);
         await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(observer);
         await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(workflow);
-        var tableName = "orders_leaver_" + Guid.NewGuid().ToString("N")[..8];
-        var originRequest = await SeedPendingRequestAsync(Store.TenantA, tableName, workflow.Id);
-        var table = new TableIdentifier("sales", "dbo", tableName);
-        var tableId = (await Store.TableMetadata.GetTableMetadataAsync(table))!.Table.Id;
         var leaver = new Sid("S-1-5-21-1000-1000-1000-1170");
-        Task<Consent> GrantAsync(Sid grantee, Guid? requestId) => Store.Consents.CreateConsentAsync(new Consent
+
+        // A consent request yields at most one consent (ux_consents_request), so every request-linked grant gets its own origin request.
+        async Task<(Guid RequestId, TableIdentifier Table, Guid TableId)> SeedRoutedRequestAsync(string prefix)
         {
-            TableId = tableId, TableIdentifier = table, TenantId = Store.TenantA, GranteeType = GranteeType.User, GranteeSid = grantee,
+            var tableName = prefix + Guid.NewGuid().ToString("N")[..8];
+            var requestId = await SeedPendingRequestAsync(Store.TenantA, tableName, workflow.Id);
+            var table = new TableIdentifier("sales", "dbo", tableName);
+            return (requestId, table, (await Store.TableMetadata.GetTableMetadataAsync(table))!.Table.Id);
+        }
+
+        Task<Consent> GrantAsync(Sid grantee, (Guid? RequestId, TableIdentifier Table, Guid TableId) origin) => Store.Consents.CreateConsentAsync(new Consent
+        {
+            TableId = origin.TableId, TableIdentifier = origin.Table, TenantId = Store.TenantA, GranteeType = GranteeType.User, GranteeSid = grantee,
             Effect = ConsentEffect.Allow, ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(30),
-            CreatedBySid = new Sid("S-1-5-21-ADMIN-1170"), ConsentRequestId = requestId
+            CreatedBySid = new Sid("S-1-5-21-ADMIN-1170"), ConsentRequestId = origin.RequestId
         });
-        var routedGrant = await GrantAsync(leaver, originRequest);
-        var internalGrant = await GrantAsync(leaver, null);
-        var externalGrant = await GrantAsync(new Sid("S-1-5-21-1000-1000-1000-1171"), originRequest);
+
+        var leaverOrigin = await SeedRoutedRequestAsync("orders_leaver_");
+        var externalOrigin = await SeedRoutedRequestAsync("orders_ext_revoke_");
+        var originRequest = leaverOrigin.RequestId;
+        var routedGrant = await GrantAsync(leaver, leaverOrigin);
+        var internalGrant = await GrantAsync(leaver, (null, leaverOrigin.Table, leaverOrigin.TableId));
+        var externalGrant = await GrantAsync(new Sid("S-1-5-21-1000-1000-1000-1171"), externalOrigin);
 
         var deprovisioning = new GrantRevocationService(Store.Consents, Store.ConsentApprovals, new Autheris.Tests.Common.Fakes.InMemoryAuditWriter());
         var run = await deprovisioning.RevokeAllForSubjectAsync(Store.TenantA, leaver, "SCIM_DEPROVISION");
@@ -523,8 +533,8 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
         (await deprovisioning.RevokeAllForSubjectAsync(Store.TenantA, leaver, "SCIM_DEPROVISION")).GrantsRevoked.Should().Be(0);
 
         var actor = new Sid("external-system:" + workflow.Id.ToString("D"));
-        (await Store.Consents.RevokeSystemConsentAsync(externalGrant.Id, originRequest, actor, "Access no longer needed")).Should().BeTrue();
-        (await Store.Consents.RevokeSystemConsentAsync(externalGrant.Id, originRequest, actor, "Second attempt")).Should().BeFalse();
+        (await Store.Consents.RevokeSystemConsentAsync(externalGrant.Id, externalOrigin.RequestId, actor, "Access no longer needed")).Should().BeTrue();
+        (await Store.Consents.RevokeSystemConsentAsync(externalGrant.Id, externalOrigin.RequestId, actor, "Second attempt")).Should().BeFalse();
 
         var observed = (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 50, observer.Id)).Events
             .Where(e => e.Type == ConsentEventTypes.GrantRevoked).ToList();
@@ -540,6 +550,8 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
         using var payload = JsonDocument.Parse(routed.First(e => e.SubjectId == routedGrant.Id.ToString("D")).PayloadJson);
         payload.RootElement.GetProperty("workflowMode").GetString().Should().Be("EXTERNAL");
         payload.RootElement.GetProperty("requestId").GetGuid().Should().Be(originRequest);
+        using var externalPayload = JsonDocument.Parse(routed.First(e => e.SubjectId == externalGrant.Id.ToString("D")).PayloadJson);
+        externalPayload.RootElement.GetProperty("requestId").GetGuid().Should().Be(externalOrigin.RequestId);
     }
 
     private static (string? Status, int Version) ReadStatusAndVersion(string payloadJson)
