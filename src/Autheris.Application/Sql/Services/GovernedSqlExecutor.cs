@@ -741,7 +741,7 @@ public sealed partial class GovernedSqlExecutor
                             }
                             var info = new GovernedResultInfo(columns, reader.FieldCount == 0 ? ImmutableArray<bool>.Empty : maskArray);
                             var limitedReader = rewrite.DeliveredRowLimit > 0 ? new RowLimitedDataReader(reader, rewrite.DeliveredRowLimit) : null;
-                            var toWrite = await PrepareResultCacheReaderAsync(cacheFill, limitedReader ?? reader, info, ct).ConfigureAwait(false);
+                            var toWrite = cacheFill is { IsLeader: true } ? await PrepareResultCacheReaderAsync(cacheFill, limitedReader ?? reader, info, ct).ConfigureAwait(false) : limitedReader ?? reader;
                             await rowWriter(toWrite, info, ct).ConfigureAwait(false);
                             if (limitedReader != null)
                             {

@@ -64,8 +64,8 @@ public sealed partial class WebSqlResultCache : IWebSqlResultCache, IDisposable
         _time = timeProvider ?? TimeProvider.System;
         _logger = logger;
         _store = new WebSqlResultCacheStore(_time);
-        Refresh();
         _changeSubscription = _options.OnChange(_ => Refresh());
+        Refresh();
     }
 
     public bool IsEnabled => Limits.Enabled && _governance is not null && _epochs is not null;

@@ -105,28 +105,22 @@ public sealed class WebSqlResultCacheIntegrationTests : IClassFixture<WebSqlResu
         return doc.RootElement.TryGetProperty("resultCache", out var rc) ? rc.GetProperty("status").GetString() : null;
     }
 
-    /// <summary>Posts until the caller's own repeated statement is answered from the cache; null when the host never hits.</summary>
-    private async Task<(HttpResponseMessage Response, string Body)?> PostUntilHitAsync(string sid, string sql = Sql)
+    /// <summary>Posts until the caller's own repeated statement is answered from the cache; fails the test when the host never hits, so no test passes vacuously.</summary>
+    private async Task<(HttpResponseMessage Response, string Body)> PostUntilHitAsync(string sid, string sql = Sql)
     {
         await PostAsync(sid, sql);
-        (HttpResponseMessage Response, string Body)? hit = null;
-        try
+        (HttpResponseMessage Response, string Body) hit = default;
+        await WaitHelper.WaitUntil(async () =>
         {
-            await WaitHelper.WaitUntil(async () =>
+            var next = await PostAsync(sid, sql);
+            if (CacheStatus(next.Body) != "hit")
             {
-                var next = await PostAsync(sid, sql);
-                if (CacheStatus(next.Body) != "hit")
-                {
-                    return false;
-                }
+                return false;
+            }
 
-                hit = next;
-                return true;
-            }, TimeSpan.FromSeconds(10), "resultCache.status=hit", TimeSpan.FromMilliseconds(200));
-        }
-        catch (TimeoutException)
-        {
-        }
+            hit = next;
+            return true;
+        }, TimeSpan.FromSeconds(10), "resultCache.status=hit for the repeated statement", TimeSpan.FromMilliseconds(200));
 
         return hit;
     }
@@ -146,22 +140,18 @@ public sealed class WebSqlResultCacheIntegrationTests : IClassFixture<WebSqlResu
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task Revoked_grant_denied_and_no_cached_rows_served()
+    public async Task Table_registration_change_after_store_gives_no_stale_rows()
     {
         await RegisterAsync();
         await PostUntilHitAsync(SidA);
 
-        // Closest feasible revocation in this host (consent checks are bypassed): the column the statement needs leaves the catalog.
+        // The host bypasses consent checks, so the closest feasible revocation is the column the statement needs leaving the catalog.
         await RegisterAsync(null, "id", "secret", "tenant_id");
         var (response, body) = await PostAsync(SidA);
-
+        body.ShouldNotContain("Ada");
         if (response.StatusCode == HttpStatusCode.OK)
         {
             CacheStatus(body).ShouldNotBe("hit");
-        }
-        else
-        {
-            body.ShouldNotContain("Ada");
         }
     }
 
@@ -191,10 +181,8 @@ public sealed class WebSqlResultCacheIntegrationTests : IClassFixture<WebSqlResu
         var (response, body) = await PostAsync(SidA, maskedSql);
 
         response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
-        if (CacheStatus(body) == "hit")
-        {
-            body.ShouldNotContain("s-1");
-        }
+        CacheStatus(body).ShouldNotBe("hit");
+        body.ShouldNotContain("s-1");
 
         body.ShouldNotContain("s-3");
     }
@@ -204,8 +192,7 @@ public sealed class WebSqlResultCacheIntegrationTests : IClassFixture<WebSqlResu
     public async Task Hit_produces_audit_row_marked_hit()
     {
         await RegisterAsync();
-        var hit = await PostUntilHitAsync(SidA);
-        hit.ShouldNotBeNull("the single-node host is expected to reach the cache");
+        await PostUntilHitAsync(SidA);
 
         AuditLogEntry? marked = null;
         await WaitHelper.WaitUntil(async () =>
@@ -230,29 +217,25 @@ public sealed class WebSqlResultCacheIntegrationTests : IClassFixture<WebSqlResu
     {
         await RegisterAsync();
         var hit = await PostUntilHitAsync(SidA);
-        hit.ShouldNotBeNull("the single-node host is expected to reach the cache");
 
-        hit.Value.Response.Headers.CacheControl?.NoStore.ShouldBe(true);
+        hit.Response.Headers.CacheControl?.NoStore.ShouldBe(true);
     }
 
     [Fact]
     [Trait("Category", "Security")]
     public async Task Metric_view_min_group_size_rows_not_leaked_via_cache()
     {
-        // No metric view is registered in this host. The closest assertion: a replayed aggregate equals the executed one row for row,
-        // and a second caller never receives the first caller's entry.
+        // Metric views (and so a minimum group size) exist only for engines with a measure syntax; the PostgreSQL host here cannot register one.
+        // The key and the filtered reader are covered by unit tests. Here: a replayed aggregate equals the executed one, and a second caller
+        // never receives the first caller's entry.
         const string groupedSql = "SELECT name, COUNT(*) AS n FROM rc_items GROUP BY name ORDER BY name";
         await RegisterAsync();
         var (_, executed) = await PostAsync(SidA, groupedSql);
         var hit = await PostUntilHitAsync(SidA, groupedSql);
-
-        if (hit != null)
-        {
-            using var first = JsonDocument.Parse(executed);
-            using var replayed = JsonDocument.Parse(hit.Value.Body);
-            replayed.RootElement.GetProperty("rows").GetRawText().ShouldBe(first.RootElement.GetProperty("rows").GetRawText());
-            replayed.RootElement.GetProperty("rowCount").GetInt32().ShouldBe(first.RootElement.GetProperty("rowCount").GetInt32());
-        }
+        using var first = JsonDocument.Parse(executed);
+        using var replayed = JsonDocument.Parse(hit.Body);
+        replayed.RootElement.GetProperty("rows").GetRawText().ShouldBe(first.RootElement.GetProperty("rows").GetRawText());
+        replayed.RootElement.GetProperty("rowCount").GetInt32().ShouldBe(first.RootElement.GetProperty("rowCount").GetInt32());
 
         var (_, other) = await PostAsync(SidB, groupedSql);
         CacheStatus(other).ShouldNotBe("hit");
