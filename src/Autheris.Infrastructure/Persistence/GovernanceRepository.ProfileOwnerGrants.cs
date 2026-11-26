@@ -267,11 +267,31 @@ WHERE c.tenant_id = @tenantId
         DbTransaction transaction, Guid consentId, CancellationToken ct) =>
         GetConsentByIdAsync(consentId, ct);
 
-    async Task IProfileAssignmentStore.MarkConsentRevokedInTransactionAsync(
+    async Task<bool> IProfileAssignmentStore.MarkConsentRevokedInTransactionAsync(
         DbTransaction transaction, Guid consentId, Sid actorSid, string reason, DateTimeOffset now, CancellationToken ct)
     {
         var conn = transaction.Connection ?? throw new InvalidOperationException("Transaction connection unavailable.");
-        await ConsentGrantSqlCore.MarkRevokedAsync(conn, transaction, consentId, actorSid, reason, now, ct).ConfigureAwait(false);
+        return await ConsentGrantSqlCore.MarkRevokedAsync(conn, transaction, consentId, actorSid, reason, now, ct).ConfigureAwait(false);
+    }
+
+    async Task IProfileAssignmentStore.AppendGrantRevokedEventsInTransactionAsync(
+        DbTransaction transaction, TenantId tenantId, IReadOnlyList<RevokedProfileGrant> revokedGrants, DateTimeOffset occurredAt, CancellationToken ct)
+    {
+        if (revokedGrants.Count == 0)
+        {
+            return;
+        }
+
+        TenantScope.RequireTenant(tenantId, nameof(GovernanceTable.Consents));
+        StoredTenant.RequireWritable(tenantId);
+        var conn = transaction.Connection ?? throw new InvalidOperationException("Transaction connection unavailable.");
+        var pending = new List<PendingGrantRevokedEvent>(revokedGrants.Count);
+        foreach (var grant in revokedGrants)
+        {
+            pending.Add(new PendingGrantRevokedEvent(grant.ConsentId, tenantId, grant.Table, occurredAt));
+        }
+
+        await EmitGrantRevokedEventsInTransactionAsync(conn, transaction, pending, ct, requireRoutingRow: true).ConfigureAwait(false);
     }
 
     async Task IProfileAssignmentStore.AddApprovingOwnersInTransactionAsync(

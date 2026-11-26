@@ -45,6 +45,9 @@ public interface IProfileAssignmentTransaction : IAsyncDisposable
     Task RollbackAsync(CancellationToken ct = default);
 }
 
+/// <summary>A consent revoked by a profile-assignment revocation, with its table for event routing.</summary>
+public readonly record struct RevokedProfileGrant(Guid ConsentId, TableIdentifier Table);
+
 public interface IProfileAssignmentStore
 {
     Task<IProfileAssignmentTransaction> BeginTransactionAsync(CancellationToken ct = default);
@@ -80,12 +83,24 @@ public interface IProfileAssignmentStore
         Guid consentId,
         CancellationToken ct = default);
 
-    Task MarkConsentRevokedInTransactionAsync(
+    /// <summary>Returns true only when the conditional update matched an active consent.</summary>
+    Task<bool> MarkConsentRevokedInTransactionAsync(
         DbTransaction transaction,
         Guid consentId,
         Sid actorSid,
         string reason,
         DateTimeOffset now,
+        CancellationToken ct = default);
+
+    /// <summary>
+    /// Appends one grant.revoked event per revoked grant inside the revoke transaction, after all its other writes.
+    /// An empty list is a no-op.
+    /// </summary>
+    Task AppendGrantRevokedEventsInTransactionAsync(
+        DbTransaction transaction,
+        TenantId tenantId,
+        IReadOnlyList<RevokedProfileGrant> revokedGrants,
+        DateTimeOffset occurredAt,
         CancellationToken ct = default);
 
     Task AddApprovingOwnersInTransactionAsync(

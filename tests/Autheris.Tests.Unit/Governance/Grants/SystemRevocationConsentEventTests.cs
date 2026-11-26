@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests.Events;
+using Autheris.Application.ConsentRequests.ProfileAssignments;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Grants.Records;
 using Autheris.Application.Governance.Requests;
@@ -409,6 +410,95 @@ public sealed class SystemRevocationConsentEventTests
         }
 
         EventInserts(conn).ShouldBeEmpty();
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task Profile_assignment_store_appends_one_grant_revoked_per_grant_with_origin_routing(string dialect)
+    {
+        var conn = DialectKit.Of(dialect).NewConnection();
+        await using var repo = CreateRepo(dialect, conn, []);
+        IProfileAssignmentStore store = repo;
+        var system = Guid.NewGuid();
+        var externalRequest = Guid.NewGuid();
+        var internalRequest = Guid.NewGuid();
+        var external = Grant(PermissionGrantKind.Data);
+        var internalGrant = Grant(PermissionGrantKind.Data);
+        conn.EnqueueReader(OriginRequestRow(externalRequest, "EXTERNAL", system));
+        conn.EnqueueReader(OriginRequestRow(internalRequest, "INTERNAL", null));
+        await using var tx = await conn.BeginTransactionAsync();
+
+        await store.AppendGrantRevokedEventsInTransactionAsync(
+            tx, Tenant, [new RevokedProfileGrant(external.Id, external.TableIdentifier), new RevokedProfileGrant(internalGrant.Id, internalGrant.TableIdentifier)], Now);
+
+        var inserts = EventInserts(conn);
+        inserts.Count.ShouldBe(2, dialect);
+        var firstLock = conn.Commands.FindIndex(IsEventLock);
+        conn.Commands.Take(firstLock).Count(c => c.CommandText.Contains("FROM CONSENTS c", StringComparison.Ordinal)).ShouldBe(2, dialect);
+        conn.Commands.Skip(firstLock).ShouldNotContain(c => c.CommandText.Contains("FROM CONSENTS c", StringComparison.Ordinal));
+        Bound(inserts[0], "@type").ShouldBe(ConsentEventTypes.GrantRevoked);
+        Bound(inserts[0], "@subjectId").ShouldBe(external.Id.ToString("D"));
+        var first = ReadThinGrantPayload(inserts[0]);
+        first.Status.ShouldBe("REVOKED");
+        first.WorkflowMode.ShouldBe("EXTERNAL");
+        first.RequestId.ShouldBe(externalRequest);
+        Bound(inserts[1], "@subjectId").ShouldBe(internalGrant.Id.ToString("D"));
+        var second = ReadThinGrantPayload(inserts[1]);
+        second.WorkflowMode.ShouldBe("INTERNAL");
+        second.RequestId.ShouldBe(internalRequest);
+        foreach (var insert in inserts)
+        {
+            ((string)Bound(insert, "@payload")!).ShouldNotContain("previousGrantId", Case.Insensitive);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task Profile_assignment_store_appends_nothing_for_an_empty_list(string dialect)
+    {
+        var conn = DialectKit.Of(dialect).NewConnection();
+        await using var repo = CreateRepo(dialect, conn, []);
+        IProfileAssignmentStore store = repo;
+        await using var tx = await conn.BeginTransactionAsync();
+
+        await store.AppendGrantRevokedEventsInTransactionAsync(tx, Tenant, [], Now);
+
+        conn.Commands.ShouldBeEmpty(dialect);
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task Profile_assignment_store_reports_whether_the_conditional_revoke_matched(string dialect)
+    {
+        var conn = DialectKit.Of(dialect).NewConnection();
+        await using var repo = CreateRepo(dialect, conn, []);
+        IProfileAssignmentStore store = repo;
+        await using var tx = await conn.BeginTransactionAsync();
+
+        conn.NonQueryResult = 1;
+        (await store.MarkConsentRevokedInTransactionAsync(tx, Guid.NewGuid(), Leaver, "reason", Now)).ShouldBeTrue(dialect);
+        conn.NonQueryResult = 0;
+        (await store.MarkConsentRevokedInTransactionAsync(tx, Guid.NewGuid(), Leaver, "reason", Now)).ShouldBeFalse(dialect);
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task Profile_assignment_store_throws_without_routing_row_and_leaks_nothing(string dialect)
+    {
+        var conn = DialectKit.Of(dialect).NewConnection();
+        await using var repo = CreateRepo(dialect, conn, []);
+        IProfileAssignmentStore store = repo;
+        var grant = Grant(PermissionGrantKind.Data);
+        conn.EnqueueReader(new DataTable());
+        await using var tx = await conn.BeginTransactionAsync();
+
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() => store.AppendGrantRevokedEventsInTransactionAsync(
+            tx, Tenant, [new RevokedProfileGrant(grant.Id, grant.TableIdentifier)], Now));
+
+        ex.Message.ShouldNotContain(Leaver.Value);
+        ex.Message.ShouldNotContain("payload", Case.Insensitive);
+        EventInserts(conn).ShouldBeEmpty();
+        conn.Commands.Any(IsEventLock).ShouldBeFalse(dialect);
     }
 
     private sealed record RenewalRun(RecordingDbConnection Conn, SelfGrantHarness Harness, Consent Old, Guid System);

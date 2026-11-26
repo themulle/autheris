@@ -4,10 +4,13 @@ using System.Linq;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Threading.Tasks;
+using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.ConsentRequests.Events;
+using Autheris.Application.ConsentRequests.ProfileAssignments;
 using Autheris.Application.ConsentRequests.Routing;
 using Autheris.Application.Governance.Grants;
+using Autheris.Application.Governance.Grants.Records;
 using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
 using Autheris.Domain.Model;
@@ -553,6 +556,139 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
         using var externalPayload = JsonDocument.Parse(routed.First(e => e.SubjectId == externalGrant.Id.ToString("D")).PayloadJson);
         externalPayload.RootElement.GetProperty("requestId").GetGuid().Should().Be(externalOrigin.RequestId);
     }
+
+    /// <summary>
+    /// Issue #1173: a renewal appends grant.renewed for the renewed grant, routed by the superseded grant's origin request. Rolling back
+    /// a renewal that was announced appends grant.revoked for the renewed grant; rolling back one that was never announced appends nothing.
+    /// </summary>
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task Observer_feed_shows_grant_renewed_and_the_terminal_revoke_of_a_rolled_back_renewal()
+    {
+        if (!Store.IsAvailable) return;
+
+        var observer = NewSystem(Store.TenantA.Value, "observer-renewal", ExternalWorkflowSystemRole.Observer);
+        var workflow = NewSystem(Store.TenantA.Value, "workflow-renewal", ExternalWorkflowSystemRole.Workflow);
+        var otherTenantObserver = NewSystem(Store.TenantB.Value, "observer-renewal-b", ExternalWorkflowSystemRole.Observer);
+        await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(observer);
+        await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(workflow);
+        await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(otherTenantObserver);
+        var actor = new Sid("S-1-5-21-ADMIN-1173");
+        var grantee = new Sid("S-1-5-21-1000-1000-1000-1173");
+
+        var origin = await SeedRoutedOriginAsync("orders_renew_", workflow.Id);
+        var old = await CreateGrantAsync(grantee, origin.Table, origin.TableId, origin.RequestId);
+        // The renewed row carries no origin request (ux_consents_request allows one consent per request).
+        var renewed = await CreateGrantAsync(grantee, origin.Table, origin.TableId, null);
+
+        (await Store.Consents.RevokeSystemConsentByIdAsync(Store.TenantA, old.Id, actor, "Renewed", SystemRevocationKind.Renewal, renewed.Id))
+            .Should().BeTrue();
+
+        foreach (var system in new[] { observer, workflow })
+        {
+            var announced = (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 50, system.Id)).Events
+                .Where(e => e.Type == ConsentEventTypes.GrantRenewed).Should().ContainSingle().Which;
+            announced.SubjectId.Should().Be(renewed.Id.ToString("D"));
+            using var payload = JsonDocument.Parse(announced.PayloadJson);
+            payload.RootElement.GetProperty("previousGrantId").GetGuid().Should().Be(old.Id);
+            payload.RootElement.GetProperty("requestId").GetGuid().Should().Be(origin.RequestId);
+            payload.RootElement.GetProperty("workflowMode").GetString().Should().Be("EXTERNAL");
+        }
+
+        (await Store.Consents.RevokeSystemConsentByIdAsync(Store.TenantA, renewed.Id, actor, "RenewalRollback", SystemRevocationKind.RenewalRollback))
+            .Should().BeTrue();
+        var neverAnnounced = await CreateGrantAsync(grantee, origin.Table, origin.TableId, null);
+        (await Store.Consents.RevokeSystemConsentByIdAsync(Store.TenantA, neverAnnounced.Id, actor, "RenewalRollback", SystemRevocationKind.RenewalRollback))
+            .Should().BeTrue();
+
+        var revoked = (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 50, observer.Id)).Events
+            .Where(e => e.Type == ConsentEventTypes.GrantRevoked).Should().ContainSingle().Which;
+        revoked.SubjectId.Should().Be(renewed.Id.ToString("D"));
+
+        (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantB, 0, 50, otherTenantObserver.Id)).Events
+            .Where(e => e.Type == ConsentEventTypes.GrantRenewed || e.Type == ConsentEventTypes.GrantRevoked).Should().BeEmpty();
+    }
+
+    /// <summary>
+    /// Issue #1173: revoking a profile assignment appends one grant.revoked per revoked consent in the revocation transaction; a second
+    /// revocation of the same assignment revokes and appends nothing.
+    /// </summary>
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task Observer_feed_shows_grant_revoked_for_each_consent_of_a_revoked_profile_assignment()
+    {
+        if (!Store.IsAvailable) return;
+
+        var observer = NewSystem(Store.TenantA.Value, "observer-profile", ExternalWorkflowSystemRole.Observer);
+        var workflow = NewSystem(Store.TenantA.Value, "workflow-profile", ExternalWorkflowSystemRole.Workflow);
+        await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(observer);
+        await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(workflow);
+        var actor = new Sid("S-1-5-21-ADMIN-1173");
+        var grantee = new Sid("S-1-5-21-1000-1000-1000-1174");
+        var assignmentId = Guid.NewGuid();
+
+        var routedOrigin = await SeedRoutedOriginAsync("orders_profile_a_", workflow.Id);
+        var internalOrigin = await SeedRoutedOriginAsync("orders_profile_b_", null);
+        var routed = await CreateGrantAsync(grantee, routedOrigin.Table, routedOrigin.TableId, routedOrigin.RequestId, assignmentId);
+        var internalGrant = await CreateGrantAsync(grantee, internalOrigin.Table, internalOrigin.TableId, internalOrigin.RequestId, assignmentId);
+
+        var materializer = new ProfileGrantMaterializer(
+            Store.Services.GetRequiredService<IGrantWriter>(), Store.Services.GetRequiredService<IProfileAssignmentStore>());
+
+        (await materializer.RevokeAssignmentAsync(Store.TenantA, assignmentId, actor, "Profile withdrawn")).Should().Be(2);
+        (await materializer.RevokeAssignmentAsync(Store.TenantA, assignmentId, actor, "Profile withdrawn")).Should().Be(0);
+
+        var observed = (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 50, observer.Id)).Events
+            .Where(e => e.Type == ConsentEventTypes.GrantRevoked).ToList();
+        observed.Select(e => e.SubjectId).Should().BeEquivalentTo([routed.Id.ToString("D"), internalGrant.Id.ToString("D")]);
+        observed.Should().OnlyContain(e => ReadStatusAndVersion(e.PayloadJson) == ("REVOKED", 1));
+        observed.Should().OnlyContain(e => !e.PayloadJson.Contains("Profile withdrawn") && !e.PayloadJson.Contains(grantee.Value));
+
+        var routedFeed = (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 50, workflow.Id)).Events
+            .Where(e => e.Type == ConsentEventTypes.GrantRevoked).Should().ContainSingle().Which;
+        routedFeed.SubjectId.Should().Be(routed.Id.ToString("D"));
+    }
+
+    /// <summary>
+    /// Issue #1173: the check that a renewal was announced is tenant-scoped: a grant.renewed of another tenant for the same subject id
+    /// does not make the compensation emit grant.revoked.
+    /// </summary>
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task Renewal_rollback_check_is_tenant_scoped_a_grant_renewed_of_another_tenant_does_not_announce()
+    {
+        if (!Store.IsAvailable) return;
+
+        var observer = NewSystem(Store.TenantA.Value, "observer-rollback-scope", ExternalWorkflowSystemRole.Observer);
+        await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(observer);
+        var origin = await SeedRoutedOriginAsync("orders_scope_", null);
+        var grant = await CreateGrantAsync(new Sid("S-1-5-21-1000-1000-1000-1175"), origin.Table, origin.TableId, null);
+
+        await Store.ConsentEventOutbox.AppendAsync(new ConsentEventWrite(
+            Store.TenantB.Value, Guid.NewGuid(), ConsentEventTypes.GrantRenewed, grant.Id.ToString("D"), "{}", FixedNow, null));
+
+        (await Store.Consents.RevokeSystemConsentByIdAsync(
+            Store.TenantA, grant.Id, new Sid("S-1-5-21-ADMIN-1173"), "RenewalRollback", SystemRevocationKind.RenewalRollback)).Should().BeTrue();
+
+        (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 50, observer.Id)).Events
+            .Should().NotContain(e => e.Type == ConsentEventTypes.GrantRevoked);
+    }
+
+    private async Task<(Guid RequestId, TableIdentifier Table, Guid TableId)> SeedRoutedOriginAsync(string prefix, Guid? externalSystemId)
+    {
+        var tableName = prefix + Guid.NewGuid().ToString("N")[..8];
+        var requestId = await SeedPendingRequestAsync(Store.TenantA, tableName, externalSystemId);
+        var table = new TableIdentifier("sales", "dbo", tableName);
+        return (requestId, table, (await Store.TableMetadata.GetTableMetadataAsync(table))!.Table.Id);
+    }
+
+    private Task<Consent> CreateGrantAsync(Sid grantee, TableIdentifier table, Guid tableId, Guid? requestId, Guid? profileAssignmentId = null) =>
+        Store.Consents.CreateConsentAsync(new Consent
+        {
+            TableId = tableId, TableIdentifier = table, TenantId = Store.TenantA, GranteeType = GranteeType.User, GranteeSid = grantee,
+            Effect = ConsentEffect.Allow, ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(30),
+            CreatedBySid = new Sid("S-1-5-21-ADMIN-1173"), ConsentRequestId = requestId, ProfileAssignmentId = profileAssignmentId
+        });
 
     private static (string? Status, int Version) ReadStatusAndVersion(string payloadJson)
     {

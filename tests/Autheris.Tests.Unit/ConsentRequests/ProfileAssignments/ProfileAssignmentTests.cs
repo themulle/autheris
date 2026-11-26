@@ -366,13 +366,37 @@ public sealed class ProfileAssignmentTests
             return Task.FromResult(n);
         }
         public Task<IReadOnlyList<Consent>> GetConsentsByProfileAssignmentAsync(DbTransaction? transaction, TenantId tenantId, Guid profileAssignmentId, CancellationToken ct = default) =>
-            Task.FromResult<IReadOnlyList<Consent>>(Consents.Where(c => c.TenantId == tenantId && c.ProfileAssignmentId == profileAssignmentId && !c.IsRevoked).ToList());
+            Task.FromResult<IReadOnlyList<Consent>>(Consents.Where(c => (IgnoreTenantFilter || c.TenantId == tenantId) && c.ProfileAssignmentId == profileAssignmentId && !c.IsRevoked).ToList());
         public Task<Consent?> GetConsentByIdInTransactionAsync(DbTransaction transaction, Guid consentId, CancellationToken ct = default) =>
             Task.FromResult(Consents.FirstOrDefault(c => c.Id == consentId));
-        public Task MarkConsentRevokedInTransactionAsync(DbTransaction transaction, Guid consentId, Sid actorSid, string reason, DateTimeOffset now, CancellationToken ct = default)
+        public bool IgnoreTenantFilter { get; set; }
+        public HashSet<Guid> LoseRevokeRace { get; } = [];
+        public List<IReadOnlyList<RevokedProfileGrant>> AppendedRevokedEvents { get; } = [];
+        public Exception? AppendFailure { get; set; }
+        public List<string> CallLog { get; } = [];
+        public int CommitCount { get; private set; }
+        public Task<bool> MarkConsentRevokedInTransactionAsync(DbTransaction transaction, Guid consentId, Sid actorSid, string reason, DateTimeOffset now, CancellationToken ct = default)
         {
+            if (LoseRevokeRace.Contains(consentId))
+            {
+                CallLog.Add("mark-lost");
+                return Task.FromResult(false);
+            }
+
+            CallLog.Add("mark");
             var idx = Consents.FindIndex(x => x.Id == consentId);
             Consents[idx] = CloneConsent(Consents[idx], isRevoked: true, revokedBy: actorSid, revokedAt: now, revokeReason: reason);
+            return Task.FromResult(true);
+        }
+        public Task AppendGrantRevokedEventsInTransactionAsync(DbTransaction transaction, TenantId tenantId, IReadOnlyList<RevokedProfileGrant> revokedGrants, DateTimeOffset occurredAt, CancellationToken ct = default)
+        {
+            CallLog.Add("append");
+            if (AppendFailure is not null)
+            {
+                throw AppendFailure;
+            }
+
+            AppendedRevokedEvents.Add(revokedGrants);
             return Task.CompletedTask;
         }
         public Task AddApprovingOwnersInTransactionAsync(DbTransaction transaction, Consent consent, IReadOnlyCollection<string> ownerSids, CancellationToken ct = default)
@@ -384,8 +408,8 @@ public sealed class ProfileAssignmentTests
             consent.ApprovingOwners = list;
             return Task.CompletedTask;
         }
-        public Task IncrementTableEpochInTransactionAsync(DbTransaction transaction, TableIdentifier table, CancellationToken ct = default) { EpochBumps++; EpochBumpTargets.Add(table); return Task.CompletedTask; }
-        public Task RecordAuditInTransactionAsync(DbTransaction transaction, AuditLogEntry entry, CancellationToken ct = default) { Audits.Add(entry); return Task.CompletedTask; }
+        public Task IncrementTableEpochInTransactionAsync(DbTransaction transaction, TableIdentifier table, CancellationToken ct = default) { CallLog.Add("epoch"); EpochBumps++; EpochBumpTargets.Add(table); return Task.CompletedTask; }
+        public Task RecordAuditInTransactionAsync(DbTransaction transaction, AuditLogEntry entry, CancellationToken ct = default) { CallLog.Add("audit"); Audits.Add(entry); return Task.CompletedTask; }
         public Task RecordAuditEventAsync(AuditLogEntry entry, CancellationToken ct = default) { Audits.Add(entry); return Task.CompletedTask; }
         public Task RecordAuditEventAsync(AuditLogEntry entry, DbTransaction existingTx, CancellationToken ct = default) { Audits.Add(entry); return Task.CompletedTask; }
         public Task<IReadOnlyList<AuditLogEntry>> GetAuditLogEntriesAsync(int limit = 100, TenantId? tenantId = null, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<AuditLogEntry>>(Audits);
@@ -436,7 +460,7 @@ public sealed class ProfileAssignmentTests
         public Task<ConsentRequestPage> QueryTenantConsentRequestsAsync(ConsentRequestPageQuery query, CancellationToken ct = default) => Task.FromResult(new ConsentRequestPage([], null));
 
         public Task<(long LastSeq, string LastHash)> LockAndReadHeadAsync(DbTransaction transaction, string tenantId, CancellationToken ct = default) => Task.FromResult((_seq, _hash));
-        public Task AppendRecordAndAdvanceHeadAsync(DbTransaction transaction, GrantRecord record, CancellationToken ct = default) { Records.Add(record); _seq = record.Seq; _hash = record.RecordHash; return Task.CompletedTask; }
+        public Task AppendRecordAndAdvanceHeadAsync(DbTransaction transaction, GrantRecord record, CancellationToken ct = default) { CallLog.Add("ledger"); Records.Add(record); _seq = record.Seq; _hash = record.RecordHash; return Task.CompletedTask; }
         public Task UpdateConsentGrantRecordSeqAsync(DbTransaction transaction, string tenantId, Guid consentId, long seq, CancellationToken ct = default) => Task.CompletedTask;
         public Task InsertConsentRowAsync(DbTransaction transaction, Consent consent, long grantRecordSeq, CancellationToken ct = default) { Consents.Add(CloneConsent(consent, grantRecordSeq: grantRecordSeq)); return Task.CompletedTask; }
 
@@ -485,7 +509,7 @@ public sealed class ProfileAssignmentTests
                 fx._hash = _hashSnap;
                 fx.EpochBumps = _epochSnap;
             }
-            public new Task CommitAsync(CancellationToken ct = default) => Task.CompletedTask;
+            public new Task CommitAsync(CancellationToken ct = default) { fx.CommitCount++; fx.CallLog.Add("commit"); return Task.CompletedTask; }
             public new Task RollbackAsync(CancellationToken ct = default) { Rollback(); return Task.CompletedTask; }
         }
     }
