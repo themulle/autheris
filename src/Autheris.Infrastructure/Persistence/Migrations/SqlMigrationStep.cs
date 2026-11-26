@@ -158,7 +158,8 @@ internal sealed partial class SqlMigrationStep
                     }
                     else
                     {
-                        list[^1].AppendLine(line);
+                        // '\n', not AppendLine: Environment.NewLine is CRLF on Windows and would change the executed text.
+                        list[^1].Append(line).Append('\n');
                     }
 
                     return list;
@@ -175,18 +176,37 @@ internal sealed partial class SqlMigrationStep
 
     internal static IReadOnlyList<SqlMigrationStep> LoadEmbedded(string engine, Assembly assembly)
     {
-        var folder = ResourcePrefix + engine + "/";
-        var resources = assembly.GetManifestResourceNames().Where(n => n.StartsWith(folder, StringComparison.Ordinal)).ToArray();
+        var resources = MapEmbeddedResources(engine, assembly.GetManifestResourceNames());
         return Load(
             engine,
-            resources.Select(r => r[folder.Length..]).ToArray(),
+            resources.Keys.ToArray(),
             file =>
             {
-                using var stream = assembly.GetManifestResourceStream(folder + file)
+                using var stream = assembly.GetManifestResourceStream(resources[file])
                     ?? throw new InvalidOperationException($"The governance migration resource '{file}' is missing (fail closed).");
                 using var reader = new StreamReader(stream, new UTF8Encoding(false), detectEncodingFromByteOrderMarks: true);
                 return reader.ReadToEnd();
             });
+    }
+
+    /// <summary>
+    /// Maps the file names of an engine's step resources to their manifest names. The logical name comes from
+    /// <c>%(RecursiveDir)</c>, which uses <c>\</c> when the assembly is built on Windows, so both separators are accepted.
+    /// </summary>
+    internal static IReadOnlyDictionary<string, string> MapEmbeddedResources(string engine, IEnumerable<string> manifestNames)
+    {
+        var folder = ResourcePrefix + engine + "/";
+        var map = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var name in manifestNames)
+        {
+            var normalized = name.Replace('\\', '/');
+            if (normalized.StartsWith(folder, StringComparison.Ordinal) && !map.TryAdd(normalized[folder.Length..], name))
+            {
+                throw new InvalidOperationException($"Duplicate governance migration resource '{normalized}' (fail closed).");
+            }
+        }
+
+        return map;
     }
 
     /// <summary>Builds steps from file names and a reader; used by the embedded loader and by tests.</summary>
