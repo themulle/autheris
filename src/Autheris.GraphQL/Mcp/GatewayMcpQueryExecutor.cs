@@ -283,6 +283,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
                 var executionResult = await executor.ExecuteAsync(requestBuilder.Build(), cancellationToken).ConfigureAwait(false);
                 if (executionResult is OperationResult op)
                 {
+                    McpResultMasking.Report(HasMaskedFields(op.Extensions));
                     var json = FormatOperationResult(op);
                     if (op.Errors is null || op.Errors.Count == 0)
                     {
@@ -620,6 +621,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.ExecutionFailed, "Unsupported GraphQL execution result.");
         }
 
+        McpResultMasking.Report(HasMaskedFields(result.Extensions));
         var raw = FormatOperationResult(result);
         var json = Capped(tool.Name, raw, McpRowCap.TrimGraphQl(raw, RowCap()));
         if (result.Errors is not null && result.Errors.Any(e => string.Equals(e.Code, "TIMEOUT", StringComparison.OrdinalIgnoreCase)))
@@ -728,6 +730,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
                 return CreateErrorResult(sessionContext.TenantId, toolName, McpErrorCodes.Forbidden, "Access denied by data governance policy.");
             }
 
+            McpResultMasking.Report(McpResultMasking.HasMaskedValues(decision, null, rows));
             return JsonSerializer.Serialize(new
             {
                 tenantId = sessionContext.TenantId,
@@ -795,6 +798,10 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         }
         return false;
     }
+
+    /// <summary>True when the GraphQL result carries the masked-fields extension, i.e. a column resolver returned a masked value.</summary>
+    internal static bool HasMaskedFields(IReadOnlyDictionary<string, object?>? extensions) =>
+        extensions is not null && extensions.ContainsKey(Interceptors.MaskedFieldsMiddleware.ExtensionKey);
 
     private static string FormatOperationResult(OperationResult op)
     {

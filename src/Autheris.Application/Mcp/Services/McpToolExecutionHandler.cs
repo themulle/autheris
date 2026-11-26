@@ -304,6 +304,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
                         ct).ConfigureAwait(false);
                 }
 
+                McpResultMasking.Report(sqlResult.HasPolicyMaskedValues);
                 return JsonSerializer.Serialize(McpSqlQueryResult.From(sqlResult), JsonOpts);
             }
             catch (SqlPagingTokenInvalidException)
@@ -347,6 +348,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             {
                 var datasetRequest = new DatasetQueryRequest(tableId, select, filter, orderBy, limit, offset, SqlTransports.Mcp);
                 var result = await _dataQueryService.ExecuteQueryAsync(datasetRequest, requestContext, ct).ConfigureAwait(false);
+                McpResultMasking.Report(result.Data.Count > 0 && result.Columns.Any(c => c.Masked));
                 return JsonSerializer.Serialize(result, JsonOpts);
             }
             catch (UnauthorizedAccessException)
@@ -789,6 +791,7 @@ public sealed class McpToolExecutionHandler : IMcpToolExecutionHandler
             using var callScope = Autheris.Application.Procedures.Interfaces.ProcedureCallScope.Enter(Autheris.Application.Procedures.Interfaces.ProcedureCallTransport.Mcp);
             var result = await _procedureExecutionService.ExecuteAsync(procName, rawInputs, userPrincipal, tenantId, ct).ConfigureAwait(false);
 
+            McpResultMasking.Report(result.HasMaskedValues && result.Rows.Count > 0);
             var rows = result.Rows;
             bool truncated = result.Truncated || rows.Count > maxRows;
             if (rows.Count > maxRows)

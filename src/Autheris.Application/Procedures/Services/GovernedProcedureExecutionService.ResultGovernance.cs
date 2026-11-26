@@ -12,7 +12,7 @@ using TableDecision = (Autheris.Domain.Interfaces.TableAccessDecision Decision, 
 
 public sealed partial class GovernedProcedureExecutionService
 {
-    private (IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows) GovernResult(
+    private (IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows, bool AnyMasked) GovernResult(
         ProcedureDefinition definition,
         RawProcedureResult raw,
         Dictionary<string, TableDecision> decisions,
@@ -161,7 +161,7 @@ public sealed partial class GovernedProcedureExecutionService
             rows.Add(output);
         }
 
-        return (plan.Select(p => p.Name).ToList(), rows);
+        return (plan.Select(p => p.Name).ToList(), rows, rows.Count > 0 && plan.Any(p => p.Level == ColumnAccessLevel.Mask));
     }
 
     private static bool TryFindDecision(

@@ -457,6 +457,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         }
 
         string rawDataJson;
+        bool? policyOutcome = null;
         var argsJson = request.ArgumentsJson ?? "{}";
         if (tool.Name.Equals("get_golden_queries", StringComparison.OrdinalIgnoreCase) && _goldenQueryService != null)
         {
@@ -577,7 +578,9 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         }
         else if (_queryExecutor != null)
         {
+            using var maskingScope = McpResultMasking.Begin();
             rawDataJson = await _queryExecutor.ExecuteOperationAsync(tool, argsJson, sessionContext, cancellationToken).ConfigureAwait(false);
+            policyOutcome = maskingScope.Outcome;
         }
         else
         {
@@ -597,7 +600,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
             McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, wasMasked, false);
             await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", $"Tool execution returned an error result ({errorCode ?? "UNKNOWN"}).", wasMasked, false, 0, cancellationToken).ConfigureAwait(false);
-            return new McpToolCallResult(IsSuccess: false, ContentJson: scrubbedJson, ErrorMessage: scrubbedJson, IsMasked: wasMasked);
+            return new McpToolCallResult(IsSuccess: false, ContentJson: scrubbedJson, ErrorMessage: scrubbedJson, IsMasked: wasMasked || policyOutcome == true);
         }
 
         scrubbedJson = await InspectOutputAsync(tool.Name, scrubbedJson, sessionContext, cancellationToken, m => wasMasked |= m).ConfigureAwait(false);
@@ -612,7 +615,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         McpDiagnostics.RecordTokenUsage(estimatedTokens, "output", tool.Name);
         McpDiagnostics.RecordGuardrailVerdict(verdict, tool.Name, wasMasked, false);
 
-        return new McpToolCallResult(IsSuccess: true, ContentJson: scrubbedJson, EstimatedTokens: estimatedTokens, IsMasked: wasMasked, TruncatedDueToBudget: truncated);
+        return new McpToolCallResult(IsSuccess: true, ContentJson: scrubbedJson, EstimatedTokens: estimatedTokens, IsMasked: wasMasked || (policyOutcome ?? (_queryExecutor != null && McpResultMasking.IsGovernedDataTool(tool))), TruncatedDueToBudget: truncated);
     }
 
     /// <summary>Audit and metric label of a resource read (the audit row names the URI where a tool call names the tool).</summary>

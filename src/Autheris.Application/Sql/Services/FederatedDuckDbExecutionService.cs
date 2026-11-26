@@ -251,7 +251,8 @@ public sealed partial class FederatedDuckDbExecutionService : IFederatedQueryExe
             (long)duckDbResult.ExecutionDuration.TotalMilliseconds,
             truncated,
             InDbColumnMaskingExecuted: !_options.Value.IsColumnMaskingDisabled,
-            PagingUnavailable: request.Page is not null && truncated ? "federated" : null);
+            PagingUnavailable: request.Page is not null && truncated ? "federated" : null,
+            MaskedColumns: duckDbResult.Columns.Select(c => IsMaskedByName(c, plan)).ToImmutableArray());
     }
 
     private async Task<(OlapQueryResult Result, CrossSourcePlan Plan, bool Truncated)> ExecuteFederatedInternalAsync(

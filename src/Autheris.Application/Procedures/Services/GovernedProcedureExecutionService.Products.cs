@@ -96,7 +96,7 @@ public sealed partial class GovernedProcedureExecutionService
     }
 
     /// <summary>Result governance of a product: only declared output columns leave, each in the state its class and the product grant allow.</summary>
-    private (IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows) GovernProductResult(
+    private (IReadOnlyList<string> Columns, IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows, bool AnyMasked) GovernProductResult(
         ProcedureDefinition definition,
         RawProcedureResult raw,
         Dictionary<string, TableDecision> decisions,
@@ -157,7 +157,7 @@ public sealed partial class GovernedProcedureExecutionService
             rows.Add(output);
         }
 
-        return (plan.Select(p => p.Name).ToList(), rows);
+        return (plan.Select(p => p.Name).ToList(), rows, rows.Count > 0 && plan.Any(p => p.Level == ColumnAccessLevel.Mask));
     }
 
     /// <summary>A write procedure runs only as a product, on REST or MCP, for a caller whose token permits writes.</summary>

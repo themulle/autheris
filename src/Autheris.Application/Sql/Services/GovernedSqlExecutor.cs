@@ -141,6 +141,7 @@ public sealed partial class GovernedSqlExecutor
         var rows = new List<IReadOnlyDictionary<string, object?>>();
         var columns = new List<string>();
         IReadOnlyList<SqlResultColumn> columnDescriptions = Array.Empty<SqlResultColumn>();
+        var maskedColumns = default(System.Collections.Immutable.ImmutableArray<bool>);
         bool isTruncated = false;
         var sw = Stopwatch.StartNew();
 
@@ -170,6 +171,7 @@ public sealed partial class GovernedSqlExecutor
             async (reader, info, token) =>
             {
                 columnDescriptions = info.Columns;
+                maskedColumns = info.MaskedColumns;
                 foreach (var column in columnDescriptions)
                 {
                     columns.Add(column.Name);
@@ -204,7 +206,7 @@ public sealed partial class GovernedSqlExecutor
         return new GovernedSqlResult(
             request.Sql, columns.AsReadOnly(), rows.AsReadOnly(), rows.Count, sw.ElapsedMilliseconds,
             isTruncated, columnDescriptions, !_options.Value.IsColumnMaskingDisabled,
-            pageOutcome?.Page, pageOutcome?.NextToken, pageOutcome?.PagingUnavailable, indexHints, sourceStats);
+            pageOutcome?.Page, pageOutcome?.NextToken, pageOutcome?.PagingUnavailable, indexHints, sourceStats, maskedColumns);
     }
 
     public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamRowsAsync(

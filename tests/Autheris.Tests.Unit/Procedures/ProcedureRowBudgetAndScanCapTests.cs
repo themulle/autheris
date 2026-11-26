@@ -256,7 +256,7 @@ public class ProcedureRowBudgetAndScanCapTests
 
         var result = await Run(f);
 
-        var names = typeof(GovernedProcedureResult).GetProperties().Select(p => p.Name).ToList();
+        var names = typeof(GovernedProcedureResult).GetProperties().Where(p => !p.IsDefined(typeof(System.Text.Json.Serialization.JsonIgnoreAttribute), true)).Select(p => p.Name).ToList();
         names.ShouldBe(["Columns", "Rows", "RowCount", "Truncated", "ElapsedMilliseconds"], ignoreOrder: true);
         result.Truncated.ShouldBeTrue();
 

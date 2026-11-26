@@ -348,6 +348,30 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
         writeResultJson.ShouldContain("read access");
     }
 
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData(true, 1, true)]
+    [InlineData(false, 1, false)]
+    [InlineData(true, 0, false)]
+    public async Task CallProcedure_ReportsPolicyMaskingOfTheResult(bool hasMaskedValues, int rowCount, bool expected)
+    {
+        var proc = CreateProcedure("ProcMasked");
+        var procRegistry = CreateRegistry(proc);
+        var rows = Enumerable.Range(0, rowCount)
+            .Select(i => (IReadOnlyDictionary<string, object?>)new Dictionary<string, object?> { ["id"] = i })
+            .ToList();
+        var procService = new StubProcedureExecutionService(
+            isVisible: (_, _, _) => true,
+            execute: _ => new GovernedProcedureResult(["id"], rows, rowCount, false, 1, hasMaskedValues));
+        var handler = CreateHandler(procRegistry, procService);
+        var tool = McpDatasetTools.Definitions().First(t => t.Name == McpDatasetTools.CallProcedure);
+
+        using var scope = McpResultMasking.Begin();
+        await handler.ExecuteToolAsync(tool, JsonSerializer.Serialize(new { procedure_name = "ProcMasked" }), CreateSession());
+
+        scope.Outcome.ShouldBe(expected);
+    }
+
     [Fact]
     [Trait("Category", "Security")]
     public async Task T_SEC_GOV153_05_CallProcedure_RowClampingAndTruncationFlag()

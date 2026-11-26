@@ -137,7 +137,14 @@ public sealed record GovernedSqlResult(
     string? Next = null,
     string? PagingUnavailable = null,
     IReadOnlyList<Autheris.Domain.Model.WebSqlIndexHint>? IndexHints = null,
-    [property: System.Text.Json.Serialization.JsonIgnore] Autheris.Application.Usage.SourceExecutionStats SourceStats = default);
+    [property: System.Text.Json.Serialization.JsonIgnore] Autheris.Application.Usage.SourceExecutionStats SourceStats = default,
+    [property: System.Text.Json.Serialization.JsonIgnore] System.Collections.Immutable.ImmutableArray<bool> MaskedColumns = default)
+{
+    /// <summary>True when the result has rows and the projection holds a policy-masked column; unknown column masks fall back to the in-database masking flag.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public bool HasPolicyMaskedValues =>
+        Rows.Count > 0 && (MaskedColumns.IsDefault ? InDbColumnMaskingExecuted : MaskedColumns.Contains(true));
+}
 
 public interface IGovernedSqlExecutionService
 {

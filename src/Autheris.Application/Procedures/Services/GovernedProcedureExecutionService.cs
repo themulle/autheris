@@ -322,7 +322,7 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
                 governed.Rows.Count,
                 true,
                 ExtractDecisionGrants(decisions.Values.Select(d => d.Decision)));
-            return new GovernedProcedureResult(governed.Columns, governed.Rows, governed.Rows.Count, truncated, sw.ElapsedMilliseconds);
+            return new GovernedProcedureResult(governed.Columns, governed.Rows, governed.Rows.Count, truncated, sw.ElapsedMilliseconds, governed.AnyMasked);
         }
         finally
         {

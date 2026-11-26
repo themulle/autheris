@@ -15,6 +15,7 @@ using RequestDelegate = HotChocolate.Execution.RequestDelegate;
 public sealed class MaskedFieldsMiddleware
 {
     public const string ContextKey = "MaskedFields";
+    public const string ExtensionKey = "maskedFields";
     private readonly RequestDelegate _next;
 
     public MaskedFieldsMiddleware(RequestDelegate next)
@@ -33,7 +34,7 @@ public sealed class MaskedFieldsMiddleware
         {
             var distinctList = bag.Distinct(StringComparer.Ordinal).OrderBy(x => x, StringComparer.Ordinal).ToList();
             var extensions = opResult.Extensions ?? HotChocolate.Collections.Immutable.ImmutableOrderedDictionary<string, object?>.Empty;
-            opResult.Extensions = extensions.SetItem("maskedFields", distinctList);
+            opResult.Extensions = extensions.SetItem(ExtensionKey, distinctList);
         }
     }
 }

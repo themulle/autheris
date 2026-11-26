@@ -13,7 +13,8 @@ public sealed record GovernedProcedureResult(
     IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows,
     int RowCount,
     bool Truncated,
-    long ElapsedMilliseconds);
+    long ElapsedMilliseconds,
+    [property: System.Text.Json.Serialization.JsonIgnore] bool HasMaskedValues = false);
 
 public interface IProcedureExecutionService
 {

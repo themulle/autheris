@@ -1096,6 +1096,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             throw new GatewayForbiddenException("Access denied by data governance policy.");
         }
 
+        McpResultMasking.Report(McpResultMasking.HasMaskedValues(decision, table, rows));
         return new McpDatasetSample(DatasetId(table.Identifier), rows.Count, rows, IsSynthetic: false);
     }
 
