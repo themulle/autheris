@@ -374,6 +374,8 @@ public sealed class PermissionRequestEngineDecideTests
         var req = PendingRequest();
         var committed = false;
         var events = new RecordingConsentEventOutbox();
+        var audit = new InMemoryAuditWriter();
+        var applier = new StubGrantApplier(ConsentRequestKind.Data);
         var approvals = NullFake.Create<IConsentApprovalRepository>((m, args) =>
         {
             if (m.Name == nameof(IConsentApprovalRepository.TryDecideAsync))
@@ -394,13 +396,13 @@ public sealed class PermissionRequestEngineDecideTests
         });
         var engine = new PermissionRequestEngine(
             approvals,
-            new InMemoryAuditWriter(),
+            audit,
             new ApproverResolver(),
             new ApproverEligibility(new GovernanceCapabilities()),
             new SeparationOfDutiesService(),
             new GrantPolicy(),
             GrantValidityPolicy.CreateDefault(),
-            [new StubGrantApplier(ConsentRequestKind.Data)],
+            [applier],
             timeProvider: new FakeTimeProvider(Now),
             eventOutbox: events);
 
@@ -410,6 +412,8 @@ public sealed class PermissionRequestEngineDecideTests
         ex.Message.ShouldContain("cannot be appended atomically");
         committed.ShouldBeFalse();
         events.Appended.ShouldBeEmpty();
+        applier.Applied.ShouldBe(0, "the guard runs before any grant is written");
+        audit.Entries.ShouldNotContain(e => e.EventType == AuditEventTypes.PermissionApproved, "no approval audit for a decision that never commits");
     }
 
     [Fact]

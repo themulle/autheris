@@ -449,8 +449,8 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
 
     /// <summary>
     /// Issue #1165: a withdrawal through the repository (the requester's withdrawal and the deprovisioning withdrawal share it) appends
-    /// request.updated in the withdrawal transaction, read on the same connection (no self-blocking read on SQL Server), routed to the
-    /// request's workflow system and fanned out to observers; a refused withdrawal appends nothing.
+    /// request.updated in the withdrawal transaction, read on the same connection (no self-blocking read on SQL Server). The event of
+    /// an externally routed request is delivered to its workflow system and fanned out to observers; a refused withdrawal appends nothing.
     /// </summary>
     [RequiresContainerRuntimeFact]
     [Trait("Category", "Security")]
@@ -459,8 +459,10 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
         if (!Store.IsAvailable) return;
 
         var observer = NewSystem(Store.TenantA.Value, "observer-withdraw", ExternalWorkflowSystemRole.Observer);
+        var workflow = NewSystem(Store.TenantA.Value, "workflow-withdraw", ExternalWorkflowSystemRole.Workflow);
         await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(observer);
-        var requestId = await SeedPendingRequestAsync(Store.TenantA, "orders_withdraw_" + Guid.NewGuid().ToString("N")[..8]);
+        await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(workflow);
+        var requestId = await SeedPendingRequestAsync(Store.TenantA, "orders_withdraw_" + Guid.NewGuid().ToString("N")[..8], workflow.Id);
 
         (await Store.ConsentApprovals.WithdrawConsentRequestAsync(requestId, new Sid("S-1-5-21-OTHER-REQ"))).Should().BeFalse();
         (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 50, observer.Id)).Events
@@ -475,6 +477,9 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
             .Where(e => e.SubjectId == requestId.ToString("D")).Should().ContainSingle().Which;
         withdrawn.Type.Should().Be(ConsentEventTypes.RequestUpdated);
         ReadStatusAndVersion(withdrawn.PayloadJson).Should().Be(("WITHDRAWN", 2));
+        var routed = (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 50, workflow.Id)).Events
+            .Where(e => e.SubjectId == requestId.ToString("D")).Should().ContainSingle().Which;
+        routed.Id.Should().Be(withdrawn.Id);
 
         (await Store.ConsentApprovals.WithdrawConsentRequestAsync(requestId, new Sid("S-1-5-21-OBSERVER-REQ"))).Should().BeFalse();
         (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 50, observer.Id)).Events
@@ -487,7 +492,7 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
         return (doc.RootElement.GetProperty("status").GetString(), doc.RootElement.GetProperty("version").GetInt32());
     }
 
-    private async Task<Guid> SeedPendingRequestAsync(TenantId tenant, string tableName)
+    private async Task<Guid> SeedPendingRequestAsync(TenantId tenant, string tableName, Guid? externalSystemId = null)
     {
         var table = new TableIdentifier("sales", "dbo", tableName);
         var meta = await Store.Repository.UpsertTableMetadataAsync(new TableMetadata
@@ -506,7 +511,9 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
             RequestedGranteeRef = "S-1-5-21-OBSERVER-REQ",
             BusinessJustification = "Observer role contract test request.",
             RequestedValidTo = FixedNow.AddDays(14),
-            Status = "PENDING",
+            Status = externalSystemId is null ? "PENDING" : "PENDING_EXTERNAL_APPROVAL",
+            WorkflowMode = externalSystemId is null ? ConsentWorkflowMode.Internal : ConsentWorkflowMode.External,
+            ExternalSystemId = externalSystemId,
             TenantId = tenant
         });
         return request.Id;

@@ -94,6 +94,18 @@ public partial class GovernanceRepository
               FROM EXTERNAL_WORKFLOW_SYSTEMS
               WHERE id = @id AND tenant_id = @tenant";
 
+        // The system row held for an update that still lets event appends read it (they read the row after the tenant event lock).
+        public const string LockExternalWorkflowSystemByIdPgSql =
+            @"SELECT id, tenant_id, name, client_id, webhook_url, webhook_secret_protected, enabled, created_by, created_at, disabled_at, system_role
+              FROM EXTERNAL_WORKFLOW_SYSTEMS
+              WHERE id = @id AND tenant_id = @tenant
+              FOR NO KEY UPDATE";
+
+        public const string LockExternalWorkflowSystemByIdSsSql =
+            @"SELECT id, tenant_id, name, client_id, webhook_url, webhook_secret_protected, enabled, created_by, created_at, disabled_at, system_role
+              FROM EXTERNAL_WORKFLOW_SYSTEMS WITH (UPDLOCK, ROWLOCK)
+              WHERE id = @id AND tenant_id = @tenant";
+
         public const string UpdateSystemRevokeSql = @"UPDATE CONSENTS
                                           SET is_revoked = 1, revoked_by_sid = @sid, revoked_at = @now, revoke_reason = @reason
                                           WHERE id = @id AND is_revoked = 0";
