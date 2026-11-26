@@ -31,15 +31,14 @@ public sealed class WebSqlResultCacheOptionsValidator : IValidateOptions<Gateway
 
         if (webSql.ResultCacheMaxMegabytes > 0)
         {
-            var total = Math.Min(webSql.ResultCacheMaxMegabytes, MaxMegabytesCeiling);
-            if (webSql.ResultCacheMaxEntryMegabytes < 1 || webSql.ResultCacheMaxEntryMegabytes > total)
+            if (webSql.ResultCacheMaxEntryMegabytes < 1)
             {
-                failures.Add("WebSql:ResultCacheMaxEntryMegabytes must be at least 1 and at most WebSql:ResultCacheMaxMegabytes.");
+                failures.Add("WebSql:ResultCacheMaxEntryMegabytes must be at least 1; values above WebSql:ResultCacheMaxMegabytes are clamped to it.");
             }
 
-            if (webSql.ResultCacheMaxUserMegabytes < 1 || webSql.ResultCacheMaxUserMegabytes > total)
+            if (webSql.ResultCacheMaxUserMegabytes < 1)
             {
-                failures.Add("WebSql:ResultCacheMaxUserMegabytes must be at least 1 and at most WebSql:ResultCacheMaxMegabytes.");
+                failures.Add("WebSql:ResultCacheMaxUserMegabytes must be at least 1; values above WebSql:ResultCacheMaxMegabytes are clamped to it.");
             }
         }
 

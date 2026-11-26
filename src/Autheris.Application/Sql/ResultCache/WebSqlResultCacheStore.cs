@@ -196,13 +196,16 @@ internal sealed class WebSqlResultCacheStore : IDisposable
     /// Stores the entry, replacing a previous one for the same hash only when the new one is accepted. Evicts the user's own oldest
     /// entries to meet the user caps first, then least recently used entries of anybody to meet the global cap.
     /// </summary>
-    public bool TryPut(ResultCacheEntry entry)
+    public bool TryPut(ResultCacheEntry entry, IResultCacheReservation? committing = null)
     {
         lock (_gate)
         {
             var limits = _limits;
             var size = entry.SizeBytes;
-            if (!limits.Enabled || size > limits.MaxEntryBytes || size > limits.MaxUserBytes || size + _reservedBytes > limits.MaxTotalBytes)
+
+            // The committing recording's own reservation stands for the memory this entry is about to occupy, so it is not counted twice.
+            var otherReserved = _reservedBytes - (committing is Reservation mine && ReferenceEquals(mine.Store, this) ? mine.Held : 0);
+            if (!limits.Enabled || size > limits.MaxEntryBytes || size > limits.MaxUserBytes || size + otherReserved > limits.MaxTotalBytes)
             {
                 return false;
             }
@@ -224,12 +227,12 @@ internal sealed class WebSqlResultCacheStore : IDisposable
                 Remove(own.Value, WebSqlResultCacheInvalidationReasons.UserCap);
             }
 
-            while (_totalBytes + _reservedBytes + size > limits.MaxTotalBytes && _lru.Last is { } oldest)
+            while (_totalBytes + otherReserved + size > limits.MaxTotalBytes && _lru.Last is { } oldest)
             {
                 Remove(oldest.Value, WebSqlResultCacheInvalidationReasons.Evicted);
             }
 
-            if (_totalBytes + _reservedBytes + size > limits.MaxTotalBytes)
+            if (_totalBytes + otherReserved + size > limits.MaxTotalBytes)
             {
                 DropIfEmpty(userKey, user);
                 return false;
@@ -315,19 +318,21 @@ internal sealed class WebSqlResultCacheStore : IDisposable
 
     public void Dispose() => _metricsRegistration.Dispose();
 
-    private bool TryGrow(UserState user, long bytes)
+    private bool TryGrow(Reservation reservation, long bytes)
     {
         lock (_gate)
         {
+            var user = reservation.User;
             var limits = _limits;
-            if (!limits.Enabled || bytes <= 0 || user.Bytes + user.Reserved + bytes > limits.MaxUserBytes)
+            if (reservation.Disposed || !limits.Enabled || bytes <= 0 || user.Bytes + user.Reserved + bytes > limits.MaxUserBytes)
             {
                 return false;
             }
 
-            while (_totalBytes + _reservedBytes + bytes > limits.MaxTotalBytes && _lru.Last is { } oldest)
+            // A recording may still fail, so it never evicts other users' entries; it only makes room from its own user's entries.
+            while (_totalBytes + _reservedBytes + bytes > limits.MaxTotalBytes && user.Lru.Last is { } own)
             {
-                Remove(oldest.Value, WebSqlResultCacheInvalidationReasons.Evicted);
+                Remove(own.Value, WebSqlResultCacheInvalidationReasons.UserCap);
             }
 
             if (_totalBytes + _reservedBytes + bytes > limits.MaxTotalBytes)
@@ -337,18 +342,26 @@ internal sealed class WebSqlResultCacheStore : IDisposable
 
             user.Reserved += bytes;
             _reservedBytes += bytes;
+            reservation.Held += bytes;
             return true;
         }
     }
 
-    private void Release((string Tenant, string Sid) userKey, UserState user, long bytes)
+    private void Release(Reservation reservation)
     {
         lock (_gate)
         {
-            user.Reserved -= bytes;
-            _reservedBytes -= bytes;
-            user.Recordings--;
-            DropIfEmpty(userKey, user);
+            if (reservation.Disposed)
+            {
+                return;
+            }
+
+            reservation.Disposed = true;
+            reservation.User.Reserved -= reservation.Held;
+            _reservedBytes -= reservation.Held;
+            reservation.Held = 0;
+            reservation.User.Recordings--;
+            DropIfEmpty(reservation.UserKey, reservation.User);
         }
     }
 
@@ -413,38 +426,21 @@ internal sealed class WebSqlResultCacheStore : IDisposable
 
     private sealed record Tombstone(string Hash, DateTimeOffset ExpiresAt);
 
-    private sealed class Reservation : IResultCacheReservation
+    private sealed class Reservation(WebSqlResultCacheStore store, (string Tenant, string Sid) userKey, UserState user) : IResultCacheReservation
     {
-        private readonly WebSqlResultCacheStore _store;
-        private readonly (string Tenant, string Sid) _userKey;
-        private readonly UserState _user;
-        private long _held;
-        private int _disposed;
+        public WebSqlResultCacheStore Store { get; } = store;
 
-        public Reservation(WebSqlResultCacheStore store, (string Tenant, string Sid) userKey, UserState user)
-        {
-            _store = store;
-            _userKey = userKey;
-            _user = user;
-        }
+        public (string Tenant, string Sid) UserKey { get; } = userKey;
 
-        public bool TryGrow(long bytes)
-        {
-            if (Volatile.Read(ref _disposed) != 0 || !_store.TryGrow(_user, bytes))
-            {
-                return false;
-            }
+        public UserState User { get; } = user;
 
-            Interlocked.Add(ref _held, bytes);
-            return true;
-        }
+        // Both fields are only read and written under the store lock.
+        public long Held { get; set; }
 
-        public void Dispose()
-        {
-            if (Interlocked.Exchange(ref _disposed, 1) == 0)
-            {
-                _store.Release(_userKey, _user, Interlocked.Exchange(ref _held, 0));
-            }
-        }
+        public bool Disposed { get; set; }
+
+        public bool TryGrow(long bytes) => Store.TryGrow(this, bytes);
+
+        public void Dispose() => Store.Release(this);
     }
 }

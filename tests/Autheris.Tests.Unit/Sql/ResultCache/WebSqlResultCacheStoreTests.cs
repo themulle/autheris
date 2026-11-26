@@ -213,4 +213,54 @@ public sealed class WebSqlResultCacheStoreTests
         store.TryPut(Entry("b", "S-1", 10)).ShouldBeFalse();
         store.BeginReservation(T1, "S-1").ShouldBeNull();
     }
+
+    [Fact]
+    public void Entry_of_exactly_the_reservation_size_commits_under_a_tight_budget()
+    {
+        using var store = Store(ResultCacheFixtures.Limits(total: 1000, entry: 1000, user: 1000));
+        using var reservation = store.BeginReservation(T1, "S-1").ShouldNotBeNull();
+        reservation.TryGrow(1000).ShouldBeTrue();
+
+        store.TryPut(Entry("a", "S-1", 1000), reservation).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Another_recordings_reservation_still_counts_against_a_commit()
+    {
+        using var store = Store(ResultCacheFixtures.Limits(total: 1000, entry: 1000, user: 1000));
+        using var mine = store.BeginReservation(T1, "S-1").ShouldNotBeNull();
+        using var other = store.BeginReservation(T1, "S-2").ShouldNotBeNull();
+        mine.TryGrow(600).ShouldBeTrue();
+        other.TryGrow(400).ShouldBeTrue();
+
+        store.TryPut(Entry("a", "S-1", 700), mine).ShouldBeFalse();
+        store.TryPut(Entry("b", "S-1", 600), mine).ShouldBeTrue();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void A_growing_recording_never_evicts_other_users_entries_SECRC14()
+    {
+        using var store = Store(ResultCacheFixtures.Limits(total: 1000, entry: 1000, user: 1000));
+        store.TryPut(Entry("victim", "S-2", 900)).ShouldBeTrue();
+        using var reservation = store.BeginReservation(T1, "S-1").ShouldNotBeNull();
+
+        reservation.TryGrow(500).ShouldBeFalse();
+
+        store.TryGet("victim", T1, "S-2").ShouldNotBeNull();
+        store.ReservedBytes.ShouldBe(0);
+    }
+
+    [Fact]
+    public void A_disposed_reservation_cannot_grow_and_leaks_nothing()
+    {
+        using var store = Store(ResultCacheFixtures.Limits());
+        var reservation = store.BeginReservation(T1, "S-1").ShouldNotBeNull();
+        reservation.TryGrow(100).ShouldBeTrue();
+
+        reservation.Dispose();
+
+        reservation.TryGrow(100).ShouldBeFalse();
+        store.ReservedBytes.ShouldBe(0);
+    }
 }

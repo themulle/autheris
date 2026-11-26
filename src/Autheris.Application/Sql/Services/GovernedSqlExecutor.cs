@@ -615,33 +615,7 @@ public sealed partial class GovernedSqlExecutor
             await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, AuditEventTypes.WebSqlDmlIntent, "ALLOW", compiled, affectedRows: null, reason: null, synthetic: false, clientValues: clientValues).ConfigureAwait(false);
         }
 
-        var maxConcurrentReads = _options.Value.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
-        List<IDisposable>? leases = null;
-        if (_concurrencyGate != null && maxConcurrentReads > 0 && rewrite.AccessedTables.Count > 0)
-        {
-            var userSid = user.FindFirst(ClaimTypes.PrimarySid)?.Value
-                          ?? user.FindFirst("sub")?.Value
-                          ?? "anonymous";
-            leases = new List<IDisposable>(rewrite.AccessedTables.Count);
-            try
-            {
-                foreach (var table in rewrite.AccessedTables)
-                {
-                    var key = $"{tenantId.Value}|{userSid}|{table.ToQualifiedName()}".ToLowerInvariant();
-                    var lease = _concurrencyGate.TryEnter(key, maxConcurrentReads)
-                                ?? throw new GatewayThrottledException(ThrottledRetryAfterSeconds);
-                    leases.Add(lease);
-                }
-            }
-            catch
-            {
-                foreach (var lease in leases)
-                {
-                    lease.Dispose();
-                }
-                throw;
-            }
-        }
+        var leases = AcquireReadLeases(user, tenantId, rewrite);
 
         try
         {
@@ -898,7 +872,7 @@ public sealed partial class GovernedSqlExecutor
         {
             executionSw.Stop();
             cacheFill?.Dispose();
-            await SettleCostAsync(admission, deliveredOrAffectedRows, executionSw.Elapsed.TotalSeconds, executionFailed, servedFromCache).ConfigureAwait(false);
+            await SettleCostAsync(admission, deliveredOrAffectedRows, executionSw.Elapsed.TotalSeconds, executionFailed, servedFromCache || cacheFill is { Served: true }).ConfigureAwait(false);
         }
     }
 }

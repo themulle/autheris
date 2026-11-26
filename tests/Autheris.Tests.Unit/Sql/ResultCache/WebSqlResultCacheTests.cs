@@ -116,6 +116,33 @@ public sealed class WebSqlResultCacheTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public async Task Closing_the_gate_clears_the_store_without_any_request_SECRC08()
+    {
+        using var h = new CacheHarness();
+        (await StoreAsync(h, CacheHarness.Key())).ShouldBeTrue();
+        h.Cache.EntryCount.ShouldBe(1);
+
+        h.Options.SetCurrent(CacheHarness.Create(0));
+
+        h.Cache.EntryCount.ShouldBe(0);
+        h.Cache.Limits.Enabled.ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Limit_changes_apply_on_reload_and_the_limits_are_cached()
+    {
+        using var h = new CacheHarness(maxUserMegabytes: 8);
+        var before = h.Cache.Limits;
+        ReferenceEquals(before, h.Cache.Limits).ShouldBeTrue();
+
+        h.Options.SetCurrent(CacheHarness.Create(16, maxUserMegabytes: 2));
+
+        h.Cache.Limits.MaxUserBytes.ShouldBe(2L * 1024 * 1024);
+        (await StoreAsync(h, CacheHarness.Key())).ShouldBeTrue();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public async Task Table_epoch_and_governance_epoch_bump_miss_SECRC06()
     {
         using var h = new CacheHarness();

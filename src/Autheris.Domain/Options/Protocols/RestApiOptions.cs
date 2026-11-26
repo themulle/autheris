@@ -70,10 +70,10 @@ public sealed class WebSqlOptions
     /// </summary>
     public int ResultCacheMaxMegabytes { get; init; } = 0;
 
-    /// <summary>Maximum size of one cached WebSQL result in megabytes (1..<c>ResultCacheMaxMegabytes</c> when the cache is on).</summary>
+    /// <summary>Maximum size of one cached WebSQL result in megabytes (at least 1; values above <c>ResultCacheMaxMegabytes</c> are clamped to it).</summary>
     public int ResultCacheMaxEntryMegabytes { get; init; } = 16;
 
-    /// <summary>Maximum memory one tenant and user may occupy in the WebSQL result cache in megabytes (1..<c>ResultCacheMaxMegabytes</c> when the cache is on).</summary>
+    /// <summary>Maximum memory one tenant and user may occupy in the WebSQL result cache in megabytes (at least 1; values above <c>ResultCacheMaxMegabytes</c> are clamped to it).</summary>
     public int ResultCacheMaxUserMegabytes { get; init; } = 64;
 
     /// <summary>Maximum number of rows of one cached WebSQL result (1..100,000). Larger results are streamed and not stored.</summary>

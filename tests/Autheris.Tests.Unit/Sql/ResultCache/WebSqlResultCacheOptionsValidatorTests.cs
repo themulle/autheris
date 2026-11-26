@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Sql.ResultCache;
 
+using Autheris.Application.Sql.ResultCache;
 using System.Collections.Generic;
 using Autheris.Api.Configuration.Validation;
 using Autheris.Domain.Options;
@@ -56,14 +57,26 @@ public sealed class WebSqlResultCacheOptionsValidatorTests
 
     [Theory]
     [InlineData(0, 8)]
-    [InlineData(17, 8)]
     [InlineData(8, 0)]
-    [InlineData(8, 17)]
-    public void Entry_and_user_caps_must_fit_the_total_when_on(int entry, int user)
+    public void Entry_and_user_caps_must_be_positive_when_on(int entry, int user)
     {
         var webSql = new WebSqlOptions { ResultCacheMaxMegabytes = 16, ResultCacheMaxEntryMegabytes = entry, ResultCacheMaxUserMegabytes = user };
 
         Run(Options(webSql)).Succeeded.ShouldBeFalse();
+    }
+
+    [Theory]
+    [InlineData(1)]
+    [InlineData(16)]
+    [InlineData(63)]
+    public void Default_entry_and_user_caps_above_a_small_total_pass_and_are_clamped(int total)
+    {
+        var webSql = new WebSqlOptions { ResultCacheMaxMegabytes = total };
+
+        Run(Options(webSql)).Succeeded.ShouldBeTrue();
+        var limits = ResultCacheLimits.FromOptions(webSql);
+        limits.MaxEntryBytes.ShouldBeLessThanOrEqualTo(limits.MaxTotalBytes);
+        limits.MaxUserBytes.ShouldBeLessThanOrEqualTo(limits.MaxTotalBytes);
     }
 
     [Theory]

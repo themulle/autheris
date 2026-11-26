@@ -28,7 +28,8 @@ public interface IWebSqlResultCache
 
     /// <summary>Stores <paramref name="result"/> when the epochs did not change since the lookup. Sets <see cref="WebSqlResultCacheLookup.Reason"/> when it does not.</summary>
     ValueTask<bool> TryCommitAsync(
-        WebSqlResultCacheLookup fill, CachedWebSqlResult result, TimeSpan ttl, string dataSource, string? traceId, CancellationToken ct);
+        WebSqlResultCacheLookup fill, CachedWebSqlResult result, TimeSpan ttl, string dataSource, string? traceId, CancellationToken ct,
+        IResultCacheReservation? reservation = null);
 
     /// <summary>Remembers that the full statement of a paged request is too large to cache, so later pages skip the attempt.</summary>
     void MarkTooLarge(WebSqlResultCacheLookup fill, TimeSpan ttl);
@@ -47,7 +48,8 @@ public sealed partial class WebSqlResultCache : IWebSqlResultCache, IDisposable
     private readonly WebSqlResultCacheStore _store;
     private readonly Lock _gate = new();
     private readonly Dictionary<string, Flight> _flights = new(StringComparer.Ordinal);
-    private ResultCacheLimits _limits = ResultCacheLimits.Off;
+    private readonly IDisposable? _changeSubscription;
+    private volatile ResultCacheLimits _limits = ResultCacheLimits.Off;
 
     public WebSqlResultCache(
         IOptionsMonitor<GatewayOptions> options,
@@ -62,27 +64,13 @@ public sealed partial class WebSqlResultCache : IWebSqlResultCache, IDisposable
         _time = timeProvider ?? TimeProvider.System;
         _logger = logger;
         _store = new WebSqlResultCacheStore(_time);
+        Refresh();
+        _changeSubscription = _options.OnChange(_ => Refresh());
     }
 
     public bool IsEnabled => Limits.Enabled && _governance is not null && _epochs is not null;
 
-    public ResultCacheLimits Limits
-    {
-        get
-        {
-            var limits = ResultCacheLimits.FromOptions(_options.CurrentValue.WebSql);
-            lock (_gate)
-            {
-                if (!limits.Equals(_limits))
-                {
-                    _limits = limits;
-                    _store.Configure(limits);
-                }
-            }
-
-            return limits;
-        }
-    }
+    public ResultCacheLimits Limits => _limits;
 
     public async ValueTask<WebSqlResultCacheLookup> LookupAsync(
         WebSqlResultCacheKey key, bool bypass, TimeSpan followerWait, CancellationToken ct)
@@ -130,7 +118,8 @@ public sealed partial class WebSqlResultCache : IWebSqlResultCache, IDisposable
     public bool IsMarkedTooLarge(string hash) => Limits.Enabled && _store.IsMarkedTooLarge(hash);
 
     public async ValueTask<bool> TryCommitAsync(
-        WebSqlResultCacheLookup fill, CachedWebSqlResult result, TimeSpan ttl, string dataSource, string? traceId, CancellationToken ct)
+        WebSqlResultCacheLookup fill, CachedWebSqlResult result, TimeSpan ttl, string dataSource, string? traceId, CancellationToken ct,
+        IResultCacheReservation? reservation = null)
     {
         ArgumentNullException.ThrowIfNull(fill);
         ArgumentNullException.ThrowIfNull(result);
@@ -164,7 +153,7 @@ public sealed partial class WebSqlResultCache : IWebSqlResultCache, IDisposable
 
             var now = _time.GetUtcNow();
             var entry = new ResultCacheEntry(key.Hash, key.Tenant, key.UserSid, key.Tables, result, fill.Snapshot, now, now + lifetime, traceId);
-            if (!_store.TryPut(entry))
+            if (!_store.TryPut(entry, reservation))
             {
                 fill.Reason = WebSqlResultCacheReasons.TooLarge;
                 return false;
@@ -205,7 +194,31 @@ public sealed partial class WebSqlResultCache : IWebSqlResultCache, IDisposable
 
     internal int EntryCount => _store.EntryCount;
 
-    public void Dispose() => _store.Dispose();
+    public void Dispose()
+    {
+        _changeSubscription?.Dispose();
+        _store.Dispose();
+    }
+
+    /// <summary>Recomputes the limits when the options change. A closed gate empties the store, the tombstones and the flights at once.</summary>
+    private void Refresh()
+    {
+        var limits = ResultCacheLimits.FromOptions(_options.CurrentValue.WebSql);
+        lock (_gate)
+        {
+            if (limits.Equals(_limits))
+            {
+                return;
+            }
+
+            _limits = limits;
+            _store.Configure(limits);
+            if (!limits.Enabled)
+            {
+                _flights.Clear();
+            }
+        }
+    }
 
     private WebSqlResultCacheLookup Unavailable()
     {

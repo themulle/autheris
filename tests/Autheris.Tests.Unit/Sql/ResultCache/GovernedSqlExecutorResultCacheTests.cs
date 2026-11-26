@@ -127,13 +127,69 @@ public sealed class GovernedSqlExecutorResultCacheTests
         pipeline.Cache.EntryCount.ShouldBe(1);
 
         pipeline.Monitor.SetCurrent(new GatewayOptions { WebSql = new WebSqlOptions { ResultCacheMaxMegabytes = 0 } });
-        var run = await pipeline.RunAsync();
+
+        // The reload alone empties the store; no request has to take part for that.
+        pipeline.Cache.EntryCount.ShouldBe(0);
+        var run = await pipeline.RunAsync(participate: false);
 
         run.Outcomes.ShouldBeEmpty();
         run.Rows.ShouldBe(AllRows);
         pipeline.Executions.ShouldBe(2);
         pipeline.Spy.Lookups.ShouldBe(1);
         pipeline.Cache.EntryCount.ShouldBe(0);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Hit_is_refused_like_a_miss_when_the_read_lease_limit_is_exhausted_SECRC16()
+    {
+        var gate = new SwitchableReadGate();
+        using var pipeline = new GovernedResultCachePipeline(gate: gate);
+        await pipeline.RunAsync();
+        gate.Active.ShouldBe(0);
+
+        gate.Deny = true;
+        var failure = await Fails(() => pipeline.RunAsync());
+
+        failure.ShouldBeOfType<Autheris.Domain.Exceptions.GatewayThrottledException>();
+        pipeline.Executions.ShouldBe(1);
+        gate.Deny = false;
+        var served = await pipeline.RunAsync();
+        served.Outcomes.ShouldHaveSingleItem().Status.ShouldBe(WebSqlResultCacheStatus.Hit);
+        gate.Active.ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Failing_writer_on_a_hit_still_settles_zero_cost()
+    {
+        var quota = new ScriptedCostQuota();
+        using var pipeline = new GovernedResultCachePipeline(costQuota: quota);
+        await pipeline.RunAsync();
+
+        await Fails(() => pipeline.RunAsync(writer: (_, _) => throw new InvalidOperationException("client gone")));
+
+        quota.Settled[^1].ShouldBe(0);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Windows_auth_settings_are_part_of_the_key_SECRC02()
+    {
+        using var pipeline = new GovernedResultCachePipeline();
+        await pipeline.RunAsync();
+        var connection = pipeline.Options.DataSources!.Connections["crm"];
+        pipeline.Options.DataSources.Connections["crm"] = new DataSourceConnectionOptions
+        {
+            Provider = connection.Provider,
+            ConnectionString = connection.ConnectionString,
+            ResultCacheTtlSeconds = connection.ResultCacheTtlSeconds,
+            WindowsAuth = new SqlServerWindowsAuthOptions { Domain = "CORP", Username = "svc-other" },
+        };
+
+        await pipeline.RunAsync();
+
+        pipeline.Spy.Hashes.Distinct().Count().ShouldBe(2);
+        pipeline.Executions.ShouldBe(2);
     }
 
     [Fact]

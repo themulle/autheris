@@ -17,7 +17,8 @@ public static class SqlFunctionVolatility
         "rand", "random", "uuid", "newid", "gen_random_uuid", "current_user", "session_user", "user", "current_role",
         "current_catalog", "current_schema", "current_database", "current_metastore", "connection_id", "pg_backend_pid",
         "txid_current", "clock_timestamp", "statement_timestamp", "transaction_timestamp", "timeofday", "sessiontimezone",
-        "dbtimezone", "current_setting", "uid", "sys_guid",
+        "dbtimezone", "current_setting", "uid", "sys_guid", "system_user", "suser_sname", "suser_name", "user_name", "host_name",
+        "app_name", "spid", "session_id",
     }.ToFrozenSet(StringComparer.OrdinalIgnoreCase);
 
     private static readonly FrozenSet<string>.AlternateLookup<ReadOnlySpan<char>> VolatileLookup =

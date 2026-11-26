@@ -67,7 +67,8 @@ internal sealed class GovernedResultCachePipeline : IDisposable
         int defaultMaxRows = 1000,
         IQueryCostQuota? costQuota = null,
         ILogger<GovernedSqlExecutionService>? logger = null,
-        bool withEpochServices = true)
+        bool withEpochServices = true,
+        ITableReadConcurrencyGate? gate = null)
     {
         Rows = rows;
         Options = new GatewayOptions
@@ -148,7 +149,8 @@ internal sealed class GovernedResultCachePipeline : IDisposable
             environment: env,
             pageTokenCodec: new WebSqlPageTokenCodec(digester),
             costQuota: costQuota,
-            resultCache: Spy);
+            resultCache: Spy,
+            concurrencyGate: gate);
     }
 
     public int Rows { get; }
@@ -312,12 +314,47 @@ internal sealed class CountingCache(IWebSqlResultCache inner) : IWebSqlResultCac
     public bool IsMarkedTooLarge(string hash) => inner.IsMarkedTooLarge(hash);
 
     public ValueTask<bool> TryCommitAsync(
-        WebSqlResultCacheLookup fill, CachedWebSqlResult result, TimeSpan ttl, string dataSource, string? traceId, CancellationToken ct) =>
-        inner.TryCommitAsync(fill, result, ttl, dataSource, traceId, ct);
+        WebSqlResultCacheLookup fill, CachedWebSqlResult result, TimeSpan ttl, string dataSource, string? traceId, CancellationToken ct,
+        IResultCacheReservation? reservation = null) =>
+        inner.TryCommitAsync(fill, result, ttl, dataSource, traceId, ct, reservation);
 
     public void MarkTooLarge(WebSqlResultCacheLookup fill, TimeSpan ttl) => inner.MarkTooLarge(fill, ttl);
 
     public IResultCacheReservation? TryReserve(WebSqlResultCacheKey key) => inner.TryReserve(key);
+}
+
+/// <summary>A read concurrency gate that can be switched to refuse and that counts the leases still held.</summary>
+internal sealed class SwitchableReadGate : ITableReadConcurrencyGate
+{
+    private int _active;
+
+    public bool Deny { get; set; }
+
+    public int Active => Volatile.Read(ref _active);
+
+    public IDisposable? TryEnter(string key, int maxConcurrent)
+    {
+        if (Deny)
+        {
+            return null;
+        }
+
+        Interlocked.Increment(ref _active);
+        return new Lease(this);
+    }
+
+    private sealed class Lease(SwitchableReadGate gate) : IDisposable
+    {
+        private int _disposed;
+
+        public void Dispose()
+        {
+            if (Interlocked.Exchange(ref _disposed, 1) == 0)
+            {
+                Interlocked.Decrement(ref gate._active);
+            }
+        }
+    }
 }
 
 /// <summary>Allows every table with every column (consent is not what these tests exercise).</summary>

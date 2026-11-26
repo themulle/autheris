@@ -7,6 +7,7 @@ using System.Linq;
 using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common;
@@ -17,6 +18,7 @@ using Autheris.Application.Sql.Internal;
 using Autheris.Application.Sql.Policy;
 using Autheris.Application.Sql.ResultCache;
 using Autheris.Domain.Common;
+using Autheris.Domain.Exceptions;
 using Autheris.Domain.Options;
 using Microsoft.Extensions.Logging;
 using TrinoSqlEngine.Ast.Emit;
@@ -65,6 +67,9 @@ public sealed partial class GovernedSqlExecutor
         public bool IsLeader => Lookup.IsFillLeader && Lookup.Hit is null;
 
         public IResultCacheReservation? Reservation { get; set; }
+
+        /// <summary>Set before the writer runs on a hit, so a failing writer still settles the cost as served from the cache.</summary>
+        public bool Served { get; set; }
 
         public ResultCacheRecordingReader? Recorder { get; set; }
 
@@ -243,6 +248,7 @@ public sealed partial class GovernedSqlExecutor
             UsesPerUserCredentials: connOptions.Databricks?.Auth.Mode == DatabricksAuthMode.OAuthObo,
             HasConnection: hasConnection,
             IsDml: isDml,
+            // Federated statements never reach this executor path, so a cached statement always reads a single source.
             IsCrossSource: false,
             IsSelectStatement: compiled.StatementClass == SqlStatementClass.Select,
             HasRecursiveCte: compiled.HasRecursiveCte,
@@ -322,9 +328,13 @@ public sealed partial class GovernedSqlExecutor
             db?.WarehouseId,
             db?.Catalog,
             db?.Auth.Mode.ToString(),
-            db?.Auth.ClientId);
+            db?.Auth.ClientId,
+            WindowsAuthFingerprint(connOptions));
         return Convert.ToHexString(SHA256.HashData(Encoding.UTF8.GetBytes(text)));
     }
+
+    private static string WindowsAuthFingerprint(DataSourceConnectionOptions connOptions) =>
+        connOptions.WindowsAuth is { } w ? JsonSerializer.Serialize(w) : string.Empty;
 
     private async Task<ResultCacheFill?> LookupResultCacheAsync(ResultCachePlan? plan, string dsName, CancellationToken ct)
     {
@@ -415,35 +425,94 @@ public sealed partial class GovernedSqlExecutor
             return false;
         }
 
-        using var reader = plan.Paged
-            ? new CachedResultDataReader(hit.Result, plan.Offset, plan.WindowSize)
-            : new CachedResultDataReader(hit.Result);
-        await rowWriter(reader, hit.Result.Info, ct).ConfigureAwait(false);
-        NotifyPageOutcome(request, user, tenantId, rewrite, reader.HasMoreRows);
-        return true;
+        // A hit skips the connection and the provider guard only; the per-user and per-table read limit applies like on a miss.
+        var leases = AcquireReadLeases(user, tenantId, rewrite);
+        try
+        {
+            fill.Served = true;
+            using var reader = plan.Paged
+                ? new CachedResultDataReader(hit.Result, plan.Offset, plan.WindowSize)
+                : new CachedResultDataReader(hit.Result);
+            await rowWriter(reader, hit.Result.Info, ct).ConfigureAwait(false);
+            NotifyPageOutcome(request, user, tenantId, rewrite, reader.HasMoreRows);
+            return true;
+        }
+        finally
+        {
+            DisposeLeases(leases);
+        }
+    }
+
+    /// <summary>Takes the per-user and per-table read leases, or throws the throttled error when one is exhausted. Null when no limit applies.</summary>
+    private List<IDisposable>? AcquireReadLeases(ClaimsPrincipal user, TenantId tenantId, GovernedRewrite rewrite)
+    {
+        var maxConcurrentReads = _options.Value.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
+        if (_concurrencyGate == null || maxConcurrentReads <= 0 || rewrite.AccessedTables.Count == 0)
+        {
+            return null;
+        }
+
+        var userSid = user.FindFirst(ClaimTypes.PrimarySid)?.Value
+                      ?? user.FindFirst("sub")?.Value
+                      ?? "anonymous";
+        var leases = new List<IDisposable>(rewrite.AccessedTables.Count);
+        try
+        {
+            foreach (var table in rewrite.AccessedTables)
+            {
+                var key = $"{tenantId.Value}|{userSid}|{table.ToQualifiedName()}".ToLowerInvariant();
+                var lease = _concurrencyGate.TryEnter(key, maxConcurrentReads)
+                            ?? throw new GatewayThrottledException(ThrottledRetryAfterSeconds);
+                leases.Add(lease);
+            }
+        }
+        catch
+        {
+            DisposeLeases(leases);
+            throw;
+        }
+
+        return leases;
+    }
+
+    private static void DisposeLeases(List<IDisposable>? leases)
+    {
+        if (leases is null)
+        {
+            return;
+        }
+
+        foreach (var lease in leases)
+        {
+            lease.Dispose();
+        }
     }
 
     /// <summary>
     /// Wraps the outermost reader of a fill leader (after the metric-view filter and the row limit), so the recorded rows are exactly the
     /// rows the client receives. A paged fill reads the full statement into the collector and hands the writer the requested window.
     /// </summary>
-    private async Task<DbDataReader> PrepareResultCacheReaderAsync(ResultCacheFill? fill, DbDataReader output, GovernedResultInfo info, CancellationToken ct)
+    private Task<DbDataReader> PrepareResultCacheReaderAsync(ResultCacheFill? fill, DbDataReader output, GovernedResultInfo info, CancellationToken ct) =>
+        fill is not { IsLeader: true } || _resultCache is null || fill.Plan.Key is null
+            ? Task.FromResult(output)
+            : PrepareResultCacheLeaderReaderAsync(fill, output, info, ct);
+
+    private async Task<DbDataReader> PrepareResultCacheLeaderReaderAsync(ResultCacheFill fill, DbDataReader output, GovernedResultInfo info, CancellationToken ct)
     {
-        if (fill is not { IsLeader: true } || _resultCache is not { } cache || fill.Plan.Key is not { } key)
-        {
-            return output;
-        }
+        var cache = _resultCache!;
+        var key = fill.Plan.Key!;
 
         var limits = cache.Limits;
         fill.Info = info;
         fill.Reservation = cache.TryReserve(key);
+        if (fill.Reservation is null)
+        {
+            // Nothing is reserved, so nothing is recorded: the response streams without a collector or recorder.
+            return output;
+        }
+
         if (!fill.Plan.Paged)
         {
-            if (fill.Reservation is null)
-            {
-                return output;
-            }
-
             fill.Recorder = new ResultCacheRecordingReader(output, limits.MaxRowsPerEntry, limits.MaxEntryBytes, fill.Reservation);
             return fill.Recorder;
         }
@@ -487,7 +556,7 @@ public sealed partial class GovernedSqlExecutor
             return;
         }
 
-        if (await cache.TryCommitAsync(fill.Lookup, result, plan.Ttl, dsName, TraceContextResolver.GetCurrentTraceId(), ct).ConfigureAwait(false))
+        if (await cache.TryCommitAsync(fill.Lookup, result, plan.Ttl, dsName, TraceContextResolver.GetCurrentTraceId(), ct, fill.Reservation).ConfigureAwait(false))
         {
             if (!plan.Bypass)
             {
