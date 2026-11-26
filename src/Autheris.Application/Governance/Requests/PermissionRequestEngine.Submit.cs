@@ -253,21 +253,12 @@ public sealed partial class PermissionRequestEngine
         }
 
         // the external workflow systems and event-feed consumers learn about a new request from this event
-        if (_eventOutbox is not null)
-        {
-            await _eventOutbox.AppendAsync(
-                new Autheris.Application.ConsentRequests.Events.ConsentEventWrite(
-                    created.TenantId.Value,
-                    Guid.NewGuid(),
-                    Autheris.Application.ConsentRequests.Events.ConsentEventTypes.RequestCreated,
-                    created.Id.ToString("D"),
-                    Autheris.Application.ConsentRequests.Events.ConsentEventPayloads.Serialize(
-                        Autheris.Application.ConsentRequests.Events.ConsentEventPayloads.ForRequest(created, now)),
-                    now,
-                    created.ExternalSystemId),
-                transaction: null,
-                ct: ct).ConfigureAwait(false);
-        }
+        await AppendRequestEventAsync(
+            Autheris.Application.ConsentRequests.Events.ConsentEventTypes.RequestCreated,
+            created,
+            Autheris.Application.ConsentRequests.Events.ConsentEventPayloads.ForRequest(created, now),
+            transaction: null,
+            ct).ConfigureAwait(false);
 
         _logger?.LogInformation(
             "Created permission request {RequestId} of kind {RequestKind} in tenant {TenantId}.",

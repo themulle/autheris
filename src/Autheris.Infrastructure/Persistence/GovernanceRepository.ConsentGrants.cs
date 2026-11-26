@@ -151,6 +151,7 @@ public partial class GovernanceRepository
             }
         }
 
+        var revokedEvents = new List<PendingGrantRevokedEvent>();
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
@@ -167,6 +168,7 @@ public partial class GovernanceRepository
                     effectiveReason,
                     effectiveAuthority,
                     requireDeclarativeForPrune: isPruned,
+                    revokedEvents,
                     ct).ConfigureAwait(false);
                 if (revoked is { } r)
                 {
@@ -208,6 +210,7 @@ public partial class GovernanceRepository
             }
 
             patternVersion = patternTouched ? await BumpCatalogVersionInternalAsync(conn, tx, 0, 1, ct).ConfigureAwait(false) : null;
+            await EmitGrantRevokedEventsInTransactionAsync(conn, tx, revokedEvents, ct).ConfigureAwait(false);
             await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -271,11 +274,13 @@ public partial class GovernanceRepository
 
         (TableIdentifier Table, TenantId Tenant)? revoked;
         Autheris.Application.Catalog.CatalogVersion? patternVersion = null;
+        var revokedEvents = new List<PendingGrantRevokedEvent>(1);
         await using var conn = await OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var tx = await conn.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
         {
-            revoked = await RevokeConsentInTransactionAsync(conn, tx, consentId, revokedBySid, reason, effectiveAuthority, requireDeclarativeForPrune: false, ct).ConfigureAwait(false);
+            revoked = await RevokeConsentInTransactionAsync(
+                conn, tx, consentId, revokedBySid, reason, effectiveAuthority, requireDeclarativeForPrune: false, revokedEvents, ct).ConfigureAwait(false);
             if (revoked is { } target)
             {
                 // A pattern grant has no table epoch: like its creation, its revoke advances the catalog version (part of every cached decision).
@@ -283,6 +288,7 @@ public partial class GovernanceRepository
                 await (patternVersion is null ? IncrementTableEpochInternalAsync(conn, tx, target.Table, ct) : Task.CompletedTask).ConfigureAwait(false);
             }
 
+            await EmitGrantRevokedEventsInTransactionAsync(conn, tx, revokedEvents, ct).ConfigureAwait(false);
             await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
         }
         catch (Exception ex)
@@ -370,7 +376,15 @@ public partial class GovernanceRepository
     }
 
     private async Task<(TableIdentifier Table, TenantId Tenant)?> RevokeConsentInTransactionAsync(
-        DbConnection conn, DbTransaction tx, Guid consentId, Sid actor, string reason, ConsentRevocationAuthority authority, bool requireDeclarativeForPrune, CancellationToken ct)
+        DbConnection conn,
+        DbTransaction tx,
+        Guid consentId,
+        Sid actor,
+        string reason,
+        ConsentRevocationAuthority authority,
+        bool requireDeclarativeForPrune,
+        List<PendingGrantRevokedEvent> revokedEvents,
+        CancellationToken ct)
     {
         var grantWriter = RequireGrantWriter();
         if (string.IsNullOrWhiteSpace(actor.Value))
@@ -439,9 +453,24 @@ public partial class GovernanceRepository
             })
         }, tx, ct).ConfigureAwait(false);
 
-        await EmitGrantRevokedEventInTransactionAsync(conn, tx, consentId, tenant, tableId.Value, now, ct).ConfigureAwait(false);
+        revokedEvents.Add(new PendingGrantRevokedEvent(consentId, tenant, tableId.Value, now));
 
         return (tableId.Value, tenant);
+    }
+
+    /// <summary>
+    /// Appends the grant.revoked events of a revoke transaction after all its other writes (grant ledger, table epochs, catalog
+    /// version): the tenant consent event lock is the last lock of every transaction that appends an event, as in a decision, so a
+    /// revoke and a decision on the same table never wait on each other in opposite order.
+    /// </summary>
+    private async Task EmitGrantRevokedEventsInTransactionAsync(
+        DbConnection conn, DbTransaction tx, IReadOnlyList<PendingGrantRevokedEvent> revokedEvents, CancellationToken ct)
+    {
+        foreach (var revoked in revokedEvents)
+        {
+            await EmitGrantRevokedEventInTransactionAsync(conn, tx, revoked.ConsentId, revoked.Tenant, revoked.Table, revoked.OccurredAt, ct)
+                .ConfigureAwait(false);
+        }
     }
 
     private async Task<bool> IsAuthorizedApproverForPatternConsentAsync(
@@ -517,6 +546,8 @@ WHERE c.id = @id";
             ct).ConfigureAwait(false);
     }
 }
+
+internal readonly record struct PendingGrantRevokedEvent(Guid ConsentId, TenantId Tenant, TableIdentifier Table, DateTimeOffset OccurredAt);
 
 internal readonly record struct RevokeTarget(
     TableIdentifier Table,

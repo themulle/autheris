@@ -1,15 +1,20 @@
 using System;
 using System.Collections.Generic;
 using System.Linq;
+using System.Security.Claims;
+using System.Text.Json;
 using System.Threading.Tasks;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.ConsentRequests.Events;
 using Autheris.Application.ConsentRequests.Routing;
 using Autheris.Application.Governance.Grants;
 using Autheris.Domain.Common;
+using Autheris.Domain.Identity;
 using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 using Autheris.Tests.Common;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Autheris.Tests.Integration.Governance.Contract;
@@ -371,7 +376,123 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
             .Should().Be(ExternalWorkflowSystemRole.Observer);
     }
 
-    private async Task<Guid> SeedPendingRequestAsync(TenantId tenant, string tableName)
+    /// <summary>
+    /// Issue #1165: an observer learns from its feed that an internal-mode request was decided (request.decided, committed in the
+    /// decision transaction) or withdrawn (request.updated), with the request's status and version after the change.
+    /// </summary>
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task Observer_feed_shows_the_decision_and_the_withdrawal_of_internal_requests()
+    {
+        if (!Store.IsAvailable) return;
+
+        var observer = NewSystem(Store.TenantA.Value, "observer-decisions", ExternalWorkflowSystemRole.Observer);
+        await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(observer);
+        var ownerGroup = new Sid("S-1-5-21-1000-1000-1000-4510");
+        var requesterSid = new Sid("S-1-5-21-1000-1000-1000-2510");
+        var requester = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim("sub", requesterSid.Value), new Claim("tenant_id", Store.TenantA.Value), new Claim(ClaimTypes.Role, "DataConsumer")], "Test"));
+        var requests = Store.Services.GetRequiredService<IConsentRequestService>();
+
+        // one table per request, each in an Open domain owned by the owner group, so the two requests never collide
+        async Task<Guid> SubmitAsync(string prefix)
+        {
+            var table = new TableIdentifier("sales", "dbo", prefix + Guid.NewGuid().ToString("N")[..8]);
+            await Store.TableMetadata.UpsertTableMetadataAsync(new TableMetadata
+            {
+                Identifier = table,
+                ReplaceKeyDefinition = true,
+                Table = new Table { Id = Guid.NewGuid(), SourceName = table.Domain, SchemaName = table.Schema, TableName = table.TableName, IsActive = true },
+                Columns = [new TableColumn { Id = Guid.NewGuid(), ColumnName = "id", DataType = "int" }],
+                PrimaryKeyColumns = ["id"]
+            });
+            await OpenDomainSeeder.AssignToOpenDomainAsync(Store.Services, Store.TenantA, table, ownerGroup);
+
+            var submitted = await requests.SubmitAsync(new ConsentRequestSubmission(
+                table.Domain, table.Schema, table.TableName, "Quarterly order reconciliation for the finance close.", DurationDays: 10,
+                IdempotencyKey: prefix + Guid.NewGuid().ToString("N"), UserSid: requesterSid, Principal: requester, ContextTenant: Store.TenantA));
+            submitted.Status.Should().Be("PENDING");
+            return submitted.RequestId;
+        }
+
+        var approvedId = await SubmitAsync("orders_decided_");
+        var withdrawnId = await SubmitAsync("orders_withdrawn_");
+
+        var owner = new ClaimsPrincipal(new ClaimsIdentity(
+        [
+            new Claim(ClaimTypes.PrimarySid, "S-1-5-21-1000-1000-1000-4511"),
+            new Claim("tenant_id", Store.TenantA.Value),
+            new Claim(ClaimTypes.Role, "DataOwner"),
+            IdentityClaimIssuers.CreateGroupSidClaim(ownerGroup.Value),
+            GroupResolutionClaims.CreateMarker(),
+            GroupResolutionClaims.CreateStatus(GroupResolutionStatus.Complete)
+        ], "Test"));
+        var engine = Store.Services.GetRequiredService<Autheris.Application.Governance.Requests.IPermissionRequestEngine>();
+        var decided = await engine.DecideAsync(new Autheris.Application.Governance.Requests.PermissionDecisionCommand(
+            approvedId, 1, SecurityPrincipalContext.FromPrincipal(owner), Approve: true));
+        decided.Request.Status.Should().Be("APPROVED");
+        (await requests.WithdrawAsync(withdrawnId, requester)).Should().BeTrue();
+
+        var feed = await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 50, observer.Id);
+        feed.Events.Where(e => e.SubjectId == approvedId.ToString("D")).Select(e => e.Type).Should()
+            .Equal(ConsentEventTypes.RequestCreated, ConsentEventTypes.RequestDecided);
+        feed.Events.Where(e => e.SubjectId == withdrawnId.ToString("D")).Select(e => e.Type).Should()
+            .Equal(ConsentEventTypes.RequestCreated, ConsentEventTypes.RequestUpdated);
+
+        var decidedEvent = feed.Events.Single(e => e.SubjectId == approvedId.ToString("D") && e.Type == ConsentEventTypes.RequestDecided);
+        ReadStatusAndVersion(decidedEvent.PayloadJson).Should().Be(("APPROVED", 2));
+        var withdrawnEvent = feed.Events.Single(e => e.SubjectId == withdrawnId.ToString("D") && e.Type == ConsentEventTypes.RequestUpdated);
+        ReadStatusAndVersion(withdrawnEvent.PayloadJson).Should().Be(("WITHDRAWN", 2));
+        withdrawnEvent.PayloadJson.Should().NotContain("Quarterly order reconciliation");
+        (await Store.ConsentApprovals.GetConsentRequestAsync(withdrawnId))!.Version.Should().Be(2);
+    }
+
+    /// <summary>
+    /// Issue #1165: a withdrawal through the repository (the requester's withdrawal and the deprovisioning withdrawal share it) appends
+    /// request.updated in the withdrawal transaction, read on the same connection (no self-blocking read on SQL Server). The event of
+    /// an externally routed request is delivered to its workflow system and fanned out to observers; a refused withdrawal appends nothing.
+    /// </summary>
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task Repository_withdrawal_appends_request_updated_in_its_transaction()
+    {
+        if (!Store.IsAvailable) return;
+
+        var observer = NewSystem(Store.TenantA.Value, "observer-withdraw", ExternalWorkflowSystemRole.Observer);
+        var workflow = NewSystem(Store.TenantA.Value, "workflow-withdraw", ExternalWorkflowSystemRole.Workflow);
+        await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(observer);
+        await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(workflow);
+        var requestId = await SeedPendingRequestAsync(Store.TenantA, "orders_withdraw_" + Guid.NewGuid().ToString("N")[..8], workflow.Id);
+
+        (await Store.ConsentApprovals.WithdrawConsentRequestAsync(requestId, new Sid("S-1-5-21-OTHER-REQ"))).Should().BeFalse();
+        (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 50, observer.Id)).Events
+            .Should().NotContain(e => e.SubjectId == requestId.ToString("D"));
+
+        (await Store.ConsentApprovals.WithdrawConsentRequestAsync(requestId, new Sid("S-1-5-21-OBSERVER-REQ"))).Should().BeTrue();
+
+        var stored = await Store.ConsentApprovals.GetConsentRequestAsync(requestId);
+        stored!.Status.Should().Be("WITHDRAWN");
+        stored.Version.Should().Be(2);
+        var withdrawn = (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 50, observer.Id)).Events
+            .Where(e => e.SubjectId == requestId.ToString("D")).Should().ContainSingle().Which;
+        withdrawn.Type.Should().Be(ConsentEventTypes.RequestUpdated);
+        ReadStatusAndVersion(withdrawn.PayloadJson).Should().Be(("WITHDRAWN", 2));
+        var routed = (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 50, workflow.Id)).Events
+            .Where(e => e.SubjectId == requestId.ToString("D")).Should().ContainSingle().Which;
+        routed.Id.Should().Be(withdrawn.Id);
+
+        (await Store.ConsentApprovals.WithdrawConsentRequestAsync(requestId, new Sid("S-1-5-21-OBSERVER-REQ"))).Should().BeFalse();
+        (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 50, observer.Id)).Events
+            .Count(e => e.SubjectId == requestId.ToString("D")).Should().Be(1);
+    }
+
+    private static (string? Status, int Version) ReadStatusAndVersion(string payloadJson)
+    {
+        using var doc = JsonDocument.Parse(payloadJson);
+        return (doc.RootElement.GetProperty("status").GetString(), doc.RootElement.GetProperty("version").GetInt32());
+    }
+
+    private async Task<Guid> SeedPendingRequestAsync(TenantId tenant, string tableName, Guid? externalSystemId = null)
     {
         var table = new TableIdentifier("sales", "dbo", tableName);
         var meta = await Store.Repository.UpsertTableMetadataAsync(new TableMetadata
@@ -390,7 +511,9 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
             RequestedGranteeRef = "S-1-5-21-OBSERVER-REQ",
             BusinessJustification = "Observer role contract test request.",
             RequestedValidTo = FixedNow.AddDays(14),
-            Status = "PENDING",
+            Status = externalSystemId is null ? "PENDING" : "PENDING_EXTERNAL_APPROVAL",
+            WorkflowMode = externalSystemId is null ? ConsentWorkflowMode.Internal : ConsentWorkflowMode.External,
+            ExternalSystemId = externalSystemId,
             TenantId = tenant
         });
         return request.Id;

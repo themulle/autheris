@@ -782,7 +782,8 @@ internal static class ConsentSqlCore
     {
         await using var cmd = conn.CreateCommand();
         cmd.Transaction = tx;
-        cmd.CommandText = "UPDATE CONSENT_REQUESTS SET status = 'WITHDRAWN' WHERE id = @id AND requester_sid = @sid AND status IN ('PENDING', 'PENDING_SECOND_APPROVAL', 'PENDING_EXTERNAL_APPROVAL')";
+        // a withdrawal is a status change: it advances the version like a decision or a reroute (the withdrawal event carries it)
+        cmd.CommandText = "UPDATE CONSENT_REQUESTS SET status = 'WITHDRAWN', version = version + 1 WHERE id = @id AND requester_sid = @sid AND status IN ('PENDING', 'PENDING_SECOND_APPROVAL', 'PENDING_EXTERNAL_APPROVAL')";
         cmd.AddBound("@id", requestId.ToString());
         cmd.AddBound("@sid", requesterSid.Value);
         return await cmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false) == 1;

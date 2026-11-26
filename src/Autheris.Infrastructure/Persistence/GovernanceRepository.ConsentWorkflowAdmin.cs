@@ -364,7 +364,12 @@ VALUES (@id, @tenant, @name, @clientId, @webhookUrl, @secret, @enabled, @created
             await using (var selectCmd = conn.CreateCommand())
             {
                 selectCmd.Transaction = tx;
-                selectCmd.CommandText = ConsentSql.SelectExternalWorkflowSystemByIdSql;
+                // The system row is held with an update lock that still lets the event appends of deciders read it (SQL Server
+                // UPDLOCK is compatible with their shared locks); it is written only after the reroute, so the order here is request
+                // rows, tenant event lock, system row, as in a decision (request row, event lock, system row read by the append).
+                selectCmd.CommandText = _dialect is PostgreSqlGovernanceDialect
+                    ? ConsentSql.LockExternalWorkflowSystemByIdPgSql
+                    : ConsentSql.LockExternalWorkflowSystemByIdSsSql;
                 selectCmd.AddBound("@id", systemId.ToString("D"));
                 selectCmd.AddBound("@tenant", tenantId.Value);
                 await using var reader = await selectCmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
@@ -380,19 +385,6 @@ VALUES (@id, @tenant, @name, @clientId, @webhookUrl, @secret, @enabled, @created
                 return (null, new ConsentRerouteResult(0, 0, []));
             }
 
-            await using (var disableCmd = conn.CreateCommand())
-            {
-                disableCmd.Transaction = tx;
-                disableCmd.CommandText = @"UPDATE EXTERNAL_WORKFLOW_SYSTEMS
-SET enabled = @enabled, disabled_at = COALESCE(disabled_at, @disabledAt)
-WHERE id = @id AND tenant_id = @tenant";
-                disableCmd.AddBound("@enabled", false, System.Data.DbType.Boolean);
-                disableCmd.AddBound("@disabledAt", disabledAt.ToUniversalTime(), System.Data.DbType.DateTimeOffset);
-                disableCmd.AddBound("@id", systemId.ToString("D"));
-                disableCmd.AddBound("@tenant", tenantId.Value);
-                await disableCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
-            }
-
             var reroute = await RerouteOpenRequestsInTransactionAsync(
                 conn,
                 tx,
@@ -405,7 +397,21 @@ WHERE id = @id AND tenant_id = @tenant";
                 occurredAt: disabledAt,
                 requestIds: null,
                 rejectInternalWithStep: false,
-                ct: ct).ConfigureAwait(false);
+                ct: ct,
+                disablingSystemId: systemId).ConfigureAwait(false);
+
+            await using (var disableCmd = conn.CreateCommand())
+            {
+                disableCmd.Transaction = tx;
+                disableCmd.CommandText = @"UPDATE EXTERNAL_WORKFLOW_SYSTEMS
+SET enabled = @enabled, disabled_at = COALESCE(disabled_at, @disabledAt)
+WHERE id = @id AND tenant_id = @tenant";
+                disableCmd.AddBound("@enabled", false, System.Data.DbType.Boolean);
+                disableCmd.AddBound("@disabledAt", disabledAt.ToUniversalTime(), System.Data.DbType.DateTimeOffset);
+                disableCmd.AddBound("@id", systemId.ToString("D"));
+                disableCmd.AddBound("@tenant", tenantId.Value);
+                await disableCmd.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+            }
 
             await RecordAuditEventAsync(new AuditLogEntry
             {
@@ -489,7 +495,8 @@ WHERE id = @id AND tenant_id = @tenant";
         DateTimeOffset occurredAt,
         IReadOnlyList<Guid>? requestIds,
         bool rejectInternalWithStep,
-        CancellationToken ct)
+        CancellationToken ct,
+        Guid? disablingSystemId = null)
     {
         if (targetMode == ConsentWorkflowMode.External && targetSystemId is { } externalTargetId)
         {
@@ -570,6 +577,7 @@ WHERE r.tenant_id = @tenant
         }
 
         var reroutedIds = new List<Guid>(candidates.Count);
+        var rerouted = new List<(Guid RequestId, TableIdentifier Table, string Status, int Version, ConsentWorkflowMode CurrentMode, Guid? CurrentSystemId)>(candidates.Count);
         var newStatus = targetMode == ConsentWorkflowMode.External ? "PENDING_EXTERNAL_APPROVAL" : "PENDING";
         var effectiveSystemId = targetMode == ConsentWorkflowMode.External ? targetSystemId : null;
 
@@ -599,6 +607,7 @@ WHERE id = @id AND tenant_id = @tenant AND status = @expectedStatus";
             }
 
             reroutedIds.Add(candidate.RequestId);
+            rerouted.Add(candidate);
 
             await RecordAuditEventAsync(new AuditLogEntry
             {
@@ -617,7 +626,12 @@ WHERE id = @id AND tenant_id = @tenant AND status = @expectedStatus";
                     targetSystemId = effectiveSystemId
                 })
             }, tx, ct).ConfigureAwait(false);
+        }
 
+        // The events follow all row updates: the tenant event lock is the last lock of the transaction, as in a decision (request
+        // row, then the event lock), so a reroute never holds the event lock while it waits for a request row a decider holds.
+        foreach (var candidate in rerouted)
+        {
             var payload = new ConsentThinEventPayload(
                 tenantId.Value,
                 candidate.RequestId,
@@ -638,7 +652,8 @@ WHERE id = @id AND tenant_id = @tenant AND status = @expectedStatus";
                     candidate.RequestId.ToString("D"),
                     ConsentEventPayloads.Serialize(payload),
                     occurredAt,
-                    effectiveSystemId ?? candidate.CurrentSystemId),
+                    // a system disabled in this transaction gets no delivery of the events that take its requests away
+                    effectiveSystemId ?? (candidate.CurrentSystemId == disablingSystemId ? null : candidate.CurrentSystemId)),
                 tenantId,
                 ct).ConfigureAwait(false);
         }

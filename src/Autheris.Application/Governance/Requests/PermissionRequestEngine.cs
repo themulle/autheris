@@ -183,4 +183,33 @@ public sealed partial class PermissionRequestEngine : IPermissionRequestEngine
     }
 
     private static string GetTraceId() => Activity.Current?.TraceId.ToString() ?? Guid.NewGuid().ToString("N");
+
+    /// <summary>
+    /// Appends a thin request event to the consent outbox: the request's tenant and external system, so routed delivery and the
+    /// observer fan-out apply. With a transaction the event commits with the state change; without one it follows the commit.
+    /// </summary>
+    private Task AppendRequestEventAsync(
+        string eventType,
+        ConsentRequest request,
+        Autheris.Application.ConsentRequests.Events.ConsentThinEventPayload payload,
+        System.Data.Common.DbTransaction? transaction,
+        CancellationToken ct)
+    {
+        if (_eventOutbox is null)
+        {
+            return Task.CompletedTask;
+        }
+
+        return _eventOutbox.AppendAsync(
+            new Autheris.Application.ConsentRequests.Events.ConsentEventWrite(
+                request.TenantId.Value,
+                Guid.NewGuid(),
+                eventType,
+                request.Id.ToString("D"),
+                Autheris.Application.ConsentRequests.Events.ConsentEventPayloads.Serialize(payload),
+                payload.OccurredAt,
+                request.ExternalSystemId),
+            transaction,
+            ct);
+    }
 }

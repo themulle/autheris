@@ -58,6 +58,7 @@ public sealed partial class PermissionRequestEngine
             throw new ConsentRequestException("INVALID_STATE", "The consent request could not be withdrawn.");
         }
 
+        // Issue #1165: the request.updated event of the withdrawal is appended by the repository in the withdrawal transaction.
         return true;
     }
 

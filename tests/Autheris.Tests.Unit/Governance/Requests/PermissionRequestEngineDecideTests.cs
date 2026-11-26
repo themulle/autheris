@@ -288,6 +288,134 @@ public sealed class PermissionRequestEngineDecideTests
         audit.Entries.Select(e => e.Decision).ShouldBe(["WITHDRAWN", "WITHDRAW_FAILED"]);
     }
 
+    /// <summary>Withdrawal fake with a recording outbox: the engine must leave the withdrawal event to the repository transaction.</summary>
+    private static (PermissionRequestEngine Engine, RecordingConsentEventOutbox Events, Func<bool> Withdrawn) WithdrawEventEngine(
+        ConsentRequest req, bool withdrawSucceeds = true)
+    {
+        var withdrawn = false;
+        var events = new RecordingConsentEventOutbox();
+        var approvals = NullFake.Create<IConsentApprovalRepository>((m, _) =>
+        {
+            if (m.Name == nameof(IConsentApprovalRepository.GetConsentRequestAsync))
+            {
+                return Task.FromResult<ConsentRequest?>(req);
+            }
+
+            if (m.Name == nameof(IConsentApprovalRepository.WithdrawConsentRequestAsync))
+            {
+                withdrawn = withdrawSucceeds;
+                return Task.FromResult(withdrawSucceeds);
+            }
+
+            return NullFake.UseDefault;
+        });
+        var engine = new PermissionRequestEngine(
+            approvals,
+            new InMemoryAuditWriter(),
+            new ApproverResolver(),
+            new ApproverEligibility(new GovernanceCapabilities()),
+            new SeparationOfDutiesService(),
+            new GrantPolicy(),
+            GrantValidityPolicy.CreateDefault(),
+            Array.Empty<IGrantEffectApplier>(),
+            timeProvider: new FakeTimeProvider(Now),
+            eventOutbox: events);
+        return (engine, events, () => withdrawn);
+    }
+
+    private static ClaimsPrincipal RequesterAlice() => new(new ClaimsIdentity(
+        [new Claim(ClaimTypes.PrimarySid, "user:alice"), new Claim("tenant_id", TenantA.Value)], "Bearer"));
+
+    [Theory]
+    [InlineData("PENDING")]
+    [InlineData("PENDING_SECOND_APPROVAL")]
+    [InlineData("PENDING_EXTERNAL_APPROVAL")]
+    public async Task Withdrawal_event_is_left_to_the_repository_transaction(string status)
+    {
+        // Issue #1165: request.updated (WITHDRAWN) commits with the withdrawal in the repository; the engine appends nothing of its own,
+        // so a committed withdrawal never reports an error for a lost event and never emits twice.
+        var req = PendingRequest();
+        req.Status = status;
+        var (engine, events, withdrawn) = WithdrawEventEngine(req);
+
+        (await engine.WithdrawAsync(req.Id, RequesterAlice())).ShouldBeTrue();
+
+        withdrawn().ShouldBeTrue();
+        events.Appended.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Refused_or_lost_withdrawals_append_no_event()
+    {
+        var decided = PendingRequest();
+        decided.Status = "APPROVED";
+        var (refusedEngine, refusedEvents, _) = WithdrawEventEngine(decided);
+        await Should.ThrowAsync<ConsentRequestException>(() => refusedEngine.WithdrawAsync(decided.Id, RequesterAlice()));
+        refusedEvents.Appended.ShouldBeEmpty();
+
+        var foreign = PendingRequest();
+        var (foreignEngine, foreignEvents, _) = WithdrawEventEngine(foreign);
+        var mallory = new ClaimsPrincipal(new ClaimsIdentity(
+            [new Claim(ClaimTypes.PrimarySid, "user:mallory"), new Claim("tenant_id", TenantA.Value)], "Bearer"));
+        await Should.ThrowAsync<ConsentRequestException>(() => foreignEngine.WithdrawAsync(foreign.Id, mallory));
+        foreignEvents.Appended.ShouldBeEmpty();
+
+        var raced = PendingRequest();
+        var (racedEngine, racedEvents, _) = WithdrawEventEngine(raced, withdrawSucceeds: false);
+        await Should.ThrowAsync<ConsentRequestException>(() => racedEngine.WithdrawAsync(raced.Id, RequesterAlice()));
+        racedEvents.Appended.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Decision_without_a_database_transaction_fails_closed_when_events_are_configured()
+    {
+        // Issue #1165: the decision event must commit with the decision; an outbox append without the decision transaction would open
+        // its own connection, so the decision is refused before anything commits.
+        var req = PendingRequest();
+        var committed = false;
+        var events = new RecordingConsentEventOutbox();
+        var audit = new InMemoryAuditWriter();
+        var applier = new StubGrantApplier(ConsentRequestKind.Data);
+        var approvals = NullFake.Create<IConsentApprovalRepository>((m, args) =>
+        {
+            if (m.Name == nameof(IConsentApprovalRepository.TryDecideAsync))
+            {
+                var decideFn = (Func<IGovernanceTransaction, ConsentRequest, Task<PermissionDecisionRecord>>)args![2]!;
+                var applyFn = (Func<IGovernanceTransaction, PermissionDecisionRecord, ConsentRequest, Task<IReadOnlyList<GrantRef>>>)args[3]!;
+                return Task.Run(async () =>
+                {
+                    var tx = NullFake.Create<IGovernanceTransaction>();
+                    var record = await decideFn(tx, req);
+                    await applyFn(tx, record, req);
+                    committed = true;
+                    return new DecisionCasResult(DecisionCasOutcome.Applied, req);
+                });
+            }
+
+            return NullFake.UseDefault;
+        });
+        var engine = new PermissionRequestEngine(
+            approvals,
+            audit,
+            new ApproverResolver(),
+            new ApproverEligibility(new GovernanceCapabilities()),
+            new SeparationOfDutiesService(),
+            new GrantPolicy(),
+            GrantValidityPolicy.CreateDefault(),
+            [applier],
+            timeProvider: new FakeTimeProvider(Now),
+            eventOutbox: events);
+
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() => engine.DecideAsync(
+            new PermissionDecisionCommand(req.Id, 1, ContextFor("user:dg-approver"), Approve: true)));
+
+        ex.Message.ShouldContain("cannot be appended atomically");
+        committed.ShouldBeFalse();
+        events.Appended.ShouldBeEmpty();
+        applier.Applied.ShouldBe(0, "the guard runs before any grant is written");
+        audit.Entries.ShouldNotContain(e => e.EventType == AuditEventTypes.PermissionApproved, "no approval audit for a decision that never commits");
+    }
+
     [Fact]
     public async Task Denied_attempt_audited()
     {

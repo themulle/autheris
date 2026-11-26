@@ -401,6 +401,8 @@ public sealed partial class SecretFourEyesApprovalTests
 
         public ConsentRequest Current { get; private set; } = initial;
 
+        public System.Data.Common.DbTransaction Transaction { get; } = new StubDbTransaction();
+
         public async Task<DecisionCasResult> TryDecideAsync(
             Guid requestId,
             int expectedVersion,
@@ -430,7 +432,8 @@ public sealed partial class SecretFourEyesApprovalTests
                     return new DecisionCasResult(DecisionCasOutcome.AlreadyDecided, req);
                 }
 
-                var tx = NullFake.Create<IGovernanceTransaction>();
+                var tx = NullFake.Create<IGovernanceTransaction>((m, _) =>
+                    m.Name == "get_" + nameof(IGovernanceTransaction.Transaction) ? Transaction : NullFake.UseDefault);
                 var record = await decide(tx, Copy(req, req.Status, req.Version, req.RequestedValidTo, req.ApprovalSteps, null));
                 var steps = new List<ApprovalStep>(req.ApprovalSteps)
                 {
@@ -480,7 +483,9 @@ public sealed partial class SecretFourEyesApprovalTests
             ApproverCapacity = final?.Capacity ?? r.ApproverCapacity,
             SelfGrant = final?.SelfGrant ?? r.SelfGrant,
             DecidedBy = final?.DecidedBy ?? r.DecidedBy,
-            DecidedAt = final?.DecidedAt ?? r.DecidedAt
+            DecidedAt = final?.DecidedAt ?? r.DecidedAt,
+            WorkflowMode = r.WorkflowMode,
+            ExternalSystemId = r.ExternalSystemId
         };
     }
 
@@ -502,7 +507,8 @@ public sealed partial class SecretFourEyesApprovalTests
             Guid? profileId = null,
             bool withTable = true,
             Exception? auditFailure = null,
-            Autheris.Application.Governance.Ownership.IDeputyAuthority? deputies = null)
+            Autheris.Application.Governance.Ownership.IDeputyAuthority? deputies = null,
+            Guid? externalSystemId = null)
         {
             _deputies = deputies;
             var columns = new Dictionary<string, ColumnProtection>(StringComparer.OrdinalIgnoreCase);
@@ -532,7 +538,9 @@ public sealed partial class SecretFourEyesApprovalTests
                 Version = 1,
                 RequestKind = kind,
                 GrantKind = kind == ConsentRequestKind.Unmask ? PermissionGrantKind.Unmask : PermissionGrantKind.Data,
-                ProfileId = profileId
+                ProfileId = profileId,
+                WorkflowMode = externalSystemId is null ? ConsentWorkflowMode.Internal : ConsentWorkflowMode.External,
+                ExternalSystemId = externalSystemId
             });
 
             _approvals = NullFake.Create<IConsentApprovalRepository>((m, args) => m.Name switch
@@ -563,10 +571,13 @@ public sealed partial class SecretFourEyesApprovalTests
                 accessProfileRepository: profiles,
                 notificationDispatcher: Notifications,
                 capabilities: _capabilities,
-                timeProvider: new FakeTimeProvider(Now));
+                timeProvider: new FakeTimeProvider(Now),
+                eventOutbox: Events);
         }
 
         public CasStore Store { get; }
+
+        public RecordingConsentEventOutbox Events { get; } = new();
 
         public InMemoryAuditWriter Audit { get; }
 

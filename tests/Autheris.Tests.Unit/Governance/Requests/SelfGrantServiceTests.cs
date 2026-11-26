@@ -169,6 +169,43 @@ public sealed class SelfGrantServiceTests
     }
 
     [Fact]
+    public async Task Self_grant_appends_one_request_decided_event()
+    {
+        // Issue #1165: the self-grant creates and approves the request in one step; consumers learn about it from request.decided.
+        var h = new H();
+
+        var result = await h.Service.SelfGrantAsync(H.Command(H.Actor("user:it")));
+
+        var (entry, transaction) = h.Events.Appended.ShouldHaveSingleItem();
+        entry.EventType.ShouldBe(Autheris.Application.ConsentRequests.Events.ConsentEventTypes.RequestDecided);
+        entry.SubjectId.ShouldBe(result.Request.Id.ToString("D"));
+        entry.ExternalSystemId.ShouldBeNull();
+        transaction.ShouldBeSameAs(h.Transaction);
+        RecordingConsentEventOutbox.ReadThinRequestPayload(entry).ShouldBe(("APPROVED", 2, "INTERNAL"));
+        entry.PayloadJson.ShouldNotContain("production incident");
+    }
+
+    [Fact]
+    public async Task Refused_self_grant_appends_no_event()
+    {
+        var h = new H(ProtectionClass.Secret);
+
+        await Should.ThrowAsync<ConsentDecisionException>(() => h.Service.SelfGrantAsync(H.Command(H.Actor("user:it"))));
+
+        h.Events.Appended.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Failed_grant_write_appends_no_event()
+    {
+        var h = new H(grantWriteFails: true);
+
+        await Should.ThrowAsync<InvalidOperationException>(() => h.Service.SelfGrantAsync(H.Command(H.Actor("user:it"))));
+
+        h.Events.Appended.ShouldBeEmpty();
+    }
+
+    [Fact]
     public void Command_and_body_carry_no_self_grant_flag()
     {
         typeof(SelfGrantCommand).GetProperty("SelfGrant").ShouldBeNull();

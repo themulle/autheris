@@ -5,6 +5,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Audit;
 using Autheris.Application.ConsentRequests;
+using Autheris.Application.ConsentRequests.Events;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Notifications;
@@ -405,6 +406,13 @@ public sealed partial class PermissionRequestEngine
         ConsentRequest updatedReq,
         CancellationToken ct)
     {
+        // Issue #1165: the decision event is appended in this transaction. Without a database transaction the outbox would append on
+        // a connection of its own, so the decision fails closed before any grant or audit is written.
+        if (_eventOutbox is not null && tx.Transaction is null)
+        {
+            throw new InvalidOperationException("The decision transaction carries no database transaction; the consent event cannot be appended atomically.");
+        }
+
         IReadOnlyList<GrantRef> grants = [];
         var validFrom = (updatedReq.RequestedValidFrom ?? decision.DecidedAt).ToUniversalTime();
         if (validFrom < decision.DecidedAt)
@@ -468,6 +476,16 @@ public sealed partial class PermissionRequestEngine
                 ApprovalStep: fourEyesStep ? decision.StepNumber : null,
                 RequiredApprovals: fourEyesStep ? SecretFourEyesRule.RequiredApprovals : null) { OnBehalfOf = decision.OnBehalfOf }.ToDetailsJson()
         }, ct).ConfigureAwait(false);
+
+        // Issue #1165: event consumers learn about the decision (request.decided) or a recorded first approval on secret data
+        // (request.updated) from a thin event appended in the decision transaction: it commits with the decision or not at all.
+        // It is the last write of the effect, so the tenant event lock is the last lock the decision takes.
+        await AppendRequestEventAsync(
+            decision.IsFinal ? ConsentEventTypes.RequestDecided : ConsentEventTypes.RequestUpdated,
+            updatedReq,
+            ConsentEventPayloads.ForRequest(updatedReq, decision.DecidedAt),
+            tx.Transaction,
+            ct).ConfigureAwait(false);
 
         return grants;
     }

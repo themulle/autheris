@@ -94,6 +94,18 @@ public partial class GovernanceRepository
               FROM EXTERNAL_WORKFLOW_SYSTEMS
               WHERE id = @id AND tenant_id = @tenant";
 
+        // The system row held for an update that still lets event appends read it (they read the row after the tenant event lock).
+        public const string LockExternalWorkflowSystemByIdPgSql =
+            @"SELECT id, tenant_id, name, client_id, webhook_url, webhook_secret_protected, enabled, created_by, created_at, disabled_at, system_role
+              FROM EXTERNAL_WORKFLOW_SYSTEMS
+              WHERE id = @id AND tenant_id = @tenant
+              FOR NO KEY UPDATE";
+
+        public const string LockExternalWorkflowSystemByIdSsSql =
+            @"SELECT id, tenant_id, name, client_id, webhook_url, webhook_secret_protected, enabled, created_by, created_at, disabled_at, system_role
+              FROM EXTERNAL_WORKFLOW_SYSTEMS WITH (UPDLOCK, ROWLOCK)
+              WHERE id = @id AND tenant_id = @tenant";
+
         public const string UpdateSystemRevokeSql = @"UPDATE CONSENTS
                                           SET is_revoked = 1, revoked_by_sid = @sid, revoked_at = @now, revoke_reason = @reason
                                           WHERE id = @id AND is_revoked = 0";
@@ -588,13 +600,17 @@ public partial class GovernanceRepository
                 return false;
             }
 
-            var req = await GetConsentRequestAsync(requestId, ct).ConfigureAwait(false);
+            // The row is read on the withdrawal's own connection and transaction: a second connection would wait on this
+            // transaction's row lock where reads are locking (SQL Server without READ_COMMITTED_SNAPSHOT).
+            var req = await ConsentSqlCore.ReadConsentRequestAsync(conn, tx, ConsentSql.SelectConsentRequestByIdSql, requestId, loadSteps: true, ct)
+                .ConfigureAwait(false);
             if (req != null)
             {
                 req.Status = "WITHDRAWN";
                 await RecordAuditEventAsync(
                     ConsentApprovalPolicy.BuildStepAudit(req, requesterSid, AuditEventTypes.ConsentWithdrawn, "WITHDRAWN", "WITHDRAWN", "Access request withdrawn by requester."),
                     tx, ct).ConfigureAwait(false);
+                await AppendWithdrawnEventInTransactionAsync(conn, tx, req, ct).ConfigureAwait(false);
             }
 
             await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
@@ -605,6 +621,35 @@ public partial class GovernanceRepository
             await RollbackTransactionAsync(tx, ct).ConfigureAwait(false);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Issue #1165: event consumers learn about a withdrawal (by the requester or by deprovisioning) from request.updated, appended
+    /// in the withdrawal transaction after the request row (row lock, then the tenant event lock, as for decisions). The payload is
+    /// the stored row: status WITHDRAWN, the version after the change, and the request's external system for routing.
+    /// </summary>
+    private async Task AppendWithdrawnEventInTransactionAsync(DbConnection conn, DbTransaction tx, ConsentRequest withdrawn, CancellationToken ct)
+    {
+        if (string.IsNullOrWhiteSpace(withdrawn.TenantId.Value) || TenantId.IsReserved(withdrawn.TenantId))
+        {
+            return;
+        }
+
+        var occurredAt = TimeProvider.System.GetUtcNow().ToUniversalTime();
+        await AppendConsentEventInTransactionAsync(
+            conn,
+            tx,
+            new Autheris.Application.ConsentRequests.Events.ConsentEventWrite(
+                withdrawn.TenantId.Value,
+                Guid.NewGuid(),
+                Autheris.Application.ConsentRequests.Events.ConsentEventTypes.RequestUpdated,
+                withdrawn.Id.ToString("D"),
+                Autheris.Application.ConsentRequests.Events.ConsentEventPayloads.Serialize(
+                    Autheris.Application.ConsentRequests.Events.ConsentEventPayloads.ForRequest(withdrawn, occurredAt)),
+                occurredAt,
+                withdrawn.ExternalSystemId),
+            withdrawn.TenantId,
+            ct).ConfigureAwait(false);
     }
 
     private ValueTask EnsureMayMaterializeAsync(TenantId tenant, TableIdentifier table, IReadOnlyList<ConsentRowFilter> filters, CancellationToken ct) =>
