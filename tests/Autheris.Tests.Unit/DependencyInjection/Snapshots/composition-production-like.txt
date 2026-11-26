@@ -369,7 +369,7 @@
 0368 Autheris.Application.Policy.Pdp.IEffectiveAccessService Scoped key=- type:Autheris.Application.Policy.Pdp.EffectiveAccessService
 0369 Autheris.Application.Policy.Pdp.IGrantEffectPreview Scoped key=- type:Autheris.Application.Policy.Pdp.GrantEffectPreviewService
 0370 Autheris.Application.Governance.Interfaces.IEuAiActAuditExporter Singleton key=- type:Autheris.Application.Governance.Services.EuAiActAuditExporter
-0371 Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService Singleton key=- type:Autheris.Application.Governance.Services.EffectiveAccessExplanationService
+0371 Autheris.Application.Governance.Interfaces.IEffectiveAccessExplanationService Scoped key=- type:Autheris.Application.Governance.Services.EffectiveAccessExplanationService
 0372 Microsoft.Extensions.Options.IConfigureOptions<Autheris.Domain.Options.IndividualGrantOptions> Transient key=- factory:Microsoft.Extensions.Options.IConfigureOptions<Autheris.Domain.Options.IndividualGrantOptions>
 0373 Microsoft.Extensions.DependencyInjection.DataAnnotationValidateOptionsRegistration<Autheris.Domain.Options.IndividualGrantOptions> Singleton key=- instance:Microsoft.Extensions.DependencyInjection.DataAnnotationValidateOptionsRegistration<Autheris.Domain.Options.IndividualGrantOptions>
 0374 Microsoft.Extensions.DependencyInjection.DataAnnotationValidateOptionsAdapter<Autheris.Domain.Options.IndividualGrantOptions> Singleton key=- type:Microsoft.Extensions.DependencyInjection.DataAnnotationValidateOptionsAdapter<Autheris.Domain.Options.IndividualGrantOptions>

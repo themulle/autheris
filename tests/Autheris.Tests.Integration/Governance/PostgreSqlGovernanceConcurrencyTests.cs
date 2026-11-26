@@ -130,18 +130,36 @@ public sealed class PostgreSqlGovernanceConcurrencyTests : IDisposable
     {
         // One owner group per container (#1009 D13): a decider outside it never records a step, even under concurrency. Approvals run
         // through the permission request engine (issue #1132); the store keeps the owner check of the rejection path.
+        const string outsiderSid = "S-1-5-21-1000-1000-1000-1003";
         var request = await NewDecisionRequestAsync("S-1-5-21-REQ-TWO-DECIDERS");
+
+        // Deterministically verify the store-level owner check while the request is still pending before starting the race.
+        await Should.ThrowAsync<UnauthorizedAccessException>(() =>
+            _repository.RejectConsentRequestAsync(request.Id, new Sid(outsiderSid), "outsider-before-race"));
+
         var refused = 0;
 
         var results = await Task.WhenAll(
             Enumerable.Range(0, 6).Select(n => Task.Run(async () =>
             {
+                if (n % 2 == 0)
+                {
+                    return await TryAsync(() => _repository.RejectConsentRequestAsync(request.Id, new Sid(OwnerGroup), "race"));
+                }
+
                 try
                 {
-                    return await TryAsync(() => _repository.RejectConsentRequestAsync(request.Id, new Sid(n % 2 == 0 ? OwnerGroup : "S-1-5-21-1000-1000-1000-1003"), "race"));
+                    await _repository.RejectConsentRequestAsync(request.Id, new Sid(outsiderSid), "race");
+                    return true;
                 }
                 catch (UnauthorizedAccessException)
                 {
+                    Interlocked.Increment(ref refused);
+                    return false;
+                }
+                catch (Autheris.Application.Governance.ConsentRequests.ConsentRequestStatusConflictException)
+                {
+                    // Owner finished rejecting first; the outsider is still refused and records nothing.
                     Interlocked.Increment(ref refused);
                     return false;
                 }
@@ -150,6 +168,7 @@ public sealed class PostgreSqlGovernanceConcurrencyTests : IDisposable
         results.Count(r => r).ShouldBe(1, "exactly one step, recorded by the owner group");
         refused.ShouldBe(3, "every attempt of the outsider is refused");
         Scalar("SELECT COUNT(*) FROM APPROVAL_STEPS WHERE consent_request_id = @id", ("@id", request.Id.ToString())).ShouldBe(1);
+        Scalar("SELECT COUNT(*) FROM APPROVAL_STEPS WHERE consent_request_id = @id AND approver_sid = @owner", ("@id", request.Id.ToString()), ("@owner", OwnerGroup)).ShouldBe(1, "only the owner group may record a step");
         Scalar("SELECT COUNT(DISTINCT approver_sid) FROM APPROVAL_STEPS WHERE consent_request_id = @id", ("@id", request.Id.ToString())).ShouldBe(1);
         (await _repository.GetConsentRequestAsync(request.Id))!.Status.ShouldBe("REJECTED");
         (await _repository.VerifyAuditHashChainAsync()).ShouldBeTrue();
