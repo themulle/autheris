@@ -15,6 +15,7 @@ using Autheris.Api.Serialization;
 using Autheris.Application.Common.Serialization;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
+using Autheris.Application.Sql.ResultCache;
 using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Options;
@@ -29,6 +30,8 @@ public static partial class WebSqlEndpoints
     /// <summary>#293: fixed texts; never the JSON parser message, a property path or a.NET type name.</summary>
     internal const string InvalidRequestBodyMessage = "The request body must be a JSON object with a string 'sql' and an optional 'parameters' object of scalar values.";
     internal const string MissingSqlMessage = "A non-empty SQL statement is required.";
+
+    private const string InvalidResultCacheOptionMessage = "The 'resultCache' option must be 'default' or 'bypass'.";
 
     private const string DuplicateParameterNameMessage = "A parameter name is repeated; names are compared without case and without a leading @.";
 
@@ -50,6 +53,48 @@ public static partial class WebSqlEndpoints
         }
 
         return false;
+    }
+
+    /// <summary>Parses the optional result cache request option; anything but default or bypass is rejected.</summary>
+    internal static bool TryParseResultCacheMode(string? value, out WebSqlResultCacheMode mode)
+    {
+        mode = WebSqlResultCacheMode.Default;
+        if (value is null || string.Equals(value, "default", StringComparison.OrdinalIgnoreCase))
+        {
+            return true;
+        }
+
+        if (string.Equals(value, "bypass", StringComparison.OrdinalIgnoreCase))
+        {
+            mode = WebSqlResultCacheMode.Bypass;
+            return true;
+        }
+
+        return false;
+    }
+
+    private static void WriteResultCacheField(Utf8JsonWriter writer, WebSqlResultCacheOutcome outcome)
+    {
+        writer.WriteStartObject("resultCache");
+        writer.WriteString("status", outcome.Status switch
+        {
+            WebSqlResultCacheStatus.Hit => "hit",
+            WebSqlResultCacheStatus.Miss => "miss",
+            WebSqlResultCacheStatus.Store => "store",
+            WebSqlResultCacheStatus.Bypass => "bypass",
+            _ => "ineligible"
+        });
+        if (outcome.AgeSeconds is { } age)
+        {
+            writer.WriteNumber("ageSeconds", age);
+        }
+
+        if (!string.IsNullOrEmpty(outcome.Reason))
+        {
+            writer.WriteString("reason", outcome.Reason);
+        }
+
+        writer.WriteEndObject();
     }
 
     private static async Task WriteRequestValidationErrorAsync(HttpContext httpContext, string code, string message, CancellationToken ct)
@@ -153,6 +198,14 @@ public static partial class WebSqlEndpoints
         {
             // Two spellings of one name are ambiguous; the names are not echoed.
             await WriteRequestValidationErrorAsync(httpContext, ApiErrorCodes.BadRequest, DuplicateParameterNameMessage, ct);
+            return;
+        }
+
+        // The option value is never echoed back.
+        string? resultCacheOption = bodyDto?.ResultCache;
+        if (!TryParseResultCacheMode(resultCacheOption, out var resultCacheMode))
+        {
+            await WriteRequestValidationErrorAsync(httpContext, ApiErrorCodes.BadRequest, InvalidResultCacheOptionMessage, ct);
             return;
         }
 
@@ -312,8 +365,20 @@ public static partial class WebSqlEndpoints
                 await WriteWebSqlErrorAsync(httpContext, new TrinoSqlEngine.Ast.Emit.SqlPagingUnsupportedException(), logger, ct);
                 return;
             }
-            await HandleParquetWebSqlRequestAsync(httpContext, sqlService, gatewayOptions, logger, governedRequest, user, tenantId, ct);
+            await HandleParquetWebSqlRequestAsync(
+                httpContext, sqlService, gatewayOptions, logger, governedRequest, user, tenantId, idempotencyLease == null ? resultCacheMode : null, ct);
             return;
+        }
+
+        // Only plain JSON reads take part in the result cache: statement, poll, cancel and write paths never do.
+        bool resultCacheOn = webSqlOptions.ResultCacheMaxMegabytes > 0 && idempotencyLease == null;
+        WebSqlResultCacheOutcome? cacheOutcome = null;
+        if (resultCacheOn)
+        {
+            governedRequest = governedRequest with
+            {
+                ResultCache = new WebSqlResultCacheRequest(resultCacheMode, "json", o => cacheOutcome = o)
+            };
         }
 
         // SEC M-10: The JSON writer is created lazily when the first result arrives. Policy/parse errors raised while the
@@ -396,7 +461,7 @@ public static partial class WebSqlEndpoints
                     w.WriteEndArray();
 
                     // WebSQL findings 2.4: rows were cut only when the probe row beyond the limit existed.
-                    truncated = reader is RowLimitedDataReader { HasMoreRows: true };
+                    truncated = reader is IRowLimitProbe { HasMoreRows: true };
                 },
                 ct);
 
@@ -433,6 +498,11 @@ public static partial class WebSqlEndpoints
             if (!string.IsNullOrEmpty(pageOutcome?.PagingUnavailable))
             {
                 writer.WriteString("pagingUnavailable", pageOutcome.PagingUnavailable);
+            }
+
+            if (resultCacheOn && cacheOutcome is { } reportedCacheOutcome)
+            {
+                WriteResultCacheField(writer, reportedCacheOutcome);
             }
 
             if (indexHints is { Count: > 0 })
@@ -500,6 +570,7 @@ public static partial class WebSqlEndpoints
         GovernedSqlQueryRequest governedRequest,
         ClaimsPrincipal user,
         TenantId tenantId,
+        WebSqlResultCacheMode? resultCacheMode,
         CancellationToken ct)
     {
         var parquetService = httpContext.RequestServices?.GetService<IParquetExportService>();
@@ -514,6 +585,11 @@ public static partial class WebSqlEndpoints
         // Row limits of the Parquet transport (Gateway:RowLimits:Parquet, falling back to WebSql).
         var rowLimit = SqlRowLimit.For(gatewayOptions.Value.WebSql ?? new WebSqlOptions(), gatewayOptions.Value.RowLimits?.Parquet);
         governedRequest = governedRequest with { RowLimit = rowLimit };
+        if (resultCacheMode is { } cacheMode && (gatewayOptions.Value.WebSql?.ResultCacheMaxMegabytes ?? 0) > 0)
+        {
+            governedRequest = governedRequest with { ResultCache = new WebSqlResultCacheRequest(cacheMode, "parquet", null) };
+        }
+
         bool rowLimitCut = false;
 
         var rows = new List<IReadOnlyDictionary<string, object?>>();
@@ -543,7 +619,7 @@ public static partial class WebSqlEndpoints
                     }
 
                     // WebSQL findings 2.4/4.2: the row limit cut the result (probe row existed) before the file limit.
-                    rowLimitCut = reader is RowLimitedDataReader { HasMoreRows: true };
+                    rowLimitCut = reader is IRowLimitProbe { HasMoreRows: true };
                 },
                 ct);
 

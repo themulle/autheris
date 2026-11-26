@@ -29,7 +29,8 @@ public static partial class WebSqlEndpoints
         Dictionary<string, object?>? Parameters,
         string? DataSource,
         WebSqlPageRequest? Page = null,
-        string? Next = null);
+        string? Next = null,
+        string? ResultCache = null);
 
     public static IEndpointRouteBuilder MapWebSqlEndpoints(this IEndpointRouteBuilder app, GatewayOptions? gatewayOptions = null)
     {
