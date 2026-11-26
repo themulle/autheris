@@ -79,7 +79,7 @@ internal static partial class CatalogRowHydrator
             MinGroupSize = minGroupSize,
             NonPersonal = nonPersonal,
             DbtUniqueId = reader.FieldCount > o + 17 && !reader.IsDBNull(o + 17) ? reader.GetString(o + 17) : null,
-            ObjectKind = ParseObjectKind(reader, o + 18),
+            ObjectKind = ParseObjectKind(reader, o + 18, logger),
             MetricViewCountMeasure = reader.FieldCount > o + 19 && !reader.IsDBNull(o + 19) ? reader.GetString(o + 19) : null
         };
     }

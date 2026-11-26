@@ -197,10 +197,14 @@ public sealed class ObjectKindViewChannelTests
         jdbcCols.Select(r => (string?)r[3]).ShouldBe(["region"]);
     }
 
-    [Fact]
-    public async Task GraphQl_MetricView_NotExposed()
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData(DiscoveryObjectKind.MetricView)]
+    [InlineData(DiscoveryObjectKind.Procedure)]
+    public async Task GraphQl_NonRelationKind_NotExposed(DiscoveryObjectKind kind)
     {
         var mv = MakeMetricView();
+        mv = mv with { Table = mv.Table with { ObjectKind = kind } };
         var repo = new FakeDiscoveryTableRepository();
         repo.Tables.Add(mv);
         var relRepo = NSubstitute.Substitute.For<ITableRelationRepository>();

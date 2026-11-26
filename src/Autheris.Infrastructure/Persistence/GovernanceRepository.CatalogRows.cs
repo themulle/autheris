@@ -74,6 +74,11 @@ public partial class GovernanceRepository
                 var identifier = new TableIdentifier(tableEntity.SourceName, tableEntity.SchemaName, tableEntity.TableName);
                 activeTables.Add((tableEntity.Id, identifier, tableEntity));
             }
+            catch (UnknownCatalogObjectKindException)
+            {
+                // The hydrator already logged the offending kind once; skip only this row.
+                continue;
+            }
             catch (Exception ex) when (ex is InvalidCastException or FormatException or JsonException or ArgumentException)
             {
                 LogCatalogNotice("A catalog row in TABLES is invalid and was skipped.");

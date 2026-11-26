@@ -255,6 +255,12 @@ public sealed partial class GovernedCatalogProvider : IGovernedCatalogProvider
             return (null, string.Empty);
         }
 
+        if (metadata.Table.ObjectKind == DiscoveryObjectKind.Procedure)
+        {
+            LogAdmissionDenied(dataSourceName, table, "The catalog entry is a procedure, not a queryable relation.");
+            return (null, string.Empty);
+        }
+
         if (metadata.DataSourceType != DataSourceType.Sql ||
             !string.Equals(metadata.Table.SourceName, dataSourceName, StringComparison.OrdinalIgnoreCase) ||
             metadata.Dialect != dialect)
