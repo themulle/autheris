@@ -58,6 +58,30 @@ public sealed class WebSqlOptions
     /// <summary>Maximum permitted SQL statement length in characters.</summary>
     public int MaxQueryLength { get; init; } = 64_000;
 
+    /// <summary>
+    /// Hard upper bound in seconds of the TTL a data source can configure through
+    /// <c>DataSources:Connections:*:ResultCacheTtlSeconds</c>.
+    /// </summary>
+    public const int ResultCacheHardMaxTtlSeconds = 3600;
+
+    /// <summary>
+    /// Global memory budget of the WebSQL result cache in megabytes (0..4096). 0 (default) switches the cache off for every data
+    /// source; a source additionally needs <c>ResultCacheTtlSeconds</c> greater than 0.
+    /// </summary>
+    public int ResultCacheMaxMegabytes { get; init; } = 0;
+
+    /// <summary>Maximum size of one cached WebSQL result in megabytes (1..<c>ResultCacheMaxMegabytes</c> when the cache is on).</summary>
+    public int ResultCacheMaxEntryMegabytes { get; init; } = 16;
+
+    /// <summary>Maximum memory one tenant and user may occupy in the WebSQL result cache in megabytes (1..<c>ResultCacheMaxMegabytes</c> when the cache is on).</summary>
+    public int ResultCacheMaxUserMegabytes { get; init; } = 64;
+
+    /// <summary>Maximum number of rows of one cached WebSQL result (1..100,000). Larger results are streamed and not stored.</summary>
+    public int ResultCacheMaxRowsPerEntry { get; init; } = 10_000;
+
+    /// <summary>Maximum number of cached WebSQL results per tenant and user (1..10,000).</summary>
+    public int ResultCacheMaxEntriesPerUser { get; init; } = 100;
+
     /// <summary>Default execution timeout in seconds for WebSQL statements.</summary>
     public int ExecutionTimeoutSeconds { get; init; } = 30;
 
