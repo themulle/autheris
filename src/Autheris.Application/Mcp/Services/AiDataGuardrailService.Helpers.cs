@@ -116,21 +116,55 @@ public sealed partial class AiDataGuardrailService
         (tool.Name.Equals(McpDatasetTools.InvokeApi, StringComparison.OrdinalIgnoreCase) && table.Equals(McpDataTargetResolver.ApiNoTable));
 
     /// <summary>
-    /// describe_dataset never computes value profiles or synthetic samples on the read path.
-    /// Value-bearing column metadata checks still require a decision when not brief.
+    /// describe_dataset with brief:true never emits value-bearing statistics. When not brief, a visible dataset for which the
+    /// caller holds no data grant (such as an open container or a catalog grant) also emits no value-bearing statistics
+    /// (DiscoveryAccessMapper withholds them unless the read decision is allowed); when the caller holds a data grant (or admin
+    /// view), the decision point decides so a policy denial blocks value-bearing profiles.
     /// </summary>
-    private static ValueTask<bool> IsValueFreeDescribeAsync(
+    private async ValueTask<bool> IsValueFreeDescribeAsync(
         McpToolDefinition tool, string? argumentsJson, McpSessionContext sessionContext, TableIdentifier table, CancellationToken ct)
     {
-        _ = sessionContext;
-        _ = table;
-        _ = ct;
         if (!tool.Name.Equals(McpDatasetTools.DescribeDataset, StringComparison.OrdinalIgnoreCase))
         {
-            return ValueTask.FromResult(false);
+            return false;
         }
 
-        return ValueTask.FromResult(McpDatasetTools.IsBriefRequested(argumentsJson));
+        if (McpDatasetTools.IsBriefRequested(argumentsJson))
+        {
+            return true;
+        }
+
+        if (_catalogVisibility is null || _consentRepository is null)
+        {
+            return false;
+        }
+
+        try
+        {
+            var principal = McpProtocolHandler.BuildPrincipalFromSession(sessionContext, _timeProvider);
+            if (principal is null)
+            {
+                return false;
+            }
+
+            var caller = new Autheris.Application.Catalog.Interfaces.CatalogCaller(
+                principal,
+                McpCatalogVisibility.SafeTenantId(principal),
+                Autheris.Application.Catalog.Interfaces.CatalogChannel.Mcp);
+            if (await _catalogVisibility.FindVisibleAsync(caller, table, ct).ConfigureAwait(false) is null)
+            {
+                return false;
+            }
+
+            var (consents, pending, isAdmin) = await McpDatasetCatalog.ResolveCallerConsentsAsync(
+                principal, _options.Value, _consentRepository, null, null, ct).ConfigureAwait(false);
+            var status = McpDatasetCatalog.AccessStatusOf(table, consents, pending, isAdmin, _options.Value.IsMcpAuthBypassed);
+            return !string.Equals(status, "GRANTED", StringComparison.OrdinalIgnoreCase);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            return false;
+        }
     }
 
     /// <summary>Reason codes of a denied decision for the audit trail: codes only, never predicate values or policy text.</summary>

@@ -1,6 +1,8 @@
 namespace Autheris.Application.Governance.Services;
 
+using Autheris.Application.Catalog.Interfaces;
 using Autheris.Application.Governance.Ownership;
+using Autheris.Application.Policy.Pdp;
 using Autheris.Application.Tenancy;
 using System;
 using System.Collections.Generic;
@@ -26,7 +28,9 @@ public sealed class EffectiveAccessExplanationService(
     IContainerOwnership? ownershipRepository = null,
     IOptions<GatewayOptions>? gatewayOptions = null,
     IOptions<GovernanceTextOptions>? textOptions = null,
-    TimeProvider? timeProvider = null) : IEffectiveAccessExplanationService
+    TimeProvider? timeProvider = null,
+    IAccessDecisionPoint? decisionPoint = null,
+    ICatalogVisibilityService? catalogVisibility = null) : IEffectiveAccessExplanationService
 {
     private int DescriptionMaxLength => (textOptions?.Value ?? new GovernanceTextOptions()).ConsentDescriptionMaxLength;
 
@@ -74,67 +78,85 @@ public sealed class EffectiveAccessExplanationService(
         if (metadata == null)
         {
             // Same lookups as for an existing table, so unknown and hidden tables behave alike.
-            await CatalogVisibility.VisibleTablesAsync(Array.Empty<TableMetadata>(), principal, tenantId, consentRepository, contract: null, CatalogOwner, gatewayOptions?.Value.Catalog.SharedTables, ct).ConfigureAwait(false);
+            if (catalogVisibility is not null)
+            {
+                await catalogVisibility.FindVisibleAsync(
+                    new CatalogCaller(principal, tenantId, CatalogChannel.Mcp),
+                    table,
+                    ct).ConfigureAwait(false);
+            }
+            else
+            {
+                await CatalogVisibility.VisibleTablesAsync(
+                    Array.Empty<TableMetadata>(),
+                    principal,
+                    tenantId,
+                    consentRepository,
+                    contract: null,
+                    CatalogOwner,
+                    gatewayOptions?.Value.Catalog.SharedTables,
+                    ct).ConfigureAwait(false);
+            }
+
             return NotFound(table);
         }
 
         var groupSids = principal.GetGroupSids();
         var allUserSids = principal.GetAllUserSids();
-        // Claims overload, as the data path: it also reads a plain 'scope' claim (issue #127).
-        var callerScopes = TokenAccessScope.GetScopeSet(principal.Claims);
+        var clock = timeProvider ?? TimeProvider.System;
+        var now = clock.GetUtcNow();
 
         var subjects = (allUserSids != null && allUserSids.Count > 0 ? allUserSids : [userSid.Value])
             .Concat(groupSids)
             .Distinct()
             .ToList();
 
-        var now = (timeProvider ?? TimeProvider.System).GetUtcNow();
-        var activeConsents = (await consentRepository.GetActiveConsentsForSubjectsAsync(subjects, table, now, tenantId, ct).ConfigureAwait(false))
-            .Where(c => c.TenantId == tenantId)
-            .ToList();
-
-        var decision = (activeConsents.Any(static c => c.IsPatternGrant) || metadata.Table.ObjectKind == DiscoveryObjectKind.MetricView)
-            ? resolutionService.ResolveAccess(
-                userSid.Value,
-                groupSids,
-                roles,
-                table,
-                activeConsents,
-                metadata.Dialect,
-                allUserSids,
-                callerScopes,
-                metadata)
-            : resolutionService.ResolveAccess(
-                userSid.Value,
-                groupSids,
-                roles,
-                table,
-                activeConsents,
-                metadata.Dialect,
-                allUserSids,
-                callerScopes
-            );
-
-        if (!decision.IsAllowed)
+        TableAccessDecision decision;
+        List<Consent> activeConsents;
+        if (decisionPoint is not null)
         {
-            // Only tables the caller can discover in the catalog are described; everything else is answered
-            // exactly like an unknown table (no columns, same message).
-            var visible = await CatalogVisibility.VisibleTablesAsync([metadata], principal, tenantId, consentRepository, contract: null, CatalogOwner, gatewayOptions?.Value.Catalog.SharedTables, ct).ConfigureAwait(false);
-            if (visible.Count == 0)
+            var subject = SecurityPrincipalContext.FromPrincipal(principal, tenantId, timeProvider: clock);
+            decision = await decisionPoint.DecideAsync(
+                new AccessRequest(subject, metadata, AccessOperation.Read, AccessTransport.Mcp),
+                ct).ConfigureAwait(false);
+            if (!decision.IsAllowed)
             {
-                return NotFound(table);
+                return await DeniedExplanationAsync(principal, tenantId, metadata, table, decision, ct).ConfigureAwait(false);
             }
 
-            return new EffectiveTableAccessDto(
-                table.ToString(),
-                "DENIED",
-                Array.Empty<string>(),
-                Array.Empty<string>(),
-                visible[0].Columns.Where(static c => !c.DiscoveryHidden).Select(c => c.ColumnName).ToList(),
-                Array.Empty<string>(),
-                decision.DeniedReasons.Count > 0 ? string.Join("; ", decision.DeniedReasons) : "No active allow consent.",
-                null
-            );
+            activeConsents = await LoadActiveConsentsWithPatternsAsync(subjects, table, now, tenantId, ct).ConfigureAwait(false);
+        }
+        else
+        {
+            // Claims overload, as the data path: it also reads a plain 'scope' claim (issue #127).
+            var callerScopes = TokenAccessScope.GetScopeSet(principal.Claims);
+            activeConsents = (await consentRepository.GetActiveConsentsForSubjectsAsync(subjects, table, now, tenantId, ct).ConfigureAwait(false))
+                .Where(c => c.TenantId == tenantId)
+                .ToList();
+            decision = (activeConsents.Any(static c => c.IsPatternGrant) || metadata.Table.ObjectKind == DiscoveryObjectKind.MetricView)
+                ? resolutionService.ResolveAccess(
+                    userSid.Value,
+                    groupSids,
+                    roles,
+                    table,
+                    activeConsents,
+                    metadata.Dialect,
+                    allUserSids,
+                    callerScopes,
+                    metadata)
+                : resolutionService.ResolveAccess(
+                    userSid.Value,
+                    groupSids,
+                    roles,
+                    table,
+                    activeConsents,
+                    metadata.Dialect,
+                    allUserSids,
+                    callerScopes);
+            if (!decision.IsAllowed)
+            {
+                return await DeniedExplanationAsync(principal, tenantId, metadata, table, decision, ct).ConfigureAwait(false);
+            }
         }
 
         var allowedCols = new List<string>();
@@ -244,6 +266,75 @@ public sealed class EffectiveAccessExplanationService(
         Array.Empty<string>(),
         TableNotFoundMessage,
         null);
+
+    private async Task<EffectiveTableAccessDto> DeniedExplanationAsync(
+        ClaimsPrincipal principal,
+        TenantId tenantId,
+        TableMetadata metadata,
+        TableIdentifier table,
+        TableAccessDecision decision,
+        CancellationToken ct)
+    {
+        // Only tables the caller can discover in the catalog are described; everything else is answered
+        // exactly like an unknown table (no columns, same message).
+        IReadOnlyList<TableColumn> visibleColumns;
+        if (catalogVisibility is not null)
+        {
+            if (await catalogVisibility.FindVisibleAsync(
+                new CatalogCaller(principal, tenantId, CatalogChannel.Mcp),
+                table,
+                ct).ConfigureAwait(false) is not { } visibleRow)
+            {
+                return NotFound(table);
+            }
+
+            visibleColumns = visibleRow.Table.Columns;
+        }
+        else
+        {
+            var visible = await CatalogVisibility.VisibleTablesAsync(
+                [metadata], principal, tenantId, consentRepository, contract: null, CatalogOwner, gatewayOptions?.Value.Catalog.SharedTables, ct).ConfigureAwait(false);
+            if (visible.Count == 0)
+            {
+                return NotFound(table);
+            }
+
+            visibleColumns = visible[0].Columns;
+        }
+
+        return new EffectiveTableAccessDto(
+            table.ToString(),
+            "DENIED",
+            Array.Empty<string>(),
+            Array.Empty<string>(),
+            visibleColumns.Where(static c => !c.DiscoveryHidden).Select(c => c.ColumnName).ToList(),
+            Array.Empty<string>(),
+            decision.DeniedReasons.Count > 0 ? string.Join("; ", decision.DeniedReasons) : "No active allow consent.",
+            null
+        );
+    }
+
+    private async Task<List<Consent>> LoadActiveConsentsWithPatternsAsync(
+        IReadOnlyList<Sid> subjects,
+        TableIdentifier table,
+        DateTimeOffset now,
+        TenantId tenantId,
+        CancellationToken ct)
+    {
+        var direct = await consentRepository.GetActiveConsentsForSubjectsAsync(subjects, table, now, tenantId, ct).ConfigureAwait(false);
+        var patterns = await consentRepository.GetActivePatternConsentsForSubjectsAsync(subjects, tenantId, now, ct).ConfigureAwait(false);
+        var merged = new List<Consent>(direct.Count + patterns.Count);
+        var seenIds = new HashSet<Guid>();
+        foreach (var c in direct.Concat(patterns))
+        {
+            if (c.TenantId == tenantId && (c.Id == Guid.Empty || seenIds.Add(c.Id)))
+            {
+                merged.Add(c);
+            }
+        }
+
+        return merged;
+    }
 
     private static bool IsGovernanceAdmin(ClaimsPrincipal principal, TenantId tenantId) =>
         Autheris.Application.Security.GatewayRoleEvaluator.HasTenantBoundRole(principal, nameof(GatewayRole.GovernanceAdmin), tenantId.Value) ||
