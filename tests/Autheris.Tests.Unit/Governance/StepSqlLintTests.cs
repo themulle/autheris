@@ -167,6 +167,25 @@ public sealed class StepSqlLintTests
     }
 
     [Fact]
+    public void EmbeddedResourceMap_AcceptsBothPathSeparators_AndFailsClosedOnDuplicates()
+    {
+        // A Windows build names the resources "governance-step.postgresql\0002_a.sql", a Linux build "governance-step.postgresql/0002_a.sql".
+        var map = SqlMigrationStep.MapEmbeddedResources("postgresql",
+        [
+            "governance-step.postgresql\\0002_a.sql",
+            "governance-step.postgresql/0002_a.shape.json",
+            "governance-step.sqlserver\\0002_a.sql",
+            "governance-shape.postgresql.v0001.json"
+        ]);
+
+        map.Keys.OrderBy(k => k, StringComparer.Ordinal).ShouldBe(["0002_a.shape.json", "0002_a.sql"]);
+        map["0002_a.sql"].ShouldBe("governance-step.postgresql\\0002_a.sql");
+
+        Should.Throw<InvalidOperationException>(() => SqlMigrationStep.MapEmbeddedResources("postgresql",
+            ["governance-step.postgresql\\0002_a.sql", "governance-step.postgresql/0002_a.sql"]));
+    }
+
+    [Fact]
     public void ShippedCatalogues_HoldExactlySteps0002To0005()
     {
         foreach (var engine in new[] { "postgresql", "sqlserver" })
