@@ -108,6 +108,7 @@ public static class McpResultMasking
             return true;
         }
 
+        // Every non-Clear level (including Deny) deliberately counts as masked, so an unknown level fails toward true.
         foreach (var key in rows[0].Keys)
         {
             if (decision.ColumnMasks?.HasMask(key) == true

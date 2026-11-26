@@ -162,7 +162,7 @@ public sealed partial class FederatedDuckDbExecutionService : IFederatedQueryExe
             using var dataTable = ConvertToDataTable(duckDbResult);
             using var reader = dataTable.CreateDataReader();
             var columns = SqlResultColumns.Describe(reader);
-            var maskArray = duckDbResult.Columns.Select(c => IsMaskedByName(c, plan)).ToImmutableArray();
+            var maskArray = MaskedColumnFlags(duckDbResult, plan);
             if (maskArray.Length != reader.FieldCount)
             {
                 throw new GovernedSqlException(GovernedSqlErrorCodes.CompilerInvariant, TargetSqlDialect.DuckDb);
@@ -252,7 +252,7 @@ public sealed partial class FederatedDuckDbExecutionService : IFederatedQueryExe
             truncated,
             InDbColumnMaskingExecuted: !_options.Value.IsColumnMaskingDisabled,
             PagingUnavailable: request.Page is not null && truncated ? "federated" : null,
-            MaskedColumns: duckDbResult.Columns.Select(c => IsMaskedByName(c, plan)).ToImmutableArray());
+            MaskedColumns: MaskedColumnFlags(duckDbResult, plan));
     }
 
     private async Task<(OlapQueryResult Result, CrossSourcePlan Plan, bool Truncated)> ExecuteFederatedInternalAsync(
