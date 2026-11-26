@@ -133,7 +133,7 @@ public sealed class ClassificationEngineRegexTimeoutTests
         proposal.DataOwnerSid.ShouldBeNull();
         proposal.Status.ShouldBe("UNCLASSIFIED");
         var line = logger.Lines.ShouldHaveSingleItem();
-        line.ShouldContain("0");
+        line.ShouldContain("mapping 0 timed out");
         line.ShouldNotContain("owner-a");
         line.ShouldNotContain("owner-b");
         line.ShouldNotContain("secret_table_name");
