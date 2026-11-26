@@ -14,6 +14,7 @@ using Autheris.Application.Governance.Notifications;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Identity;
+using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Autheris.Domain.Security;
 using Autheris.Domain.Tenancy;
@@ -458,6 +459,7 @@ public sealed partial class PermissionRequestEngine
             if (submission.RequestKind == ConsentRequestKind.Data && meta is not null && submission.RequestedWriteRules is { Count: > 0 } writeRules)
             {
                 Autheris.Application.ConsentRequests.WriteRuleWorkflowHelper.ValidateRulesAgainstMetadata(meta, writeRules, table);
+                await ValidateWriteRulesAgainstTablePolicyAsync(tenant, meta, writeRules, ct).ConfigureAwait(false);
             }
 
             ContainerKind? resolvedContainerKind = target.ContainerKind;
@@ -561,6 +563,65 @@ public sealed partial class PermissionRequestEngine
         }
 
         return (Guid.Empty, default, null, null, null, profileId);
+    }
+
+    private async Task ValidateWriteRulesAgainstTablePolicyAsync(
+        TenantId tenant,
+        TableMetadata meta,
+        IReadOnlyList<WriteRule> writeRules,
+        CancellationToken ct)
+    {
+        var tablePolicy = _writePolicyRepository is not null
+            ? await _writePolicyRepository.GetAsync(tenant, meta.Table.Id, ct).ConfigureAwait(false)
+            : null;
+
+        if (tablePolicy is null)
+        {
+            return;
+        }
+
+        if (!tablePolicy.AllowsWrites)
+        {
+            throw new ConsentRequestException(
+                "TARGET_NOT_WRITABLE",
+                "The target table is marked read-only by its table write policy.");
+        }
+
+        HashSet<string>? allowedPolicyCols = tablePolicy.WritableColumns is { Count: > 0 }
+            ? new HashSet<string>(tablePolicy.WritableColumns, StringComparer.OrdinalIgnoreCase)
+            : null;
+        HashSet<string>? stampedCols = tablePolicy.ServerStampedColumns is { Count: > 0 }
+            ? new HashSet<string>(tablePolicy.ServerStampedColumns.Keys, StringComparer.OrdinalIgnoreCase)
+            : null;
+
+        foreach (var rule in writeRules)
+        {
+            if (!tablePolicy.AllowsOperation(rule.Operation))
+            {
+                throw new ConsentRequestException(
+                    "TARGET_NOT_WRITABLE",
+                    "One or more requested write operations are not permitted by the table write policy.");
+            }
+
+            if (rule.Columns is { Count: > 0 })
+            {
+                if (allowedPolicyCols is not null && rule.Columns.Any(c => !allowedPolicyCols.Contains(c)))
+                {
+                    throw new ConsentRequestException(
+                        "TARGET_NOT_WRITABLE",
+                        "One or more requested write columns are not permitted by the table write policy.");
+                }
+
+                if (stampedCols is not null &&
+                    rule.Operation == WriteOperation.Update &&
+                    rule.Columns.Any(c => stampedCols.Contains(c)))
+                {
+                    throw new ConsentRequestException(
+                        "TARGET_NOT_WRITABLE",
+                        "Server-stamped columns cannot be requested as writable for updates.");
+                }
+            }
+        }
     }
 
     private async Task<bool> HasCatalogVisibilityForTargetAsync(

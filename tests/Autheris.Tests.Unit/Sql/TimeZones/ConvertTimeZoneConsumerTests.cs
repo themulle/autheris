@@ -70,6 +70,7 @@ public sealed class ConvertTimeZoneConsumerTests
 
         sites.Order(StringComparer.Ordinal).ShouldBe(
         [
+            "src/Autheris.Application/Governance/Writes/BoundedWriteSqlBuilder.cs:1",       // bounded row writes: admin SELECT RLS predicate only (no user SQL expressions)
             "src/Autheris.Application/Sql/Masking/MaskSpecRenderer.cs:1",                 // typed mask expressions of the policy: no user expression
             "src/Autheris.Application/Sql/Policy/PolicyPredicateRenderer.cs:1",           // admin predicates: the policy allowlist excludes the function (BC-130-2)
             "src/Autheris.Application/VirtualFilters/SqlFilterCompiler.cs:1",             // virtual filters: closed function list

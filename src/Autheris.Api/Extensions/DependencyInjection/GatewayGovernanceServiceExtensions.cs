@@ -327,6 +327,19 @@ public static partial class GatewayGovernanceServiceExtensions
             sp.GetRequiredService<TRepository>() is GovernanceRepository governanceRepository
                 ? new DeputyRelationStore(governanceRepository, sp.GetRequiredService<IGovernanceSqlDialect>())
                 : Autheris.Application.Governance.Ownership.EmptyDeputyRelationRepository.Instance);
+        services.AddSingleton<ITableWritePolicyRepository>(sp =>
+            sp.GetRequiredService<TRepository>() is GovernanceRepository governanceRepository
+                ? new TableWritePolicyStore(governanceRepository, sp.GetRequiredService<IGovernanceSqlDialect>(), sp.GetService<TimeProvider>())
+                : EmptyTableWritePolicyRepository.Instance);
+        services.AddSingleton<Autheris.Application.Governance.Writes.TableWritePolicyService>(sp =>
+            new Autheris.Application.Governance.Writes.TableWritePolicyService(
+                sp.GetRequiredService<ITableWritePolicyRepository>(),
+                sp.GetRequiredService<ITableMetadataRepository>(),
+                sp.GetRequiredService<IAuditWriter>(),
+                sp.GetRequiredService<IGovernanceCapabilities>(),
+                sp.GetService<Autheris.Application.Policy.WriteGrants.IRowPolicyDependencyIndex>(),
+                sp.GetService<Autheris.Application.Governance.Caching.IGovernanceWriteInvalidator>(),
+                sp.GetService<TimeProvider>()));
         services.AddSingleton<ICatalogGrantRevocationWriter>(sp => new CatalogGrantRevocationWriter(
             sp.GetRequiredService<TRepository>() as GovernanceRepository
                 ?? throw new InvalidOperationException("Catalog grant revocation needs the SQL governance repository for its audit transaction."),

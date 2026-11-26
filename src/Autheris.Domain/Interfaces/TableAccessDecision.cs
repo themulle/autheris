@@ -10,7 +10,8 @@ public sealed record TableWriteDecision(
     IReadOnlySet<string> WritableColumns,
     long? MaxRowsPerStatement,
     IReadOnlyList<string> GrantIds,
-    string? DenyCode = null);
+    string? DenyCode = null,
+    TableWritePolicy? Policy = null);
 
 public sealed record TableAccessDecision(
     TableIdentifier Table,

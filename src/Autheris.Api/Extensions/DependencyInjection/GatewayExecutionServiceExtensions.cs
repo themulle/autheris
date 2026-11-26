@@ -98,8 +98,10 @@ public static class GatewayExecutionServiceExtensions
             new Autheris.Application.Policy.WriteGrants.WriteGrantEvaluator(
                 sp.GetRequiredService<IConsentRepository>(),
                 sp.GetService<Autheris.Application.Policy.WriteGrants.IRowPolicyDependencyIndex>(),
-                sp.GetService<TimeProvider>()));
+                sp.GetService<TimeProvider>(),
+                writePolicies: sp.GetService<ITableWritePolicyRepository>()));
         services.AddScoped<Autheris.Application.Policy.Pdp.IAccessDecisionPoint, Autheris.Application.Policy.Pdp.AccessDecisionPoint>();
+        services.AddScoped<Autheris.Application.Governance.Writes.IBoundedRowWriteService, Autheris.Application.Governance.Writes.BoundedRowWriteService>();
 
         // Hierarchical Parquet Egress (F-DATA-01)
         services.AddSingleton<IParquetExportService, ParquetExportService>();

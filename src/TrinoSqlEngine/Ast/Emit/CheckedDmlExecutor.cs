@@ -252,15 +252,24 @@ internal sealed class DatabricksCheckedDmlExecutor : ICheckedDmlExecutor
         }
 
         // fail closed before anything reaches the facade connection
-        if (limits.MaxAffectedRows > 0)
-        {
-            throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.StatementClass, "Databricks DML while an affected-row limit is configured");
-        }
-
         if (compiled.RequiresRowCountCheck)
         {
             throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.StatementClass, "Databricks has no row-count check");
         }
+
+        if (limits.MaxAffectedRows > 0)
+        {
+            bool preBoundedWithinLimit = compiled.IsPreBoundedDml
+                && compiled.PreBoundedMaxRows is > 0
+                && compiled.PreBoundedMaxRows.Value <= limits.MaxAffectedRows;
+            if (!preBoundedWithinLimit)
+            {
+                throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.StatementClass, "Databricks DML while an affected-row limit is configured");
+            }
+        }
+
+        // Pre-execution SELECT-RLS evaluation for bounded INSERT on Delta: rejects non-compliant rows before any command is created.
+        compiled.PreExecutionRowCheck?.Validate(compiled.PreExecutionPolicyValues, clientParameterValues, compiled.Dialect);
 
         // there is no transaction to complete: the facade transaction stays the caller's
         var connection = transaction.Connection ?? throw new InvalidOperationException("The transaction is completed.");
@@ -269,9 +278,14 @@ internal sealed class DatabricksCheckedDmlExecutor : ICheckedDmlExecutor
         if (limits.CommandTimeoutSeconds > 0) command.CommandTimeout = limits.CommandTimeoutSeconds;
         _binder.Bind(command, compiled, clientParameterValues);
         int affected = await command.ExecuteNonQueryAsync(cancellationToken).ConfigureAwait(false);
+        int accountedRows = affected >= 0
+            ? affected
+            : (compiled.IsPreBoundedDml && compiled.PreBoundedMaxRows is > 0
+                ? (int)Math.Min(int.MaxValue, compiled.PreBoundedMaxRows.Value)
+                : affected);
         if (beforeCommit is not null)
         {
-            await beforeCommit(affected, cancellationToken).ConfigureAwait(false);
+            await beforeCommit(accountedRows, cancellationToken).ConfigureAwait(false);
         }
 
         return affected;

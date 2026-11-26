@@ -21,17 +21,23 @@ public sealed class WriteGrantEvaluator : IWriteGrantEvaluator
     private readonly IRowPolicyDependencyIndex? _policyDependencyIndex;
     private readonly TimeProvider _timeProvider;
     private readonly bool _allowDeleteGrants;
+    private readonly ITableWritePolicyRepository? _writePolicies;
+    private readonly bool _requireTableWritePolicy;
 
     public WriteGrantEvaluator(
         IConsentRepository consentRepository,
         IRowPolicyDependencyIndex? policyDependencyIndex = null,
         TimeProvider? timeProvider = null,
-        bool allowDeleteGrants = false)
+        bool allowDeleteGrants = false,
+        ITableWritePolicyRepository? writePolicies = null,
+        bool requireTableWritePolicy = false)
     {
         _consentRepository = consentRepository ?? throw new ArgumentNullException(nameof(consentRepository));
         _policyDependencyIndex = policyDependencyIndex;
         _timeProvider = timeProvider ?? TimeProvider.System;
         _allowDeleteGrants = allowDeleteGrants;
+        _writePolicies = writePolicies;
+        _requireTableWritePolicy = requireTableWritePolicy;
     }
 
     public async Task<WriteGrantDecision> EvaluateAsync(WriteGrantQuery query, CancellationToken ct = default)
@@ -128,6 +134,39 @@ public sealed class WriteGrantEvaluator : IWriteGrantEvaluator
             return WriteGrantDecision.Denied("no_write_grant");
         }
 
+        TableWritePolicy? tablePolicy = null;
+        if (_writePolicies is not null && query.Table.Table.Id != Guid.Empty)
+        {
+            tablePolicy = await _writePolicies.GetAsync(query.Tenant, query.Table.Table.Id, ct).ConfigureAwait(false);
+        }
+
+        if (tablePolicy is not null)
+        {
+            if (!tablePolicy.AllowsOperation(query.Operation))
+            {
+                return WriteGrantDecision.Denied("target_not_writable");
+            }
+
+            if (query.Operation == WriteOperation.Update
+                && tablePolicy.ServerStampedColumns is { Count: > 0 }
+                && query.WrittenColumns is { Count: > 0 }
+                && query.WrittenColumns.Any(wc => tablePolicy.ServerStampedColumns.ContainsKey(wc)))
+            {
+                return WriteGrantDecision.Denied("write_protected_column");
+            }
+
+            if (tablePolicy.WritableColumns is { Count: > 0 }
+                && query.WrittenColumns is { Count: > 0 }
+                && query.WrittenColumns.Any(wc => !tablePolicy.WritableColumns.Contains(wc, StringComparer.OrdinalIgnoreCase)))
+            {
+                return WriteGrantDecision.Denied("unauthorized_column");
+            }
+        }
+        else if (_requireTableWritePolicy)
+        {
+            return WriteGrantDecision.Denied("target_not_writable");
+        }
+
         if (query.Operation == WriteOperation.Delete)
         {
             var deleteScope = opRulesWithGrant.Any(r => r.Rule.RowScope == WriteRowScope.AllRows)
@@ -138,6 +177,11 @@ public sealed class WriteGrantEvaluator : IWriteGrantEvaluator
                 .Where(r => r.Rule.MaxRowsPerStatement.HasValue)
                 .Select(r => r.Rule.MaxRowsPerStatement!.Value)
                 .ToList();
+            if (tablePolicy?.MaxRowsPerStatement is { } policyDeleteCap)
+            {
+                deleteCaps.Add(policyDeleteCap);
+            }
+
             long? maxRows = deleteCaps.Count > 0 ? deleteCaps.Min() : null;
 
             var grantIds = opRulesWithGrant.Select(r => r.Grant.Id.ToString()).Distinct().ToList();
@@ -146,12 +190,27 @@ public sealed class WriteGrantEvaluator : IWriteGrantEvaluator
                 deleteScope,
                 ImmutableHashSet<string>.Empty,
                 maxRows,
-                grantIds);
+                grantIds,
+                tablePolicy);
         }
 
         var allWritableColumns = opRulesWithGrant
             .SelectMany(r => r.Rule.Columns)
             .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
+        if (tablePolicy?.WritableColumns is { Count: > 0 } policyCols)
+        {
+            var policySet = policyCols.ToHashSet(StringComparer.OrdinalIgnoreCase);
+            allWritableColumns.IntersectWith(policySet);
+        }
+
+        if (query.Operation == WriteOperation.Update && tablePolicy?.ServerStampedColumns is { Count: > 0 } stamped)
+        {
+            foreach (var stampedCol in stamped.Keys)
+            {
+                allWritableColumns.Remove(stampedCol);
+            }
+        }
 
         var contributingRulesWithGrant = new List<(Consent Grant, WriteRule Rule)>();
         var columnScopes = new List<WriteRowScope>();
@@ -194,6 +253,11 @@ public sealed class WriteGrantEvaluator : IWriteGrantEvaluator
             .Where(r => r.Rule.MaxRowsPerStatement.HasValue)
             .Select(r => r.Rule.MaxRowsPerStatement!.Value)
             .ToList();
+        if (tablePolicy?.MaxRowsPerStatement is { } policyStatementCap)
+        {
+            caps.Add(policyStatementCap);
+        }
+
         long? statementMaxRows = caps.Count > 0 ? caps.Min() : null;
 
         var statementGrantIds = contributingRulesWithGrant
@@ -205,7 +269,8 @@ public sealed class WriteGrantEvaluator : IWriteGrantEvaluator
             statementScope,
             allWritableColumns,
             statementMaxRows,
-            statementGrantIds);
+            statementGrantIds,
+            tablePolicy);
     }
 
     private static bool IsGroupResolutionDegraded(ClaimsPrincipal user)

@@ -58,6 +58,7 @@ public sealed partial class PermissionRequestEngine : IPermissionRequestEngine
     private readonly Autheris.Application.ConsentRequests.Routing.IConsentWorkflowRouter? _workflowRouter;
     private readonly Autheris.Application.ConsentRequests.Events.IConsentEventOutbox? _eventOutbox;
     private readonly ICatalogVisibilityService? _catalogVisibility;
+    private readonly ITableWritePolicyRepository? _writePolicyRepository;
 
     public PermissionRequestEngine(
         IConsentApprovalRepository approvalRepository,
@@ -91,7 +92,8 @@ public sealed partial class PermissionRequestEngine : IPermissionRequestEngine
         IConsentRepository? consentRepository = null,
         Autheris.Application.ConsentRequests.ProfileAssignments.IProfileAssignmentStore? assignmentStore = null,
         IGovernanceWriteInvalidator? writeInvalidator = null,
-        ICatalogVisibilityService? catalogVisibility = null)
+        ICatalogVisibilityService? catalogVisibility = null,
+        ITableWritePolicyRepository? writePolicyRepository = null)
     {
         _approvalRepository = approvalRepository ?? throw new ArgumentNullException(nameof(approvalRepository));
         _auditWriter = auditWriter ?? throw new ArgumentNullException(nameof(auditWriter));
@@ -127,6 +129,7 @@ public sealed partial class PermissionRequestEngine : IPermissionRequestEngine
             cacheInvalidators: cacheInvalidator is null ? null : () => [cacheInvalidator],
             timeProvider: timeProvider);
         _catalogVisibility = catalogVisibility;
+        _writePolicyRepository = writePolicyRepository;
     }
 
     private async Task InvalidateCommittedDecisionAsync(

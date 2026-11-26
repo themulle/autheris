@@ -54,6 +54,16 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         RejectUnsupportedSubquery(node.Where);
         EnsureFilteredDml(node.Where, "DELETE");
         EnsureDmlRequiredFiltersSatisfied(node.TargetTable, entry, node.Where);
+        if (_options.WritePermit.BoundedSingleTable)
+        {
+            long bound = BoundedPkPredicateValidator.Validate(
+                node.Where,
+                entry,
+                _options.WritePermit.PrimaryKeyColumns,
+                _options.WritePermit.BoundedMaxRows ?? 100);
+            IsPreBoundedDml = true;
+            PreBoundedMaxRows = bound;
+        }
         var where = node.Where != null ? (Expression)WithScope(SecurityScope.DmlSource, () => Visit(node.Where)) : null;
         var combined = AndInjected(where, BuildTargetPredicates(entry, SecurityScope.DmlTarget, null));
         return new DeleteStatement(new NamedTableSource(entry.Identity.ToQualifiedName(), null), combined);
@@ -81,6 +91,16 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         RejectUnsupportedSubquery(node.Where);
         EnsureFilteredDml(node.Where, "UPDATE");
         EnsureDmlRequiredFiltersSatisfied(node.TargetTable, entry, node.Where);
+        if (_options.WritePermit.BoundedSingleTable)
+        {
+            long bound = BoundedPkPredicateValidator.Validate(
+                node.Where,
+                entry,
+                _options.WritePermit.PrimaryKeyColumns,
+                _options.WritePermit.BoundedMaxRows ?? 100);
+            IsPreBoundedDml = true;
+            PreBoundedMaxRows = bound;
+        }
         var where = node.Where != null ? (Expression)WithScope(SecurityScope.DmlSource, () => Visit(node.Where)) : null;
         var combined = AndInjected(where, BuildTargetPredicates(entry, SecurityScope.DmlTarget, null));
         return new UpdateStatement(new NamedTableSource(entry.Identity.ToQualifiedName(), null), assignments, combined);
@@ -103,30 +123,64 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
         _rootLimitHandled = true;
         var entry = ResolveDmlTarget(node.TargetTable);
-        bool checkOption = RequiresInsertCheckOption(entry, node.Source);
+        bool bounded = _options.WritePermit.BoundedSingleTable;
+        if (bounded)
+        {
+            if (node.Source is not ValuesQueryBody boundedValues)
+            {
+                throw new SecurityException("Bounded single-table INSERT requires an explicit VALUES clause.");
+            }
+
+            if (boundedValues.Rows.Count == 0)
+            {
+                throw new SecurityException("An INSERT VALUES clause without rows cannot be verified.");
+            }
+
+            if (_options.WritePermit.BoundedMaxRows is { } cap && boundedValues.Rows.Count > cap)
+            {
+                throw new SecurityException("Bounded single-table INSERT exceeds the configured maximum row count.");
+            }
+
+            IsPreBoundedDml = true;
+            PreBoundedMaxRows = boundedValues.Rows.Count;
+        }
+
+        var checkMode = ResolveInsertCheckMode(entry, node.Source, bounded);
         var masked = MaskedColumnsOf(entry);
         var columns = ResolveInsertColumns(entry, node.Columns, masked, out int tenantIndex);
         var forced = ForceTenantInSource(entry, columns, node.Source, tenantIndex);
         var source = (QueryBody)WithScope(SecurityScope.DmlSource, () => Visit(forced));
-        if (checkOption)
+        if (checkMode == InsertCheckMode.SqlCheckOption)
         {
             source = WrapInCheckOption(entry, columns, tenantIndex, (ValuesQueryBody)source);
+        }
+        else if (checkMode == InsertCheckMode.PreExecutionCheck)
+        {
+            var policy = _typed.RowFilters.GetPredicate(entry.Identity);
+            var policyExpr = BuildPolicyExpression(entry);
+            PreExecutionRowCheck = PreExecutionRowCheck.Compile(
+                policyExpr,
+                policy.ReferencedColumns,
+                columns.Columns,
+                ((ValuesQueryBody)source).Rows);
         }
 
         return new InsertStatement(new NamedTableSource(entry.Identity.ToQualifiedName(), null), columns.Columns, source);
     }
 
+    private enum InsertCheckMode { None, SqlCheckOption, PreExecutionCheck }
+
     /// <summary>
     /// CR-ADG-35: INSERT into a table with a plain (non-consent, non-correlated) admin row predicate is allowed with check-option
-    /// semantics: <c>INSERT ... SELECT v.cols FROM (SELECT row UNION ALL ...) v WHERE policy(v)</c>. The caller compares the affected
-    /// count with <c>ExpectedAffectedRows</c> inside a transaction. Consent-filtered and correlated policies, INSERT ... SELECT and
-    /// engines without an INSERT row count stay rejected (typed).
+    /// semantics on dialects that report INSERT row counts, or via pre-execution SELECT-RLS evaluation for bounded single-table
+    /// INSERT VALUES on dialects without INSERT row counts (such as Databricks Delta). Consent-filtered and correlated policies,
+    /// INSERT ... SELECT, and unbounded inserts on engines without an INSERT row count stay rejected (typed).
     /// </summary>
-    private bool RequiresInsertCheckOption(TableCatalogEntry entry, QueryBody source)
+    private InsertCheckMode ResolveInsertCheckMode(TableCatalogEntry entry, QueryBody source, bool bounded)
     {
         var id = entry.Identity;
         bool consent = _options.TablesWithConsentRowFilter.Contains(id.ToString()) || _options.TablesWithConsentRowFilter.Contains(id.Table);
-        if (!_typed.RowFilters.ShouldApplyPolicy(id) && !consent) return false;
+        if (!_typed.RowFilters.ShouldApplyPolicy(id) && !consent) return InsertCheckMode.None;
         if (consent)
         {
             throw new SecurityException("INSERT into a table with a consent-based row policy is not permitted.");
@@ -139,10 +193,15 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
         if (!_typed.Capabilities.ReportsInsertRowCount)
         {
+            if (bounded)
+            {
+                return InsertCheckMode.PreExecutionCheck;
+            }
+
             throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "INSERT check option needs an affected row count that this dialect does not report");
         }
 
-        return true;
+        return InsertCheckMode.SqlCheckOption;
     }
 
     private QueryBody WrapInCheckOption(TableCatalogEntry entry, InsertColumns columns, int tenantIndex, ValuesQueryBody values)

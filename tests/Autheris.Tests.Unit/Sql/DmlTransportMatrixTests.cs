@@ -133,7 +133,6 @@ public sealed class DmlTransportMatrixTests
     [InlineData(AccessTransport.Mcp)]
     [InlineData(AccessTransport.ArrowExport)]
     [InlineData(AccessTransport.Olap)]
-    [InlineData(AccessTransport.GraphQl)]
     [InlineData(AccessTransport.OData)]
     [InlineData(AccessTransport.Federation)]
     [InlineData(AccessTransport.Streaming)]

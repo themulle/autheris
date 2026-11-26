@@ -64,5 +64,8 @@ public sealed partial class CutoverArchitectureTests
         ("Autheris.Infrastructure.Persistence.ManifestProposalStore", "governance store: declarative manifest proposals (Issue #1009, Amendment 6), fixed constant SQL statements with bound parameters, no client text"),
         ("Autheris.Infrastructure.Persistence.DeputyRelationStore", "governance store: external deputy relations (Issue #1126), constant SQL fragments plus generated parameter names for key lists, every value bound, no client text"),
         ("Autheris.Infrastructure.Persistence.PermissionRequestStore", "governance store: single-transaction permission decision CAS and query store (Issue #1009), fixed constant SQL statements with bound parameters, no client text"),
+        ("Autheris.Infrastructure.Persistence.TableWritePolicyStore", "governance store: tenant-scoped table write policies (Issue #1154), fixed constant SQL statements with bound parameters, no client text"),
+        ("Autheris.Application.Governance.Writes.BoundedRowWriteService", "bounded single-table row write service (Issue #1156): executes catalog-quoted INSERT/UPSERT(MERGE)/UPDATE/DELETE with bound parameters and SELECT-RLS predicates over WriteConnectionString; no client SQL text"),
+        ("Autheris.Application.Governance.Writes.BoundedWriteSqlBuilder", "bounded single-table write SQL builder (Issue #1156): constructs catalog-quoted parameterized INSERT/UPSERT(MERGE)/UPDATE/DELETE statements and compiled SELECT-RLS predicates; no client SQL text"),
     ];
 }

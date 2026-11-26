@@ -156,10 +156,27 @@ public sealed partial class GovernedSqlRewriter
             }
         }
 
+        var policy = writeGrant.Policy;
+        if (statementType == SqlStatementType.Update && policy?.ServerStampedColumns is { Count: > 0 } stamped)
+        {
+            foreach (var colName in stamped.Keys)
+            {
+                protectedCols.Add(colName);
+            }
+        }
+
+        bool bounded = policy is { AllowsWrites: true, EffectiveRequirePrimaryKeyPredicate: true };
+        IReadOnlyList<string>? pkCols = bounded && tableMeta.PrimaryKeyColumns.Count > 0
+            ? tableMeta.PrimaryKeyColumns
+            : null;
+
         return new DmlWritePermit(
             permitOp,
             writeGrant.WritableColumns.ToImmutableHashSet(StringComparer.OrdinalIgnoreCase),
-            protectedCols.ToImmutableHashSet(StringComparer.OrdinalIgnoreCase));
+            protectedCols.ToImmutableHashSet(StringComparer.OrdinalIgnoreCase),
+            BoundedSingleTable: bounded,
+            PrimaryKeyColumns: pkCols,
+            BoundedMaxRows: bounded ? writeGrant.MaxRowsPerStatement ?? policy!.MaxRowsPerStatement ?? TableWritePolicy.DefaultBoundedMaxRows : null);
     }
 
     // A DML target without a tenant column is exempt only by its exact schema-qualified name (case-insensitive, never by suffix or bare table name).

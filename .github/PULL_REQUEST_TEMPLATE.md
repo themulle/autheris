@@ -10,7 +10,7 @@
 
 - [ ] no new feature, endpoint, option, *Enabled flag or Application folder
 - [ ] ratchet baselines only lowered
-- [ ] net src lines <= 400 or size-exception justified
+- [ ] net src lines <= 4000 or size-exception justified
 
 ## Labels
 

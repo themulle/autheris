@@ -20,7 +20,10 @@ public enum DmlWriteOperation { Insert = 1, Update = 2, Delete = 3 }
 public sealed record DmlWritePermit(
     DmlWriteOperation Operation,
     IReadOnlySet<string> WritableColumns,
-    IReadOnlySet<string> WriteProtectedColumns);
+    IReadOnlySet<string> WriteProtectedColumns,
+    bool BoundedSingleTable = false,
+    IReadOnlyList<string>? PrimaryKeyColumns = null,
+    long? BoundedMaxRows = null);
 
 /// <summary>
 /// DML guard switches (plan 4.1), enforced by the typed security visitor and proved by the coverage verifier. <see cref="Strict"/> is
