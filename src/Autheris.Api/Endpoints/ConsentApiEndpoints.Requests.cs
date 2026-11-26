@@ -670,6 +670,15 @@ public static partial class ConsentApiEndpoints
             "FORBIDDEN" => ApiProblems.Forbidden(ConsentDecisionErrorCodes.DecisionNotPermitted, "Consent request operation is not permitted.", context),
             "TABLE_NOT_FOUND" or "NOT_FOUND" or "TARGET_NOT_FOUND" => ApiProblems.NotFound(ApiErrorCodes.TableNotRegistered, "Target table, access profile, or consent request was not found.", context),
             "CONFLICT" or "IDEMPOTENCY_CONFLICT" => ApiProblems.Conflict(ApiErrorCodes.Conflict, "Consent request conflicts with existing state.", context),
+            "ALREADY_COVERED" => ApiProblems.Conflict(
+                ApiErrorCodes.AlreadyCovered,
+                ex.CoveringGrantId is { } coveringGrantId
+                    ? $"The requested columns are already covered by active unmask grant '{coveringGrantId:D}'."
+                    : "The requested columns are already covered by an active unmask grant.",
+                context,
+                extraExtensions: ex.CoveringGrantId is { } gid
+                    ? new Dictionary<string, object?> { ["grantId"] = gid.ToString("D") }
+                    : null),
             AccessProfileAssignmentRules.RoleSubjectUnsupported => ApiProblems.BadRequest(AccessProfileAssignmentRules.RoleSubjectUnsupported, "Access profiles cannot be assigned directly to Role subjects.", context),
             _ => ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Consent request payload is invalid.", context)
         };

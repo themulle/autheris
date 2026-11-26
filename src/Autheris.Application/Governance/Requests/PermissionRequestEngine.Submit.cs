@@ -161,6 +161,16 @@ public sealed partial class PermissionRequestEngine
             profileId,
             ct).ConfigureAwait(false);
 
+        await EnsureNotAlreadyCoveredByActiveUnmaskGrantAsync(
+            validTenant,
+            submission,
+            tableIdentifier,
+            normalizedColumns,
+            now,
+            validFrom,
+            requestedValidTo,
+            ct).ConfigureAwait(false);
+
         var (workflowMode, externalSystemId) = await ResolveWorkflowRouteAsync(validTenant, tableIdentifier, ct).ConfigureAwait(false);
         var grantKind = MapGrantKind(submission.RequestKind);
         var requesterIds = SeparationOfDutiesService.CollectSubjectIdentifiers(submission.Caller, callerCtx.UserSid.Value).ToList();
@@ -689,6 +699,122 @@ public sealed partial class PermissionRequestEngine
             else if (submission.RequestKind == ConsentRequestKind.ProfileAssignment && req.ProfileId == profileId)
             {
                 throw new ConsentRequestException("DUPLICATE_PENDING_REQUEST", "A duplicate pending permission request already exists.");
+            }
+        }
+    }
+
+    private async Task EnsureNotAlreadyCoveredByActiveUnmaskGrantAsync(
+        TenantId tenant,
+        PermissionRequestSubmission submission,
+        TableIdentifier table,
+        IReadOnlyList<string>? normalizedColumns,
+        DateTimeOffset now,
+        DateTimeOffset validFrom,
+        DateTimeOffset requestedValidTo,
+        CancellationToken ct)
+    {
+        if (submission.RequestKind != ConsentRequestKind.Unmask || _consentRepository is null)
+        {
+            return;
+        }
+
+        var granteeNorm = submission.GranteeRef.Trim();
+        var activeGrants = await _consentRepository.GetActiveUnmaskGrantsForSubjectsAsync(
+            [new Sid(granteeNorm)],
+            table,
+            now,
+            tenant,
+            ct).ConfigureAwait(false);
+
+        if (activeGrants is null || activeGrants.Count == 0)
+        {
+            return;
+        }
+
+        var matchingGrants = activeGrants
+            .Where(g => g.GrantKind == PermissionGrantKind.Unmask
+                && g.Effect == ConsentEffect.Allow
+                && !g.IsRevoked
+                && g.GranteeType == submission.GranteeType
+                && g.GranteeSid is { } sid
+                && string.Equals(sid.Value.Trim(), granteeNorm, StringComparison.OrdinalIgnoreCase)
+                && g.ValidFrom <= validFrom
+                && g.ValidTo >= requestedValidTo
+                && g.ValidTo > now)
+            .OrderByDescending(g => g.ValidTo)
+            .ThenBy(g => g.Id)
+            .ToList();
+
+        if (matchingGrants.Count == 0)
+        {
+            return;
+        }
+
+        if (normalizedColumns is null || normalizedColumns.Count == 0)
+        {
+            var tableWide = matchingGrants.FirstOrDefault(g => g.TargetColumns is null || g.TargetColumns.Count == 0);
+            if (tableWide is not null)
+            {
+                throw new ConsentRequestException(
+                    "ALREADY_COVERED",
+                    $"The requested unmask access is already covered by active unmask grant '{tableWide.Id:D}'.",
+                    coveringGrantId: tableWide.Id);
+            }
+
+            return;
+        }
+
+        var requestedSet = new HashSet<string>(normalizedColumns, StringComparer.OrdinalIgnoreCase);
+
+        foreach (var grant in matchingGrants)
+        {
+            if (grant.TargetColumns is null || grant.TargetColumns.Count == 0)
+            {
+                throw new ConsentRequestException(
+                    "ALREADY_COVERED",
+                    $"The requested columns are already covered by active unmask grant '{grant.Id:D}'.",
+                    coveringGrantId: grant.Id);
+            }
+
+            var grantColumns = new HashSet<string>(grant.TargetColumns, StringComparer.OrdinalIgnoreCase);
+            if (requestedSet.IsSubsetOf(grantColumns))
+            {
+                throw new ConsentRequestException(
+                    "ALREADY_COVERED",
+                    $"The requested columns are already covered by active unmask grant '{grant.Id:D}'.",
+                    coveringGrantId: grant.Id);
+            }
+        }
+
+        var coveredColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        Guid? firstCoveringGrantId = null;
+        foreach (var grant in matchingGrants)
+        {
+            if (grant.TargetColumns is not { Count: > 0 })
+            {
+                continue;
+            }
+
+            var contributed = false;
+            foreach (var col in grant.TargetColumns)
+            {
+                if (requestedSet.Contains(col) && coveredColumns.Add(col))
+                {
+                    contributed = true;
+                }
+            }
+
+            if (contributed && firstCoveringGrantId is null)
+            {
+                firstCoveringGrantId = grant.Id;
+            }
+
+            if (coveredColumns.Count == requestedSet.Count && firstCoveringGrantId is { } coveringId)
+            {
+                throw new ConsentRequestException(
+                    "ALREADY_COVERED",
+                    $"The requested columns are already covered by active unmask grant '{coveringId:D}'.",
+                    coveringGrantId: coveringId);
             }
         }
     }

@@ -55,17 +55,21 @@ public sealed class SubmitConsentRequestResult
 /// <summary>Business failure of a consent use case; <see cref="Code"/> is the stable error code exposed to clients.</summary>
 public sealed class ConsentRequestException : Exception
 {
-    public ConsentRequestException(string code, string message, int? retryAfterSeconds = null)
+    public ConsentRequestException(string code, string message, int? retryAfterSeconds = null, Guid? coveringGrantId = null)
         : base(message)
     {
         Code = code;
         RetryAfterSeconds = retryAfterSeconds;
+        CoveringGrantId = coveringGrantId;
     }
 
     public string Code { get; }
 
     /// <summary>Seconds after which a rate-limited caller may retry (only set for <c>RATE_LIMIT_EXCEEDED</c>).</summary>
     public int? RetryAfterSeconds { get; }
+
+    /// <summary>Identifier of an active grant that already covers the requested unmask columns (only set for <c>ALREADY_COVERED</c>).</summary>
+    public Guid? CoveringGrantId { get; }
 }
 
 /// <summary>Use case: a user requests access to a table.</summary>

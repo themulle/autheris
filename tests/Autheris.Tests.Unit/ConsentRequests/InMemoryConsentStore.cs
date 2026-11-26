@@ -45,7 +45,9 @@ internal sealed class InMemoryConsentStore(
         Identifier = new TableIdentifier("pg", "public", "orders"),
         Columns =
         [
-            new TableColumn { Id = Guid.NewGuid(), ColumnName = "id", DataType = "bigint" }
+            new TableColumn { Id = Guid.NewGuid(), ColumnName = "id", DataType = "bigint" },
+            new TableColumn { Id = Guid.NewGuid(), ColumnName = "email", DataType = "varchar" },
+            new TableColumn { Id = Guid.NewGuid(), ColumnName = "phone", DataType = "varchar" }
         ]
     };
 
@@ -62,7 +64,9 @@ internal sealed class InMemoryConsentStore(
         Identifier = new TableIdentifier("pg", "public", "hidden_payroll"),
         Columns =
         [
-            new TableColumn { Id = Guid.NewGuid(), ColumnName = "id", DataType = "bigint" }
+            new TableColumn { Id = Guid.NewGuid(), ColumnName = "id", DataType = "bigint" },
+            new TableColumn { Id = Guid.NewGuid(), ColumnName = "email", DataType = "varchar" },
+            new TableColumn { Id = Guid.NewGuid(), ColumnName = "phone", DataType = "varchar" }
         ]
     };
 
@@ -235,7 +239,34 @@ internal sealed class InMemoryConsentStore(
     }
 
     public Task<ConsentPage> GetConsentPageAsync(ConsentPageQuery query, CancellationToken ct = default) =>
-        Task.FromResult(new ConsentPage(Consents.Where(c => c.TenantId == query.Tenant && (query.IncludeInactive || !c.IsRevoked)).ToList(), null));
+        Task.FromResult(new ConsentPage(
+            Consents.Where(c => c.TenantId == query.Tenant
+                && (query.IncludeInactive || !c.IsRevoked)
+                && (query.GrantKind is null || c.GrantKind == query.GrantKind)
+                && (query.Table is null || c.TableIdentifier.Equals(query.Table.Value))
+                && (string.IsNullOrWhiteSpace(query.Grantee) || string.Equals(c.GranteeSid?.Value, query.Grantee, StringComparison.OrdinalIgnoreCase))).ToList(),
+            null));
+
+    public Task<IReadOnlyList<Consent>> GetActiveUnmaskGrantsForSubjectsAsync(
+        IEnumerable<Sid> subjects,
+        TableIdentifier table,
+        DateTimeOffset atTime,
+        TenantId tenantId,
+        CancellationToken ct = default)
+    {
+        var subjectSet = subjects.Select(s => s.Value.Trim()).ToHashSet(StringComparer.OrdinalIgnoreCase);
+        var matches = Consents
+            .Where(c => c.TenantId == tenantId
+                && c.GrantKind == PermissionGrantKind.Unmask
+                && !c.IsRevoked
+                && c.TableIdentifier.Equals(table)
+                && c.ValidFrom <= atTime
+                && c.ValidTo > atTime
+                && c.GranteeSid is { } sid
+                && subjectSet.Contains(sid.Value.Trim()))
+            .ToList();
+        return Task.FromResult<IReadOnlyList<Consent>>(matches);
+    }
 
     public Task<ConsentEventFeedPage> ReadFeedAsync(TenantId tenantId, long sinceSeq, int pageSize, Guid? externalSystemId = null, DateTimeOffset? retentionCutoff = null, CancellationToken ct = default)
     {

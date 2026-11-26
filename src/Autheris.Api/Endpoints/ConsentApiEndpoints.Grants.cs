@@ -78,11 +78,17 @@ public static partial class ConsentApiEndpoints
         int? pageSize = null,
         bool? includeInactive = null,
         bool? clamped = null,
+        string? kind = null,
         CancellationToken ct = default)
     {
         if (await EnforceRateLimitAsync(context, rateLimiter, governanceOptions, ConsentApiRateLimitBucket.Reads, ct).ConfigureAwait(false) is { } limited)
         {
             return limited;
+        }
+
+        if (!TryParseGrantKindFilter(kind, out var kindFilter))
+        {
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Supported grant kinds: data, unmask.", context);
         }
 
         TableIdentifier? tableFilter = null;
@@ -129,7 +135,8 @@ public static partial class ConsentApiEndpoints
                 effectiveGrantee,
                 includeInactive == true,
                 after,
-                pageSize ?? ConsentPageQuery.DefaultPageSize),
+                pageSize ?? ConsentPageQuery.DefaultPageSize,
+                GrantKind: kindFilter),
             clamped == true,
             now,
             ct).ConfigureAwait(false);
@@ -140,6 +147,30 @@ public static partial class ConsentApiEndpoints
             nextCursor = page.NextAfterId is { } nextId ? PageCursor.Encode(nextId.ToString()) : null,
             totalCount = page.Items.Count
         });
+    }
+
+    internal static bool TryParseGrantKindFilter(string? raw, out PermissionGrantKind? kind)
+    {
+        if (string.IsNullOrWhiteSpace(raw))
+        {
+            kind = null;
+            return true;
+        }
+
+        if (string.Equals(raw.Trim(), "data", StringComparison.OrdinalIgnoreCase))
+        {
+            kind = PermissionGrantKind.Data;
+            return true;
+        }
+
+        if (string.Equals(raw.Trim(), "unmask", StringComparison.OrdinalIgnoreCase))
+        {
+            kind = PermissionGrantKind.Unmask;
+            return true;
+        }
+
+        kind = null;
+        return false;
     }
 
     internal static async Task<IResult> GetGrantByIdAsync(

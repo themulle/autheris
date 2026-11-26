@@ -139,6 +139,7 @@ public static class ApiErrorCodes
     public const string IdempotencyKeyReused = "IDEMPOTENCY_KEY_REUSED";
     public const string CursorExpired = "CURSOR_EXPIRED";
     public const string GrantAlreadyEnded = "GRANT_ALREADY_ENDED";
+    public const string AlreadyCovered = "ALREADY_COVERED";
     public const string RateLimited = "RATE_LIMITED";
     public const string DecisionExceedsRequest = "DECISION_EXCEEDS_REQUEST";
     public const string InvalidArtifact = "INVALID_ARTIFACT";

@@ -379,7 +379,9 @@ public static partial class ConsentApiEndpoints
             c.GrantSource.ToSqlString(),
             c.GrantRecordSeq,
             c.ProfileAssignmentId,
-            c.Description);
+            c.Description,
+            c.GrantKind.ToString(),
+            c.TargetColumns);
 
     private static string ResolvePrincipalBucketKey(ClaimsPrincipal principal) =>
         ExternalApiPermissions.GetClientId(principal)
@@ -439,4 +441,6 @@ public sealed record ConsentGrantDto(
     string GrantSource,
     long GrantRecordSeq,
     Guid? ProfileAssignmentId,
-    string? Description);
+    string? Description,
+    string GrantKind = "Data",
+    IReadOnlyList<string>? TargetColumns = null);

@@ -151,11 +151,17 @@ public static partial class GovernanceEndpoints
         string? granteeType,
         string? grantee,
         bool? includeInactive,
-        bool? clamped)
+        bool? clamped,
+        string? kind = null)
     {
         if (!await IsAuthorizedForSimulationAsync(context, table).ConfigureAwait(false))
         {
             return Results.StatusCode(StatusCodes.Status403Forbidden);
+        }
+
+        if (!ConsentApiEndpoints.TryParseGrantKindFilter(kind, out var kindFilter))
+        {
+            return ApiProblems.BadRequest(ApiErrorCodes.BadRequest, "Supported grant kinds: data, unmask.", context);
         }
 
         TableIdentifier? tableFilter = null;
@@ -201,7 +207,8 @@ public static partial class GovernanceEndpoints
                 string.IsNullOrWhiteSpace(grantee) ? null : grantee,
                 includeInactive == true,
                 after,
-                pageSize ?? ConsentPageQuery.DefaultPageSize),
+                pageSize ?? ConsentPageQuery.DefaultPageSize,
+                GrantKind: kindFilter),
             clamped == true,
             now,
             context.RequestAborted).ConfigureAwait(false);
@@ -219,6 +226,8 @@ public static partial class GovernanceEndpoints
                 granteeType = c.GranteeType.ToString(),
                 grantee = c.GranteeSid?.Value,
                 effect = c.Effect.ToString(),
+                grantKind = c.GrantKind.ToString(),
+                targetColumns = c.TargetColumns,
                 validFrom = c.ValidFrom,
                 validTo = c.ValidTo,
                 effectiveValidTo = c.EffectiveValidTo,
