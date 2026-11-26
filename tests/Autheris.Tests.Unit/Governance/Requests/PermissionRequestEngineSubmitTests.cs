@@ -329,13 +329,14 @@ public sealed class PermissionRequestEngineSubmitTests
     [Fact]
     public async Task Duplicate_pending_rejected()
     {
+        var seededId = Guid.NewGuid();
         var approvals = NullFake.Create<IConsentApprovalRepository>((m, _) =>
             m.Name == nameof(IConsentApprovalRepository.GetRequestsByRequesterSidAsync)
                 ? Task.FromResult<IReadOnlyList<ConsentRequest>>(
                 [
                     new ConsentRequest
                     {
-                        Id = Guid.NewGuid(),
+                        Id = seededId,
                         TableIdentifier = OrdersTable,
                         RequesterSid = new Sid("user:alice"),
                         RequestedGranteeType = GranteeType.User,
@@ -353,6 +354,51 @@ public sealed class PermissionRequestEngineSubmitTests
                 UserPrincipal(), TenantA, ConsentRequestKind.Data, PermissionTarget.ForTable(OrdersTable),
                 GranteeType.User, "user:alice", "Need orders data access for billing.", ValidTo: Now.AddDays(30))));
         ex.Code.ShouldBe("DUPLICATE_PENDING_REQUEST");
+        ex.PendingRequestId.ShouldBe(seededId);
+    }
+
+    [Theory]
+    [InlineData(ConsentRequestKind.Data)]
+    [InlineData(ConsentRequestKind.Unmask)]
+    public async Task Submit_DuplicatePending_ExceptionCarriesPendingRequestIdOnlyForDuplicateCode(ConsentRequestKind kind)
+    {
+        var seededId = Guid.NewGuid();
+        IReadOnlyList<string>? columns = kind == ConsentRequestKind.Unmask ? ["email"] : null;
+        var approvals = NullFake.Create<IConsentApprovalRepository>((m, _) =>
+            m.Name == nameof(IConsentApprovalRepository.GetRequestsByRequesterSidAsync)
+                ? Task.FromResult<IReadOnlyList<ConsentRequest>>(
+                [
+                    new ConsentRequest
+                    {
+                        Id = seededId,
+                        TableIdentifier = OrdersTable,
+                        RequesterSid = new Sid("user:alice"),
+                        RequestedGranteeType = GranteeType.User,
+                        RequestedGranteeRef = "user:alice",
+                        RequestKind = kind,
+                        TargetColumns = columns,
+                        Status = "PENDING",
+                        TenantId = TenantA
+                    }
+                ])
+                : NullFake.UseDefault);
+        var engine = CreateEngine(approvals);
+
+        var duplicate = await Should.ThrowAsync<ConsentRequestException>(() => engine.SubmitAsync(
+            new PermissionRequestSubmission(
+                UserPrincipal(), TenantA, kind, PermissionTarget.ForTable(OrdersTable, columns),
+                GranteeType.User, "user:alice", "Need orders data access for billing.", ValidTo: Now.AddDays(30))));
+        duplicate.Code.ShouldBe("DUPLICATE_PENDING_REQUEST");
+        duplicate.PendingRequestId.ShouldBe(seededId);
+        duplicate.Message.ShouldNotContain(seededId.ToString());
+
+        // A different failure code (missing end date) must not carry a pending request id.
+        var other = await Should.ThrowAsync<ConsentRequestException>(() => engine.SubmitAsync(
+            new PermissionRequestSubmission(
+                UserPrincipal(), TenantA, kind, PermissionTarget.ForTable(OrdersTable, columns),
+                GranteeType.User, "user:alice", "Need orders data access for billing.")));
+        other.Code.ShouldNotBe("DUPLICATE_PENDING_REQUEST");
+        other.PendingRequestId.ShouldBeNull();
     }
 
     [Fact]

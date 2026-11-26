@@ -1,5 +1,8 @@
 namespace Autheris.Tests.Unit.GraphQL;
 
+using System;
+using System.Collections.Generic;
+using System.Linq;
 using Autheris.Api.Middleware;
 using Autheris.Tests.Common;
 using HotChocolate;
@@ -230,6 +233,26 @@ public sealed class ErrorSanitizingFilterCodeTests
         result.Message.ShouldContain("1000");
         result.Message.ShouldNotContain("secret_tbl");
         result.Message.ShouldNotContain("5000");
+    }
+
+    /// <summary>#1168: the REST-only <c>requestId</c> of the duplicated request never reaches the GraphQL error.</summary>
+    [Fact]
+    [Trait("Category", "Security")]
+    public void GraphQl_DuplicatePending_ErrorDoesNotContainRequestId()
+    {
+        var pendingId = Guid.NewGuid();
+        var ex = new Autheris.Application.ConsentRequests.ConsentRequestException(
+            "DUPLICATE_PENDING_REQUEST", "A duplicate pending permission request already exists.", pendingRequestId: pendingId);
+        var error = ErrorBuilder.New().SetMessage(ex.Message).SetCode(ex.Code).SetException(ex).Build();
+
+        var result = CreateFilter("Production").OnError(error);
+
+        result.Code.ShouldBe("DUPLICATE_PENDING_REQUEST");
+        result.Message.ShouldNotContain(pendingId.ToString("D"));
+        (result.Extensions ?? new Dictionary<string, object?>()).Values
+            .Select(v => v?.ToString() ?? string.Empty)
+            .ShouldAllBe(v => !v.Contains(pendingId.ToString("D")));
+        result.Exception.ShouldBeNull();
     }
 
     /// <summary>
