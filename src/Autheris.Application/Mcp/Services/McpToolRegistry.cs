@@ -150,7 +150,7 @@ public sealed class McpToolRegistry : IMcpToolRegistry
               "type": "object",
               "required": ["query"],
               "properties": {
-                "query": { "type": "string", "description": "The GraphQL query string to simulate." }
+                "query": { "type": "string", "description": "The GraphQL query string to simulate, written in the gateway's GraphQL schema like query_graphql." }
               }
             }
             """,

@@ -61,7 +61,7 @@ public class McpIntegrationTests : IClassFixture<McpIntegrationTests.HostFixture
     }
 
     [Fact]
-    public async Task McpSimulateQueryAndResourcesFlow_ShouldWorkEndToEnd()
+    public async Task McpResourcesFlow_AndLegacySimulateQueryForm_FailsClosed()
     {
         await using var client = await McpTestClient.ConnectAsync(_factory.CreateClient());
 
@@ -71,11 +71,11 @@ public class McpIntegrationTests : IClassFixture<McpIntegrationTests.HostFixture
         var read = await client.ReadResourceAsync(resources[0].Uri);
         read.Contents.ShouldNotBeEmpty();
 
-        // simulate_query
-        var (_, simulation) = await McpTestClient.CallAsync(client, "simulate_query",
+        // The legacy table(...) form is not part of the gateway schema: simulate_query denies it as an unresolvable query.
+        var (simulationError, simulation) = await McpTestClient.CallAsync(client, "simulate_query",
             new { query = @"query { table(domain: ""finance"", name: ""finance_table_1"", first: 15) { id name } }" });
-        simulation.ShouldContain("isAllowed");
-        simulation.ShouldContain("estimatedRowCount");
+        simulationError.ShouldBeTrue(simulation);
+        simulation.ShouldContain("fail-closed");
 
         // query_customers returns a _provenance footnote, or a structured error without a data source (SEC M-17), never mock data.
         var (_, customers) = await McpTestClient.CallAsync(client, "query_customers", new { });
@@ -83,19 +83,6 @@ public class McpIntegrationTests : IClassFixture<McpIntegrationTests.HostFixture
          customers.Contains("EXECUTION_FAILED", StringComparison.Ordinal) ||
          customers.Contains("FORBIDDEN", StringComparison.Ordinal)).ShouldBeTrue(customers);
         customers.ShouldNotContain("Erika Mustermann");
-    }
-
-    [Fact]
-    public async Task McpSimulateQueryTool_ExceedingLimit_ReturnsBlockedResult()
-    {
-        await using var client = await McpTestClient.ConnectAsync(_factory.CreateClient());
-
-        // first: 50000 exceeds the default limit of 10000
-        var (_, text) = await McpTestClient.CallAsync(client, "simulate_query",
-            new { query = @"query { table(domain: ""finance"", name: ""finance_table_1"", first: 50000) { id name } }" });
-
-        text.ShouldContain("\"isAllowed\":false");
-        text.ShouldContain("Hard-Safety-Limit");
     }
 
     [Fact]

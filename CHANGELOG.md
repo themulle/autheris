@@ -6,6 +6,12 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+### Fixed
+- `simulate_query` resolves the tables of a query in the gateway's GraphQL schema from its AST, like `query_graphql` (same access decision per table, fail-closed when a table cannot be resolved), and returns the estimate instead of always denying (#1180).
+
+### Changed
+- The `table(domain:, schema:, name:)` form of `simulate_query` is no longer accepted; it is not part of the gateway schema and is now denied as an unresolvable query (#1180).
+
 ## [2.1.0] - 2026-11-26
 
 ### Added

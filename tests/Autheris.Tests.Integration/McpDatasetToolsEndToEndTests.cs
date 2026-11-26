@@ -176,6 +176,21 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
         var (hiddenError, hidden) = await CallAsync(client, "query_graphql", new { query = $"{{ {field}(first: 10) {{ serial_number owner_email }} }}" });
         hidden.ToString().ShouldNotContain("x.test");
 
+        // simulate_query resolves the same gateway-schema field from its AST and returns the estimate.
+        var (simError, simulation) = await CallRawAsync(client, "simulate_query", new { query = $"{{ {field}(first: 10) {{ serial_number tonnage }} }}" });
+        simError.ShouldBeFalse(simulation);
+        simulation.ShouldContain("\"isAllowed\":true");
+        simulation.ShouldContain("estimatedRowCount");
+
+        var (overError, overLimit) = await CallRawAsync(client, "simulate_query", new { query = $"{{ {field}(first: 50000) {{ serial_number tonnage }} }}" });
+        overError.ShouldBeFalse(overLimit);
+        overLimit.ShouldContain("\"isAllowed\":false");
+        overLimit.ShouldContain("Hard-Safety-Limit");
+
+        var (unknownError, unknown) = await CallRawAsync(client, "simulate_query", new { query = "{ no_such_field_1180 { x } }" });
+        unknownError.ShouldBeTrue(unknown);
+        unknown.ShouldContain("fail-closed");
+
         // Mutations never reach the executor: the guardrail cannot map them to catalog tables and fails closed.
         var (mutationError, mutation) = await CallRawAsync(client, "query_graphql", new { query = "mutation { __typename }" });
         mutationError.ShouldBeTrue();
