@@ -406,12 +406,19 @@ public sealed partial class GovernedAggregationService
             var sqlResult = await _sqlExecutionService.ExecuteQueryBufferedAsync(sqlRequest, principal, tenantId, ct).ConfigureAwait(false);
             if (sqlResult.Rows.Count > 0 && sqlResult.Rows[0].ContainsKey(planned.CountColumnAlias))
             {
-                //  (F-2): the planner was asked for one group more than the limit; a surplus group means the SQL cut groups off.
-                bool sourceTruncated = sqlResult.Rows.Count > sqlLimit;
-                var plannedRows = sourceTruncated ? sqlResult.Rows.Take(sqlLimit).ToList() : sqlResult.Rows;
+                // The planner was asked for one group more than the limit, so a surplus group means the SQL cut groups off;
+                // the governed row cap can also cut the result silently, which the Truncated flag reports.
+                bool sourceTruncated = sqlResult.Truncated || sqlResult.Rows.Count > sqlLimit;
+                var plannedRows = sqlResult.Rows.Count > sqlLimit ? sqlResult.Rows.Take(sqlLimit).ToList() : sqlResult.Rows;
                 return new BucketRead(
                     BuildBucketsFromPlannedSqlResult(plannedRows, groupByColumns, resolvedAggregates, planned.CountColumnAlias, query.TimeBuckets, planned.BucketKeyShapes),
                     sourceTruncated);
+            }
+
+            // Aggregating a cut raw row set would yield wrong counts and sums; fail closed like the other in-memory paths.
+            if (sqlResult.Truncated)
+            {
+                throw new AggregationRowCapExceededException();
             }
 
             var rlsRows = InMemoryRowFilterEvaluator.FilterRows(sqlResult.Rows.ToList(), decision, metadata);

@@ -100,7 +100,7 @@ internal static class MetricGraphQlTypes
             d.Field("metrics").Type(NonNullList("String")).Resolve(ctx => ctx.Parent<MetricResultDto>().Metrics);
             d.Field("manifestVersion").Type(NonNull("String")).Resolve(ctx => ctx.Parent<MetricResultDto>().ManifestVersion);
             d.Field("groups").Type(NonNullList(AggregateTypeNames.MetricGroup)).Resolve(ctx => ctx.Parent<MetricResultDto>().Groups);
-            d.Field("count").Type(NonNull("Long")).Resolve(ctx => ctx.Parent<MetricResultDto>().Count);
+            d.Field("count").Description("Number of source rows covered by the returned groups (the sum of their rowCount); not the number of groups.").Type(NonNull("Long")).Resolve(ctx => ctx.Parent<MetricResultDto>().Count);
             d.Field("suppressed").Type(NonNull("Boolean")).Resolve(ctx => ctx.Parent<MetricResultDto>().Suppressed);
             d.Field("suppressedGroupsCount").Type(NonNull("Int")).Resolve(ctx => ctx.Parent<MetricResultDto>().SuppressedGroupsCount);
             d.Field("minimumGroupSize").Type(NonNull("Int")).Resolve(ctx => ctx.Parent<MetricResultDto>().MinimumGroupSize);
