@@ -434,7 +434,6 @@ internal sealed class ConsentApiTestHarness : IAsyncDisposable
             sp.GetRequiredService<IConsentApprovalRepository>(),
             sp.GetRequiredService<IConsentWorkflowConfigRepository>(),
             sp.GetService<IIdempotencyStore>(),
-            sp.GetService<IConsentEventOutbox>(),
             sp.GetService<IRateLimiterService>(),
             sp.GetService<IOptions<GovernanceOptions>>(),
             sp.GetService<TimeProvider>(),

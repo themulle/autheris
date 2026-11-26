@@ -221,8 +221,21 @@ internal sealed class InMemoryConsentStore(
     {
         var idx = Consents.FindIndex(c => c.Id == consentId && c.ConsentRequestId == consentRequestId && !c.IsRevoked);
         if (idx < 0) return Task.FromResult(false);
-        Consents[idx] = CloneConsentRevoked(Consents[idx], reason, clock.GetUtcNow());
+        var revokedAt = clock.GetUtcNow();
+        Consents[idx] = CloneConsentRevoked(Consents[idx], reason, revokedAt);
         AppendGrantRecord(Consents[idx], GrantRecordType.Revoked, revokedBySid.Value);
+
+        // Like the governance repository, the system revocation appends its own grant.revoked, routed by the origin request.
+        var origin = Requests.FirstOrDefault(r => r.Id == consentRequestId);
+        var workflowMode = origin?.WorkflowMode ?? ConsentWorkflowMode.Internal;
+        AppendAsync(new ConsentEventWrite(
+            Consents[idx].TenantId.Value,
+            Guid.NewGuid(),
+            ConsentEventTypes.GrantRevoked,
+            consentId.ToString("D"),
+            ConsentEventPayloads.Serialize(ConsentEventPayloads.ForGrant(Consents[idx], workflowMode, 1, "REVOKED", revokedAt)),
+            revokedAt,
+            origin?.ExternalSystemId), ct: ct);
         return Task.FromResult(true);
     }
 

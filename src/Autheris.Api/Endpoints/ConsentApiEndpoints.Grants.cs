@@ -12,7 +12,6 @@ using Autheris.Api.Security;
 using Autheris.Application.Audit;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests;
-using Autheris.Application.ConsentRequests.Events;
 using Autheris.Application.ConsentRequests.ProfileAssignments;
 using Autheris.Application.Governance.ConsentRequests;
 using Autheris.Application.Governance.Grants.Records;
@@ -205,7 +204,6 @@ public static partial class ConsentApiEndpoints
         IConsentApprovalRepository approvalRepo,
         IConsentWorkflowConfigRepository workflowConfigRepo,
         IIdempotencyStore? idempotencyStore = null,
-        IConsentEventOutbox? eventOutbox = null,
         IRateLimiterService? rateLimiter = null,
         IOptions<GovernanceOptions>? governanceOptions = null,
         TimeProvider? timeProvider = null,
@@ -299,25 +297,7 @@ public static partial class ConsentApiEndpoints
                 return ApiProblems.Conflict(ApiErrorCodes.GrantAlreadyEnded, $"Consent grant '{id}' has already expired or been revoked.", context);
             }
 
-            if (eventOutbox is not null)
-            {
-                var payload = ConsentEventPayloads.ForGrant(
-                    consent,
-                    ConsentWorkflowMode.External,
-                    1,
-                    "REVOKED",
-                    now);
-                await eventOutbox.AppendAsync(
-                    new ConsentEventWrite(
-                        consent.TenantId.Value,
-                        Guid.NewGuid(),
-                        ConsentEventTypes.GrantRevoked,
-                        consent.GranteeSid?.Value ?? actorSid.Value,
-                        ConsentEventPayloads.Serialize(payload),
-                        now,
-                        callerSystem.Id),
-                    ct: ct).ConfigureAwait(false);
-            }
+            // The repository appends grant.revoked in the revocation transaction (routed to the origin request's system, plus observers).
         }
         else
         {

@@ -511,6 +511,10 @@ public partial class GovernanceRepository
                 })
             };
             await RecordAuditEventAsync(entry, tx, ct).ConfigureAwait(false);
+
+            // The revocation appends its grant.revoked itself, as its last write (the event lock is the last lock of the transaction).
+            await EmitGrantRevokedEventsInTransactionAsync(conn, tx, [new PendingGrantRevokedEvent(consentId, tenant, tableId.Value, now)], ct)
+                .ConfigureAwait(false);
             await CommitTransactionAsync(tx, ct).ConfigureAwait(false);
         }
         catch (Exception ex)

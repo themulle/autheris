@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.ConsentRequests;
 
 using System;
+using System.Linq;
 using System.Threading.Tasks;
 using Autheris.Api.Endpoints;
 using Autheris.Api.Security;
@@ -105,6 +106,10 @@ public sealed class ConsentApiGrantAndRequestSecurityTests
         var alreadyEnded = await harness.RevokeGrantAsync(revokeClient, grantId, "Second revoke attempt", "rev-own-2");
         alreadyEnded.StatusCode.ShouldBe(StatusCodes.Status409Conflict);
         alreadyEnded.Body.ShouldContain("GRANT_ALREADY_ENDED");
+
+        // Issue #1170: the revocation appends grant.revoked in its own transaction; the endpoint adds none, so the revoke, its replay
+        // and the refused second revoke leave exactly one event, keyed by the grant id.
+        harness.Store.Events.Where(e => e.Type == ConsentEventTypes.GrantRevoked).ShouldHaveSingleItem().SubjectId.ShouldBe(grantId.ToString("D"));
     }
 
     [Fact]

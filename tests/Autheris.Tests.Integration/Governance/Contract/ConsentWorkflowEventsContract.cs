@@ -486,6 +486,62 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
             .Count(e => e.SubjectId == requestId.ToString("D")).Should().Be(1);
     }
 
+    /// <summary>
+    /// Issue #1170: deprovisioning a leaver appends one grant.revoked per revoked grant in the revocation transaction. The event is routed
+    /// by the grant's origin request and fanned out to observers; a second run appends nothing. The external-system revocation appends
+    /// exactly one grant.revoked as well.
+    /// </summary>
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task Observer_feed_shows_grant_revoked_after_deprovisioning()
+    {
+        if (!Store.IsAvailable) return;
+
+        var observer = NewSystem(Store.TenantA.Value, "observer-deprovision", ExternalWorkflowSystemRole.Observer);
+        var workflow = NewSystem(Store.TenantA.Value, "workflow-deprovision", ExternalWorkflowSystemRole.Workflow);
+        await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(observer);
+        await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(workflow);
+        var tableName = "orders_leaver_" + Guid.NewGuid().ToString("N")[..8];
+        var originRequest = await SeedPendingRequestAsync(Store.TenantA, tableName, workflow.Id);
+        var table = new TableIdentifier("sales", "dbo", tableName);
+        var tableId = (await Store.TableMetadata.GetTableMetadataAsync(table))!.Table.Id;
+        var leaver = new Sid("S-1-5-21-1000-1000-1000-1170");
+        Task<Consent> GrantAsync(Sid grantee, Guid? requestId) => Store.Consents.CreateConsentAsync(new Consent
+        {
+            TableId = tableId, TableIdentifier = table, TenantId = Store.TenantA, GranteeType = GranteeType.User, GranteeSid = grantee,
+            Effect = ConsentEffect.Allow, ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(30),
+            CreatedBySid = new Sid("S-1-5-21-ADMIN-1170"), ConsentRequestId = requestId
+        });
+        var routedGrant = await GrantAsync(leaver, originRequest);
+        var internalGrant = await GrantAsync(leaver, null);
+        var externalGrant = await GrantAsync(new Sid("S-1-5-21-1000-1000-1000-1171"), originRequest);
+
+        var deprovisioning = new GrantRevocationService(Store.Consents, Store.ConsentApprovals, new Autheris.Tests.Common.Fakes.InMemoryAuditWriter());
+        var run = await deprovisioning.RevokeAllForSubjectAsync(Store.TenantA, leaver, "SCIM_DEPROVISION");
+        run.Complete.Should().BeTrue();
+        run.GrantsRevoked.Should().Be(2);
+        (await deprovisioning.RevokeAllForSubjectAsync(Store.TenantA, leaver, "SCIM_DEPROVISION")).GrantsRevoked.Should().Be(0);
+
+        var actor = new Sid("external-system:" + workflow.Id.ToString("D"));
+        (await Store.Consents.RevokeSystemConsentAsync(externalGrant.Id, originRequest, actor, "Access no longer needed")).Should().BeTrue();
+        (await Store.Consents.RevokeSystemConsentAsync(externalGrant.Id, originRequest, actor, "Second attempt")).Should().BeFalse();
+
+        var observed = (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 50, observer.Id)).Events
+            .Where(e => e.Type == ConsentEventTypes.GrantRevoked).ToList();
+        observed.Select(e => e.SubjectId).Should().BeEquivalentTo(
+            [routedGrant.Id.ToString("D"), internalGrant.Id.ToString("D"), externalGrant.Id.ToString("D")]);
+        observed.Should().OnlyContain(e => ReadStatusAndVersion(e.PayloadJson) == ("REVOKED", 1));
+        observed.Should().OnlyContain(e => !e.PayloadJson.Contains("SCIM_DEPROVISION") && !e.PayloadJson.Contains(leaver.Value));
+
+        var routed = (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 50, workflow.Id)).Events
+            .Where(e => e.Type == ConsentEventTypes.GrantRevoked).ToList();
+        routed.Select(e => e.SubjectId).Should().BeEquivalentTo([routedGrant.Id.ToString("D"), externalGrant.Id.ToString("D")]);
+        routed.Should().OnlyContain(r => observed.Any(o => o.Id == r.Id));
+        using var payload = JsonDocument.Parse(routed.First(e => e.SubjectId == routedGrant.Id.ToString("D")).PayloadJson);
+        payload.RootElement.GetProperty("workflowMode").GetString().Should().Be("EXTERNAL");
+        payload.RootElement.GetProperty("requestId").GetGuid().Should().Be(originRequest);
+    }
+
     private static (string? Status, int Version) ReadStatusAndVersion(string payloadJson)
     {
         using var doc = JsonDocument.Parse(payloadJson);

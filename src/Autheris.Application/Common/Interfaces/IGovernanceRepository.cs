@@ -342,14 +342,16 @@ public interface IConsentRepository
     /// <summary>
     /// SEC E-05 / EX-02: System revocation of a consent owned by an automated sync. Only revokes when the consent carries
     /// <paramref name="consentRequestId"/> (the sync marker); there is no data-owner check because the system actor is not
-    /// a table owner and a revocation can only tighten access. Returns false when nothing was revoked.
+    /// a table owner and a revocation can only tighten access. Returns false when nothing was revoked. A revocation appends its
+    /// grant.revoked consent event in the same transaction; callers append none.
     /// </summary>
     Task<bool> RevokeSystemConsentAsync(Guid consentId, Guid consentRequestId, Sid revokedBySid, string reason, CancellationToken ct = default);
 
     /// <summary>
     /// System revocation of one consent by id, scoped to <paramref name="tenantId"/>: a consent of another tenant is never touched.
     /// Used by deprovisioning and grant renewal, which revoke grants regardless of kind or request linkage. Returns false when
-    /// nothing was revoked. Implementations must override; the default fails closed.
+    /// nothing was revoked. A revocation appends its grant.revoked consent event in the same transaction. Implementations must
+    /// override; the default fails closed.
     /// </summary>
     Task<bool> RevokeSystemConsentByIdAsync(TenantId tenantId, Guid consentId, Sid revokedBySid, string reason, CancellationToken ct = default)
         => throw new NotSupportedException("RevokeSystemConsentByIdAsync is not implemented by this repository.");
