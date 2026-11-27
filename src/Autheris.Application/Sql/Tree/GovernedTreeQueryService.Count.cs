@@ -111,7 +111,7 @@ public sealed partial class GovernedTreeQueryService
 
         var compiled = TreeSqlCompiler.CompileCount(countRoot, treeAccess, dialect, _options.IsColumnMaskingDisabled);
 
-        using var lease = AcquireLease(access);
+        using var lease = await AcquireReadSlotAsync(memo, access, ct).ConfigureAwait(false);
         var text = await RunAsync(compiled, connOptions, dialect, access.Tenant, access.UserSid.Value, purpose: null, ct).ConfigureAwait(false);
         if (!long.TryParse(text, NumberStyles.Integer, CultureInfo.InvariantCulture, out var count) || count < 0)
         {
