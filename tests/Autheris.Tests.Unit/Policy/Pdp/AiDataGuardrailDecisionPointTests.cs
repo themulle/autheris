@@ -50,7 +50,7 @@ public sealed class AiDataGuardrailDecisionPointTests
         IGatewayEventBus Bus,
         IMcpQueryExecutor Executor);
 
-    private static Harness Create(Func<TableIdentifier, TableAccessDecision> decide, Action<AccessRequest>? capture = null, bool knownTables = true, Func<TableIdentifier, TableMetadata>? metadataOf = null, CatalogOutputShape? shape = null, CatalogView view = CatalogView.Granted, bool released = false, bool granted = false)
+    private static Harness Create(Func<TableIdentifier, TableAccessDecision> decide, Action<AccessRequest>? capture = null, bool knownTables = true, Func<TableIdentifier, TableMetadata>? metadataOf = null, CatalogOutputShape? shape = null, CatalogView view = CatalogView.Granted, bool released = false, bool granted = false, Func<string, IReadOnlyList<TableIdentifier>?>? documentTables = null, bool bypassMcpAuth = false)
     {
         var pdp = Substitute.For<IAccessDecisionPoint>();
         pdp.DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>())
@@ -66,7 +66,7 @@ public sealed class AiDataGuardrailDecisionPointTests
                 : null);
         var map = Substitute.For<IGraphQlCatalogMap>();
         map.ResolveDocumentTablesAsync(Arg.Any<string>(), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IReadOnlyList<TableIdentifier>?>([Orders]));
+            .Returns(ci => Task.FromResult(documentTables is null ? [Orders] : documentTables(ci.Arg<string>())));
         var audit = new InMemoryAuditLogRepository();
         var bus = Substitute.For<IGatewayEventBus>();
         var executor = Substitute.For<IMcpQueryExecutor>();
@@ -76,7 +76,7 @@ public sealed class AiDataGuardrailDecisionPointTests
         // Casbin stays disabled (the default): the decision point check runs regardless.
         var guardrail = new AiDataGuardrailService(
             new McpToolRegistry(Options.Create(new GatewayOptions()), new FixedDemoData()),
-            Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true } }),
+            Options.Create(new GatewayOptions { Mcp = new McpOptions { Enabled = true }, Insecure = new InsecureGettingStartedOptions { danger_bypass_mcp_auth = bypassMcpAuth } }),
             NullLogger<AiDataGuardrailService>.Instance,
             audit,
             queryExecutor: executor,
@@ -356,5 +356,129 @@ public sealed class AiDataGuardrailDecisionPointTests
         result.IsSuccess.ShouldBeFalse();
         await h.Pdp.Received(1).DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>());
     }
-}
 
+    private static readonly Func<TableIdentifier, TableAccessDecision> AllowAll =
+        t => TableAccessDecision.Allowed(t, new Dictionary<string, ColumnAccessLevel>(), hasUnconstrainedColumnAllow: true);
+
+    private static string Args(string query) => System.Text.Json.JsonSerializer.Serialize(new { query });
+
+    private const string OrdersDoc = "query { sales_public_orders(first: 3) { id } }";
+
+    [Fact]
+    public async Task Simulate_query_on_an_allowed_gateway_field_reaches_the_executor()
+    {
+        var h = Create(AllowAll);
+
+        var result = await h.Guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("simulate_query", Args(OrdersDoc)), Session());
+
+        result.IsSuccess.ShouldBeTrue(result.ErrorMessage);
+        await h.Executor.ReceivedWithAnyArgs(1).ExecuteOperationAsync(default!, default!, default!, default);
+        await h.Pdp.Received().DecideAsync(Arg.Is<AccessRequest>(r => r.Object.Identifier == Orders), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    public async Task Simulate_query_on_a_denied_table_gets_the_same_answer_as_query_graphql()
+    {
+        var h = Create(Denied);
+
+        var viaGraphQl = await h.Guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("query_graphql", Args(OrdersDoc)), Session());
+        var viaSimulate = await h.Guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("simulate_query", Args(OrdersDoc)), Session());
+
+        viaGraphQl.IsSuccess.ShouldBeFalse();
+        viaSimulate.IsSuccess.ShouldBeFalse();
+        viaSimulate.ErrorMessage!.Replace("simulate_query", "query_graphql").ShouldBe(viaGraphQl.ErrorMessage);
+        viaSimulate.ErrorMessage!.ShouldNotContain("orders");
+        await h.Executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
+    }
+
+    [Fact]
+    public async Task Simulate_query_denies_when_any_resolved_table_is_denied()
+    {
+        var h = Create(t => t == Customers ? Denied(t) : AllowAll(t), documentTables: _ => [Orders, Customers]);
+
+        var result = await h.Guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("simulate_query", Args(OrdersDoc)), Session());
+
+        result.IsSuccess.ShouldBeFalse();
+        result.ErrorMessage!.ShouldNotContain("customers");
+        await h.Executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
+    }
+
+    [Fact]
+    public async Task Simulate_query_with_an_unresolvable_document_fails_closed_without_the_executor()
+    {
+        var h = Create(AllowAll, documentTables: _ => null);
+
+        var result = await h.Guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("simulate_query", Args("query { no_such_field { x } }")), Session());
+
+        result.IsSuccess.ShouldBeFalse();
+        result.ErrorMessage!.ShouldContain("fail-closed");
+        result.ErrorMessage!.ShouldNotContain("no_such_field");
+        await h.Pdp.DidNotReceiveWithAnyArgs().DecideAsync(default!, default);
+        await h.Executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
+    }
+
+    [Fact]
+    public async Task Simulate_query_ignores_a_legacy_table_form_inside_the_document()
+    {
+        var h = Create(t => t == Orders ? AllowAll(t) : Denied(t), documentTables: _ => [Customers]);
+        const string doc = "query { crm_dbo_customers(where: { note: { eq: \"table(domain: \\\"sales\\\", schema: \\\"public\\\", name: \\\"orders\\\")\" } }) { id } }";
+
+        var result = await h.Guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("simulate_query", Args(doc)), Session());
+
+        result.IsSuccess.ShouldBeFalse();
+        await h.Pdp.Received().DecideAsync(Arg.Is<AccessRequest>(r => r.Object.Identifier == Customers), Arg.Any<CancellationToken>());
+        await h.Pdp.DidNotReceive().DecideAsync(Arg.Is<AccessRequest>(r => r.Object.Identifier == Orders || r.Object.Identifier.Domain == "governance"), Arg.Any<CancellationToken>());
+        await h.Executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
+    }
+
+    [Fact]
+    public async Task Simulate_query_introspection_only_document_needs_no_decision()
+    {
+        var h = Create(Denied, documentTables: _ => []);
+
+        var result = await h.Guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("simulate_query", Args("query { __typename }")), Session());
+
+        result.IsSuccess.ShouldBeTrue(result.ErrorMessage);
+        await h.Pdp.DidNotReceiveWithAnyArgs().DecideAsync(default!, default);
+    }
+
+    [Fact]
+    public async Task Simulate_query_on_an_inactive_table_is_not_accessible()
+    {
+        var h = Create(AllowAll, metadataOf: t => new TableMetadata { Identifier = t, Table = new Table { IsActive = false } });
+
+        var result = await h.Guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("simulate_query", Args(OrdersDoc)), Session());
+
+        result.IsSuccess.ShouldBeFalse();
+        result.ErrorMessage!.ShouldContain("not accessible");
+        await h.Executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
+    }
+
+    [Fact]
+    public async Task Simulate_query_oversized_document_fails_closed_like_query_graphql()
+    {
+        var h = Create(AllowAll, documentTables: doc => doc.Length > 64 * 1024 ? null : [Orders]);
+        var big = "query { sales_public_orders { id } } # " + new string('x', 70_000);
+
+        var viaGraphQl = await h.Guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("query_graphql", Args(big)), Session());
+        var viaSimulate = await h.Guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("simulate_query", Args(big)), Session());
+
+        viaGraphQl.IsSuccess.ShouldBeFalse();
+        viaSimulate.IsSuccess.ShouldBeFalse();
+        viaSimulate.ErrorMessage!.ShouldContain("fail-closed");
+        viaSimulate.ErrorMessage!.Replace("simulate_query", "query_graphql").ShouldBe(viaGraphQl.ErrorMessage);
+        await h.Executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
+    }
+
+    [Fact]
+    public async Task Simulate_query_under_auth_bypass_still_fails_closed_on_an_unresolvable_document()
+    {
+        var h = Create(AllowAll, documentTables: _ => null, bypassMcpAuth: true);
+
+        var result = await h.Guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("simulate_query", Args("query { no_such_field { x } }")), Session());
+
+        result.IsSuccess.ShouldBeFalse();
+        result.ErrorMessage!.ShouldContain("fail-closed");
+        await h.Executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
+    }
+}

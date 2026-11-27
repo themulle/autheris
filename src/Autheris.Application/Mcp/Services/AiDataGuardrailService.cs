@@ -320,7 +320,8 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                 resolvedTables = await ParseTablesFromToolAsync(tool, request.ArgumentsJson, _sqlEngine, _options.Value.WebSql?.DefaultDataSourceName, cancellationToken).ConfigureAwait(false);
             }
         }
-        else if (string.Equals(tool.Name, McpDatasetTools.QueryGraphQl, StringComparison.OrdinalIgnoreCase))
+        else if (string.Equals(tool.Name, McpDatasetTools.QueryGraphQl, StringComparison.OrdinalIgnoreCase) ||
+                 string.Equals(tool.Name, "simulate_query", StringComparison.OrdinalIgnoreCase))
         {
             resolvedTables = await ResolveGraphQlTablesAsync(request.ArgumentsJson, cancellationToken).ConfigureAwait(false);
         }

@@ -112,7 +112,8 @@ public sealed partial class AiDataGuardrailService
          !tool.Name.Equals(McpDatasetTools.GetTableSchema, StringComparison.OrdinalIgnoreCase) &&
          !tool.Name.Equals(McpDatasetTools.DescribeDataset, StringComparison.OrdinalIgnoreCase)) ||
         McpSemanticTools.IsSemanticTool(tool.Name) ||
-        (tool.Name.Equals("query_graphql", StringComparison.OrdinalIgnoreCase) && table.Equals(McpDatasetTools.CatalogTable)) ||
+        ((tool.Name.Equals("query_graphql", StringComparison.OrdinalIgnoreCase) ||
+          tool.Name.Equals("simulate_query", StringComparison.OrdinalIgnoreCase)) && table.Equals(McpDatasetTools.CatalogTable)) ||
         (tool.Name.Equals(McpDatasetTools.InvokeApi, StringComparison.OrdinalIgnoreCase) && table.Equals(McpDataTargetResolver.ApiNoTable));
 
     /// <summary>
@@ -420,7 +421,6 @@ public sealed partial class AiDataGuardrailService
         name.Equals("query_invoices", StringComparison.OrdinalIgnoreCase) ||
         name.Equals("query_data_catalog", StringComparison.OrdinalIgnoreCase) ||
         name.Equals("get_golden_queries", StringComparison.OrdinalIgnoreCase) ||
-        name.Equals("simulate_query", StringComparison.OrdinalIgnoreCase) ||
         McpDatasetTools.IsDatasetTool(name) ||
         McpSemanticTools.IsSemanticTool(name);
 
@@ -429,8 +429,7 @@ public sealed partial class AiDataGuardrailService
         if (McpDatasetTools.IsDatasetTool(tool.Name)) return McpDatasetTools.ReadsRows(tool.Name);
         if (McpSemanticTools.IsSemanticTool(tool.Name)) return McpSemanticTools.ReadsRows(tool.Name);
         if (tool.Name.Equals("get_golden_queries", StringComparison.OrdinalIgnoreCase) ||
-            tool.Name.Equals("query_data_catalog", StringComparison.OrdinalIgnoreCase) ||
-            tool.Name.Equals("simulate_query", StringComparison.OrdinalIgnoreCase))
+            tool.Name.Equals("query_data_catalog", StringComparison.OrdinalIgnoreCase))
         {
             return false;
         }
@@ -572,19 +571,6 @@ public sealed partial class AiDataGuardrailService
         if (tool.Name.Equals("get_golden_queries", StringComparison.OrdinalIgnoreCase)) return new TableIdentifier("governance", "mcp", "golden_queries");
         if (McpDatasetTools.IsDatasetTool(tool.Name)) return McpDatasetTools.TargetTable(tool.Name, argumentsJson);
         if (McpSemanticTools.IsSemanticTool(tool.Name)) return McpSemanticTools.SemanticCatalogTable;
-
-        if (tool.Name.Equals("simulate_query", StringComparison.OrdinalIgnoreCase))
-        {
-            if (!string.IsNullOrWhiteSpace(argumentsJson))
-            {
-                var m = Regex.Match(argumentsJson, @"table\s*\\?\(\s*domain:\s*\\*""([^""\\]+)\\*""\s*,\s*(?:schema:\s*\\*""([^""\\]+)\\*""\s*,\s*)?name:\s*\\*""([^""\\]+)\\*""", RegexOptions.IgnoreCase, DefaultRegexTimeout);
-                if (m.Success)
-                {
-                    return new TableIdentifier(m.Groups[1].Value, m.Groups[2].Success ? m.Groups[2].Value : "dbo", m.Groups[3].Value);
-                }
-            }
-            return new TableIdentifier("governance", "simulator", "ast");
-        }
 
         if (tool.Name.StartsWith("query_", StringComparison.OrdinalIgnoreCase) && tool.Name.Length > 6)
         {
