@@ -325,7 +325,7 @@ public static partial class GatewayGovernanceServiceExtensions
         // Issue #1122: Unity Catalog provisioning ledger and feedback (writes carry their audit in the governance transaction).
         services.AddSingleton<Autheris.Application.Governance.Provisioning.IUcProvisioningStore>(sp =>
             sp.GetRequiredService<TRepository>() is GovernanceRepository provisioningRepository
-                ? new UcProvisioningStore(provisioningRepository, sp.GetRequiredService<IGovernanceSqlDialect>())
+                ? new UcProvisioningStore(provisioningRepository, sp.GetRequiredService<IGovernanceSqlDialect>(), timeProvider: sp.GetService<TimeProvider>())
                 : Autheris.Application.Governance.Provisioning.UnavailableUcProvisioningStore.Instance);
         // Issue #1126: externally sourced deputy relations (writes carry their audit in the governance transaction).
         services.AddSingleton<Autheris.Application.Governance.Ownership.IDeputyRelationRepository>(sp =>

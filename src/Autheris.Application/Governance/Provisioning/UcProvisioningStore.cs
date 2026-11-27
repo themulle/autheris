@@ -146,29 +146,35 @@ public static class UcProvisioningStoreNames
 public interface IUcProvisioningStore
 {
     /// <summary>
-    /// Every non-revoked table consent of <paramref name="tenant"/> on a table of <paramref name="dataSource"/>, hydrated with its
-    /// column, row, row-scope and write rules. The list is complete (read in pages); the caller applies the validity window.
+    /// Every non-revoked table consent of <paramref name="tenant"/> on a table of <paramref name="dataSource"/> that has not ended before
+    /// <paramref name="now"/> minus one day, hydrated with its column, row, row-scope and write rules. The pages are read in one
+    /// transaction (a snapshot where the engine offers one); under concurrent changes without a snapshot a consent can be missed, so
+    /// callers must not revoke on a single read while the set is changing. The caller applies the exact validity window.
     /// </summary>
-    Task<IReadOnlyList<Consent>> ListTableConsentsAsync(TenantId tenant, string dataSource, CancellationToken ct);
+    Task<IReadOnlyList<Consent>> ListTableConsentsAsync(TenantId tenant, string dataSource, DateTimeOffset now, CancellationToken ct);
 
     Task<IReadOnlyList<UcLedgerEntry>> ListLedgerAsync(string dataSource, CancellationToken ct);
 
     /// <summary>The data sources that still hold ledger rows (including sources that are no longer provisioning-managed).</summary>
     Task<IReadOnlyList<string>> ListLedgerDataSourcesAsync(CancellationToken ct);
 
-    /// <summary>Inserts or replaces ledger rows by their key, with the audit entries, in one transaction.</summary>
-    Task SaveLedgerAsync(IReadOnlyList<UcLedgerEntry> entries, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct);
+    /// <summary>
+    /// Inserts or replaces ledger rows of <paramref name="dataSource"/> by their key, with the audit entries, in one transaction that
+    /// first checks <paramref name="fencingToken"/> against the data source's fence (a lower token than the highest seen throws
+    /// <see cref="Autheris.Application.State.FencingTokenRejectedException"/>).
+    /// </summary>
+    Task SaveLedgerAsync(string dataSource, long fencingToken, IReadOnlyList<UcLedgerEntry> entries, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct);
 
-    /// <summary>Deletes ledger rows by their key, with the audit entries, in one transaction.</summary>
-    Task DeleteLedgerAsync(IReadOnlyList<UcLedgerEntry> entries, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct);
+    /// <summary>Deletes ledger rows of <paramref name="dataSource"/> by their key, with the audit entries, fenced like <see cref="SaveLedgerAsync"/>.</summary>
+    Task DeleteLedgerAsync(string dataSource, long fencingToken, IReadOnlyList<UcLedgerEntry> entries, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct);
 
     Task<IReadOnlyList<UcGrantFeedback>> ListFeedbackAsync(TenantId tenant, string dataSource, CancellationToken ct);
 
     /// <summary>The feedback of the given consents of <paramref name="tenant"/>; consents without a row are absent.</summary>
     Task<IReadOnlyDictionary<Guid, UcGrantFeedback>> GetFeedbackAsync(TenantId tenant, IReadOnlyCollection<Guid> consentIds, CancellationToken ct);
 
-    /// <summary>Inserts or replaces feedback rows of <paramref name="tenant"/>, with the audit entries, in one transaction.</summary>
-    Task SaveFeedbackAsync(TenantId tenant, IReadOnlyList<UcGrantFeedback> rows, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct);
+    /// <summary>Inserts or replaces feedback rows of <paramref name="tenant"/> on <paramref name="dataSource"/>, with the audit entries, fenced like <see cref="SaveLedgerAsync"/>.</summary>
+    Task SaveFeedbackAsync(TenantId tenant, string dataSource, long fencingToken, IReadOnlyList<UcGrantFeedback> rows, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct);
 }
 
 /// <summary>
@@ -183,7 +189,7 @@ public sealed class UnavailableUcProvisioningStore : IUcProvisioningStore
     {
     }
 
-    public Task<IReadOnlyList<Consent>> ListTableConsentsAsync(TenantId tenant, string dataSource, CancellationToken ct) =>
+    public Task<IReadOnlyList<Consent>> ListTableConsentsAsync(TenantId tenant, string dataSource, DateTimeOffset now, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<Consent>>([]);
 
     public Task<IReadOnlyList<UcLedgerEntry>> ListLedgerAsync(string dataSource, CancellationToken ct) =>
@@ -192,10 +198,10 @@ public sealed class UnavailableUcProvisioningStore : IUcProvisioningStore
     public Task<IReadOnlyList<string>> ListLedgerDataSourcesAsync(CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<string>>([]);
 
-    public Task SaveLedgerAsync(IReadOnlyList<UcLedgerEntry> entries, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct) =>
+    public Task SaveLedgerAsync(string dataSource, long fencingToken, IReadOnlyList<UcLedgerEntry> entries, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct) =>
         throw Unavailable();
 
-    public Task DeleteLedgerAsync(IReadOnlyList<UcLedgerEntry> entries, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct) =>
+    public Task DeleteLedgerAsync(string dataSource, long fencingToken, IReadOnlyList<UcLedgerEntry> entries, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct) =>
         throw Unavailable();
 
     public Task<IReadOnlyList<UcGrantFeedback>> ListFeedbackAsync(TenantId tenant, string dataSource, CancellationToken ct) =>
@@ -204,7 +210,7 @@ public sealed class UnavailableUcProvisioningStore : IUcProvisioningStore
     public Task<IReadOnlyDictionary<Guid, UcGrantFeedback>> GetFeedbackAsync(TenantId tenant, IReadOnlyCollection<Guid> consentIds, CancellationToken ct) =>
         Task.FromResult<IReadOnlyDictionary<Guid, UcGrantFeedback>>(new Dictionary<Guid, UcGrantFeedback>());
 
-    public Task SaveFeedbackAsync(TenantId tenant, IReadOnlyList<UcGrantFeedback> rows, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct) =>
+    public Task SaveFeedbackAsync(TenantId tenant, string dataSource, long fencingToken, IReadOnlyList<UcGrantFeedback> rows, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct) =>
         throw Unavailable();
 
     private static InvalidOperationException Unavailable() =>

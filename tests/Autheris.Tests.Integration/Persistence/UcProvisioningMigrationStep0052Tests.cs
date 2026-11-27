@@ -30,6 +30,8 @@ public sealed class UcProvisioningMigrationStep0052Tests
         "tenant_id", "consent_id", "data_source", "state", "reason_code", "updated_at", "verified_at"
     ];
 
+    private static readonly string[] FenceColumns = ["data_source", "fencing_token", "updated_at"];
+
     [Theory]
     [InlineData("postgresql")]
     [InlineData("sqlserver")]
@@ -67,6 +69,11 @@ public sealed class UcProvisioningMigrationStep0052Tests
                 (await ColumnExistsPgAsync(conn, "uc_grant_provisioning", column)).ShouldBeTrue(column);
             }
 
+            foreach (var column in FenceColumns)
+            {
+                (await ColumnExistsPgAsync(conn, "uc_provisioning_fences", column)).ShouldBeTrue(column);
+            }
+
             var verifier = new GovernanceSchemaShapeVerifier("postgresql", new PostgreSqlSchemaCatalogReader());
             var result = await verifier.VerifyAsync(conn, expectedShape, CancellationToken.None);
             result.Deviations.ShouldBeEmpty();
@@ -97,6 +104,11 @@ public sealed class UcProvisioningMigrationStep0052Tests
             foreach (var column in FeedbackColumns)
             {
                 (await ColumnExistsSsAsync(conn, "UC_GRANT_PROVISIONING", column)).ShouldBeTrue(column);
+            }
+
+            foreach (var column in FenceColumns)
+            {
+                (await ColumnExistsSsAsync(conn, "UC_PROVISIONING_FENCES", column)).ShouldBeTrue(column);
             }
 
             var verifier = new GovernanceSchemaShapeVerifier("sqlserver", new SqlServerSchemaCatalogReader());

@@ -1,7 +1,9 @@
 -- Governance schema step 0052 (PostgreSQL): provisioning of approved grants as Unity Catalog privileges (issue #1122).
 -- uc_provisioned_privileges is the ledger of the privileges Autheris applied, or is about to apply, per Databricks data source. A row
 -- is written before the privilege is added and deleted only after a verified removal, so no applied privilege is ever untracked.
--- uc_grant_provisioning holds the provisioning feedback per consent, tenant scoped like the consent.
+-- uc_grant_provisioning holds the provisioning feedback per consent, tenant scoped like the consent. uc_provisioning_fences holds the
+-- highest cluster fencing token per data source; every ledger or feedback write checks it first, so a reconciler that lost its lease
+-- can no longer write.
 
 CREATE TABLE IF NOT EXISTS uc_provisioned_privileges (
     id VARCHAR(36) NOT NULL PRIMARY KEY,
@@ -37,3 +39,9 @@ CREATE TABLE IF NOT EXISTS uc_grant_provisioning (
 
 CREATE INDEX IF NOT EXISTS ix_uc_grant_provisioning_source
     ON uc_grant_provisioning (tenant_id, data_source, state);
+
+CREATE TABLE IF NOT EXISTS uc_provisioning_fences (
+    data_source VARCHAR(128) NOT NULL PRIMARY KEY,
+    fencing_token BIGINT NOT NULL,
+    updated_at TIMESTAMPTZ NOT NULL
+);

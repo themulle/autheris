@@ -17,13 +17,25 @@ namespace Autheris.Infrastructure.Persistence;
 /// PostgreSQL and SQL Server persistence of Unity Catalog provisioning (issue #1122): the desired-state read over the consents of
 /// one tenant on one data source, the ledger of applied privileges (<c>uc_provisioned_privileges</c>) and the per-consent feedback
 /// (<c>uc_grant_provisioning</c>). Writes run in one governance transaction with their audit entries
-/// (<see cref="GovernanceRepository.WriteWithAuditAsync{T}"/>); a failing audit insert rolls the rows back. A single cluster-wide
-/// reconciler writes the ledger, so rows carry no lease; every write is an idempotent upsert or delete by key.
+/// (<see cref="GovernanceRepository.WriteWithAuditAsync{T}"/>); a failing audit insert rolls the rows back. Every write first checks the
+/// writer's cluster fencing token against the data source's fence row (<c>uc_provisioning_fences</c>), so a reconciler that lost its
+/// lease cannot change the ledger any more. Data source names and external ids are stored in lower case on both engines.
 /// </summary>
-public sealed class UcProvisioningStore(GovernanceRepository repository, IGovernanceSqlDialect dialect) : IUcProvisioningStore
+public sealed class UcProvisioningStore(
+    GovernanceRepository repository,
+    IGovernanceSqlDialect dialect,
+    int consentPageSize = UcProvisioningStore.ConsentPageSize,
+    TimeProvider? timeProvider = null)
+    : IUcProvisioningStore
 {
     /// <summary>Consents read per page of the desired-state read.</summary>
     public const int ConsentPageSize = 500;
+
+    private const string PgFence = "uc_provisioning_fences";
+    private const string SsFence = "dbo.UC_PROVISIONING_FENCES";
+    private const string FenceUpdate = " SET fencing_token = @fencingToken, updated_at = @fencedAt WHERE data_source = @fenceSource AND fencing_token <= @fencingToken";
+    private const string FenceInsert = " (data_source, fencing_token, updated_at) VALUES (@fenceSource, @fencingToken, @fencedAt)";
+    private const string FenceExists = " WHERE data_source = @fenceSource";
 
     private const string PgLedger = "uc_provisioned_privileges";
     private const string SsLedger = "dbo.UC_PROVISIONED_PRIVILEGES";
@@ -59,7 +71,8 @@ public sealed class UcProvisioningStore(GovernanceRepository repository, IGovern
         " c.id, c.table_id, c.consent_request_id, c.effect, c.grantee_type, c.grantee_sid, c.valid_from, c.valid_to, c.is_revoked," +
         " t.source_name, t.schema_name, t.table_name, c.tenant_id, c.renewal_count, " + ConsentWorkflowSql.ConsentColumns +
         " FROM CONSENTS c JOIN TABLES t ON c.table_id = t.id" +
-        " WHERE c.is_revoked = 0 AND c.object_pattern IS NULL AND c.tenant_id = @tenantId AND LOWER(t.source_name) = @dataSource AND c.id > @after";
+        " WHERE c.is_revoked = 0 AND c.object_pattern IS NULL AND c.tenant_id = @tenantId AND LOWER(t.source_name) = @dataSource" +
+        " AND c.valid_to > @endedBefore AND c.id > @after";
 
     private readonly GovernanceRepository _repository = repository ?? throw new ArgumentNullException(nameof(repository));
     private readonly IGovernanceSqlDialect _dialect = dialect ?? throw new ArgumentNullException(nameof(dialect));
@@ -70,47 +83,92 @@ public sealed class UcProvisioningStore(GovernanceRepository repository, IGovern
 
     private string Feedback => IsSqlServer ? SsFeedback : PgFeedback;
 
-    public async Task<IReadOnlyList<Consent>> ListTableConsentsAsync(TenantId tenant, string dataSource, CancellationToken ct)
+    private string Fence => IsSqlServer ? SsFence : PgFence;
+
+    private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+
+    private readonly int _pageSize = consentPageSize > 0 ? consentPageSize : throw new ArgumentOutOfRangeException(nameof(consentPageSize));
+
+    public async Task<IReadOnlyList<Consent>> ListTableConsentsAsync(TenantId tenant, string dataSource, DateTimeOffset now, CancellationToken ct)
     {
         var tenantValue = RequireTenant(tenant);
-        var source = RequireDataSource(dataSource).ToLowerInvariant();
+        var source = RequireDataSource(dataSource);
+
+        // Consents that ended more than a day ago are skipped in SQL (text timestamps compare safely with that margin); the caller
+        // applies the exact window. All pages come from one transaction, a snapshot where the engine offers one.
+        var endedBefore = now.ToUniversalTime().AddDays(-1).ToString("O", CultureInfo.InvariantCulture);
         var result = new List<Consent>();
-        await using var conn = await OpenAsync(ct).ConfigureAwait(false);
-        var after = string.Empty;
-        while (true)
+        await using var conn = await _repository.OpenConnectionAsync(ct).ConfigureAwait(false);
+        var isolation = await ReadIsolationAsync(conn, ct).ConfigureAwait(false);
+        await using (var tx = await conn.BeginTransactionAsync(isolation, ct).ConfigureAwait(false))
         {
-            var page = new List<Consent>(ConsentPageSize);
-            await using (var cmd = conn.CreateCommand())
+            var after = string.Empty;
+            while (true)
             {
-                cmd.CommandText = IsSqlServer
-                    ? "SELECT TOP (@max)" + ConsentSelectBody + " ORDER BY c.id"
-                    : "SELECT" + ConsentSelectBody + " ORDER BY c.id LIMIT @max";
-                cmd.AddBound("@tenantId", tenantValue);
-                cmd.AddBound("@dataSource", source);
-                cmd.AddBound("@after", after);
-                cmd.AddBound("@max", ConsentPageSize);
-                await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
-                while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                var page = 0;
+                await using (var cmd = conn.CreateCommand())
                 {
-                    page.Add(ReadConsent(reader));
+                    cmd.Transaction = tx;
+                    cmd.CommandText = IsSqlServer
+                        ? "SELECT TOP (@max)" + ConsentSelectBody + " ORDER BY c.id"
+                        : "SELECT" + ConsentSelectBody + " ORDER BY c.id LIMIT @max";
+                    cmd.AddBound("@tenantId", tenantValue);
+                    cmd.AddBound("@dataSource", source);
+                    cmd.AddBound("@endedBefore", endedBefore);
+                    cmd.AddBound("@after", after);
+                    cmd.AddBound("@max", _pageSize);
+                    await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+                    while (await reader.ReadAsync(ct).ConfigureAwait(false))
+                    {
+                        var consent = ReadConsent(reader);
+                        if (consent.TenantId == tenant)
+                        {
+                            result.Add(consent);
+                        }
+
+                        after = reader.GetString(0);
+                        page++;
+                    }
+                }
+
+                if (page < _pageSize)
+                {
+                    break;
                 }
             }
 
-            await ConsentSqlCore.HydrateConsentsBatchAsync(conn, page, ct).ConfigureAwait(false);
-            result.AddRange(page);
-            if (page.Count < ConsentPageSize)
-            {
-                return result;
-            }
-
-            after = page[^1].Id.ToString();
+            await tx.CommitAsync(ct).ConfigureAwait(false);
         }
+
+        // Rule rows are written with their consent and never changed afterwards, so they are read outside the snapshot.
+        for (var i = 0; i < result.Count; i += ConsentPageSize)
+        {
+            await ConsentSqlCore.HydrateConsentsBatchAsync(conn, result.GetRange(i, Math.Min(ConsentPageSize, result.Count - i)), ct).ConfigureAwait(false);
+        }
+
+        return result;
+    }
+
+    /// <summary>PostgreSQL reads one MVCC snapshot; SQL Server uses snapshot isolation when the database allows it.</summary>
+    private async Task<IsolationLevel> ReadIsolationAsync(DbConnection conn, CancellationToken ct)
+    {
+        if (!IsSqlServer)
+        {
+            return IsolationLevel.RepeatableRead;
+        }
+
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT snapshot_isolation_state FROM sys.databases WHERE name = DB_NAME()";
+        var state = await cmd.ExecuteScalarAsync(ct).ConfigureAwait(false);
+        return state is not null && state != DBNull.Value && Convert.ToInt32(state, CultureInfo.InvariantCulture) == 1
+            ? IsolationLevel.Snapshot
+            : IsolationLevel.ReadCommitted;
     }
 
     public async Task<IReadOnlyList<UcLedgerEntry>> ListLedgerAsync(string dataSource, CancellationToken ct)
     {
         var source = RequireDataSource(dataSource);
-        await using var conn = await OpenAsync(ct).ConfigureAwait(false);
+        await using var conn = await _repository.OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT " + LedgerColumns + " FROM " + Ledger + " WHERE data_source = @dataSource ORDER BY securable_type, full_name, principal_external_id, privilege";
         cmd.AddBound("@dataSource", source);
@@ -118,10 +176,7 @@ public sealed class UcProvisioningStore(GovernanceRepository repository, IGovern
         await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
         while (await reader.ReadAsync(ct).ConfigureAwait(false))
         {
-            if (ReadLedger(reader) is { } entry)
-            {
-                result.Add(entry);
-            }
+            result.Add(ReadLedger(reader));
         }
 
         return result;
@@ -129,7 +184,7 @@ public sealed class UcProvisioningStore(GovernanceRepository repository, IGovern
 
     public async Task<IReadOnlyList<string>> ListLedgerDataSourcesAsync(CancellationToken ct)
     {
-        await using var conn = await OpenAsync(ct).ConfigureAwait(false);
+        await using var conn = await _repository.OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT DISTINCT data_source FROM " + Ledger + " ORDER BY data_source";
         var result = new List<string>();
@@ -142,21 +197,16 @@ public sealed class UcProvisioningStore(GovernanceRepository repository, IGovern
         return result;
     }
 
-    public Task SaveLedgerAsync(IReadOnlyList<UcLedgerEntry> entries, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct)
+    public Task SaveLedgerAsync(string dataSource, long fencingToken, IReadOnlyList<UcLedgerEntry> entries, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(entries);
-        ArgumentNullException.ThrowIfNull(audit);
-        foreach (var entry in entries)
-        {
-            Validate(entry);
-        }
-
-        return entries.Count == 0 && audit.Count == 0
+        var (source, ordered) = PrepareLedger(dataSource, entries, audit);
+        return ordered.Count == 0 && audit.Count == 0
             ? Task.CompletedTask
             : _repository.WriteWithAuditAsync(
                 async (conn, tx) =>
                 {
-                    foreach (var entry in entries)
+                    await FenceAsync(conn, tx, source, fencingToken, ct).ConfigureAwait(false);
+                    foreach (var entry in ordered)
                     {
                         await UpsertLedgerAsync(conn, tx, entry, ct).ConfigureAwait(false);
                     }
@@ -168,21 +218,16 @@ public sealed class UcProvisioningStore(GovernanceRepository repository, IGovern
                 ct);
     }
 
-    public Task DeleteLedgerAsync(IReadOnlyList<UcLedgerEntry> entries, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct)
+    public Task DeleteLedgerAsync(string dataSource, long fencingToken, IReadOnlyList<UcLedgerEntry> entries, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct)
     {
-        ArgumentNullException.ThrowIfNull(entries);
-        ArgumentNullException.ThrowIfNull(audit);
-        foreach (var entry in entries)
-        {
-            Validate(entry);
-        }
-
-        return entries.Count == 0 && audit.Count == 0
+        var (source, ordered) = PrepareLedger(dataSource, entries, audit);
+        return ordered.Count == 0 && audit.Count == 0
             ? Task.CompletedTask
             : _repository.WriteWithAuditAsync(
                 async (conn, tx) =>
                 {
-                    foreach (var entry in entries)
+                    await FenceAsync(conn, tx, source, fencingToken, ct).ConfigureAwait(false);
+                    foreach (var entry in ordered)
                     {
                         await using var cmd = Command(conn, tx, "DELETE FROM " + Ledger + LedgerKeyWhere);
                         BindKey(cmd, entry);
@@ -196,11 +241,36 @@ public sealed class UcProvisioningStore(GovernanceRepository repository, IGovern
                 ct);
     }
 
+    /// <summary>Validates and normalizes a ledger change set; rows are written in key order so two writers never cross.</summary>
+    private static (string Source, List<UcLedgerEntry> Ordered) PrepareLedger(string dataSource, IReadOnlyList<UcLedgerEntry> entries, IReadOnlyList<AuditLogEntry> audit)
+    {
+        ArgumentNullException.ThrowIfNull(entries);
+        ArgumentNullException.ThrowIfNull(audit);
+        var source = RequireDataSource(dataSource);
+        var ordered = new List<UcLedgerEntry>(entries.Count);
+        foreach (var entry in entries)
+        {
+            Validate(entry);
+            if (!string.Equals(entry.DataSource.ToLowerInvariant(), source, StringComparison.Ordinal))
+            {
+                throw new ArgumentException("Every ledger entry of a change set must belong to its data source.", nameof(entries));
+            }
+
+            ordered.Add(entry with { DataSource = source });
+        }
+
+        ordered.Sort(static (a, b) => string.CompareOrdinal(KeyText(a), KeyText(b)));
+        return (source, ordered);
+    }
+
+    private static string KeyText(UcLedgerEntry e) =>
+        e.SecurableType.ToStored() + "|" + e.FullName + "|" + e.PrincipalExternalId + "|" + e.Privilege;
+
     public async Task<IReadOnlyList<UcGrantFeedback>> ListFeedbackAsync(TenantId tenant, string dataSource, CancellationToken ct)
     {
         var tenantValue = RequireTenant(tenant);
         var source = RequireDataSource(dataSource);
-        await using var conn = await OpenAsync(ct).ConfigureAwait(false);
+        await using var conn = await _repository.OpenConnectionAsync(ct).ConfigureAwait(false);
         await using var cmd = conn.CreateCommand();
         cmd.CommandText = "SELECT " + FeedbackColumns + " FROM " + Feedback + " WHERE tenant_id = @tenantId AND data_source = @dataSource ORDER BY consent_id";
         cmd.AddBound("@tenantId", tenantValue);
@@ -225,7 +295,7 @@ public sealed class UcProvisioningStore(GovernanceRepository repository, IGovern
             return result;
         }
 
-        await using var conn = await OpenAsync(ct).ConfigureAwait(false);
+        await using var conn = await _repository.OpenConnectionAsync(ct).ConfigureAwait(false);
         foreach (var batch in consentIds.Distinct().Select(id => id.ToString()).Chunk(ConsentPageSize))
         {
             await using var cmd = conn.CreateCommand();
@@ -243,11 +313,12 @@ public sealed class UcProvisioningStore(GovernanceRepository repository, IGovern
         return result;
     }
 
-    public Task SaveFeedbackAsync(TenantId tenant, IReadOnlyList<UcGrantFeedback> rows, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct)
+    public Task SaveFeedbackAsync(TenantId tenant, string dataSource, long fencingToken, IReadOnlyList<UcGrantFeedback> rows, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(rows);
         ArgumentNullException.ThrowIfNull(audit);
         var tenantValue = RequireTenant(tenant);
+        var source = RequireDataSource(dataSource);
         if (rows.Any(r => r.Tenant != tenant) || audit.Any(a => a.TenantId != tenant))
         {
             throw new ArgumentException("Every feedback row and audit entry must belong to the tenant.", nameof(rows));
@@ -255,7 +326,12 @@ public sealed class UcProvisioningStore(GovernanceRepository repository, IGovern
 
         foreach (var row in rows)
         {
-            RequireDataSource(row.DataSource);
+            if (!string.Equals(RequireDataSource(row.DataSource), source, StringComparison.Ordinal))
+            {
+                throw new ArgumentException("Every feedback row must belong to the data source.", nameof(rows));
+            }
+
+            _ = row.State.ToStored();
             if (row.ReasonCode is { Length: > 64 })
             {
                 throw new ArgumentException("A reason code is at most 64 characters.", nameof(rows));
@@ -267,9 +343,10 @@ public sealed class UcProvisioningStore(GovernanceRepository repository, IGovern
             : _repository.WriteWithAuditAsync(
                 async (conn, tx) =>
                 {
-                    foreach (var row in rows)
+                    await FenceAsync(conn, tx, source, fencingToken, ct).ConfigureAwait(false);
+                    foreach (var row in rows.OrderBy(r => r.ConsentId))
                     {
-                        await UpsertFeedbackAsync(conn, tx, tenantValue, row, ct).ConfigureAwait(false);
+                        await UpsertFeedbackAsync(conn, tx, tenantValue, row with { DataSource = source }, ct).ConfigureAwait(false);
                     }
 
                     return true;
@@ -280,6 +357,43 @@ public sealed class UcProvisioningStore(GovernanceRepository repository, IGovern
     }
 
     // ---- writes ----
+
+    /// <summary>
+    /// The fence row is the first lock of every write transaction. A token lower than the highest one seen for the data source means
+    /// the writer lost its lease to a newer one: the transaction is rejected.
+    /// </summary>
+    private async Task FenceAsync(DbConnection conn, DbTransaction tx, string source, long fencingToken, CancellationToken ct)
+    {
+        var now = _time.GetUtcNow();
+        await using (var update = Command(conn, tx, "UPDATE " + Fence + FenceUpdate))
+        {
+            BindFence(update, source, fencingToken, now);
+            if (await update.ExecuteNonQueryAsync(ct).ConfigureAwait(false) > 0)
+            {
+                return;
+            }
+        }
+
+        await using (var exists = Command(conn, tx, "SELECT COUNT(*) FROM " + Fence + FenceExists))
+        {
+            exists.AddBound("@fenceSource", source);
+            if (Convert.ToInt64(await exists.ExecuteScalarAsync(ct).ConfigureAwait(false), CultureInfo.InvariantCulture) > 0)
+            {
+                throw new Autheris.Application.State.FencingTokenRejectedException("uc-provisioning:" + source, fencingToken);
+            }
+        }
+
+        await using var insert = Command(conn, tx, "INSERT INTO " + Fence + FenceInsert);
+        BindFence(insert, source, fencingToken, now);
+        await insert.ExecuteNonQueryAsync(ct).ConfigureAwait(false);
+    }
+
+    private static void BindFence(DbCommand cmd, string source, long fencingToken, DateTimeOffset now)
+    {
+        cmd.AddBound("@fenceSource", source);
+        cmd.AddBound("@fencingToken", fencingToken);
+        cmd.AddBound("@fencedAt", now, DbType.DateTimeOffset);
+    }
 
     private async Task UpsertLedgerAsync(DbConnection conn, DbTransaction tx, UcLedgerEntry entry, CancellationToken ct)
     {
@@ -381,12 +495,12 @@ public sealed class UcProvisioningStore(GovernanceRepository repository, IGovern
             renewalCount: reader.GetInt32(13));
     }
 
-    /// <summary>A row with an unknown securable type is skipped; it is never acted on.</summary>
-    private static UcLedgerEntry? ReadLedger(DbDataReader reader)
+    /// <summary>A row with an unknown securable type fails the read: it can neither be revoked nor silently ignored.</summary>
+    private static UcLedgerEntry ReadLedger(DbDataReader reader)
     {
         if (!UcProvisioningStoreNames.TryParseSecurableType(reader.GetString(2), out var type))
         {
-            return null;
+            throw new InvalidOperationException("A provisioning ledger row has an unknown securable type.");
         }
 
         return new UcLedgerEntry
@@ -427,37 +541,26 @@ public sealed class UcProvisioningStore(GovernanceRepository repository, IGovern
         _ = entry.SecurableType.ToStored();
         _ = entry.State.ToStored();
         if (string.IsNullOrWhiteSpace(entry.FullName) || entry.FullName.Length > UcSecurableNames.MaxFullNameLength ||
+            entry.FullName.Split('.').Any(segment => !UcSecurableNames.IsValidSegment(segment)) ||
             string.IsNullOrWhiteSpace(entry.Principal) || entry.Principal.Length > 256 ||
             string.IsNullOrWhiteSpace(entry.PrincipalExternalId) || entry.PrincipalExternalId.Length > 64 ||
+            !string.Equals(entry.PrincipalExternalId, entry.PrincipalExternalId.ToLowerInvariant(), StringComparison.Ordinal) ||
             string.IsNullOrWhiteSpace(entry.Privilege) || entry.Privilege.Length > 32 ||
-            entry.LastErrorCode is { Length: > 64 })
+            entry.LastErrorCode is { Length: > 64 } ||
+            entry.CreatedAt == default || entry.UpdatedAt == default)
         {
-            throw new ArgumentException("The ledger entry has an empty or over-long field.", nameof(entry));
+            throw new ArgumentException("The ledger entry has an empty, over-long or malformed field.", nameof(entry));
         }
     }
 
+    /// <summary>Data source names are stored and compared in lower case on both engines.</summary>
     private static string RequireDataSource(string? dataSource) =>
         !string.IsNullOrWhiteSpace(dataSource) && dataSource.Length <= 128
-            ? dataSource
+            ? dataSource.Trim().ToLowerInvariant()
             : throw new ArgumentException("A data source name of 1 to 128 characters is required.", nameof(dataSource));
 
     private static string RequireTenant(TenantId tenant) =>
         TenantId.TryParse(TenantScope.RequireTenant(tenant, GovernanceTable.Consents.ToSqlName()).Value, out var valid)
             ? valid.Value
             : throw new ArgumentException("A valid non-reserved TenantId is required.", nameof(tenant));
-
-    private async Task<DbConnection> OpenAsync(CancellationToken ct)
-    {
-        var conn = _dialect.CreateConnection();
-        try
-        {
-            await conn.OpenAsync(ct).ConfigureAwait(false);
-            return conn;
-        }
-        catch
-        {
-            await conn.DisposeAsync().ConfigureAwait(false);
-            throw;
-        }
-    }
 }
