@@ -6,11 +6,37 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 
 ## [Unreleased]
 
+## [2.1.2] - 2026-11-27
+
+Full release: ships the `autheris-full` container image and the signed module archive (including the dbt module).
+
+### Added
+- Opt-in governed WebSQL result cache: node-local, in-memory, for complete successful reads; every hit still runs authentication, the governed rewrite, admission, rate limits and a fail-closed audit, and only skips execution at the source. Paged requests are sliced from one cached full result. Enabled globally with `Gateway:WebSql:ResultCacheMaxMegabytes` and per data source with `ResultCacheTtlSeconds` (optionally `ResultCacheTables`); invalidated on governance, table and catalog epoch changes; delegated and on-behalf-of sources are not eligible (#1163).
+- Consent events: observer external systems receive all consent events and can read requests (#1161); `request.decided` and `request.updated` for decisions, first approvals and withdrawals (#1165); `grant.revoked` for deprovisioning and external-system revocations (#1170); `grant.renewed` on renewal (with `previousGrantId`) and `grant.revoked` for profile-assignment revocations (#1173).
+
 ### Fixed
+- GraphQL aggregations report `truncated: true` when the governed SQL result was cut, and refuse to aggregate a truncated result without group counts (#1164).
+- A duplicate of the caller's own pending consent request is answered with `409 DUPLICATE_PENDING_REQUEST` and the open request's id instead of a generic `400` (#1168).
+- Consent request index `ux_consents_request` is replaced by indexes keyed on request, profile item and renewal generation (migration `0051`, PostgreSQL and SQL Server), so grant renewals and multi-target profile assignments no longer collide; `renewal_count` is now persisted (#1187).
+- MCP `_meta.isMasked` reports column masks applied by the governed executors for every data tool, not only the guardrail's own scrub (#1181).
 - `simulate_query` resolves the tables of a query in the gateway's GraphQL schema from its AST, like `query_graphql` (same access decision per table, fail-closed when a table cannot be resolved), and returns the estimate instead of always denying (#1180).
+- WebSQL page tokens are verified against the data source the request resolves to, so continuation works for requests without `dataSource` (including the MCP `query_sql` cursor) (#1207).
+- GraphQL `extensions.autheris.indexHints` render column objects instead of a C# type name (#1184).
+- Pre-flight simulator block reason in English; stale `table(domain:, name:)` references removed from the docs (#1197).
 
 ### Changed
 - The `table(domain:, schema:, name:)` form of `simulate_query` is no longer accepted; it is not part of the gateway schema and is now denied as an unresolvable query (#1180).
+
+### Security
+- Classification fails closed on regex match timeouts: a timed-out PII pattern counts as a match and the column is flagged for steward review; timeout raised to 1 s, `RegexOptions.NonBacktracking` where possible, and the pattern cache is case-sensitive (#1177).
+- Catalog hydration fails closed on unknown persisted object kinds, and the governed SQL catalog, the GraphQL schema and the REST table-query path refuse `Procedure` entries (#1183, #1196).
+
+## [2.1.1] - 2026-11-26
+
+Patch release on top of 2.1.0. Ships the `autheris-full` container image and the signed module archive (including the dbt module) with this version.
+
+### Fixed
+- Windows builds no longer skip every governance migration step after the frozen baseline. Embedded step resources are matched independently of the platform path separator, and SQL Server batches are joined with `\n` so the executed text matches the LF-normalised, checksummed step text on every platform (#1166, #1167).
 
 ## [2.1.0] - 2026-11-26
 
