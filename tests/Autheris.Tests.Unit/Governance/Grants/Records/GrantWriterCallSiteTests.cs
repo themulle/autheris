@@ -133,6 +133,37 @@ public sealed class GrantWriterCallSiteTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task GrantRecordSqlCore_InsertConsentRowAsync_PersistsRenewalGenerationFromConsent()
+    {
+        using var conn = new StubDbConnection();
+        await using var tx = await conn.BeginTransactionAsync();
+        var core = new GovernanceRepository.GrantRecordStore(new PostgreSqlGovernanceDialect(() => conn));
+        var consent = new Consent
+        {
+            Id = Guid.NewGuid(),
+            TableId = Guid.NewGuid(),
+            TableIdentifier = OrdersTable,
+            TenantId = Tenant,
+            Effect = ConsentEffect.Allow,
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid("S-1-5-21-TEST"),
+            ValidFrom = FixedNow,
+            ValidTo = FixedNow.AddDays(7),
+            GrantSource = ConsentGrantSource.ConsentRequest,
+            ConsentRequestId = Guid.NewGuid(),
+            RenewalCount = 2
+        };
+
+        await core.InsertConsentRowAsync(tx, consent, 7L);
+
+        var cmd = conn.ExecutedCommands.ShouldHaveSingleItem();
+        cmd.Sql.ShouldContain("renewal_count");
+        cmd.Sql.ShouldContain("@renewalCount");
+        cmd.Parameters["@renewalCount"].ShouldBe(2);
+    }
+
+    [Fact]
     public async Task GovernanceRepository_WithoutGrantWriter_FailsClosed_OnConsentInsertAndRevoke()
     {
         using var conn = new StubDbConnection();

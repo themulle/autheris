@@ -239,7 +239,8 @@ public sealed class StepSqlLintTests
                 (47, "approval_step_identifiers"),
                 (48, "deputy_relations"),
                 (49, "table_write_policies"),
-                (50, "external_system_role")
+                (50, "external_system_role"),
+                (51, "consents_request_generation")
             ]);
         }
     }

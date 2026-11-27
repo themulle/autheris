@@ -506,7 +506,7 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
         await Store.ConsentWorkflowAdmin.UpsertExternalWorkflowSystemAsync(workflow);
         var leaver = new Sid("S-1-5-21-1000-1000-1000-1170");
 
-        // A consent request yields at most one consent (ux_consents_request), so every request-linked grant gets its own origin request.
+        // A consent request yields at most one consent per profile item and renewal generation, so every request-linked grant gets its own origin request.
         async Task<(Guid RequestId, TableIdentifier Table, Guid TableId)> SeedRoutedRequestAsync(string prefix)
         {
             var tableName = prefix + Guid.NewGuid().ToString("N")[..8];
@@ -578,8 +578,8 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
 
         var origin = await SeedRoutedOriginAsync("orders_renew_", workflow.Id);
         var old = await CreateGrantAsync(grantee, origin.Table, origin.TableId, origin.RequestId);
-        // The renewed row carries no origin request (ux_consents_request allows one consent per request).
-        var renewed = await CreateGrantAsync(grantee, origin.Table, origin.TableId, null);
+        // The renewed row is the next generation of the same request (renewal_count 1), which the request index allows next to the original.
+        var renewed = await CreateGrantAsync(grantee, origin.Table, origin.TableId, origin.RequestId, renewalCount: 1);
 
         (await Store.Consents.RevokeSystemConsentByIdAsync(Store.TenantA, old.Id, actor, "Renewed", SystemRevocationKind.Renewal, renewed.Id))
             .Should().BeTrue();
@@ -682,12 +682,12 @@ public abstract class ConsentWorkflowEventsContract : GovernanceContractBase
         return (requestId, table, (await Store.TableMetadata.GetTableMetadataAsync(table))!.Table.Id);
     }
 
-    private Task<Consent> CreateGrantAsync(Sid grantee, TableIdentifier table, Guid tableId, Guid? requestId, Guid? profileAssignmentId = null) =>
+    private Task<Consent> CreateGrantAsync(Sid grantee, TableIdentifier table, Guid tableId, Guid? requestId, Guid? profileAssignmentId = null, int renewalCount = 0) =>
         Store.Consents.CreateConsentAsync(new Consent
         {
             TableId = tableId, TableIdentifier = table, TenantId = Store.TenantA, GranteeType = GranteeType.User, GranteeSid = grantee,
             Effect = ConsentEffect.Allow, ValidFrom = DateTimeOffset.UtcNow.AddDays(-1), ValidTo = DateTimeOffset.UtcNow.AddDays(30),
-            CreatedBySid = new Sid("S-1-5-21-ADMIN-1173"), ConsentRequestId = requestId, ProfileAssignmentId = profileAssignmentId
+            CreatedBySid = new Sid("S-1-5-21-ADMIN-1173"), ConsentRequestId = requestId, ProfileAssignmentId = profileAssignmentId, RenewalCount = renewalCount
         });
 
     private static (string? Status, int Version) ReadStatusAndVersion(string payloadJson)
