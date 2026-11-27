@@ -104,4 +104,62 @@ public sealed class AggregationNegatedFilterTests
 
     [Fact]
     public void NegatedLiteralTextInString_DoesNotTrigger() => Check("status = 'a <> b'");
+
+    [Theory]
+    [InlineData("employee_id <> 7", "department", false)]
+    [InlineData("employee_id <> 7", "employee_id", false)]
+    [InlineData("status NOT IN ('A')", "department", false)]
+    [InlineData("status IS NOT NULL", "department", false)]
+    [InlineData("employee_id = 7", "department", false)]
+    [InlineData("department <> 'x'", "department", false)]
+    [InlineData("status <> ", "department", false)]
+    [InlineData("NOT (status = 'A'", "department", false)]
+    public void RejectsPredicate_MatchesEnforce_ForSameInput(string sql, string groupBy, bool knownColumnsOnly)
+    {
+        var enforced = false;
+        try
+        {
+            Check(sql, [groupBy]);
+        }
+        catch (AggregationFilterRejectedException)
+        {
+            enforced = true;
+        }
+
+        AggregationNegationGuard.RejectsPredicate(sql, [groupBy], Meta, knownColumnsOnly).ShouldBe(enforced);
+    }
+
+    [Fact]
+    public void RejectsPredicate_KnownColumnsOnly_IgnoresOnlyParamIdentifiers()
+    {
+        string[] grouped = ["department"];
+
+        // A client parameter identifier is not a filtered column.
+        AggregationNegationGuard.RejectsPredicate("department <> __param_p0", grouped, Meta, knownColumnsOnly: true).ShouldBeFalse();
+        AggregationNegationGuard.RejectsPredicate("department <> __PARAM_p0", grouped, Meta, knownColumnsOnly: true).ShouldBeFalse();
+
+        // It never hides a real column in the same predicate.
+        AggregationNegationGuard.RejectsPredicate("status <> __param_p0", grouped, Meta, knownColumnsOnly: true).ShouldBeTrue();
+
+        // Any other unknown identifier is refused.
+        AggregationNegationGuard.RejectsPredicate("department <> mystery", grouped, Meta, knownColumnsOnly: true).ShouldBeTrue();
+        AggregationNegationGuard.RejectsPredicate("department <> other_param_p0", grouped, Meta, knownColumnsOnly: true).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void RejectsPredicate_KnownColumnsOnly_ColumnWithParamPrefixIsAColumn()
+    {
+        var meta = new TableMetadata
+        {
+            Identifier = Meta.Identifier,
+            Columns =
+            [
+                new TableColumn { ColumnName = "department", DataType = "varchar" },
+                new TableColumn { ColumnName = "__param_x", DataType = "varchar" }
+            ]
+        };
+
+        AggregationNegationGuard.RejectsPredicate("__param_x <> 'a'", ["department"], meta, knownColumnsOnly: true).ShouldBeTrue();
+        AggregationNegationGuard.RejectsPredicate("__param_x <> 'a'", ["__param_x"], meta, knownColumnsOnly: true).ShouldBeFalse();
+    }
 }

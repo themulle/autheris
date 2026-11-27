@@ -67,7 +67,7 @@ public sealed class MetricViewStatementGuardTests
     {
         var mv = MakeMetricView();
         Should.Throw<WebSqlPolicyException>(() =>
-            MetricViewStatementGuard.EnforceForSingleTable(sql, mv, AllowAll(mv), DatabaseDialect.Databricks))
+            MetricViewStatementGuard.EnforceForSingleTable(sql, mv, AllowAll(mv), DatabaseDialect.Databricks, 0, true))
             .Message.ShouldBe(MetricViewStatementGuard.RefusalMessage);
     }
 
@@ -77,7 +77,7 @@ public sealed class MetricViewStatementGuardTests
     {
         var mv = MakeMetricView();
         Should.Throw<WebSqlPolicyException>(() =>
-            MetricViewStatementGuard.EnforceForSingleTable("SELECT region, revenue FROM analytics.sales_mv GROUP BY region, revenue", mv, AllowAll(mv), DatabaseDialect.Databricks))
+            MetricViewStatementGuard.EnforceForSingleTable("SELECT region, revenue FROM analytics.sales_mv GROUP BY region, revenue", mv, AllowAll(mv), DatabaseDialect.Databricks, 0, true))
             .Message.ShouldBe(MetricViewStatementGuard.RefusalMessage);
     }
 
@@ -87,7 +87,7 @@ public sealed class MetricViewStatementGuardTests
     {
         var mv = MakeMetricView();
         Should.Throw<WebSqlPolicyException>(() =>
-            MetricViewStatementGuard.EnforceForSingleTable("SELECT region, MEASURE(region) FROM analytics.sales_mv GROUP BY region", mv, AllowAll(mv), DatabaseDialect.Databricks))
+            MetricViewStatementGuard.EnforceForSingleTable("SELECT region, MEASURE(region) FROM analytics.sales_mv GROUP BY region", mv, AllowAll(mv), DatabaseDialect.Databricks, 0, true))
             .Message.ShouldBe(MetricViewStatementGuard.RefusalMessage);
     }
 
@@ -97,7 +97,7 @@ public sealed class MetricViewStatementGuardTests
     {
         var mv = MakeMetricView();
         Should.Throw<WebSqlPolicyException>(() =>
-            MetricViewStatementGuard.EnforceForSingleTable("SELECT region, MEASURE(does_not_exist) FROM analytics.sales_mv GROUP BY region", mv, AllowAll(mv), DatabaseDialect.Databricks))
+            MetricViewStatementGuard.EnforceForSingleTable("SELECT region, MEASURE(does_not_exist) FROM analytics.sales_mv GROUP BY region", mv, AllowAll(mv), DatabaseDialect.Databricks, 0, true))
             .Message.ShouldBe(MetricViewStatementGuard.RefusalMessage);
     }
 
@@ -107,7 +107,7 @@ public sealed class MetricViewStatementGuardTests
     {
         var mv = MakeMetricView();
         Should.Throw<WebSqlPolicyException>(() =>
-            MetricViewStatementGuard.EnforceForSingleTable("SELECT m.region, MEASURE(m.revenue) FROM analytics.sales_mv m JOIN analytics.other o ON m.region = o.region GROUP BY m.region", mv, AllowAll(mv), DatabaseDialect.Databricks))
+            MetricViewStatementGuard.EnforceForSingleTable("SELECT m.region, MEASURE(m.revenue) FROM analytics.sales_mv m JOIN analytics.other o ON m.region = o.region GROUP BY m.region", mv, AllowAll(mv), DatabaseDialect.Databricks, 0, true))
             .Message.ShouldBe(MetricViewStatementGuard.RefusalMessage);
     }
 
@@ -117,7 +117,7 @@ public sealed class MetricViewStatementGuardTests
     {
         var mv = MakeMetricView();
         Should.Throw<WebSqlPolicyException>(() =>
-            MetricViewStatementGuard.EnforceForSingleTable("SELECT region FROM (SELECT region FROM analytics.sales_mv) s", mv, AllowAll(mv), DatabaseDialect.Databricks))
+            MetricViewStatementGuard.EnforceForSingleTable("SELECT region FROM (SELECT region FROM analytics.sales_mv) s", mv, AllowAll(mv), DatabaseDialect.Databricks, 0, true))
             .Message.ShouldBe(MetricViewStatementGuard.RefusalMessage);
     }
 
@@ -130,7 +130,7 @@ public sealed class MetricViewStatementGuardTests
     {
         var mv = MakeMetricView();
         Should.Throw<WebSqlPolicyException>(() =>
-            MetricViewStatementGuard.EnforceForSingleTable("SELECT region, MEASURE(revenue) FROM analytics.sales_mv GROUP BY region", mv, AllowAll(mv), dialect))
+            MetricViewStatementGuard.EnforceForSingleTable("SELECT region, MEASURE(revenue) FROM analytics.sales_mv GROUP BY region", mv, AllowAll(mv), dialect, 0, true))
             .Message.ShouldBe(MetricViewStatementGuard.RefusalMessage);
     }
 
@@ -140,7 +140,7 @@ public sealed class MetricViewStatementGuardTests
     {
         var mv = MakeMetricView();
         Should.Throw<WebSqlPolicyException>(() =>
-            MetricViewStatementGuard.EnforceForSingleTable("SELECT region, MEASURE(revenue) FROM analytics.sales_mv WHERE MEASURE(revenue) > 10 GROUP BY region", mv, AllowAll(mv), DatabaseDialect.Databricks))
+            MetricViewStatementGuard.EnforceForSingleTable("SELECT region, MEASURE(revenue) FROM analytics.sales_mv WHERE MEASURE(revenue) > 10 GROUP BY region", mv, AllowAll(mv), DatabaseDialect.Databricks, 0, true))
             .Message.ShouldBe(MetricViewStatementGuard.RefusalMessage);
     }
 
@@ -150,7 +150,7 @@ public sealed class MetricViewStatementGuardTests
     {
         var mv = MakeMetricView();
         Should.Throw<WebSqlPolicyException>(() =>
-            MetricViewStatementGuard.EnforceForSingleTable("SELECT region, MEASURE(MEASURE(revenue)) FROM analytics.sales_mv GROUP BY region", mv, AllowAll(mv), DatabaseDialect.Databricks))
+            MetricViewStatementGuard.EnforceForSingleTable("SELECT region, MEASURE(MEASURE(revenue)) FROM analytics.sales_mv GROUP BY region", mv, AllowAll(mv), DatabaseDialect.Databricks, 0, true))
             .Message.ShouldBe(MetricViewStatementGuard.RefusalMessage);
     }
 
@@ -159,7 +159,7 @@ public sealed class MetricViewStatementGuardTests
     {
         var mv = MakeMetricView();
         Should.NotThrow(() =>
-            MetricViewStatementGuard.EnforceForSingleTable("SELECT region, MEASURE(revenue) FROM analytics.sales_mv GROUP BY ALL", mv, AllowAll(mv), DatabaseDialect.Databricks));
+            MetricViewStatementGuard.EnforceForSingleTable("SELECT region, MEASURE(revenue) FROM analytics.sales_mv GROUP BY ALL", mv, AllowAll(mv), DatabaseDialect.Databricks, 0, true));
     }
 
     [Fact]
@@ -167,7 +167,7 @@ public sealed class MetricViewStatementGuardTests
     {
         var mv = MakeMetricView();
         Should.NotThrow(() =>
-            MetricViewStatementGuard.EnforceForSingleTable("SELECT region, MEASURE(revenue) FROM analytics.sales_mv GROUP BY region HAVING MEASURE(revenue) > 100", mv, AllowAll(mv), DatabaseDialect.Databricks));
+            MetricViewStatementGuard.EnforceForSingleTable("SELECT region, MEASURE(revenue) FROM analytics.sales_mv GROUP BY region HAVING MEASURE(revenue) > 100", mv, AllowAll(mv), DatabaseDialect.Databricks, 0, true));
     }
 
     [Fact]
@@ -180,7 +180,7 @@ public sealed class MetricViewStatementGuardTests
                 "SELECT region, MEASURE(revenue) FROM analytics.sales_mv GROUP BY region",
                 mv,
                 AllowAll(mv, rowFilterSql: "revenue > 0"),
-                DatabaseDialect.Databricks))
+                DatabaseDialect.Databricks, 0, true))
             .Message.ShouldBe(MetricViewStatementGuard.RefusalMessage);
     }
 
@@ -194,7 +194,7 @@ public sealed class MetricViewStatementGuardTests
                 "SELECT region, MEASURE(revenue) FROM analytics.sales_mv GROUP BY region",
                 mv,
                 AllowAll(mv, rowFilterSql: "region = 'EU'"),
-                DatabaseDialect.Databricks));
+                DatabaseDialect.Databricks, 0, true));
 
         var mvBadTenant = MakeMetricView(tenantColumn: "revenue");
         Should.Throw<WebSqlPolicyException>(() =>
@@ -202,7 +202,7 @@ public sealed class MetricViewStatementGuardTests
                 "SELECT region, MEASURE(revenue) FROM analytics.sales_mv GROUP BY region",
                 mvBadTenant,
                 AllowAll(mvBadTenant),
-                DatabaseDialect.Databricks))
+                DatabaseDialect.Databricks, 0, true))
             .Message.ShouldBe(MetricViewStatementGuard.RefusalMessage);
     }
 
@@ -254,7 +254,7 @@ public sealed class MetricViewStatementGuardTests
     {
         var mv = MakeMetricView(minGroupSize: 5, countMeasure: null);
         Should.Throw<WebSqlPolicyException>(() =>
-            MetricViewStatementGuard.EnforceForSingleTable("SELECT region, MEASURE(revenue) FROM analytics.sales_mv GROUP BY region", mv, AllowAll(mv), DatabaseDialect.Databricks))
+            MetricViewStatementGuard.EnforceForSingleTable("SELECT region, MEASURE(revenue) FROM analytics.sales_mv GROUP BY region", mv, AllowAll(mv), DatabaseDialect.Databricks, 0, true))
             .Message.ShouldBe(MetricViewStatementGuard.RefusalMessage);
     }
 
@@ -267,7 +267,7 @@ public sealed class MetricViewStatementGuardTests
             "SELECT region, MEASURE(revenue) FROM analytics.sales_mv GROUP BY region",
             mv,
             AllowAll(mv),
-            DatabaseDialect.Databricks);
+            DatabaseDialect.Databricks, 0, true);
 
         result.HiddenCountColumnAlias.ShouldNotBeNullOrWhiteSpace();
         result.EffectiveMinGroupSize.ShouldBe(5);
@@ -303,7 +303,7 @@ public sealed class MetricViewStatementGuardTests
             sql,
             mv,
             AllowAll(mv),
-            DatabaseDialect.Databricks);
+            DatabaseDialect.Databricks, 0, true);
 
         result.AugmentedSql.ShouldNotBeNull();
         var engine = new FastSqlEngine();
@@ -320,7 +320,7 @@ public sealed class MetricViewStatementGuardTests
                 "SELECT *** MEASURE(x) FROM regular_table",
                 new Dictionary<TableIdentity, TableMetadata>(),
                 new Dictionary<TableIdentity, TableAccessDecision>(),
-                DatabaseDialect.Databricks))
+                DatabaseDialect.Databricks, 0, true))
             .Message.ShouldBe(MetricViewStatementGuard.RefusalMessage);
     }
 
@@ -351,7 +351,7 @@ public sealed class MetricViewStatementGuardTests
         var decision = TableAccessDecision.Allowed(mv.Identifier, levels);
 
         Should.Throw<WebSqlPolicyException>(() =>
-            MetricViewStatementGuard.EnforceForSingleTable(sql, mv, decision, DatabaseDialect.Databricks))
+            MetricViewStatementGuard.EnforceForSingleTable(sql, mv, decision, DatabaseDialect.Databricks, 0, true))
             .Message.ShouldBe(MetricViewStatementGuard.RefusalMessage);
     }
 
@@ -371,7 +371,7 @@ public sealed class MetricViewStatementGuardTests
             "SELECT region, MEASURE(revenue) FROM analytics.sales_mv GROUP BY region",
             mv,
             TableAccessDecision.Allowed(mv.Identifier, denyCountLevels),
-            DatabaseDialect.Databricks);
+            DatabaseDialect.Databricks, 0, true);
 
         guard.InternalCountMeasureColumn.ShouldBe("row_count");
         guard.AugmentedSql!.ShouldContain("MEASURE(\"row_count\")");
@@ -381,7 +381,7 @@ public sealed class MetricViewStatementGuardTests
                 "SELECT region, MEASURE(revenue), MEASURE(row_count) FROM analytics.sales_mv GROUP BY region",
                 mv,
                 TableAccessDecision.Allowed(mv.Identifier, denyCountLevels),
-                DatabaseDialect.Databricks))
+                DatabaseDialect.Databricks, 0, true))
             .Message.ShouldBe(MetricViewStatementGuard.RefusalMessage);
 
         var maskedCountLevels = new Dictionary<string, ColumnAccessLevel>(denyCountLevels, StringComparer.OrdinalIgnoreCase)
@@ -393,8 +393,198 @@ public sealed class MetricViewStatementGuardTests
                 "SELECT region, MEASURE(revenue) FROM analytics.sales_mv GROUP BY region",
                 mv,
                 TableAccessDecision.Allowed(mv.Identifier, maskedCountLevels),
-                DatabaseDialect.Databricks))
+                DatabaseDialect.Databricks, 0, true))
             .Message.ShouldBe(MetricViewStatementGuard.RefusalMessage);
+    }
+
+    private const string ByOrderDate = "SELECT order_date, MEASURE(revenue) FROM analytics.sales_mv WHERE {0} GROUP BY order_date";
+
+    private static string Fill(string template, string predicate) =>
+        template.Replace("{0}", predicate, StringComparison.Ordinal);
+
+    private static MetricViewGuardResult Run(string sql, TableMetadata mv, int floor, bool restrictNegatedFilters = true) =>
+        MetricViewStatementGuard.EnforceForSingleTable(sql, mv, AllowAll(mv), DatabaseDialect.Databricks, floor, restrictNegatedFilters);
+
+    private static void ShouldRefuse(string sql, TableMetadata mv, int floor = 5, bool restrictNegatedFilters = true) =>
+        Should.Throw<WebSqlPolicyException>(() => Run(sql, mv, floor, restrictNegatedFilters))
+            .Message.ShouldBe(MetricViewStatementGuard.RefusalMessage);
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void PassedFloor_WithoutCatalogValue_InjectsHiddenCountMeasure()
+    {
+        var mv = MakeMetricView(countMeasure: "row_count");
+        var result = Run("SELECT region, MEASURE(revenue) FROM analytics.sales_mv GROUP BY region", mv, 5);
+
+        result.EffectiveMinGroupSize.ShouldBe(5);
+        result.InternalCountMeasureColumn.ShouldBe("row_count");
+        result.AugmentedSql!.ShouldContain("MEASURE(\"row_count\")");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void PassedFloor_WithoutCountMeasure_IsRefused() =>
+        ShouldRefuse("SELECT region, MEASURE(revenue) FROM analytics.sales_mv GROUP BY region", MakeMetricView());
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void PassedFloorOfOne_DoesNotInjectCountMeasure()
+    {
+        var mv = MakeMetricView();
+        var result = Run("SELECT region, MEASURE(revenue) FROM analytics.sales_mv GROUP BY region", mv, 1);
+
+        result.AugmentedSql.ShouldBeNull();
+        result.EffectiveMinGroupSize.ShouldBe(0);
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("region <> 'EU'")]
+    [InlineData("region != 'EU'")]
+    [InlineData("region NOT IN ('EU', 'US')")]
+    [InlineData("region NOT LIKE 'E%'")]
+    [InlineData("region NOT BETWEEN 'A' AND 'F'")]
+    [InlineData("NOT (region = 'EU')")]
+    public void NegatedWhere_OnNonGroupedDimension_IsRefused(string predicate)
+    {
+        var mv = MakeMetricView(countMeasure: "row_count");
+        ShouldRefuse(Fill(ByOrderDate, predicate), mv);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void NegatedWhere_WithNegationGuardOff_IsAccepted()
+    {
+        var mv = MakeMetricView(countMeasure: "row_count");
+        Run(Fill(ByOrderDate, "region <> 'EU'"), mv, 5, restrictNegatedFilters: false).AugmentedSql.ShouldNotBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void NegatedWhere_WithKOfOne_IsAccepted()
+    {
+        var mv = MakeMetricView();
+        Should.NotThrow(() => Run(Fill(ByOrderDate, "region <> 'EU'"), mv, 1));
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("region <> 'EU'")]
+    [InlineData("region NOT IN ('EU')")]
+    [InlineData("NOT (region = 'EU')")]
+    public void NegatedWhere_OnBareGroupedColumn_IsAccepted(string predicate)
+    {
+        var mv = MakeMetricView(countMeasure: "row_count");
+        Run($"SELECT region, MEASURE(revenue) FROM analytics.sales_mv WHERE {predicate} GROUP BY region", mv, 5).AugmentedSql.ShouldNotBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void NegatedWhere_OnColumnGroupedOnlyInsideExpression_IsRefused()
+    {
+        var mv = MakeMetricView(countMeasure: "row_count");
+        const string Sql = "SELECT CAST(region AS STRING) AS r, MEASURE(revenue) FROM analytics.sales_mv WHERE {0} GROUP BY CAST(region AS STRING)";
+        Should.NotThrow(() => Run(Fill(Sql, "region = 'EU'"), mv, 5));
+        ShouldRefuse(Fill(Sql, "region <> 'EU'"), mv);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void GroupByAll_BareProjectionColumn_IsExemptFromNegationCheck()
+    {
+        var mv = MakeMetricView(countMeasure: "row_count");
+        Run("SELECT region, MEASURE(revenue) FROM analytics.sales_mv WHERE region <> 'EU' GROUP BY ALL", mv, 5)
+            .AugmentedSql.ShouldNotBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void GroupByAll_ExpressionProjection_IsNotExempt()
+    {
+        var mv = MakeMetricView(countMeasure: "row_count");
+        const string Sql = "SELECT CAST(region AS STRING) AS r, MEASURE(revenue) FROM analytics.sales_mv WHERE {0} GROUP BY ALL";
+        Should.NotThrow(() => Run(Fill(Sql, "region = 'EU'"), mv, 5));
+        ShouldRefuse(Fill(Sql, "region <> 'EU'"), mv);
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("\"REGION\" <> 'EU'")]
+    [InlineData("sales_mv.region <> 'EU'")]
+    [InlineData("analytics.sales_mv.Region != 'EU'")]
+    [InlineData("`Region` <> 'EU'")]
+    public void NegatedWhere_QuotedQualifiedAndMixedCaseColumn_IsRefused(string predicate)
+    {
+        var mv = MakeMetricView(countMeasure: "row_count");
+        ShouldRefuse(Fill(ByOrderDate, predicate), mv);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ParameterIdentifier_DoesNotHideColumnReference()
+    {
+        var mv = MakeMetricView(countMeasure: "row_count");
+        ShouldRefuse(Fill(ByOrderDate, "region <> __param_p0"), mv);
+        ShouldRefuse(Fill(ByOrderDate, "__param_p0 <> region"), mv);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ColumnNamedWithParamPrefix_IsStillTreatedAsColumn()
+    {
+        var baseView = MakeMetricView(countMeasure: "row_count");
+        var mv = baseView with
+        {
+            Columns = [.. baseView.Columns, new TableColumn { ColumnName = "__param_region", DataType = "string", Role = MetricViewColumnRole.Dimension }]
+        };
+        var decision = TableAccessDecision.Allowed(
+            mv.Identifier,
+            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
+            {
+                ["region"] = ColumnAccessLevel.Clear,
+                ["order_date"] = ColumnAccessLevel.Clear,
+                ["revenue"] = ColumnAccessLevel.Clear,
+                ["row_count"] = ColumnAccessLevel.Clear,
+                ["__param_region"] = ColumnAccessLevel.Clear
+            });
+
+        Should.Throw<WebSqlPolicyException>(() => MetricViewStatementGuard.EnforceForSingleTable(
+            Fill(ByOrderDate, "__param_region <> 'EU'"), mv, decision, DatabaseDialect.Databricks, 5, true));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void UnknownNonParamIdentifier_IsRefused()
+    {
+        var mv = MakeMetricView(countMeasure: "row_count");
+        ShouldRefuse(Fill(ByOrderDate, "mystery_col = 'x'"), mv);
+        ShouldRefuse(Fill(ByOrderDate, "mystery_col <> 'x'"), mv);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Having_OnNonGroupedDimension_IsRefused()
+    {
+        var mv = MakeMetricView(countMeasure: "row_count");
+        const string Sql = "SELECT region, MEASURE(revenue) FROM analytics.sales_mv GROUP BY region HAVING order_date > 5";
+        ShouldRefuse(Sql, mv);
+        Should.NotThrow(() => Run(Sql, mv, 5, restrictNegatedFilters: false));
+        Should.NotThrow(() => Run(
+            "SELECT region, MEASURE(revenue) FROM analytics.sales_mv GROUP BY region HAVING region = 'EU'", mv, 5));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void RefusalMessage_ContainsNoSqlOrColumnNames()
+    {
+        var mv = MakeMetricView(countMeasure: "row_count");
+        var ex = Should.Throw<WebSqlPolicyException>(() => Run(Fill(ByOrderDate, "region <> 'EU'"), mv, 5));
+
+        ex.Message.ShouldBe(MetricViewStatementGuard.RefusalMessage);
+        ex.Message.ShouldNotContain("region");
+        ex.Message.ShouldNotContain("sales_mv");
+        ex.Message.ShouldNotContain("5");
+        ex.Message.ShouldNotContain("EU");
     }
 
     private sealed class InMemoryPolicyProvider : IPolicyPredicateProvider

@@ -39,6 +39,35 @@ public sealed class MetricViewGroupSizeExecutionTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public async Task SmallGroupStrategyMergeIntoOther_StillSuppresses()
+    {
+        var analytics = new AnalyticsOptions { SmallGroupStrategy = SmallGroupStrategy.MergeIntoOther };
+        var rewriter = new GovernedSqlRewriter(Options.Create(new GatewayOptions()), analyticsOptions: Options.Create(analytics));
+        var view = new TableMetadata
+        {
+            Identifier = new TableIdentifier("dbx", "analytics", "sales_mv"),
+            Table = new Table { Id = Guid.NewGuid(), SchemaName = "analytics", TableName = "sales_mv", ObjectKind = DiscoveryObjectKind.MetricView }
+        };
+        int k = await rewriter.ResolveMetricViewMinGroupSizeAsync(view, new TenantId(Tenant), CancellationToken.None);
+        k.ShouldBe(5);
+
+        await using var raw = new SequentialAccessReader(
+            ["region", MetricViewStatementGuard.HiddenCountAlias],
+            [typeof(string), typeof(long)],
+            [["EU", 12L], ["US", 4L]]);
+        await using var wrapper = new MetricViewGroupSizeDataReader(raw, hiddenOrdinal: 1, minGroupSize: k);
+
+        var surviving = new List<string>();
+        while (await wrapper.ReadAsync(CancellationToken.None))
+        {
+            surviving.Add(wrapper.GetString(0));
+        }
+
+        surviving.ShouldBe(["EU"]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public async Task SequentialAccessReader_DropsSmallGroups_HidesInternalCountColumn_AndHandlesZeroRows()
     {
         await using var raw = new SequentialAccessReader(

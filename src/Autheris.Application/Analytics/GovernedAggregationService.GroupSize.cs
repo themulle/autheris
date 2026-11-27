@@ -19,7 +19,7 @@ public sealed partial class GovernedAggregationService
 {
     internal static EffectiveMinGroupSize Resolve(
         TableMetadata metadata,
-        AggregationQuery query,
+        AggregationQuery? query,
         OperatorFloor operatorFloor,
         AnalyticsPrivacyOptions? privacy = null,
         ILogger? logger = null,
@@ -34,7 +34,7 @@ public sealed partial class GovernedAggregationService
 
     internal static EffectiveMinGroupSize Resolve(
         IReadOnlyList<TableMetadata> tables,
-        AggregationQuery query,
+        AggregationQuery? query,
         OperatorFloor operatorFloor,
         AnalyticsPrivacyOptions? privacy = null,
         ILogger? logger = null,
@@ -212,37 +212,48 @@ public sealed partial class GovernedAggregationService
         EffectiveProtection? protection = null;
         if (_protectionProvider is not null)
         {
-            try
-            {
-                protection = await _protectionProvider.GetAsync(tenantId, metadata.Identifier, ct).ConfigureAwait(false);
-            }
-            catch (Exception) when (!ct.IsCancellationRequested)
-            {
-                // Fail closed: deny catalog lowering when protection metadata is unavailable.
-                protection = new EffectiveProtection(
-                    new ContainerRef(ContainerKind.Domain, Guid.Empty),
-                    null,
-                    ProtectionClass.Confidential,
-                    ProtectionClass.Confidential,
-                    null,
-                    new Dictionary<string, ColumnProtection>(),
-                    CatalogVisibilityMode.OnRequest);
-            }
+            protection = await LoadProtectionFailClosedAsync(_protectionProvider, tenantId, metadata.Identifier, ct).ConfigureAwait(false);
         }
 
         return ResolveEffectiveMinGroupSize(query, metadata, protection);
     }
 
-    private EffectiveMinGroupSize ResolveEffectiveMinGroupSize(AggregationQuery query, TableMetadata metadata, EffectiveProtection? protection = null)
+    internal static EffectiveProtection ProtectionUnavailable() => new(
+        new ContainerRef(ContainerKind.Domain, Guid.Empty),
+        null,
+        ProtectionClass.Confidential,
+        ProtectionClass.Confidential,
+        null,
+        new Dictionary<string, ColumnProtection>(),
+        CatalogVisibilityMode.OnRequest);
+
+    internal static async Task<EffectiveProtection> LoadProtectionFailClosedAsync(
+        IProtectionSnapshotProvider provider,
+        TenantId tenantId,
+        TableIdentifier table,
+        CancellationToken ct)
     {
-        int resolved = _hasExplicitAnalyticsOptions
-            ? _analyticsOptions.Privacy.DefaultMinGroupSize
+        try
+        {
+            return await provider.GetAsync(tenantId, table, ct).ConfigureAwait(false);
+        }
+        catch (Exception) when (!ct.IsCancellationRequested)
+        {
+            // Fail closed: deny catalog lowering when protection metadata is unavailable.
+            return ProtectionUnavailable();
+        }
+    }
+
+    internal static OperatorFloor BuildOperatorFloor(AnalyticsOptions options, bool hasExplicitOptions, TableIdentifier table)
+    {
+        int resolved = hasExplicitOptions
+            ? options.Privacy.DefaultMinGroupSize
             : 1;
         bool explicitOverride = false;
 
-        foreach (var candidateKey in CandidateTableKeys(query.Table))
+        foreach (var candidateKey in CandidateTableKeys(table))
         {
-            if (_analyticsOptions.TableMinimumGroupSizes.TryGetValue(candidateKey, out var tableMin))
+            if (options.TableMinimumGroupSizes.TryGetValue(candidateKey, out var tableMin))
             {
                 resolved = tableMin;
                 explicitOverride = true;
@@ -250,9 +261,9 @@ public sealed partial class GovernedAggregationService
             }
         }
 
-        foreach (var candidateKey in CandidateTableKeys(query.Table))
+        foreach (var candidateKey in CandidateTableKeys(table))
         {
-            if (_analyticsOptions.Privacy.Datasets.TryGetValue(candidateKey, out var dsOverride) && dsOverride.MinGroupSize.HasValue)
+            if (options.Privacy.Datasets.TryGetValue(candidateKey, out var dsOverride) && dsOverride.MinGroupSize.HasValue)
             {
                 resolved = dsOverride.MinGroupSize.Value;
                 explicitOverride = true;
@@ -260,7 +271,14 @@ public sealed partial class GovernedAggregationService
             }
         }
 
+        return new OperatorFloor(resolved, explicitOverride);
+    }
+
+    private EffectiveMinGroupSize ResolveEffectiveMinGroupSize(AggregationQuery query, TableMetadata metadata, EffectiveProtection? protection = null)
+    {
+        var floor = BuildOperatorFloor(_analyticsOptions, _hasExplicitAnalyticsOptions, query.Table);
+
         // Issue #448: Catalog-owned minimum group size resolution with lowering support for non-personal tables.
-        return Resolve(metadata, query, new OperatorFloor(resolved, explicitOverride), _analyticsOptions.Privacy, _logger, protection);
+        return Resolve(metadata, query, floor, _analyticsOptions.Privacy, _logger, protection);
     }
 }
