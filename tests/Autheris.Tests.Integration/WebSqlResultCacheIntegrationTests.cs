@@ -90,12 +90,12 @@ public sealed class WebSqlResultCacheIntegrationTests : IClassFixture<WebSqlResu
         });
     }
 
-    private async Task<(HttpResponseMessage Response, string Body)> PostAsync(string sid, string sql = Sql, string? resultCache = null)
+    private async Task<(HttpResponseMessage Response, string Body)> PostAsync(string sid, string sql = Sql, string? resultCache = null, Dictionary<string, object?>? parameters = null)
     {
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", sid);
         client.DefaultRequestHeaders.Add("X-Test-Tenant", Tenant);
-        var response = await client.PostAsJsonAsync("/api/v1/sql", new { sql, resultCache });
+        var response = await client.PostAsJsonAsync("/api/v1/sql", new { sql, resultCache, parameters });
         return (response, await response.Content.ReadAsStringAsync());
     }
 
@@ -106,13 +106,13 @@ public sealed class WebSqlResultCacheIntegrationTests : IClassFixture<WebSqlResu
     }
 
     /// <summary>Posts until the caller's own repeated statement is answered from the cache; fails the test when the host never hits, so no test passes vacuously.</summary>
-    private async Task<(HttpResponseMessage Response, string Body)> PostUntilHitAsync(string sid, string sql = Sql)
+    private async Task<(HttpResponseMessage Response, string Body)> PostUntilHitAsync(string sid, string sql = Sql, Dictionary<string, object?>? parameters = null)
     {
-        await PostAsync(sid, sql);
+        await PostAsync(sid, sql, null, parameters);
         (HttpResponseMessage Response, string Body) hit = default;
         await WaitHelper.WaitUntil(async () =>
         {
-            var next = await PostAsync(sid, sql);
+            var next = await PostAsync(sid, sql, null, parameters);
             if (CacheStatus(next.Body) != "hit")
             {
                 return false;
@@ -123,6 +123,28 @@ public sealed class WebSqlResultCacheIntegrationTests : IClassFixture<WebSqlResu
         }, TimeSpan.FromSeconds(10), "resultCache.status=hit for the repeated statement", TimeSpan.FromMilliseconds(200));
 
         return hit;
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ResultCache_NullAndValue_SeparateEntries()
+    {
+        const string optionalSql = "SELECT id, name FROM rc_items WHERE (@n IS NULL OR name = @n) ORDER BY id";
+        var nullValue = new Dictionary<string, object?> { ["n"] = null };
+        var withValue = new Dictionary<string, object?> { ["n"] = "Ada" };
+        await RegisterAsync();
+
+        var (nullHitResponse, nullHitBody) = await PostUntilHitAsync(SidA, optionalSql, nullValue);
+        nullHitResponse.StatusCode.ShouldBe(HttpStatusCode.OK, nullHitBody);
+        nullHitBody.ShouldContain("Bob");
+
+        // the value statement has another compiled shape: it never reads the entry of the null statement
+        var (response, body) = await PostAsync(SidA, optionalSql, null, withValue);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.OK, body);
+        CacheStatus(body).ShouldNotBe("hit");
+        body.ShouldContain("Ada");
+        body.ShouldNotContain("Bob");
     }
 
     [Fact]
