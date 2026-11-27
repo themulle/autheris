@@ -77,7 +77,7 @@ public sealed class McpResourceColumnFilterMcp1Tests
 
         resources.ShouldNotBeEmpty();
         resources.ShouldAllBe(r => !r.Text.Contains("salary_band") && !r.Uri.Contains("salary_band"));
-        resources.ShouldContain(r => r.Uri == "dbt://models/employees/columns/name/docs");
+        resources.ShouldContain(r => r.Uri == "dbt://models/corp/public/employees/columns/name/docs");
     }
 
     [Fact]

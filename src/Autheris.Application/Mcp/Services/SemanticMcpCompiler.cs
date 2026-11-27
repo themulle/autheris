@@ -27,7 +27,8 @@ public sealed class SemanticMcpCompiler(
     IReadPathSwitches? switches = null,
     Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? catalogVisibility = null,
     IGraphQlCatalogMap? graphQlCatalogMap = null,
-    Autheris.Application.Policy.Pdp.IAccessDecisionPoint? decisionPoint = null) : ISemanticMcpCompiler
+    Autheris.Application.Policy.Pdp.IAccessDecisionPoint? decisionPoint = null,
+    IOptions<Autheris.Application.Catalog.Services.CatalogDiscoveryOptions>? discoveryOptions = null) : ISemanticMcpCompiler
 {
     private const int DefaultPageSize = 100;
     private const int MaxPageSize = 100;
@@ -37,6 +38,7 @@ public sealed class SemanticMcpCompiler(
     private readonly ILogger<SemanticMcpCompiler> _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     private readonly IGoldenQueryService? _goldenQueryService = goldenQueryService;
     private readonly IConsentRepository? _consentRepo = consentRepo;
+    private readonly IOptions<Autheris.Application.Catalog.Services.CatalogDiscoveryOptions>? _discoveryOptions = discoveryOptions;
     private readonly IOptions<GatewayOptions>? _options = options;
     private static readonly JsonSerializerOptions CachedIndentedOptions = new() { WriteIndented = true };
 
@@ -144,13 +146,15 @@ public sealed class SemanticMcpCompiler(
             ? visible
             : visible.Where(t => string.Equals(t.Identifier.Domain, domainScope, StringComparison.OrdinalIgnoreCase)).ToList();
 
+        var hiddenText = await HiddenTextColumnsAsync(filtered, principal, ct).ConfigureAwait(false);
         var resources = new List<McpResourceItem>();
         foreach (var t in filtered)
         {
-            resources.Add(RenderGlossary(t));
+            var hiddenCols = HiddenFor(hiddenText, t);
+            resources.Add(RenderGlossary(t, hiddenCols));
             foreach (var col in VisibleColumns(t))
             {
-                if (RenderColumnDocs(t, col) is { } colDoc)
+                if (RenderColumnDocs(t, col, hiddenCols) is { } colDoc)
                 {
                     resources.Add(colDoc);
                 }
@@ -191,20 +195,22 @@ public sealed class SemanticMcpCompiler(
         var visible = await VisibleTablesAsync(allTables, principal, ct).ConfigureAwait(false);
 
         // Descriptor items only (no Text): nothing is rendered and no golden query is loaded to list the URIs.
+        var hiddenText = await HiddenTextColumnsAsync(visible, principal, ct).ConfigureAwait(false);
         var items = new List<McpResourceItem>();
         foreach (var t in visible.OrderBy(t => t.Identifier.ToString(), StringComparer.Ordinal))
         {
             var domain = t.Identifier.Domain;
             var table = t.Identifier.TableName;
+            var hiddenCols = HiddenFor(hiddenText, t);
             items.Add(new McpResourceItem(
-                $"glossary://{domain}/{table}", $"{domain}_{table}_glossary",
+                GlossaryUri(t.Identifier), $"{domain}_{table}_glossary",
                 $"Business glossary and semantic column definitions for {domain}.{table}", "text/markdown", string.Empty));
             foreach (var col in VisibleColumns(t))
             {
-                if (HasColumnDocs(col))
+                if (!hiddenCols.Contains(col.ColumnName) && HasColumnDocs(col))
                 {
                     items.Add(new McpResourceItem(
-                        $"dbt://models/{table}/columns/{col.ColumnName}/docs", $"{table}_{col.ColumnName}_docs",
+                        ColumnDocsUri(t.Identifier, col.ColumnName), $"{table}_{col.ColumnName}_docs",
                         $"Documentation and metadata for {table}.{col.ColumnName}", "text/markdown", string.Empty));
                 }
             }
@@ -212,7 +218,7 @@ public sealed class SemanticMcpCompiler(
             if (_goldenQueryService != null)
             {
                 items.Add(new McpResourceItem(
-                    $"examples://{domain}/{table}", $"{domain}_{table}_golden_queries",
+                    ExamplesUri(t.Identifier), $"{domain}_{table}_golden_queries",
                     $"Verified golden GraphQL queries and few-shot examples for {domain}.{table}", "text/markdown", string.Empty));
             }
         }
@@ -232,7 +238,7 @@ public sealed class SemanticMcpCompiler(
             return null;
         }
 
-        if (!TryParseSemanticUri(uri, out var kind, out var domain, out var table, out var column))
+        if (!TryParseSemanticUri(uri, out var kind, out var domain, out var schema, out var table, out var column))
         {
             return null;
         }
@@ -242,7 +248,9 @@ public sealed class SemanticMcpCompiler(
             table.Length > Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength ||
             table.AsSpan().IndexOfAny('\0', '\r', '\n') >= 0 ||
             (domain is not null && (domain.Length > Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength ||
-                                    domain.AsSpan().IndexOfAny('\0', '\r', '\n') >= 0)))
+                                    domain.AsSpan().IndexOfAny('\0', '\r', '\n') >= 0)) ||
+            (schema is not null && (schema.Length > Autheris.Application.Catalog.CatalogTableQuery.MaxFilterLength ||
+                                    schema.AsSpan().IndexOfAny('\0', '\r', '\n') >= 0)))
         {
             return null;
         }
@@ -254,7 +262,8 @@ public sealed class SemanticMcpCompiler(
                 NamePrefix: table,
                 Limit: Autheris.Application.Catalog.CatalogTableQuery.MaxLimit),
             t => string.Equals(t.Identifier.TableName, table, StringComparison.OrdinalIgnoreCase) &&
-                 (domain is null || string.Equals(t.Identifier.Domain, domain, StringComparison.OrdinalIgnoreCase)),
+                 (domain is null || string.Equals(t.Identifier.Domain, domain, StringComparison.OrdinalIgnoreCase)) &&
+                 (schema is null || string.Equals(t.Identifier.Schema, schema, StringComparison.OrdinalIgnoreCase)),
             ct: ct).ConfigureAwait(false);
         if (candidates.Count == 0)
         {
@@ -275,17 +284,25 @@ public sealed class SemanticMcpCompiler(
             allVisibleForExamples = await VisibleTablesAsync(allActive, principal, ct).ConfigureAwait(false);
         }
 
+        // A URI without the schema (earlier form) that matches tables of different schemas is ambiguous and answers like an unknown one.
+        if (schema is null && visible.Select(t => (t.Identifier.Domain, t.Identifier.Schema)).Distinct().Count() > 1)
+        {
+            return null;
+        }
+
+        var hiddenText = await HiddenTextColumnsAsync(visible, principal, ct).ConfigureAwait(false);
         foreach (var t in visible.OrderBy(t => t.Identifier.ToString(), StringComparer.Ordinal))
         {
+            var hiddenCols = HiddenFor(hiddenText, t);
             switch (kind)
             {
                 case SemanticUriKind.Glossary:
-                    return RenderGlossary(t);
+                    return RenderGlossary(t, hiddenCols);
                 case SemanticUriKind.Examples:
                     return await RenderExamplesAsync(t, allVisibleForExamples ?? visible, principal, ct).ConfigureAwait(false);
                 default:
                     var col = VisibleColumns(t).FirstOrDefault(c => string.Equals(c.ColumnName, column, StringComparison.OrdinalIgnoreCase));
-                    if (col != null && RenderColumnDocs(t, col) is { } doc)
+                    if (col != null && RenderColumnDocs(t, col, hiddenCols) is { } doc)
                     {
                         return doc;
                     }
@@ -304,10 +321,22 @@ public sealed class SemanticMcpCompiler(
         Examples
     }
 
-    private static bool TryParseSemanticUri(string? uri, out SemanticUriKind kind, out string? domain, out string table, out string? column)
+    private static string GlossaryUri(TableIdentifier id) => $"glossary://{id.Domain}/{id.Schema}/{id.TableName}";
+
+    private static string ExamplesUri(TableIdentifier id) => $"examples://{id.Domain}/{id.Schema}/{id.TableName}";
+
+    private static string ColumnDocsUri(TableIdentifier id, string column) =>
+        $"dbt://models/{id.Domain}/{id.Schema}/{id.TableName}/columns/{column}/docs";
+
+    /// <summary>
+    /// Parses the resource URIs: <c>glossary://domain/schema/table</c>, <c>examples://domain/schema/table</c> and
+    /// <c>dbt://models/domain/schema/table/columns/column/docs</c>. The earlier forms without the schema are still accepted (schema is null).
+    /// </summary>
+    private static bool TryParseSemanticUri(string? uri, out SemanticUriKind kind, out string? domain, out string? schema, out string table, out string? column)
     {
         kind = SemanticUriKind.Glossary;
         domain = null;
+        schema = null;
         table = string.Empty;
         column = null;
         if (string.IsNullOrWhiteSpace(uri) || uri.Length > 1024)
@@ -319,13 +348,14 @@ public sealed class SemanticMcpCompiler(
         {
             kind = uri.StartsWith("glossary://", StringComparison.OrdinalIgnoreCase) ? SemanticUriKind.Glossary : SemanticUriKind.Examples;
             var parts = uri["glossary://".Length..].Split('/');
-            if (parts.Length != 2 || parts.Any(string.IsNullOrWhiteSpace))
+            if (parts.Length is not (2 or 3) || parts.Any(string.IsNullOrWhiteSpace))
             {
                 return false;
             }
 
             domain = parts[0];
-            table = parts[1];
+            schema = parts.Length == 3 ? parts[1] : null;
+            table = parts[^1];
             return true;
         }
 
@@ -333,18 +363,107 @@ public sealed class SemanticMcpCompiler(
         if (uri.StartsWith(dbtPrefix, StringComparison.OrdinalIgnoreCase) && uri.EndsWith("/docs", StringComparison.OrdinalIgnoreCase))
         {
             var parts = uri[dbtPrefix.Length..^"/docs".Length].Split('/');
-            if (parts.Length != 3 || !string.Equals(parts[1], "columns", StringComparison.OrdinalIgnoreCase) || parts.Any(string.IsNullOrWhiteSpace))
+            if (parts.Length is not (3 or 5) || parts.Any(string.IsNullOrWhiteSpace) ||
+                !string.Equals(parts[^2], "columns", StringComparison.OrdinalIgnoreCase))
             {
                 return false;
             }
 
             kind = SemanticUriKind.ColumnDocs;
-            table = parts[0];
-            column = parts[2];
+            if (parts.Length == 5)
+            {
+                domain = parts[0];
+                schema = parts[1];
+            }
+
+            table = parts[^3];
+            column = parts[^1];
             return true;
         }
 
         return false;
+    }
+
+    private static readonly IReadOnlySet<string> EmptyColumnSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+    private static IReadOnlySet<string> HiddenFor(IReadOnlyDictionary<TableIdentifier, IReadOnlySet<string>> hiddenText, TableMetadata t) =>
+        hiddenText.TryGetValue(t.Identifier, out var set) ? set : EmptyColumnSet;
+
+    /// <summary>
+    /// The columns of each table whose catalog text (description, long description, meta) must not reach the caller: the same rule the
+    /// discovery path applies (a column that is not clear for the caller and whose text is hidden, or masked for a restricted scope when
+    /// the tenant option is on). Fails closed: when the decision cannot be made every column of the table is treated as hidden.
+    /// </summary>
+    private async Task<IReadOnlyDictionary<TableIdentifier, IReadOnlySet<string>>> HiddenTextColumnsAsync(
+        IReadOnlyList<TableMetadata> tables,
+        System.Security.Claims.ClaimsPrincipal? principal,
+        CancellationToken ct)
+    {
+        var result = new Dictionary<TableIdentifier, IReadOnlySet<string>>();
+        if (decisionPoint is null || tables.Count == 0 || _options?.Value.IsMcpAuthBypassed == true)
+        {
+            return result;
+        }
+
+        Dictionary<TableIdentifier, Autheris.Domain.Interfaces.TableAccessDecision> byTable = [];
+        try
+        {
+            if (principal is null)
+            {
+                throw new InvalidOperationException("No caller identity.");
+            }
+
+            var decisions = await decisionPoint.DecideManyAsync(
+                Autheris.Domain.Security.SecurityPrincipalContext.FromPrincipal(principal, McpCatalogVisibility.TryTenantId(principal)),
+                tables,
+                Autheris.Application.Policy.Pdp.AccessOperation.Discover,
+                Autheris.Application.Policy.Pdp.AccessTransport.Mcp,
+                ct).ConfigureAwait(false);
+            foreach (var d in decisions ?? [])
+            {
+                if (d is not null)
+                {
+                    byTable[d.Table] = d;
+                }
+            }
+        }
+        catch (Exception ex) when (ex is not OutOfMemoryException and not OperationCanceledException)
+        {
+            _logger.LogWarning(ex, "Semantic resource text visibility could not be decided; catalog text of all columns is withheld");
+            byTable.Clear();
+        }
+
+        var hideForRestrictedScopes = _discoveryOptions?.Value.Discovery?.HideMaskedColumnCatalogTextForRestrictedScopes == true;
+        foreach (var t in tables)
+        {
+            var hidden = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+            if (!byTable.TryGetValue(t.Identifier, out var decision) || !decision.IsAllowed)
+            {
+                foreach (var col in t.Columns)
+                {
+                    hidden.Add(col.ColumnName);
+                }
+            }
+            else
+            {
+                foreach (var col in t.Columns)
+                {
+                    var (state, _) = Autheris.Application.Catalog.Discovery.DiscoveryAccessMapper.MapColumnState(t, decision, col.ColumnName);
+                    if (state != DiscoveryColumnState.Clear &&
+                        (decision.IsCatalogTextHidden(col.ColumnName, t) || (hideForRestrictedScopes && decision.ScopeClearance is not null)))
+                    {
+                        hidden.Add(col.ColumnName);
+                    }
+                }
+            }
+
+            if (hidden.Count > 0)
+            {
+                result[t.Identifier] = hidden;
+            }
+        }
+
+        return result;
     }
 
     /// <summary>
@@ -393,7 +512,7 @@ public sealed class SemanticMcpCompiler(
         return true;
     }).ToList();
 
-    private static McpResourceItem RenderGlossary(TableMetadata t)
+    private static McpResourceItem RenderGlossary(TableMetadata t, IReadOnlySet<string> hiddenText)
     {
         var domain = t.Identifier.Domain;
         var table = t.Identifier.TableName;
@@ -408,12 +527,12 @@ public sealed class SemanticMcpCompiler(
                            string.Join("\n", visibleColumns.Select(c =>
                            {
                                var sensitivityTag = ClassificationMetadata.IsColumnSensitive(t, c) ? " [SENSITIVE/MASKED]" : "";
-                               var descTag = !string.IsNullOrWhiteSpace(c.Description) ? $": {c.Description}" : "";
+                               var descTag = !hiddenText.Contains(c.ColumnName) && !string.IsNullOrWhiteSpace(c.Description) ? $": {c.Description}" : "";
                                return $"  - `{c.ColumnName}` ({c.DataType}){sensitivityTag}{descTag}";
                            }));
 
         return new McpResourceItem(
-            Uri: $"glossary://{domain}/{table}",
+            Uri: GlossaryUri(t.Identifier),
             Name: $"{domain}_{table}_glossary",
             Description: $"Business glossary and semantic column definitions for {domain}.{table}",
             MimeType: "text/markdown",
@@ -438,8 +557,13 @@ public sealed class SemanticMcpCompiler(
     private static bool HasColumnDocs(TableColumn col) =>
         !string.IsNullOrWhiteSpace(col.Description) || !string.IsNullOrWhiteSpace(col.LongDescription) || DescriptiveMeta(col).Count > 0;
 
-    private static McpResourceItem? RenderColumnDocs(TableMetadata t, TableColumn col)
+    private static McpResourceItem? RenderColumnDocs(TableMetadata t, TableColumn col, IReadOnlySet<string> hiddenText)
     {
+        if (hiddenText.Contains(col.ColumnName))
+        {
+            return null;
+        }
+
         var domain = t.Identifier.Domain;
         var table = t.Identifier.TableName;
         var hasDesc = !string.IsNullOrWhiteSpace(col.Description);
@@ -485,7 +609,7 @@ public sealed class SemanticMcpCompiler(
         }
 
         return new McpResourceItem(
-            Uri: $"dbt://models/{table}/columns/{col.ColumnName}/docs",
+            Uri: ColumnDocsUri(t.Identifier, col.ColumnName),
             Name: $"{table}_{col.ColumnName}_docs",
             Description: $"Documentation and metadata for {table}.{col.ColumnName}",
             MimeType: "text/markdown",
@@ -633,7 +757,7 @@ public sealed class SemanticMcpCompiler(
         }
 
         return new McpResourceItem(
-            Uri: $"examples://{domain}/{table}",
+            Uri: ExamplesUri(t.Identifier),
             Name: $"{domain}_{table}_golden_queries",
             Description: $"Verified golden GraphQL queries and few-shot examples for {domain}.{table}",
             MimeType: "text/markdown",

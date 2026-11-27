@@ -109,6 +109,7 @@ public sealed partial class McpToolExecutionHandler
             }
 
             McpResultMasking.Report(sqlResult.HasPolicyMaskedValues);
+            McpRowContinuation.Offer(sqlResult.ResumeAfter);
             return JsonSerializer.Serialize(McpSqlQueryResult.From(sqlResult), JsonOpts);
         }
         catch (SqlPagingTokenInvalidException)

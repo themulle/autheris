@@ -59,17 +59,19 @@ public sealed class McpSemanticResourceSecurityTests
         return service;
     }
 
-    private static SemanticMcpCompiler Compiler(
+    internal static SemanticMcpCompiler Compiler(
         IReadOnlyList<TableMetadata> tables,
         ICatalogVisibilityService? visibility,
-        IGoldenQueryService? golden = null)
+        IGoldenQueryService? golden = null,
+        Autheris.Application.Policy.Pdp.IAccessDecisionPoint? decisionPoint = null,
+        IOptions<Autheris.Application.Catalog.Services.CatalogDiscoveryOptions>? discoveryOptions = null)
     {
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.StubAllTables(Task.FromResult(tables));
         Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.ServeCatalogReads(repo);
         return new SemanticMcpCompiler(
             repo, NullLogger<SemanticMcpCompiler>.Instance, golden, AllowAll(tables.Select(t => t.Identifier)),
-            catalogVisibility: visibility);
+            catalogVisibility: visibility, decisionPoint: decisionPoint, discoveryOptions: discoveryOptions);
     }
 
     [Fact]
@@ -79,7 +81,7 @@ public sealed class McpSemanticResourceSecurityTests
         var compiler = Compiler([Table(Orders), Table(Payroll)], VisibleOnly(Orders));
 
         var page = await compiler.ListSemanticResourceUrisAsync(User());
-        page.Items.ShouldContain(r => r.Uri == "glossary://sales/orders");
+        page.Items.ShouldContain(r => r.Uri == "glossary://sales/public/orders");
         page.Items.ShouldNotContain(r => r.Uri.Contains("payroll"));
 
         (await compiler.ReadSemanticResourceAsync(User(), "glossary://sales/orders")).ShouldNotBeNull();

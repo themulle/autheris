@@ -73,7 +73,7 @@ public sealed class McpErrorClassificationTests
     [Fact]
     public async Task TokenBudgetReplacement_IsErrorViaFlag_NotBySniffing_AuditStaysAllowTruncated()
     {
-        var payload = "{\"rows\":[" + string.Join(',', Enumerable.Range(0, 400).Select(i => $"{{\"id\":{i},\"name\":\"value-{i}\"}}")) + "]}";
+        var payload = "{\"rows\":[{\"id\":1,\"name\":\"value-" + new string('x', 400) + "\"}]}";
         var rig = Rig(payload, maxTokens: 50);
 
         var result = await rig.Call("sample_rows", Args);

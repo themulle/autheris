@@ -203,10 +203,18 @@ public sealed partial class GovernedSqlExecutor
             isTruncated = true;
         }
 
+        // A continuation can only start inside the rows this page delivered.
+        var mintResume = pageOutcome?.ResumeAfter;
+        var deliveredRows = rows.Count;
+        Func<int, string?>? resumeAfter = mintResume is null ? null : kept => kept >= deliveredRows ? null : mintResume(kept);
+
         return new GovernedSqlResult(
             request.Sql, columns.AsReadOnly(), rows.AsReadOnly(), rows.Count, sw.ElapsedMilliseconds,
             isTruncated, columnDescriptions, !_options.Value.IsColumnMaskingDisabled,
-            pageOutcome?.Page, pageOutcome?.NextToken, pageOutcome?.PagingUnavailable, indexHints, sourceStats, maskedColumns);
+            pageOutcome?.Page, pageOutcome?.NextToken, pageOutcome?.PagingUnavailable, indexHints, sourceStats, maskedColumns)
+        {
+            ResumeAfter = resumeAfter,
+        };
     }
 
     public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamRowsAsync(

@@ -516,4 +516,53 @@ public sealed class WebSqlPagingTokenTests
 
         clientParams.ContainsKey("page_offset").ShouldBeTrue();
     }
+
+    private static WebSqlDecodedPageToken RoundTrip(long offset, int size, int number, long maxOffset = 10_000)
+    {
+        var (codec, _, _) = CreateCodec();
+        var user = CreateUser("user-1", "tenant-1");
+        var tenant = new TenantId("tenant-1");
+        const string Sql = "SELECT id FROM crm.customers ORDER BY id";
+        string token = codec.EncodeToken(Sql, null, user, tenant, "crm", "WebSql", offset, size, number, TimeSpan.FromMinutes(15));
+        return codec.DecodeToken(token, Sql, null, user, tenant, "crm", "WebSql", maxOffset);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void DecodeToken_ResumeOffsetNotMultipleOfSize_WithValidMac_IsAccepted()
+    {
+        var decoded = RoundTrip(offset: 103, size: 100, number: 2);
+
+        decoded.Offset.ShouldBe(103);
+        decoded.Size.ShouldBe(100);
+        decoded.PageNumber.ShouldBe(2);
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData(103, 100, 3)]
+    [InlineData(103, 100, 1)]
+    [InlineData(100, 100, 5)]
+    [InlineData(0, 100, 2)]
+    public void DecodeToken_PageNumberInconsistentWithOffset_IsRejected(long offset, int size, int number)
+    {
+        Should.Throw<SqlPagingTokenInvalidException>(() => RoundTrip(offset, size, number));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void DecodeToken_OffsetBeyondMaxOffset_StillRejectedWithConsistentNumber()
+    {
+        Should.Throw<SqlPagingTokenInvalidException>(() => RoundTrip(offset: 203, size: 100, number: 3, maxOffset: 200));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void EncodeToken_AlignedNext_IsUnchangedByNumberDerivation()
+    {
+        var decoded = RoundTrip(offset: 200, size: 100, number: 3);
+
+        decoded.Offset.ShouldBe(200);
+        decoded.PageNumber.ShouldBe(3);
+    }
 }
