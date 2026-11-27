@@ -248,6 +248,10 @@ The bulk table stream seeks on the primary key (else the first unique index) and
 
 `describe_dataset` returns `primaryKeyOrder` (`[{ "column", "direction" }]`, key order, `ASC` / `DESC`) and the index `directions` only for a key or index whose columns are all visible to the caller (access level `Clear` or `Mask`, not discovery-hidden); a key or index touching a denied or hidden column is omitted as a whole, directions included. A masked key column keeps its key and index membership (#1105): the caller already sees the column name in the same answer, and filtering, ordering and joining on a masked column stay refused (`FILTER_ON_MASKED_COLUMN`). The REST catalog dataset detail applies the same rule. The catalog dataset detail reports `primaryKeyDirections` parallel to `primaryKeys` (omitted when every column is ascending). OData and the dynamic OpenAPI document have no direction concept and are unchanged.
 
+### 5.2.3 GraphQL connections
+
+`<tableField>Connection` seeks on the primary key, else the first unique index; a table with neither fails with `KEYSET_PAGINATION_UNAVAILABLE`. A caller-supplied `orderBy` may only name a prefix of the key columns in key order, and each named column may set its own direction; any other `orderBy` is rejected with `INVALID_QUERY`. Without `orderBy` the connection pages in key order. The `after` cursor is bound to the caller, the table, the key directions, the `where` filter and the selected fields, so a cursor sent with a different filter, direction or selection is rejected. For a caller-chosen sort column, use the root list field with `first`/`offset`, where the default key order is appended as a tie-breaker.
+
 ### 5.3 OData next link
 
 `@odata.nextLink` is emitted whenever the look-ahead row proves more rows, for keyed, unique-indexed and unkeyed tables alike. Each path segment (domain, schema, table) is URI-escaped; the link carries only the client's own query options.
