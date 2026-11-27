@@ -88,7 +88,7 @@ public sealed partial class GovernedSqlExecutor
     }
 
     /// <summary>
-    /// a list value is admitted only on WebSql and Trino (a JSON array) or SqlEndpoints (an already normalized
+    /// a list value is admitted only on WebSql, Trino and Mcp (a JSON array) or SqlEndpoints (an already normalized
     /// <see cref="ClientListValue"/>), never on a planned table read, never with another transport or none, never as a loose collection.
     /// </summary>
     private static void AdmitList(GovernedSqlQueryRequest request, object? value)
@@ -96,7 +96,7 @@ public sealed partial class GovernedSqlExecutor
         string? transport = request.Transport;
         bool admitted = !request.PlannedTableRead && value switch
         {
-            JsonElement => transport is SqlTransports.WebSql or SqlTransports.Trino,
+            JsonElement => transport is SqlTransports.WebSql or SqlTransports.Trino or SqlTransports.Mcp,
             ClientListValue => transport is SqlTransports.SqlEndpoints,
             _ => false
         };

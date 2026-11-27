@@ -13,7 +13,7 @@ public sealed class GraphQlChannel(ParityHostFixture host) : IParityChannel
 
     public static string? Render(ParityQuery q)
     {
-        if (q.RawSql is not null)
+        if (q.RawSql is not null || q.Parameters is not null)
         {
             return null;
         }

@@ -40,7 +40,7 @@ internal static class McpDataTargetResolver
         try
         {
             var engine = sqlEngine ?? FastSqlEngine.Default;
-            return MapResolvedSqlTables(engine.Analyze(sql.AsMemory()), defaultDataSourceName);
+            return MapResolvedSqlTables(engine.Analyze(McpSqlPlaceholders.NeutralizeForAnalysis(sql).AsMemory()), defaultDataSourceName);
         }
         catch (Exception ex)
         {
@@ -59,7 +59,7 @@ internal static class McpDataTargetResolver
         try
         {
             var engine = sqlEngine ?? FastSqlEngine.Default;
-            var metadata = await engine.AnalyzeAsync(sql.AsMemory(), null, ct).ConfigureAwait(false);
+            var metadata = await engine.AnalyzeAsync(McpSqlPlaceholders.NeutralizeForAnalysis(sql).AsMemory(), null, ct).ConfigureAwait(false);
             return MapResolvedSqlTables(metadata, defaultDataSourceName);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

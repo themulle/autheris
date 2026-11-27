@@ -18,7 +18,7 @@ public sealed class McpChannel(IParityHost? host = null) : IParityChannel
         var robin = new RobinClient(host);
         if (query.RawSql is not null)
         {
-            return await robin.McpAsync("query_sql", new { query = query.RawSql });
+            return await robin.McpAsync("query_sql", new { query = query.RawSql, parameters = query.Parameters });
         }
 
         var graphql = GraphQlChannel.Render(query);

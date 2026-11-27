@@ -178,6 +178,21 @@ public sealed class McpQueryGuideTests
     }
 
     [Fact]
+    public void Issue1192_Guide_ExplainsQuerySqlParameters_OnlyWhenToolEnabled()
+    {
+        var on = McpQueryGuideBuilder.Build(SwitchesFrom(), new GraphQLOptions());
+        var off = McpQueryGuideBuilder.Build(SwitchesFrom(new GatewayOptions { Mcp = new McpOptions { DisabledTools = ["query_sql"] } }), new GraphQLOptions());
+
+        on.ShouldContain("`parameters`");
+        on.ShouldContain("@name");
+        on.ShouldContain("IN (@ids)");
+        on.ShouldContain("SQL_LITERAL_NOT_PERMITTED");
+        on.ShouldContain("same `parameters`");
+        off.ShouldNotContain("`parameters`");
+        off.ShouldNotContain("SQL_LITERAL_NOT_PERMITTED");
+    }
+
+    [Fact]
     public void Issue1106_Guide_DoesNotNameDescribeMyAccess_WhenTheToolIsDisabled()
     {
         var off = McpQueryGuideBuilder.Build(SwitchesFrom(new GatewayOptions { Mcp = new McpOptions { DisabledTools = ["describe_my_access"] } }), new GraphQLOptions());

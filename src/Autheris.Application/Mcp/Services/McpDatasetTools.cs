@@ -302,7 +302,7 @@ public static class McpDatasetTools
 
         yield return new McpToolDefinition(
             Name: QuerySql,
-            Description: "Executes a governed SQL query with row-level security, column masking, and tenant isolation under the caller's context. Results are capped at Mcp:MaxResultRows; pass optional 'limit' and follow the returned 'cursor' (when 'hasMore' is true) to retrieve subsequent pages of a deterministic ORDER BY query.",
+            Description: "Executes a governed SQL query with row-level security, column masking, and tenant isolation under the caller's context. Results are capped at Mcp:MaxResultRows; pass optional 'limit' and follow the returned 'cursor' (when 'hasMore' is true) to retrieve subsequent pages of a deterministic ORDER BY query. Pass values as named 'parameters' bound to @name placeholders instead of SQL literals; a cursor is only valid with the same query and parameters.",
             InputJsonSchema: """
             {
               "type": "object",
@@ -310,7 +310,12 @@ public static class McpDatasetTools
               "properties": {
                 "query": { "type": "string", "description": "SQL SELECT query to execute against the gateway." },
                 "limit": { "type": "integer", "minimum": 1, "description": "Optional maximum rows per page (capped server-side to Mcp:MaxResultRows)." },
-                "cursor": { "type": "string", "description": "Optional signed continuation cursor returned by a previous query_sql call." }
+                "cursor": { "type": "string", "description": "Optional signed continuation cursor returned by a previous query_sql call." },
+                "parameters": {
+                  "type": ["object", "null"],
+                  "description": "Optional named values bound to @name placeholders, as in POST /api/v1/sql: string, number, boolean or null; an array of scalars only as the single item of IN (@name) or NOT IN (@name). Values are bound, never inlined.",
+                  "additionalProperties": { "type": ["string", "number", "boolean", "null", "array"], "items": { "type": ["string", "number", "boolean"] } }
+                }
               }
             }
             """,

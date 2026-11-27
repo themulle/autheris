@@ -47,6 +47,17 @@ public sealed class PersistedToolValidatorTests
     }
 
     [Theory]
+    [InlineData("""{"query":"SELECT 1","parameters":null}""")]
+    [InlineData("""{"query":"SELECT 1","parameters":{"n":1,"l":[1,2]}}""")]
+    [InlineData("""{"query":"SELECT 1"}""")]
+    public void QuerySql_ParametersNullObjectOrAbsent_PassTheToolSchema(string json)
+    {
+        var querySql = McpDatasetTools.Definitions().Single(t => t.Name == McpDatasetTools.QuerySql);
+        using var doc = JsonDocument.Parse(json);
+        _validator.ValidateToolInvocation(querySql, doc.RootElement, out var reason).ShouldBeTrue(reason);
+    }
+
+    [Theory]
     [InlineData("""["dataset"]""")]
     [InlineData("\"dataset\"")]
     [InlineData("42")]

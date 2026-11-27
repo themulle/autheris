@@ -76,7 +76,7 @@ internal static class McpQueryGuideBuilder
 
         if (Tool(switches, McpDatasetTools.QuerySql))
         {
-            sb.AppendLine($"- **SQL Query Tool:** `{McpDatasetTools.QuerySql}` executes governed SQL queries.");
+            sb.AppendLine($"- **SQL Query Tool:** `{McpDatasetTools.QuerySql}` executes governed SQL queries. Pass values in `parameters` bound to `@name` placeholders (`IN (@ids)` for a list); a statement rejected with `SQL_LITERAL_NOT_PERMITTED` is resent with the value as a parameter; a `cursor` call repeats the same `parameters`.");
         }
 
         if (switches is not null && switches.RestDataEndpointEnabled && Tool(switches, McpDatasetTools.QueryDataset))
