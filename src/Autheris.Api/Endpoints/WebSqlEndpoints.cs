@@ -41,6 +41,7 @@ public static partial class WebSqlEndpoints
         // OpenAPI description of the endpoint (documentation only, no data).
         webSql.MapGet("/api/v1/sql/openapi.json", (IOptionsMonitor<GatewayOptions> liveOptions) => GetOpenApiSpec(liveOptions.CurrentValue))
             .WithName("GetWebSqlOpenApiSpec")
+            .WithMetadata(OpenApiRouteMetadata.Instance)
             .RequireAuthorization()
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
 

@@ -4,7 +4,9 @@ using System;
 using System.Collections.Generic;
 using Autheris.Application.Sql;
 using Autheris.Domain.Options;
+using System.Threading.Tasks;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Extensions.Options;
 
 public static partial class WebSqlEndpoints
 {
@@ -18,6 +20,33 @@ public static partial class WebSqlEndpoints
         options?.WebSql is { Enabled: true }
             ? Results.Json(BuildOpenApiSpec(options))
             : Results.NotFound();
+
+    /// <summary>Marks the OpenAPI route so <see cref="DisabledOpenApiGuardAsync"/> can answer for it while WebSQL is disabled.</summary>
+    internal sealed class OpenApiRouteMetadata
+    {
+        internal static readonly OpenApiRouteMetadata Instance = new();
+
+        private OpenApiRouteMetadata()
+        {
+        }
+    }
+
+    /// <summary>
+    /// Runs after authorization. While WebSQL is disabled an authenticated caller gets the bare 404 an unmatched route gets,
+    /// ending the request before the governance, resource-group and egress headers that only matched endpoints add.
+    /// </summary>
+    internal static Task DisabledOpenApiGuardAsync(HttpContext context, RequestDelegate next)
+    {
+        if (context.GetEndpoint()?.Metadata.GetMetadata<OpenApiRouteMetadata>() is not null
+            && context.RequestServices.GetService(typeof(IOptionsMonitor<GatewayOptions>)) is IOptionsMonitor<GatewayOptions> live
+            && live.CurrentValue.WebSql is not { Enabled: true })
+        {
+            context.Response.StatusCode = StatusCodes.Status404NotFound;
+            return Task.CompletedTask;
+        }
+
+        return next(context);
+    }
 
     private static Dictionary<string, object> Obj(params (string Key, object Value)[] members)
     {
