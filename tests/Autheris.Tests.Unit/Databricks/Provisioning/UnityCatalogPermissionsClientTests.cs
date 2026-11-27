@@ -374,7 +374,45 @@ public sealed class UnityCatalogPermissionsClientTests
             .Status.ShouldBe(UcPrincipalResolutionStatus.Ambiguous);
     }
 
+    [Fact]
+    public async Task Display_name_match_without_a_scim_id_is_ambiguous()
+    {
+        var handler = Handler(r => !r.Uri.AbsolutePath.EndsWith("/Groups", StringComparison.Ordinal) ? null
+            : Uri.UnescapeDataString(r.Uri.Query).Contains("displayName eq", StringComparison.Ordinal)
+                ? Ok(Scim("{\"displayName\":\"Data Analysts\"}"))
+                : Ok(Scim("{\"id\":\"42\",\"displayName\":\"Data Analysts\"}")));
+
+        (await Client(handler).ResolvePrincipalAsync("dbx", GranteeType.Group, GroupOid, CancellationToken.None))
+            .Status.ShouldBe(UcPrincipalResolutionStatus.Ambiguous);
+    }
+
+    [Fact]
+    public async Task Omitted_external_id_is_trusted_only_when_the_server_reports_exactly_one_result()
+    {
+        var handler = Handler(r => r.Uri.AbsolutePath.EndsWith("/scim/v2/Users", StringComparison.Ordinal)
+            ? Ok("{\"Resources\":[{\"id\":\"1\",\"userName\":\"jane@example.com\"}]}")
+            : null);
+
+        (await Client(handler).ResolvePrincipalAsync("dbx", GranteeType.User, GroupOid, CancellationToken.None))
+            .Status.ShouldBe(UcPrincipalResolutionStatus.NotFound);
+    }
+
     [Theory]
+    [InlineData("\"1\"")]
+    [InlineData("1.5")]
+    [InlineData("null")]
+    public async Task Total_results_that_is_not_an_integer_is_a_protocol_violation(string total)
+    {
+        var handler = Handler(r => r.Uri.AbsolutePath.EndsWith("/scim/v2/Users", StringComparison.Ordinal)
+            ? Ok("{\"totalResults\":" + total + ",\"Resources\":[{\"id\":\"1\",\"userName\":\"jane@example.com\"}]}")
+            : null);
+
+        (await Should.ThrowAsync<UcProvisioningException>(() => Client(handler).ResolvePrincipalAsync("dbx", GranteeType.User, GroupOid, CancellationToken.None)))
+            .Code.ShouldBe(UcErrorCodes.Protocol);
+    }
+
+    [Theory]
+    [InlineData("\"externalId\":\"7d3c4c1e-5a2b-4f0e-9c1d-2b3a4c5d6e7f\",")]
     [InlineData("\"externalId\":123,")]
     [InlineData("\"externalId\":null,")]
     [InlineData("\"externalId\":\"not-a-guid\",")]
@@ -397,6 +435,7 @@ public sealed class UnityCatalogPermissionsClientTests
 
         var result = await Client(handler).ResolvePrincipalAsync("dbx", GranteeType.User, GroupOid, CancellationToken.None);
 
+        result.Status.ShouldBe(UcPrincipalResolutionStatus.Resolved);
         result.Principal.ShouldBe(new UcPrincipal(GranteeType.User, "jane@example.com", GroupOid));
     }
 

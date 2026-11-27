@@ -152,7 +152,7 @@ public sealed partial class UnityCatalogPermissionsClient(
 
         var group = matches.Items[0];
         var displayName = ReadString(group, "displayName");
-        if (!MatchesFilteredId(group, "externalId", externalId) || !IsValidPrincipal(displayName))
+        if (!MatchesFilteredId(matches, "externalId", externalId) || !IsValidPrincipal(displayName))
         {
             return UcPrincipalResolution.NotFound;
         }
@@ -165,7 +165,7 @@ public sealed partial class UnityCatalogPermissionsClient(
             return UcPrincipalResolution.Ambiguous;
         }
 
-        var sameName = await ScimQueryAsync(settings, "Groups", "displayName eq \"" + EscapeScim(displayName!) + "\"", "id,displayName,externalId", ct).ConfigureAwait(false);
+        var sameName = await ScimQueryAsync(settings, "Groups", "displayName eq \"" + EscapeScim(displayName!) + "\"", "id,displayName", ct).ConfigureAwait(false);
         if (sameName.NotSingle is not null || !string.Equals(ReadString(sameName.Items[0], "id"), scimId, StringComparison.Ordinal))
         {
             return UcPrincipalResolution.Ambiguous;
@@ -183,7 +183,7 @@ public sealed partial class UnityCatalogPermissionsClient(
         }
 
         var userName = ReadString(matches.Items[0], "userName");
-        return MatchesFilteredId(matches.Items[0], "externalId", externalId) && IsValidPrincipal(userName)
+        return MatchesFilteredId(matches, "externalId", externalId) && IsValidPrincipal(userName)
             ? UcPrincipalResolution.Resolved(new UcPrincipal(GranteeType.User, userName!, externalId))
             : UcPrincipalResolution.NotFound;
     }
@@ -234,11 +234,21 @@ public sealed partial class UnityCatalogPermissionsClient(
         }
 
         // A total above the listed page means more matches exist than were returned: never pick one of them.
-        var truncated = root.TryGetProperty("totalResults", out var total) && total.TryGetInt32(out var totalResults) && totalResults > result.Count;
-        return new ScimMatches(result, truncated);
+        int? totalResults = null;
+        if (root.TryGetProperty("totalResults", out var total))
+        {
+            if (total.ValueKind != JsonValueKind.Number || !total.TryGetInt32(out var value))
+            {
+                throw new UcProvisioningException(UcErrorCodes.Protocol);
+            }
+
+            totalResults = value;
+        }
+
+        return new ScimMatches(result, totalResults > result.Count, totalResults);
     }
 
-    private sealed record ScimMatches(List<JsonElement> Items, bool Truncated)
+    private sealed record ScimMatches(List<JsonElement> Items, bool Truncated, int? TotalResults)
     {
         /// <summary>Null when exactly one match exists; otherwise the not-found or ambiguous outcome.</summary>
         public UcPrincipalResolution? NotSingle =>
@@ -254,13 +264,14 @@ public sealed partial class UnityCatalogPermissionsClient(
         Guid.TryParse(actual, out var a) && Guid.TryParse(expected, out var e) && a == e;
 
     /// <summary>
-    /// Whether a match of a SCIM filter on <paramref name="property"/> carries the requested id. Workspace SCIM omits
-    /// <c>externalId</c> for callers without admin rights; an absent attribute is then the server's own filter match. A present
-    /// value must still be the requested id.
+    /// Whether the single match of a SCIM filter on <paramref name="property"/> carries the requested id. Workspace SCIM omits
+    /// <c>externalId</c> for callers without admin rights; an absent attribute is then trusted as the server's own filter match,
+    /// but only when the server also reports exactly one result. A present value must still be the requested id.
     /// </summary>
-    private static bool MatchesFilteredId(JsonElement item, string property, string expected) =>
-        !item.TryGetProperty(property, out var value) ||
-        (value.ValueKind == JsonValueKind.String && SameId(value.GetString(), expected));
+    private static bool MatchesFilteredId(ScimMatches matches, string property, string expected) =>
+        matches.Items[0].TryGetProperty(property, out var value)
+            ? value.ValueKind == JsonValueKind.String && SameId(value.GetString(), expected)
+            : matches.TotalResults == 1;
 
     private static string? ReadString(JsonElement element, string property) =>
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
