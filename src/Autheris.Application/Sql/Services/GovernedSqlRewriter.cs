@@ -46,6 +46,26 @@ using TrinoSqlEngine.Governance;
 public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
 {
     // 07(e): "__rls_ks" is the reserved prefix of the key-set subquery parameters. A pure deny check; the text never decides whether later steps run.
+    private static TrinoSqlEngine.Ast.Security.FunctionNotPermittedException FunctionNotPermitted(SqlQueryMetadata metadata, string functionName)
+    {
+        int? line = null;
+        int? column = null;
+        if (metadata.FunctionCallSites is { } sites)
+        {
+            foreach (var site in sites)
+            {
+                if (string.Equals(site.Name, functionName, StringComparison.Ordinal))
+                {
+                    line = site.Line;
+                    column = site.Column;
+                    break;
+                }
+            }
+        }
+
+        return new TrinoSqlEngine.Ast.Security.FunctionNotPermittedException(functionName, line, column);
+    }
+
     private static void ThrowIfReservedGatewayIdentifier(string rawSql)
     {
         if (rawSql.Contains(InternalParameterPrefix, StringComparison.OrdinalIgnoreCase) || rawSql.Contains("__rls_ks", StringComparison.OrdinalIgnoreCase))
@@ -308,7 +328,7 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
             {
                 if (SqlFunctionPolicy.IsDeniedByDefault(functionName))
                 {
-                    throw new WebSqlPolicyException($"Function '{functionName}' is not permitted in WebSQL.");
+                    throw FunctionNotPermitted(metadata, functionName);
                 }
             }
         }
@@ -794,7 +814,7 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
             {
                 if (!SqlFunctionPolicy.IsFunctionAllowed(functionName, allowedFunctions, additionalDeniedFunctions: null))
                 {
-                    throw new WebSqlPolicyException($"Function '{functionName}' is not permitted in WebSQL.");
+                    throw FunctionNotPermitted(metadata, functionName);
                 }
             }
         }

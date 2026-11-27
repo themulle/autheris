@@ -1201,12 +1201,17 @@ public sealed partial class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         }
     }
 
-    private void EnsureFunctionAllowed(string name)
+    private void EnsureFunctionAllowed(string name, ParserRuleContext at)
     {
         if (_options.EnforceFunctionPolicy &&
             (_options.AllowedFunctions is null ||
              !SqlFunctionPolicy.IsFunctionAllowed(name, _options.AllowedFunctions, _options.AdditionalDeniedFunctions)))
         {
+            if (_options.ExposeRejectionDetails)
+            {
+                throw new Security.FunctionNotPermittedException(name.ToLowerInvariant(), at.Start?.Line, at.Start is null ? null : at.Start.Column + 1);
+            }
+
             throw new SecurityException($"Function '{name}' is not permitted by the SQL function policy.");
         }
     }
@@ -1214,19 +1219,19 @@ public sealed partial class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     // Wunsch 4: SQL special forms (no visitor before: ArgumentNullException → 500). They follow the function policy
     // under their usual function names.
 
-    public override SqlNode VisitCurrentDate(SqlBaseParser.CurrentDateContext context) => CurrentDateTime("current_date", null, CurrentDateTimeKind.CurrentDate);
+    public override SqlNode VisitCurrentDate(SqlBaseParser.CurrentDateContext context) => CurrentDateTime(context, "current_date", null, CurrentDateTimeKind.CurrentDate);
 
-    public override SqlNode VisitCurrentTime(SqlBaseParser.CurrentTimeContext context) => CurrentDateTime("current_time", context.precision, CurrentDateTimeKind.CurrentTime);
+    public override SqlNode VisitCurrentTime(SqlBaseParser.CurrentTimeContext context) => CurrentDateTime(context, "current_time", context.precision, CurrentDateTimeKind.CurrentTime);
 
-    public override SqlNode VisitCurrentTimestamp(SqlBaseParser.CurrentTimestampContext context) => CurrentDateTime("current_timestamp", context.precision, CurrentDateTimeKind.CurrentTimestamp);
+    public override SqlNode VisitCurrentTimestamp(SqlBaseParser.CurrentTimestampContext context) => CurrentDateTime(context, "current_timestamp", context.precision, CurrentDateTimeKind.CurrentTimestamp);
 
-    public override SqlNode VisitLocalTime(SqlBaseParser.LocalTimeContext context) => CurrentDateTime("localtime", context.precision, CurrentDateTimeKind.LocalTime);
+    public override SqlNode VisitLocalTime(SqlBaseParser.LocalTimeContext context) => CurrentDateTime(context, "localtime", context.precision, CurrentDateTimeKind.LocalTime);
 
-    public override SqlNode VisitLocalTimestamp(SqlBaseParser.LocalTimestampContext context) => CurrentDateTime("localtimestamp", context.precision, CurrentDateTimeKind.LocalTimestamp);
+    public override SqlNode VisitLocalTimestamp(SqlBaseParser.LocalTimestampContext context) => CurrentDateTime(context, "localtimestamp", context.precision, CurrentDateTimeKind.LocalTimestamp);
 
-    private CurrentDateTimeExpression CurrentDateTime(string name, IToken? precision, CurrentDateTimeKind kind)
+    private CurrentDateTimeExpression CurrentDateTime(ParserRuleContext context, string name, IToken? precision, CurrentDateTimeKind kind)
     {
-        EnsureFunctionAllowed(name);
+        EnsureFunctionAllowed(name, context);
         if (precision != null)
         {
             throw Unsupported($"{name}(precision)");
@@ -1238,7 +1243,7 @@ public sealed partial class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     public override SqlNode VisitSubstring(SqlBaseParser.SubstringContext context)
     {
         using var _ = EnterScope();
-        EnsureFunctionAllowed("substring");
+        EnsureFunctionAllowed("substring", context);
         var parts = context.valueExpression();
         return new SubstringExpression(
             (Expression)Visit(parts[0]),
@@ -1249,7 +1254,7 @@ public sealed partial class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     public override SqlNode VisitTrim(SqlBaseParser.TrimContext context)
     {
         using var _ = EnterScope();
-        EnsureFunctionAllowed("trim");
+        EnsureFunctionAllowed("trim", context);
         var spec = context.trimsSpecification() switch
         {
             null => TrimSpecification.Both,
@@ -1264,7 +1269,7 @@ public sealed partial class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     public override SqlNode VisitPosition(SqlBaseParser.PositionContext context)
     {
         using var _ = EnterScope();
-        EnsureFunctionAllowed("position");
+        EnsureFunctionAllowed("position", context);
         var parts = context.valueExpression();
         return new PositionExpression((Expression)Visit(parts[0]), (Expression)Visit(parts[1]));
     }
@@ -1369,7 +1374,7 @@ public sealed partial class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     {
         using var _ = EnterScope();
         string name = SqlIdentifierHelper.NormalizeQualifiedName(context.qualifiedName());
-        EnsureFunctionAllowed(name);
+        EnsureFunctionAllowed(name, context);
 
         // Wunsch 4: modifiers the AST cannot represent yet are rejected instead of being dropped.
         if (context.processingMode() != null) throw Unsupported("RUNNING/FINAL");

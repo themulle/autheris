@@ -48,6 +48,7 @@ public sealed class TableQualificationValidator : SqlAstRewriter
         var statement = new SqlAstBuilder(new AstBuilderOptions
         {
             EnforceFunctionPolicy = true,
+            ExposeRejectionDetails = true,
             AllowedFunctions = SqlDialectMapper.AllSafeDialectFunctions
         }).BuildStatement(tree);
         Validate(statement, authorizedCatalogs);

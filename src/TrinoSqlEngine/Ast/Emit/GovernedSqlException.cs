@@ -77,6 +77,15 @@ public static class GovernedSqlErrorCodes
     public const string DmlWriteConnectionMissing = "DML_WRITE_CONNECTION_MISSING";
     public const string RowPolicyExpressionNotAllowed = "ROW_POLICY_EXPRESSION_NOT_ALLOWED";
 
+    /// <summary>The client statement calls a function that is not permitted for the data source (403).</summary>
+    public const string FunctionNotPermitted = "SQL_FUNCTION_NOT_PERMITTED";
+
+    /// <summary>The client statement contains a nested block comment, or any comment on a strict surface (400).</summary>
+    public const string CommentNotPermitted = "SQL_COMMENT_NOT_PERMITTED";
+
+    /// <summary>The client statement references a column that does not exist on tables that are fully visible to the caller (400).</summary>
+    public const string UnknownColumn = "UNKNOWN_COLUMN";
+
     /// <summary>The fixed, value-free message of a code. It never carries driver text, values or object names.</summary>
     public static string FixedMessage(string code) => code switch
     {
@@ -126,6 +135,9 @@ public static class GovernedSqlErrorCodes
         LiteralNotPermitted => "A string literal contains a character sequence that is not permitted; pass the value as a parameter.",
         AggregationInvalidFunctionForType => "The aggregate function is not valid for the type of its argument.",
         RowPolicyExpressionNotAllowed => "The statement uses an expression that is not permitted on a table with a row policy. Use non-raising expressions such as TRY_CAST or NULLIF instead.",
+        FunctionNotPermitted => "The statement calls a function that is not permitted for this data source.",
+        CommentNotPermitted => "The statement contains a comment that is not permitted.",
+        UnknownColumn => "The statement references a column that does not exist.",
         _ => "The statement could not be executed."
     };
 }
