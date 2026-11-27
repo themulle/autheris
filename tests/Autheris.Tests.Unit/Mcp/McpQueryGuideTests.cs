@@ -10,6 +10,7 @@ using Autheris.Application.Mcp.Interfaces;
 using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using HotChocolate.Language;
 using Microsoft.Extensions.Options;
 using NSubstitute;
 using Shouldly;
@@ -303,5 +304,147 @@ public sealed class McpQueryGuideTests
 
         guide.ShouldContain("timeZone: \"America/New_York\"");
         guide.ShouldNotContain("timeZone: \"UTC\"");
+    }
+
+    private static string Section7(string guide)
+    {
+        var from = guide.IndexOf("## 7.", StringComparison.Ordinal);
+        from.ShouldBeGreaterThan(0);
+        var rest = guide[from..];
+        return rest[..rest.IndexOf("## Semantic Metrics", StringComparison.Ordinal)];
+    }
+
+    private static string Section(string guide, string start, string end)
+    {
+        var rest = guide[guide.IndexOf(start, StringComparison.Ordinal)..];
+        return rest[..rest.IndexOf(end, StringComparison.Ordinal)];
+    }
+
+    [Fact]
+    public void Issue1193_Section7_DescribesStoredQueriesWithVariables()
+    {
+        var section7 = Section7(McpQueryGuideBuilder.Build(SwitchesFrom(), new GraphQLOptions()));
+
+        foreach (var expected in new[]
+        {
+            "$where: orders_filter", "matches no row", "$filter: orders_filter! = {}", "a `null` member inside `and`",
+            "[orders_order_by!]", "AutherisSortDirection! = ASC", "$after: String", "timeBuckets", "section 6",
+            McpQueryGuideBuilder.ListExample, McpQueryGuideBuilder.ConnectionExample, McpQueryGuideBuilder.AggregateExample
+        })
+        {
+            section7.ShouldContain(expected);
+        }
+    }
+
+    public static TheoryData<string, string> StoredQueryExamples => new()
+    {
+        { McpQueryGuideBuilder.ListExample, "OrdersPage" },
+        { McpQueryGuideBuilder.ConnectionExample, "PaidOrdersConnection" },
+        { McpQueryGuideBuilder.AggregateExample, "OrdersByStatus" }
+    };
+
+    [Theory]
+    [MemberData(nameof(StoredQueryExamples))]
+    public void Issue1193_StoredQueryExamples_AreSingleOperationsWithDeclaredVariables(string text, string name)
+    {
+        var operation = Utf8GraphQLParser.Parse(text).Definitions.ShouldHaveSingleItem().ShouldBeOfType<OperationDefinitionNode>();
+        operation.Name!.Value.ShouldBe(name);
+
+        var declared = operation.VariableDefinitions.Select(v => v.Variable.Name.Value).ToHashSet(StringComparer.Ordinal);
+        var used = System.Text.RegularExpressions.Regex.Matches(text, @"\$([A-Za-z_]\w*)").Select(m => m.Groups[1].Value).ToHashSet(StringComparer.Ordinal);
+        used.ShouldBe(declared, ignoreOrder: true);
+    }
+
+    [Fact]
+    public void Issue1193_Section3_StatesKeyPrefixOrderingAndAlternatives()
+    {
+        var guide = McpQueryGuideBuilder.Build(SwitchesFrom(), new GraphQLOptions());
+        var section3 = Section(guide, "## 3.", "## 4.");
+
+        section3.ShouldContain("prefix of the table's key columns");
+        section3.ShouldContain("INVALID_QUERY");
+        section3.ShouldContain("KEYSET_PAGINATION_UNAVAILABLE");
+        section3.ShouldContain("`first`/`offset`");
+        section3.ShouldContain("gt: $last");
+        section3.ShouldNotContain("Always include a unique tie-breaker");
+    }
+
+    [Fact]
+    public void Issue1193_Section2_CursorIsBoundToFilterAndSelection()
+    {
+        var guide = McpQueryGuideBuilder.Build(SwitchesFrom(), new GraphQLOptions());
+
+        guide.ShouldContain("bound to the caller, the table, the key directions, the `where` filter and the selected fields");
+        guide.ShouldNotContain("bound to the query's `orderBy` key");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void QueryGuide_StoredQueriesSection_NamesNoDisabledTool()
+    {
+        var allOff = SwitchesFrom(new GatewayOptions
+        {
+            RestApi = new RestApiOptions { DataEndpoint = new RestDataEndpointOptions { Enabled = false } },
+            Mcp = new McpOptions
+            {
+                Tools = new McpToolGroupOptions { Query = false, Api = false },
+                DisabledTools = ["describe_dataset", "find_relevant_tables", "get_table_schema", "describe_my_access", "list_datasets", "call_procedure"]
+            }
+        });
+
+        foreach (var switches in new[] { allOff, null })
+        {
+            var section7 = Section7(McpQueryGuideBuilder.Build(switches, new GraphQLOptions()));
+            foreach (var tool in new[]
+            {
+                "query_graphql", "query_sql", "query_dataset", "describe_dataset", "find_relevant_tables",
+                "get_table_schema", "describe_my_access", "list_datasets", "call_procedure"
+            })
+            {
+                section7.ShouldNotContain(tool);
+            }
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void QueryGuide_StoredQueriesSection_DoesNotMentionMaskedColumnInExamples()
+    {
+        foreach (var example in new[] { McpQueryGuideBuilder.ListExample, McpQueryGuideBuilder.ConnectionExample, McpQueryGuideBuilder.AggregateExample })
+        {
+            var columns = System.Text.RegularExpressions.Regex.Matches(example, @"\b(\w+)\s*:\s*\{\s*(eq|gte)\b")
+                .Select(m => m.Groups[1].Value)
+                .Concat(System.Text.RegularExpressions.Regex.Matches(example, @"orderBy:\s*\[\{\s*(\w+)\s*:").Select(m => m.Groups[1].Value));
+            columns.ShouldAllBe(c => c == "id" || c == "status" || c == "amount");
+        }
+
+        var section7 = Section7(McpQueryGuideBuilder.Build(SwitchesFrom(), new GraphQLOptions()));
+        System.Text.RegularExpressions.Regex.Matches(section7, "\"(\\w+)\": \\{ \"(?:eq|gte)\"")
+            .Select(m => m.Groups[1].Value).ShouldAllBe(c => c == "id" || c == "status" || c == "amount");
+        section7.ShouldContain("section 6");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void QueryGuide_CursorBullet_DoesNotDescribeSigningInternals()
+    {
+        var guide = McpQueryGuideBuilder.Build(SwitchesFrom(), new GraphQLOptions());
+        var section2 = Section(guide, "## 2.", "## 3.");
+
+        foreach (var text in new[] { section2, Section7(guide) })
+        {
+            text.ShouldNotContain("HMAC key", Case.Insensitive);
+            text.ShouldNotContain("signing key", Case.Insensitive);
+            text.ShouldNotContain("salt", Case.Insensitive);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Issue1193_GuideNeverDocumentsNullAndAsAcceptedFilter()
+    {
+        var section7 = Section7(McpQueryGuideBuilder.Build(SwitchesFrom(), new GraphQLOptions()));
+
+        section7.ShouldNotContain("and: null");
     }
 }

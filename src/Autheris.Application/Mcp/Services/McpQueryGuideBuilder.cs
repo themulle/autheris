@@ -13,7 +13,7 @@ using Autheris.Domain.Options;
 /// matching <see cref="McpAccessHints"/>: null switches fail closed for tool names, and disabled
 /// features or tools are never named.
 /// </summary>
-internal static class McpQueryGuideBuilder
+internal static partial class McpQueryGuideBuilder
 {
     public static string Build(IReadPathSwitches? switches, GraphQLOptions? graphQlOptions = null, AggregationOptions? aggregationOptions = null)
     {
@@ -33,6 +33,7 @@ internal static class McpQueryGuideBuilder
 
         AppendAggregationAndTimeBuckets(sb, gql, agg);
         AppendMaskedColumnsAndRestrictedScopes(sb, switches);
+        AppendStoredQueriesWithVariables(sb);
         AppendMetrics(sb);
         AppendToolErrors(sb);
 
@@ -115,7 +116,7 @@ internal static class McpQueryGuideBuilder
         sb.AppendLine();
         sb.AppendLine(string.Create(CultureInfo.InvariantCulture,
             $"- **Page Size (`first`):** Defaults to `100`; maximum `{gql.MaxResponseRows}` rows per response."));
-        sb.AppendLine("- **Keyset Cursor (`after`):** Pass `pageInfo.endCursor` from the previous response. Cursors are HMAC-signed and bound to the query's `orderBy` key.");
+        sb.AppendLine("- **Keyset Cursor (`after`):** Pass `pageInfo.endCursor` from the previous response. Cursors are HMAC-signed and bound to the caller, the table, the key directions, the `where` filter and the selected fields; a cursor sent with a different filter, direction or selection is rejected (`The supplied cursor is invalid.`). Only `first` may change between pages.");
         sb.AppendLine(string.Create(CultureInfo.InvariantCulture,
             $"- **Offset Bound:** `MaxAllowedOffset` is `{gql.MaxAllowedOffset}`."));
         sb.AppendLine(string.Create(CultureInfo.InvariantCulture,
@@ -134,8 +135,10 @@ internal static class McpQueryGuideBuilder
         sb.AppendLine("## 3. Key Order & Sorting (`orderBy`)");
         sb.AppendLine();
         sb.AppendLine("- Pass `orderBy` as a list of single-field sort objects using `AutherisSortDirection` (`ASC` or `DESC`), e.g. `orderBy: [{ createdAt: DESC }, { id: ASC }]`.");
-        sb.AppendLine("- On `*Connection` fields, `orderBy` is validated against the table's keyset/index column prefix so seek pagination remains deterministic.");
-        sb.AppendLine("- Always include a unique tie-breaker column (such as the primary key) at the end of `orderBy` when paging with `after`.");
+        sb.AppendLine("- On the root list field (`<tableField>`), `orderBy` may name any column readable in clear text; the table's default key order is appended as a tie-breaker, so `first`/`offset` pages stay stable.");
+        sb.AppendLine("- On `<tableField>Connection`, `orderBy` may only name a prefix of the table's key columns in key order (the primary key, else the first unique index); each named key column may set its own direction. Any other `orderBy` is rejected with `INVALID_QUERY`. Without `orderBy` the connection pages in key order.");
+        sb.AppendLine("- A connection needs a primary key or unique index; without one it fails with `KEYSET_PAGINATION_UNAVAILABLE`.");
+        sb.AppendLine("- For a caller-chosen sort column, page the root list with `first`/`offset` (bounded by `MaxAllowedOffset`). For a table without a key, page by hand on a column with unique values: `where: { <col>: { gt: $last } }` with `orderBy: [{ <col>: ASC }]` and `first`, passing the last value of the previous page as `$last`.");
         sb.AppendLine();
     }
 
