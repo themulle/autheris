@@ -46,10 +46,10 @@ public sealed class WebSqlPagingTests
             ],
             "TestAuth")));
 
-    private static TableMetadata CustomersTable(string schema = "crm") => new()
+    private static TableMetadata CustomersTable(string schema = "crm", string source = "crm") => new()
     {
-        Identifier = new TableIdentifier("crm", schema, "customers"),
-        Table = new Table { TableName = "customers", SchemaName = schema, SourceName = "crm", SourceType = "PostgreSQL", IsActive = true, DataSourceType = DataSourceType.Sql },
+        Identifier = new TableIdentifier(source, schema, "customers"),
+        Table = new Table { TableName = "customers", SchemaName = schema, SourceName = source, SourceType = "PostgreSQL", IsActive = true, DataSourceType = DataSourceType.Sql },
         Columns =
         [
             new TableColumn { ColumnName = "id", DataType = "int" },
@@ -96,7 +96,8 @@ public sealed class WebSqlPagingTests
 
     private static (GovernedSqlExecutionService Service, GatewayOptions Options, IAuditWriter Audit) CreatePipeline(
         WebSqlPagingOptions? paging = null,
-        int fakeRows = 0)
+        int fakeRows = 0,
+        bool withDemoSource = false)
     {
         var options = new GatewayOptions
         {
@@ -104,6 +105,7 @@ public sealed class WebSqlPagingTests
             {
                 Enabled = true,
                 DefaultDataSourceName = "crm",
+                AllowedDataSources = withDemoSource ? ["crm", "demo"] : [],
                 Paging = paging ?? new WebSqlPagingOptions
                 {
                     MaxOffset = 10_000,
@@ -122,11 +124,19 @@ public sealed class WebSqlPagingTests
                 }
             }
         };
+        if (withDemoSource)
+        {
+            options.DataSources.Connections["demo"] = new DataSourceConnectionOptions
+            {
+                Provider = "PostgreSQL",
+                ConnectionString = "Server=localhost;Database=demo;User Id=postgres;Password=postgres;"
+            };
+        }
 
         var auditWriter = Substitute.For<IAuditWriter>();
         var repo = Substitute.For<ITableMetadataRepository>();
         repo.GetTableMetadataAsync(Arg.Any<TableIdentifier>(), Arg.Any<CancellationToken>())
-            .Returns(ci => Task.FromResult<TableMetadata?>(CustomersTable(ci.Arg<TableIdentifier>().Schema)));
+            .Returns(ci => Task.FromResult<TableMetadata?>(CustomersTable(ci.Arg<TableIdentifier>().Schema, ci.Arg<TableIdentifier>().Domain)));
 
         var consents = Substitute.For<IConsentRepository>();
         consents.GetActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<TableIdentifier>(), Arg.Any<DateTimeOffset>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
@@ -435,5 +445,60 @@ public sealed class WebSqlPagingTests
 
         options.MaxOffset.ShouldBe(10_000);
         options.TokenLifetimeMinutes.ShouldBe(15);
+    }
+
+    private const string DemoPagedSql = "SELECT id, name FROM demo.main.customers ORDER BY id";
+
+    private static async Task<GovernedSqlResult> FirstDemoPageAsync(GovernedSqlExecutionService service, string? dataSource)
+    {
+        var first = await service.ExecuteQueryBufferedAsync(
+            new GovernedSqlQueryRequest(DemoPagedSql, DataSourceName: dataSource, Page: new SqlPageWindow(0, 2, 1), OnPageOutcome: _ => { }),
+            CreateUser(), new TenantId("tenant-1"));
+        first.Next.ShouldNotBeNullOrEmpty();
+        return first;
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task PageToken_CatalogResolvedSource_RoundTripsWithoutDataSource()
+    {
+        var (service, _, _) = CreatePipeline(fakeRows: 10, withDemoSource: true);
+        var first = await FirstDemoPageAsync(service, null);
+
+        var second = await service.ExecuteQueryBufferedAsync(
+            new GovernedSqlQueryRequest(DemoPagedSql, NextToken: first.Next, OnPageOutcome: _ => { }),
+            CreateUser(), new TenantId("tenant-1"));
+
+        second.Page.ShouldNotBeNull();
+        second.Page.Number.ShouldBe(2);
+        second.Page.Offset.ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task PageToken_NamedDataSource_RoundTrips()
+    {
+        var (service, _, _) = CreatePipeline(fakeRows: 10, withDemoSource: true);
+        var first = await FirstDemoPageAsync(service, "demo");
+
+        var second = await service.ExecuteQueryBufferedAsync(
+            new GovernedSqlQueryRequest(DemoPagedSql, DataSourceName: "demo", NextToken: first.Next, OnPageOutcome: _ => { }),
+            CreateUser(), new TenantId("tenant-1"));
+
+        second.Page.ShouldNotBeNull();
+        second.Page.Number.ShouldBe(2);
+        second.Page.Offset.ShouldBe(2);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task PageToken_IssuedWithoutDataSource_RejectedWhenReplayedWithOtherDataSource()
+    {
+        var (service, _, _) = CreatePipeline(fakeRows: 10, withDemoSource: true);
+        var first = await FirstDemoPageAsync(service, null);
+
+        await Should.ThrowAsync<SqlPagingTokenInvalidException>(async () =>
+            await service.ExecuteQueryBufferedAsync(
+                new GovernedSqlQueryRequest(DemoPagedSql, DataSourceName: "demo", NextToken: first.Next, OnPageOutcome: _ => { }),
+                CreateUser(), new TenantId("tenant-1")));
     }
 }

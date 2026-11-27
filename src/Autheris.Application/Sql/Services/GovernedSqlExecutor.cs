@@ -356,7 +356,7 @@ public sealed partial class GovernedSqlExecutor
                 throw new SqlPagingTokenInvalidException();
             }
 
-            string sourceId = requestedDs ?? _options.Value.WebSql.DefaultDataSourceName;
+            string sourceId = PageTokenSourceBinding(request, tenantId);
             string transport = request.Transport ?? "WebSql";
             long maxOffset = _options.Value.WebSql.Paging?.MaxOffset ?? 10_000;
             var decoded = _pageTokenCodec.DecodeToken(

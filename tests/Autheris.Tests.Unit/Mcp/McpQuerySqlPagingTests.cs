@@ -66,14 +66,14 @@ public sealed class McpQuerySqlPagingTests
             IsReadOnly: false,
             AdditionalClaims: new Dictionary<string, string>());
 
-    private static TableMetadata CreateOrdersMetadata() => new()
+    private static TableMetadata CreateOrdersMetadata(string source = "sales") => new()
     {
-        Identifier = OrdersTableId,
+        Identifier = new TableIdentifier(source, "public", "orders"),
         Table = new Table
         {
             TableName = "orders",
             SchemaName = "public",
-            SourceName = "sales",
+            SourceName = source,
             SourceType = "PostgreSQL",
             IsActive = true,
             DataSourceType = DataSourceType.Sql
@@ -93,7 +93,8 @@ public sealed class McpQuerySqlPagingTests
     private static (McpToolExecutionHandler Handler, FakeTimeProvider Time, List<string> ExecutedSql) CreatePipeline(
         int maxResultRows = 2,
         bool maskEmail = false,
-        int webSqlMaxAllowedRows = 0)
+        int webSqlMaxAllowedRows = 0,
+        bool withDemoSource = false)
     {
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 11, 24, 4, 0, 0, TimeSpan.Zero));
         var options = new GatewayOptions
@@ -103,7 +104,7 @@ public sealed class McpQuerySqlPagingTests
             {
                 Enabled = true,
                 DefaultDataSourceName = "sales",
-                AllowedDataSources = ["sales"],
+                AllowedDataSources = withDemoSource ? ["sales", "demo"] : ["sales"],
                 MaxAllowedRows = webSqlMaxAllowedRows,
                 Paging = new WebSqlPagingOptions
                 {
@@ -124,8 +125,19 @@ public sealed class McpQuerySqlPagingTests
             }
         };
 
+        if (withDemoSource)
+        {
+            options.DataSources.Connections["demo"] = new DataSourceConnectionOptions
+            {
+                Provider = "PostgreSQL",
+                ConnectionString = "Host=localhost;Database=demo;Username=u;Password=p"
+            };
+        }
+
         var executedSql = new List<string>();
-        var tableRepo = new InMemoryTableMetadataRepository(CreateOrdersMetadata());
+        var tableRepo = withDemoSource
+            ? new InMemoryTableMetadataRepository(CreateOrdersMetadata(), CreateOrdersMetadata("demo"))
+            : new InMemoryTableMetadataRepository(CreateOrdersMetadata());
         var consentResolution = new StubConsentResolutionService(table =>
             TableAccessDecision.Allowed(
                 table,
@@ -279,6 +291,25 @@ public sealed class McpQuerySqlPagingTests
         await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql }), CreateSession());
 
         scope.Outcome.ShouldBe(expected);
+    }
+
+    [Fact]
+    public async Task QuerySql_CursorOnNonDefaultCatalog_ReturnsNextPage()
+    {
+        var (handler, _, _) = CreatePipeline(maxResultRows: 2, withDemoSource: true);
+        var session = CreateSession();
+        const string sql = "SELECT id, name FROM demo.public.orders ORDER BY id";
+
+        var firstJson = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql }), session);
+        using var firstDoc = JsonDocument.Parse(firstJson);
+        firstDoc.RootElement.GetProperty("hasMore").GetBoolean().ShouldBeTrue();
+        var cursor = firstDoc.RootElement.GetProperty("cursor").GetString();
+        cursor.ShouldNotBeNullOrWhiteSpace();
+
+        var secondJson = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor }), session);
+        using var secondDoc = JsonDocument.Parse(secondJson);
+        secondDoc.RootElement.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("id").GetInt32()).ToList()
+            .ShouldBe([3, 4]);
     }
 
     [Fact]
