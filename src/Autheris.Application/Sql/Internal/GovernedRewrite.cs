@@ -23,7 +23,14 @@ internal sealed record GovernedRewrite(
     long? WriteMaxRowsPerStatement = null,
     IReadOnlyList<Autheris.Domain.Interfaces.MaskedColumnAuditEntry>? MaskedColumnsAudit = null,
     string? MetricViewHiddenCountAlias = null,
-    int MetricViewMinGroupSize = 0);
+    int MetricViewMinGroupSize = 0,
+    UnknownColumnProbe? ColumnProbe = null);
+
+/// <summary>
+/// What the executor needs to name an unknown column after the provider rejected the statement: the original client text and the catalog
+/// columns (every one, hidden included) of the referenced tables. Present only when every table of the statement is fully visible to the caller.
+/// </summary>
+internal sealed record UnknownColumnProbe(string ClientSql, IReadOnlySet<string> CatalogColumns);
 
 /// <summary>
 /// Collects the DML classification during governance so that executed AND rejected DML can be audited.

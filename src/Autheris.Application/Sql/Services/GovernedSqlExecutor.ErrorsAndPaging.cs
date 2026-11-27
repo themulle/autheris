@@ -84,6 +84,21 @@ public sealed partial class GovernedSqlExecutor
         return mapped;
     }
 
+    /// <summary>
+    /// A provider's unknown-column error is a denial by default. When every table of the statement is fully visible to the caller (the probe is
+    /// present) the column is named from the client statement text; nothing of the driver message is used. Without a name the denial stays.
+    /// </summary>
+    private static GovernedSqlException? NameUnknownColumn(GovernedSqlException? sanitized, UnknownColumnProbe? probe, TargetSqlDialect dialect)
+    {
+        if (sanitized?.Code != GovernedSqlErrorCodes.PolicyDenied || probe is null ||
+            !UnknownColumnResolver.TryFind(probe, out var name, out var line, out var column))
+        {
+            return sanitized;
+        }
+
+        return new SqlUnknownColumnException(name, line, column, dialect);
+    }
+
     private static bool IsProviderError(Exception error)
     {
         for (var current = error; current is not null; current = current.InnerException)

@@ -854,6 +854,7 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
             : null;
 
         var maskedAudit = decisions.Values.SelectMany(d => d.MaskedColumnsAudit).ToList();
-        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, callerAttributes, metadata, pagingUnavailable, bindPageOffset, indexHints, dmlMaxRowsCap, maskedAudit, mvGuard.HiddenCountColumnAlias, mvGuard.EffectiveMinGroupSize);
+        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, callerAttributes, metadata, pagingUnavailable, bindPageOffset, indexHints, dmlMaxRowsCap, maskedAudit, mvGuard.HiddenCountColumnAlias, mvGuard.EffectiveMinGroupSize,
+            BuildColumnProbe(rawSql, metadata.StatementType == SqlStatementType.Select && !isDml, distinctCatalogs.Count, decisions, decidedTableMetadata));
     }
 }

@@ -123,6 +123,26 @@ public sealed class GovernedSqlRejectionAuditTests
         denied.DetailsJson.ShouldNotContain(ex.Message.Length > 0 && ex.Message != code ? ex.Message : "\u0000");   // never the message
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task FunctionNotPermitted_Audit_StoresCodeNotName()
+    {
+        var (service, audit) = CreateService();
+
+        var ex = await Should.ThrowAsync<TrinoSqlEngine.Ast.Security.FunctionNotPermittedException>(() => service.ExecuteQueryBufferedAsync(
+            new GovernedSqlQueryRequest("SELECT pg_sleep(1) FROM orders", Transport: SqlTransports.WebSql), Writer(), new TenantId(Tenant)));
+
+        ex.FunctionName.ShouldBe("pg_sleep");
+        var details = Details(audit.ShouldHaveSingleItem());
+        details.GetProperty("reasonCode").GetString().ShouldBe("SECURITY_VIOLATION");   // the class of the refusal, not the name
+        details.GetProperty("error").GetString().ShouldBe("SQL_FUNCTION_NOT_PERMITTED");
+        // the redacted statement text is the pre-existing record of the request; no other field carries the function name or the message
+        foreach (var property in details.EnumerateObject().Where(p => p.Name != "originalSql"))
+        {
+            property.Value.ToString().ShouldNotContain("pg_sleep", Case.Insensitive, property.Name);
+        }
+    }
+
     [Theory]
     [InlineData("UPDATE orders SET amount = (SELECT SUM(amount) FROM orders GROUP BY AUTO) WHERE id = 1", "SQL_CONSTRUCT_NOT_SUPPORTED")]
     public async Task AnEngineRejectedDml_IsAuditedAsDmlRejected_WithTheStableCode_AndRethrown(string sql, string code)
