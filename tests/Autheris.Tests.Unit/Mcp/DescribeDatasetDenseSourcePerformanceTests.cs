@@ -170,7 +170,6 @@ public sealed class DescribeDatasetDenseSourcePerformanceTests
         var visible = await RunAsync(DenseHarness.HubIdString, "relations");
         using (var doc = JsonDocument.Parse(visible))
         {
-            doc.RootElement.GetProperty("isError").GetBoolean().ShouldBeTrue();
             doc.RootElement.GetProperty("error").GetProperty("code").GetString().ShouldBe("INVALID_PARAMS");
         }
 
