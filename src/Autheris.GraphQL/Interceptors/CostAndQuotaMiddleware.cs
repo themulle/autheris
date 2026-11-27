@@ -128,7 +128,24 @@ public sealed partial class CostAndQuotaMiddleware
             autherisExt = new Dictionary<string, object?>(1, StringComparer.Ordinal);
         }
 
-        autherisExt["indexHints"] = indexHints;
+        var projected = new List<object?>(indexHints.Count);
+        foreach (var hint in indexHints)
+        {
+            var columns = new List<object?>(hint.HelpfulIndexColumns.Count);
+            foreach (var column in hint.HelpfulIndexColumns)
+            {
+                columns.Add(column);
+            }
+
+            projected.Add(new Dictionary<string, object?>(3, StringComparer.Ordinal)
+            {
+                ["root"] = hint.Root,
+                ["reason"] = hint.Reason,
+                ["helpfulIndexColumns"] = columns,
+            });
+        }
+
+        autherisExt["indexHints"] = projected;
         opResult.Extensions = extensions.SetItem("autheris", autherisExt);
     }
 
