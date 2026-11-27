@@ -152,14 +152,21 @@ public sealed partial class UnityCatalogPermissionsClient(
 
         var group = matches.Items[0];
         var displayName = ReadString(group, "displayName");
-        if (!SameId(ReadString(group, "externalId"), externalId) || !IsValidPrincipal(displayName))
+        if (!MatchesFilteredId(group, "externalId", externalId) || !IsValidPrincipal(displayName))
         {
             return UcPrincipalResolution.NotFound;
         }
 
         // Unity Catalog names a group by its display name, which is neither unique nor immutable: it must name exactly this group.
+        // The SCIM id identifies it, because non-admin callers do not see the external id of the display-name match.
+        var scimId = ReadString(group, "id");
+        if (string.IsNullOrEmpty(scimId))
+        {
+            return UcPrincipalResolution.Ambiguous;
+        }
+
         var sameName = await ScimQueryAsync(settings, "Groups", "displayName eq \"" + EscapeScim(displayName!) + "\"", "id,displayName,externalId", ct).ConfigureAwait(false);
-        if (sameName.NotSingle is not null || !SameId(ReadString(sameName.Items[0], "externalId"), externalId))
+        if (sameName.NotSingle is not null || !string.Equals(ReadString(sameName.Items[0], "id"), scimId, StringComparison.Ordinal))
         {
             return UcPrincipalResolution.Ambiguous;
         }
@@ -176,7 +183,7 @@ public sealed partial class UnityCatalogPermissionsClient(
         }
 
         var userName = ReadString(matches.Items[0], "userName");
-        return SameId(ReadString(matches.Items[0], "externalId"), externalId) && IsValidPrincipal(userName)
+        return MatchesFilteredId(matches.Items[0], "externalId", externalId) && IsValidPrincipal(userName)
             ? UcPrincipalResolution.Resolved(new UcPrincipal(GranteeType.User, userName!, externalId))
             : UcPrincipalResolution.NotFound;
     }
@@ -245,6 +252,15 @@ public sealed partial class UnityCatalogPermissionsClient(
 
     private static bool SameId(string? actual, string expected) =>
         Guid.TryParse(actual, out var a) && Guid.TryParse(expected, out var e) && a == e;
+
+    /// <summary>
+    /// Whether a match of a SCIM filter on <paramref name="property"/> carries the requested id. Workspace SCIM omits
+    /// <c>externalId</c> for callers without admin rights; an absent attribute is then the server's own filter match. A present
+    /// value must still be the requested id.
+    /// </summary>
+    private static bool MatchesFilteredId(JsonElement item, string property, string expected) =>
+        !item.TryGetProperty(property, out var value) ||
+        (value.ValueKind == JsonValueKind.String && SameId(value.GetString(), expected));
 
     private static string? ReadString(JsonElement element, string property) =>
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String

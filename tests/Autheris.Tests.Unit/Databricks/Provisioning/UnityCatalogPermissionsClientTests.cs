@@ -337,6 +337,69 @@ public sealed class UnityCatalogPermissionsClientTests
             .Status.ShouldBe(UcPrincipalResolutionStatus.NotFound);
     }
 
+    [Fact]
+    public async Task Group_resolves_when_scim_omits_the_external_id_for_a_non_admin_caller()
+    {
+        // Non-admin principals get the filter match, but SCIM leaves the externalId attribute out of the response.
+        var handler = Handler(r => r.Uri.AbsolutePath.EndsWith("/scim/v2/Groups", StringComparison.Ordinal)
+            ? Ok(Scim("{\"id\":\"42\",\"displayName\":\"Data Analysts\"}"))
+            : null);
+
+        var result = await Client(handler).ResolvePrincipalAsync("dbx", GranteeType.Group, GroupOid, CancellationToken.None);
+
+        result.Status.ShouldBe(UcPrincipalResolutionStatus.Resolved);
+        result.Principal.ShouldBe(new UcPrincipal(GranteeType.Group, "Data Analysts", GroupOid));
+    }
+
+    [Fact]
+    public async Task Group_whose_display_name_names_another_scim_id_is_ambiguous()
+    {
+        var handler = Handler(r => !r.Uri.AbsolutePath.EndsWith("/Groups", StringComparison.Ordinal) ? null
+            : Uri.UnescapeDataString(r.Uri.Query).Contains("displayName eq", StringComparison.Ordinal)
+                ? Ok(Scim("{\"id\":\"43\",\"displayName\":\"Data Analysts\"}"))
+                : Ok(Scim("{\"id\":\"42\",\"displayName\":\"Data Analysts\"}")));
+
+        (await Client(handler).ResolvePrincipalAsync("dbx", GranteeType.Group, GroupOid, CancellationToken.None))
+            .Status.ShouldBe(UcPrincipalResolutionStatus.Ambiguous);
+    }
+
+    [Fact]
+    public async Task Group_without_a_scim_id_is_ambiguous()
+    {
+        var handler = Handler(r => r.Uri.AbsolutePath.EndsWith("/Groups", StringComparison.Ordinal)
+            ? Ok(Scim("{\"displayName\":\"Data Analysts\"}"))
+            : null);
+
+        (await Client(handler).ResolvePrincipalAsync("dbx", GranteeType.Group, GroupOid, CancellationToken.None))
+            .Status.ShouldBe(UcPrincipalResolutionStatus.Ambiguous);
+    }
+
+    [Theory]
+    [InlineData("\"externalId\":123,")]
+    [InlineData("\"externalId\":null,")]
+    [InlineData("\"externalId\":\"not-a-guid\",")]
+    public async Task External_id_that_is_present_but_not_the_requested_id_is_not_trusted(string externalId)
+    {
+        var handler = Handler(r => r.Uri.AbsolutePath.EndsWith("/scim/v2/Users", StringComparison.Ordinal)
+            ? Ok(Scim("{" + externalId + "\"id\":\"1\",\"userName\":\"jane@example.com\"}"))
+            : null);
+
+        (await Client(handler).ResolvePrincipalAsync("dbx", GranteeType.User, GroupOid, CancellationToken.None))
+            .Status.ShouldBe(UcPrincipalResolutionStatus.NotFound);
+    }
+
+    [Fact]
+    public async Task User_resolves_when_scim_omits_the_external_id_for_a_non_admin_caller()
+    {
+        var handler = Handler(r => r.Uri.AbsolutePath.EndsWith("/scim/v2/Users", StringComparison.Ordinal)
+            ? Ok(Scim("{\"id\":\"1\",\"userName\":\"jane@example.com\"}"))
+            : null);
+
+        var result = await Client(handler).ResolvePrincipalAsync("dbx", GranteeType.User, GroupOid, CancellationToken.None);
+
+        result.Principal.ShouldBe(new UcPrincipal(GranteeType.User, "jane@example.com", GroupOid));
+    }
+
     [Theory]
     [InlineData("Data Analysts")]
     [InlineData("not-a-guid\" or displayName pr \"")]
@@ -409,8 +472,9 @@ public sealed class UnityCatalogPermissionsClientTests
 
     private static UcPermissionChange Grant(string principal, string privilege) => new(principal, [privilege], []);
 
+    // The SCIM id is stable per external id, as in a real workspace: both lookups of one group return the same id.
     private static string Group(string displayName, string externalId) =>
-        "{\"id\":\"" + Guid.NewGuid().ToString("N") + "\",\"displayName\":\"" + displayName + "\",\"externalId\":\"" + externalId + "\"}";
+        "{\"id\":\"" + Guid.Parse(externalId).ToString("N") + "\",\"displayName\":\"" + displayName + "\",\"externalId\":\"" + externalId + "\"}";
 
     private static string Scim(params string[] resources) =>
         "{\"totalResults\":" + resources.Length + ",\"Resources\":[" + string.Join(",", resources) + "]}";

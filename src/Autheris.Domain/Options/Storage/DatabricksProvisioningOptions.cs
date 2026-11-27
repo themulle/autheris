@@ -55,7 +55,8 @@ public sealed class DatabricksProvisioningOptions
 
     /// <summary>
     /// The dedicated provisioning principal. Only OAuth M2M with a client secret reference is accepted; it must differ from the
-    /// principal that runs queries.
+    /// principal that runs queries. It needs no workspace admin rights: a workspace entitlement that allows API calls (consumer
+    /// access is enough) and <c>MANAGE</c> on the allowed schemas suffice, including for the SCIM lookups of grantees.
     /// </summary>
     public DatabricksAuthOptions Auth { get; init; } = new();
 }
