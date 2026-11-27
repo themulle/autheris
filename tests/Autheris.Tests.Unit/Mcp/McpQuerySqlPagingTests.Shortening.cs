@@ -78,7 +78,7 @@ public sealed partial class McpQuerySqlPagingTests
         var session = CreateSession();
         var (resume, _) = await FirstPageAsync(handler, session);
         var token = resume!(2)!;
-        var tampered = token[..^1] + (token[^1] == 'A' ? 'B' : 'A');
+        var tampered = FlipMidMacChar(token);
 
         AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = OrderedSql, cursor = tampered }), session));
     }
@@ -109,25 +109,28 @@ public sealed partial class McpQuerySqlPagingTests
         AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = OrderedSql, cursor = token }), CreateSession("S-1-5-21-1055-OWNER", "tenant-2")));
     }
 
+    /// <summary>Changes a character in the middle of the signature part, which always changes the decoded bytes.</summary>
+    private static string FlipMidMacChar(string token)
+    {
+        var index = token.IndexOf('.', StringComparison.Ordinal) + 8;
+        return token[..index] + (token[index] == 'A' ? 'B' : 'A') + token[(index + 1)..];
+    }
+
     [Fact]
     [Trait("Category", "Security")]
     public async Task QuerySql_ResumeToken_ReplayOnOtherTransport_IsInvalidParams()
     {
-        var (handler, time, _) = CreatePipeline(maxResultRows: 4);
+        WebSqlPageTokenCodec? codec = null;
+        var (handler, _, _) = CreatePipeline(maxResultRows: 4, captureCodec: c => codec = c);
         var session = CreateSession();
         var (resume, _) = await FirstPageAsync(handler, session);
         var token = resume!(2)!;
-
-        // The token is bound to the MCP transport: a codec with the same key refuses it for any other transport.
-        var options = Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions());
-        var codec = new WebSqlPageTokenCodec(new CompiledSqlAuditDigester(options, null, new TestHostEnvironment("Development")), time);
-        var user = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, session.UserSid!)], "Test"));
+        var user = McpProtocolHandler.BuildPrincipalFromSession(session, TimeProvider.System)!;
         var tenant = new TenantId("tenant-1");
 
-        var minted = codec.EncodeToken(OrderedSql, null, user, tenant, "sales", SqlTransports.Mcp, 2, 4, 1, TimeSpan.FromMinutes(15));
-        Should.NotThrow(() => codec.DecodeToken(minted, OrderedSql, null, user, tenant, "sales", SqlTransports.Mcp, 10_000));
-        Should.Throw<SqlPagingTokenInvalidException>(() => codec.DecodeToken(minted, OrderedSql, null, user, tenant, "sales", "WebSql", 10_000));
-        token.ShouldNotBeNullOrWhiteSpace();
+        // The minted token decodes for the MCP transport it was issued for and for no other one.
+        codec!.DecodeToken(token, OrderedSql, null, user, tenant, "sales", SqlTransports.Mcp, 10_000).Offset.ShouldBe(2);
+        Should.Throw<SqlPagingTokenInvalidException>(() => codec.DecodeToken(token, OrderedSql, null, user, tenant, "sales", "WebSql", 10_000));
     }
 
     [Fact]
@@ -164,24 +167,8 @@ public sealed partial class McpQuerySqlPagingTests
     {
         IGovernedSqlExecutionService? service = null;
         CreatePipeline(maxResultRows: 4, captureService: s => service = s);
-        ClaimsPrincipal Principal(bool withSid)
-        {
-            var principal = McpProtocolHandler.BuildPrincipalFromSession(CreateSession(), TimeProvider.System)!;
-            var identity = (ClaimsIdentity)principal.Identity!;
-            identity.AddClaim(new Claim("tid", "tenant-1"));
-            if (!withSid)
-            {
-                foreach (var claim in identity.Claims.Where(c => c.Type is ClaimTypes.PrimarySid or ClaimTypes.NameIdentifier or "objectSid" or "onprem_sid" or "primarysid" or "oid" or "sub" or "http://schemas.microsoft.com/ws/2008/06/identity/claims/primarysid" or "http://schemas.microsoft.com/identity/claims/objectidentifier").ToList())
-                {
-                    identity.RemoveClaim(claim);
-                }
-            }
-
-            return principal;
-        }
-
-        var withSid = Principal(true);
-        var withoutSid = Principal(false);
+        var withSid = McpProtocolHandler.BuildPrincipalFromSession(CreateSession(), TimeProvider.System)!;
+        ((ClaimsIdentity)withSid.Identity!).AddClaim(new Claim("tid", "tenant-1"));
 
         async Task<Func<int, string?>?> ResumeForAsync(ClaimsPrincipal user)
         {
@@ -192,20 +179,36 @@ public sealed partial class McpQuerySqlPagingTests
             return result.ResumeAfter;
         }
 
-        (await ResumeForAsync(withSid))!(2).ShouldNotBeNull();
+        var resumeWithSid = (await ResumeForAsync(withSid))!;
+        resumeWithSid(2).ShouldNotBeNull();
 
-        // A caller without a SID is not bindable: either the governed pipeline refuses it outright or the minter returns null.
-        Func<int, string?>? resume = null;
-        try
+        // The minter re-checks the caller at call time: once the principal has no SID it mints nothing.
+        var identity = (ClaimsIdentity)withSid.Identity!;
+        foreach (var claim in identity.Claims.Where(c => c.Type is ClaimTypes.PrimarySid or ClaimTypes.NameIdentifier or "objectSid" or "onprem_sid" or "primarysid" or "oid" or "sub" or "http://schemas.microsoft.com/ws/2008/06/identity/claims/primarysid" or "http://schemas.microsoft.com/identity/claims/objectidentifier").ToList())
         {
-            resume = await ResumeForAsync(withoutSid);
-        }
-        catch (Exception ex) when (ex is not Xunit.Sdk.XunitException)
-        {
-            // refused before any page was produced
+            identity.RemoveClaim(claim);
         }
 
-        resume?.Invoke(2).ShouldBeNull();
+        resumeWithSid(2).ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task QuerySql_ResumeAfter_ShortLastPage_IsBoundedByDeliveredRows()
+    {
+        var (handler, _, _) = CreatePipeline(maxResultRows: 4);
+        var session = CreateSession();
+        var (firstResume, _) = await FirstPageAsync(handler, session);
+        var lastPageCursor = firstResume!(3)!;
+
+        // The page at offset 3 delivers two rows (4 and 5) although its window is four wide.
+        using var scope = McpRowContinuation.Begin();
+        var json = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = OrderedSql, cursor = lastPageCursor }), session);
+        JsonDocument.Parse(json).RootElement.GetProperty("rows").GetArrayLength().ShouldBe(2);
+
+        scope.ResumeAfter!(1).ShouldNotBeNull();
+        scope.ResumeAfter(2).ShouldBeNull();
+        scope.ResumeAfter(3).ShouldBeNull();
     }
 
     [Fact]

@@ -254,7 +254,8 @@ public sealed class McpTokenBudgetShorteningEndToEndTests : IClassFixture<McpTok
         const string sql = "SELECT id, note FROM default.main.mcp_budget_rows ORDER BY id";
         var (_, first, _) = await CallAsync(Client(), "query_sql", new { query = sql });
         var cursor = first.GetProperty("next").GetString()!;
-        var tampered = cursor[..^1] + (cursor[^1] == 'A' ? 'B' : 'A');
+        var index = cursor.IndexOf('.', StringComparison.Ordinal) + 8;
+        var tampered = cursor[..index] + (cursor[index] == 'A' ? 'B' : 'A') + cursor[(index + 1)..];
 
         var (isError, payload, _) = await CallAsync(Client(), "query_sql", new { query = sql, cursor = tampered });
 

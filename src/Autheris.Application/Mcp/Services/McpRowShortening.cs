@@ -92,20 +92,32 @@ internal static class McpRowShortening
             return new McpRowShorteningOutcome(McpRowShorteningStatus.FirstRowTooLarge, string.Empty, 0);
         }
 
-        string? cursor = null;
-        if (resume is not null && resume(kept) is { Length: > 0 and <= MaxCursorLength } probe)
+        // At most two mints per call: the probe sized the payload, a second one covers a changed row count.
+        var mints = 0;
+        string? Mint(int rows)
         {
-            var withCursor = Fit(root, toolName, kept, lengths, probe, maxChars);
+            if (resume is null)
+            {
+                return null;
+            }
+
+            mints++;
+            return resume(rows) is { Length: > 0 and <= MaxCursorLength } token ? token : null;
+        }
+
+        var cursor = Mint(kept);
+        if (cursor is not null)
+        {
+            var withCursor = Fit(root, toolName, kept, lengths, cursor, maxChars);
             if (withCursor < 1)
             {
                 return new McpRowShorteningOutcome(McpRowShorteningStatus.FirstRowTooLarge, string.Empty, 0);
             }
 
-            cursor = probe;
             if (withCursor != kept)
             {
                 kept = withCursor;
-                cursor = resume(kept) is { Length: > 0 and <= MaxCursorLength } exact ? exact : null;
+                cursor = Mint(kept);
             }
         }
 
@@ -114,7 +126,7 @@ internal static class McpRowShortening
             array.Add(items[i]);
         }
 
-        // The sizing used an approximate row count; without a minted cursor a digit of drift is absorbed by dropping rows (bounded).
+        // The sizing used an approximate row count and a probe cursor: when the result is still over, drop one row (bounded).
         for (var attempt = 0; ; attempt++)
         {
             ApplyMarks(root, toolName, kept, cursor);
@@ -124,12 +136,16 @@ internal static class McpRowShortening
                 return new McpRowShorteningOutcome(McpRowShorteningStatus.Shortened, result, kept);
             }
 
-            if (cursor is not null || kept <= 1 || attempt >= 2)
+            if (kept <= 1 || attempt >= 2 || (cursor is not null && mints >= 2))
             {
                 return new McpRowShorteningOutcome(McpRowShorteningStatus.FirstRowTooLarge, string.Empty, 0);
             }
 
             array.RemoveAt(--kept);
+            if (cursor is not null)
+            {
+                cursor = Mint(kept);
+            }
         }
     }
 

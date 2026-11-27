@@ -161,12 +161,24 @@ public sealed partial class GovernedSqlExecutor
         {
             long maxResumeOffset = _options.Value.WebSql.Paging?.MaxOffset ?? 10_000;
             resumeAfter = rowsKept =>
-                rowsKept < 1
-                || rowsKept >= request.Page.Size
-                || request.Page.Offset + rowsKept > maxResumeOffset
-                || user.GetUserSid() == null
-                    ? null
-                    : EncodePageToken(request, user, tenantId, request.Page.Offset + rowsKept);
+            {
+                if (rowsKept < 1
+                    || rowsKept >= request.Page.Size
+                    || request.Page.Offset + rowsKept > maxResumeOffset
+                    || user.GetUserSid() == null)
+                {
+                    return null;
+                }
+
+                try
+                {
+                    return EncodePageToken(request, user, tenantId, request.Page.Offset + rowsKept);
+                }
+                catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or OverflowException)
+                {
+                    return null;
+                }
+            };
         }
 
         request.OnPageOutcome(new GovernedSqlPageOutcome(pageResponse, nextToken, pagingUnavailable, resumeAfter));
