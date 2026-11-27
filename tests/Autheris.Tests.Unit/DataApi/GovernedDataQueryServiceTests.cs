@@ -31,7 +31,7 @@ public sealed class GovernedDataQueryServiceTests
 
     private readonly TableIdentifier _customerTable = new("sales", "dbo", "customers");
 
-    private TableMetadata CreateCustomerTableMetadata(DataSourceType sourceType = DataSourceType.Sql, IReadOnlyList<string>? primaryKey = null)
+    private TableMetadata CreateCustomerTableMetadata(DataSourceType sourceType = DataSourceType.Sql, IReadOnlyList<string>? primaryKey = null, DiscoveryObjectKind objectKind = DiscoveryObjectKind.Table)
     {
         return new TableMetadata
         {
@@ -43,6 +43,7 @@ public sealed class GovernedDataQueryServiceTests
                 SchemaName = "dbo",
                 TableName = "customers",
                 DataSourceType = sourceType,
+                ObjectKind = objectKind,
                 IsActive = true
             },
             Columns = new List<TableColumn>
@@ -723,5 +724,36 @@ public sealed class GovernedDataQueryServiceTests
             new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id" }, Limit: 5), Ctx()));
 
         await _sqlExecutionService.DidNotReceive().ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ExecuteQueryAsync_ProcedureKindEntry_IsNotFound_NeverAuthorizesOrReads()
+    {
+        AllowAll(CreateCustomerTableMetadata(objectKind: DiscoveryObjectKind.Procedure));
+
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.TableNotFoundException>(() => CreateService().ExecuteQueryAsync(
+            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id" }, Limit: 5), Ctx()));
+
+        await _pdp.DidNotReceive().DecideAsync(Arg.Any<AccessRequest>(), Arg.Any<CancellationToken>());
+        await _sqlExecutionService.DidNotReceive().ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>());
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData(DiscoveryObjectKind.Table)]
+    [InlineData(DiscoveryObjectKind.View)]
+    [InlineData(DiscoveryObjectKind.MetricView)]
+    public async Task ExecuteQueryAsync_RelationKinds_StillExecute(DiscoveryObjectKind kind)
+    {
+        AllowAll(CreateCustomerTableMetadata(objectKind: kind));
+        _sqlExecutionService.ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>())
+            .Returns(SqlResult(2));
+
+        var result = await CreateService().ExecuteQueryAsync(
+            new DatasetQueryRequest(_customerTable, SelectColumns: new[] { "id", "name" }, Limit: 5), Ctx());
+
+        result.Count.ShouldBe(2);
+        await _sqlExecutionService.Received(1).ExecuteQueryBufferedAsync(Arg.Any<GovernedSqlQueryRequest>(), Arg.Any<ClaimsPrincipal>(), Arg.Any<TenantId>(), Arg.Any<CancellationToken>());
     }
 }

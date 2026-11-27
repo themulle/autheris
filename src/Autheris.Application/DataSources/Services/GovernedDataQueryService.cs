@@ -105,7 +105,8 @@ public sealed class GovernedDataQueryService : IGovernedDataQueryService
             throw new TableNotFoundException(request.Table);
         }
 
-        if (metadata == null)
+        // A procedure catalog entry is not a queryable relation; answer exactly like an unknown table.
+        if (metadata == null || metadata.Table.ObjectKind == DiscoveryObjectKind.Procedure)
         {
             throw new TableNotFoundException(request.Table);
         }
