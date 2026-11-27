@@ -130,7 +130,7 @@ public sealed class AggregationNegatedFilterTests
     }
 
     [Fact]
-    public void RejectsPredicate_KnownColumnsOnly_IgnoresOnlyParamIdentifiers()
+    public void RejectsPredicate_KnownColumnsOnly_RefusesEveryNonColumnIdentifier()
     {
         string[] grouped = ["department"];
 
@@ -175,6 +175,6 @@ public sealed class AggregationNegatedFilterTests
         AggregationNegationGuard.RejectsPredicate("employees.status <> 'x'", ["department"], meta, knownColumnsOnly: true).ShouldBeTrue();
 
         // "status" is a real column and stays a column even when followed by a dot.
-        AggregationNegationGuard.RejectsPredicate("status.field <> 'x'", ["department"], meta, knownColumnsOnly: true).ShouldBeTrue();
+        AggregationNegationGuard.RejectsPredicate("status.department <> 'x'", ["department"], meta, knownColumnsOnly: true).ShouldBeTrue();
     }
 }
