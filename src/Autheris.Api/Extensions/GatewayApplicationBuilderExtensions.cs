@@ -111,6 +111,8 @@ public static class GatewayApplicationBuilderExtensions
             return next(context);
         });
         app.UseAuthorization();
+        // WebSQL OpenAPI document: while WebSQL is disabled the answer is the bare 404 of an unmatched route.
+        app.Use(Autheris.Api.Endpoints.WebSqlEndpoints.DisabledOpenApiGuardAsync);
         app.Use(Autheris.Api.Endpoints.ScimEndpointGuard.MiddlewareAsync);
         app.UseMiddleware<PostAuthSidRateLimitingMiddleware>();
         app.UseMiddleware<SecurityContextResolutionMiddleware>();
