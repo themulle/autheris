@@ -45,6 +45,7 @@ public sealed partial class GovernedSqlRewriter
     internal async Task<int> ResolveMetricViewMinGroupSizeAsync(TableMetadata metricView, TenantId tenantId, CancellationToken ct)
     {
         var floor = GovernedAggregationService.BuildOperatorFloor(_analyticsOptions, hasExplicitOptions: true, metricView.Identifier);
+        // Without a provider catalog lowering is deliberately refused (stricter than the aggregation path).
         var protection = _protectionProvider is null
             ? GovernedAggregationService.ProtectionUnavailable()
             : await GovernedAggregationService.LoadProtectionFailClosedAsync(_protectionProvider, tenantId, metricView.Identifier, ct).ConfigureAwait(false);

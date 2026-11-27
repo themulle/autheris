@@ -445,6 +445,8 @@ public sealed class MetricViewStatementGuardTests
     [InlineData("region NOT LIKE 'E%'")]
     [InlineData("region NOT BETWEEN 'A' AND 'F'")]
     [InlineData("NOT (region = 'EU')")]
+    [InlineData("order_date IS NULL OR region <> 'EU'")]
+    [InlineData("NOT (region <> 'EU')")]
     public void NegatedWhere_OnNonGroupedDimension_IsRefused(string predicate)
     {
         var mv = MakeMetricView(countMeasure: "row_count");
@@ -472,6 +474,7 @@ public sealed class MetricViewStatementGuardTests
     [InlineData("region <> 'EU'")]
     [InlineData("region NOT IN ('EU')")]
     [InlineData("NOT (region = 'EU')")]
+    [InlineData("region NOT LIKE 'E%'")]
     public void NegatedWhere_OnBareGroupedColumn_IsAccepted(string predicate)
     {
         var mv = MakeMetricView(countMeasure: "row_count");
@@ -517,48 +520,6 @@ public sealed class MetricViewStatementGuardTests
     {
         var mv = MakeMetricView(countMeasure: "row_count");
         ShouldRefuse(Fill(ByOrderDate, predicate), mv);
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public void ParameterIdentifier_DoesNotHideColumnReference()
-    {
-        var mv = MakeMetricView(countMeasure: "row_count");
-        ShouldRefuse(Fill(ByOrderDate, "region <> __param_p0"), mv);
-        ShouldRefuse(Fill(ByOrderDate, "__param_p0 <> region"), mv);
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public void ColumnNamedWithParamPrefix_IsStillTreatedAsColumn()
-    {
-        var baseView = MakeMetricView(countMeasure: "row_count");
-        var mv = baseView with
-        {
-            Columns = [.. baseView.Columns, new TableColumn { ColumnName = "__param_region", DataType = "string", Role = MetricViewColumnRole.Dimension }]
-        };
-        var decision = TableAccessDecision.Allowed(
-            mv.Identifier,
-            new Dictionary<string, ColumnAccessLevel>(StringComparer.OrdinalIgnoreCase)
-            {
-                ["region"] = ColumnAccessLevel.Clear,
-                ["order_date"] = ColumnAccessLevel.Clear,
-                ["revenue"] = ColumnAccessLevel.Clear,
-                ["row_count"] = ColumnAccessLevel.Clear,
-                ["__param_region"] = ColumnAccessLevel.Clear
-            });
-
-        Should.Throw<WebSqlPolicyException>(() => MetricViewStatementGuard.EnforceForSingleTable(
-            Fill(ByOrderDate, "__param_region <> 'EU'"), mv, decision, DatabaseDialect.Databricks, 5, true));
-    }
-
-    [Fact]
-    [Trait("Category", "Security")]
-    public void UnknownNonParamIdentifier_IsRefused()
-    {
-        var mv = MakeMetricView(countMeasure: "row_count");
-        ShouldRefuse(Fill(ByOrderDate, "mystery_col = 'x'"), mv);
-        ShouldRefuse(Fill(ByOrderDate, "mystery_col <> 'x'"), mv);
     }
 
     [Fact]

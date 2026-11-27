@@ -134,16 +134,10 @@ public sealed class AggregationNegatedFilterTests
     {
         string[] grouped = ["department"];
 
-        // A client parameter identifier is not a filtered column.
-        AggregationNegationGuard.RejectsPredicate("department <> __param_p0", grouped, Meta, knownColumnsOnly: true).ShouldBeFalse();
-        AggregationNegationGuard.RejectsPredicate("department <> __PARAM_p0", grouped, Meta, knownColumnsOnly: true).ShouldBeFalse();
-
-        // It never hides a real column in the same predicate.
-        AggregationNegationGuard.RejectsPredicate("status <> __param_p0", grouped, Meta, knownColumnsOnly: true).ShouldBeTrue();
-
-        // Any other unknown identifier is refused.
+        // Every identifier that is not a column rejects, including one that looks like a client parameter.
+        AggregationNegationGuard.RejectsPredicate("department <> __param_p0", grouped, Meta, knownColumnsOnly: true).ShouldBeTrue();
         AggregationNegationGuard.RejectsPredicate("department <> mystery", grouped, Meta, knownColumnsOnly: true).ShouldBeTrue();
-        AggregationNegationGuard.RejectsPredicate("department <> other_param_p0", grouped, Meta, knownColumnsOnly: true).ShouldBeTrue();
+        AggregationNegationGuard.RejectsPredicate("department <> 'x'", grouped, Meta, knownColumnsOnly: true).ShouldBeFalse();
     }
 
     [Fact]
@@ -161,5 +155,26 @@ public sealed class AggregationNegatedFilterTests
 
         AggregationNegationGuard.RejectsPredicate("__param_x <> 'a'", ["department"], meta, knownColumnsOnly: true).ShouldBeTrue();
         AggregationNegationGuard.RejectsPredicate("__param_x <> 'a'", ["__param_x"], meta, knownColumnsOnly: true).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void RejectsPredicate_KnownColumnsOnly_QualifierSkippedOnlyWhenNotAColumn()
+    {
+        var meta = new TableMetadata
+        {
+            Identifier = Meta.Identifier,
+            Columns =
+            [
+                new TableColumn { ColumnName = "department", DataType = "varchar" },
+                new TableColumn { ColumnName = "status", DataType = "varchar" }
+            ]
+        };
+
+        // "employees" is a qualifier, not a column.
+        AggregationNegationGuard.RejectsPredicate("employees.department <> 'x'", ["department"], meta, knownColumnsOnly: true).ShouldBeFalse();
+        AggregationNegationGuard.RejectsPredicate("employees.status <> 'x'", ["department"], meta, knownColumnsOnly: true).ShouldBeTrue();
+
+        // "status" is a real column and stays a column even when followed by a dot.
+        AggregationNegationGuard.RejectsPredicate("status.field <> 'x'", ["department"], meta, knownColumnsOnly: true).ShouldBeTrue();
     }
 }

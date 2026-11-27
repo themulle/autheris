@@ -40,8 +40,7 @@ internal static partial class AggregationNegationGuard
 
     /// <summary>
     /// Shared decision: true when the predicate negates or isolates a column that is not grouped. An unparseable predicate is rejected.
-    /// With <paramref name="knownColumnsOnly"/> an identifier that is not a column of <paramref name="metadata"/> is skipped only when it
-    /// carries the client parameter prefix and no column has that name; any other unknown identifier rejects the predicate.
+    /// With <paramref name="knownColumnsOnly"/> every identifier that is not a column of <paramref name="metadata"/> (and not a qualifier) rejects the predicate.
     /// </summary>
     internal static bool RejectsPredicate(
         string sqlPredicate,
@@ -448,25 +447,15 @@ internal static partial class AggregationNegationGuard
                 continue;
             }
 
-            if (knownColumnsOnly)
+            // A qualifier (identifier followed by '.') that is not itself a column is resolved through the column that follows it.
+            if (knownColumnsOnly && i + 1 < tokens.Count && tokens[i + 1].Text == "." && metadata.GetColumn(name) is null)
             {
-                // A qualifier (identifier followed by '.') is resolved through the column that follows it.
-                if (i + 1 < tokens.Count && tokens[i + 1].Text == ".")
-                {
-                    continue;
-                }
-
-                if (metadata.GetColumn(name) is null && name.StartsWith(ClientParameterPrefix, StringComparison.OrdinalIgnoreCase))
-                {
-                    continue;
-                }
+                continue;
             }
 
             yield return metadata.GetColumn(name)?.ColumnName ?? name;
         }
     }
-
-    private const string ClientParameterPrefix = "__param_";
 
     private static bool IsWordToken(IToken token) => token.Text.Length > 0 && (char.IsLetter(token.Text[0]) || token.Text[0] == '_');
 
