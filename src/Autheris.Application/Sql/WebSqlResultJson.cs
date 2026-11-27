@@ -2,7 +2,6 @@ namespace Autheris.Application.Sql;
 
 using System;
 using System.Collections.Generic;
-using System.IO;
 using System.Text;
 using System.Text.Encodings.Web;
 using System.Text.Json;
@@ -102,8 +101,8 @@ public static class WebSqlResultJson
     {
         ArgumentNullException.ThrowIfNull(result);
 
-        using var stream = new MemoryStream();
-        using (var w = new Utf8JsonWriter(stream, new JsonWriterOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
+        var buffer = new System.Buffers.ArrayBufferWriter<byte>(1024);
+        using (var w = new Utf8JsonWriter(buffer, new JsonWriterOptions { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping }))
         {
             var keys = result.Columns;
             var names = SqlResultColumns.MakeUnique(keys.Count == 0 ? Array.Empty<string?>() : [.. keys]);
@@ -149,6 +148,6 @@ public static class WebSqlResultJson
             w.WriteEndObject();
         }
 
-        return Encoding.UTF8.GetString(stream.GetBuffer(), 0, (int)stream.Length);
+        return Encoding.UTF8.GetString(buffer.WrittenSpan);
     }
 }

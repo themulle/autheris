@@ -27,14 +27,14 @@ public sealed class McpServerErrorEnvelopeTests
             ValueTask.FromResult(respond(request, cancellationToken));
     }
 
-    private static ServiceProvider Services(IAiDataGuardrailService guardrail, InMemoryAuditLogRepository? audit = null)
+    private static ServiceProvider Services(IAiDataGuardrailService guardrail, InMemoryAuditLogRepository? audit = null, ServiceCollection? extra = null)
     {
         var http = new DefaultHttpContext
         {
             User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.PrimarySid, "S-1-USER"), new Claim("tenant_id", Tenant)], "Bearer"))
         };
         http.Items[Autheris.Domain.Security.SecurityPrincipalContext.TenantIdItemKey] = new TenantId(Tenant);
-        var services = new ServiceCollection();
+        var services = extra ?? new ServiceCollection();
         services.AddSingleton<IHttpContextAccessor>(new HttpContextAccessor { HttpContext = http });
         services.AddSingleton(Microsoft.Extensions.Options.Options.Create(new GatewayOptions()));
         services.AddSingleton(guardrail);
@@ -248,5 +248,32 @@ public sealed class McpServerErrorEnvelopeTests
         var result = await Call(Returning(new McpToolCallResult(true, """{"rows":[]}""", EstimatedTokens: 3)));
 
         result.Meta!.ContainsKey("pageSizeCapped").ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task ToolError_DifferentlyCasedQueryGraphQl_KeepsErrorsLikeCanonicalCall()
+    {
+        const string envelope = """{"error":{"code":"GRAPHQL_COST_EXCEEDED","message":"m"},"errors":[{"message":"x","extensions":{"code":"GRAPHQL_COST_EXCEEDED"}}]}""";
+        var guardrail = Returning(new McpToolCallResult(false, envelope, envelope));
+        var registry = new McpToolRegistry(
+            Microsoft.Extensions.Options.Options.Create(new GatewayOptions()), new Demo(), Autheris.Application.Mcp.Services.ReadPathSwitches.From(new GatewayOptions()));
+
+        string[] texts = new string[2];
+        var i = 0;
+        foreach (var name in new[] { "query_graphql", "QUERY_GRAPHQL" })
+        {
+            var services = new ServiceCollection();
+            services.AddSingleton<IMcpToolRegistry>(registry);
+            await using var sp = Services(guardrail, extra: services);
+            texts[i++] = Text(await GatewayMcpServer.CallGuardedToolAsync(sp, name, "{}", default));
+        }
+
+        texts[1].ShouldBe(texts[0]);
+        texts[0].ShouldContain("\"errors\"");
+    }
+
+    private sealed class Demo : IDemoDataSwitch
+    {
+        public bool Enabled => false;
     }
 }

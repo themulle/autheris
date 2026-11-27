@@ -268,15 +268,43 @@ public sealed partial class McpQuerySqlPagingTests
     public async Task QuerySql_NextWithoutPage_StillCarriesExecutedPageSize()
     {
         var capture = new List<CapturingSqlService>();
-        var (handler, _, _) = CreatePipeline(maxResultRows: 2, capture: capture);
-        var first = await RunAsync(handler, Call(Ordered));
+        var (handler, _, _) = CreatePipeline(maxResultRows: 2, webSqlMaxAllowedRows: 10, capture: capture);
+        var first = await RunAsync(handler, Call(Ordered, new { size = 2 }));
 
-        await RunAsync(handler, Call(Ordered, next: NextOf(first)));
+        await RunAsync(handler, Call(Ordered, new { size = 2 }, next: NextOf(first)));
 
         var continuation = capture[0].Requests[^1];
         continuation.NextToken.ShouldNotBeNull();
-        continuation.Page.ShouldNotBeNull("a token request must carry the executed size so a token from a larger cap fails");
+        continuation.Page.ShouldNotBeNull("an explicit page.size is always sent with the token, so a mismatch fails");
         continuation.Page!.Size.ShouldBe(2);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task QuerySql_NextWithoutPageSize_ContinuesWithTokenSize()
+    {
+        var capture = new List<CapturingSqlService>();
+        var (handler, _, _) = CreatePipeline(maxResultRows: 3, webSqlMaxAllowedRows: 10, capture: capture);
+        var first = await RunAsync(handler, Call(Ordered, new { size = 1 }));
+
+        var second = await RunAsync(handler, Call(Ordered, next: NextOf(first)));
+
+        capture[0].Requests[^1].Page.ShouldBeNull("like POST /api/v1/sql, size and offset come from the verified token");
+        IdsOf(second).ShouldBe([2]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task QuerySql_NextWithoutPageSize_TokenAboveCurrentCap_IsSqlPagingTokenInvalid_NoRows()
+    {
+        var (large, _, _) = CreatePipeline(maxResultRows: 4);
+        var (small, _, _) = CreatePipeline(maxResultRows: 2);
+        var token = NextOf(await RunAsync(large, Call(Ordered)));
+
+        var json = await RunAsync(small, Call(Ordered, next: token));
+
+        ErrorCodeOf(json).ShouldBe("SQL_PAGING_TOKEN_INVALID");
+        json.ShouldNotContain("\"rows\"");
     }
 
     [Fact]

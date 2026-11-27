@@ -120,7 +120,8 @@ public sealed partial class McpToolExecutionHandler
                 DataSourceName: dataSource,
                 RowLimit: boundedRowLimit,
                 Transport: SqlTransports.Mcp,
-                Page: new SqlPageWindow(0, executedSize, 1),
+                // A token request without page.size lets the executor take size and offset from the verified token, as POST /api/v1/sql does.
+                Page: next is not null && requestedSize is null ? null : new SqlPageWindow(0, executedSize, 1),
                 NextToken: next);
             var fallbackTruncated = false;
             try
@@ -135,6 +136,12 @@ public sealed partial class McpToolExecutionHandler
                     tenantId,
                     ct).ConfigureAwait(false);
                 fallbackTruncated = sqlResult.Truncated && cap < maxAllowedRows;
+            }
+
+            // A token minted under a larger cap (or scope clamp) than the current one never returns a larger page.
+            if (next is not null && requestedSize is null && sqlResult.Page is { } tokenPage && tokenPage.Size > executedSize)
+            {
+                return McpToolError.FailSql(new SqlPagingTokenInvalidException()).ContentJson;
             }
 
             McpResultMasking.Report(sqlResult.HasPolicyMaskedValues);

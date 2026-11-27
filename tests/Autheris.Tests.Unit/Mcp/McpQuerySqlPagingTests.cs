@@ -413,8 +413,8 @@ public sealed partial class McpQuerySqlPagingTests
         smallPage1Doc.RootElement.GetProperty("rowCount").GetInt32().ShouldBe(1);
         var smallCursor = smallPage1Doc.RootElement.GetProperty("next").GetString()!;
 
-        // Page 2 repeats page.size (a token request always carries the executed size, so a larger cap cannot widen a page)
-        var smallPage2Json = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql, page = new { size = 1 }, next = smallCursor }), session);
+        // Page 2 without repeating page.size keeps the token's page size 1, as on POST /api/v1/sql
+        var smallPage2Json = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql, next = smallCursor }), session);
         using var smallPage2Doc = JsonDocument.Parse(smallPage2Json);
         smallPage2Doc.RootElement.GetProperty("rowCount").GetInt32().ShouldBe(1);
         smallPage2Doc.RootElement.GetProperty("rows")[0].GetProperty("id").GetInt32().ShouldBe(2);

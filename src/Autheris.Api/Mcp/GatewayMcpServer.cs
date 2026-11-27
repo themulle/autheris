@@ -448,6 +448,8 @@ public static class GatewayMcpServer
     {
         var session = Caller(services);
         var guardrail = services.GetRequiredService<IAiDataGuardrailService>();
+        // The registry lookup ignores case, so the error envelope is shaped by the registered name, not by the spelling the caller sent.
+        var canonicalName = services.GetService<IMcpToolRegistry>()?.FindTool(toolName)?.Name ?? toolName;
         McpToolCallResult result;
         try
         {
@@ -471,13 +473,13 @@ public static class GatewayMcpServer
             logger?.LogError(ex, "MCP tool call failed with {Code}.", code);
             await McpToolFailureRecorder.RecordDenyAsync(
                 services.GetService<Autheris.Application.Audit.IAuditWriter>(), services.GetService<TimeProvider>(), logger, session, toolName, code, ct).ConfigureAwait(false);
-            return ToolError(McpToolError.Fail(code).ContentJson, toolName);
+            return ToolError(McpToolError.Fail(code).ContentJson, canonicalName);
         }
 
         // The guardrail classified the result once; a failed result is always an error result, a successful one never is.
         if (!result.IsSuccess)
         {
-            return ToolError(result.ErrorMessage ?? result.ContentJson, toolName);
+            return ToolError(result.ErrorMessage ?? result.ContentJson, canonicalName);
         }
 
         var meta = new System.Text.Json.Nodes.JsonObject
