@@ -75,6 +75,7 @@ internal static class GatewayStartupChecks
     internal static void Databricks(StartupCheckContext context)
     {
         GatewayStartupValidator.ValidateDatabricks(context.Options, context.Environment);
+        Autheris.Infrastructure.Databricks.Provisioning.DatabricksProvisioningOptionsValidator.Validate(context.Options);
     }
 
     internal static void DataSourceMappings(StartupCheckContext context)

@@ -1,6 +1,8 @@
 namespace Autheris.Infrastructure.Databricks;
 
+using Autheris.Application.Governance.Provisioning;
 using Autheris.Application.Security;
+using Autheris.Infrastructure.Databricks.Provisioning;
 using Autheris.Application.Usage;
 using Autheris.Domain.Common;
 using Autheris.Domain.Connectors;
@@ -50,6 +52,15 @@ public static class DatabricksServiceCollectionExtensions
             .RedactLoggedHeaders(["Authorization"]);
 
         services.TryAddEnumerable(ServiceDescriptor.Transient<ISourceCostCollector, DatabricksSourceCostCollector>(sp => sp.GetRequiredService<DatabricksSourceCostCollector>()));
+
+        services.AddHttpClient<UnityCatalogPermissionsClient>(client =>
+            {
+                client.MaxResponseContentBufferSize = UnityCatalogPermissionsClient.MaxResponseBytes;
+                client.Timeout = TimeSpan.FromSeconds(30);
+            })
+            .AddSecureOutboundHandlers(EgressIntegrations.Databricks)
+            .RedactLoggedHeaders(["Authorization"]);
+        services.TryAddTransient<IUnityCatalogPermissionsClient>(sp => sp.GetRequiredService<UnityCatalogPermissionsClient>());
 
         return services;
     }

@@ -360,6 +360,9 @@ public sealed class DatabricksDataSourceOptions
 
     /// <summary>Delay between status polls in milliseconds.</summary>
     [Range(10, 10000)] public int PollIntervalMilliseconds { get; init; } = 500;
+
+    /// <summary>Provisioning of approved grants as Unity Catalog privileges; null when the data source is not provisioning-managed.</summary>
+    public DatabricksProvisioningOptions? Provisioning { get; init; }
 }
 
 /// <summary>WP-X0b, strict identifier rule for<see cref="DataSourceConnectionOptions.DefaultSchema"/>.</summary>
