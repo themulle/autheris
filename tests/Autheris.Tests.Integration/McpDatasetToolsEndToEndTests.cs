@@ -511,9 +511,12 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
             [("entry", ColumnAccessLevel.Clear), ("amount", ColumnAccessLevel.Clear)]);
         var client = Client();
 
+        var (_, firstLook) = await CallAsync(client, "describe_dataset", new { dataset = "default.main.mcp_cranes" });
+        var field = firstLook.GetProperty("graphQl").GetProperty("queryField").GetString()!;
+        // The key and column fields come from the built schema, so describe again once it has caught up with the seeded catalog.
+        await RefreshGraphQlSchemaAsync(field);
         var (_, cranes) = await CallAsync(client, "describe_dataset", new { dataset = "default.main.mcp_cranes" });
         var graphQl = cranes.GetProperty("graphQl");
-        var field = graphQl.GetProperty("queryField").GetString()!;
         var variables = graphQl.GetProperty("variables").EnumerateArray().ToDictionary(v => v.GetProperty("name").GetString()!, v => v.GetProperty("type").GetString()!);
         var aggregate = graphQl.GetProperty("aggregate");
         var aggregateInput = aggregate.GetProperty("variables").EnumerateArray().Single(v => v.GetProperty("name").GetString() == "aggregates").GetProperty("type").GetString()!;
@@ -560,6 +563,8 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
             [("id", ColumnAccessLevel.Mask), ("label", ColumnAccessLevel.Clear)]);
         var client = Client();
 
+        var (_, firstLook) = await CallAsync(client, "describe_dataset", new { dataset = "default.main.mcp_keyvault" });
+        await RefreshGraphQlSchemaAsync(firstLook.GetProperty("graphQl").GetProperty("queryField").GetString()!);
         var (_, vault) = await CallAsync(client, "describe_dataset", new { dataset = "default.main.mcp_keyvault" });
         var connection = vault.GetProperty("graphQl").GetProperty("connection");
         connection.GetProperty("available").GetBoolean().ShouldBeFalse();
@@ -567,7 +572,6 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
         connection.TryGetProperty("keyFields", out _).ShouldBeFalse();
 
         var field = connection.GetProperty("field").GetString()!;
-        await RefreshGraphQlSchemaAsync(vault.GetProperty("graphQl").GetProperty("queryField").GetString()!);
         var (_, text) = await CallRawAsync(client, "query_graphql", new { query = $"{{ {field}(first: 2) {{ edges {{ node {{ label }} }} }} }}" });
         text.ShouldContain("KEYSET_PAGINATION_UNAVAILABLE");
     }
