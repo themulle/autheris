@@ -39,6 +39,15 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
     /// </summary>
     public ImmutableArray<bool> OutputColumnMasks { get; private set; } = ImmutableArray<bool>.Empty;
 
+    /// <summary>
+    /// Output ordinal of each <see cref="KeysetKeyColumns"/> entry in the root result row (a plain column projection,
+    /// directly or through a wildcard); -1 where a key is not projected as a plain column. Default when no key columns were requested.
+    /// </summary>
+    public ImmutableArray<int> RootKeysetOrdinals { get; private set; }
+
+    /// <summary>The declared key columns of a keyset candidate whose output ordinals the visitor resolves on the root read. Default or empty: none.</summary>
+    public ImmutableArray<string> KeysetKeyColumns { get; init; }
+
     /// <summary>True when the visited DML statement passed static single-table row-bound validation.</summary>
     public bool IsPreBoundedDml { get; private set; }
 

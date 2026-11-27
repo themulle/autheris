@@ -59,6 +59,12 @@ public sealed record CompiledSql(
     /// </summary>
     public ImmutableArray<bool> OutputColumnMasks { get; internal init; } = ImmutableArray<bool>.Empty;
 
+    /// <summary>The keyset shape of an eligible paged read (<see cref="CompileRequest.Keyset"/> was set); null otherwise.</summary>
+    public KeysetKeyInfo? KeysetKey { get; internal init; }
+
+    /// <summary>Why a statement with a <see cref="CompileRequest.Keyset"/> candidate is not keyset-eligible (a <see cref="KeysetUnavailableReasons"/> value), else null.</summary>
+    public string? KeysetUnavailable { get; internal init; }
+
     /// <summary>
     /// Issue #277: true when the emitted statement contains a recursive WITH definition. The cache keeps it, so a template hit
     /// audits like the first compile.

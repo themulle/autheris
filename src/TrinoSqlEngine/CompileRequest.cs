@@ -133,7 +133,16 @@ public sealed record CompileRequest
     /// </summary>
     public IReadOnlySet<string> GatewayLikePatternParameters { get; init; } = FrozenSet<string>.Empty;
 
+    /// <summary>
+    /// The declared primary key of the table a paged read targets. When set, the compiler reports on <see cref="CompiledSql.KeysetKey"/> /
+    /// <see cref="CompiledSql.KeysetUnavailable"/> whether the statement is eligible for keyset continuation. Part of the cache key.
+    /// </summary>
+    public KeysetCandidate? Keyset { get; init; }
+
     internal long? PageOffset { get; init; }
+
+    /// <summary>A server-issued keyset continuation (requires <see cref="Keyset"/>, never together with a page offset).</summary>
+    internal KeysetSeek? KeysetSeek { get; init; }
     internal long MaxAllowedOffset { get; init; } = 1_000_000;
 }
 

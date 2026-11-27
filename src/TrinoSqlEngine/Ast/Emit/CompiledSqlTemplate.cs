@@ -48,7 +48,9 @@ public sealed record CompiledSqlTemplate(
     ImmutableArray<bool> OutputColumnMasks = default,
     bool IsPreBoundedDml = false,
     long? PreBoundedMaxRows = null,
-    Ast.Security.PreExecutionRowCheck? PreExecutionRowCheck = null)
+    Ast.Security.PreExecutionRowCheck? PreExecutionRowCheck = null,
+    KeysetKeyInfo? KeysetKey = null,
+    string? KeysetUnavailable = null)
 {
     public static CompiledSqlTemplate From(string keyMaterial, CompiledSql compiled, ImmutableArray<TableDependency> dependencies) =>
         new(
@@ -65,7 +67,9 @@ public sealed record CompiledSqlTemplate(
             compiled.OutputColumnMasks,
             compiled.IsPreBoundedDml,
             compiled.PreBoundedMaxRows,
-            compiled.PreExecutionRowCheck);
+            compiled.PreExecutionRowCheck,
+            compiled.KeysetKey,
+            compiled.KeysetUnavailable);
 
     private static ImmutableArray<SqlSlot> ToSlots(ImmutableArray<BoundParameter> parameters)
     {
@@ -179,6 +183,8 @@ public sealed record CompiledSqlTemplate(
             IsPreBoundedDml = IsPreBoundedDml,
             PreBoundedMaxRows = PreBoundedMaxRows,
             PreExecutionRowCheck = PreExecutionRowCheck,
+            KeysetKey = KeysetKey,
+            KeysetUnavailable = KeysetUnavailable,
             PreExecutionPolicyValues = PreExecutionRowCheck is not null
                 ? policyValues.ToImmutableDictionary(StringComparer.Ordinal)
                 : ImmutableDictionary<string, PolicyValue>.Empty
@@ -416,9 +422,41 @@ public static class CompileCacheKey
 
         Write(sb, request, skipValue: false);
         // CR-ADG-41: the engine's input limit is checked while parsing, which a cache hit skips; it is part of the key instead.
+        AppendKeysetSeek(sb, request.KeysetSeek);
         sb.Append(";maxq=").Append(engineMaxQueryLength.ToString(CultureInfo.InvariantCulture));
         sb.Append(";sql=").Append(rawSql.Length).Append(':').Append(rawSql);
         return sb;
+    }
+
+    /// <summary>The seek part of the key: the issued shape hash and the slot types. The values never enter the key.</summary>
+    private static void AppendKeysetSeek(StringBuilder sb, KeysetSeek? seek)
+    {
+        sb.Append(";ks=");
+        if (seek is null)
+        {
+            sb.Append('-');
+            return;
+        }
+
+        sb.Append(seek.ShapeHash.Length).Append(':').Append(seek.ShapeHash);
+        if (seek.Values.IsDefault)
+        {
+            sb.Append('!');
+            return;
+        }
+
+        foreach (var value in seek.Values)
+        {
+            sb.Append(',');
+            if (value is null)
+            {
+                sb.Append('!');
+            }
+            else
+            {
+                sb.Append((int)DbCommandCompiledSqlBinder.InferType(value));
+            }
+        }
     }
 
     /// <summary>Drops a builder that a very large statement grew, so the thread does not pin it.</summary>

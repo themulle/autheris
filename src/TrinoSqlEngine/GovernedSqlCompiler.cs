@@ -123,6 +123,8 @@ internal sealed class GovernedSqlCompiler
             throw new SqlLimitExceededException(SqlLimitKind.QueryLength, request.TargetDialect, sql.Length, _engine.MaxQueryLength);
         }
 
+        request = ValidateKeysetRequest(request);
+
         // 2. cache: a hit still validates every table dependency and rebinds the current values (INV-12)
         // The key stays in the thread-local builder on the hot (hit) path; the raw text and the key string exist only after a miss.
         var keyBuilder = CompileCacheKey.Build(request, sql.Span, caps, _engine.MaxQueryLength);
@@ -136,7 +138,7 @@ internal sealed class GovernedSqlCompiler
         {
             CompileCacheKey.ReleaseBuilder(keyBuilder);
             _cache.CountHit();
-            return template.Rebind(typed.PolicyValues, request.PageOffset, request.MaxAllowedOffset);
+            return template.Rebind(typed.PolicyValues, request.PageOffset, request.MaxAllowedOffset, request.KeysetSeek?.Values);
         }
 
         string keyMaterial = keyBuilder.ToString();
@@ -212,15 +214,31 @@ internal sealed class GovernedSqlCompiler
             }
         }
 
+        // 5c. keyset continuation: the shape of the user tree decides eligibility; the seek predicate joins the user WHERE before the
+        // security visitor, so row filters, mask guards and the coverage proof all judge the final tree.
+        var keyset = AnalyzeKeyset(request, caps, typed, statementClass, simplified);
+        simplified = keyset.Tree;
+
         // 6. typed security injection; user literals first learn the catalog type of the column they are compared with (16 item 2)
         Pass("inject");
         var typedLiterals = (SqlStatement)new LiteralColumnTypeAnnotator(policy.Catalog) { CancellationToken = token }.Visit(simplified);
         typedLiterals = (SqlStatement)new IntegralOperandClassifier(policy.Catalog) { CancellationToken = token }.Visit(typedLiterals);
         var visitor = new AstSecurityVisitor(BuildOptions(request, typed, _engine.MaxQueryLength), typed)
         {
+            KeysetKeyColumns = keyset.Shape.Columns,
             CancellationToken = token
         };
-        var secured = (SqlStatement)visitor.Visit(typedLiterals);
+        SqlStatement secured;
+        try
+        {
+            secured = (SqlStatement)visitor.Visit(typedLiterals);
+        }
+        catch (MaskedColumnPredicateException) when (request.KeysetSeek is not null && keyset.Reason is null)
+        {
+            // A key that is masked now cannot be compared: the continuation no longer fits the statement.
+            throw new KeysetSeekRejectedException();
+        }
+
         bool evaluationFenced = visitor.RowPolicyApplied
             && caps.HasEvaluationFence
             && Ast.Security.RowPolicyErrorGuard.AreAllPolicyTablesFenced(secured);
@@ -232,6 +250,8 @@ internal sealed class GovernedSqlCompiler
         }
 
         CheckBudget(request, clock, token);
+
+        var (keysetKey, keysetUnavailable) = ResolveKeysetKey(request, keyset, visitor);
 
         secured = CompilerHooks.Current.InterceptInjected(secured);
 
@@ -272,6 +292,8 @@ internal sealed class GovernedSqlCompiler
                 AppliedPredicates = applied,
                 ExpectedAffectedRows = Ast.Security.InsertCheckOption.ExpectedRows(secured),
                 OutputColumnMasks = visitor.OutputColumnMasks,
+                KeysetKey = keysetKey,
+                KeysetUnavailable = keysetUnavailable,
                 IsPreBoundedDml = visitor.IsPreBoundedDml,
                 PreBoundedMaxRows = visitor.PreBoundedMaxRows,
                 PreExecutionRowCheck = visitor.PreExecutionRowCheck,
@@ -318,11 +340,195 @@ internal sealed class GovernedSqlCompiler
         // 11. only verified output is cached, value-free
         var templateToCache = CompiledSqlTemplate.From(keyMaterial, compiled, typed.Dependencies);
         _cache.Add(templateToCache, keyHash);
-        if (request.BindPageOffset)
+        if (request.BindPageOffset || request.KeysetSeek is not null)
         {
-            return templateToCache.Rebind(typed.PolicyValues, request.PageOffset, request.MaxAllowedOffset);
+            return templateToCache.Rebind(typed.PolicyValues, request.PageOffset, request.MaxAllowedOffset, request.KeysetSeek?.Values);
         }
         return compiled;
+    }
+
+    private readonly record struct KeysetAnalysis(SqlStatement Tree, KeysetShape Shape, string? Reason, string ShapeHash);
+
+    /// <summary>
+    /// A seek is accepted only as a server-issued continuation of a keyset candidate read: never without the candidate, never with a page
+    /// offset, never with fewer than one or more than eight values, never with a missing value. Fails closed before the cache is consulted.
+    /// </summary>
+    private static CompileRequest ValidateKeysetRequest(CompileRequest request)
+    {
+        if (request.Keyset is { KeyColumns.IsDefault: true })
+        {
+            request = request with { Keyset = new KeysetCandidate(System.Collections.Immutable.ImmutableArray<string>.Empty) };
+        }
+
+        if (request.KeysetSeek is not { } seek)
+        {
+            return request;
+        }
+
+        if (request.Keyset is null || request.BindPageOffset || request.PageOffset.HasValue
+            || string.IsNullOrEmpty(seek.ShapeHash) || seek.Values.IsDefaultOrEmpty || seek.Values.Length > KeysetLimits.MaxKeyColumns)
+        {
+            throw new KeysetSeekRejectedException();
+        }
+
+        foreach (var value in seek.Values)
+        {
+            if (value is null)
+            {
+                throw new KeysetSeekRejectedException();
+            }
+
+            SqlParameterType type;
+            try
+            {
+                type = DbCommandCompiledSqlBinder.InferType(value);
+            }
+            catch (SecurityException)
+            {
+                throw new KeysetSeekRejectedException();
+            }
+
+            if (type is SqlParameterType.Null or SqlParameterType.Binary or SqlParameterType.Boolean or SqlParameterType.Double or SqlParameterType.Time)
+            {
+                throw new KeysetSeekRejectedException();
+            }
+        }
+
+        return request;
+    }
+
+    private static KeysetAnalysis AnalyzeKeyset(CompileRequest request, DialectCapabilities caps, TypedPolicyContext typed, SqlStatementClass statementClass, SqlStatement tree)
+    {
+        if (request.Keyset is not { } candidate)
+        {
+            return new KeysetAnalysis(tree, default, null, string.Empty);
+        }
+
+        Pass("keyset");
+        KeysetShape shape = default;
+        string? reason;
+        string hash = string.Empty;
+        if (statementClass != SqlStatementClass.Select)
+        {
+            reason = KeysetUnavailableReasons.Shape;
+        }
+        else
+        {
+            shape = KeysetShapeAnalyzer.Analyze(tree, candidate);
+            reason = shape.Reason;
+        }
+
+        System.Collections.Immutable.ImmutableArray<string> catalogTypes = default;
+        if (reason is null)
+        {
+            (reason, catalogTypes) = ResolveKeyTypes(request, typed, shape);
+        }
+
+        if (reason is null)
+        {
+            hash = KeysetShapeHash.Compute(shape.Columns, shape.Descending, catalogTypes);
+        }
+
+        if (request.KeysetSeek is not { } seek)
+        {
+            return new KeysetAnalysis(tree, shape, reason, hash);
+        }
+
+        if (reason is not null || !string.Equals(seek.ShapeHash, hash, StringComparison.Ordinal) || seek.Values.Length != shape.Columns.Length)
+        {
+            throw new KeysetSeekRejectedException();
+        }
+
+        var types = System.Collections.Immutable.ImmutableArray.CreateBuilder<SqlParameterType>(seek.Values.Length);
+        foreach (var value in seek.Values)
+        {
+            types.Add(DbCommandCompiledSqlBinder.InferType(value));
+        }
+
+        var injected = KeysetSeekInjector.Inject(tree, shape, types.MoveToImmutable(), catalogTypes);
+        return new KeysetAnalysis(injected, shape, null, hash);
+    }
+
+    private static (string? Reason, System.Collections.Immutable.ImmutableArray<string> Types) ResolveKeyTypes(CompileRequest request, TypedPolicyContext typed, KeysetShape shape)
+    {
+        if (request.TargetDialect is not (TargetSqlDialect.PostgreSql or TargetSqlDialect.SqlServer or TargetSqlDialect.DuckDb
+            or TargetSqlDialect.Databricks or TargetSqlDialect.Oracle)
+            || shape.Table is null
+            || typed.Catalog.Resolve(shape.Table.Name) is not { IsMetricView: false } entry)
+        {
+            return (KeysetUnavailableReasons.Shape, default);
+        }
+
+        var types = System.Collections.Immutable.ImmutableArray.CreateBuilder<string>(shape.Columns.Length);
+        foreach (var key in shape.Columns)
+        {
+            string? dataType = ColumnDataTypeOf(entry, key);
+            if (dataType is null)
+            {
+                return (KeysetUnavailableReasons.NotPrimaryKey, default);
+            }
+
+            // Oracle's NLS_SORT and NLS_COMP can make ORDER BY and the comparison operators disagree for text.
+            if (request.TargetDialect == TargetSqlDialect.Oracle
+                && ColumnBindAdapter.Classify(dataType) is ColumnTypeClass.AnsiText or ColumnTypeClass.UnicodeText)
+            {
+                return (KeysetUnavailableReasons.Shape, default);
+            }
+
+            types.Add(dataType);
+        }
+
+        return (null, types.MoveToImmutable());
+    }
+
+    /// <summary>The keyset key of an eligible statement, or the reason it is unavailable. With a seek, any reason is a rejection.</summary>
+    private static (KeysetKeyInfo? Key, string? Unavailable) ResolveKeysetKey(CompileRequest request, KeysetAnalysis keyset, AstSecurityVisitor visitor)
+    {
+        if (request.Keyset is null)
+        {
+            return (null, null);
+        }
+
+        string? reason = keyset.Reason;
+        KeysetKeyInfo? key = null;
+        if (reason is null)
+        {
+            var ordinals = visitor.RootKeysetOrdinals;
+            var masks = visitor.OutputColumnMasks;
+            if (ordinals.IsDefaultOrEmpty || ordinals.Length != keyset.Shape.Columns.Length)
+            {
+                reason = KeysetUnavailableReasons.KeyNotProjected;
+            }
+            else
+            {
+                foreach (int ordinal in ordinals)
+                {
+                    if (ordinal < 0 || ordinal >= masks.Length)
+                    {
+                        reason = KeysetUnavailableReasons.KeyNotProjected;
+                        break;
+                    }
+
+                    if (masks[ordinal])
+                    {
+                        reason = KeysetUnavailableReasons.KeyMasked;
+                        break;
+                    }
+                }
+            }
+
+            if (reason is null)
+            {
+                key = new KeysetKeyInfo(keyset.Shape.Columns, keyset.Shape.Descending, ordinals, keyset.ShapeHash);
+            }
+        }
+
+        if (reason is not null && request.KeysetSeek is not null)
+        {
+            throw new KeysetSeekRejectedException();
+        }
+
+        return (key, reason);
     }
 
     /// <summary>

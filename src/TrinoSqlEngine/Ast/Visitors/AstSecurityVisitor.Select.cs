@@ -161,6 +161,11 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         if (isRootRead)
         {
             OutputColumnMasks = ComputeRootOutputColumnMasks(body);
+            if (!KeysetKeyColumns.IsDefaultOrEmpty)
+            {
+                // Resolved on the user's projections (before masks rewrite them), so a masked key is told apart from an unprojected one.
+                RootKeysetOrdinals = ComputeKeysetOrdinals(node.Body, KeysetKeyColumns);
+            }
         }
 
         if (node.With != null)
@@ -332,6 +337,59 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             default:
                 return ImmutableArray<bool>.Empty;
         }
+    }
+
+    private ImmutableArray<int> ComputeKeysetOrdinals(QueryBody body, ImmutableArray<string> keys)
+    {
+        var ordinals = new int[keys.Length];
+        Array.Fill(ordinals, -1);
+        if (body is not QuerySpecification { From: NamedTableSource table } spec || IsCte(table.Name))
+        {
+            return ImmutableArray.Create(ordinals);
+        }
+
+        string tableName = table.Name.NormalizedName;
+        int position = 0;
+        foreach (var projection in spec.Projections)
+        {
+            if (projection is WildcardSelectItem wildcard)
+            {
+                if (!MatchesWildcardQualifier(wildcard.Qualifier, tableName, table.Alias?.Value) || ColumnsOf(tableName) is not { } columns)
+                {
+                    return ImmutableArray.Create(ordinals);   // the width of the row is unknown: no key is trusted
+                }
+
+                for (int c = 0; c < columns.Count; c++)
+                {
+                    int k = IndexOfKey(keys, columns[c]);
+                    if (k >= 0 && ordinals[k] < 0) ordinals[k] = position + c;
+                }
+
+                position += columns.Count;
+            }
+            else
+            {
+                if (projection is ColumnSelectItem { Expression: ColumnReference reference })
+                {
+                    int k = IndexOfKey(keys, reference.Name.Parts[^1].Value);
+                    if (k >= 0 && ordinals[k] < 0) ordinals[k] = position;
+                }
+
+                position++;
+            }
+        }
+
+        return ImmutableArray.Create(ordinals);
+    }
+
+    private static int IndexOfKey(ImmutableArray<string> keys, string column)
+    {
+        for (int i = 0; i < keys.Length; i++)
+        {
+            if (string.Equals(keys[i], column, StringComparison.OrdinalIgnoreCase)) return i;
+        }
+
+        return -1;
     }
 
     private void ExpandWildcardMasks(TableSource? from, SqlQualifiedName? qualifier, ImmutableArray<bool>.Builder builder)
