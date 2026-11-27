@@ -118,6 +118,71 @@ public sealed class DescribeDatasetDenseSourcePerformanceTests
     }
 
     [Fact]
+    public async Task IncludeRelationsOnly_ReturnsRelationsInGraphQlSection_NoOtherGraphQlMembers()
+    {
+        var harness = DenseHarness.Create(hubRelationCount: 20, visibleChildCount: 5, transitiveNeighborCount: 5, goldenQueries: [], withDiscovery: true);
+        var executor = harness.CreateExecutor();
+
+        var json = await executor.ExecuteOperationAsync(
+            DescribeTool(),
+            $$"""{"dataset":"{{DenseHarness.HubIdString}}","include":["relations"]}""",
+            Session());
+
+        using var doc = JsonDocument.Parse(json);
+        var gql = doc.RootElement.GetProperty("graphQl");
+        gql.EnumerateObject().Select(p => p.Name).ShouldBe(["relations"]);
+        gql.GetProperty("relations").GetArrayLength().ShouldBeGreaterThan(0);
+        doc.RootElement.GetProperty("columns").GetArrayLength().ShouldBe(0);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task DescribeDataset_ColumnPagingDoesNotChangeConnectionAvailability_DiscoveryPath()
+    {
+        var harness = DenseHarness.Create(hubRelationCount: 5, visibleChildCount: 5, transitiveNeighborCount: 5, goldenQueries: [], extraHubColumns: 10, withDiscovery: true);
+        var executor = harness.CreateExecutor();
+
+        async Task<string> ConnectionAsync(string arguments)
+        {
+            var json = await executor.ExecuteOperationAsync(DescribeTool(), arguments, Session());
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.GetProperty("graphQl").GetProperty("connection").GetRawText();
+        }
+
+        var full = await ConnectionAsync($$"""{"dataset":"{{DenseHarness.HubIdString}}"}""");
+        (await ConnectionAsync($$"""{"dataset":"{{DenseHarness.HubIdString}}","columnOffset":5,"columnLimit":2}""")).ShouldBe(full);
+        (await ConnectionAsync($$"""{"dataset":"{{DenseHarness.HubIdString}}","columns":["extra_0"]}""")).ShouldBe(full);
+        full.ShouldContain("\"available\":true");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task BriefWithIncludeRelations_IsInvalidParams_SameForHiddenAndMissingDataset()
+    {
+        var harness = DenseHarness.Create(hubRelationCount: 5, visibleChildCount: 2, transitiveNeighborCount: 1, goldenQueries: [], withDiscovery: true);
+        var executor = harness.CreateExecutor();
+
+        async Task<string> RunAsync(string dataset, string include) => await executor.ExecuteOperationAsync(
+            DescribeTool(),
+            $$"""{"dataset":"{{dataset}}","brief":true,"include":["{{include}}"]}""",
+            Session());
+
+        var visible = await RunAsync(DenseHarness.HubIdString, "relations");
+        using (var doc = JsonDocument.Parse(visible))
+        {
+            doc.RootElement.GetProperty("error").GetProperty("code").GetString().ShouldBe("INVALID_PARAMS");
+        }
+
+        (await RunAsync("dense.dbo.hidden_table", "relations")).ShouldBe(visible);
+        (await RunAsync("dense.dbo.no_such_table", "relations")).ShouldBe(visible);
+        (await RunAsync(DenseHarness.HubIdString, "graphql")).ShouldBe(visible);
+
+        var allowed = await executor.ExecuteOperationAsync(
+            DescribeTool(), $$"""{"dataset":"{{DenseHarness.HubIdString}}","brief":true,"include":["columns"]}""", Session());
+        JsonDocument.Parse(allowed).RootElement.TryGetProperty("error", out _).ShouldBeFalse();
+    }
+
+    [Fact]
     [Trait("Category", "Security")]
     public async Task DescribeDataset_RelationTerm_PreFiltersTargetsBeforeVisibilityLookup()
     {
@@ -409,7 +474,9 @@ public sealed class DescribeDatasetDenseSourcePerformanceTests
         };
 
         private static GraphQlTableMapping Mapping(TableIdentifier id, string root, IEnumerable<string> cols, IReadOnlyList<GraphQlRelationMapping> relations) =>
-            new(id, root, root, root + "_filter", root + "_order", cols.Select(c => new GraphQlColumnMapping(c, c, "String")).ToList(), relations);
+            new(id, root, root, root + "_filter", root + "_order", cols.Select(c => new GraphQlColumnMapping(c, c, "String")).ToList(), relations,
+                [], new GraphQlRootFieldSignature(root + "_aggregate", root + "_aggregate_result", []),
+                new GraphQlRootFieldSignature(root + "Connection", root + "Connection", [new McpGraphQlArgument("first", "Int")]), ["id"]);
     }
 
     private sealed class SpyVisibilityService(ICatalogVisibilityService inner) : ICatalogVisibilityService

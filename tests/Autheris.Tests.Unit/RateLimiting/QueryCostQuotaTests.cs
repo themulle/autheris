@@ -479,4 +479,20 @@ public sealed class QueryCostQuotaTests : IDisposable
 
         recorder.Calls.ShouldBe(0);
     }
+
+    [Fact]
+    public void GroupsRootField_MapsToTableForQuota()
+    {
+        var meta = Autheris.Tests.Unit.GraphQL.TypedAggregateTestHost.DefaultTable();
+        TableMetadata? Lookup(string name) => name == "orders" ? meta : null;
+        var document = HotChocolate.Language.Utf8GraphQLParser.Parse("{ werte: orders_groups { count } n: orders_aggregate { count } }");
+
+        var roots = CostAndQuotaMiddleware.CollectRootFieldNames(document);
+
+        roots.ShouldBe(["orders_groups", "orders_aggregate"]);
+        AggregateRootResolution.Resolve(roots[0], Lookup, out var groupsBase).ShouldBeSameAs(meta);
+        AggregateRootResolution.Resolve(roots[1], Lookup, out var aggregateBase).ShouldBeSameAs(meta);
+        groupsBase.ShouldBe("orders");
+        aggregateBase.ShouldBe("orders");
+    }
 }

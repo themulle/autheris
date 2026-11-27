@@ -84,7 +84,8 @@ internal sealed class ClientListPgFixture : IAsyncDisposable
     public static async Task<ClientListPgFixture?> CreateAsync(
         int? maxListValues = null,
         int? maxLists = null,
-        PgListCapturingLogger<GovernedSqlExecutionService>? logger = null)
+        PgListCapturingLogger<GovernedSqlExecutionService>? logger = null,
+        string[]? requiredFilterColumns = null)
     {
         var db = await PostgreSqlTestDatabase.CreateAsync();
         if (!db.IsAvailable)
@@ -174,7 +175,7 @@ internal sealed class ClientListPgFixture : IAsyncDisposable
         var consentRepo = new SingleConsentRepo([writeConsent]);
         var consentResolution = new AllowAllConsentResolution();
         var auditRepo = new RecordingAuditRepo();
-        var catalog = new OrdersCatalogProvider(orders);
+        var catalog = new OrdersCatalogProvider(orders, requiredFilterColumns is null ? default : [.. requiredFilterColumns]);
         var policyFactory = new GovernancePolicyFactory(catalog, tableRepo, options);
         var typedPolicies = new TypedPolicySources(
             new RowPolicyFactory(new PolicyPredicateRenderer()),
@@ -302,12 +303,12 @@ internal sealed class ClientListPgFixture : IAsyncDisposable
         public Task<bool> VerifyAuditHashChainAsync(CancellationToken ct = default) => Task.FromResult(true);
     }
 
-    private sealed class OrdersCatalogProvider(TableMetadata table) : IGovernedCatalogProvider
+    private sealed class OrdersCatalogProvider(TableMetadata table, ImmutableArray<string> requiredFilterColumns) : IGovernedCatalogProvider
     {
         public ValueTask<ITableCatalog> GetCatalogAsync(GovernedDataSource dataSource, IReadOnlyCollection<TableIdentifier> tables, CancellationToken ct = default)
         {
             var cols = table.Columns.Select(c => new CatalogColumn(c.ColumnName, c.DataType)).ToImmutableArray();
-            return new(new InMemoryTableCatalog([new TableCatalogEntry(new TableIdentity("public", "orders"), cols, "tenant_id", 1)], "public"));
+            return new(new InMemoryTableCatalog([new TableCatalogEntry(new TableIdentity("public", "orders"), cols, "tenant_id", requiredFilterColumns, 1)], "public"));
         }
     }
 

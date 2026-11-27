@@ -508,7 +508,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             bypass: options?.Value.IsMcpAuthBypassed == true);
         var sunsetRules = await LoadSunsettingRulesAsync(ct).ConfigureAwait(false);
 
-        var skipGraphQlMap = brief || (narrowing is not null && !narrowing.WantsColumns && !narrowing.WantsGraphQl && !narrowing.WantsExamples);
+        var skipGraphQlMap = brief || (narrowing is not null && !narrowing.WantsColumns && !narrowing.WantsGraphQlBlock && !narrowing.WantsExamples);
         var graphQl = skipGraphQlMap || graphQlMap == null ? null : await graphQlMap.GetTableAsync(id, ct).ConfigureAwait(false);
         var graphQlColumns = (graphQl?.Columns ?? []).ToDictionary(c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
 
@@ -632,7 +632,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
 
         long graphQlMs = 0;
         McpGraphQlAccess? graphQlAccess = null;
-        if (graphQl is not null && (narrowing is null || narrowing.WantsGraphQl))
+        if (graphQl is not null && (narrowing is null || narrowing.WantsGraphQlBlock))
         {
             var graphQlStart = Stopwatch.GetTimestamp();
             graphQlAccess = await GraphQlAccessAsync(principal, graphQl, columns, ct, hiddenCols, narrowing).ConfigureAwait(false);
@@ -1139,6 +1139,27 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     }
 
     /// <summary>Dataset ids use the same <c>domain.schema.table</c> form as catalog objects.</summary>
+    /// <summary>Persisted catalog tags of an already catalog-visible table, bounded for response extensions (blank tags dropped).</summary>
+    public static IReadOnlyList<string> BoundedTags(TableMetadata table, int maxCount, int maxLength)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        var tags = new List<string>(Math.Min(table.CatalogTags.Count, maxCount));
+        foreach (var tag in table.CatalogTags)
+        {
+            if (tags.Count >= maxCount)
+            {
+                break;
+            }
+
+            if (!string.IsNullOrWhiteSpace(tag))
+            {
+                tags.Add(tag.Length > maxLength ? tag[..maxLength] : tag);
+            }
+        }
+
+        return tags;
+    }
+
     public static string DatasetId(TableIdentifier id) => $"{id.Domain}.{id.Schema}.{id.TableName}".ToLowerInvariant();
 
     /// <summary>

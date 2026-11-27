@@ -377,6 +377,21 @@ public abstract class UcProvisioningContract : GovernanceContractBase
     }
 
     [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task Feedback_tenants_lists_only_tenants_with_unrevoked_rows_on_the_source()
+    {
+        if (!Store.IsAvailable) return;
+
+        var source = NewSource();
+        await Repo.SaveFeedbackAsync(Store.TenantA, source, 1, [Feedback(Store.TenantA, Guid.NewGuid(), source, UcGrantState.Provisioned)], [], [], CancellationToken.None);
+        await Repo.SaveFeedbackAsync(Store.TenantB, source, 1, [Feedback(Store.TenantB, Guid.NewGuid(), source, UcGrantState.Revoked)], [], [], CancellationToken.None);
+        var elsewhere = NewSource();
+        await Repo.SaveFeedbackAsync(Store.TenantB, elsewhere, 1, [Feedback(Store.TenantB, Guid.NewGuid(), elsewhere, UcGrantState.Pending)], [], [], CancellationToken.None);
+
+        (await Repo.ListFeedbackTenantsAsync(source, CancellationToken.None)).ShouldBe([Store.TenantA]);
+    }
+
+    [RequiresContainerRuntimeFact]
     public async Task Ledger_rejects_over_long_fields_before_writing()
     {
         if (!Store.IsAvailable) return;

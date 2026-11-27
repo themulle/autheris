@@ -1,7 +1,10 @@
 using Autheris.Application.Analytics;
 using Autheris.Domain.Options;
+using Autheris.GraphQL.Catalog;
 using Autheris.GraphQL.Interceptors;
 using HotChocolate;
+using HotChocolate.Configuration;
+using HotChocolate.Types.Descriptors.Configurations;
 using HotChocolate.Execution;
 using HotChocolate.Execution.Configuration;
 using HotChocolate.Language;
@@ -21,7 +24,14 @@ public sealed class AggregateCostAnalysisTests
           queryMetrics(metrics: [String!]!, groupBy: [String!], limit: Int): MetricResult!
           sales(first: Int = 10): [Sale!]!
           plain_aggregate: Sale
+          sales_groups(where: String, orderBy: [String], limit: Int = 100): [sales_group_row!]!
+          plain_groups(limit: Int = 100): [sales_group_row!]!
         }
+        type sales_group_row {
+          region: String amount: Decimal qty: Long created: String is_vip: Boolean count: Long! _isMergedOther: Boolean!
+          region_count_distinct: Long qty_sum: Long qty_min: Long amount_sum: Decimal amount_avg: Float amount_min: Decimal
+        }
+        scalar Decimal
         enum sales_column { region qty amount flag }
         enum Fn { COUNT COUNT_DISTINCT SUM }
         input sales_aggregate_input { fn: Fn! column: sales_column alias: String! }
@@ -34,9 +44,23 @@ public sealed class AggregateCostAnalysisTests
         scalar Long
         """;
 
-    private static IRequestExecutorBuilder Builder()
+    /// <summary>Gives <c>sales_groups</c> (and only it) the catalog root field feature; <c>plain_groups</c> keeps none.</summary>
+    public sealed class FlatRootFeatureInterceptor : TypeInterceptor
     {
-        var builder = new ServiceCollection().AddGraphQLServer().AddDocumentFromString(Sdl);
+        public static readonly CatalogTableType Table = FlatAggregateTestSupport.SalesTable();
+
+        public override void OnBeforeCompleteType(ITypeCompletionContext completionContext, TypeSystemConfiguration configuration)
+        {
+            if (configuration is ObjectTypeConfiguration { Name: "Query" } query)
+            {
+                query.Fields.Single(f => f.Name == "sales_groups").Features.Set(new CatalogRootFieldFeature(Table, null!));
+            }
+        }
+    }
+
+    internal static IRequestExecutorBuilder Builder()
+    {
+        var builder = new ServiceCollection().AddGraphQLServer().AddDocumentFromString(Sdl).TryAddTypeInterceptor<FlatRootFeatureInterceptor>();
         foreach (var type in Utf8GraphQLParser.Parse(Sdl).Definitions.OfType<ObjectTypeDefinitionNode>())
         {
             foreach (var field in type.Fields)
@@ -48,9 +72,9 @@ public sealed class AggregateCostAnalysisTests
         return builder;
     }
 
-    private static async Task<ISchemaDefinition> SchemaAsync() => await Builder().BuildSchemaAsync();
+    internal static async Task<ISchemaDefinition> SchemaAsync() => await Builder().BuildSchemaAsync();
 
-    private static async Task<int> CostAsync(string query, IReadOnlyDictionary<string, object?>? variables = null)
+    internal static async Task<int> CostAsync(string query, IReadOnlyDictionary<string, object?>? variables = null)
     {
         var schema = await SchemaAsync();
         return QueryCostAnalyzerRule.CalculateCost(Utf8GraphQLParser.Parse(query), schema, variableValues: variables);
@@ -161,9 +185,9 @@ public sealed class AggregateCostAnalysisTests
         schema.ShouldNotBeNull();
     }
 
-    private static List<string?> ErrorCodes(IExecutionResult result) => Errors(result).Select(e => e.Code).ToList();
+    internal static List<string?> ErrorCodes(IExecutionResult result) => Errors(result).Select(e => e.Code).ToList();
 
-    private static List<(string? Code, string Message)> Errors(IExecutionResult result)
+    internal static List<(string? Code, string Message)> Errors(IExecutionResult result)
     {
         using var doc = System.Text.Json.JsonDocument.Parse(result.ToJson());
         var list = new List<(string?, string)>();
@@ -179,7 +203,7 @@ public sealed class AggregateCostAnalysisTests
         return list;
     }
 
-    private static async Task<IExecutionResult> RunWithCapAsync(string query, int cap)
+    internal static async Task<IExecutionResult> RunWithCapAsync(string query, int cap)
     {
         var executor = await Builder()
             .AddValidationRule<QueryCostAnalyzerRule>((_, _) => new QueryCostAnalyzerRule(maxAllowedCost: 100_000, maxAggregateFieldsPerOperation: cap))
@@ -234,5 +258,45 @@ public sealed class AggregateCostAnalysisTests
         var doc = Utf8GraphQLParser.Parse("{ a: sales(first: 1) { id } b: sales(first: 1) { id } c: plain_aggregate { id } d: sales_aggregate(aggregates: [{ fn: COUNT, alias: \"n\" }]) { count } }");
 
         QueryCostAnalyzerRule.CountAggregateRootFields(doc, schema).ShouldBe(1);
+    }
+
+    private const string FlatSelection = "region qty qty_sum region_count_distinct";
+
+    [Fact]
+    public async Task FlatCost_EqualsNestedCost_ForSameGroupsAndAggregates()
+    {
+        var nested = await CostAsync(Q("region, qty", $"{One}, {Distinct}"));
+        var flat = await CostAsync($"{{ sales_groups {{ {FlatSelection} }} }}");
+
+        flat.ShouldBe(nested);
+    }
+
+    [Fact]
+    public async Task FlatCost_CountDistinctField_CostsMore()
+    {
+        var cheap = await CostAsync("{ sales_groups { region qty_sum } }");
+        var distinct = await CostAsync("{ sales_groups { region region_count_distinct } }");
+
+        distinct.ShouldBeGreaterThan(cheap);
+    }
+
+    [Fact]
+    public async Task FlatCost_FragmentsCounted_DuplicatesOnce()
+    {
+        var plain = await CostAsync("{ sales_groups { region qty qty_sum } }");
+        var composed = await CostAsync(
+            "{ sales_groups { ...F region again: region ... on sales_group_row { qty_sum dup: qty_sum } } } fragment F on sales_group_row { qty }");
+
+        composed.ShouldBe(plain);
+        (await CostAsync("{ sales_groups { region qty qty_sum amount_sum } }")).ShouldBeGreaterThan(plain);
+    }
+
+    [Fact]
+    public async Task FlatField_CountsTowardMaxFieldsPerOperation()
+    {
+        var schema = await SchemaAsync();
+        var doc = Utf8GraphQLParser.Parse("{ a: sales_groups { count } b: sales_groups { count } c: sales(first: 1) { id } d: plain_groups { count } }");
+
+        QueryCostAnalyzerRule.CountAggregateRootFields(doc, schema).ShouldBe(3);
     }
 }

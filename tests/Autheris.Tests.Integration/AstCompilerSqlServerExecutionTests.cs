@@ -170,9 +170,9 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
         }
     };
 
-    private async Task<List<object?[]>> RunAsync(string sql, string tenant, IReadOnlyDictionary<string, object?>? client = null, string? connectionString = null, bool translateDates = false, int? commandTimeoutSeconds = null)
+    private async Task<List<object?[]>> RunAsync(string sql, string tenant, IReadOnlyDictionary<string, object?>? client = null, string? connectionString = null, bool translateDates = false, int? commandTimeoutSeconds = null, ClientNullShapes? nulls = null)
     {
-        var compiled = _engine.Compile(sql.AsMemory(), Request(tenant) with { TranslateTrinoDateFunctions = translateDates }, CancellationToken.None);
+        var compiled = _engine.Compile(sql.AsMemory(), Request(tenant) with { TranslateTrinoDateFunctions = translateDates, ClientNulls = nulls ?? ClientNullShapes.Empty }, CancellationToken.None);
         await using var conn = new SqlConnection(connectionString ?? _db.ConnectionString);
         await conn.OpenAsync();
         await using var cmd = conn.CreateCommand();
@@ -487,6 +487,24 @@ public sealed class AstCompilerSqlServerExecutionTests : IClassFixture<AstCompil
     {
         if (!_db.IsAvailable) return;
         (await RunAsync(sql, "acme")).ShouldNotBeNull();
+    }
+
+    [Fact]
+    public async Task OptionalFilter_WithNull_ReturnsAllTenantRows()
+    {
+        if (!_db.IsAvailable) return;
+        var rows = await RunAsync("SELECT id FROM orders WHERE (__param_r IS NULL OR region = __param_r)", "acme",
+            new Dictionary<string, object?> { ["r"] = null }, nulls: ClientNullShapes.Create(["r"]));
+        Ids(rows).ShouldBe(new List<int> { 1, 2, 6 });
+    }
+
+    [Fact]
+    public async Task OptionalFilter_WithValue_Filters()
+    {
+        if (!_db.IsAvailable) return;
+        var rows = await RunAsync("SELECT id FROM orders WHERE (__param_r IS NULL OR region = __param_r)", "acme",
+            new Dictionary<string, object?> { ["r"] = "EU" });
+        Ids(rows).ShouldBe(new List<int> { 1, 6 });
     }
 
     [Fact]

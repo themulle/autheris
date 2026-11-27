@@ -173,6 +173,9 @@ public interface IUcProvisioningStore
 
     Task<IReadOnlyList<UcGrantFeedback>> ListFeedbackAsync(TenantId tenant, string dataSource, CancellationToken ct);
 
+    /// <summary>The tenants that hold feedback rows on <paramref name="dataSource"/> that are not yet <see cref="UcGrantState.Revoked"/>.</summary>
+    Task<IReadOnlyList<TenantId>> ListFeedbackTenantsAsync(string dataSource, CancellationToken ct);
+
     /// <summary>The feedback of the given consents of <paramref name="tenant"/>; consents without a row are absent.</summary>
     Task<IReadOnlyDictionary<Guid, UcGrantFeedback>> GetFeedbackAsync(TenantId tenant, IReadOnlyCollection<Guid> consentIds, CancellationToken ct);
 
@@ -212,6 +215,9 @@ public sealed class UnavailableUcProvisioningStore : IUcProvisioningStore
 
     public Task DeleteLedgerAsync(string dataSource, long fencingToken, IReadOnlyList<UcLedgerEntry> entries, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct) =>
         throw Unavailable();
+
+    public Task<IReadOnlyList<TenantId>> ListFeedbackTenantsAsync(string dataSource, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<TenantId>>([]);
 
     public Task<IReadOnlyList<UcGrantFeedback>> ListFeedbackAsync(TenantId tenant, string dataSource, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<UcGrantFeedback>>([]);

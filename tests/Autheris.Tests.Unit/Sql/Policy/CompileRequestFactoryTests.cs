@@ -34,6 +34,16 @@ public sealed class CompileRequestFactoryTests
         TargetSqlDialect dialect = TargetSqlDialect.PostgreSql, bool isDml = false, long maxRows = 100, IReadOnlySet<string>? functions = null, GovernancePolicy? policy = null) =>
         CompileRequestFactory.Create(policy ?? Policy(), dialect, new WebSqlOptions(), isDml, maxRows, functions ?? new HashSet<string> { "lower" });
 
+    [Fact]
+    public void Create_passes_client_nulls()
+    {
+        var nulls = ClientNullShapes.Create(["region"]);
+        var request = CompileRequestFactory.Create(Policy(), TargetSqlDialect.PostgreSql, new WebSqlOptions(), false, 100, new HashSet<string> { "lower" }, clientNulls: nulls);
+
+        request.ClientNulls.ShouldBeSameAs(nulls);
+        Create().ClientNulls.ShouldBeSameAs(ClientNullShapes.Empty);
+    }
+
     [Theory]
     [InlineData(TargetSqlDialect.PostgreSql)]
     [InlineData(TargetSqlDialect.SqlServer)]

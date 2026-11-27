@@ -60,6 +60,23 @@ public sealed class WebSqlPagingTokenTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public void Page_token_rejected_when_null_set_changes()
+    {
+        var (codec, _, _) = CreateCodec();
+        var user = CreateUser();
+        var tenant = new TenantId("tenant-1");
+        const string sql = "SELECT id FROM crm.customers WHERE (@region IS NULL OR region = @region) ORDER BY id";
+        var withNull = new Dictionary<string, object?> { ["region"] = null };
+        var withValue = new Dictionary<string, object?> { ["region"] = "EU" };
+
+        string token = codec.EncodeToken(sql, withNull, user, tenant, "crm", "WebSql", 100, 100, 2, TimeSpan.FromMinutes(15));
+
+        codec.DecodeToken(token, sql, withNull, user, tenant, "crm", "WebSql", 10_000).Offset.ShouldBe(100);
+        Should.Throw<SqlPagingTokenInvalidException>(() => codec.DecodeToken(token, sql, withValue, user, tenant, "crm", "WebSql", 10_000));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public void OtherPrincipal_Rejected()
     {
         var (codec, _, _) = CreateCodec();

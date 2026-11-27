@@ -11,8 +11,16 @@ internal readonly record struct AggregateTypeNames(
     string Key,
     string Group,
     string Result,
-    string Field)
+    string Field,
+    string GroupRow,
+    string GroupsField)
 {
+    public const string AggregateFieldSuffix = "_aggregate";
+    public const string GroupsFieldSuffix = "_groups";
+    public const string GroupRowSuffix = "_group_row";
+    public const string MergedOtherField = "_isMergedOther";
+    public const string CountField = "count";
+
     public const string AggregateFn = "AutherisAggregateFn";
     public const string ValueKind = "AutherisValueKind";
     public const string AggregateValue = "AutherisAggregateValue";
@@ -43,7 +51,25 @@ internal readonly record struct AggregateTypeNames(
             Key: tableTypeName + "_aggregate_key",
             Group: tableTypeName + "_aggregate_group",
             Result: tableTypeName + "_aggregate_result",
-            Field: tableTypeName + "_aggregate");
+            Field: tableTypeName + AggregateFieldSuffix,
+            GroupRow: tableTypeName + GroupRowSuffix,
+            GroupsField: tableTypeName + GroupsFieldSuffix);
+    }
+
+    /// <summary>The table-based name of a nested (<c>_aggregate</c>) or flat (<c>_groups</c>) aggregation root field.</summary>
+    internal static bool TryGetAggregateRootBase(string rootFieldName, out string baseName)
+    {
+        foreach (var suffix in (ReadOnlySpan<string>)[AggregateFieldSuffix, GroupsFieldSuffix])
+        {
+            if (rootFieldName.EndsWith(suffix, StringComparison.Ordinal) && rootFieldName.Length > suffix.Length)
+            {
+                baseName = rootFieldName[..^suffix.Length];
+                return true;
+            }
+        }
+
+        baseName = string.Empty;
+        return false;
     }
 
     public string GroupByFields => Column.EndsWith("_column", StringComparison.Ordinal)
@@ -66,5 +92,7 @@ internal readonly record struct AggregateTypeNames(
         yield return Group;
         yield return Result;
         yield return Field;
+        yield return GroupRow;
+        yield return GroupsField;
     }
 }

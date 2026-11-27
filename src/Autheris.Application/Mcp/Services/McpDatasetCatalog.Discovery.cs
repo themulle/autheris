@@ -363,7 +363,7 @@ public sealed partial class McpDatasetCatalog
             return narrowing is null ? summaryDesc : McpDescribeNarrowing.Apply(summaryDesc, narrowing);
         }
 
-        var skipGraphQlMap = brief || (narrowing is not null && !narrowing.WantsColumns && !narrowing.WantsGraphQl && !narrowing.WantsExamples);
+        var skipGraphQlMap = brief || (narrowing is not null && !narrowing.WantsColumns && !narrowing.WantsGraphQlBlock && !narrowing.WantsExamples);
         var graphQl = skipGraphQlMap || graphQlMap == null ? null : await graphQlMap.GetTableAsync(id, ct).ConfigureAwait(false);
         var graphQlColumns = (graphQl?.Columns ?? []).ToDictionary(c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
 
@@ -430,7 +430,7 @@ public sealed partial class McpDatasetCatalog
 
         long graphQlMs = 0;
         McpGraphQlAccess? graphQlAccess = null;
-        if (!brief && graphQl is not null && (narrowing is null || narrowing.WantsGraphQl))
+        if (!brief && graphQl is not null && (narrowing is null || narrowing.WantsGraphQlBlock))
         {
             var graphQlStart = Stopwatch.GetTimestamp();
             graphQlAccess = await GraphQlAccessAsync(principal, graphQl, columns, ct, hiddenCols, narrowing).ConfigureAwait(false);
