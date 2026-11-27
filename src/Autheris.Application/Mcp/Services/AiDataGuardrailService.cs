@@ -242,7 +242,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             }
 
             // MCP-08: doc tools run under the same per-call token budget as dataset tools.
-            scrubbedDocJson = ApplyTokenBudget(tool.Name, scrubbedDocJson, out var docTokens, out var docTruncated, out var docBudgetFailed);
+            scrubbedDocJson = ApplyTokenBudget(tool.Name, scrubbedDocJson, out var docTokens, out var docTruncated, out var docBudgetFailed, out _);
             await RecordAuditEventAsync(tool.Name, sessionContext, isError ? "DENY" : "ALLOW",
                 isError ? $"Doc tool returned error ({docErr ?? "ERROR"})." : "Document MCP tool executed successfully under AI guardrails.",
                 docWasMasked, docTruncated, docTokens, cancellationToken).ConfigureAwait(false);
@@ -461,6 +461,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
 
         string rawDataJson;
         bool? policyOutcome = null;
+        Func<int, string?>? resumeAfter = null;
         var argsJson = request.ArgumentsJson ?? "{}";
         if (tool.Name.Equals("get_golden_queries", StringComparison.OrdinalIgnoreCase) && _goldenQueryService != null)
         {
@@ -582,8 +583,10 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         else if (_queryExecutor != null)
         {
             using var maskingScope = McpResultMasking.Begin();
+            using var continuationScope = McpRowContinuation.Begin();
             rawDataJson = await _queryExecutor.ExecuteOperationAsync(tool, argsJson, sessionContext, cancellationToken).ConfigureAwait(false);
             policyOutcome = maskingScope.Outcome;
+            resumeAfter = continuationScope.ResumeAfter;
         }
         else
         {
@@ -608,9 +611,9 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         }
 
         scrubbedJson = await InspectOutputAsync(tool.Name, scrubbedJson, sessionContext, cancellationToken, m => wasMasked |= m).ConfigureAwait(false);
-        scrubbedJson = ApplyTokenBudget(tool.Name, scrubbedJson, out var estimatedTokens, out var truncated, out var budgetFailed, argsJson);
+        scrubbedJson = ApplyTokenBudget(tool.Name, scrubbedJson, out var estimatedTokens, out var truncated, out var budgetFailed, out var returnedRows, argsJson, resumeAfter);
 
-        await RecordAuditEventAsync(tool.Name, sessionContext, "ALLOW", "Tool executed successfully under AI guardrails.", wasMasked, truncated, estimatedTokens, cancellationToken).ConfigureAwait(false);
+        await RecordAuditEventAsync(tool.Name, sessionContext, "ALLOW", "Tool executed successfully under AI guardrails.", wasMasked, truncated, estimatedTokens, cancellationToken, returnedRows: returnedRows).ConfigureAwait(false);
 
         var verdict = wasMasked ? "masked" : "allow";
         activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, verdict);
@@ -619,7 +622,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         McpDiagnostics.RecordTokenUsage(estimatedTokens, "output", tool.Name);
         McpDiagnostics.RecordGuardrailVerdict(verdict, tool.Name, wasMasked, false);
 
-        return new McpToolCallResult(IsSuccess: !budgetFailed, ContentJson: scrubbedJson, ErrorMessage: budgetFailed ? scrubbedJson : null, EstimatedTokens: estimatedTokens, IsMasked: wasMasked || (policyOutcome ?? (_queryExecutor != null && McpResultMasking.IsGovernedDataTool(tool))), TruncatedDueToBudget: truncated);
+        return new McpToolCallResult(IsSuccess: !budgetFailed, ContentJson: scrubbedJson, ErrorMessage: budgetFailed ? scrubbedJson : null, EstimatedTokens: estimatedTokens, IsMasked: wasMasked || (policyOutcome ?? (_queryExecutor != null && McpResultMasking.IsGovernedDataTool(tool))), TruncatedDueToBudget: truncated, ReturnedRows: budgetFailed ? null : returnedRows);
     }
 
     /// <summary>The audited block of a request refused by the input guardrail; the caller sees the fixed code only.</summary>

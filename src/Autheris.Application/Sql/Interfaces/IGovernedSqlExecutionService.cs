@@ -88,7 +88,8 @@ public sealed record GovernedSqlPageResponse(int Number, long Offset, int Size);
 public sealed record GovernedSqlPageOutcome(
     GovernedSqlPageResponse? Page,
     string? NextToken,
-    string? PagingUnavailable);
+    string? PagingUnavailable,
+    Func<int, string?>? ResumeAfter = null);
 
 public sealed record GovernedSqlQueryRequest(
     string Sql,
@@ -140,6 +141,10 @@ public sealed record GovernedSqlResult(
     [property: System.Text.Json.Serialization.JsonIgnore] Autheris.Application.Usage.SourceExecutionStats SourceStats = default,
     [property: System.Text.Json.Serialization.JsonIgnore] System.Collections.Immutable.ImmutableArray<bool> MaskedColumns = default)
 {
+    /// <summary>Mints a signed continuation token that resumes after the first <c>k</c> rows of this page; null when none can be issued. Never serialized.</summary>
+    [System.Text.Json.Serialization.JsonIgnore]
+    public Func<int, string?>? ResumeAfter { get; init; }
+
     /// <summary>True when the result has rows and the projection holds a policy-masked column; unknown column masks fall back to the in-database masking flag.</summary>
     [System.Text.Json.Serialization.JsonIgnore]
     public bool HasPolicyMaskedValues =>

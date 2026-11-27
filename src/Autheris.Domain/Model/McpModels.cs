@@ -35,7 +35,8 @@ public sealed record McpToolCallResult(
     string? ErrorMessage = null,
     int EstimatedTokens = 0,
     bool IsMasked = false,
-    bool TruncatedDueToBudget = false
+    bool TruncatedDueToBudget = false,
+    int? ReturnedRows = null
 );
 
 /// <summary>

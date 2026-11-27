@@ -206,7 +206,10 @@ public sealed partial class GovernedSqlExecutor
         return new GovernedSqlResult(
             request.Sql, columns.AsReadOnly(), rows.AsReadOnly(), rows.Count, sw.ElapsedMilliseconds,
             isTruncated, columnDescriptions, !_options.Value.IsColumnMaskingDisabled,
-            pageOutcome?.Page, pageOutcome?.NextToken, pageOutcome?.PagingUnavailable, indexHints, sourceStats, maskedColumns);
+            pageOutcome?.Page, pageOutcome?.NextToken, pageOutcome?.PagingUnavailable, indexHints, sourceStats, maskedColumns)
+        {
+            ResumeAfter = pageOutcome?.ResumeAfter,
+        };
     }
 
     public async IAsyncEnumerable<IReadOnlyDictionary<string, object?>> StreamRowsAsync(

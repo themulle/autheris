@@ -12,6 +12,21 @@ using Microsoft.Extensions.Logging;
 
 public sealed partial class AiDataGuardrailService
 {
+    private sealed class AuditDetails
+    {
+        public string? sessionId { get; init; }
+        public string? tenantId { get; init; }
+        public string? tool { get; init; }
+        public string? decision { get; init; }
+        public string? details { get; init; }
+        public bool isMasked { get; init; }
+        public bool truncated { get; init; }
+        public int estimatedTokens { get; init; }
+        [System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+        public int? returnedRows { get; init; }
+        public DateTimeOffset timestamp { get; init; }
+    }
+
     private async Task RecordAuditEventAsync(
         string toolName,
         McpSessionContext sessionContext,
@@ -21,7 +36,8 @@ public sealed partial class AiDataGuardrailService
         bool truncated,
         int estimatedTokens,
         CancellationToken ct,
-        string eventType = "MCP_TOOL_EXECUTION")
+        string eventType = "MCP_TOOL_EXECUTION",
+        int? returnedRows = null)
     {
         try
         {
@@ -37,16 +53,17 @@ public sealed partial class AiDataGuardrailService
                 TargetTable = toolName,
                 Decision = decision,
                 TraceId = sessionContext.SessionId,
-                DetailsJson = JsonSerializer.Serialize(new
+                DetailsJson = JsonSerializer.Serialize(new AuditDetails
                 {
                     sessionId = sessionContext.SessionId,
                     tenantId = sessionContext.TenantId,
                     tool = toolName,
-                    decision,
-                    details,
-                    isMasked,
-                    truncated,
-                    estimatedTokens,
+                    decision = decision,
+                    details = details,
+                    isMasked = isMasked,
+                    truncated = truncated,
+                    estimatedTokens = estimatedTokens,
+                    returnedRows = returnedRows,
                     timestamp = DateTimeOffset.UtcNow
                 })
             };
@@ -374,33 +391,68 @@ public sealed partial class AiDataGuardrailService
     /// <c>describe_dataset</c>, whole columns (issue #820; <paramref name="argumentsJson"/> carries the column cursor), any other result is
     /// replaced by the <c>TOKEN_BUDGET_EXCEEDED</c> error envelope (<paramref name="failed"/> is then true). Shared by dataset tools and doc tools so no tool skips the budget.
     /// </summary>
-    private string ApplyTokenBudget(string toolName, string json, out int estimatedTokens, out bool truncated, out bool failed, string? argumentsJson = null)
+    private string ApplyTokenBudget(
+        string toolName,
+        string json,
+        out int estimatedTokens,
+        out bool truncated,
+        out bool failed,
+        out int? returnedRows,
+        string? argumentsJson = null,
+        Func<int, string?>? resumeAfter = null)
     {
         int maxTokens = _options.Value.Mcp.MaxTokensPerCall > 0 ? _options.Value.Mcp.MaxTokensPerCall : 4096;
         estimatedTokens = Math.Max(1, json.Length / 4);
         truncated = false;
         failed = false;
+        returnedRows = null;
 
         if (estimatedTokens > maxTokens)
         {
             _logger.LogWarning("Tool result for '{ToolName}' ({EstimatedTokens} tokens) exceeded max token budget ({MaxTokens}). Truncating result.", toolName, estimatedTokens, maxTokens);
             int maxChars = maxTokens * 4;
+            string? hint = null;
             if (json.Length > maxChars && McpBudgetShortening.TryShorten(toolName, json, argumentsJson, maxChars, maxTokens, out var shortened))
             {
                 json = shortened;
-                estimatedTokens = Math.Max(1, json.Length / 4);
                 truncated = true;
             }
             else if (json.Length > maxChars)
             {
-                json = McpToolError.Serialize(new McpToolErrorBody(McpErrorCodes.TokenBudgetExceeded, McpErrorCodes.FixedMessage(McpErrorCodes.TokenBudgetExceeded))
+                var rowOutcome = McpRowShortening.AppliesTo(toolName)
+                    ? McpRowShortening.Shorten(toolName, json, maxChars, resumeAfter)
+                    : default;
+                switch (rowOutcome.Status)
                 {
-                    Hint = McpBudgetShortening.NoticeNote(toolName, argumentsJson)
-                });
-                failed = true;
-                estimatedTokens = Math.Max(1, json.Length / 4);
-                truncated = true;
+                    case McpRowShorteningStatus.Shortened:
+                        json = rowOutcome.Json;
+                        truncated = true;
+                        returnedRows = rowOutcome.ReturnedRows;
+                        break;
+                    case McpRowShorteningStatus.Fits:
+                        json = rowOutcome.Json;
+                        break;
+                    case McpRowShorteningStatus.FirstRowTooLarge:
+                        hint = McpRowShortening.FirstRowNote(toolName);
+                        returnedRows = 0;
+                        break;
+                    default:
+                        hint = McpBudgetShortening.NoticeNote(toolName, argumentsJson);
+                        break;
+                }
+
+                if (rowOutcome.Status is McpRowShorteningStatus.NotApplicable or McpRowShorteningStatus.FirstRowTooLarge)
+                {
+                    json = McpToolError.Serialize(new McpToolErrorBody(McpErrorCodes.TokenBudgetExceeded, McpErrorCodes.FixedMessage(McpErrorCodes.TokenBudgetExceeded))
+                    {
+                        Hint = hint
+                    });
+                    failed = true;
+                    truncated = true;
+                }
             }
+
+            estimatedTokens = Math.Max(1, json.Length / 4);
         }
 
         return json;

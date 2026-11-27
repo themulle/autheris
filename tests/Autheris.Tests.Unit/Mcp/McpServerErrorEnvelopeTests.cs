@@ -196,4 +196,24 @@ public sealed class McpServerErrorEnvelopeTests
 
         result.IsError.ShouldBe(false);
     }
+
+    [Fact]
+    public async Task CallGuardedTool_RowShortened_MetaHasTruncationReasonAndReturnedRows()
+    {
+        var result = await Call(Returning(new McpToolCallResult(true, """{"rows":[{"id":1}]}""", EstimatedTokens: 9, TruncatedDueToBudget: true, ReturnedRows: 1)));
+
+        result.IsError.ShouldBe(false);
+        result.Meta!["truncated"]!.GetValue<bool>().ShouldBeTrue();
+        result.Meta["truncationReason"]!.GetValue<string>().ShouldBe("TOKEN_BUDGET");
+        result.Meta["returnedRows"]!.GetValue<int>().ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task CallGuardedTool_UnderBudget_MetaHasNoTruncationReason()
+    {
+        var result = await Call(Returning(new McpToolCallResult(true, """{"rows":[]}""", EstimatedTokens: 3)));
+
+        result.Meta!.ContainsKey("truncationReason").ShouldBeFalse();
+        result.Meta.ContainsKey("returnedRows").ShouldBeFalse();
+    }
 }

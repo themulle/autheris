@@ -169,7 +169,7 @@ public sealed class WebSqlPageTokenCodec : IWebSqlPageTokenCodec
             throw new SqlPagingTokenInvalidException();
         }
 
-        if (payload.o < 0 || payload.o > maxOffset || payload.n <= 0 || payload.p <= 0 || payload.o != (payload.p - 1) * (long)payload.n)
+        if (payload.o < 0 || payload.o > maxOffset || payload.n <= 0 || payload.p <= 0 || payload.p != (payload.o / payload.n) + 1)
         {
             throw new SqlPagingTokenInvalidException();
         }

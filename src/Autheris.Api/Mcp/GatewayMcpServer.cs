@@ -471,16 +471,27 @@ public static class GatewayMcpServer
             return ToolError(result.ErrorMessage ?? result.ContentJson);
         }
 
+        var meta = new System.Text.Json.Nodes.JsonObject
+        {
+            ["isMasked"] = result.IsMasked,
+            ["estimatedTokens"] = result.EstimatedTokens,
+            ["truncated"] = result.TruncatedDueToBudget
+        };
+        if (result.TruncatedDueToBudget)
+        {
+            meta["truncationReason"] = "TOKEN_BUDGET";
+        }
+
+        if (result.ReturnedRows is { } returnedRows)
+        {
+            meta["returnedRows"] = returnedRows;
+        }
+
         return new CallToolResult
         {
             Content = [new TextContentBlock { Text = result.ContentJson }],
             IsError = false,
-            Meta = new System.Text.Json.Nodes.JsonObject
-            {
-                ["isMasked"] = result.IsMasked,
-                ["estimatedTokens"] = result.EstimatedTokens,
-                ["truncated"] = result.TruncatedDueToBudget
-            }
+            Meta = meta
         };
     }
 

@@ -153,21 +153,37 @@ public sealed partial class GovernedSqlExecutor
             }
             else
             {
-                string sourceId = PageTokenSourceBinding(request, tenantId);
-                nextToken = _pageTokenCodec.EncodeToken(
-                    request.Sql,
-                    request.Parameters,
-                    user,
-                    tenantId,
-                    sourceId,
-                    request.Transport ?? "WebSql",
-                    nextOffset,
-                    request.Page.Size,
-                    request.Page.Number + 1,
-                    TimeSpan.FromMinutes(_options.Value.WebSql.Paging?.TokenLifetimeMinutes ?? 15));
+                nextToken = EncodePageToken(request, user, tenantId, nextOffset);
             }
         }
-        request.OnPageOutcome(new GovernedSqlPageOutcome(pageResponse, nextToken, pagingUnavailable));
+        Func<int, string?>? resumeAfter = null;
+        if (rewrite?.PagingUnavailable == null)
+        {
+            long maxResumeOffset = _options.Value.WebSql.Paging?.MaxOffset ?? 10_000;
+            resumeAfter = rowsKept =>
+                rowsKept < 1
+                || rowsKept >= request.Page.Size
+                || request.Page.Offset + rowsKept > maxResumeOffset
+                || user.GetUserSid() == null
+                    ? null
+                    : EncodePageToken(request, user, tenantId, request.Page.Offset + rowsKept);
+        }
+
+        request.OnPageOutcome(new GovernedSqlPageOutcome(pageResponse, nextToken, pagingUnavailable, resumeAfter));
     }
+
+    /// <summary>Signs a continuation token for <paramref name="offset"/> with the binding every page token of this request carries.</summary>
+    private string EncodePageToken(GovernedSqlQueryRequest request, ClaimsPrincipal user, TenantId tenantId, long offset) =>
+        _pageTokenCodec.EncodeToken(
+            request.Sql,
+            request.Parameters,
+            user,
+            tenantId,
+            PageTokenSourceBinding(request, tenantId),
+            request.Transport ?? "WebSql",
+            offset,
+            request.Page!.Size,
+            checked((int)((offset / request.Page.Size) + 1)),
+            TimeSpan.FromMinutes(_options.Value.WebSql.Paging?.TokenLifetimeMinutes ?? 15));
 
 }
