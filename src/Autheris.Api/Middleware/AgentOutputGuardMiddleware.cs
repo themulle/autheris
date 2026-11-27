@@ -81,7 +81,7 @@ public sealed class AgentOutputGuardMiddleware
         if (context.Response.HasStarted)
         {
             // The inner pipeline bypassed the buffer; nothing can be withheld any more.
-            _logger.LogError("Agent output guard could not inspect a response that had already started on {Path}.", context.Request.Path);
+            _logger.LogError("Agent output guard could not inspect a response that had already started.");
             return;
         }
 

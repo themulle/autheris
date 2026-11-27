@@ -8,6 +8,8 @@ using Autheris.Application.Mcp.Services;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.Features;
+using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Shouldly;
@@ -241,5 +243,46 @@ public sealed class AgentOutputGuardMiddlewareTests
 
         AgentOutputGuardMiddleware.IsAgentCaller(Principal("Analysis.Run"), options).ShouldBeTrue();
         AgentOutputGuardMiddleware.IsAgentCaller(Principal("Bulk.Run"), options).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task StartedResponse_LogsConstantTextOnly_ForgedPathCannotInjectLogLine()
+    {
+        const string forged = "/graphql\r\n2026-01-01 FAKE Information: admin logged in";
+        var logger = new CapturingLogger();
+        var options = new GatewayOptions();
+        var wrapped = Options.Create(options);
+        var middleware = new AgentOutputGuardMiddleware(
+            Writes(Rows), new AgentOutputGuard(new SemanticPromptGuardrail(), wrapped), wrapped, logger);
+        var ctx = Context(Principal("Agent.Read"), forged);
+        ctx.Features.Set<IHttpResponseFeature>(new StartedResponseFeature());
+
+        await middleware.InvokeAsync(ctx);
+
+        logger.Lines.ShouldNotBeEmpty();
+        foreach (var line in logger.Lines)
+        {
+            line.ShouldNotContain("\r");
+            line.ShouldNotContain("\n");
+            line.ShouldNotContain("FAKE");
+        }
+    }
+
+    private sealed class StartedResponseFeature : HttpResponseFeature
+    {
+        public override bool HasStarted => true;
+    }
+
+    private sealed class CapturingLogger : ILogger<AgentOutputGuardMiddleware>
+    {
+        public List<string> Lines { get; } = [];
+
+        public IDisposable? BeginScope<TState>(TState state)
+            where TState : notnull => null;
+
+        public bool IsEnabled(LogLevel logLevel) => true;
+
+        public void Log<TState>(LogLevel logLevel, EventId eventId, TState state, Exception? exception, Func<TState, Exception?, string> formatter) =>
+            Lines.Add(formatter(state, exception));
     }
 }
