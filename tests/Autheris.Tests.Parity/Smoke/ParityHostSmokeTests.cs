@@ -53,6 +53,30 @@ public sealed class ParityHostSmokeTests(ParityHostFixture host) : ParityTestBas
         });
     }
 
+    [ParityTheory]
+    [InlineData("WebSql")]
+    [InlineData("Mcp")]
+    public async Task Smoke_RawSqlWithParameters_McpEqualsWebSql(string channelName)
+    {
+        var channel = Channels.Single(c => c.Name == channelName);
+        var query = new ParityQuery(
+            ParitySeed.SalesTable,
+            [],
+            RawSql: $"SELECT id, region FROM {ParitySeed.SalesTable} WHERE region IN (@regions) ORDER BY id",
+            Parameters: new Dictionary<string, object?> { ["regions"] = new[] { "North" } });
+
+        await ParityCell.RunAsync(new ParityCellInfo("smoke", channelName, "raw_sql_parameters", "region_in"), async () =>
+        {
+            var r = await channel.ExecuteAsync(query, CancellationToken.None);
+            r.Status.ShouldBe(200, r.RawBody);
+            r.Rows.ShouldNotBeEmpty(r.RawBody);
+            r.Rows.ShouldAllBe(x => Equals(x["region"], "North"), r.RawBody);
+            var web = await new WebSqlChannel(host).ExecuteAsync(query, CancellationToken.None);
+            web.Status.ShouldBe(200, web.RawBody);
+            r.Rows.Select(x => Convert.ToInt32(x["id"])).ShouldBe(web.Rows.Select(x => Convert.ToInt32(x["id"])), r.RawBody);
+        });
+    }
+
     [ParityFact]
     public async Task Smoke_McpIsPending()
     {

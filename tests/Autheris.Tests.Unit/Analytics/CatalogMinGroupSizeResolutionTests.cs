@@ -424,5 +424,23 @@ public sealed class CatalogMinGroupSizeResolutionTests
         result.Value.ShouldBe(5);
         result.Source.ShouldBe(MinGroupSizeSource.Default);
     }
-}
 
+    [Fact]
+    public void BuildOperatorFloor_DatasetOverrideWinsOverTableMinimum()
+    {
+        var options = new AnalyticsOptions();
+        options.Privacy.DefaultMinGroupSize = 5;
+        options.TableMinimumGroupSizes["public.test_table"] = 7;
+
+        var tableOnly = GovernedAggregationService.BuildOperatorFloor(options, hasExplicitOptions: true, TestTableId);
+        tableOnly.Value.ShouldBe(7);
+        tableOnly.IsExplicit.ShouldBeTrue();
+
+        options.Privacy.Datasets["public.test_table"] = new DatasetPrivacyOverrideOptions { MinGroupSize = 9 };
+        GovernedAggregationService.BuildOperatorFloor(options, hasExplicitOptions: true, TestTableId).Value.ShouldBe(9);
+
+        var implicitFloor = GovernedAggregationService.BuildOperatorFloor(new AnalyticsOptions(), hasExplicitOptions: false, TestTableId);
+        implicitFloor.Value.ShouldBe(1);
+        implicitFloor.IsExplicit.ShouldBeFalse();
+    }
+}

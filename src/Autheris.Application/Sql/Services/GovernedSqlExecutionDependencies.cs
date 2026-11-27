@@ -26,7 +26,9 @@ public sealed record GovernedSqlRewriteDependencies(
     IMemoryCache? MemoryCache = null,
     TypedPolicySources? TypedPolicies = null,
     Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? TimeZoneState = null,
-    Autheris.Application.Policy.Pdp.IAccessDecisionPoint? AccessDecisionPoint = null);
+    Autheris.Application.Policy.Pdp.IAccessDecisionPoint? AccessDecisionPoint = null,
+    Microsoft.Extensions.Options.IOptions<Autheris.Domain.Options.AnalyticsOptions>? AnalyticsOptions = null,
+    Autheris.Application.Common.Interfaces.IProtectionSnapshotProvider? ProtectionProvider = null);
 
 /// <summary>Optional collaborators of the governed database execution (forwarded to <c>GovernedSqlExecutor</c>).</summary>
 public sealed record GovernedSqlExecutionDependencies(

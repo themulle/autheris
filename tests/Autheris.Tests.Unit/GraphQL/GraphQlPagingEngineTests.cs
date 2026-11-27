@@ -434,6 +434,70 @@ public sealed class GraphQlPagingEngineTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public async Task AndNull_IsRejected()
+    {
+        var (json, errors) = await RunAsync("Development", "{ sales_dbo_customers(first: 5, where: { and: null }) { id } }");
+
+        errors.ShouldNotBeEmpty(json);
+        _nodes.ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("{\"c\":null}")]
+    [InlineData("{}")]
+    [Trait("Category", "Security")]
+    public async Task AndNullVariable_IsRejected(string variables)
+    {
+        var (json, errors) = await RunAsync(
+            "Development",
+            "query($c: [sales_dbo_customers_filter!]) { sales_dbo_customers(first: 5, where: { and: $c }) { id } }",
+            variables);
+
+        errors.ShouldNotBeEmpty(json);
+        _nodes.ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("or: [{ and: null }, { name: { eq: \"A\" } }]")]
+    [InlineData("not: { and: null }")]
+    [Trait("Category", "Security")]
+    public async Task AndNull_NestedInOrAndNot_IsRejected(string where)
+    {
+        var (json, errors) = await RunAsync("Development", "{ sales_dbo_customers(first: 5, where: { " + where + " }) { id } }");
+
+        errors.ShouldNotBeEmpty(json);
+        _nodes.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task AndNullMemberVariable_IsRejected()
+    {
+        var (json, errors) = await RunAsync(
+            "Development",
+            "query($m: sales_dbo_customers_filter) { sales_dbo_customers(first: 5, where: { and: [$m] }) { id } }",
+            "{\"m\":null}");
+
+        errors.ShouldNotBeEmpty(json);
+        _nodes.ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("and: { name: { eq: \"A\" } }")]
+    [InlineData("or: { name: { eq: \"A\" } }")]
+    [Trait("Category", "Security")]
+    public async Task SingleObjectAndOr_IsApplied(string where)
+    {
+        var (json, errors) = await RunAsync("Development", "{ sales_dbo_customers(first: 5, where: { " + where + " }) { id } }");
+
+        errors.ShouldBeEmpty(json);
+        var filter = _nodes.Single().Where.ShouldNotBeNull();
+        var items = filter is TreeAndFilter and ? and.Items : filter.ShouldBeOfType<TreeOrFilter>().Items;
+        items.Single().ShouldBeOfType<TreeComparison>();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public async Task SEC_RG_11_OrEmptyMember_RowPolicyStillApplied()
     {
         // The neutral or leaves no tree filter, but the row policy is added by the compiler outside the user filter.

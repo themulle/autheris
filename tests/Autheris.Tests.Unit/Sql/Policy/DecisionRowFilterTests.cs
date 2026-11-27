@@ -349,25 +349,25 @@ public sealed class DecisionRowFilterTests
         const string query = "SELECT region, MEASURE(revenue) FROM analytics.sales_mv GROUP BY region";
 
         var typedDim = TableAccessDecision.Allowed(mv.Identifier, clearAccess).WithAdditionalRowPolicy(TypedRegionPolicy("EU", TargetSqlDialect.Databricks));
-        Should.NotThrow(() => MetricViewStatementGuard.EnforceForSingleTable(query, mv, typedDim, DatabaseDialect.Databricks));
+        Should.NotThrow(() => MetricViewStatementGuard.EnforceForSingleTable(query, mv, typedDim, DatabaseDialect.Databricks, 0, true));
 
         var bracketedText = TableAccessDecision.Allowed(mv.Identifier, clearAccess, rowFilterSql: "[region] = @p0");
-        Should.NotThrow(() => MetricViewStatementGuard.EnforceForSingleTable(query, mv, bracketedText, DatabaseDialect.Databricks));
+        Should.NotThrow(() => MetricViewStatementGuard.EnforceForSingleTable(query, mv, bracketedText, DatabaseDialect.Databricks, 0, true));
 
         var typedMeasure = TableAccessDecision.Allowed(mv.Identifier, clearAccess).WithAdditionalRowPolicy(TypedMeasurePolicy());
-        Should.Throw<WebSqlPolicyException>(() => MetricViewStatementGuard.EnforceForSingleTable(query, mv, typedMeasure, DatabaseDialect.Databricks))
+        Should.Throw<WebSqlPolicyException>(() => MetricViewStatementGuard.EnforceForSingleTable(query, mv, typedMeasure, DatabaseDialect.Databricks, 0, true))
             .Message.ShouldBe(MetricViewStatementGuard.RefusalMessage);
 
         var drifted = typedDim with { CombinedRowFilterSql = "region = 'US'" };
-        Should.Throw<WebSqlPolicyException>(() => MetricViewStatementGuard.EnforceForSingleTable(query, mv, drifted, DatabaseDialect.Databricks))
+        Should.Throw<WebSqlPolicyException>(() => MetricViewStatementGuard.EnforceForSingleTable(query, mv, drifted, DatabaseDialect.Databricks, 0, true))
             .Message.ShouldBe(MetricViewStatementGuard.RefusalMessage);
 
         var unknown = TableAccessDecision.Allowed(mv.Identifier, clearAccess) with { RowPolicy = new UnknownRowPolicy(), CombinedRowFilterSql = null };
-        Should.Throw<WebSqlPolicyException>(() => MetricViewStatementGuard.EnforceForSingleTable(query, mv, unknown, DatabaseDialect.Databricks))
+        Should.Throw<WebSqlPolicyException>(() => MetricViewStatementGuard.EnforceForSingleTable(query, mv, unknown, DatabaseDialect.Databricks, 0, true))
             .Message.ShouldBe(MetricViewStatementGuard.RefusalMessage);
 
         var disallowedFn = TableAccessDecision.Allowed(mv.Identifier, clearAccess, rowFilterSql: "xp_cmdshell(region) = 1");
-        Should.Throw<WebSqlPolicyException>(() => MetricViewStatementGuard.EnforceForSingleTable(query, mv, disallowedFn, DatabaseDialect.Databricks))
+        Should.Throw<WebSqlPolicyException>(() => MetricViewStatementGuard.EnforceForSingleTable(query, mv, disallowedFn, DatabaseDialect.Databricks, 0, true))
             .Message.ShouldBe(MetricViewStatementGuard.RefusalMessage);
     }
 

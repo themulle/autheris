@@ -2,6 +2,7 @@ namespace Autheris.Api.Endpoints;
 
 using Autheris.Application.Governance.Ownership;
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
@@ -79,6 +80,8 @@ public static partial class ConsentApiEndpoints
         bool? includeInactive = null,
         bool? clamped = null,
         string? kind = null,
+        [FromServices] IOptionsMonitor<GatewayOptions>? gatewayOptions = null,
+        [FromServices] Autheris.Application.Governance.Provisioning.IUcProvisioningStore? provisioningStore = null,
         CancellationToken ct = default)
     {
         if (await EnforceRateLimitAsync(context, rateLimiter, governanceOptions, ConsentApiRateLimitBucket.Reads, ct).ConfigureAwait(false) is { } limited)
@@ -141,9 +144,12 @@ public static partial class ConsentApiEndpoints
             now,
             ct).ConfigureAwait(false);
 
+        var provisioning = gatewayOptions is null
+            ? new Dictionary<Guid, GrantProvisioningDto>()
+            : await ProvisioningEndpoints.LookupAsync(page.Items.ToList(), gatewayOptions.CurrentValue, provisioningStore, ct).ConfigureAwait(false);
         return Results.Ok(new
         {
-            items = page.Items.Select(ToGrantDto).ToArray(),
+            items = page.Items.Select(g => ToGrantDto(g) with { Provisioning = provisioning.GetValueOrDefault(g.Id) }).ToArray(),
             nextCursor = page.NextAfterId is { } nextId ? PageCursor.Encode(nextId.ToString()) : null,
             totalCount = page.Items.Count
         });
@@ -179,6 +185,8 @@ public static partial class ConsentApiEndpoints
         IConsentRepository consentRepo,
         IRateLimiterService? rateLimiter = null,
         IOptions<GovernanceOptions>? governanceOptions = null,
+        [FromServices] IOptionsMonitor<GatewayOptions>? gatewayOptions = null,
+        [FromServices] Autheris.Application.Governance.Provisioning.IUcProvisioningStore? provisioningStore = null,
         CancellationToken ct = default)
     {
         if (await EnforceRateLimitAsync(context, rateLimiter, governanceOptions, ConsentApiRateLimitBucket.Reads, ct).ConfigureAwait(false) is { } limited)
@@ -193,7 +201,10 @@ public static partial class ConsentApiEndpoints
             return ApiProblems.NotFound(ConsentDecisionErrorCodes.GrantNotFound, $"Consent grant '{id}' was not found.", context);
         }
 
-        return Results.Ok(ToGrantDto(consent));
+        var provisioning = gatewayOptions is null
+            ? new Dictionary<Guid, GrantProvisioningDto>()
+            : await ProvisioningEndpoints.LookupAsync([consent], gatewayOptions.CurrentValue, provisioningStore, ct).ConfigureAwait(false);
+        return Results.Ok(ToGrantDto(consent) with { Provisioning = provisioning.GetValueOrDefault(consent.Id) });
     }
 
     internal static async Task<IResult> RevokeGrantAsync(

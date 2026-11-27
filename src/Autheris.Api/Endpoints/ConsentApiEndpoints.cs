@@ -470,4 +470,6 @@ public sealed record ConsentGrantDto(
     Guid? ProfileAssignmentId,
     string? Description,
     string GrantKind = "Data",
-    IReadOnlyList<string>? TargetColumns = null);
+    IReadOnlyList<string>? TargetColumns = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    GrantProvisioningDto? Provisioning = null);

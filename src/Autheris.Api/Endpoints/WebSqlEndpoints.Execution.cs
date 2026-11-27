@@ -36,24 +36,8 @@ public static partial class WebSqlEndpoints
     private const string DuplicateParameterNameMessage = "A parameter name is repeated; names are compared without case and without a leading @.";
 
     /// <summary>True when two keys name the same parameter after the leading @ is dropped and case is ignored.</summary>
-    internal static bool HasCaseOnlyDuplicateParameterNames(IReadOnlyDictionary<string, object?>? parameters)
-    {
-        if (parameters is null || parameters.Count < 2)
-        {
-            return false;
-        }
-
-        var seen = new HashSet<string>(parameters.Count, StringComparer.OrdinalIgnoreCase);
-        foreach (var key in parameters.Keys)
-        {
-            if (!seen.Add(key.TrimStart('@')))
-            {
-                return true;
-            }
-        }
-
-        return false;
-    }
+    internal static bool HasCaseOnlyDuplicateParameterNames(IReadOnlyDictionary<string, object?>? parameters) =>
+        WebSqlParameterValues.HasCaseOnlyDuplicateNames(parameters);
 
     /// <summary>Parses the optional result cache request option; anything but default or bypass is rejected.</summary>
     internal static bool TryParseResultCacheMode(string? value, out WebSqlResultCacheMode mode)

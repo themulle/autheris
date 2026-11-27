@@ -84,7 +84,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
             rewrite.MemoryCache,
             typedPolicies: rewrite.TypedPolicies,
             timeZoneState: rewrite.TimeZoneState,
-            accessDecisionPoint: rewrite.AccessDecisionPoint);
+            accessDecisionPoint: rewrite.AccessDecisionPoint,
+            analyticsOptions: rewrite.AnalyticsOptions,
+            protectionProvider: rewrite.ProtectionProvider);
 
         _executor = new GovernedSqlExecutor(
             _rewriter,
@@ -600,68 +602,22 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
             }
         }
 
-        var sb = new StringBuilder(sql.Length + 16);
-        char quote = '\0';
-        for (int i = 0; i < sql.Length; i++)
+        return SqlPlaceholderScanner.Replace(sql, name =>
         {
-            char c = sql[i];
-            if (quote != '\0')
+            if (gatewayNames.Contains(name))
             {
-                sb.Append(c);
-                if (c == quote)
-                {
-                    if (i + 1 < sql.Length && sql[i + 1] == quote)
-                    {
-                        sb.Append(sql[++i]);
-                    }
-                    else
-                    {
-                        quote = '\0';
-                    }
-                }
-                continue;
+                var alias = GatewayParameterAlias(name);
+                names.Add(alias);
+                return ClientParameterPlaceholderPrefix + alias;
             }
 
-            if (c is '\'' or '"' or '`')
+            if (supplied.Contains(name))
             {
-                quote = c;
-                sb.Append(c);
-                continue;
+                names.Add(name);
+                return ClientParameterPlaceholderPrefix + name;
             }
 
-            bool startsParameter = c == '@'
-                && i + 1 < sql.Length && (char.IsAsciiLetter(sql[i + 1]) || sql[i + 1] == '_')
-                && (i == 0 || !(char.IsAsciiLetterOrDigit(sql[i - 1]) || sql[i - 1] is '_' or '@'));
-            if (startsParameter)
-            {
-                int end = i + 1;
-                while (end < sql.Length && (char.IsAsciiLetterOrDigit(sql[end]) || sql[end] == '_'))
-                {
-                    end++;
-                }
-
-                string name = sql[(i + 1)..end];
-                if (gatewayNames.Contains(name))
-                {
-                    var alias = GatewayParameterAlias(name);
-                    sb.Append(ClientParameterPlaceholderPrefix).Append(alias);
-                    names.Add(alias);
-                    i = end - 1;
-                    continue;
-                }
-
-                if (supplied.Contains(name))
-                {
-                    sb.Append(ClientParameterPlaceholderPrefix).Append(name);
-                    names.Add(name);
-                    i = end - 1;
-                    continue;
-                }
-            }
-
-            sb.Append(c);
-        }
-
-        return sb.ToString();
+            return null;
+        });
     }
 }

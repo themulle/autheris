@@ -75,6 +75,7 @@ public sealed class OpenApiContractTests
             typeof(ExternalCatalogChangesResponseDto),
             typeof(ConsentRequestDto),
             typeof(ConsentGrantDto),
+            typeof(GrantProvisioningDto),
             typeof(CreateConsentRequestBody),
             typeof(ConsentDecisionBody),
             typeof(RevokeConsentGrantBody),

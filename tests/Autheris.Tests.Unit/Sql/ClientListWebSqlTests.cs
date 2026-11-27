@@ -7,6 +7,7 @@ using System.Threading.Tasks;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Errors;
+using Autheris.Tests.Unit.Sql.Policy;
 using Autheris.Domain.Common;
 using Shouldly;
 using TrinoSqlEngine;
@@ -78,7 +79,7 @@ public sealed class ClientListWebSqlTests
         await using var f = await CreateAsync();
         const string sql = "SELECT id FROM orders WHERE id IN (@ids)";
         var raw = P("ids", "[1,2]");
-        foreach (string? transport in new string?[] { null, SqlTransports.Rest, SqlTransports.Mcp, SqlTransports.ArrowExport, SqlTransports.AsyncJob, SqlTransports.Olap, "graphql" })
+        foreach (string? transport in new string?[] { null, SqlTransports.Rest, SqlTransports.ArrowExport, SqlTransports.AsyncJob, SqlTransports.Olap, "graphql" })
         {
             var ex = await Should.ThrowAsync<ClientListException>(() => f.QueryAsync(sql, raw, transport: transport));
             ex.Code.ShouldBe("SQL_LIST_PARAM_POSITION");
@@ -132,5 +133,82 @@ public sealed class ClientListWebSqlTests
         await using var f = await CreateAsync();
         await f.IdsAsync("SELECT id FROM orders WHERE id = @x", new Dictionary<string, object?> { ["x"] = Json("1") });
         f.Audit.Single(e => e.EventType == "WEBSQL_QUERY").DetailsJson!.ShouldNotContain("list_params");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task McpTransport_ListParameters_AdmittedWithWebSqlLimitsAndCodes()
+    {
+        var db = new RecordingDbConnection();
+        await using var f = await CreateAsync(maxLists: 2, openConnection: () => db);
+        const string inSql = "SELECT id FROM orders WHERE id IN (@ids) ORDER BY id";
+
+        await f.QueryAsync(inSql, P("ids", "[1,3,5]"), transport: SqlTransports.Mcp);
+        var bound = db.Commands.SelectMany(c => c.Parameters).Select(p => p.Value)
+            .Where(v => v is long or int or decimal or double)
+            .Select(v => Convert.ToInt64(v, System.Globalization.CultureInfo.InvariantCulture)).ToList();
+        bound.ShouldContain(1L);
+        bound.ShouldContain(3L);
+        bound.ShouldContain(5L);
+
+        (await Should.ThrowAsync<ClientListException>(() => f.QueryAsync("SELECT id FROM orders WHERE id = @l", P("l", "[1,2]"), transport: SqlTransports.Mcp)))
+            .Code.ShouldBe("SQL_LIST_PARAM_POSITION");
+        (await Should.ThrowAsync<ClientListException>(() => f.QueryAsync(inSql, P("ids", "[1,null]"), transport: SqlTransports.Mcp)))
+            .Code.ShouldBe("SQL_LIST_PARAM_NULL");
+        (await Should.ThrowAsync<ClientListException>(() => f.QueryAsync(
+                "SELECT id FROM orders WHERE id IN (@a)",
+                new Dictionary<string, object?> { ["a"] = Json("[1]"), ["b"] = Json("[2]"), ["c"] = Json("[3]") },
+                transport: SqlTransports.Mcp)))
+            .Code.ShouldBe("SQL_LIST_PARAM_TOO_LARGE");
+        (await Should.ThrowAsync<ClientListException>(() => f.QueryAsync(inSql, P("ids", "[1,2]"), transport: SqlTransports.Mcp, planned: true)))
+            .Code.ShouldBe("SQL_LIST_PARAM_POSITION");
+
+        await f.QueryAsync(
+            "SELECT id FROM orders WHERE id IN (@ids) AND status IN (@statuses)",
+            new Dictionary<string, object?> { ["ids"] = Json("[1,2,3]"), ["statuses"] = Json("[\"super-secret\", \"other\"]") },
+            transport: SqlTransports.Mcp);
+        var details = f.Audit.Select(e => e.DetailsJson).Where(d => d is not null && d.Contains("list_params", StringComparison.Ordinal)).ToList();
+        details.ShouldNotBeEmpty();
+        details.ShouldAllBe(d => !d!.Contains("super-secret", StringComparison.Ordinal) && !d.Contains("other", StringComparison.Ordinal));
+        details.ShouldContain(d => d!.Contains("\"list_params\":{\"ids\":3,\"statuses\":2}", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task McpTransport_ListLimits_UseWebSqlOptions()
+    {
+        await using var f = await CreateAsync(maxListValues: 3);
+        const string sql = "SELECT id FROM orders WHERE id IN (@ids) ORDER BY id";
+
+        await Should.NotThrowAsync(() => f.QueryAsync(sql, P("ids", "[1,2,3]"), transport: SqlTransports.Mcp));
+        (await Should.ThrowAsync<ClientListException>(() => f.QueryAsync(sql, P("ids", "[1,2,3,4]"), transport: SqlTransports.Mcp)))
+            .Code.ShouldBe("SQL_LIST_PARAM_TOO_LARGE");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task OtherTransports_ListAdmission_IsUnchanged()
+    {
+        await using var f = await CreateAsync();
+        const string sql = "SELECT id FROM orders WHERE id IN (@ids)";
+        var raw = P("ids", "[1,2]");
+        var value = new Dictionary<string, object?> { ["ids"] = ClientListValue.Create([1L, 2L], SqlParameterType.Int64) };
+
+        foreach (var transport in new[] { SqlTransports.WebSql, SqlTransports.Trino })
+        {
+            await Should.NotThrowAsync(() => f.QueryAsync(sql, raw, transport: transport));
+            (await Should.ThrowAsync<ClientListException>(() => f.QueryAsync(sql, value, transport: transport))).Code.ShouldBe("SQL_LIST_PARAM_POSITION");
+        }
+
+        await Should.NotThrowAsync(() => f.QueryAsync(sql, value, transport: SqlTransports.SqlEndpoints));
+        (await Should.ThrowAsync<ClientListException>(() => f.QueryAsync(sql, raw, transport: SqlTransports.SqlEndpoints))).Code.ShouldBe("SQL_LIST_PARAM_POSITION");
+
+        foreach (string? transport in new string?[] { null, "unknown-transport" })
+        {
+            (await Should.ThrowAsync<ClientListException>(() => f.QueryAsync(sql, raw, transport: transport))).Code.ShouldBe("SQL_LIST_PARAM_POSITION");
+            (await Should.ThrowAsync<ClientListException>(() => f.QueryAsync(sql, value, transport: transport))).Code.ShouldBe("SQL_LIST_PARAM_POSITION");
+        }
+
+        (await Should.ThrowAsync<ClientListException>(() => f.QueryAsync(sql, value, transport: SqlTransports.Mcp))).Code.ShouldBe("SQL_LIST_PARAM_POSITION");
     }
 }

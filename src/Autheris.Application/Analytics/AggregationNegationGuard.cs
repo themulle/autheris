@@ -32,10 +32,26 @@ internal static partial class AggregationNegationGuard
             return;
         }
 
-        var tokens = Tokenize(where.SqlPredicate);
-        if (tokens == null)
+        if (RejectsPredicate(where.SqlPredicate, groupByColumns, metadata, knownColumnsOnly: false))
         {
             throw new AggregationFilterRejectedException();
+        }
+    }
+
+    /// <summary>
+    /// Shared decision: true when the predicate negates or isolates a column that is not grouped. An unparseable predicate is rejected.
+    /// With <paramref name="knownColumnsOnly"/> every identifier that is not a column of <paramref name="metadata"/> (and not a qualifier) rejects the predicate.
+    /// </summary>
+    internal static bool RejectsPredicate(
+        string sqlPredicate,
+        IReadOnlyCollection<string> groupByColumns,
+        TableMetadata metadata,
+        bool knownColumnsOnly)
+    {
+        var tokens = Tokenize(sqlPredicate);
+        if (tokens == null)
+        {
+            return true;
         }
 
         var groupBy = new HashSet<string>(groupByColumns, StringComparer.OrdinalIgnoreCase);
@@ -62,11 +78,16 @@ internal static partial class AggregationNegationGuard
                 : AtomScope(tokens, i);
             if (start < 0)
             {
-                throw new AggregationFilterRejectedException();
+                return true;
             }
 
-            foreach (var column in ColumnsIn(tokens, start, end, metadata))
+            foreach (var column in ColumnsIn(tokens, start, end, metadata, knownColumnsOnly))
             {
+                if (knownColumnsOnly && metadata.GetColumn(column) is null)
+                {
+                    return true;
+                }
+
                 if (groupBy.Contains(column))
                 {
                     continue;
@@ -74,10 +95,12 @@ internal static partial class AggregationNegationGuard
 
                 if (negates || ((equals || isRange) && isolating.Contains(column)))
                 {
-                    throw new AggregationFilterRejectedException();
+                    return true;
                 }
             }
         }
+
+        return false;
     }
 
     /// <summary>
@@ -147,7 +170,7 @@ internal static partial class AggregationNegationGuard
                 continue;
             }
 
-            foreach (var col in ColumnsIn(tokens, start, end, metadata))
+            foreach (var col in ColumnsIn(tokens, start, end, metadata, knownColumnsOnly: false))
             {
                 pairs.Add($"{col}:{op}");
             }
@@ -400,7 +423,7 @@ internal static partial class AggregationNegationGuard
         return false;
     }
 
-    private static IEnumerable<string> ColumnsIn(List<IToken> tokens, int start, int end, TableMetadata metadata)
+    private static IEnumerable<string> ColumnsIn(List<IToken> tokens, int start, int end, TableMetadata metadata, bool knownColumnsOnly)
     {
         for (var i = start; i < end; i++)
         {
@@ -420,6 +443,12 @@ internal static partial class AggregationNegationGuard
 
             // A function name (identifier followed by '(') is not a column.
             if (i + 1 < tokens.Count && tokens[i + 1].Text == "(")
+            {
+                continue;
+            }
+
+            // A qualifier (identifier followed by '.') that is not itself a column is resolved through the column that follows it.
+            if (knownColumnsOnly && i + 1 < tokens.Count && tokens[i + 1].Text == "." && metadata.GetColumn(name) is null)
             {
                 continue;
             }

@@ -146,6 +146,13 @@ public sealed class DatabricksProvisioningOptionsValidationTests
     }
 
     [Fact]
+    public void Revert_drift_mode_is_not_accepted_yet()
+    {
+        Should.Throw<ValidationException>(() => DatabricksProvisioningOptionsValidator.Validate(Options(Provisioning(drift: DatabricksDriftMode.Revert))))
+            .Message.ShouldContain("Report");
+    }
+
+    [Fact]
     public void Undefined_modes_are_rejected()
     {
         Should.Throw<ValidationException>(() => DatabricksProvisioningOptionsValidator.Validate(Options(Provisioning(mode: (DatabricksProvisioningMode)9))));

@@ -75,8 +75,13 @@ internal sealed class FakeUcStore : IUcProvisioningStore
             .Where(f => f.Tenant == tenant && consentIds.Contains(f.ConsentId))
             .ToDictionary(f => f.ConsentId));
 
-    public Task SaveFeedbackAsync(TenantId tenant, string dataSource, long fencingToken, IReadOnlyList<UcGrantFeedback> rows, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct)
+    public List<UcFeedbackEvent> Events { get; } = [];
+
+    public Task SaveFeedbackAsync(
+        TenantId tenant, string dataSource, long fencingToken, IReadOnlyList<UcGrantFeedback> rows, IReadOnlyList<AuditLogEntry> audit,
+        IReadOnlyList<UcFeedbackEvent> events, CancellationToken ct)
     {
+        Events.AddRange(events);
         LastToken = fencingToken;
         foreach (var row in rows)
         {
@@ -232,7 +237,7 @@ internal static class UcProvisioningScenario
     public const string GroupOid = "8b0c4b5e-6f0e-4a63-9a5e-1b2a4f9d7c11";
     public const string OtherOid = "0f9d7c11-1b2a-4f9d-9a5e-8b0c4b5e6f0e";
 
-    public static GatewayOptions Options(DatabricksProvisioningMode mode = DatabricksProvisioningMode.Enforce) => new()
+    public static GatewayOptions Options(DatabricksProvisioningMode mode = DatabricksProvisioningMode.Enforce, DatabricksDriftMode drift = DatabricksDriftMode.Report) => new()
     {
         DataSources = new SqlDataSourceOptions
         {
@@ -249,6 +254,7 @@ internal static class UcProvisioningScenario
                         Provisioning = new DatabricksProvisioningOptions
                         {
                             Mode = mode,
+                            DriftMode = drift,
                             Tenant = "acme",
                             AllowedSchemas = ["main.sales"],
                             Auth = new DatabricksAuthOptions { ClientId = "prov-sp", ClientSecretRef = "kv://prov" }

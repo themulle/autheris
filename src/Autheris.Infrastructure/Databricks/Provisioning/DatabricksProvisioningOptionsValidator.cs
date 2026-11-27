@@ -53,9 +53,9 @@ public static class DatabricksProvisioningOptionsValidator
             throw Fail(name, "Provisioning.Mode must be Off, DryRun or Enforce.");
         }
 
-        if (!Enum.IsDefined(provisioning.DriftMode))
+        if (provisioning.DriftMode != DatabricksDriftMode.Report)
         {
-            throw Fail(name, "Provisioning.DriftMode must be Report or Revert.");
+            throw Fail(name, "Provisioning.DriftMode must be Report; reverting foreign privileges is not available yet.");
         }
 
         if (provisioning.ReconcileIntervalSeconds is < MinReconcileIntervalSeconds or > MaxReconcileIntervalSeconds)

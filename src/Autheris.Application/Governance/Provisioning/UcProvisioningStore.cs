@@ -78,6 +78,9 @@ public sealed record UcGrantFeedback(
     DateTimeOffset UpdatedAt,
     DateTimeOffset? VerifiedAt);
 
+/// <summary>A feedback transition announced to consumers as a consent event: provisioned, or provisioning failed.</summary>
+public sealed record UcFeedbackEvent(Guid ConsentId, TableIdentifier Table, bool Provisioned, DateTimeOffset OccurredAt);
+
 /// <summary>Wire names of the provisioning enums as stored in the governance database.</summary>
 public static class UcProvisioningStoreNames
 {
@@ -173,8 +176,14 @@ public interface IUcProvisioningStore
     /// <summary>The feedback of the given consents of <paramref name="tenant"/>; consents without a row are absent.</summary>
     Task<IReadOnlyDictionary<Guid, UcGrantFeedback>> GetFeedbackAsync(TenantId tenant, IReadOnlyCollection<Guid> consentIds, CancellationToken ct);
 
-    /// <summary>Inserts or replaces feedback rows of <paramref name="tenant"/> on <paramref name="dataSource"/>, with the audit entries, fenced like <see cref="SaveLedgerAsync"/>.</summary>
-    Task SaveFeedbackAsync(TenantId tenant, string dataSource, long fencingToken, IReadOnlyList<UcGrantFeedback> rows, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct);
+    /// <summary>
+    /// Inserts or replaces feedback rows of <paramref name="tenant"/> on <paramref name="dataSource"/>, with the audit entries, fenced like
+    /// <see cref="SaveLedgerAsync"/>. <paramref name="events"/> are appended to the tenant's consent event outbox in the same transaction,
+    /// as its last writes.
+    /// </summary>
+    Task SaveFeedbackAsync(
+        TenantId tenant, string dataSource, long fencingToken, IReadOnlyList<UcGrantFeedback> rows, IReadOnlyList<AuditLogEntry> audit,
+        IReadOnlyList<UcFeedbackEvent> events, CancellationToken ct);
 }
 
 /// <summary>
@@ -210,7 +219,9 @@ public sealed class UnavailableUcProvisioningStore : IUcProvisioningStore
     public Task<IReadOnlyDictionary<Guid, UcGrantFeedback>> GetFeedbackAsync(TenantId tenant, IReadOnlyCollection<Guid> consentIds, CancellationToken ct) =>
         Task.FromResult<IReadOnlyDictionary<Guid, UcGrantFeedback>>(new Dictionary<Guid, UcGrantFeedback>());
 
-    public Task SaveFeedbackAsync(TenantId tenant, string dataSource, long fencingToken, IReadOnlyList<UcGrantFeedback> rows, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct) =>
+    public Task SaveFeedbackAsync(
+        TenantId tenant, string dataSource, long fencingToken, IReadOnlyList<UcGrantFeedback> rows, IReadOnlyList<AuditLogEntry> audit,
+        IReadOnlyList<UcFeedbackEvent> events, CancellationToken ct) =>
         throw Unavailable();
 
     private static InvalidOperationException Unavailable() =>

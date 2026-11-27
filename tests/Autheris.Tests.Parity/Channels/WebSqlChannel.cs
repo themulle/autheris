@@ -52,7 +52,7 @@ public sealed class WebSqlChannel(ParityHostFixture host) : IParityChannel
     public async Task<ChannelResult> ExecuteAsync(ParityQuery query, CancellationToken ct)
     {
         using var client = host.CreateClient();
-        using var response = await client.PostAsJsonAsync("/api/v1/sql", new { sql = Render(query) }, ct);
+        using var response = await client.PostAsJsonAsync("/api/v1/sql", new { sql = Render(query), parameters = query.Parameters }, ct);
         var body = await response.Content.ReadAsStringAsync(ct);
         return Parse((int)response.StatusCode, body);
     }

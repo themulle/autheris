@@ -26,6 +26,7 @@ public sealed class UcProvisioningReconcilerTests
     private readonly FakeUcClient _client = new();
     private readonly FakeUcContext _context = new();
     private readonly StaticOptionsMonitor<GatewayOptions> _options = new(Options());
+    private readonly UcProvisioningState _state = new();
 
     public UcProvisioningReconcilerTests()
     {
@@ -38,7 +39,7 @@ public sealed class UcProvisioningReconcilerTests
     private DateTimeOffset Now => _time.GetUtcNow();
 
     private Task RunAsync(long fencingToken = 1) =>
-        new UcProvisioningReconciler(_options, _store, _client, _context, NullLogger<UcProvisioningReconciler>.Instance, _time)
+        new UcProvisioningReconciler(_options, _store, _client, _context, NullLogger<UcProvisioningReconciler>.Instance, _time, _state)
             .ExecuteAsync(new ClusterJobContext(fencingToken, null!), CancellationToken.None);
 
     [Fact]
@@ -61,6 +62,40 @@ public sealed class UcProvisioningReconcilerTests
         _store.Writes.First(w => w.EndsWith(Table, StringComparison.Ordinal)).ShouldBe("save:Pending:" + Table);
         _client.Calls.FindIndex(c => c.StartsWith("patch:" + Schema + ":", StringComparison.Ordinal))
             .ShouldBeLessThan(_client.Calls.FindIndex(c => c.StartsWith("patch:" + Table, StringComparison.Ordinal)));
+    }
+
+    [Fact]
+    public async Task Provisioned_and_failed_transitions_are_announced_once()
+    {
+        _client.CatalogAccess.Clear();
+        var consent = Grant(Now);
+        _store.Consents.Add(consent);
+
+        await RunAsync();
+        await RunAsync();
+        _client.CatalogAccess.Add("analysts");
+        await RunAsync();
+        await RunAsync();
+
+        _store.Events.Select(e => (e.ConsentId, e.Provisioned)).ShouldBe([(consent.Id, false), (consent.Id, true)]);
+        _store.Events.ShouldAllBe(e => e.Table.Equals(consent.TableIdentifier));
+    }
+
+    [Fact]
+    public async Task Transient_lookup_failure_neither_downgrades_nor_re_announces_a_provisioned_grant()
+    {
+        var consent = Grant(Now);
+        _store.Consents.Add(consent);
+        await RunAsync();
+
+        _client.ResolveFailure = UcErrorCodes.RateLimited;
+        await RunAsync();
+        _store.FeedbackOf(consent).State.ShouldBe(UcGrantState.Provisioned);
+
+        _client.ResolveFailure = null;
+        await RunAsync();
+
+        _store.Events.Count(e => e.ConsentId == consent.Id && e.Provisioned).ShouldBe(1);
     }
 
     [Fact]

@@ -1,6 +1,7 @@
 namespace Autheris.Application.Sql;
 
 using System;
+using System.Collections.Generic;
 using System.Text.Json;
 
 /// <summary>
@@ -56,4 +57,24 @@ public static class WebSqlParameterValues
         ListParameters.ListParameterNormalizer.IsListCandidate(value)
             ? ListParameters.ListParameterNormalizer.Normalize(value!, limits, null)
             : Normalize(value);
+
+    /// <summary>True when two keys name the same parameter after the leading @ is dropped and case is ignored.</summary>
+    public static bool HasCaseOnlyDuplicateNames(IReadOnlyDictionary<string, object?>? parameters)
+    {
+        if (parameters is null || parameters.Count < 2)
+        {
+            return false;
+        }
+
+        var seen = new HashSet<string>(parameters.Count, StringComparer.OrdinalIgnoreCase);
+        foreach (var key in parameters.Keys)
+        {
+            if (!seen.Add(key.TrimStart('@')))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
 }

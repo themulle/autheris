@@ -1,6 +1,7 @@
 namespace Autheris.Application.Sql.Services;
 
 using Autheris.Application.Common;
+using Autheris.Application.Common.Interfaces;
 using System;
 using System.Collections.Generic;
 using System.Linq;
@@ -72,6 +73,8 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
     private readonly IAccessProfileRepository? _accessProfileRepository;
     private readonly IMemoryCache? _memoryCache;
     private readonly SqlDataSourceResolver _dataSourceResolver;
+    private readonly AnalyticsOptions _analyticsOptions;
+    private readonly IProtectionSnapshotProvider? _protectionProvider;
     private readonly TypedPolicySources? _typedPolicies;
     private readonly Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? _timeZoneState;   // null = conversion unavailable (fail closed)
     private readonly Autheris.Application.Policy.Pdp.IAccessDecisionPoint _accessDecisionPoint;
@@ -105,8 +108,12 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
         SqlDataSourceResolver? dataSourceResolver = null,
         TypedPolicySources? typedPolicies = null,
         Autheris.Application.Sql.TimeZones.ITimeZoneConversionState? timeZoneState = null,
-        Autheris.Application.Policy.Pdp.IAccessDecisionPoint? accessDecisionPoint = null)
+        Autheris.Application.Policy.Pdp.IAccessDecisionPoint? accessDecisionPoint = null,
+        IOptions<AnalyticsOptions>? analyticsOptions = null,
+        IProtectionSnapshotProvider? protectionProvider = null)
     {
+        _analyticsOptions = analyticsOptions?.Value ?? new AnalyticsOptions();
+        _protectionProvider = protectionProvider;
         _accessDecisionPoint = accessDecisionPoint ?? new Autheris.Application.Policy.Pdp.AccessDecisionPoint(
             options,
             consentResolution,
@@ -766,7 +773,8 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
             throw new WebSqlPolicyException(SqlDialectMapper.UnsupportedDialectMessage);
         }
 
-        (rawSql, var mvGuard) = EnforceMetricViewGuard(rawSql, decidedTableMetadata, decisions, targetDatabaseDialect.Value);
+        (rawSql, var mvGuard) = await EnforceMetricViewGuardAsync(
+            rawSql, decidedTableMetadata, decisions, targetDatabaseDialect.Value, tenantId, ct).ConfigureAwait(false);
 
         TargetSqlDialect targetSqlDialect = SqlDialectMapper.ToTargetDialect(targetDatabaseDialect.Value);
 
