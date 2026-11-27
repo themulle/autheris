@@ -367,6 +367,31 @@ public class QueryDefenseStressTests : IClassFixture<QueryDefenseStressTests.Hos
                                     new TableColumn { ColumnName = "created_at", DataType = "datetime" },
                                 ]
                             };
+                            if (fullyVisible &&
+                                string.Equals(id.Domain, "finance", StringComparison.OrdinalIgnoreCase) &&
+                                string.Equals(id.Schema, "dbo", StringComparison.OrdinalIgnoreCase) &&
+                                string.Equals(id.TableName, "finance_items", StringComparison.OrdinalIgnoreCase))
+                            {
+                                // The relation target of finance_table_1: the caller sees it completely too.
+                                string[] childColumns = ["id", "parent_id", "product_name", "price", "sensitive_note"];
+                                var childMeta = new TableMetadata
+                                {
+                                    Identifier = id,
+                                    Table = meta.Table,
+                                    Columns = [.. childColumns.Select(c => new TableColumn { ColumnName = c, DataType = "varchar" })]
+                                };
+                                return new ResolvedTableAccess(
+                                    childMeta,
+                                    TableAccessDecision.Allowed(
+                                        id,
+                                        childColumns.ToDictionary(c => c, _ => ColumnAccessLevel.Clear, StringComparer.OrdinalIgnoreCase),
+                                        null,
+                                        hasUnconstrainedColumnAllow: false),
+                                    new TenantId("T1"),
+                                    new Sid("S-1-5-21-test-analyst"),
+                                    principal);
+                            }
+
                             if (string.Equals(id.Domain, "finance", StringComparison.OrdinalIgnoreCase) &&
                                 string.Equals(id.Schema, "dbo", StringComparison.OrdinalIgnoreCase) &&
                                 string.Equals(id.TableName, "finance_table_1", StringComparison.OrdinalIgnoreCase))
