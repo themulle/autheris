@@ -248,7 +248,7 @@ public sealed class AgentOutputGuardMiddlewareTests
     [Fact]
     public async Task StartedResponse_LogsConstantTextOnly_ForgedPathCannotInjectLogLine()
     {
-        const string forged = "/graphql\r\n2026-01-01 FAKE Information: admin logged in";
+        const string forged = "/graphql/x\r\n2026-01-01 FAKE Information: admin logged in";
         var logger = new CapturingLogger();
         var options = new GatewayOptions();
         var wrapped = Options.Create(options);
