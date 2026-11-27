@@ -11,6 +11,7 @@ using System.Text.Json;
 internal static class WebSqlValueWriter
 {
     private const string TimestampFormat = "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'";
+    private const string LocalTimestampFormat = "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF";
     private const string DateFormat = "yyyy-MM-dd";
     private const string TimeFormat = "HH:mm:ss.FFFFFFF";
 
@@ -66,6 +67,10 @@ internal static class WebSqlValueWriter
                 break;
             case decimal dec:
                 writer.WriteNumberValue(dec);
+                break;
+            case DateTime { Kind: DateTimeKind.Unspecified } local:
+                // Zone-less timestamp (for example a convert_timezone result): a wall-clock value, not an instant.
+                writer.WriteStringValue(local.ToString(LocalTimestampFormat, CultureInfo.InvariantCulture));
                 break;
             case DateTime dt:
                 writer.WriteStringValue(ToUtc(dt).ToString(TimestampFormat, CultureInfo.InvariantCulture));
