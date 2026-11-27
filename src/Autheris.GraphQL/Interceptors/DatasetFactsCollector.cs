@@ -11,6 +11,7 @@ using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Common;
 using Autheris.GraphQL.Security;
 using HotChocolate.Resolvers;
+using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging;
 
@@ -146,27 +147,13 @@ public sealed class DatasetFactsCollector
             return null;
         }
 
-        var caller = new CatalogCaller(principal, GraphQlCallerPrincipal.ResolveContextTenantId(ctx), CatalogChannel.GraphQl);
+        var caller = new CatalogCaller(principal, GraphQlCallerPrincipal.ResolveContextTenantId(ctx, ctx.Services.GetService<IHttpContextAccessor>()), CatalogChannel.GraphQl);
         var batch = await visibility.FindVisibleManyAsync(caller, [table], ctx.RequestAborted).ConfigureAwait(false);
         if (!batch.Rows.TryGetValue(table, out var row))
         {
             return null;
         }
 
-        var tags = new List<string>(Math.Min(row.Table.CatalogTags.Count, MaxTags));
-        foreach (var tag in row.Table.CatalogTags)
-        {
-            if (tags.Count >= MaxTags)
-            {
-                break;
-            }
-
-            if (!string.IsNullOrWhiteSpace(tag))
-            {
-                tags.Add(tag.Length > MaxTagLength ? tag[..MaxTagLength] : tag);
-            }
-        }
-
-        return new VisibleDataset(McpDatasetCatalog.DatasetId(row.Table.Identifier), tags);
+        return new VisibleDataset(McpDatasetCatalog.DatasetId(row.Table.Identifier), McpDatasetCatalog.BoundedTags(row.Table, MaxTags, MaxTagLength));
     }
 }
