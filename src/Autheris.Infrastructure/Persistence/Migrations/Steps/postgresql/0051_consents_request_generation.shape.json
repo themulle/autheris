@@ -1,0 +1,7 @@
+{
+  "ops": [
+    { "op": "addIndex", "table": "consents", "name": "ux_consents_request_generation", "unique": true, "columns": ["consent_request_id", "renewal_count"] },
+    { "op": "addIndex", "table": "consents", "name": "ux_consents_request_item_generation", "unique": true, "columns": ["consent_request_id", "profile_item_no", "renewal_count"] },
+    { "op": "dropIndex", "table": "consents", "name": "ux_consents_request" }
+  ]
+}
