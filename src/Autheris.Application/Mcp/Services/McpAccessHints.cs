@@ -14,7 +14,9 @@ using Autheris.Application.Mcp.Interfaces;
 /// </summary>
 internal sealed class McpAccessHints(IReadPathSwitches? switches, bool mcpEnabled = true)
 {
-    public bool Tool(string name) => mcpEnabled && switches is not null && switches.IsToolEnabled(name);
+    public bool Tool(string name) =>
+        mcpEnabled && switches is not null && switches.IsToolEnabled(name)
+        && (name != McpDatasetTools.QueryDataset || switches.RestDataEndpointEnabled);
 
     /// <summary>Null when nothing it would recommend is enabled (never a default string).</summary>
     public string? Guidance()
@@ -83,26 +85,126 @@ internal sealed class McpAccessHints(IReadPathSwitches? switches, bool mcpEnable
 
     public string ServerInstructions()
     {
+        var text = "Autheris is a governed data gateway. Results are filtered and masked for your identity; hidden datasets and columns do not appear.";
         var steps = new List<string>(3);
         var find = Plain(McpDatasetTools.FindRelevantTables, McpDatasetTools.SearchCatalog);
-        if (find.Length > 0) steps.Add($"call {find} to find candidate tables and foreign key join conditions for your use-case");
-        var schema = Plain(McpDatasetTools.GetTableSchema, McpDatasetTools.DescribeDataset)
-            .Replace(McpDatasetTools.DescribeDataset, "describe_dataset(brief: true)", StringComparison.Ordinal);
-        if (schema.Length > 0) steps.Add($"call {schema} to fetch concise schemas without consuming token budget");
-        var query = Plain(McpDatasetTools.QuerySql, McpDatasetTools.QueryDataset, McpDatasetTools.QueryGraphQl);
-        if (query.Length > 0) steps.Add($"query data with {query}");
-
-        var text = "Autheris is a governed data gateway with 10,000+ datasets.";
-        if (steps.Count > 0)
+        if (find.Length > 0) steps.Add($"call {find} to find candidate tables and foreign key join conditions");
+        if (Tool(McpDatasetTools.DescribeDataset))
         {
-            text += " For token-efficient AI workflows (Report & App Generation): "
-                + string.Join(", ", steps.Select((s, i) => $"{i + 1}) {s}")) + ".";
+            steps.Add("call describe_dataset (without brief) for the columns, "
+                + (Tool(McpDatasetTools.QueryGraphQl) ? "GraphQL field, filter and sort types, relations and an example query" : "relations and an example query")
+                + " before you write a query");
+        }
+        else if (Tool(McpDatasetTools.GetTableSchema))
+        {
+            steps.Add("call get_table_schema for the columns");
         }
 
-        if (Tool(McpDatasetTools.ListDatasets)) text += " Use list_datasets(overview: true) for domain summaries.";
-        if (Tool(McpDatasetTools.SampleRows)) text += " sample_rows inspects sample records.";
-        return text + " Results are filtered and masked for your identity; hidden datasets and columns do not appear.";
+        var queryRule = QueryToolRule();
+        if (queryRule.Length > 0) steps.Add("query the data");
+        if (steps.Count > 0)
+        {
+            text += " Workflow: " + string.Join("; ", steps.Select((s, i) => $"{i + 1}) {s}")) + ".";
+        }
+
+        if (queryRule.Length > 0) text += "\n" + queryRule;
+        if (mcpEnabled && switches is not null && switches.IsResourceEnabled(McpResourceProvider.QueryGuideDocUri))
+        {
+            text += $"\nBefore writing a non-trivial query, read the resource {McpResourceProvider.QueryGuideDocUri}.";
+        }
+
+        var tail = new List<string>(2);
+        if (Tool(McpDatasetTools.ListDatasets)) tail.Add("Use list_datasets(overview: true) for domain summaries.");
+        if (Tool(McpDatasetTools.SampleRows)) tail.Add("sample_rows inspects sample records.");
+        return tail.Count == 0 ? text : text + "\n" + string.Join(' ', tail);
     }
+
+    /// <summary>One short rule for which query tool to use when; empty when no query tool is enabled.</summary>
+    private string QueryToolRule()
+    {
+        var graphQl = Tool(McpDatasetTools.QueryGraphQl);
+        var sql = Tool(McpDatasetTools.QuerySql);
+        var dataset = Tool(McpDatasetTools.QueryDataset);
+        var count = (graphQl ? 1 : 0) + (sql ? 1 : 0) + (dataset ? 1 : 0);
+        if (count == 0) return string.Empty;
+        if (count == 1) return $"Query data with {(graphQl ? McpDatasetTools.QueryGraphQl : sql ? McpDatasetTools.QuerySql : McpDatasetTools.QueryDataset)}.";
+
+        var parts = new List<string>(3);
+        if (graphQl) parts.Add("query_graphql is the default for reading data (filter, sort, page, aggregate, follow relations between datasets)");
+        if (sql) parts.Add("use query_sql when you need SQL" + (graphQl ? " or a query GraphQL cannot express" : string.Empty));
+        if (dataset) parts.Add("use query_dataset for a simple read of one dataset by identifier");
+        return "Which query tool: " + string.Join("; ", parts) + ".";
+    }
+
+    /// <summary>The tip under the catalog summary; null when no discovery or schema tool is enabled.</summary>
+    public string? CatalogSummaryTip()
+    {
+        var find = BacktickList(McpDatasetTools.FindRelevantTables, McpDatasetTools.SearchCatalog);
+        string? schema = null;
+        if (Tool(McpDatasetTools.DescribeDataset))
+        {
+            schema = $"`{McpDatasetTools.DescribeDataset}` for the columns, "
+                + (Tool(McpDatasetTools.QueryGraphQl) ? "GraphQL field and relations" : "relations and an example query");
+        }
+        else if (Tool(McpDatasetTools.GetTableSchema))
+        {
+            schema = $"`{McpDatasetTools.GetTableSchema}` for the columns";
+        }
+
+        if (find.Length == 0 && schema is null) return null;
+        var text = find.Length > 0 ? $"Use {find} to find tables for a use case" : "Use";
+        if (schema is not null) text += find.Length > 0 ? $", and {schema} before you query" : $" {schema} before you query";
+        return $"> **Tip:** {text}.";
+    }
+
+    /// <summary>Text of the <c>explore_dataset</c> prompt; names only enabled tools.</summary>
+    public string ExplorePromptText(string ds)
+    {
+        var steps = new List<string>(3);
+        var inspect = Plain(McpDatasetTools.DescribeDataset, McpDatasetTools.GetMyPermissions);
+        if (inspect.Length > 0) steps.Add($"Call {inspect} for '{ds}' to view accessible columns, data types, and masking rules.");
+        if (Tool(McpDatasetTools.SampleRows)) steps.Add("Call sample_rows with count=5 to inspect representative records.");
+        var query = Plain(McpDatasetTools.QueryGraphQl, McpDatasetTools.QuerySql, McpDatasetTools.QueryDataset);
+        if (query.Length > 0)
+        {
+            var step = $"Recommend the best query strategy ({query}) including pagination and filter criteria.";
+            if (mcpEnabled && switches is not null && switches.IsResourceEnabled(McpResourceProvider.QueryGuideDocUri))
+            {
+                step += $" Read {McpResourceProvider.QueryGuideDocUri} for the query dialect.";
+            }
+
+            steps.Add(step);
+        }
+
+        return NumberedPrompt($"I need to explore the dataset '{ds}'.", steps);
+    }
+
+    /// <summary>Text of the <c>audit_access_compliance</c> prompt; names only enabled tools.</summary>
+    public string AuditPromptText(string ds)
+    {
+        var steps = new List<string>(3)
+        {
+            "Check effective authorization and row-level security constraints.",
+            "List all columns with their sensitivity classifications and masking states (clear, mask, deny)."
+        };
+        if (Tool(McpDatasetTools.GetDataLineage))
+        {
+            steps.Add("Inspect data lineage via get_data_lineage to identify downstream consumers and potential compliance risks.");
+        }
+
+        return NumberedPrompt($"Perform an access and compliance audit on dataset '{ds}' for the current caller.", steps);
+    }
+
+    public string QueryGraphQlDescription() =>
+        "Default tool for reading data. Runs a read-only GraphQL query against the gateway: filter (where), sort (orderBy), page (first, offset) and follow relations between datasets."
+        + (Tool(McpDatasetTools.DescribeDataset) ? " Get the field names and an example query from describe_dataset." : string.Empty);
+
+    private static string NumberedPrompt(string intro, List<string> steps) =>
+        steps.Count == 0
+            ? intro
+            : intro[..^1] + ". Please:\n" + string.Join('\n', steps.Select((s, i) => $"{i + 1}. {s}"));
+
+    private string BacktickList(params string[] names) => JoinOr(names.Where(Tool).Select(n => $"`{n}`"));
 
     private string Plain(params string[] names) => JoinOr(names.Where(Tool));
 

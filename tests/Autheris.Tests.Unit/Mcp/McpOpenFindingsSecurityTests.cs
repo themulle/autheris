@@ -329,6 +329,43 @@ public sealed class McpOpenFindingsSecurityTests
         await provider.DidNotReceiveWithAnyArgs().ReadAsync(default!, default!, default);
     }
 
+    private sealed class GuideProvider(bool enabled) : IMcpResourceProvider
+    {
+        public int Reads { get; private set; }
+
+        public bool IsNativeResource(string uri) => true;
+
+        public bool IsResourceEnabled(string uri) => enabled;
+
+        public Task<McpResourceContent> ReadAsync(string uri, McpSessionContext session, CancellationToken ct = default)
+        {
+            Reads++;
+            return Task.FromResult(new McpResourceContent(uri, "text/markdown", "# guide"));
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task SEC_1209_Guide_keeps_abac_guard()
+    {
+        // The guide is a static API document like openapi.json: its guard target stays the API description object and the guardrail
+        // treats it exactly like the other static documents. The target is neither widened nor removed, and a closed gate never reaches the guardrail.
+        var guide = McpResourceProvider.QueryGuideDocUri;
+        McpResourceProvider.GuardTargets(guide)!.ShouldHaveSingleItem().ToString().ShouldBe("governance.api.describe");
+        McpResourceProvider.GuardTargets(guide)!.ShouldBe(McpResourceProvider.GuardTargets("autheris://api/docs/endpoints")!);
+        McpResourceProvider.IsStaticDocumentation(guide).ShouldBeTrue();
+
+        var closed = new GuideProvider(enabled: false);
+        await Should.ThrowAsync<McpProtocolException>(async () =>
+            await GatewayMcpServer.ReadGuardedNativeResourceAsync(ResourceServices(Guardrail(PolicyDenying())), guide, closed, CancellationToken.None));
+        closed.Reads.ShouldBe(0);
+
+        var open = new GuideProvider(enabled: true);
+        var result = await GatewayMcpServer.ReadGuardedNativeResourceAsync(ResourceServices(Guardrail(PolicyDenying())), guide, open, CancellationToken.None);
+        ((ModelContextProtocol.Protocol.TextResourceContents)result.Contents[0]).Text.ShouldContain("guide");
+        open.Reads.ShouldBe(1);
+    }
+
     [Fact]
     public async Task SdkResourceRead_Allowed_ReturnsTheScrubbedProviderContent()
     {
