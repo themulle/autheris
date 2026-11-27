@@ -312,6 +312,9 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
 
     private static List<int> Ids(List<JsonNode?[]> rows) => rows.Select(r => r[0]!.GetValue<int>()).OrderBy(x => x).ToList();
 
+    /// <summary>The ids in the order the database returned them (<see cref="Ids"/> sorts, which would hide an ORDER BY).</summary>
+    private static List<int> OrderedIds(List<JsonNode?[]> rows) => rows.Select(r => r[0]!.GetValue<int>()).ToList();
+
     private void RequireSpark()
     {
         // CR-ADG-11: the image presence is decided at discovery (skip with a reason, failure on CI). A present image whose proxy does
@@ -479,7 +482,7 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
         RequireSpark();
         var rows = await RunAsync("SELECT id FROM orders ORDER BY CASE __param_sort WHEN 'region' THEN region END, CASE __param_sort WHEN 'status' THEN status END, id", "acme",
             new Dictionary<string, object?> { ["sort"] = sort }, nulls: sort is null ? ClientNullShapes.Create(["sort"]) : null);
-        Ids(rows).ShouldBe(expected.ToList());
+        OrderedIds(rows).ShouldBe(expected.ToList());
     }
 
     [SparkFact]

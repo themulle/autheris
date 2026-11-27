@@ -201,6 +201,9 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
 
     private static List<int> Ids(List<object?[]> rows) => rows.Select(r => Convert.ToInt32(r[0])).OrderBy(x => x).ToList();
 
+    /// <summary>The ids in the order the database returned them (<see cref="Ids"/> sorts, which would hide an ORDER BY).</summary>
+    private static List<int> OrderedIds(List<object?[]> rows) => rows.Select(r => Convert.ToInt32(r[0])).ToList();
+
     [Fact]
     public async Task Tenant_SeesOnlyItsOwnRows()
     {
@@ -479,7 +482,7 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
     {
         var rows = await RunAsync("SELECT id FROM orders ORDER BY CASE __param_sort WHEN 'region' THEN region END, CASE __param_sort WHEN 'status' THEN status END, id", "acme",
             new Dictionary<string, object?> { ["sort"] = sort }, nulls: sort is null ? ClientNullShapes.Create(["sort"]) : null);
-        Ids(rows).ShouldBe(expected.ToList());
+        OrderedIds(rows).ShouldBe(expected.ToList());
     }
 
     [Fact]
@@ -487,8 +490,8 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
     {
         // the sort runs over the rows the tenant predicate lets through; the other tenant's row 5 never appears
         const string sql = "SELECT id FROM orders ORDER BY CASE __param_sort WHEN 'region' THEN region END, CASE __param_sort WHEN 'status' THEN status END, id";
-        Ids(await RunAsync(sql, "acme", new Dictionary<string, object?> { ["sort"] = "status" })).ShouldBe(new List<int> { 6, 1, 2 });
-        Ids(await RunAsync(sql, "other", new Dictionary<string, object?> { ["sort"] = "status" })).ShouldBe(new List<int> { 5 });
+        OrderedIds(await RunAsync(sql, "acme", new Dictionary<string, object?> { ["sort"] = "status" })).ShouldBe(new List<int> { 6, 1, 2 });
+        OrderedIds(await RunAsync(sql, "other", new Dictionary<string, object?> { ["sort"] = "status" })).ShouldBe(new List<int> { 5 });
     }
 
     [Fact]
