@@ -52,7 +52,9 @@ public static class TypedAggregationFlatSupport
             builder.UseSetting("Analytics:Privacy:ExposeSuppressedGroupsCount", ExposeSuppressedGroupsCount ? "true" : "false");
         }
 
-        // Groups: EU 12 rows, US 8, APAC 4 (below k = 5), LATAM 1 (below k).
+        // Groups: EU 12 rows, ASIA 10, US 8, APAC 4 (below k = 5), LATAM 1 (below k). Under Suppress, complementary suppression
+        // also hides the smallest surviving group (US), so two groups stay visible (ASIA, EU); under MergeIntoOther all three
+        // large groups stay and APAC + LATAM form the OTHER row.
         protected override void SeedExtraData(NpgsqlConnection connection)
         {
             using var cmd = connection.CreateCommand();
@@ -61,6 +63,7 @@ CREATE TABLE flat_sales (id INTEGER PRIMARY KEY, region TEXT NOT NULL, amount IN
 INSERT INTO flat_sales (id, region, amount)
 SELECT row_number() OVER (), r, a FROM (
     SELECT 'EU' AS r, 10 AS a FROM generate_series(1, 12)
+    UNION ALL SELECT 'ASIA', 2 FROM generate_series(1, 10)
     UNION ALL SELECT 'US', 5 FROM generate_series(1, 8)
     UNION ALL SELECT 'APAC', 7 FROM generate_series(1, 4)
     UNION ALL SELECT 'LATAM', 3 FROM generate_series(1, 1)) AS t;
@@ -281,11 +284,12 @@ public sealed class TypedAggregationFlatEndToEndTests : IClassFixture<TypedAggre
 
         actual.Rows.ShouldBe(expected.Rows);
         actual.Rows.Count.ShouldBe(2);
-        actual.Rows[0].ShouldStartWith("EU|12|120|12|");
+        actual.Rows[0].ShouldStartWith("ASIA|10|20|10|");
+        actual.Rows[1].ShouldStartWith("EU|12|120|12|");
         actual.ShouldBe(expected, "facts must be identical, including the hidden suppressed-groups count");
         actual.Suppressed.ShouldBeTrue();
         actual.SuppressedGroupsCount.ShouldBe(0);
-        actual.Count.ShouldBe(20);
+        actual.Count.ShouldBe(22);
     }
 
     [Fact]
@@ -334,8 +338,8 @@ public sealed class TypedAggregationFlatEndToEndTests : IClassFixture<TypedAggre
             $"{{ werte: {TypedAggregationFlatSupport.Sales}_groups(orderBy: [{{ column: region }}]) {{ gebiet: region anzahl: count summe: amount_sum schnitt: amount_avg _isMergedOther }} }}");
 
         var rows = flat.RootElement.GetProperty("data").GetProperty("werte").EnumerateArray().ToList();
-        rows.Select(r => r.GetProperty("gebiet").GetString()).ShouldBe(["EU", "US"]);
-        rows.Select(r => r.GetProperty("anzahl").GetInt64()).ShouldBe([12, 8]);
+        rows.Select(r => r.GetProperty("gebiet").GetString()).ShouldBe(["ASIA", "EU"]);
+        rows.Select(r => r.GetProperty("anzahl").GetInt64()).ShouldBe([10, 12]);
         flat.RootElement.GetProperty("extensions").GetProperty("autherisAggregation").TryGetProperty("werte", out _).ShouldBeTrue();
     }
 
@@ -446,7 +450,7 @@ public sealed class TypedAggregationFlatExposeCountEndToEndTests : IClassFixture
         var actual = TypedAggregationFlatSupport.ReadFlat(flat.RootElement, TypedAggregationFlatSupport.Sales);
 
         actual.ShouldBe(expected);
-        actual.SuppressedGroupsCount.ShouldBe(2);
+        actual.SuppressedGroupsCount.ShouldBe(3, "APAC and LATAM below k plus US by complementary suppression");
     }
 }
 
