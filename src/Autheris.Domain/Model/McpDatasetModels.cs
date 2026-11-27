@@ -140,14 +140,43 @@ public sealed record McpRelationColumnPair(string Column, string TargetColumn);
 
 /// <summary>How to query a dataset through GraphQL, the preferred query path.</summary>
 public sealed record McpGraphQlAccess(
-    string Endpoint,
-    string QueryField,
-    string TypeName,
-    string FilterType,
-    string OrderByType,
-    string Arguments,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Endpoint,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? QueryField,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? TypeName,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? FilterType,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? OrderByType,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Arguments,
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? ExampleQuery,
-    IReadOnlyList<McpGraphQlRelation> Relations);
+    IReadOnlyList<McpGraphQlRelation> Relations,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<McpGraphQlArgument>? Variables = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] McpGraphQlAggregate? Aggregate = null,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] McpGraphQlConnection? Connection = null)
+{
+    /// <summary>A block that carries only the relations (<c>include</c> without <c>graphql</c>); every other member is null and not serialized.</summary>
+    public static McpGraphQlAccess RelationsOnly(IReadOnlyList<McpGraphQlRelation> relations) =>
+        new(null, null, null, null, null, null, null, relations);
+}
+
+/// <summary>One GraphQL argument (variable) with its type, for example <c>where</c> of type <c>orders_filter</c>.</summary>
+public sealed record McpGraphQlArgument(string Name, string Type);
+
+/// <summary>The aggregate root field of a table: field name, result type and arguments.</summary>
+public sealed record McpGraphQlAggregate(string Field, string ResultType, IReadOnlyList<McpGraphQlArgument> Variables);
+
+/// <summary>
+/// The keyset connection root field of a table. <paramref name="Reason"/> (<c>no_usable_key</c> or <c>masked_key</c>) is set only when
+/// unavailable and <paramref name="KeyFields"/> only when available; neither ever names a column of an unavailable key.
+/// </summary>
+public sealed record McpGraphQlConnection(
+    string Field,
+    string ResultType,
+    bool Available,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? Reason,
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] IReadOnlyList<string>? KeyFields,
+    IReadOnlyList<McpGraphQlArgument> Variables);
+
+/// <summary>Root field signature of a catalog table as built by the GraphQL schema: field, result type and typed arguments.</summary>
+public sealed record GraphQlRootFieldSignature(string Field, string ResultType, IReadOnlyList<McpGraphQlArgument> Arguments);
 
 /// <summary>A curated example query (golden query) for a dataset.</summary>
 public sealed record McpDatasetExample(
@@ -229,7 +258,11 @@ public sealed record GraphQlTableMapping(
     string FilterType,
     string OrderByType,
     IReadOnlyList<GraphQlColumnMapping> Columns,
-    IReadOnlyList<GraphQlRelationMapping> Relations);
+    IReadOnlyList<GraphQlRelationMapping> Relations,
+    IReadOnlyList<McpGraphQlArgument>? ListArguments = null,
+    GraphQlRootFieldSignature? Aggregate = null,
+    GraphQlRootFieldSignature? Connection = null,
+    IReadOnlyList<string>? KeysetColumns = null);
 
 public sealed record GraphQlColumnMapping(string ColumnName, string Field, string GraphQlType);
 

@@ -508,7 +508,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
             bypass: options?.Value.IsMcpAuthBypassed == true);
         var sunsetRules = await LoadSunsettingRulesAsync(ct).ConfigureAwait(false);
 
-        var skipGraphQlMap = brief || (narrowing is not null && !narrowing.WantsColumns && !narrowing.WantsGraphQl && !narrowing.WantsExamples);
+        var skipGraphQlMap = brief || (narrowing is not null && !narrowing.WantsColumns && !narrowing.WantsGraphQlBlock && !narrowing.WantsExamples);
         var graphQl = skipGraphQlMap || graphQlMap == null ? null : await graphQlMap.GetTableAsync(id, ct).ConfigureAwait(false);
         var graphQlColumns = (graphQl?.Columns ?? []).ToDictionary(c => c.ColumnName, StringComparer.OrdinalIgnoreCase);
 
@@ -632,7 +632,7 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
 
         long graphQlMs = 0;
         McpGraphQlAccess? graphQlAccess = null;
-        if (graphQl is not null && (narrowing is null || narrowing.WantsGraphQl))
+        if (graphQl is not null && (narrowing is null || narrowing.WantsGraphQlBlock))
         {
             var graphQlStart = Stopwatch.GetTimestamp();
             graphQlAccess = await GraphQlAccessAsync(principal, graphQl, columns, ct, hiddenCols, narrowing).ConfigureAwait(false);

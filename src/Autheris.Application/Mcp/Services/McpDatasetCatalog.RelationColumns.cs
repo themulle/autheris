@@ -50,6 +50,11 @@ public sealed partial class McpDatasetCatalog
                 .ConfigureAwait(false);
         }
 
+        if (narrowing is { WantsGraphQl: false })
+        {
+            return McpGraphQlAccess.RelationsOnly(relations);
+        }
+
         var topFields = columns.Where(c => c.GraphQlField != null).Take(ExampleColumns).ToList();
         string? example = hiddenTextColumns is { Count: > 0 } && topFields.Any(c => hiddenTextColumns.Contains(c.Name))
             ? null
@@ -60,7 +65,10 @@ public sealed partial class McpDatasetCatalog
             "first: Int (default 100), offset: Int. Always pass a small first: queries above the complexity budget are rejected. " +
             "Filter and sort only on columns you can read in clear text.";
 
-        return new McpGraphQlAccess(GraphQlEndpoint, graphQl.QueryField, graphQl.TypeName, graphQl.FilterType, graphQl.OrderByType, arguments, example, relations);
+        return new McpGraphQlAccess(GraphQlEndpoint, graphQl.QueryField, graphQl.TypeName, graphQl.FilterType, graphQl.OrderByType, arguments, example, relations,
+            Variables: graphQl.ListArguments,
+            Aggregate: McpGraphQlBlock.Aggregate(graphQl),
+            Connection: McpGraphQlBlock.Connection(graphQl, columns));
     }
 
     /// <summary>

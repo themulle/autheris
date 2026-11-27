@@ -196,11 +196,14 @@ public static partial class GatewayServiceCollectionExtensions
 
         gqlBuilder
             .UseDocumentParser()
+            // Issue #1198: table-roots-only scopes are enforced before validation and cost, on every request (cache hits included).
+            .UseRequest<Autheris.GraphQL.Interceptors.TableRootsOnlyScopeMiddleware>()
             .UseDocumentValidation()
             .UseRequest<Autheris.GraphQL.Interceptors.ReadOnlyOperationMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.DbtHealthExecutionMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.SchemaSunsettingExecutionMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.MaskedFieldsMiddleware>()
+            .UseRequest<Autheris.GraphQL.Interceptors.AggregationFactsMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.SlowListsMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.DatasetFactsMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.PaginationTruncationMiddleware>()

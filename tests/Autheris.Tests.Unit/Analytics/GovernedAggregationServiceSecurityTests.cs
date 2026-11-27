@@ -129,6 +129,30 @@ public sealed class GovernedAggregationServiceSecurityTests
     }
 
     [Fact]
+    public async Task Audit_RecordsAggregateSpecs_NotResponseKeys()
+    {
+        var (service, audit) = CreateService(BuildRows());
+
+        // The aliases stand for what a client picked (a GraphQL response key for the nested shape, a synthetic alias for the flat one).
+        await service.ExecuteAggregationAsync(
+            CreatePrincipal(),
+            new AggregationQuery(
+                OrdersTableId,
+                GroupBy: ["department"],
+                Aggregates:
+                [
+                    new AggregateSelection(AggregateFunction.Sum, "amount", "client_key_one"),
+                    new AggregateSelection(AggregateFunction.Count, null, "agg_1")
+                ],
+                PreEvaluatedDecision: CreateDecision().AsPdpEvaluated()));
+
+        using var details = JsonDocument.Parse(audit.Entries.Last().DetailsJson!);
+        details.RootElement.GetProperty("aggregate_specs").EnumerateArray().Select(e => e.GetString()).ShouldBe(["sum:amount", "count:*"]);
+        details.RootElement.GetProperty("aggregates").GetArrayLength().ShouldBe(2);
+        details.RootElement.GetProperty("aggregate_specs").ToString().ShouldNotContain("client_key");
+    }
+
+    [Fact]
     public async Task Audit_contains_filter_shape_without_literals_and_exposed_flag()
     {
         var (serviceDefault, auditDefault) = CreateService(BuildRows());

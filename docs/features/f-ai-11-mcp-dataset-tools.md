@@ -30,6 +30,15 @@ The dataset description is also available as an MCP resource: the resource templ
 
 `endpoints` contains, depending on the configuration: GraphQL, OData v4, OpenAPI, WebSQL (`WebSql:Enabled`), saved SQL queries (`SqlEndpoints:Enabled`), stored procedures (`SqlEndpoints:Procedures:Enabled`), DuckDB OLAP (`DuckDbOlap:Enabled`) and Arrow IPC export (`Arrow:Enabled`).
 
+The agent query guide (`autheris://api/docs/query-guide`) describes the GraphQL dialect for the features enabled on the instance. Its section on stored queries with variables states these rules:
+
+- The whole `where` can be one variable; `null`, `{}` or an omitted variable means no filter.
+- A `null` operand on a comparison or string operator matches no row; `null` on `in`, `nin`, `isNull` or a whole column filter is rejected.
+- A fixed condition plus an optional filter is `and: [{ ... }, $filter]` with `$filter: <t>_filter! = {}`; a `null` member inside `and` or `or` is rejected.
+- `orderBy` can be one variable or only the direction; on a connection only key columns are accepted.
+- Paging uses `$first` and `$offset` on the root list, `$first` and `$after` on a connection.
+- Aggregate arguments (`groupBy`, `timeBuckets`, `aggregates`, `where`, `orderBy`, `limit`) all take variables; `aggregates` is required.
+
 ## 3. Security
 
 - **Visibility** is the same as for the GraphQL `catalog` query and the MCP resources: a table is listed when the caller has an active Allow consent in its tenant and no unconditional Deny; only granted columns are shown, and relations only to datasets the caller can see. `GovernanceAdmin` and `ClusterAdmin` see the whole catalog; anonymous callers see nothing.

@@ -190,6 +190,10 @@ internal sealed class DatasetFactsTestHost
             return Task.FromResult(JsonDocument.Parse(RowJson[root.Table]));
         }
 
+        public Task<long> CountAsync(
+            ClaimsPrincipal? principal, TreeQueryNode root, IReadOnlyDictionary<string, string[]>? requestHeaders, string operationId, CancellationToken ct = default) =>
+            throw new NotSupportedException();
+
         public IReadOnlyList<TreeMaskedColumn> GetMaskedColumns(ClaimsPrincipal? principal, TreeQueryNode root, string operationId) => [];
 
         public IReadOnlyList<DatasetAccessFacts> GetDatasetFacts(ClaimsPrincipal? principal, TreeQueryNode root, string operationId)

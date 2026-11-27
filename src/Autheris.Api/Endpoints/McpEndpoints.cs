@@ -148,6 +148,11 @@ public static class McpEndpoints
             .ToList();
     }
 
+    private static string MergeScopeValues(IEnumerable<string> values) =>
+        string.Join(' ', values
+            .SelectMany(v => v.Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            .Distinct(StringComparer.Ordinal));
+
     internal static McpCaller ResolveCaller(HttpContext context, bool allowOpenMcp, CallerAttributeOptions? attributeOptions = null)
     {
         var principal = context.User;
@@ -202,8 +207,14 @@ public static class McpEndpoints
                 .GroupBy(c => c.Type, StringComparer.Ordinal)
                 // Token claim order is IdP-controlled, so first-wins could widen an attribute policy. A scalar attribute
                 // with several different values is treated as Ambiguous (same as REST/GraphQL): unavailable, never an arbitrary pick.
-                .Where(g => g.Select(c => c.Value).Distinct(StringComparer.Ordinal).Count() == 1)
-                .ToDictionary(g => g.Key, g => g.First().Value, StringComparer.Ordinal)
+                // Scope claims are the exception: a multi-valued scope claim (for example an array "scp") keeps every scope, merged into one
+                // space-separated value, so the session principal never carries fewer scopes than the token.
+                .Select(g => (g.Key, Values: g.Select(c => c.Value).ToList()))
+                .Where(g => Autheris.Domain.Security.TokenAccessScope.IsScopeClaimType(g.Key) || g.Values.Distinct(StringComparer.Ordinal).Count() == 1)
+                .ToDictionary(
+                    g => g.Key,
+                    g => Autheris.Domain.Security.TokenAccessScope.IsScopeClaimType(g.Key) ? MergeScopeValues(g.Values) : g.Values[0],
+                    StringComparer.Ordinal)
             : null;
         if (additionalClaims is not null && CallerAttributeSchemeGate.HasAllowedOriginalScheme(principal, attributeOptions ?? new CallerAttributeOptions()))
         {

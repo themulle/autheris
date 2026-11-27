@@ -447,6 +447,7 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
                     {
                         var aggregateField = AggregateGraphQlTypes.AddQueryField(d, table);
                         AttachRootFieldFeatures(aggregateField, logicalSource, table, schemaModel);
+                        AttachRootFieldFeatures(FlatAggregateGraphQlTypes.AddQueryField(d, table), logicalSource, table, schemaModel);
                     }
 
                     var connectionField = ConnectionGraphQlTypes.AddQueryField(d, table, schemaModel);

@@ -30,6 +30,12 @@ internal sealed class TypedAggregateTestHost
 
     public bool AggregationEnabled { get; set; } = true;
 
+    /// <summary>False leaves the aggregation facts middleware out of the pipeline (a flat field then fails closed).</summary>
+    public bool InstallFactsMiddleware { get; set; } = true;
+
+    /// <summary>Optional hook to add request middleware right after the aggregation facts middleware (innermost to it).</summary>
+    public Action<HotChocolate.Execution.Configuration.IRequestExecutorBuilder>? ConfigureBuilder { get; set; }
+
     public ClaimsPrincipal User { get; set; } =
         new(new ClaimsIdentity([new Claim(ClaimTypes.Name, "alice"), new Claim("tenant_id", "T1")], "TestAuth"));
 
@@ -67,10 +73,17 @@ internal sealed class TypedAggregateTestHost
         services.AddSingleton(Options.Create(new GatewayOptions()));
         services.AddSingleton(Options.Create(Analytics));
 
-        return await services
+        var builder = services
             .AddGraphQLServer()
             .AddQueryType<Query>()
-            .UseRequest<CatalogOperationCleanupMiddleware>()
+            .UseRequest<CatalogOperationCleanupMiddleware>();
+        if (InstallFactsMiddleware)
+        {
+            builder.UseRequest<Autheris.GraphQL.Interceptors.AggregationFactsMiddleware>();
+        }
+
+        ConfigureBuilder?.Invoke(builder);
+        return await builder
             .UseDefaultPipeline()
             .AddTypeModule(sp => new CatalogGraphQlTypeModule(
                 metadataRepo,

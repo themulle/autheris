@@ -300,7 +300,7 @@ public sealed class GraphQlEnumerationShieldMiddleware
     private static string? ReadStringArgument(FieldNode field, string argName) =>
         field.Arguments.FirstOrDefault(a => string.Equals(a.Name.Value, argName, StringComparison.Ordinal))?.Value is StringValueNode svn ? svn.Value : null;
 
-    private static bool TryCollectRootCatalogField(
+    internal static bool TryCollectRootCatalogField(
         FieldNode rootField, CatalogTableType table, CatalogSchemaModel schemaModel,
         Dictionary<string, FragmentDefinitionNode> fragments, Dictionary<TableIdentifier, CatalogTableType> catalogTables,
         Dictionary<TableIdentifier, HashSet<string>> requestedColumns, Dictionary<TableIdentifier, HashSet<string>> clearRequiredColumns)
@@ -340,7 +340,30 @@ public sealed class GraphQlEnumerationShieldMiddleware
             return true;
         }
 
+        if (string.Equals(fieldName, FlatAggregateRowFields.RootFieldName(table), StringComparison.Ordinal))
+            return TryCollectFlatGroupsField(rootField, table, fragments, catalogTables, requestedColumns, clearRequiredColumns);
+
         return TryCollectTableField(rootField, table, schemaModel, fragments, catalogTables, requestedColumns, clearRequiredColumns, 0);
+    }
+
+    /// <summary>The flat <c>_groups</c> field: group columns count as read columns; count, merged marker, aggregates and typename add none.</summary>
+    private static bool TryCollectFlatGroupsField(
+        FieldNode rootField, CatalogTableType table, Dictionary<string, FragmentDefinitionNode> fragments,
+        Dictionary<TableIdentifier, CatalogTableType> catalogTables,
+        Dictionary<TableIdentifier, HashSet<string>> requestedColumns, Dictionary<TableIdentifier, HashSet<string>> clearRequiredColumns)
+    {
+        EnsureTableSets(table, catalogTables, requestedColumns, clearRequiredColumns, out var reqCols, out var clearCols);
+        if (!TryCollectWhereAndOrderColumns(rootField, table, reqCols, clearCols) || rootField.SelectionSet is null) return false;
+        foreach (var rowField in SelectFields(rootField.SelectionSet, fragments))
+        {
+            if (string.Equals(rowField.Name.Value, "__typename", StringComparison.Ordinal)) continue;
+            if (FlatAggregateRowFields.Find(table, rowField.Name.Value) is not { } classified) return false;
+            if (classified.Role != FlatAggregateRowFieldRole.Column) continue;
+            reqCols.Add(classified.Column!.ColumnName);
+            clearCols.Add(classified.Column.ColumnName);
+        }
+
+        return true;
     }
 
     private static bool TryCollectTableField(

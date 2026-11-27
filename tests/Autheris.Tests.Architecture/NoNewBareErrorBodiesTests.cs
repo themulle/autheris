@@ -29,9 +29,7 @@ public sealed partial class NoNewBareErrorBodiesTests(ITestOutputHelper output)
         ["src/Autheris.Application/VirtualFilters/EffectiveFilterInspector.cs|new { error = \"Forbidden: missing required role for effective-filters\" }"] =
             "Audit DetailsJson payload of a denied inspection, not a response body",
         ["src/Autheris.Application/Sql/Services/FederatedDuckDbExecutionService.cs|[\"error\"] = errorText"] =
-            "Audit details dictionary of a rejected federated statement, not a response body",
-        ["src/Autheris.Api/Endpoints/WebSqlEndpoints.Governance.cs|[\"error\"] = new Dictionary<string, object> { [\"type\"] = \"string\" },"] =
-            "OpenAPI schema property declaration, not a response body"
+            "Audit details dictionary of a rejected federated statement, not a response body"
     };
 
     /// <summary>

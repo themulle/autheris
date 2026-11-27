@@ -36,6 +36,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "QUERY_TOO_COMPLEX",
         "BAD_REQUEST",
         "INVALID_QUERY",
+        "ROOT_FIELD_NOT_ALLOWED",
         "NOT_IMPLEMENTED",
         "ALREADY_PROCESSED",
         "VALIDATION_ERROR",
@@ -237,6 +238,7 @@ public sealed class ErrorSanitizingFilter : IErrorFilter
         "DECISION_NOT_PERMITTED",
         "ACCESS_REQUEST_NOT_PENDING",
         "READ_ONLY_TOKEN",
+        "ROOT_FIELD_NOT_ALLOWED",
         "AGGREGATION_TIME_BUCKET_UNSUPPORTED",
         "AGGREGATION_TIME_BUCKET_LIMIT_EXCEEDED",
         "ROW_POLICY_EXPRESSION_NOT_ALLOWED"

@@ -180,7 +180,8 @@ public sealed class RestrictedScopeResolveAccessArchitectureTests
             .OrderBy(k => k, StringComparer.Ordinal)
             .ToList();
 
-        callers.ShouldBe(["Autheris.Api.Security.RealmTokenScopePolicy"]);
+        // The GraphQL table-roots-only restriction matches the token scopes against its configured list (Issue #1198).
+        callers.ShouldBe(["Autheris.Api.Security.RealmTokenScopePolicy", "Autheris.GraphQL.Interceptors.TableRootsOnlyScopeMiddleware"]);
     }
 
     [Fact]
