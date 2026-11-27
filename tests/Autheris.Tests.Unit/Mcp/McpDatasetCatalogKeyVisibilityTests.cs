@@ -74,12 +74,7 @@ public sealed class McpDatasetCatalogKeyVisibilityTests
     [Fact]
     public async Task IndexWithInvisibleColumn_NotReported_AndPartialPrimaryKeyIsDropped()
     {
-        var golden = Substitute.For<IGoldenQueryService>();
-        golden.GetGoldenQueriesAsync(Arg.Any<GoldenQueryReadContext>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(ValueTask.FromResult<IReadOnlyList<GoldenQuery>>([]));
-        var catalog = new McpDatasetCatalog(_metadata, _consents, Substitute.For<IGatewayExecutionService>(), golden,
-            Options.Create(new GatewayOptions()), Substitute.For<IGraphQlCatalogMap>(),
-            visibilityService: Autheris.Tests.Unit.TestSupport.CatalogVisibilityTestFactory.Create(_metadata.ServeSingleReadsFromCatalog(), _consents));
+        var catalog = Catalog();
         var user = new ClaimsPrincipal(new ClaimsIdentity(
             [new Claim(ClaimTypes.PrimarySid, "S-1-USER"), new Claim("tenant_id", Tenant)], "MCP"));
 
@@ -88,5 +83,71 @@ public sealed class McpDatasetCatalogKeyVisibilityTests
         result.Columns.Select(c => c.Name).ShouldNotContain("customer_email");
         result.Columns.ShouldAllBe(c => !c.PrimaryKey);
         result.Indexes.ShouldNotBeNull().Select(i => string.Join(",", i.Columns)).ShouldBe(new[] { "id,amount" });
+    }
+
+    private McpDatasetCatalog Catalog(params string[] keysetColumns)
+    {
+        var golden = Substitute.For<IGoldenQueryService>();
+        golden.GetGoldenQueriesAsync(Arg.Any<GoldenQueryReadContext>(), Arg.Any<string?>(), Arg.Any<string?>(), Arg.Any<CancellationToken>())
+            .Returns(ValueTask.FromResult<IReadOnlyList<GoldenQuery>>([]));
+        var map = Substitute.For<IGraphQlCatalogMap>();
+        map.GetTableAsync(Orders, Arg.Any<CancellationToken>()).Returns(new GraphQlTableMapping(
+            Orders, "orders", "orders", "orders_filter", "orders_order_by",
+            [
+                new GraphQlColumnMapping("id", "id", "Int"),
+                new GraphQlColumnMapping("amount", "amount", "Decimal"),
+                new GraphQlColumnMapping("customer_email", "customer_email", "String")
+            ],
+            [],
+            [new("where", "orders_filter")],
+            new GraphQlRootFieldSignature("orders_aggregate", "orders_aggregate_result", []),
+            new GraphQlRootFieldSignature("ordersConnection", "ordersConnection", [new("first", "Int")]),
+            keysetColumns));
+        return new McpDatasetCatalog(_metadata, _consents, Substitute.For<IGatewayExecutionService>(), golden,
+            Options.Create(new GatewayOptions()), map,
+            visibilityService: CatalogVisibilityTestFactory.Create(_metadata.ServeSingleReadsFromCatalog(), _consents));
+    }
+
+    private static ClaimsPrincipal Caller() => new(new ClaimsIdentity(
+        [new Claim(ClaimTypes.PrimarySid, "S-1-USER"), new Claim("tenant_id", Tenant)], "MCP"));
+
+    [Fact]
+    public async Task Describe_HiddenKeyColumn_ConnectionNoUsableKey_LikeKeysSection()
+    {
+        var hidden = (await Catalog("id", "customer_email").DescribeDatasetAsync(Caller(), "sales.public.orders")).GraphQl!.Connection!;
+        var keyless = (await Catalog().DescribeDatasetAsync(Caller(), "sales.public.orders")).GraphQl!.Connection!;
+
+        hidden.Available.ShouldBeFalse();
+        hidden.Reason.ShouldBe("no_usable_key");
+        System.Text.Json.JsonSerializer.Serialize(hidden, McpResultJson.Options).ShouldBe(System.Text.Json.JsonSerializer.Serialize(keyless, McpResultJson.Options));
+    }
+
+    [Fact]
+    public async Task Describe_MaskedKey_ConnectionMaskedKey()
+    {
+        _consents.GetAllActiveConsentsForSubjectsAsync(Arg.Any<IEnumerable<Sid>>(), Arg.Any<IEnumerable<string>?>(), Arg.Any<DateTimeOffset?>(), Arg.Any<TenantId?>(), Arg.Any<CancellationToken>())
+            .Returns(Task.FromResult<IReadOnlyList<Consent>>(
+            [
+                new Consent
+                {
+                    TableIdentifier = Orders,
+                    TenantId = new TenantId(Tenant),
+                    Effect = ConsentEffect.Allow,
+                    GranteeSid = new Sid("S-1-USER"),
+                    ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+                    ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+                    ColumnRules =
+                    [
+                        new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear },
+                        new ConsentColumnRule { ColumnName = "amount", AccessLevel = ColumnAccessLevel.Mask }
+                    ]
+                }
+            ]));
+
+        var connection = (await Catalog("id", "amount").DescribeDatasetAsync(Caller(), "sales.public.orders")).GraphQl!.Connection!;
+
+        connection.Available.ShouldBeFalse();
+        connection.Reason.ShouldBe("masked_key");
+        connection.KeyFields.ShouldBeNull();
     }
 }

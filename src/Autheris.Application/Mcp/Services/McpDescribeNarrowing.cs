@@ -46,7 +46,13 @@ public static class McpDescribeNarrowing
         public bool WantsColumns => Include is null || Include.Contains(SectionColumns);
         public bool WantsExamples => Include is null || Include.Contains(SectionExamples);
         public bool WantsGraphQl => Include is null || Include.Contains(SectionGraphQl);
-        public bool WantsRelations => Include is null || (Include.Contains(SectionGraphQl) && Include.Contains(SectionRelations));
+        public bool WantsRelations => Include is null || Include.Contains(SectionRelations);
+
+        /// <summary>The <c>graphQl</c> member is returned: either the full block or, for <c>relations</c> alone, only its relations.</summary>
+        public bool WantsGraphQlBlock => WantsGraphQl || WantsRelations;
+
+        /// <summary>The compact brief view has no GraphQL block, so asking for it together with the brief is a caller error.</summary>
+        public bool ConflictsWithBrief => Include is not null && (Include.Contains(SectionGraphQl) || Include.Contains(SectionRelations));
         public bool WantsLongDescription => Include?.Contains(SectionLongDescription) == true;
 
         public bool MatchesRelation(string field, string targetDatasetId) =>
@@ -183,7 +189,9 @@ public static class McpDescribeNarrowing
         {
             if (!sections.Contains(SectionGraphQl))
             {
-                graphQl = null;
+                graphQl = graphQl is not null && sections.Contains(SectionRelations)
+                    ? McpGraphQlAccess.RelationsOnly(graphQl.Relations)
+                    : null;
             }
             else if (graphQl is not null && !sections.Contains(SectionRelations))
             {
