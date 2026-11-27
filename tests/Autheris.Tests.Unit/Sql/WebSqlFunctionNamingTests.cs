@@ -131,4 +131,20 @@ public sealed class WebSqlFunctionNamingTests
 
         ex.FunctionName.ShouldBe("pg_sleep");
     }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("pg\nsleep")]
+    [InlineData("\"quoted\"")]
+    [InlineData("a<b>")]
+    public void FunctionWithUnsafeName_FallsBackToUnnamedBody(string unsafeName)
+    {
+        Autheris.Application.Sql.Errors.SqlCompilerErrorMapper.TryMap(new FunctionNotPermittedException(unsafeName, 1, 8), out var mapped).ShouldBeTrue();
+
+        mapped.Code.ShouldBe("SQL_FUNCTION_NOT_PERMITTED");
+        mapped.Subject.ShouldBeNull();
+        mapped.Hint.ShouldBeNull();
+        mapped.Line.ShouldBeNull();
+        mapped.Title.ShouldBe(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.FixedMessage("SQL_FUNCTION_NOT_PERMITTED"));
+    }
 }

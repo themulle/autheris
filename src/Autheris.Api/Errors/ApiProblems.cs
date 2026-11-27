@@ -198,6 +198,8 @@ public static class ApiProblems
         "violation",
         // Safe non-raising expression remediation hint
         "hint",
+        // Sanitized name of a rejected function, construct or unknown column (PublicSqlName / closed construct catalog only)
+        "function", "construct", "columnName",
         // Existing active grant covering a duplicate unmask request
         "grantId",
         // Caller's own open request that an identical submission duplicates
