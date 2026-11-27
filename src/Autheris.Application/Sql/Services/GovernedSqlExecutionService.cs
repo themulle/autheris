@@ -84,7 +84,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
             rewrite.MemoryCache,
             typedPolicies: rewrite.TypedPolicies,
             timeZoneState: rewrite.TimeZoneState,
-            accessDecisionPoint: rewrite.AccessDecisionPoint);
+            accessDecisionPoint: rewrite.AccessDecisionPoint,
+            analyticsOptions: rewrite.AnalyticsOptions,
+            protectionProvider: rewrite.ProtectionProvider);
 
         _executor = new GovernedSqlExecutor(
             _rewriter,

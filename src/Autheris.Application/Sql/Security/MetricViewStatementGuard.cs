@@ -4,6 +4,7 @@ using System;
 using System.Collections.Generic;
 using System.Linq;
 using Antlr4.Runtime.Tree;
+using Autheris.Application.Analytics;
 using Autheris.Application.Sql.Policy;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -40,7 +41,9 @@ public static class MetricViewStatementGuard
         string sql,
         TableMetadata table,
         TableAccessDecision decision,
-        DatabaseDialect dialect)
+        DatabaseDialect dialect,
+        int minGroupSize,
+        bool restrictNegatedFilters)
     {
         ArgumentNullException.ThrowIfNull(table);
         ArgumentNullException.ThrowIfNull(decision);
@@ -50,14 +53,18 @@ public static class MetricViewStatementGuard
             sql,
             new Dictionary<TableIdentity, TableMetadata> { [id] = table },
             new Dictionary<TableIdentity, TableAccessDecision> { [id] = decision },
-            dialect);
+            dialect,
+            minGroupSize,
+            restrictNegatedFilters);
     }
 
     public static MetricViewGuardResult Enforce(
         string sql,
         IReadOnlyDictionary<TableIdentity, TableMetadata> tables,
         IReadOnlyDictionary<TableIdentity, TableAccessDecision> decisions,
-        DatabaseDialect dialect)
+        DatabaseDialect dialect,
+        int minGroupSize,
+        bool restrictNegatedFilters)
     {
         ArgumentNullException.ThrowIfNull(tables);
         ArgumentNullException.ThrowIfNull(decisions);
@@ -132,9 +139,9 @@ public static class MetricViewStatementGuard
         ValidatePredicatesOnDimensions(mv, decision, columnsByName);
 
         // D-MV-8: minimum group size requires a declared exposed non-masked measure column.
-        int minGroupSize = mv.EffectiveMinGroupSize ?? 0;
+        int effectiveK = Math.Max(minGroupSize, mv.EffectiveMinGroupSize ?? 0);
         string? countMeasure = null;
-        if (minGroupSize > 1)
+        if (effectiveK > 1)
         {
             if (string.IsNullOrWhiteSpace(mv.Table.MetricViewCountMeasure) ||
                 !columnsByName.TryGetValue(mv.Table.MetricViewCountMeasure, out var countCol) ||
@@ -151,6 +158,8 @@ public static class MetricViewStatementGuard
         // Collect GROUP BY dimensions (unless GROUP BY ALL).
         bool groupByAll = spec.GroupBy?.IsAll == true;
         var groupedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        var bareGroupedColumns = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        bool negationCheck = effectiveK > 1 && restrictNegatedFilters;
         if (spec.GroupBy is not null && !groupByAll)
         {
             if (spec.GroupBy.AdvancedElements is { Count: > 0 })
@@ -162,6 +171,10 @@ public static class MetricViewStatementGuard
             {
                 ValidateDimensionOnlyExpression(expr, columnsByName, decision, mv);
                 CollectColumnNames(expr, groupedColumns);
+                if (expr is ColumnReference { Name.Parts.Count: > 0 } bare)
+                {
+                    bareGroupedColumns.Add(bare.Name.Parts[^1].Value);
+                }
             }
         }
 
@@ -194,6 +207,12 @@ public static class MetricViewStatementGuard
             }
 
             ValidateSelectExpression(colItem.Expression, columnsByName, decision, mv, groupByAll, groupedColumns, spec.GroupBy);
+
+            if (groupByAll && !ContainsMeasureCall(colItem.Expression) &&
+                colItem.Expression is ColumnReference { Name.Parts.Count: > 0 } projected)
+            {
+                bareGroupedColumns.Add(projected.Name.Parts[^1].Value);
+            }
         }
 
         if (countMeasure is not null && selectAliases.Contains(HiddenCountAlias))
@@ -201,9 +220,25 @@ public static class MetricViewStatementGuard
             throw Refuse();
         }
 
+        if (negationCheck && spec.Where is not null)
+        {
+            var whereText = ExtractWhereText(sql, tree);
+            if (AggregationNegationGuard.RejectsPredicate(whereText, bareGroupedColumns, mv, knownColumnsOnly: true))
+            {
+                throw Refuse();
+            }
+        }
+
         if (spec.Having is not null)
         {
-            ValidateHavingOrOrderExpression(spec.Having, columnsByName, decision, mv, selectAliases, allowAliases: false);
+            ValidateHavingOrOrderExpression(
+                spec.Having,
+                columnsByName,
+                decision,
+                mv,
+                selectAliases,
+                allowAliases: false,
+                groupedDimensions: negationCheck ? bareGroupedColumns : null);
         }
 
         if (select.OrderBy?.Elements is { Count: > 0 } orderElements)
@@ -217,7 +252,7 @@ public static class MetricViewStatementGuard
         if (countMeasure is not null)
         {
             var augmented = InjectHiddenCountMeasure(sql, tree, countMeasure, HiddenCountAlias);
-            return new MetricViewGuardResult(augmented, HiddenCountAlias, minGroupSize, countMeasure);
+            return new MetricViewGuardResult(augmented, HiddenCountAlias, effectiveK, countMeasure);
         }
 
         return MetricViewGuardResult.None;
@@ -358,7 +393,8 @@ public static class MetricViewStatementGuard
         TableAccessDecision decision,
         TableMetadata mv,
         IReadOnlySet<string> selectAliases,
-        bool allowAliases)
+        bool allowAliases,
+        IReadOnlySet<string>? groupedDimensions = null)
     {
         switch (expr)
         {
@@ -372,7 +408,8 @@ public static class MetricViewStatementGuard
                     return;
                 }
 
-                if (!IsExposedClearDimension(name, columnsByName, decision, mv))
+                if (!IsExposedClearDimension(name, columnsByName, decision, mv) ||
+                    (groupedDimensions is not null && !groupedDimensions.Contains(name)))
                 {
                     throw Refuse();
                 }
@@ -381,22 +418,22 @@ public static class MetricViewStatementGuard
             case LiteralExpression or ParameterReference or NamedBindMarkerExpression:
                 return;
             case ParenthesizedExpression p:
-                ValidateHavingOrOrderExpression(p.Expression, columnsByName, decision, mv, selectAliases, allowAliases);
+                ValidateHavingOrOrderExpression(p.Expression, columnsByName, decision, mv, selectAliases, allowAliases, groupedDimensions);
                 return;
             case CastExpression c:
-                ValidateHavingOrOrderExpression(c.Operand, columnsByName, decision, mv, selectAliases, allowAliases);
+                ValidateHavingOrOrderExpression(c.Operand, columnsByName, decision, mv, selectAliases, allowAliases, groupedDimensions);
                 return;
             case BinaryExpression b:
-                ValidateHavingOrOrderExpression(b.Left, columnsByName, decision, mv, selectAliases, allowAliases);
-                ValidateHavingOrOrderExpression(b.Right, columnsByName, decision, mv, selectAliases, allowAliases);
+                ValidateHavingOrOrderExpression(b.Left, columnsByName, decision, mv, selectAliases, allowAliases, groupedDimensions);
+                ValidateHavingOrOrderExpression(b.Right, columnsByName, decision, mv, selectAliases, allowAliases, groupedDimensions);
                 return;
             case UnaryExpression u:
-                ValidateHavingOrOrderExpression(u.Operand, columnsByName, decision, mv, selectAliases, allowAliases);
+                ValidateHavingOrOrderExpression(u.Operand, columnsByName, decision, mv, selectAliases, allowAliases, groupedDimensions);
                 return;
             case BetweenExpression bw:
-                ValidateHavingOrOrderExpression(bw.Operand, columnsByName, decision, mv, selectAliases, allowAliases);
-                ValidateHavingOrOrderExpression(bw.Lower, columnsByName, decision, mv, selectAliases, allowAliases);
-                ValidateHavingOrOrderExpression(bw.Upper, columnsByName, decision, mv, selectAliases, allowAliases);
+                ValidateHavingOrOrderExpression(bw.Operand, columnsByName, decision, mv, selectAliases, allowAliases, groupedDimensions);
+                ValidateHavingOrOrderExpression(bw.Lower, columnsByName, decision, mv, selectAliases, allowAliases, groupedDimensions);
+                ValidateHavingOrOrderExpression(bw.Upper, columnsByName, decision, mv, selectAliases, allowAliases, groupedDimensions);
                 return;
             default:
                 throw Refuse();
@@ -520,6 +557,18 @@ public static class MetricViewStatementGuard
 
         var quotedMeasure = SqlIdentifierHelper.QuoteIdentifier(countMeasure);
         return string.Concat(sql.AsSpan(0, insertPos), $", MEASURE({quotedMeasure}) AS {alias} ", sql.AsSpan(insertPos));
+    }
+
+    private static string ExtractWhereText(string sql, SqlBaseParser.SingleStatementContext tree)
+    {
+        var where = FindFirstQuerySpecification(tree)?.where;
+        if (where?.Start is not { } start || where.Stop is not { } stop ||
+            start.StartIndex < 0 || stop.StopIndex < start.StartIndex || stop.StopIndex >= sql.Length)
+        {
+            throw Refuse();
+        }
+
+        return sql.Substring(start.StartIndex, stop.StopIndex - start.StartIndex + 1);
     }
 
     private static SqlBaseParser.QuerySpecificationContext? FindFirstQuerySpecification(IParseTree node)
