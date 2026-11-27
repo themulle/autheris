@@ -354,6 +354,29 @@ public abstract class UcProvisioningContract : GovernanceContractBase
     }
 
     [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task Rejected_or_invalid_feedback_writes_append_no_event()
+    {
+        if (!Store.IsAvailable) return;
+
+        var source = NewSource();
+        var table = await SeedTableAsync(source, "orders");
+        var consent = await GrantAsync(table.Identifier, Store.TenantA);
+        await Repo.SaveLedgerAsync(source, 5, [], [Audit(Store.TenantA, "uc:" + source)], CancellationToken.None);
+        var since = (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 1000)).NextSince;
+
+        await Should.ThrowAsync<Autheris.Application.State.FencingTokenRejectedException>(() => Repo.SaveFeedbackAsync(
+            Store.TenantA, source, 4, [Feedback(Store.TenantA, consent.Id, source, UcGrantState.Provisioned)], [],
+            [new UcFeedbackEvent(consent.Id, table.Identifier, true, Now)], CancellationToken.None));
+        await Should.ThrowAsync<ArgumentException>(() => Repo.SaveFeedbackAsync(
+            Store.TenantA, source, 5, [], [], [new UcFeedbackEvent(consent.Id, table.Identifier, true, Now)], CancellationToken.None));
+
+        (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, since, 1000)).Events
+            .ShouldNotContain(e => e.PayloadJson.Contains(consent.Id.ToString()));
+        (await Repo.GetFeedbackAsync(Store.TenantA, [consent.Id], CancellationToken.None)).ShouldBeEmpty();
+    }
+
+    [RequiresContainerRuntimeFact]
     public async Task Ledger_rejects_over_long_fields_before_writing()
     {
         if (!Store.IsAvailable) return;

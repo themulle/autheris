@@ -106,6 +106,7 @@ public static class ProvisioningEndpoints
             }
 
             var target = "databricks:" + found.Name;
+            var now = TimeProvider.System.GetUtcNow();
             var tenant = UcProvisioningPlanner.ProvisioningTenant(found.Provisioning);
             var own = bySource.Where(g => tenant is { } t && g.TenantId == t).ToList();
             var rows = own.Count == 0 || tenant is null
@@ -119,7 +120,7 @@ public static class ProvisioningEndpoints
                         ? new GrantProvisioningDto(target, UcGrantState.Unsupported.ToStored(), UcReasonCodes.TenantNotProvisioned, null)
                         : rows.TryGetValue(grant.Id, out var row)
                             ? new GrantProvisioningDto(target, row.State.ToStored(), row.ReasonCode, row.VerifiedAt)
-                            : new GrantProvisioningDto(target, UcGrantState.Pending.ToStored(), null, null);
+                            : new GrantProvisioningDto(target, (grant.IsActive(now) ? UcGrantState.Pending : UcGrantState.Revoked).ToStored(), null, null);
             }
         }
 

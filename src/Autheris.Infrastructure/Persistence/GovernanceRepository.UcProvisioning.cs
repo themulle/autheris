@@ -16,8 +16,8 @@ internal readonly record struct UcProvisioningEventWrite(string EventType, strin
 public partial class GovernanceRepository
 {
     /// <summary>
-    /// Issue #1122: a provisioning feedback write, its audit entries and then its consent events in one transaction. The tenant
-    /// consent event lock is the last lock, as in a decision: every routing read happens before the first append.
+    /// Issue #1122: a provisioning feedback write, the routing reads of its events, its audit entries and then its consent events in
+    /// one transaction. The tenant consent event lock is the last lock, as in a decision; no read follows the audit chain lock.
     /// </summary>
     internal async Task WriteWithAuditAndConsentEventsAsync(
         Func<DbConnection, DbTransaction, Task> write,
@@ -33,17 +33,19 @@ public partial class GovernanceRepository
         try
         {
             await write(conn, tx).ConfigureAwait(false);
-            foreach (var entry in audit)
-            {
-                await RecordAuditEventAsync(entry, tx, ct).ConfigureAwait(false);
-            }
 
+            // Routing reads before the audit chain and the event lock; a consent not found for the tenant rolls everything back.
             var writes = new List<ConsentEventWrite>(events.Count);
             foreach (var e in events)
             {
                 writes.Add(await BuildGrantEventWriteAsync(
-                    conn, tx, e.EventType, e.Status, e.ConsentId, e.ConsentId, tenant, e.Table, e.OccurredAt, previousGrantId: null, requireRoutingRow: false, ct)
+                    conn, tx, e.EventType, e.Status, e.ConsentId, e.ConsentId, tenant, e.Table, e.OccurredAt, previousGrantId: null, requireRoutingRow: true, ct)
                     .ConfigureAwait(false));
+            }
+
+            foreach (var entry in audit)
+            {
+                await RecordAuditEventAsync(entry, tx, ct).ConfigureAwait(false);
             }
 
             foreach (var w in writes)

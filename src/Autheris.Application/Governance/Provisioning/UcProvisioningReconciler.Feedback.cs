@@ -56,6 +56,13 @@ public sealed partial class UcProvisioningReconciler
                 continue;
             }
 
+            // A transient failure (a lookup or read that failed this cycle) does not change what consumers were told: the reported
+            // state stays until a cycle decides it, so a recovery never announces the same transition twice.
+            if (state == UcGrantState.Pending && IsTransient(reason) && before is { State: UcGrantState.Provisioned or UcGrantState.Failed })
+            {
+                continue;
+            }
+
             changed.Add(new UcGrantFeedback(tenant, plan.Consent.Id, dataSource, state, reason, now, state == UcGrantState.Provisioned ? now : null));
 
             // Consumers learn the transitions that matter to them: effective in Unity Catalog, or not achievable.
@@ -80,11 +87,19 @@ public sealed partial class UcProvisioningReconciler
             }
         }
 
-        if (changed.Count > 0)
+        // Chunks keep each transaction (and the tenant event lock it ends with) short on a large first run.
+        foreach (var chunk in changed.Chunk(FeedbackChunk))
         {
-            await store.SaveFeedbackAsync(tenant, dataSource, _fencingToken, changed, [], events, ct).ConfigureAwait(false);
+            var ids = chunk.Select(r => r.ConsentId).ToHashSet();
+            await store.SaveFeedbackAsync(tenant, dataSource, _fencingToken, chunk, [], events.Where(e => ids.Contains(e.ConsentId)).ToList(), ct)
+                .ConfigureAwait(false);
         }
     }
+
+    private const int FeedbackChunk = 100;
+
+    private static bool IsTransient(string? reason) =>
+        reason is not null && (reason == PlanningFailedReason || (reason.StartsWith("UC_", StringComparison.Ordinal) && UcErrorCodes.IsTransient(reason)));
 
     private async Task<(UcGrantState State, string? Reason)> EnforcedStateAsync(
         string dataSource,
