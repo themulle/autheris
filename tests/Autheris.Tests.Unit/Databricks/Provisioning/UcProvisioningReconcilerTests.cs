@@ -210,6 +210,42 @@ public sealed class UcProvisioningReconcilerTests
     }
 
     [Fact]
+    public async Task Ended_consent_of_a_former_tenant_reads_revoke_pending_until_its_privileges_are_gone()
+    {
+        var consent = Grant(Now);
+        _store.Consents.Add(consent);
+        await RunAsync();
+        _store.Consents.Remove(consent);
+        _options.CurrentValue = Options(tenant: "beta");
+        _client.FailUpdates = UcErrorCodes.Unavailable;
+
+        await RunAsync();
+        _store.FeedbackOf(consent).ReasonCode.ShouldBe(UcProvisioningReconciler.RevokePendingReason);
+
+        _client.FailUpdates = null;
+        _time.Advance(TimeSpan.FromMinutes(10));
+        await RunAsync();
+        _store.FeedbackOf(consent).State.ShouldBe(UcGrantState.Revoked);
+    }
+
+    [Theory]
+    [InlineData("account users", "BROWSE", UcGrantState.Failed)]
+    [InlineData("analysts", "USE_CATALOG", UcGrantState.Provisioned)]
+    [InlineData("account users", "ALL_PRIVILEGES", UcGrantState.Provisioned)]
+    public async Task Direct_catalog_grants_settle_access_only_with_a_usable_privilege(string principal, string privilege, UcGrantState expected)
+    {
+        _client.CatalogAccess.Clear();
+        _client.EffectiveFailure = UcErrorCodes.Forbidden;
+        _client.Set(UcSecurableType.Catalog, "main", principal).Add(privilege);
+        var consent = Grant(Now);
+        _store.Consents.Add(consent);
+
+        await RunAsync();
+
+        _store.FeedbackOf(consent).State.ShouldBe(expected);
+    }
+
+    [Fact]
     public async Task Revoke_during_an_outage_stays_pending_becomes_overdue_and_completes_later()
     {
         var consent = Grant(Now);
@@ -409,6 +445,35 @@ public sealed class UcProvisioningReconcilerTests
     }
 
     [Fact]
+    public async Task Catalog_grant_to_account_users_settles_catalog_access_without_reading_effective_permissions()
+    {
+        _client.CatalogAccess.Clear();
+        _client.EffectiveFailure = UcErrorCodes.Forbidden;
+        _client.Set(UcSecurableType.Catalog, "main", "account users").Add(UcPrivileges.UseCatalog);
+        var consent = Grant(Now);
+        _store.Consents.Add(consent);
+
+        await RunAsync();
+
+        _store.FeedbackOf(consent).State.ShouldBe(UcGrantState.Provisioned);
+        _client.Calls.ShouldNotContain(c => c.StartsWith("effective:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Catalog_access_that_cannot_be_read_is_unverified_not_provisioned()
+    {
+        _client.CatalogAccess.Clear();
+        _client.EffectiveFailure = UcErrorCodes.Forbidden;
+        var consent = Grant(Now);
+        _store.Consents.Add(consent);
+
+        await RunAsync();
+
+        _store.FeedbackOf(consent).State.ShouldBe(UcGrantState.Failed);
+        _store.FeedbackOf(consent).ReasonCode.ShouldBe(UcProvisioningReconciler.CatalogAccessUnverifiedReason);
+    }
+
+    [Fact]
     public async Task Renamed_group_is_recorded_as_drift_without_a_new_grant()
     {
         _store.Consents.Add(Grant(Now));
@@ -559,6 +624,45 @@ public sealed class UcProvisioningReconcilerTests
         _client.Calls.ShouldNotContain(c => c.StartsWith("patch:", StringComparison.Ordinal));
         _store.Ledger.Count.ShouldBe(2);
         _store.FeedbackOf(replacement).ReasonCode.ShouldBe(UcErrorCodes.RateLimited);
+    }
+
+    [Fact]
+    public async Task Feedback_of_a_former_provisioning_tenant_is_retired_once_its_privileges_are_gone()
+    {
+        var consent = Grant(Now);
+        _store.Consents.Add(consent);
+        await RunAsync();
+        _store.FeedbackOf(consent).State.ShouldBe(UcGrantState.Provisioned);
+
+        // The data source now provisions another tenant: acme's privileges are revoked and its feedback retired.
+        _options.CurrentValue = Options(tenant: "beta");
+        await RunAsync();
+
+        _client.Holds(UcSecurableType.Table, Table, "analysts", UcPrivileges.Select).ShouldBeFalse();
+        _store.Ledger.ShouldBeEmpty();
+        _store.FeedbackOf(consent).State.ShouldBe(UcGrantState.Unsupported);
+        _store.FeedbackOf(consent).ReasonCode.ShouldBe(UcReasonCodes.TenantNotProvisioned);
+        _store.Events.ShouldContain(e => e.ConsentId == consent.Id && !e.Provisioned);
+    }
+
+    [Fact]
+    public async Task Ledger_rows_of_a_source_without_provisioning_section_are_audited_once()
+    {
+        _store.Ledger[("legacy", new UcPrivilegeKey(UcSecurableType.Table, "main.sales.x", GroupOid, UcPrivileges.Select))] = new UcLedgerEntry
+        {
+            DataSource = "legacy",
+            SecurableType = UcSecurableType.Table,
+            FullName = "main.sales.x",
+            Principal = "analysts",
+            PrincipalExternalId = GroupOid,
+            Privilege = UcPrivileges.Select,
+            State = UcLedgerState.Applied
+        };
+
+        await RunAsync();
+        await RunAsync();
+
+        _store.Audit.Count(a => a.Decision == "ORPHANED" && a.TenantId == Autheris.Domain.Common.TenantId.Platform).ShouldBe(1);
     }
 
     [Fact]

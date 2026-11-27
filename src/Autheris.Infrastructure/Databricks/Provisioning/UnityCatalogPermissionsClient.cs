@@ -105,8 +105,8 @@ public sealed partial class UnityCatalogPermissionsClient(
         for (var page = 0; page < MaxPages; page++)
         {
             var url = pageToken is null ? path : path + "&page_token=" + Uri.EscapeDataString(pageToken);
-            using var doc = await SendAsync(settings, HttpMethod.Get, url, null, ct).ConfigureAwait(false);
-            if (ReadEffectivePrivileges(doc.RootElement, principal).Overlaps(privileges))
+            using var doc = await SendAsync(settings, HttpMethod.Get, url, null, ct, forbiddenIsExpected: true).ConfigureAwait(false);
+            if (ReadEffectivePrivileges(doc.RootElement).Overlaps(privileges))
             {
                 return true;
             }
@@ -417,7 +417,7 @@ public sealed partial class UnityCatalogPermissionsClient(
         return result;
     }
 
-    private static HashSet<string> ReadEffectivePrivileges(JsonElement root, string principal)
+    private static HashSet<string> ReadEffectivePrivileges(JsonElement root)
     {
         var result = new HashSet<string>(StringComparer.Ordinal);
         if (root.ValueKind != JsonValueKind.Object)
@@ -437,9 +437,9 @@ public sealed partial class UnityCatalogPermissionsClient(
 
         foreach (var item in assignments.EnumerateArray())
         {
-            // Only the assignment of the asked principal counts, whatever else the service returns.
-            if (!string.Equals(ReadString(item, "principal"), principal, StringComparison.Ordinal) ||
-                !item.TryGetProperty("privileges", out var list) || list.ValueKind != JsonValueKind.Array)
+            // The response is already scoped to the asked principal; privileges it holds through a group are listed under the group's
+            // name (for example "account users"), so every returned assignment counts.
+            if (!item.TryGetProperty("privileges", out var list) || list.ValueKind != JsonValueKind.Array)
             {
                 continue;
             }
@@ -470,7 +470,8 @@ public sealed partial class UnityCatalogPermissionsClient(
 
     // ---- HTTP ----
 
-    private async Task<JsonDocument> SendAsync(Settings settings, HttpMethod method, string pathAndQuery, string? body, CancellationToken ct)
+    private async Task<JsonDocument> SendAsync(
+        Settings settings, HttpMethod method, string pathAndQuery, string? body, CancellationToken ct, bool forbiddenIsExpected = false)
     {
         var token = await AcquireTokenAsync(settings, ct).ConfigureAwait(false);
         using var response = await SendOnceAsync(settings, token, method, pathAndQuery, body, ct).ConfigureAwait(false);
@@ -480,10 +481,10 @@ public sealed partial class UnityCatalogPermissionsClient(
             credentials.EvictToken(settings.Credentials, null);
             var refreshed = await AcquireTokenAsync(settings, ct).ConfigureAwait(false);
             using var retry = await SendOnceAsync(settings, refreshed, method, pathAndQuery, body, ct).ConfigureAwait(false);
-            return await ReadResponseAsync(settings, retry, ct).ConfigureAwait(false);
+            return await ReadResponseAsync(settings, retry, forbiddenIsExpected, ct).ConfigureAwait(false);
         }
 
-        return await ReadResponseAsync(settings, response, ct).ConfigureAwait(false);
+        return await ReadResponseAsync(settings, response, forbiddenIsExpected, ct).ConfigureAwait(false);
     }
 
     private async Task<string> AcquireTokenAsync(Settings settings, CancellationToken ct)
@@ -530,7 +531,7 @@ public sealed partial class UnityCatalogPermissionsClient(
         }
     }
 
-    private async Task<JsonDocument> ReadResponseAsync(Settings settings, HttpResponseMessage response, CancellationToken ct)
+    private async Task<JsonDocument> ReadResponseAsync(Settings settings, HttpResponseMessage response, bool forbiddenIsExpected, CancellationToken ct)
     {
         var status = (int)response.StatusCode;
         if (status is >= 300 and < 400)
@@ -565,7 +566,10 @@ public sealed partial class UnityCatalogPermissionsClient(
         }
 
         var remoteCode = ReadRemoteErrorCode(bytes);
-        logger?.LogWarning("Unity Catalog call failed with HTTP {StatusCode} ({ErrorCode}).", status, remoteCode ?? "none");
+        if (!(forbiddenIsExpected && response.StatusCode == HttpStatusCode.Forbidden))
+        {
+            logger?.LogWarning("Unity Catalog call failed with HTTP {StatusCode} ({ErrorCode}).", status, remoteCode ?? "none");
+        }
         var code = response.StatusCode switch
         {
             HttpStatusCode.Unauthorized => UcErrorCodes.AuthFailed,
@@ -575,7 +579,9 @@ public sealed partial class UnityCatalogPermissionsClient(
             _ when status >= 500 => UcErrorCodes.Unavailable,
             _ => UcErrorCodes.Rejected
         };
-        if (code is UcErrorCodes.AuthFailed or UcErrorCodes.Forbidden)
+        // A refused read of another principal's effective permissions is expected (it needs rights the provisioning principal lacks)
+        // and says nothing about the token.
+        if (code == UcErrorCodes.AuthFailed || (code == UcErrorCodes.Forbidden && !forbiddenIsExpected))
         {
             credentials.EvictToken(settings.Credentials, null);
         }
