@@ -102,6 +102,32 @@ public sealed partial class UcProvisioningReconciler
 
     private const int FeedbackChunk = 100;
 
+    /// <summary>
+    /// Feedback of tenants that are no longer the data source's provisioning tenant (the tenant was changed): their privileges are
+    /// revoked like any unwanted privilege, so their feedback reads <c>REVOKE_PENDING</c> until nothing unwanted is left, then
+    /// <c>REVOKED</c>.
+    /// </summary>
+    private async Task RetireFormerTenantsAsync(string dataSource, TenantId tenant, UcApplyOutcome outcome, DateTimeOffset now, CancellationToken ct)
+    {
+        var (state, reason) = outcome.RevokesOutstanding ? (UcGrantState.Pending, (string?)RevokePendingReason) : (UcGrantState.Revoked, null);
+        foreach (var former in await store.ListFeedbackTenantsAsync(dataSource, ct).ConfigureAwait(false))
+        {
+            if (former == tenant)
+            {
+                continue;
+            }
+
+            var rows = (await store.ListFeedbackAsync(former, dataSource, ct).ConfigureAwait(false))
+                .Where(row => row.State != UcGrantState.Revoked && (row.State != state || !string.Equals(row.ReasonCode, reason, StringComparison.Ordinal)))
+                .Select(row => row with { State = state, ReasonCode = reason, UpdatedAt = now, VerifiedAt = null })
+                .ToList();
+            foreach (var chunk in rows.Chunk(FeedbackChunk))
+            {
+                await store.SaveFeedbackAsync(former, dataSource, _fencingToken, chunk, [], [], ct).ConfigureAwait(false);
+            }
+        }
+    }
+
     private static bool IsTransient(string? reason) =>
         reason is not null && (reason == PlanningFailedReason || (reason.StartsWith("UC_", StringComparison.Ordinal) && UcErrorCodes.IsTransient(reason)));
 

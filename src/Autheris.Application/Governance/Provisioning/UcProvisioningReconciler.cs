@@ -8,6 +8,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Runtime.Hosting;
 using Autheris.Application.State;
+using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Diagnostics;
 using Autheris.Domain.Model;
@@ -178,6 +179,14 @@ public sealed partial class UcProvisioningReconciler(
             logger.LogError(
                 "Data source {DataSource} holds {Count} Autheris-applied Unity Catalog privileges but has no provisioning section; restore the section with Mode Off to revoke them.",
                 source, rows.Count);
+
+            // Audited once per privilege and process: the privilege stays in Unity Catalog until the section is restored.
+            var fresh = rows.Where(row => _state.ReportedOrphans.TryAdd(source + "|" + row.Key, 0)).ToList();
+            if (fresh.Count > 0)
+            {
+                var audit = fresh.Select(row => Audit(TenantId.Platform, AuditEventTypes.GrantProvisioningFailed, "ORPHANED", source, row.Key, [], row.LastErrorCode)).ToList();
+                await store.SaveLedgerAsync(source, _fencingToken, [], audit, ct).ConfigureAwait(false);
+            }
         }
 
         return orphaned;
@@ -243,6 +252,7 @@ public sealed partial class UcProvisioningReconciler(
         var outcome = new UcApplyOutcome(keys, overdue, outstanding);
 
         await UpdateFeedbackAsync(name, provisioning.Mode, tenant, desired, outcome, now, ct).ConfigureAwait(false);
+        await RetireFormerTenantsAsync(name, tenant, outcome, now, ct).ConfigureAwait(false);
         return outcome.OverdueRevokes;
     }
 

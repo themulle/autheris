@@ -591,6 +591,43 @@ public sealed class UcProvisioningReconcilerTests
     }
 
     [Fact]
+    public async Task Feedback_of_a_former_provisioning_tenant_is_retired_once_its_privileges_are_gone()
+    {
+        var consent = Grant(Now);
+        _store.Consents.Add(consent);
+        await RunAsync();
+        _store.FeedbackOf(consent).State.ShouldBe(UcGrantState.Provisioned);
+
+        // The data source now provisions another tenant: acme's privileges are revoked and its feedback retired.
+        _options.CurrentValue = Options(tenant: "beta");
+        await RunAsync();
+
+        _client.Holds(UcSecurableType.Table, Table, "analysts", UcPrivileges.Select).ShouldBeFalse();
+        _store.Ledger.ShouldBeEmpty();
+        _store.FeedbackOf(consent).State.ShouldBe(UcGrantState.Revoked);
+    }
+
+    [Fact]
+    public async Task Ledger_rows_of_a_source_without_provisioning_section_are_audited_once()
+    {
+        _store.Ledger[("legacy", new UcPrivilegeKey(UcSecurableType.Table, "main.sales.x", GroupOid, UcPrivileges.Select))] = new UcLedgerEntry
+        {
+            DataSource = "legacy",
+            SecurableType = UcSecurableType.Table,
+            FullName = "main.sales.x",
+            Principal = "analysts",
+            PrincipalExternalId = GroupOid,
+            Privilege = UcPrivileges.Select,
+            State = UcLedgerState.Applied
+        };
+
+        await RunAsync();
+        await RunAsync();
+
+        _store.Audit.Count(a => a.Decision == "ORPHANED" && a.TenantId == Autheris.Domain.Common.TenantId.Platform).ShouldBe(1);
+    }
+
+    [Fact]
     public async Task Ledger_rows_of_a_source_without_provisioning_section_count_as_overdue()
     {
         _store.Ledger[("legacy", new UcPrivilegeKey(UcSecurableType.Table, "main.sales.x", GroupOid, UcPrivileges.Select))] = new UcLedgerEntry

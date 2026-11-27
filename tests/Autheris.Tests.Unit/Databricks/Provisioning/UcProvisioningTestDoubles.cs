@@ -67,6 +67,13 @@ internal sealed class FakeUcStore : IUcProvisioningStore
         return Task.CompletedTask;
     }
 
+    public Task<IReadOnlyList<TenantId>> ListFeedbackTenantsAsync(string dataSource, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<TenantId>>(Feedback.Values
+            .Where(f => f.DataSource == dataSource && f.State != UcGrantState.Revoked)
+            .Select(f => f.Tenant)
+            .Distinct()
+            .ToList());
+
     public Task<IReadOnlyList<UcGrantFeedback>> ListFeedbackAsync(TenantId tenant, string dataSource, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<UcGrantFeedback>>(Feedback.Values.Where(f => f.Tenant == tenant && f.DataSource == dataSource).ToList());
 
@@ -245,7 +252,8 @@ internal static class UcProvisioningScenario
     public const string GroupOid = "8b0c4b5e-6f0e-4a63-9a5e-1b2a4f9d7c11";
     public const string OtherOid = "0f9d7c11-1b2a-4f9d-9a5e-8b0c4b5e6f0e";
 
-    public static GatewayOptions Options(DatabricksProvisioningMode mode = DatabricksProvisioningMode.Enforce, DatabricksDriftMode drift = DatabricksDriftMode.Report) => new()
+    public static GatewayOptions Options(
+        DatabricksProvisioningMode mode = DatabricksProvisioningMode.Enforce, DatabricksDriftMode drift = DatabricksDriftMode.Report, string tenant = "acme") => new()
     {
         DataSources = new SqlDataSourceOptions
         {
@@ -263,7 +271,7 @@ internal static class UcProvisioningScenario
                         {
                             Mode = mode,
                             DriftMode = drift,
-                            Tenant = "acme",
+                            Tenant = tenant,
                             AllowedSchemas = ["main.sales"],
                             Auth = new DatabricksAuthOptions { ClientId = "prov-sp", ClientSecretRef = "kv://prov" }
                         }
