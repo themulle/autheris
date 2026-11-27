@@ -295,7 +295,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     activeConsents,
                     sunsetRules,
                     tableLookup,
-                    compileDataSource: null, runCompileParity: false,
+                    compileDataSource: null, runCompileParity: false, simulatedTarget: false,
                     ct).ConfigureAwait(false);
 
                 VerifyOrPopulateDeclaredReferencedTables(
@@ -342,7 +342,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                         activeConsents,
                         sunsetRules,
                         tableLookup,
-                        compileDataSource: null, runCompileParity: false,
+                        compileDataSource: null, runCompileParity: false, simulatedTarget: false,
                         ct).ConfigureAwait(false);
 
                     VerifyOrPopulateDeclaredReferencedTables(
@@ -423,7 +423,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     activeConsents,
                     sunsetRules,
                     tableLookup,
-                    compileDataSource: item.DataSource, runCompileParity: true,
+                    compileDataSource: item.DataSource, runCompileParity: true, simulatedTarget: targetPrincipal != null,
                     ct).ConfigureAwait(false);
 
                 MergeOutcome(

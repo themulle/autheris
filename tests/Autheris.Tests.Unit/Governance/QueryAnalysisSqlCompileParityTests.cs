@@ -144,34 +144,35 @@ public sealed class QueryAnalysisSqlCompileParityTests
     }
 
     [Fact]
-    public async Task SimulatedTarget_UsesTargetDecisions()
+    [Trait("Category", "Security")]
+    public async Task Simulation_SkipsCompileCheck_WithInformationalDiagnostic()
     {
-        var h = new SqlCompileParityHarness(consents: [SqlCompileParityHarness.AllowConsent("S-1-USER"), SqlCompileParityHarness.AllowConsent("S-1-TARGET")]);
+        var check = new FakeCompileParityCheck(new SqlCompileParityFailure("SQL_POLICY_DENIED", "Denied.", null, null, null, null, null));
+        var h = new SqlCompileParityHarness(check, SqlCompileParityHarness.AllowConsent("S-1-TARGET"));
         var caller = SqlCompileParityHarness.Caller(roles: "governance:simulate");
-        var target = SqlCompileParityHarness.Target("S-1-TARGET");
 
-        // the target (not the caller) is masked on masked_col: the same statement is refused for it exactly as its own execution refuses it
-        var result = await h.AnalyzeAsync(MaskedFilter, caller, target);
+        var result = await h.AnalyzeAsync("SELECT id FROM demo.main.t", caller, SqlCompileParityHarness.Target("S-1-TARGET"));
 
-        (await h.ExecutionRefusalAsync(MaskedFilter, target)).ShouldNotBeNull().Code.ShouldBe("FILTER_ON_MASKED_COLUMN");
-        Blocking(result, "FILTER_ON_MASKED_COLUMN").ShouldNotBeNull();
+        check.Calls.ShouldBe(0);
+        var info = result.ValidationReport.Diagnostics.Single(d => d.Code == QueryDiagnosticCodes.CompileCheckNotRunForSimulation);
+        info.BlocksExecution.ShouldBeFalse();
+        info.Column.ShouldBeNull();
+        result.ValidationReport.IsValid.ShouldBeTrue();
     }
 
     [Fact]
     [Trait("Category", "Security")]
     public async Task Simulation_UsesTargetVisibility_NotCaller()
     {
-        // the caller sees the table, the target has no consent: the answer is the policy denial of the target
-        var h = Create();
+        // the caller sees the table, the target has no consent: the catalog stage answers for the target
+        var check = new FakeCompileParityCheck();
+        var h = new SqlCompileParityHarness(check, SqlCompileParityHarness.AllowConsent());
         var caller = SqlCompileParityHarness.Caller(roles: "governance:simulate");
-        var target = SqlCompileParityHarness.Target("S-1-OTHER");
-        const string sql = "SELECT id FROM demo.main.t";
 
-        var result = await h.AnalyzeAsync(sql, caller, target);
+        var result = await h.AnalyzeAsync("SELECT id FROM demo.main.t", caller, SqlCompileParityHarness.Target("S-1-OTHER"));
 
-        (await h.ExecutionRefusalAsync(sql, target)).ShouldNotBeNull().Code.ShouldBe("SQL_POLICY_DENIED");
-        Blocking(result, "SQL_POLICY_DENIED").ShouldNotBeNull();
-        result.ValidationReport.IsValid.ShouldBeFalse();
+        check.Calls.ShouldBe(0);
+        result.AccessRequirements.MissingConsents.ShouldNotBeEmpty();
     }
 
     [Fact]

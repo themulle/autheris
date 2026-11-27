@@ -42,10 +42,11 @@ public sealed partial class QueryAnalysisService
         Dictionary<string, TableMetadata> tableLookup,
         string? compileDataSource,
         bool runCompileParity,
+        bool simulatedTarget,
         CancellationToken ct)
     {
         SqlCompileParityFailure? compileFailure = null;
-        if (runCompileParity && _compileCheck is not null)
+        if (runCompileParity && !simulatedTarget && _compileCheck is not null)
         {
             // The verdict of execution first: one dry run of the governed compile for the effective principal. Anything it cannot
             // classify is thrown (the analysis fails), never reported as valid.
@@ -70,6 +71,15 @@ public sealed partial class QueryAnalysisService
             tableLookup,
             adHocStatement: runCompileParity,
             ct).ConfigureAwait(false);
+
+        if (runCompileParity && simulatedTarget && _compileCheck is not null)
+        {
+            // A simulated target carries no resolved group set, so the governed compile cannot answer for it: say so instead of reporting a verdict.
+            outcome.Diagnostics.Add(new QueryValidationDiagnostic(
+                QueryDiagnosticCodes.CompileCheckNotRunForSimulation,
+                "The execution compile check is not run for a simulated target.",
+                QueryName: queryName));
+        }
 
         if (compileFailure is not null)
         {

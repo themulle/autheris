@@ -19,6 +19,9 @@ public static class QueryDiagnosticCodes
     public const string ReferencedTablesMismatch = "REFERENCED_TABLES_MISMATCH";
     public const string QueryTooComplex = "QUERY_TOO_COMPLEX";
 
+    /// <summary>Informational: the compile check of execution is skipped because the target is a simulated principal.</summary>
+    public const string CompileCheckNotRunForSimulation = "COMPILE_CHECK_NOT_RUN_FOR_SIMULATION";
+
     /// <summary>Informational: the analysis target is another principal whose token scopes are unknown (issue #127).</summary>
     public const string TargetScopesUnknown = "TARGET_SCOPES_UNKNOWN";
 }
