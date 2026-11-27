@@ -730,7 +730,7 @@ public sealed partial class RobinScenarios
         r.Result.Ok();
         using var doc = JsonDocument.Parse(r.Body);
         (FindProperty(doc.RootElement, "isValid") ?? throw new XunitException("isValid missing")).ValueKind.ShouldBe(JsonValueKind.False);
-        ContainsString(doc.RootElement, "SYNTAX_ERROR").ShouldBeTrue("an invalid query is reported without a SYNTAX_ERROR diagnostic");
+        ContainsString(doc.RootElement, "SQL_SYNTAX_ERROR").ShouldBeTrue("an invalid query is reported without the SQL_SYNTAX_ERROR diagnostic execution answers");
     });
 
     [ParityFact]

@@ -43,6 +43,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
     private readonly IRateLimiterService? _rateLimiterService;
     private readonly QueryAnalysisSettings _queryAnalysisSettings;
     private readonly int _maxRootFields;
+    private readonly ISqlCompileParityCheck? _compileCheck;
 
     [Microsoft.Extensions.DependencyInjection.ActivatorUtilitiesConstructor]
     public QueryAnalysisService(
@@ -61,8 +62,10 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         Autheris.Application.State.Caching.Interfaces.IClientTierResolver? clientTierResolver = null,
         IRateLimiterService? rateLimiterService = null,
         IOptions<QueryAnalysisSettings>? queryAnalysisSettings = null,
-        IConfiguration? configuration = null)
+        IConfiguration? configuration = null,
+        ISqlCompileParityCheck? compileCheck = null)
     {
+        _compileCheck = compileCheck;
         // The default is the secure list, never "off".
         _restrictedScopes = restrictedScopes ?? Autheris.Domain.Security.RestrictedScopePolicy.Default;
         _metadataRepository = metadataRepository ?? throw new ArgumentNullException(nameof(metadataRepository));
@@ -177,6 +180,11 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
             targetPrincipal = null;
         }
 
+        if (targetPrincipal != null && _compileCheck != null)
+        {
+            EnsureTargetInCallerTenant(callerPrincipal, targetPrincipal);
+        }
+
         var effectivePrincipal = targetPrincipal ?? callerPrincipal;
         var effectiveSid = ResolvePrincipalSid(effectivePrincipal) ?? callerSid.Value;
 
@@ -287,6 +295,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     activeConsents,
                     sunsetRules,
                     tableLookup,
+                    compileDataSource: null, runCompileParity: false,
                     ct).ConfigureAwait(false);
 
                 VerifyOrPopulateDeclaredReferencedTables(
@@ -333,6 +342,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                         activeConsents,
                         sunsetRules,
                         tableLookup,
+                        compileDataSource: null, runCompileParity: false,
                         ct).ConfigureAwait(false);
 
                     VerifyOrPopulateDeclaredReferencedTables(
@@ -413,6 +423,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
                     activeConsents,
                     sunsetRules,
                     tableLookup,
+                    compileDataSource: item.DataSource, runCompileParity: true,
                     ct).ConfigureAwait(false);
 
                 MergeOutcome(
@@ -535,7 +546,8 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
             !string.Equals(d.Code, QueryDiagnosticCodes.UnknownTable, StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(d.Code, QueryDiagnosticCodes.UnknownColumn, StringComparison.OrdinalIgnoreCase) &&
             !string.Equals(d.Code, QueryDiagnosticCodes.ReferencedTablesMismatch, StringComparison.OrdinalIgnoreCase) &&
-            !string.Equals(d.Code, QueryDiagnosticCodes.QueryTooComplex, StringComparison.OrdinalIgnoreCase));
+            !string.Equals(d.Code, QueryDiagnosticCodes.QueryTooComplex, StringComparison.OrdinalIgnoreCase) &&
+            !d.BlocksExecution);
 
         var validationReport = new QueryValidationReport(
             IsValid: isValid,

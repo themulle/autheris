@@ -25,7 +25,7 @@ using TrinoSqlEngine.Ast.Nodes;
 
 public sealed partial class QueryAnalysisService
 {
-    private async Task<SingleQueryAnalysisOutcome> AnalyzeSqlTextAsync(
+    private async Task<SingleQueryAnalysisOutcome> AnalyzeSqlTextCoreAsync(
         string sql,
         string queryName,
         ClaimsPrincipal effectivePrincipal,
@@ -35,6 +35,7 @@ public sealed partial class QueryAnalysisService
         IReadOnlyList<Consent> activeConsents,
         IReadOnlyList<FieldSunsettingRule> sunsetRules,
         Dictionary<string, TableMetadata> tableLookup,
+        bool adHocStatement,
         CancellationToken ct)
     {
         var outcome = new SingleQueryAnalysisOutcome();
@@ -42,10 +43,12 @@ public sealed partial class QueryAnalysisService
 
         if (!IsBalancedSqlSyntax(trimmed))
         {
-            outcome.Diagnostics.Add(new QueryValidationDiagnostic(
-                QueryDiagnosticCodes.SyntaxError,
-                "SQL syntax error: unbalanced parentheses, quotes, or malformed statement.",
-                QueryName: queryName));
+            outcome.Diagnostics.Add(adHocStatement
+                ? AdHocSyntaxDiagnostic(queryName)
+                : new QueryValidationDiagnostic(
+                    QueryDiagnosticCodes.SyntaxError,
+                    "SQL syntax error: unbalanced parentheses, quotes, or malformed statement.",
+                    QueryName: queryName));
             return outcome;
         }
 
@@ -65,19 +68,24 @@ public sealed partial class QueryAnalysisService
         }
         catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested))
         {
-            outcome.Diagnostics.Add(new QueryValidationDiagnostic(
-                QueryDiagnosticCodes.SyntaxError,
-                $"SQL syntax error: {ex.Message}",
-                QueryName: queryName));
+            // An ad-hoc statement never echoes the parser's text: the fixed message of the code only.
+            outcome.Diagnostics.Add(adHocStatement
+                ? AdHocSyntaxDiagnostic(queryName)
+                : new QueryValidationDiagnostic(
+                    QueryDiagnosticCodes.SyntaxError,
+                    $"SQL syntax error: {ex.Message}",
+                    QueryName: queryName));
             return outcome;
         }
 
         if (metadata.StatementType != SqlStatementType.Select || metadata.ReferencedTables.Count == 0)
         {
-            outcome.Diagnostics.Add(new QueryValidationDiagnostic(
-                QueryDiagnosticCodes.SyntaxError,
-                "SQL statement is not a valid SELECT query or is missing a valid FROM clause.",
-                QueryName: queryName));
+            outcome.Diagnostics.Add(adHocStatement
+                ? AdHocSyntaxDiagnostic(queryName)
+                : new QueryValidationDiagnostic(
+                    QueryDiagnosticCodes.SyntaxError,
+                    "SQL statement is not a valid SELECT query or is missing a valid FROM clause.",
+                    QueryName: queryName));
             return outcome;
         }
 

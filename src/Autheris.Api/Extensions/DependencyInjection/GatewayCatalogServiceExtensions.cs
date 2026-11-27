@@ -191,7 +191,11 @@ public static class GatewayCatalogServiceExtensions
             sp.GetService<IProtectionSnapshotProvider>()));
         services.TryAddScoped<IPrincipalResolverService, PrincipalResolverService>();
         services.TryAddScoped<IDatasourceTestingService, DatasourceTestingService>();
-        services.TryAddScoped<IQueryAnalysisService, QueryAnalysisService>();
+        services.TryAddScoped<Autheris.Application.Governance.Analysis.ISqlCompileParityCheck, Autheris.Application.Governance.Analysis.GovernedSqlCompileParityCheck>();
+        // The dry run is part of the verdict: without its registration the analysis cannot be composed (never a silent skip).
+        services.TryAddScoped<IQueryAnalysisService>(sp => ActivatorUtilities.CreateInstance<QueryAnalysisService>(
+            sp,
+            sp.GetRequiredService<Autheris.Application.Governance.Analysis.ISqlCompileParityCheck>()));
         services.TryAddScoped<IGraphQlCostAnalysisEngine, Autheris.GraphQL.Analysis.HotChocolateGraphQlCostAnalysisEngine>();
         services.TryAddScoped<IBundledConsentRequestService, BundledConsentRequestService>();
         services.TryAddSingleton<Autheris.Application.Catalog.External.ICatalogChangedSignal, Autheris.Application.Catalog.External.CatalogChangedSignal>();
