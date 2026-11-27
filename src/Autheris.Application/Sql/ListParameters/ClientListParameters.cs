@@ -53,6 +53,48 @@ public static class ClientListParameters
     }
 
     /// <summary>
+    /// Null shape of the statement: the referenced (<paramref name="referencedNames"/>, case-insensitive) scalar parameters whose value is
+    /// null, <see cref="DBNull"/> or a JSON null. Lists, unreferenced and absent parameters are never part of it, so an absent
+    /// parameter stays a missing parameter and the shape holds names only.
+    /// </summary>
+    public static ClientNullShapes NullShapes(IReadOnlyDictionary<string, object?> clientValues, IReadOnlySet<string> referencedNames)
+    {
+        ArgumentNullException.ThrowIfNull(clientValues);
+        ArgumentNullException.ThrowIfNull(referencedNames);
+
+        List<string>? names = null;
+        HashSet<string>? referenced = null;
+        foreach (var (name, value) in clientValues)
+        {
+            if (value is not (null or DBNull or JsonElement { ValueKind: JsonValueKind.Null }))
+            {
+                continue;
+            }
+
+            referenced ??= new HashSet<string>(referencedNames, StringComparer.OrdinalIgnoreCase);
+            if (referenced.Contains(name))
+            {
+                (names ??= []).Add(name);
+            }
+        }
+
+        if (names is null)
+        {
+            return ClientNullShapes.Empty;
+        }
+
+        try
+        {
+            return ClientNullShapes.Create(names);
+        }
+        catch (ArgumentException)
+        {
+            // Same mapping as a list name the compiler would not accept: a stable code, no name.
+            throw new ClientListException(GovernedSqlErrorCodes.ListParamPosition);
+        }
+    }
+
+    /// <summary>
     /// Refuses a request whose RAW parameters contain a list (a JSON array, a collection or a <see cref="ClientListValue"/>) with
     /// SQL_LIST_PARAM_UNSUPPORTED. The federated executor never sees parameters, so a list would be dropped silently.
     /// </summary>
