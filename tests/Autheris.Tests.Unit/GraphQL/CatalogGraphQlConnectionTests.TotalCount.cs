@@ -8,6 +8,8 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Sql.Tree;
 using Autheris.Domain.Exceptions;
+using HotChocolate;
+using HotChocolate.Execution;
 using NSubstitute;
 using Shouldly;
 using Xunit;
@@ -79,7 +81,7 @@ public sealed partial class CatalogGraphQlConnectionTests
         StubPage(rows: "[{\"id\":1,\"name\":\"a\"},{\"id\":2,\"name\":\"b\"},{\"id\":3,\"name\":\"c\"}]");
         StubCount(7);
         var executor = await CreateExecutorAsync();
-        var first = await executor.ExecuteAsync("query { sales_dbo_customersConnection(first: 2) { pageInfo { endCursor } } }");
+        var first = await executor.ExecuteAsync("query { sales_dbo_customersConnection(first: 2, where: { status: { eq: \"open\" } }) { pageInfo { endCursor } } }");
         using var firstDoc = JsonDocument.Parse(first.ToJson());
         var cursor = firstDoc.RootElement.GetProperty("data").GetProperty("sales_dbo_customersConnection").GetProperty("pageInfo").GetProperty("endCursor").GetString();
 
@@ -105,7 +107,7 @@ public sealed partial class CatalogGraphQlConnectionTests
         StubPage();
         StubCount(9);
 
-        var (raw, _) = await RunAsync("first: 2", "a: totalCount ... on CustomersConnection { b: totalCount }");
+        var (raw, _) = await RunAsync("first: 2", "a: totalCount ... on sales_dbo_customersConnection { b: totalCount }");
 
         raw.ShouldNotContain("\"errors\":");
         await _treeService.ReceivedWithAnyArgs(1).CountAsync(default, default!, default, default!, default);

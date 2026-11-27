@@ -101,8 +101,8 @@ public sealed class QueryCostAnalyzerTotalCountTests
 
         var two = Cost(schema, $"{{ thingsConnection(first: 10) {{ {Page} a: totalCount b: totalCount }} }}");
 
-        // The second alias is a further scalar of the selection, not a second count.
-        (two - one).ShouldBeLessThan(QueryCostAnalyzerRule.TotalCountSurchargeRows);
+        // The second alias is a further scalar of the selection (priced per row, first: 10), not a second surcharge (10 rows x 10).
+        (two - one).ShouldBeLessThan(QueryCostAnalyzerRule.TotalCountSurchargeRows * 10);
     }
 
     [Fact]

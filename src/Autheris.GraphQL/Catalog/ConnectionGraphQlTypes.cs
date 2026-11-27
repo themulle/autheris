@@ -540,9 +540,13 @@ internal static class ConnectionGraphQlTypes
         }
         catch (Exception ex) when (!ctx.RequestAborted.IsCancellationRequested)
         {
-            ctx.Services.GetService<Microsoft.Extensions.Logging.ILoggerFactory>()
-                ?.CreateLogger(typeof(ConnectionGraphQlTypes))
-                .LogDebug("The total count of '{Table}' could not be determined ({ExceptionType}).", queryNode.Table.ToQualifiedName(), ex.GetType().Name);
+            var logger = ctx.Services.GetService<Microsoft.Extensions.Logging.ILoggerFactory>()
+                ?.CreateLogger("Autheris.GraphQL.Catalog.ConnectionGraphQlTypes");
+            if (logger != null)
+            {
+                Microsoft.Extensions.Logging.LoggerExtensions.LogDebug(logger, "The total count of '{Table}' could not be determined ({ExceptionType}).", queryNode.Table.ToQualifiedName(), ex.GetType().Name);
+            }
+
             return null;
         }
     }

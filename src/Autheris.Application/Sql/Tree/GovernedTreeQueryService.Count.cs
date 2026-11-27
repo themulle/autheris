@@ -11,6 +11,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
+using Microsoft.Extensions.Logging;
 
 public sealed partial class GovernedTreeQueryService
 {
