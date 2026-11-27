@@ -266,19 +266,17 @@ public sealed class McpQueryGuideTests
         }
     }
 
-    [Theory]
-    [InlineData(nameof(McpQueryGuideBuilder.ListExample), "OrdersPage")]
-    [InlineData(nameof(McpQueryGuideBuilder.ConnectionExample), "PaidOrdersConnection")]
-    [InlineData(nameof(McpQueryGuideBuilder.AggregateExample), "OrdersByStatus")]
-    public void Issue1193_StoredQueryExamples_AreSingleOperationsWithDeclaredVariables(string constant, string name)
+    public static TheoryData<string, string> StoredQueryExamples => new()
     {
-        var text = constant switch
-        {
-            nameof(McpQueryGuideBuilder.ListExample) => McpQueryGuideBuilder.ListExample,
-            nameof(McpQueryGuideBuilder.ConnectionExample) => McpQueryGuideBuilder.ConnectionExample,
-            _ => McpQueryGuideBuilder.AggregateExample
-        };
+        { McpQueryGuideBuilder.ListExample, "OrdersPage" },
+        { McpQueryGuideBuilder.ConnectionExample, "PaidOrdersConnection" },
+        { McpQueryGuideBuilder.AggregateExample, "OrdersByStatus" }
+    };
 
+    [Theory]
+    [MemberData(nameof(StoredQueryExamples))]
+    public void Issue1193_StoredQueryExamples_AreSingleOperationsWithDeclaredVariables(string text, string name)
+    {
         var operation = Utf8GraphQLParser.Parse(text).Definitions.ShouldHaveSingleItem().ShouldBeOfType<OperationDefinitionNode>();
         operation.Name!.Value.ShouldBe(name);
 
