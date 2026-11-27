@@ -223,13 +223,24 @@ public sealed partial class UcProvisioningReconciler(
             UcProvisioningMetrics.Count("grant", "dry_run", keys.Count);
         }
 
+        // Drift is read back only against a stable desired state; re-applied privileges report their own status.
+        if (provisioning.Mode == DatabricksProvisioningMode.Enforce && !deferRevokes)
+        {
+            var repaired = await CheckDriftAsync(name, tenant, desired, now, ct).ConfigureAwait(false);
+            if (repaired.Count > 0)
+            {
+                var merged = keys.ToDictionary(kv => kv.Key, kv => kv.Value);
+                foreach (var (key, status) in repaired)
+                {
+                    merged[key] = status;
+                }
+
+                keys = merged;
+            }
+        }
+
         var outstanding = deferRevokes || (unwanted > 0 && (await store.ListLedgerAsync(name, ct).ConfigureAwait(false)).Any(row => IsUnwanted(row, desired)));
         var outcome = new UcApplyOutcome(keys, overdue, outstanding);
-
-        if (provisioning.Mode == DatabricksProvisioningMode.Enforce)
-        {
-            await CheckDriftAsync(name, tenant, provisioning, desired, now, ct).ConfigureAwait(false);
-        }
 
         await UpdateFeedbackAsync(name, provisioning.Mode, tenant, desired, outcome, now, ct).ConfigureAwait(false);
         return outcome.OverdueRevokes;

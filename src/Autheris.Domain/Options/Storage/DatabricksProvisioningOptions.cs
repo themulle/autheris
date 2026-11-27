@@ -24,7 +24,7 @@ public enum DatabricksDriftMode
     /// <summary>Foreign privileges are reported and never removed.</summary>
     Report = 0,
 
-    /// <summary>Foreign privileges on managed securables are removed (opt-in per data source).</summary>
+    /// <summary>Foreign privileges on managed securables are removed (opt-in per data source). Reserved: rejected at startup until available.</summary>
     Revert = 1
 }
 
@@ -47,7 +47,7 @@ public sealed class DatabricksProvisioningOptions
     /// </summary>
     public IReadOnlyList<string> AllowedSchemas { get; init; } = [];
 
-    /// <summary>Report (default) or Revert foreign privileges on managed securables.</summary>
+    /// <summary>How foreign privileges on managed securables are handled; only Report (the default) is accepted today.</summary>
     public DatabricksDriftMode DriftMode { get; init; } = DatabricksDriftMode.Report;
 
     /// <summary>Seconds between two reconcile cycles (10 to 300).</summary>

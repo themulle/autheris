@@ -11,8 +11,8 @@ using Xunit;
 using static Autheris.Tests.Unit.Databricks.Provisioning.UcProvisioningScenario;
 
 /// <summary>
-/// Issue #1122 (drift): a missing Autheris privilege is re-applied and audited as a repair; foreign privileges on managed tables are
-/// reported once and removed only with DriftMode = Revert; schemas and the provisioning principal are never reverted.
+/// Issue #1122 (drift): a missing Autheris privilege is re-applied; foreign privileges on managed tables and schemas are reported
+/// once while they stand and never removed; privileges that a consent, Autheris or a configured principal accounts for are not foreign.
 /// </summary>
 [Trait("Category", "Security")]
 public sealed class UcProvisioningDriftTests
@@ -45,66 +45,104 @@ public sealed class UcProvisioningDriftTests
         await RunAsync();
     }
 
+    private int DriftAudits(string decision) =>
+        _store.Audit.Count(a => a.EventType == AuditEventTypes.GrantProvisioningDrift && a.Decision == decision);
+
     [Fact]
-    public async Task Missing_autheris_privilege_is_reapplied_and_audited_as_repair()
+    public async Task Missing_autheris_privilege_is_reapplied_and_confirmed()
     {
         await RunAsync();
-        _client.Set(Autheris.Application.Governance.Provisioning.UcSecurableType.Table, Table, "analysts").Clear();
+        _client.Set(UcSecurableType.Table, Table, "analysts").Clear();
 
         await RunAfterIntervalAsync();
 
         _client.Holds(UcSecurableType.Table, Table, "analysts", UcPrivileges.Select).ShouldBeTrue();
-        _store.Audit.ShouldContain(a => a.EventType == AuditEventTypes.GrantProvisioningDrift && a.Decision == "REPAIRED");
+        DriftAudits("MISSING").ShouldBe(1);
+        _store.Audit.Count(a => a.EventType == AuditEventTypes.GrantProvisioned && a.Decision == "APPLIED").ShouldBe(3);
         _store.Ledger.Values.ShouldAllBe(e => e.State == UcLedgerState.Applied);
     }
 
     [Fact]
-    public async Task Drift_is_checked_at_most_once_per_interval()
+    public async Task Drift_is_read_once_per_interval()
     {
         await RunAsync();
         _client.Calls.Clear();
 
         await RunAsync();
-
         _client.Calls.ShouldNotContain(c => c.StartsWith("get:", StringComparison.Ordinal));
+
+        await RunAfterIntervalAsync();
+        _client.Calls.Count(c => c.StartsWith("get:", StringComparison.Ordinal)).ShouldBe(2);
     }
 
     [Fact]
-    public async Task Foreign_privilege_is_reported_once_and_kept_in_report_mode()
+    public async Task Foreign_privilege_is_reported_once_kept_and_reported_again_after_it_came_back()
     {
         await RunAsync();
         _client.Set(UcSecurableType.Table, Table, "intruders").Add("MODIFY");
 
         await RunAfterIntervalAsync();
         await RunAfterIntervalAsync();
-
         _client.Holds(UcSecurableType.Table, Table, "intruders", "MODIFY").ShouldBeTrue();
-        _store.Audit.Count(a => a.EventType == AuditEventTypes.GrantProvisioningDrift && a.Decision == "FOREIGN").ShouldBe(1);
-        _store.Audit.ShouldAllBe(a => !a.DetailsJson.Contains("intruders"));
+        DriftAudits("FOREIGN").ShouldBe(1);
+
+        _client.Set(UcSecurableType.Table, Table, "intruders").Clear();
+        await RunAfterIntervalAsync();
+        _client.Set(UcSecurableType.Table, Table, "intruders").Add("MODIFY");
+        await RunAfterIntervalAsync();
+
+        DriftAudits("FOREIGN").ShouldBe(2);
+        _store.Audit.ShouldAllBe(a => !a.DetailsJson.Contains("intruders") && !a.TargetTable.Contains("intruders"));
     }
 
     [Fact]
-    public async Task Revert_removes_foreign_table_privileges_but_never_schema_or_own_privileges()
+    public async Task Foreign_privilege_on_a_managed_schema_is_reported()
     {
-        _options.CurrentValue = Options(drift: DatabricksDriftMode.Revert);
         await RunAsync();
-        _client.Set(UcSecurableType.Table, Table, "intruders").Add("SELECT");
-        _client.Set(UcSecurableType.Table, Table, "prov-sp").Add("MANAGE");
-        _client.Set(UcSecurableType.Schema, Schema, "intruders").Add("USE_SCHEMA");
+        _client.Set(UcSecurableType.Schema, Schema, "intruders").Add("SELECT");
 
         await RunAfterIntervalAsync();
 
-        _client.Holds(UcSecurableType.Table, Table, "intruders", "SELECT").ShouldBeFalse();
-        _client.Holds(UcSecurableType.Table, Table, "prov-sp", "MANAGE").ShouldBeTrue();
-        _client.Holds(UcSecurableType.Schema, Schema, "intruders", "USE_SCHEMA").ShouldBeTrue();
-        _client.Holds(UcSecurableType.Table, Table, "analysts", UcPrivileges.Select).ShouldBeTrue();
-        _store.Audit.ShouldContain(a => a.EventType == AuditEventTypes.GrantProvisioningDrift && a.Decision == "REVERTED");
+        _client.Holds(UcSecurableType.Schema, Schema, "intruders", "SELECT").ShouldBeTrue();
+        DriftAudits("FOREIGN").ShouldBe(1);
+    }
+
+    [Fact]
+    public async Task Privileges_accounted_for_are_never_foreign()
+    {
+        // A privilege held before Autheris that satisfies the consent, and the provisioning principal's own privilege.
+        _client.Set(UcSecurableType.Table, Table, "analysts").Add(UcPrivileges.Select);
+        _client.Set(UcSecurableType.Table, Table, "prov-sp").Add("MANAGE");
+        await RunAsync();
+
+        await RunAfterIntervalAsync();
+
+        DriftAudits("FOREIGN").ShouldBe(0);
+    }
+
+    [Fact]
+    public async Task Unconfirmed_rename_is_neither_repaired_nor_reported()
+    {
+        await RunAsync();
+
+        // The group now resolves to another name, and the privilege is not visible under either name.
+        _client.Principals[GroupOid] = Group("analysts-eu");
+        _client.Set(UcSecurableType.Table, Table, "analysts").Clear();
+        _client.Calls.Clear();
+        await RunAfterIntervalAsync();
+
+        _client.Calls.ShouldNotContain(c => c.StartsWith("patch:", StringComparison.Ordinal));
+        DriftAudits("MISSING").ShouldBe(0);
+        DriftAudits("FOREIGN").ShouldBe(0);
     }
 
     [Fact]
     public async Task No_drift_check_in_dry_run()
     {
+        await RunAsync();
         _options.CurrentValue = Options(DatabricksProvisioningMode.DryRun);
+        _client.Calls.Clear();
+
         await RunAfterIntervalAsync();
 
         _client.Calls.ShouldNotContain(c => c.StartsWith("get:", StringComparison.Ordinal));
