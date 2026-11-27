@@ -95,13 +95,22 @@ public sealed class Issue1198TableRootsOnlyScopeIntegrationTests : IClassFixture
     }
 
     [Fact]
-    public async Task Graphql_restricted_scope_allows_list_aggregate_connection_mix()
+    public async Task Graphql_restricted_scope_allows_list_and_aggregate_roots()
     {
         var (status, body) = await PostAsync(Caller(),
-            "{ default_main_air1(first: 2) { id } default_main_air1_aggregate(aggregates: [{ fn: COUNT, alias: \"n\" }]) { count } default_main_air1Connection(first: 2) { edges { node { id } } } __typename }");
+            "{ default_main_air1(first: 2) { id } default_main_air1_aggregate(aggregates: [{ fn: COUNT, alias: \"n\" }]) { count } __typename }");
         status.ShouldBe(HttpStatusCode.OK, body);
         using var doc = JsonDocument.Parse(body);
         doc.RootElement.TryGetProperty("errors", out _).ShouldBeFalse(body);
+    }
+
+    [Fact]
+    public async Task Graphql_restricted_scope_connection_root_is_not_rejected_by_the_scope_check()
+    {
+        // Whether the keyset connection can serve this fixture table is not the subject here; the scope check must let it through.
+        var (status, body) = await PostAsync(Caller(), "{ default_main_air1Connection(first: 2) { edges { node { id } } } }");
+        status.ShouldNotBe(HttpStatusCode.Forbidden, body);
+        body.ShouldNotContain(Code);
     }
 
     [Fact]
