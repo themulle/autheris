@@ -74,6 +74,7 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<GovernedEnt
                 ["Gateway:DataSources:Connections:default:ConnectionString"] = _dbPath,
                 ["Gateway:WebSql:Enabled"] = "true",
                 ["Gateway:WebSql:DefaultDataSourceName"] = "default",
+                ["Gateway:WebSql:MaxListParameterValues"] = "3",
                 ["Gateway:SqlEndpoints:Enabled"] = "true",
                 ["Gateway:SqlEndpoints:Directory"] = _queries,
                 ["Gateway:SqlEndpoints:EnableHotReload"] = "false",
@@ -402,5 +403,157 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<GovernedEnt
         var unknown = await client.PostAsJsonAsync("/api/v1/sql", new { sql = "SELECT id FROM main.not_catalogued" });
         unknown.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
         (await unknown.Content.ReadAsStringAsync()).ShouldContain("SQL_POLICY_DENIED");
+    }
+
+    private async Task<(HttpStatusCode Status, string Body)> WebSqlAsync(string sql, Dictionary<string, object?>? parameters)
+    {
+        var response = await Client().PostAsJsonAsync("/api/v1/sql", new { sql, parameters });
+        return (response.StatusCode, await response.Content.ReadAsStringAsync());
+    }
+
+    private static string? McpErrorCode(string text)
+    {
+        if (!text.TrimStart().StartsWith('{'))
+        {
+            return null;
+        }
+
+        using var doc = System.Text.Json.JsonDocument.Parse(text);
+        return doc.RootElement.TryGetProperty("error", out var error) && error.TryGetProperty("code", out var code) ? code.GetString() : null;
+    }
+
+    private static int[] RowIds(string text)
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse(text);
+        return doc.RootElement.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("id").GetInt32()).ToArray();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task McpSqlToolParameters_ReturnSameRowsAsWebSql()
+    {
+        await RegisterAsync();
+        await using var mcp = await McpTestClient.ConnectAsync(Client());
+        var cases = new (string Sql, Dictionary<string, object?> Parameters)[]
+        {
+            ("SELECT id, name FROM main.ep_orders WHERE name = @n ORDER BY id", new() { ["n"] = "acme-row-1" }),
+            ("SELECT id, name FROM main.ep_orders WHERE id IN (@ids) ORDER BY id", new() { ["ids"] = new[] { 1, 2, 3 } })
+        };
+
+        foreach (var (sql, parameters) in cases)
+        {
+            var web = await WebSqlAsync(sql, parameters);
+            web.Status.ShouldBe(HttpStatusCode.OK, web.Body);
+            var (isError, text) = await McpTestClient.CallAsync(mcp, Autheris.Application.Mcp.Services.McpDatasetTools.QuerySql, new { query = sql, parameters });
+
+            isError.ShouldBeFalse(text);
+            text.ShouldNotContain("other-row");
+            using var webDoc = System.Text.Json.JsonDocument.Parse(web.Body);
+            var webIds = webDoc.RootElement.GetProperty("rows").EnumerateArray()
+                .Select(r => r.ValueKind == JsonValueKind.Array ? r[0].GetInt32() : r.GetProperty("id").GetInt32()).ToArray();
+            webIds.ShouldNotBeEmpty();
+            RowIds(text).ShouldBe(webIds, sql);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task McpSqlToolParameters_ErrorCodesEqualWebSql()
+    {
+        await RegisterAsync();
+        await using var mcp = await McpTestClient.ConnectAsync(Client());
+        var cases = new (string Sql, Dictionary<string, object?>? Parameters, string Code)[]
+        {
+            ("SELECT id FROM main.ep_orders WHERE id = @l", new() { ["l"] = new[] { 1, 2 } }, "SQL_LIST_PARAM_POSITION"),
+            ("SELECT id FROM main.ep_orders WHERE id IN (@l)", new() { ["l"] = new[] { 1, 2, 3, 4 } }, "SQL_LIST_PARAM_TOO_LARGE"),
+            ("SELECT id FROM main.ep_orders WHERE name = 'a\\b'", null, "SQL_LITERAL_NOT_PERMITTED")
+        };
+
+        foreach (var (sql, parameters, code) in cases)
+        {
+            var web = await WebSqlAsync(sql, parameters);
+            web.Status.ShouldNotBe(HttpStatusCode.OK, sql);
+            web.Body.ShouldContain(code, customMessage: sql);
+
+            var (isError, text) = await McpTestClient.CallAsync(mcp, Autheris.Application.Mcp.Services.McpDatasetTools.QuerySql, new { query = sql, parameters });
+            isError.ShouldBeTrue(text);
+            McpErrorCode(text).ShouldBe(code, text);
+        }
+    }
+
+    [Fact]
+    public async Task McpSqlToolParameters_UnsuppliedPlaceholder_IsRefusedLikeWebSql()
+    {
+        await RegisterAsync();
+        await using var mcp = await McpTestClient.ConnectAsync(Client());
+        const string sql = "SELECT id FROM main.ep_orders WHERE name = @n";
+        var parameters = new Dictionary<string, object?> { ["other"] = "x" };
+
+        var web = await WebSqlAsync(sql, parameters);
+        web.Status.ShouldNotBe(HttpStatusCode.OK, web.Body);
+
+        var (isError, text) = await McpTestClient.CallAsync(mcp, Autheris.Application.Mcp.Services.McpDatasetTools.QuerySql, new { query = sql, parameters });
+        isError.ShouldBeTrue(text);
+        text.ShouldNotContain("acme-row");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task McpSqlToolParameters_CursorBindsParameters()
+    {
+        await RegisterAsync();
+        await using var mcp = await McpTestClient.ConnectAsync(Client());
+        const string sql = "SELECT id, name FROM main.ep_orders WHERE name <> @n ORDER BY id";
+        var tool = Autheris.Application.Mcp.Services.McpDatasetTools.QuerySql;
+        var parameters = new Dictionary<string, object?> { ["n"] = "zzz" };
+
+        var (firstError, first) = await McpTestClient.CallAsync(mcp, tool, new { query = sql, parameters, limit = 1 });
+        firstError.ShouldBeFalse(first);
+        RowIds(first).ShouldBe([1]);
+        using var firstDoc = System.Text.Json.JsonDocument.Parse(first);
+        var cursor = firstDoc.RootElement.GetProperty("cursor").GetString()!;
+
+        var (secondError, second) = await McpTestClient.CallAsync(mcp, tool, new { query = sql, parameters, limit = 1, cursor });
+        secondError.ShouldBeFalse(second);
+        RowIds(second).ShouldBe([2]);
+
+        var tampered = cursor[..^1] + (cursor[^1] == 'A' ? 'B' : 'A');
+        var (_, tamperedText) = await McpTestClient.CallAsync(mcp, tool, new { query = sql, parameters, limit = 1, cursor = tampered });
+        var invalidCode = McpErrorCode(tamperedText);
+        invalidCode.ShouldNotBeNull(tamperedText);
+
+        var (changedError, changed) = await McpTestClient.CallAsync(mcp, tool,
+            new { query = sql, parameters = new Dictionary<string, object?> { ["n"] = "yyy" }, limit = 1, cursor });
+        changedError.ShouldBeTrue(changed);
+        McpErrorCode(changed).ShouldBe(invalidCode);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task McpSqlToolParameters_TenantScope_EqualWebSql()
+    {
+        await RegisterAsync();
+        await using var mcp = await McpTestClient.ConnectAsync(Client());
+        var tool = Autheris.Application.Mcp.Services.McpDatasetTools.QuerySql;
+
+        // the other tenant's row (id 3) is never returned, by name or inside an IN list, and WebSQL answers the same
+        var byName = new Dictionary<string, object?> { ["n"] = "other-row-3" };
+        var byIds = new Dictionary<string, object?> { ["ids"] = new[] { 3 } };
+        var cases = new (string Sql, Dictionary<string, object?> Parameters)[]
+        {
+            ("SELECT id, name FROM main.ep_orders WHERE name = @n", byName),
+            ("SELECT id, name FROM main.ep_orders WHERE id IN (@ids)", byIds)
+        };
+
+        foreach (var (sql, parameters) in cases)
+        {
+            var web = await WebSqlAsync(sql, parameters);
+            web.Status.ShouldBe(HttpStatusCode.OK, web.Body);
+            var (isError, text) = await McpTestClient.CallAsync(mcp, tool, new { query = sql, parameters });
+            isError.ShouldBeFalse(text);
+            RowIds(text).ShouldBeEmpty();
+            text.ShouldNotContain("other-row");
+            web.Body.ShouldNotContain("other-row");
+        }
     }
 }

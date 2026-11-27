@@ -12,6 +12,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Services;
+using Autheris.Tests.Unit.Sql;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
@@ -189,5 +190,31 @@ public sealed class GovernedSqlAuditTests
                 e.DetailsJson.Contains(nameof(InvalidOperationException)) &&
                 e.TargetTable == DataSource),
             Arg.Any<CancellationToken>());
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Mcp_ParameterizedQuery_AuditHoldsNoParameterValues()
+    {
+        await using var f = await ClientListFixture.CreateAsync();
+        var parameters = new Dictionary<string, object?>
+        {
+            ["status"] = System.Text.Json.JsonDocument.Parse("\"scalar-secret-91\"").RootElement.Clone(),
+            ["ids"] = System.Text.Json.JsonDocument.Parse("[1,2,3]").RootElement.Clone(),
+            ["labels"] = System.Text.Json.JsonDocument.Parse("[\"list-secret-42\"]").RootElement.Clone()
+        };
+
+        await f.QueryAsync(
+            "SELECT id FROM orders WHERE status = @status AND id IN (@ids) AND status IN (@labels)",
+            parameters,
+            transport: SqlTransports.Mcp);
+
+        f.Audit.ShouldNotBeEmpty();
+        foreach (var entry in f.Audit)
+        {
+            var text = (entry.DetailsJson ?? string.Empty) + (entry.TargetTable ?? string.Empty);
+            text.ShouldNotContain("scalar-secret-91");
+            text.ShouldNotContain("list-secret-42");
+        }
     }
 }

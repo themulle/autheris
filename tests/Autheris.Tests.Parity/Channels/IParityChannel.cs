@@ -22,7 +22,8 @@ public sealed record ParityQuery(
     IReadOnlyList<ParityAggregate> Aggregates,
     IReadOnlyList<string>? GroupBy = null,
     IReadOnlyList<ParityEquals>? Where = null,
-    string? RawSql = null);
+    string? RawSql = null,
+    IReadOnlyDictionary<string, object?>? Parameters = null);
 
 public sealed record ChannelResult(
     int Status,

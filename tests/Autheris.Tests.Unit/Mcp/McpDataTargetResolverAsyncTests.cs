@@ -21,6 +21,23 @@ using Xunit;
 
 public sealed class McpDataTargetResolverAsyncTests
 {
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task TryResolveSqlTablesAsync_WithScalarAndListPlaceholders_ResolvesSameTablesAsLiterals()
+    {
+        var engine = new RecordingAsyncSqlEngine();
+
+        var (literal, literalError) = await McpDataTargetResolver.TryResolveSqlTablesAsync(
+            "SELECT o.id FROM sales.public.orders o WHERE o.name = 'x' AND o.id IN (1, 2)", engine, "default");
+        var (placeholders, placeholderError) = await McpDataTargetResolver.TryResolveSqlTablesAsync(
+            "SELECT o.id FROM sales.public.orders o WHERE o.name = @n AND o.id IN (@ids)", engine, "default");
+
+        literalError.ShouldBeNull();
+        placeholderError.ShouldBeNull();
+        placeholders.ShouldBe(literal);
+        placeholders.ShouldBe([new TableIdentifier("sales", "public", "orders")]);
+    }
+
     private sealed class RecordingAsyncSqlEngine : ISqlEngine, IAsyncSqlEngine
     {
         public int SyncAnalyzeCalls { get; private set; }

@@ -59,7 +59,7 @@ internal static class McpDataTargetResolver
         try
         {
             var engine = sqlEngine ?? FastSqlEngine.Default;
-            var metadata = await engine.AnalyzeAsync(sql.AsMemory(), null, ct).ConfigureAwait(false);
+            var metadata = await engine.AnalyzeAsync(McpSqlPlaceholders.NeutralizeForAnalysis(sql).AsMemory(), null, ct).ConfigureAwait(false);
             return MapResolvedSqlTables(metadata, defaultDataSourceName);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)

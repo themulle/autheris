@@ -36,7 +36,7 @@ using Shouldly;
 using Xunit;
 
 [Trait("Category", "Security")]
-public sealed class McpQuerySqlPagingTests
+public sealed partial class McpQuerySqlPagingTests
 {
     private static readonly TableIdentifier OrdersTableId = new("sales", "public", "orders");
 
@@ -94,7 +94,9 @@ public sealed class McpQuerySqlPagingTests
         int maxResultRows = 2,
         bool maskEmail = false,
         int webSqlMaxAllowedRows = 0,
-        bool withDemoSource = false)
+        bool withDemoSource = false,
+        List<IReadOnlyList<object?>>? boundValues = null,
+        List<CapturingSqlService>? capture = null)
     {
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 11, 24, 4, 0, 0, TimeSpan.Zero));
         var options = new GatewayOptions
@@ -154,6 +156,7 @@ public sealed class McpQuerySqlPagingTests
         var connFactory = new RecordingConnectionFactory((sql, parameters) =>
         {
             executedSql.Add(sql);
+            boundValues?.Add(parameters.ToArray());
             int limit = int.MaxValue;
             var limitMatch = Regex.Match(sql, @"LIMIT\s+(\d+)", RegexOptions.IgnoreCase);
             if (limitMatch.Success && int.TryParse(limitMatch.Groups[1].Value, NumberStyles.Integer, CultureInfo.InvariantCulture, out var parsedLimit))
@@ -218,8 +221,10 @@ public sealed class McpQuerySqlPagingTests
             pageTokenCodec: codec,
             logger: NullLogger<GovernedSqlExecutionService>.Instance);
 
+        var capturing = new CapturingSqlService(sqlService);
+        capture?.Add(capturing);
         var handler = new McpToolExecutionHandler(
-            sqlService,
+            capturing,
             new StubDataQueryService(),
             new StubCatalogDiscoveryService(),
             new StubApiDispatcherService(),
