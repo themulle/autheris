@@ -140,7 +140,7 @@ public sealed class McpQueryExecutorSecurityTests
         var resultJson = await mcpExecutor.ExecuteOperationAsync(tool, "{}", session);
 
         Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Error(resultJson);
-        resultJson.ShouldContain("This token only permits read access; mutations are rejected.");
+        resultJson.ShouldContain("\"code\":\"FORBIDDEN\"");
         await executorProvider.DidNotReceiveWithAnyArgs().GetExecutorAsync(default, default);
     }
 

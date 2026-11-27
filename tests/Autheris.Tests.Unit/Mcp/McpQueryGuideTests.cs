@@ -25,6 +25,19 @@ public sealed class McpQueryGuideTests
         ReadPathSwitches.From(options ?? new GatewayOptions());
 
     [Fact]
+    public void Guide_ListsEnvelopeAndEveryActionableCode()
+    {
+        var guide = McpQueryGuideBuilder.Build(SwitchesFrom(), new GraphQLOptions());
+
+        guide.ShouldContain("## Tool Errors");
+        guide.ShouldContain("structuredContent");
+        foreach (var (code, _) in McpErrorCodes.AgentActionable)
+        {
+            guide.ShouldContain("`" + code + "`");
+        }
+    }
+
+    [Fact]
     public void Build_DefaultEnabledFeatures_CoversFullGraphQlDialectAndEnabledTools()
     {
         var switches = SwitchesFrom();

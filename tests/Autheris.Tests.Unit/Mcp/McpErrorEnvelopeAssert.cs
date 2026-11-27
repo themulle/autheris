@@ -24,6 +24,10 @@ internal static class McpErrorEnvelopeAssert
 
     public static string Code(string? json) => Error(json).GetProperty("code").GetString()!;
 
+    /// <summary>The <c>detail</c> member (a fixed argument text of the server), or null.</summary>
+    public static string? Detail(string? json) =>
+        Error(json).TryGetProperty("detail", out var d) ? d.GetString() : null;
+
     public static string Message(string? json) => Error(json).GetProperty("message").GetString()!;
 
     /// <summary>The code of a failed tool result (the envelope is both the content and the error message).</summary>

@@ -199,7 +199,7 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
 
         // Byte-exact error status and payload check
         resultUnconsented.ShouldBe(resultNonExistent);
-        resultUnconsented.ShouldContain("\"code\":\"NOT_FOUND\"");
+        resultUnconsented.ShouldContain("\"code\":\"DATASET_NOT_FOUND\"");
         resultUnconsented.ShouldContain("Dataset not found or not visible.");
     }
 
@@ -345,7 +345,7 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
 
         Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Error(writeResultJson);
         writeResultJson.ShouldContain("\"code\":\"FORBIDDEN\"");
-        writeResultJson.ShouldContain("read access");
+        writeResultJson.ShouldNotContain("ProcWrite");
     }
 
     [Theory]
@@ -435,7 +435,7 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
             session);
 
         resultUnconsented.ShouldBe(resultNonExistent);
-        resultUnconsented.ShouldContain("\"code\":\"NOT_FOUND\"");
+        resultUnconsented.ShouldContain("\"code\":\"RESOURCE_NOT_FOUND\"");
         resultUnconsented.ShouldContain("Procedure endpoint not found.");
     }
 
@@ -501,7 +501,7 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
             JsonSerializer.Serialize(new { procedure_name = "ProcTenantA" }),
             sessionTenantB);
 
-        execResult.ShouldContain("\"code\":\"NOT_FOUND\"");
+        execResult.ShouldContain("\"code\":\"RESOURCE_NOT_FOUND\"");
         execResult.ShouldContain("Procedure endpoint not found.");
     }
 
@@ -536,5 +536,39 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
 
         public ValueTask<IReadOnlySet<TableIdentifier>> FilterVisibleAsync(CatalogCaller caller, IReadOnlyCollection<TableIdentifier> candidates, CancellationToken ct = default)
             => ValueTask.FromResult<IReadOnlySet<TableIdentifier>>(tables.Select(t => t.Identifier).Where(candidates.Contains).ToHashSet());
+    }
+
+    private static async Task<string> CallProcedureWith(Func<string, GovernedProcedureResult> execute)
+    {
+        var procRegistry = CreateRegistry(CreateProcedure("ProcRead", mode: ProcedureMode.Read));
+        var handler = CreateHandler(procRegistry, new StubProcedureExecutionService(isVisible: (_, _, _) => true, execute: execute));
+        var tool = McpDatasetTools.Definitions().First(t => t.Name == McpDatasetTools.CallProcedure);
+        return await handler.ExecuteToolAsync(tool, JsonSerializer.Serialize(new { procedure_name = "ProcRead" }), CreateSession());
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task CallProcedure_UnknownAndForbidden_ByteIdentical_ResourceNotFound()
+    {
+        var unknown = await CallProcedureWith(_ => throw new KeyNotFoundException("no such procedure ProcRead"));
+        var forbidden = await CallProcedureWith(_ => throw new GatewayForbiddenException("policy detail for ProcRead"));
+
+        unknown.ShouldBe(forbidden);
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(unknown).ShouldBe("RESOURCE_NOT_FOUND");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Message(unknown).ShouldBe("Procedure endpoint not found.");
+        unknown.ShouldNotContain("ProcRead");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task CallProcedure_BusinessException_NeverReturnsDatabaseText()
+    {
+        var json = await CallProcedureWith(_ => throw new ProcedureBusinessException(50001, "45000", "trace-1", "MAPPED_CODE", "Customer 4711 (secret@example.com) is locked"));
+
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(json).ShouldBe("PROCEDURE_REJECTED");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Message(json).ShouldBe(ProcedureBusinessException.FixedMessage);
+        json.ShouldNotContain("4711");
+        json.ShouldNotContain("secret@example.com");
+        json.ShouldNotContain("MAPPED_CODE");
     }
 }

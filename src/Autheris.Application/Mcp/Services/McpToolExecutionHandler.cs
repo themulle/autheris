@@ -39,7 +39,6 @@ public sealed partial class McpToolExecutionHandler : IMcpToolExecutionHandler
     // Structured tool errors (isError:true) use the stable codes of the MCP query executor; the messages are fixed texts.
     private const string InvalidParamsCode = "INVALID_PARAMS";
     private const string ForbiddenCode = "FORBIDDEN";
-    private const string AccessDeniedMessage = "Access denied by data governance policy.";
     private const string InvalidSearchQueryMessage = "The search query is invalid or too long.";
 
     /// <summary>Documented maximum and default of the candidate tables search_catalog / find_relevant_tables return.</summary>
@@ -168,11 +167,9 @@ public sealed partial class McpToolExecutionHandler : IMcpToolExecutionHandler
             return await _scopeGuard.RunAsync(userPrincipal, apiKey: null, sessionContext.ClientIp, (_, scopedCt) =>
                 ExecuteToolCoreAsync(tool, argumentsJson, sessionContext, scopedCt), ct).ConfigureAwait(false);
         }
-        catch (Autheris.Domain.Exceptions.ScopeConcurrencyExceededException)
+        catch (Autheris.Domain.Exceptions.ScopeConcurrencyExceededException ex)
         {
-            return CreateMcpError(
-                sessionContext.TenantId, tool.Name, "SCOPE_CONCURRENCY_EXCEEDED",
-                "Too many concurrent queries are active for this client scope. Retry later.");
+            return McpToolError.Serialize(new McpToolErrorBody(McpErrorCodes.ScopeConcurrencyExceeded, string.Empty) { RetryAfterSeconds = ex.RetryAfterSeconds });
         }
         catch (TimeoutException)
         {
@@ -257,10 +254,10 @@ public sealed partial class McpToolExecutionHandler : IMcpToolExecutionHandler
                 McpResultMasking.Report(result.Data.Count > 0 && result.Columns.Any(c => c.Masked));
                 return JsonSerializer.Serialize(result, JsonOpts);
             }
-            catch (UnauthorizedAccessException)
+            catch (Exception ex) when (McpToolError.TryMapQueryDatasetFailure(ex, out var mappedError))
             {
-                // Fixed text: the exception message can carry policy details (denied reasons, hidden table or column names).
-                return CreateMcpError(sessionContext.TenantId, tool.Name, ForbiddenCode, AccessDeniedMessage);
+                // Fixed codes and texts only: the exception message can carry policy details (denied reasons, hidden table or column names).
+                return mappedError;
             }
         }
 
@@ -715,11 +712,12 @@ public sealed partial class McpToolExecutionHandler : IMcpToolExecutionHandler
         }
         catch (KeyNotFoundException)
         {
-            return CreateMcpError(sessionContext.TenantId, McpDatasetTools.CallProcedure, "NOT_FOUND", "Procedure endpoint not found.");
+            return McpToolError.Serialize(McpErrorCodes.ResourceNotFound, string.Empty);
         }
-        catch (Autheris.Application.Procedures.Interfaces.ProcedureBusinessException ex)
+        catch (Autheris.Application.Procedures.Interfaces.ProcedureBusinessException)
         {
-            return CreateMcpError(sessionContext.TenantId, McpDatasetTools.CallProcedure, "EXECUTION_FAILED", ex.MappedMessage ?? ex.Message);
+            // Never the mapped or database text: the fixed message of the code.
+            return McpToolError.Serialize(McpErrorCodes.ProcedureRejected, string.Empty);
         }
         catch (Autheris.Application.Procedures.Interfaces.ProcedureUnavailableException)
         {
@@ -727,7 +725,7 @@ public sealed partial class McpToolExecutionHandler : IMcpToolExecutionHandler
         }
         catch (GatewayForbiddenException)
         {
-            return CreateMcpError(sessionContext.TenantId, McpDatasetTools.CallProcedure, "FORBIDDEN", "Access denied by data governance policy.");
+            return McpToolError.Serialize(McpErrorCodes.ResourceNotFound, string.Empty);
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not TransportNotAllowedException and not TimeoutException)
         {

@@ -1,17 +1,19 @@
 namespace Autheris.Application.Mcp.Services;
 
 using System.Buffers;
-using System.Runtime.CompilerServices;
+using System.Collections.Concurrent;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Autheris.Application.Common;
 using Autheris.Application.Sql.Errors;
 using Autheris.Domain.Model;
+using TrinoSqlEngine.Ast.Capabilities;
 using TrinoSqlEngine.Ast.Emit;
 
-/// <summary>The optional members of the error envelope (same names and meaning as the WebSQL problem extensions).</summary>
+/// <summary>The members of the error envelope (same names and meaning as the WebSQL problem extensions).</summary>
 /// <param name="Code">Stable upper-case code.</param>
-/// <param name="Message">Fixed message of the code.</param>
+/// <param name="Message">Text a producer offers for the call. The written <c>message</c> is always the fixed message of the code; this text is
+/// kept only as <c>detail</c> for <c>INVALID_PARAMS</c> and <c>INVALID_QUERY</c> (a fixed argument text of the server).</param>
 public sealed record McpToolErrorBody(string Code, string Message)
 {
     public string? Hint { get; init; }
@@ -22,14 +24,15 @@ public sealed record McpToolErrorBody(string Code, string Message)
     public int? MaxAllowedCost { get; init; }
     public int? RetryAfterSeconds { get; init; }
 
-    /// <summary>The GraphQL execution result of a GraphQL tool failure; written unchanged under <c>error.graphQL</c>.</summary>
+    /// <summary>The GraphQL execution result of a GraphQL tool failure; only its filtered errors (message, path, code) are written.</summary>
     public JsonElement? GraphQL { get; init; }
 }
 
 /// <summary>
-/// The single producer of MCP tool error results: <c>{"error":{"code","message"[,"hint","line","column","limit","estimatedCost",
-/// "maxAllowedCost","retryAfterSeconds","graphQL"]}}</c>. The root carries nothing else (no tenant, tool or flag). The message is the
-/// fixed message of the code; nothing of the request or of an exception is written.
+/// The single producer of MCP tool error results: <c>{"error":{"code","message"[,"detail","hint","line","column","limit","estimatedCost",
+/// "maxAllowedCost","retryAfterSeconds","graphQL"]}}</c>. The root carries nothing else. <c>message</c> is the fixed message of the code.
+/// <see cref="Normalize"/> rebuilds any body from the catalogue code and allowlisted typed members only, so it is idempotent and needs no
+/// knowledge of where a body came from.
 /// </summary>
 public static partial class McpToolError
 {
@@ -37,6 +40,10 @@ public static partial class McpToolError
     public const int MaxHintLength = 512;
     public const int MaxNormalizeInputLength = 256 * 1024;
     public const string FallbackCode = "ERROR";
+
+    private const int MaxGraphQlErrors = 20;
+    private const int MaxGraphQlPathLength = 32;
+    private const int MaxServerTexts = 2048;
 
     [GeneratedRegex("^[A-Z][A-Z0-9_]{1,63}$")]
     private static partial Regex CodePattern();
@@ -46,12 +53,41 @@ public static partial class McpToolError
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping
     };
 
-    // Strings written by this class (by reference): only those carry a message that may be passed on unchanged.
-    private static readonly ConditionalWeakTable<string, object> Produced = new();
+    private static readonly HashSet<string> LimitKinds = new(Enum.GetNames<SqlLimitKind>(), StringComparer.Ordinal);
 
-    private static readonly object Marker = new();
+    // Fixed texts of the server (argument templates and mapper hints), registered when the server writes them. Only a registered text
+    // survives Normalize, so a relayed body cannot bring its own detail or hint. Bounded: a producer that wrongly formats request input
+    // into a template can neither grow it without limit nor make the text reach a client after the bound.
+    private static readonly ConcurrentDictionary<string, byte> ServerTexts = new(StringComparer.Ordinal);
 
-    /// <summary>Serializes an envelope of a code and a message (both guarded).</summary>
+    private static bool AllowsDetail(string code) =>
+        code is McpErrorCodes.InvalidParams or McpErrorCodes.InvalidQuery;
+
+    private static bool AllowsHint(string code) =>
+        code == McpErrorCodes.TokenBudgetExceeded || McpErrorCodes.IsGovernedSql(code);
+
+    private static bool AllowsGraphQl(string code) =>
+        code is McpErrorCodes.ExecutionFailed or McpErrorCodes.QueryTimeout or McpErrorCodes.InvalidQuery;
+
+    private static string? Register(string? text, int maxLength)
+    {
+        var clean = ErrorText.Sanitize(text, string.Empty, maxLength);
+        if (clean.Length == 0)
+        {
+            return null;
+        }
+
+        if (!ServerTexts.ContainsKey(clean) && ServerTexts.Count < MaxServerTexts)
+        {
+            ServerTexts.TryAdd(clean, 0);
+        }
+
+        return clean;
+    }
+
+    private static bool IsServerText(string? text) => text is not null && ServerTexts.ContainsKey(text);
+
+    /// <summary>Serializes an envelope of a code and the producer's text (see <see cref="McpToolErrorBody"/>).</summary>
     public static string Serialize(string code, string message) => Serialize(new McpToolErrorBody(code, message));
 
     /// <summary>Serializes the envelope in its fixed member order; null members are omitted.</summary>
@@ -59,7 +95,22 @@ public static partial class McpToolError
     {
         ArgumentNullException.ThrowIfNull(body);
         var code = !string.IsNullOrEmpty(body.Code) && CodePattern().IsMatch(body.Code) ? body.Code : FallbackCode;
-        var message = ErrorText.Sanitize(body.Message, "The request failed.", MaxMessageLength);
+        var fixedMessage = McpErrorCodes.FixedMessage(code);
+        string? detail = null;
+        if (AllowsDetail(code) && !string.IsNullOrWhiteSpace(body.Message) && body.Message != fixedMessage)
+        {
+            detail = Register(body.Message, MaxMessageLength);
+        }
+
+        string? hint = AllowsHint(code) ? Register(body.Hint, MaxHintLength) : null;
+        var limit = body.Limit is { } l && LimitKinds.Contains(l) ? l : null;
+        return Write(code, fixedMessage, detail, hint, body.Line, body.Column, limit, body.EstimatedCost, body.MaxAllowedCost, body.RetryAfterSeconds,
+            AllowsGraphQl(code) ? body.GraphQL : null);
+    }
+
+    private static string Write(string code, string message, string? detail, string? hint, int? line, int? column, string? limit,
+        int? estimatedCost, int? maxAllowedCost, int? retryAfterSeconds, JsonElement? graphQl)
+    {
         var buffer = new ArrayBufferWriter<byte>(256);
         using (var w = new Utf8JsonWriter(buffer, WriterOptions))
         {
@@ -67,36 +118,111 @@ public static partial class McpToolError
             w.WriteStartObject("error");
             w.WriteString("code", code);
             w.WriteString("message", message);
-            if (body.Hint is { } hint && ErrorText.Sanitize(hint, string.Empty, MaxHintLength) is { Length: > 0 } safeHint)
+            if (detail is not null) w.WriteString("detail", detail);
+            if (hint is not null) w.WriteString("hint", hint);
+            if (line is { } ln) w.WriteNumber("line", ln);
+            if (column is { } col) w.WriteNumber("column", col);
+            if (limit is not null) w.WriteString("limit", limit);
+            if (estimatedCost is { } est) w.WriteNumber("estimatedCost", est);
+            if (maxAllowedCost is { } max) w.WriteNumber("maxAllowedCost", max);
+            if (retryAfterSeconds is { } retry) w.WriteNumber("retryAfterSeconds", retry);
+            if (graphQl is { ValueKind: JsonValueKind.Object } gql)
             {
-                w.WriteString("hint", safeHint);
-            }
-
-            if (body.Line is { } line) w.WriteNumber("line", line);
-            if (body.Column is { } column) w.WriteNumber("column", column);
-            if (body.Limit is { } limit && ErrorText.Sanitize(limit, string.Empty, 64) is { Length: > 0 } safeLimit) w.WriteString("limit", safeLimit);
-            if (body.EstimatedCost is { } est) w.WriteNumber("estimatedCost", est);
-            if (body.MaxAllowedCost is { } max) w.WriteNumber("maxAllowedCost", max);
-            if (body.RetryAfterSeconds is { } retry) w.WriteNumber("retryAfterSeconds", retry);
-            if (body.GraphQL is { ValueKind: JsonValueKind.Object } graphQl)
-            {
-                w.WritePropertyName("graphQL");
-                graphQl.WriteTo(w);
+                WriteGraphQlErrors(w, gql);
             }
 
             w.WriteEndObject();
             w.WriteEndObject();
         }
 
-        var json = System.Text.Encoding.UTF8.GetString(buffer.WrittenSpan);
-        Produced.TryAdd(json, Marker);
-        return json;
+        return System.Text.Encoding.UTF8.GetString(buffer.WrittenSpan);
     }
 
-    /// <summary>A failed tool result whose message is the fixed message of the code (or the sanitised <paramref name="text"/>).</summary>
-    public static McpToolCallResult Fail(string code, string? text = null)
+    /// <summary>
+    /// Writes <c>graphQL: {errors:[{message, path, extensions:{code}}]}</c> from a GraphQL result: the errors as the /graphql pipeline
+    /// (error filter and enumeration shield of the request executor) produced them, reduced to message, path and code. No data,
+    /// locations or other extensions.
+    /// </summary>
+    private static void WriteGraphQlErrors(Utf8JsonWriter w, JsonElement result)
     {
-        var envelope = Serialize(code, ErrorText.Sanitize(text, McpErrorCodes.FixedMessage(code), MaxMessageLength));
+        if (!result.TryGetProperty("errors", out var errors) || errors.ValueKind != JsonValueKind.Array)
+        {
+            return;
+        }
+
+        var written = new List<(string Message, JsonElement? Path, string? Code)>();
+        foreach (var error in errors.EnumerateArray())
+        {
+            if (written.Count >= MaxGraphQlErrors)
+            {
+                break;
+            }
+
+            if (error.ValueKind != JsonValueKind.Object || !error.TryGetProperty("message", out var m) || m.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+
+            JsonElement? path = error.TryGetProperty("path", out var p) && IsSafePath(p) ? p : null;
+            string? code = error.TryGetProperty("extensions", out var ext) && ext.ValueKind == JsonValueKind.Object
+                           && ext.TryGetProperty("code", out var c) && c.ValueKind == JsonValueKind.String
+                           && c.GetString() is { } cs && CodePattern().IsMatch(cs) ? cs : null;
+            written.Add((ErrorText.Sanitize(m.GetString(), string.Empty, 512), path, code));
+        }
+
+        if (written.Count == 0)
+        {
+            return;
+        }
+
+        w.WriteStartObject("graphQL");
+        w.WriteStartArray("errors");
+        foreach (var (message, path, code) in written)
+        {
+            w.WriteStartObject();
+            w.WriteString("message", message);
+            if (path is { } pe)
+            {
+                w.WritePropertyName("path");
+                pe.WriteTo(w);
+            }
+
+            if (code is not null)
+            {
+                w.WriteStartObject("extensions");
+                w.WriteString("code", code);
+                w.WriteEndObject();
+            }
+
+            w.WriteEndObject();
+        }
+
+        w.WriteEndArray();
+        w.WriteEndObject();
+    }
+
+    private static bool IsSafePath(JsonElement path)
+    {
+        if (path.ValueKind != JsonValueKind.Array || path.GetArrayLength() > MaxGraphQlPathLength)
+        {
+            return false;
+        }
+
+        foreach (var segment in path.EnumerateArray())
+        {
+            if (segment.ValueKind is not (JsonValueKind.String or JsonValueKind.Number) || (segment.ValueKind == JsonValueKind.String && segment.GetString()!.Length > 128))
+            {
+                return false;
+            }
+        }
+
+        return true;
+    }
+
+    /// <summary>A failed tool result for a code; <paramref name="detail"/> is a fixed argument text (kept for INVALID_PARAMS and INVALID_QUERY only).</summary>
+    public static McpToolCallResult Fail(string code, string? detail = null)
+    {
+        var envelope = Serialize(code, detail ?? McpErrorCodes.FixedMessage(code));
         return new McpToolCallResult(IsSuccess: false, ContentJson: envelope, ErrorMessage: envelope);
     }
 
@@ -104,7 +230,7 @@ public static partial class McpToolError
     public static McpToolCallResult FailWith(string envelopeJson) =>
         new(IsSuccess: false, ContentJson: envelopeJson, ErrorMessage: envelopeJson);
 
-    /// <summary>The envelope body of a governed SQL error: the stable code, the fixed message and the position/limit/retry fields of the WebSQL problem.</summary>
+    /// <summary>The envelope body of a governed SQL error: the stable code and the position/limit/retry fields of the WebSQL problem.</summary>
     public static McpToolErrorBody FromSql(Exception? exception, in SqlErrorMapping mapped)
     {
         int? estimated = null, maxAllowed = null, retry = null;
@@ -128,7 +254,7 @@ public static partial class McpToolError
         }
 
         var hasPosition = mapped.Line is not null && mapped.Column is not null;
-        return new McpToolErrorBody(mapped.Code, mapped.Title)
+        return new McpToolErrorBody(mapped.Code, McpErrorCodes.FixedMessage(mapped.Code))
         {
             Hint = mapped.Hint,
             Limit = mapped.Limit,
@@ -152,77 +278,39 @@ public static partial class McpToolError
         return Fail(GovernedSqlErrorCodes.SyntaxError);
     }
 
-    private static readonly string[] AdminMessageAllowlist =
-    [
-        "Both 'planId' and 'confirmationToken' are required to apply a confirmed administrator operation.",
-        "Confirmation token is required to apply access changes (ADR-03).",
-        "Invalid or already consumed TOTP verification code.",
-        "Plan confirmation must be performed by the initiating administrator."
-    ];
+    /// <summary>A failed admin tool result: the message is the fixed message of the code; the admin layer's own text stays in the audit row.</summary>
+    public static McpToolCallResult FailAdmin(string? adminErrorText) => Fail(McpErrorCodes.AdminOperationRejected);
 
     /// <summary>
-    /// A failed admin tool result: the message comes from a closed allowlist of fixed texts; any other text (it may carry principals,
-    /// plan ids, datasource names or secrets) is replaced by the fixed message of the code.
-    /// </summary>
-    public static McpToolCallResult FailAdmin(string? adminErrorText)
-    {
-        var text = adminErrorText;
-        string? fixedText = null;
-        if (text is not null)
-        {
-            foreach (var allowed in AdminMessageAllowlist)
-            {
-                if (string.Equals(text, allowed, StringComparison.Ordinal))
-                {
-                    fixedText = allowed;
-                    break;
-                }
-            }
-
-            fixedText ??= text switch
-            {
-                _ when text.StartsWith("Invalid arguments for admin tool", StringComparison.Ordinal) => "The arguments of the admin tool are invalid.",
-                _ when text.StartsWith("Grant policy violation", StringComparison.Ordinal) => "The operation violates the grant policy.",
-                _ when text.StartsWith("Unsupported admin tool", StringComparison.Ordinal) => "The admin tool is not supported.",
-                _ => null
-            };
-        }
-
-        return Fail(McpErrorCodes.AdminOperationRejected, fixedText);
-    }
-
-    /// <summary>
-    /// The one place that turns any failure content into the envelope. Bodies written by this class pass unchanged; every other body
-    /// (relayed problem details, JSON-RPC or OData errors, an upstream body that merely looks like the envelope, free text) keeps at
-    /// most a catalogue code and its allowed numeric/hint fields and always gets the fixed message of that code. Never throws.
+    /// The one place that turns any failure content into the envelope. Any body (own, relayed problem details, JSON-RPC or OData errors,
+    /// free text) is re-parsed and rebuilt from its catalogue code and the allowlisted typed members; the message is always the fixed
+    /// message of the code. A code outside the catalogue, an unparseable or oversized body gives EXECUTION_FAILED. Idempotent, never throws.
     /// </summary>
     public static string Normalize(string? json)
     {
         try
         {
-            if (json is not null && Produced.TryGetValue(json, out _))
-            {
-                return json;
-            }
-
-            return NormalizeForeign(json);
+            return NormalizeCore(json);
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
-            return Fail(McpErrorCodes.ExecutionFailed).ContentJson;
+            return Fallback();
         }
     }
 
-    private static string NormalizeForeign(string? json)
+    private static string Fallback() =>
+        Write(McpErrorCodes.ExecutionFailed, McpErrorCodes.FixedMessage(McpErrorCodes.ExecutionFailed), null, null, null, null, null, null, null, null, null);
+
+    private static string NormalizeCore(string? json)
     {
         if (string.IsNullOrWhiteSpace(json) || json.Length > MaxNormalizeInputLength)
         {
-            return Serialize(McpErrorCodes.ExecutionFailed, McpErrorCodes.FixedMessage(McpErrorCodes.ExecutionFailed));
+            return Fallback();
         }
 
         try
         {
-            using var doc = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 16 });
+            using var doc = JsonDocument.Parse(json, new JsonDocumentOptions { MaxDepth = 32 });
             var root = doc.RootElement;
             if (root.ValueKind != JsonValueKind.Object)
             {
@@ -230,44 +318,36 @@ public static partial class McpToolError
             }
 
             JsonElement source;
-            string? code = null;
             if (root.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object)
             {
                 source = error;
-                code = StringMember(error, "code");
             }
             else if (root.TryGetProperty("status", out var status) && status.ValueKind == JsonValueKind.Number)
             {
                 source = root;
-                code = StringMember(root, "code");
             }
             else
             {
                 return Fallback();
             }
 
+            var code = StringMember(source, "code");
             if (code is null || !CodePattern().IsMatch(code) || !McpErrorCodes.IsCatalogueCode(code))
             {
                 return Fallback();
             }
 
-            return Serialize(new McpToolErrorBody(code, McpErrorCodes.FixedMessage(code))
-            {
-                Hint = StringMember(source, "hint"),
-                Line = IntMember(source, "line"),
-                Column = IntMember(source, "column"),
-                Limit = StringMember(source, "limit"),
-                EstimatedCost = IntMember(source, "estimatedCost"),
-                MaxAllowedCost = IntMember(source, "maxAllowedCost"),
-                RetryAfterSeconds = IntMember(source, "retryAfterSeconds")
-            });
+            var detail = AllowsDetail(code) && StringMember(source, "detail") is { } d && IsServerText(d) ? d : null;
+            var hint = AllowsHint(code) && StringMember(source, "hint") is { } h && IsServerText(h) ? h : null;
+            var limit = StringMember(source, "limit") is { } l && LimitKinds.Contains(l) ? l : null;
+            JsonElement? graphQl = AllowsGraphQl(code) && source.TryGetProperty("graphQL", out var gql) && gql.ValueKind == JsonValueKind.Object ? gql : null;
+            return Write(code, McpErrorCodes.FixedMessage(code), detail, hint, IntMember(source, "line"), IntMember(source, "column"), limit,
+                IntMember(source, "estimatedCost"), IntMember(source, "maxAllowedCost"), IntMember(source, "retryAfterSeconds"), graphQl);
         }
         catch (JsonException)
         {
             return Fallback();
         }
-
-        static string Fallback() => Serialize(McpErrorCodes.ExecutionFailed, McpErrorCodes.FixedMessage(McpErrorCodes.ExecutionFailed));
     }
 
     private static string? StringMember(JsonElement element, string name) =>

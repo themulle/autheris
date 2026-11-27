@@ -246,8 +246,7 @@ public sealed class McpDatasetToolWiringTests
 
         var json = await executor.ExecuteOperationAsync(Tool("query_graphql"), args, Session());
 
-        json.ShouldContain("INVALID_PARAMS");
-        _ = expected;
+        json.ShouldContain(expected == "parse" ? "GRAPHQL_PARSE_FAILED" : "INVALID_PARAMS");
         await provider.DidNotReceiveWithAnyArgs().GetExecutorAsync(default, default);
     }
 
@@ -450,7 +449,7 @@ public sealed class McpDatasetToolWiringTests
 
         var json = await Executor(catalog).ExecuteOperationAsync(Tool("sample_rows"), """{"dataset":"sales.public.orders"}""", Session());
 
-        json.ShouldContain("FORBIDDEN");
+        json.ShouldContain("DATASET_NOT_FOUND");
     }
 
     private sealed class AnyTableMetadataRepo(bool isActive = true) : ITableMetadataRepository
@@ -487,5 +486,15 @@ public sealed class McpDatasetToolWiringTests
 
         public Task<IReadOnlyList<TableIdentifier>?> ResolveDocumentTablesAsync(string documentText, CancellationToken ct = default)
             => Task.FromResult(tables);
+    }
+
+    [Fact]
+    public void QueryTools_DescribeTheirErrorCodes()
+    {
+        string Describe(string name) => McpDatasetTools.Definitions().Concat(McpSemanticTools.Definitions()).Single(t => t.Name == name).Description;
+
+        Describe("query_sql").ShouldContain("SQL_SYNTAX_ERROR");
+        Describe("query_dataset").ShouldContain("DATASET_NOT_FOUND");
+        Describe("query_metrics").ShouldContain("METRIC_NOT_FOUND");
     }
 }

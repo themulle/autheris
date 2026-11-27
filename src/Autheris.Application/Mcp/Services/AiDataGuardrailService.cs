@@ -194,27 +194,14 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         }
 
         var promptEvaluation = _promptGuardrail.EvaluatePrompt(request.ToolName, request.ArgumentsJson);
-        if (!promptEvaluation.IsAllowed)
+
+        // A tool whose caller-specific denial answers TOOL_NOT_AVAILABLE (a curated tool) is blocked by the input guardrail only after
+        // its target gates, so an injection text cannot tell a tool the caller may not use from a name that does not exist.
+        var deferPromptBlock = !promptEvaluation.IsAllowed && !McpDocTools.IsDocTool(tool.Name) && !McpAdminTools.IsAdminTool(tool.Name)
+            && McpErrorCodes.TargetDeniedCode(tool.Name) == McpErrorCodes.ToolNotAvailable;
+        if (!promptEvaluation.IsAllowed && !deferPromptBlock)
         {
-            activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
-            McpDiagnostics.RecordGuardrailVerdict("deny", request.ToolName, false, false);
-            _logger.LogWarning("Semantic prompt injection or jailbreak detected for tool '{ToolName}': {Reason}", request.ToolName, promptEvaluation.Reason);
-            await RecordAuditEventAsync(request.ToolName, sessionContext, "DENY", $"Execution blocked by prompt injection guardrail ({promptEvaluation.AttackType}): {promptEvaluation.Reason}", false, false, 0, cancellationToken).ConfigureAwait(false);
-
-            if (_eventBus != null)
-            {
-                await _eventBus.PublishAsync(new SecurityAlertEvent(
-                    EventId: Guid.NewGuid().ToString("N"),
-                    AlertType: promptEvaluation.AttackType ?? "PROMPT_INJECTION",
-                    Severity: "HIGH",
-                    Details: promptEvaluation.Reason ?? "Prompt injection detected",
-                    SourceIp: sessionContext.ClientIp,
-                    UserSid: sessionContext.UserSid,
-                    Timestamp: DateTimeOffset.UtcNow,
-                    TenantId: sessionContext.TenantId), cancellationToken).ConfigureAwait(false);
-            }
-
-            return McpToolError.Fail(McpErrorCodes.RequestBlocked);
+            return await DenyByPromptGuardAsync(activity, request, sessionContext, promptEvaluation, cancellationToken).ConfigureAwait(false);
         }
 
         if (McpAdminTools.IsAdminTool(tool.Name))
@@ -467,6 +454,11 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             }
         }
 
+        if (deferPromptBlock)
+        {
+            return await DenyByPromptGuardAsync(activity, request, sessionContext, promptEvaluation, cancellationToken).ConfigureAwait(false);
+        }
+
         string rawDataJson;
         bool? policyOutcome = null;
         var argsJson = request.ArgumentsJson ?? "{}";
@@ -630,6 +622,31 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         return new McpToolCallResult(IsSuccess: !budgetFailed, ContentJson: scrubbedJson, ErrorMessage: budgetFailed ? scrubbedJson : null, EstimatedTokens: estimatedTokens, IsMasked: wasMasked || (policyOutcome ?? (_queryExecutor != null && McpResultMasking.IsGovernedDataTool(tool))), TruncatedDueToBudget: truncated);
     }
 
+    /// <summary>The audited block of a request refused by the input guardrail; the caller sees the fixed code only.</summary>
+    private async ValueTask<McpToolCallResult> DenyByPromptGuardAsync(
+        Activity? activity, McpToolCallRequest request, McpSessionContext sessionContext, PromptGuardrailEvaluation promptEvaluation, CancellationToken cancellationToken)
+    {
+        activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
+        McpDiagnostics.RecordGuardrailVerdict("deny", request.ToolName, false, false);
+        _logger.LogWarning("Semantic prompt injection or jailbreak detected for tool '{ToolName}': {Reason}", request.ToolName, promptEvaluation.Reason);
+        await RecordAuditEventAsync(request.ToolName, sessionContext, "DENY", $"Execution blocked by prompt injection guardrail ({promptEvaluation.AttackType}): {promptEvaluation.Reason}", false, false, 0, cancellationToken).ConfigureAwait(false);
+
+        if (_eventBus != null)
+        {
+            await _eventBus.PublishAsync(new SecurityAlertEvent(
+                EventId: Guid.NewGuid().ToString("N"),
+                AlertType: promptEvaluation.AttackType ?? "PROMPT_INJECTION",
+                Severity: "HIGH",
+                Details: promptEvaluation.Reason ?? "Prompt injection detected",
+                SourceIp: sessionContext.ClientIp,
+                UserSid: sessionContext.UserSid,
+                Timestamp: DateTimeOffset.UtcNow,
+                TenantId: sessionContext.TenantId), cancellationToken).ConfigureAwait(false);
+        }
+
+        return McpToolError.Fail(McpErrorCodes.RequestBlocked);
+    }
+
     /// <summary>Audit and metric label of a resource read (the audit row names the URI where a tool call names the tool).</summary>
     internal static string ResourceAuditName(string resourceUri) => "resources/read " + resourceUri;
 
@@ -676,7 +693,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         ArgumentNullException.ThrowIfNull(sessionContext);
 
         var name = ResourceAuditName(resourceUri);
-        var notFound = new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Resource '{resourceUri}' not found.");
+        var notFound = new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: "Resource not found.");
 
         using var activity = McpDiagnostics.ActivitySource.StartActivity($"gen_ai.resource {resourceUri}", ActivityKind.Internal);
         activity?.SetTag(McpDiagnostics.GenAiSystemKey, "autheris_mcp");

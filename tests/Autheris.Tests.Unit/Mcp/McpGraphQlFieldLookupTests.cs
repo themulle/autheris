@@ -224,7 +224,7 @@ public sealed class McpGraphQlFieldLookupTests
 
         using var doc = JsonDocument.Parse(wrongCase);
         doc.RootElement.TryGetProperty("isError", out _).ShouldBeFalse();
-        doc.RootElement.GetProperty("error").GetProperty("code").GetString().ShouldBe("NOT_FOUND");
+        doc.RootElement.GetProperty("error").GetProperty("code").GetString().ShouldBe("DATASET_NOT_FOUND");
     }
 
     [Theory]
@@ -247,7 +247,7 @@ public sealed class McpGraphQlFieldLookupTests
         invisibleJson.ShouldBe(unknownJson);
         using var doc = JsonDocument.Parse(invisibleJson);
         doc.RootElement.TryGetProperty("isError", out _).ShouldBeFalse();
-        doc.RootElement.GetProperty("error").GetProperty("code").GetString().ShouldBe("NOT_FOUND");
+        doc.RootElement.GetProperty("error").GetProperty("code").GetString().ShouldBe("DATASET_NOT_FOUND");
     }
 
     [Theory]

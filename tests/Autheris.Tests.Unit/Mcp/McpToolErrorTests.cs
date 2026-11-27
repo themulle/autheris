@@ -21,8 +21,10 @@ public sealed class McpToolErrorTests
     {
         var json = McpToolError.Serialize("INVALID_PARAMS", "Argument 'metric' is required.");
 
-        Members(ErrorOf(json)).ShouldBe(["code", "message"]);
+        Members(ErrorOf(json)).ShouldBe(["code", "message", "detail"]);
         ErrorOf(json).GetProperty("code").GetString().ShouldBe("INVALID_PARAMS");
+        McpErrorEnvelopeAssert.Message(json).ShouldBe(McpErrorCodes.FixedMessage(McpErrorCodes.InvalidParams));
+        McpErrorEnvelopeAssert.Detail(json).ShouldBe("Argument 'metric' is required.");
         AiDataGuardrailService.TryGetExecutorError(json, out var code).ShouldBeTrue();
         code.ShouldBe("INVALID_PARAMS");
     }
@@ -42,13 +44,13 @@ public sealed class McpToolErrorTests
     [Fact]
     public void Serialize_Body_WritesOptionalFieldsInFixedOrder_OmitsNulls()
     {
-        using var graphQl = JsonDocument.Parse("""{"errors":[{"message":"m"}]}""");
+        var kind = Enum.GetNames<TrinoSqlEngine.Ast.Capabilities.SqlLimitKind>()[0];
         var json = McpToolError.Serialize(new McpToolErrorBody("SQL_LIMIT_EXCEEDED", "m")
         {
-            GraphQL = graphQl.RootElement, RetryAfterSeconds = 4, MaxAllowedCost = 9, EstimatedCost = 10, Limit = "Rows", Column = 3, Line = 2, Hint = "h"
+            RetryAfterSeconds = 4, MaxAllowedCost = 9, EstimatedCost = 10, Limit = kind, Column = 3, Line = 2, Hint = "h"
         });
 
-        Members(ErrorOf(json)).ShouldBe(["code", "message", "hint", "line", "column", "limit", "estimatedCost", "maxAllowedCost", "retryAfterSeconds", "graphQL"]);
+        Members(ErrorOf(json)).ShouldBe(["code", "message", "hint", "line", "column", "limit", "estimatedCost", "maxAllowedCost", "retryAfterSeconds"]);
         Members(ErrorOf(McpToolError.Serialize(new McpToolErrorBody("EXECUTION_FAILED", "m")))).ShouldBe(["code", "message"]);
     }
 
@@ -65,9 +67,10 @@ public sealed class McpToolErrorTests
     [Fact]
     public void Message_Is_Sanitized_And_Capped()
     {
-        var message = McpErrorEnvelopeAssert.Message(McpToolError.Serialize("NOT_FOUND", "a\r\nb" + new string('z', 5000)));
-        message.ShouldNotContain("\n");
-        message.Length.ShouldBeLessThanOrEqualTo(McpToolError.MaxMessageLength);
+        var detail = McpErrorEnvelopeAssert.Detail(McpToolError.Serialize("INVALID_PARAMS", "a\r\nb" + new string('z', 5000)))!;
+        detail.ShouldNotContain("\n");
+        detail.Length.ShouldBeLessThanOrEqualTo(McpToolError.MaxMessageLength);
+        McpErrorEnvelopeAssert.Message(McpToolError.Serialize("NOT_FOUND", "producer text")).ShouldBe(McpErrorCodes.FixedMessage("NOT_FOUND"));
     }
 
     [Fact]
@@ -77,8 +80,9 @@ public sealed class McpToolErrorTests
         var custom = McpToolError.Fail(McpErrorCodes.InvalidParams, "bad\r\n" + new string('x', 1000));
         custom.IsSuccess.ShouldBeFalse();
         custom.ErrorMessage.ShouldBe(custom.ContentJson);
-        McpErrorEnvelopeAssert.Message(custom.ContentJson).Length.ShouldBeLessThanOrEqualTo(McpToolError.MaxMessageLength);
-        McpErrorEnvelopeAssert.Message(custom.ContentJson).ShouldNotContain("\n");
+        McpErrorEnvelopeAssert.Detail(custom.ContentJson)!.Length.ShouldBeLessThanOrEqualTo(McpToolError.MaxMessageLength);
+        McpErrorEnvelopeAssert.Detail(custom.ContentJson)!.ShouldNotContain("\n");
+        McpErrorEnvelopeAssert.Detail(McpToolError.Fail(McpErrorCodes.DatasetNotFound, "caller text").ContentJson).ShouldBeNull();
     }
 
     [Fact]
@@ -211,23 +215,67 @@ public sealed class McpToolErrorTests
     public void Normalize_HintOnlyForCatalogueCodes_AndBounded()
     {
         var longHint = new string('h', 2000);
-        var known = McpToolError.Normalize("{\"error\":{\"code\":\"TOKEN_BUDGET_EXCEEDED\",\"message\":\"m\",\"hint\":\"" + longHint + "\"}}");
+        var foreign = McpToolError.Normalize("{\"error\":{\"code\":\"TOKEN_BUDGET_EXCEEDED\",\"message\":\"m\",\"hint\":\"" + longHint + "\"}}");
         var unknown = McpToolError.Normalize("{\"error\":{\"code\":\"NOT_IN_CATALOGUE\",\"message\":\"m\",\"hint\":\"" + longHint + "\"}}");
 
-        ErrorOf(known).GetProperty("hint").GetString()!.Length.ShouldBeLessThanOrEqualTo(McpToolError.MaxHintLength);
+        // A hint the server did not write is dropped, whatever the code.
+        ErrorOf(foreign).TryGetProperty("hint", out _).ShouldBeFalse();
         ErrorOf(unknown).TryGetProperty("hint", out _).ShouldBeFalse();
         var own = McpToolError.Serialize(new McpToolErrorBody("TOKEN_BUDGET_EXCEEDED", "m") { Hint = longHint });
         ErrorOf(own).GetProperty("hint").GetString()!.Length.ShouldBeLessThanOrEqualTo(McpToolError.MaxHintLength);
+        McpToolError.Normalize(own).ShouldBe(own);
+        // A server hint on a code that carries none is dropped as well.
+        ErrorOf(McpToolError.Serialize(new McpToolErrorBody("DATASET_NOT_FOUND", "m") { Hint = "server hint" })).TryGetProperty("hint", out _).ShouldBeFalse();
     }
 
     [Fact]
-    public void FailAdmin_OnlyAllowlistedTextsPass_OtherTextIsReplacedByTheFixedMessage()
+    public void Normalize_Detail_OnlyForServerTexts_AndOnlyForInvalidParamsOrQuery()
     {
-        McpToolError.FailAdmin("Invalid or already consumed TOTP verification code.").ErrorMessage!.ShouldContain("TOTP verification code");
+        var own = McpToolError.Serialize("INVALID_PARAMS", "Argument 'x' is required.");
+
+        McpToolError.Normalize(own).ShouldBe(own);
+        var forged = McpToolError.Normalize("{\"error\":{\"code\":\"INVALID_PARAMS\",\"message\":\"m\",\"detail\":\"table secret.salary missing\"}}");
+        McpErrorEnvelopeAssert.Detail(forged).ShouldBeNull();
+        var wrongCode = McpToolError.Normalize("{\"error\":{\"code\":\"DATASET_NOT_FOUND\",\"message\":\"m\",\"detail\":\"Argument 'x' is required.\"}}");
+        McpErrorEnvelopeAssert.Detail(wrongCode).ShouldBeNull();
+    }
+
+    [Fact]
+    public void GraphQlErrorPayload_ContainsOnlyFilteredMessagePathAndCode()
+    {
+        using var result = JsonDocument.Parse("""
+            {"data":{"orders":[{"ssn":"123-45-6789"}]},"extensions":{"cost":5},
+             "errors":[{"message":"The query is invalid or references fields that are not available.","path":["orders",0,"ssn"],
+                        "locations":[{"line":1,"column":2}],"extensions":{"code":"INVALID_QUERY","stack":"at Foo.Bar","password":"p"}}]}
+            """);
+
+        var json = McpToolError.Serialize(new McpToolErrorBody("EXECUTION_FAILED", "m") { GraphQL = result.RootElement.Clone() });
+
+        var graphQl = ErrorOf(json).GetProperty("graphQL");
+        Members(graphQl).ShouldBe(["errors"]);
+        var error = graphQl.GetProperty("errors")[0];
+        Members(error).ShouldBe(["message", "path", "extensions"]);
+        Members(error.GetProperty("extensions")).ShouldBe(["code"]);
+        error.GetProperty("extensions").GetProperty("code").GetString().ShouldBe("INVALID_QUERY");
+        json.ShouldNotContain("123-45-6789");
+        json.ShouldNotContain("locations");
+        json.ShouldNotContain("stack");
+        json.ShouldNotContain("password");
+        json.ShouldNotContain("\"data\"");
+        McpToolError.Normalize(json).ShouldBe(json);
+
+        // Only the codes of a failed execution carry a GraphQL payload.
+        ErrorOf(McpToolError.Serialize(new McpToolErrorBody("DATASET_NOT_FOUND", "m") { GraphQL = result.RootElement.Clone() })).TryGetProperty("graphQL", out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    public void FailAdmin_AlwaysUsesTheFixedMessage_NeverTheAdminText()
+    {
         var leaked = McpToolError.FailAdmin("Plan 'plan_secret' has a datasource password=hunter2.");
 
         McpErrorEnvelopeAssert.Code(leaked).ShouldBe("ADMIN_OPERATION_REJECTED");
         McpErrorEnvelopeAssert.Message(leaked.ContentJson).ShouldBe(McpErrorCodes.FixedMessage(McpErrorCodes.AdminOperationRejected));
         leaked.ContentJson.ShouldNotContain("hunter2");
+        leaked.ContentJson.ShouldNotContain("plan_secret");
     }
 }

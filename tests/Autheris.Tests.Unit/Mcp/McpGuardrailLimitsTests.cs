@@ -61,7 +61,7 @@ public sealed class McpGuardrailLimitsTests
         var json = await McpDocTools.ExecuteSearchDocsAsync(search, args, Session());
 
         using var doc = JsonDocument.Parse(json);
-        doc.RootElement.GetProperty("error").GetProperty("message").GetString()!.ShouldContain("limit");
+        doc.RootElement.GetProperty("error").GetProperty("detail").GetString()!.ShouldContain("limit");
         search.ReceivedCalls().ShouldBeEmpty();
     }
 

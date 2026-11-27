@@ -72,11 +72,11 @@ public sealed class CrossChannelIntegrationFixesTests
 
         // Assert: a structured tool error with a fixed text; the exception message (policy details) is never echoed.
         resultJson.ShouldNotContain("isError");
-        resultJson.ShouldContain("FORBIDDEN");
-        resultJson.ShouldContain("Access denied by data governance policy.");
+        resultJson.ShouldContain("DATASET_NOT_FOUND");
+        resultJson.ShouldContain("Dataset not found or not visible.");
         resultJson.ShouldNotContain("Subject lacks permission");
         AiDataGuardrailService.TryGetExecutorError(resultJson, out var code).ShouldBeTrue();
-        code.ShouldBe("FORBIDDEN");
+        code.ShouldBe("DATASET_NOT_FOUND");
     }
 
     // =========================================================================

@@ -125,7 +125,7 @@ public sealed class McpAccessStatusFilterTests
         using var doc = JsonDocument.Parse(json);
         doc.RootElement.TryGetProperty("isError", out _).ShouldBeFalse();
         doc.RootElement.GetProperty("error").GetProperty("code").GetString().ShouldBe("INVALID_PARAMS");
-        doc.RootElement.GetProperty("error").GetProperty("message").GetString()!.ShouldContain("REQUEST_ACCESS");
+        doc.RootElement.GetProperty("error").GetProperty("detail").GetString()!.ShouldContain("REQUEST_ACCESS");
         json.ShouldNotContain("READABLE");
         await search.DidNotReceiveWithAnyArgs().SearchCatalogDetailedAsync(default!, default!, default);
     }

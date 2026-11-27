@@ -33,6 +33,7 @@ internal static class McpQueryGuideBuilder
         AppendAggregationAndTimeBuckets(sb, gql);
         AppendMaskedColumnsAndRestrictedScopes(sb, switches);
         AppendMetrics(sb);
+        AppendToolErrors(sb);
 
         if (gql.Subscriptions.Enabled)
         {
@@ -212,6 +213,20 @@ internal static class McpQueryGuideBuilder
         sb.AppendLine("## Semantic Metrics (`queryMetrics`)");
         sb.AppendLine();
         sb.AppendLine("- The `queryMetrics` root field is enabled for querying governed semantic metrics.");
+        sb.AppendLine();
+    }
+
+    private static void AppendToolErrors(StringBuilder sb)
+    {
+        sb.AppendLine("## Tool Errors");
+        sb.AppendLine();
+        sb.AppendLine("A failed tool call is a result with `isError: true`. Its text and `structuredContent` are `{\"error\":{\"code\",\"message\"}}` with the optional members `detail`, `hint`, `line`, `column`, `limit`, `estimatedCost`, `maxAllowedCost` and `retryAfterSeconds`. The `message` is the fixed text of the `code`; act on the code:");
+        sb.AppendLine();
+        foreach (var (code, action) in McpErrorCodes.AgentActionable)
+        {
+            sb.Append("- `").Append(code).Append("`: ").AppendLine(action);
+        }
+
         sb.AppendLine();
     }
 

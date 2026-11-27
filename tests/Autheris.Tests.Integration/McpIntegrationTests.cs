@@ -81,7 +81,6 @@ public class McpIntegrationTests : IClassFixture<McpIntegrationTests.HostFixture
         var (_, customers) = await McpTestClient.CallAsync(client, "query_customers", new { });
         (customers.Contains("_provenance", StringComparison.Ordinal) ||
          customers.Contains("EXECUTION_FAILED", StringComparison.Ordinal) ||
-         customers.Contains("FORBIDDEN", StringComparison.Ordinal) ||
          customers.Contains("TOOL_NOT_AVAILABLE", StringComparison.Ordinal)).ShouldBeTrue(customers);
         customers.ShouldNotContain("Erika Mustermann");
     }

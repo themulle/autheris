@@ -2,6 +2,7 @@ namespace Autheris.Application.Mcp.Services;
 
 using System.Collections.Frozen;
 using System.Reflection;
+using Autheris.Application.Analytics;
 using TrinoSqlEngine.Ast.Emit;
 
 /// <summary>
@@ -67,6 +68,30 @@ public static class McpErrorCodes
     /// <summary>A procedure refused the call for a business reason.</summary>
     public const string ProcedureRejected = "PROCEDURE_REJECTED";
 
+    /// <summary>The GraphQL document of a query_graphql call cannot be parsed (the code /graphql answers).</summary>
+    public const string GraphQlParseFailed = "GRAPHQL_PARSE_FAILED";
+
+    /// <summary>The arguments of a tool are not valid JSON.</summary>
+    public const string InvalidJson = "INVALID_JSON";
+
+    /// <summary>A documentation store operation failed.</summary>
+    public const string DocError = "DOC_ERROR";
+
+    /// <summary>A deposited document is empty.</summary>
+    public const string DocEmpty = "DOC_EMPTY";
+
+    /// <summary>A deposited document exceeds the size limit.</summary>
+    public const string DocTooLarge = "DOC_TOO_LARGE";
+
+    /// <summary>The caller is not authenticated.</summary>
+    public const string Unauthorized = "UNAUTHORIZED";
+
+    /// <summary>An aggregation column is not available to the caller (the exception class keeps this code).</summary>
+    public const string AggregationColumnUnavailable = "AGGREGATION_COLUMN_UNAVAILABLE";
+
+    /// <summary>An aggregation exceeds the row cap (the exception class keeps this code).</summary>
+    public const string AggregationRowCapExceeded = "AGGREGATION_ROW_CAP_EXCEEDED";
+
     /// <summary>Quota or rate limit reached.</summary>
     public const string RateLimitExceeded = "RATE_LIMIT_EXCEEDED";
 
@@ -97,13 +122,22 @@ public static class McpErrorCodes
         MetricNotFound => "One or more requested metrics were not found in the semantic catalog.",
         InvalidMetricQuery => "The semantic metric query parameters are invalid.",
         ResourceNotFound => "Procedure endpoint not found.",
-        ProcedureRejected => "The procedure rejected the call.",
+        ProcedureRejected => "The procedure rejected the request.",
         InvalidParams => "The request arguments are invalid.",
         NotAvailable => "The requested service is not available.",
         NotFound => "The requested item was not found.",
         Forbidden => "Access denied by data governance policy.",
         RateLimitExceeded => "Query cost quota exhausted.",
+        GraphQlParseFailed => "The GraphQL document could not be parsed.",
+        InvalidJson => "Arguments must be valid JSON.",
+        DocError => "The documentation operation failed.",
+        DocEmpty => "The document is empty.",
+        DocTooLarge => "The document exceeds the size limit.",
+        Unauthorized => "Authentication is required.",
         ExecutionFailed => DefaultMessage,
+        AggregationColumnUnavailable => "An aggregation column is not available.",
+        AggregationRowCapExceeded => "The aggregation exceeds the row cap.",
+        not null when IsAggregationCode(code) => "The aggregation request was rejected.",
         not null when IsGovernedSqlCode(code) => GovernedSqlErrorCodes.FixedMessage(code),
         _ => DefaultMessage
     };
@@ -121,14 +155,17 @@ public static class McpErrorCodes
         return McpDatasetTools.IsDatasetTool(toolName) || string.Equals(toolName, SimulateQueryTool, StringComparison.OrdinalIgnoreCase) ? DatasetNotFound : ToolNotAvailable;
     }
 
+    /// <summary>A sentence for a tool description that names the error codes the caller can act on.</summary>
+    public static string ErrorsSentence(params string[] codes) => " Errors (see the query guide): " + string.Join(", ", codes) + ".";
+
     /// <summary>The codes an agent can act on, each with a one-line action.</summary>
     public static IReadOnlyList<(string Code, string Action)> AgentActionable { get; } =
     [
-        (ToolNotAvailable, "Do not retry; use one of the tools returned by tools/list."),
-        (DatasetNotFound, "Check the dataset id against list_datasets; do not retry with the same id."),
+        (ToolNotAvailable, "Do not retry; use one of the tools the server lists."),
+        (DatasetNotFound, "Check the dataset id against the dataset catalog; do not retry with the same id."),
         (InvalidParams, "Fix the arguments and call again."),
         (GovernedSqlErrorCodes.SyntaxError, "Correct the statement at the given line and column."),
-        (GovernedSqlErrorCodes.PolicyDenied, "Use only tables returned by list_datasets."),
+        (GovernedSqlErrorCodes.PolicyDenied, "Use only tables the dataset catalog lists for you."),
         (InvalidQuery, "Fix the filter, select or orderBy and call again."),
         (RequiredFilterColumnMissing, "Add a filter on the required column."),
         (MetricNotFound, "Use a metric name returned by the semantic catalog."),
@@ -140,12 +177,29 @@ public static class McpErrorCodes
         (InternalError, "Retry later; report the problem to an operator if it persists.")
     ];
 
-    private static bool IsGovernedSqlCode(string code) => Catalogue.Contains(code);
+    private static readonly FrozenSet<string> GovernedSqlCodes = typeof(GovernedSqlErrorCodes)
+        .GetFields(BindingFlags.Public | BindingFlags.Static)
+        .Where(f => f.IsLiteral && f.FieldType == typeof(string) && f.GetRawConstantValue() is string)
+        .Select(f => (string)f.GetRawConstantValue()!)
+        .ToFrozenSet(StringComparer.Ordinal);
+
+    private static readonly FrozenSet<string> AggregationCodes = typeof(AggregationErrorCodes)
+        .GetFields(BindingFlags.Public | BindingFlags.Static)
+        .Where(f => f.IsLiteral && f.FieldType == typeof(string) && f.GetRawConstantValue() is string)
+        .Select(f => (string)f.GetRawConstantValue()!)
+        .ToFrozenSet(StringComparer.Ordinal);
+
+    private static bool IsAggregationCode(string code) => AggregationCodes.Contains(code) && !GovernedSqlCodes.Contains(code);
+
+    private static bool IsGovernedSqlCode(string code) => GovernedSqlCodes.Contains(code);
+
+    /// <summary>Whether a code is one of the governed SQL codes (their mapper hints are server-generated).</summary>
+    internal static bool IsGovernedSql(string? code) => code is not null && GovernedSqlCodes.Contains(code);
 
     private static FrozenSet<string> BuildCatalogue()
     {
         var set = new HashSet<string>(StringComparer.Ordinal);
-        foreach (var type in new[] { typeof(McpErrorCodes), typeof(GovernedSqlErrorCodes) })
+        foreach (var type in new[] { typeof(McpErrorCodes), typeof(GovernedSqlErrorCodes), typeof(AggregationErrorCodes) })
         {
             foreach (var field in type.GetFields(BindingFlags.Public | BindingFlags.Static))
             {

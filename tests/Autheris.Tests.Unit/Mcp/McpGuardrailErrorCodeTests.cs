@@ -79,6 +79,36 @@ public sealed class McpGuardrailErrorCodeTests
     }
 
     [Fact]
+    public async Task UnknownVsHiddenCuratedToolWithInjectionText_AreByteIdentical()
+    {
+        // A curated tool the caller may not use is answered like a name that does not exist, with or without injection text.
+        var rig = McpErrorTestRig.Create(decide: McpErrorTestRig.Deny, tables: [McpErrorTestRig.Active("orders")]);
+        var args = $$"""{"note":"{{Injection}}"}""";
+
+        var unknown = await Bytes(rig.Call("never_registered_tool", args));
+        var denied = await Bytes(rig.Call("query_customers", args));
+        var deniedPlain = await Bytes(rig.Call("query_customers", "{}"));
+
+        McpErrorEnvelopeAssert.Code(unknown).ShouldBe("TOOL_NOT_AVAILABLE");
+        denied.ShouldBe(unknown);
+        deniedPlain.ShouldBe(unknown);
+        rig.Executor.Calls.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task InjectionText_OnAnAllowedCuratedTool_IsStillBlockedBeforeExecution()
+    {
+        var rig = McpErrorTestRig.Create(tables: [McpErrorTestRig.Active("orders")]);
+
+        var result = await rig.Call("query_customers", $$"""{"note":"{{Injection}}"}""");
+
+        result.IsSuccess.ShouldBeFalse();
+        rig.Executor.Calls.ShouldBeEmpty();
+        var code = McpErrorEnvelopeAssert.Code(result);
+        new[] { "REQUEST_BLOCKED", "TOOL_NOT_AVAILABLE" }.ShouldContain(code);
+    }
+
+    [Fact]
     public async Task PromptInjection_ReturnsRequestBlocked_WithoutAttackType()
     {
         var rig = DatasetRig();
