@@ -160,7 +160,7 @@ public sealed class GatewayExecutionRequestValidationTests
     public async Task ConcurrentReads_AboveLimitPerUserAndTable_AreThrottled()
     {
         var gate = new TableReadConcurrencyGate();
-        var options = new GatewayOptions { DataSources = new SqlDataSourceOptions { MaxConcurrentReadsPerUserAndTable = 1 } };
+        var options = new GatewayOptions { DataSources = new SqlDataSourceOptions { MaxConcurrentReadsPerUserAndTable = 1, TableReadWaitTimeoutMs = 0 } };
         var blocking = new CapturingExecutor { Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) };
         var first = CreateService(blocking, options, gate);
         var second = CreateService(new CapturingExecutor(), options, gate);
@@ -180,6 +180,55 @@ public sealed class GatewayExecutionRequestValidationTests
 
         // The slot is released after completion.
         await Should.NotThrowAsync(() => second.ExecuteTableQueryAsync(CreateUser(), Table, 100, 0, null, null, null));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ConcurrentReads_FiveRequestsLimitFour_AllSucceedWithinWait()
+    {
+        var gate = new TableReadConcurrencyGate();
+        var options = new GatewayOptions { DataSources = new SqlDataSourceOptions { MaxConcurrentReadsPerUserAndTable = 4, TableReadWaitTimeoutMs = 5000 } };
+        var blockers = Enumerable.Range(0, 4)
+            .Select(_ => new CapturingExecutor { Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) })
+            .ToArray();
+        var running = blockers.Select(b => CreateService(b, options, gate).ExecuteTableQueryAsync(CreateUser(), Table, 100, 0, null, null, null)).ToArray();
+        foreach (var b in blockers)
+        {
+            await b.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+        }
+
+        var fifth = CreateService(new CapturingExecutor(), options, gate).ExecuteTableQueryAsync(CreateUser(), Table, 100, 0, null, null, null);
+        fifth.IsCompleted.ShouldBeFalse();
+        blockers[0].Gate!.SetResult();
+
+        await fifth.WaitAsync(TimeSpan.FromSeconds(5));
+        foreach (var b in blockers.Skip(1))
+        {
+            b.Gate!.SetResult();
+        }
+
+        await Task.WhenAll(running);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ConcurrentReads_SustainedOverload_ThrottledWithRetryAfter()
+    {
+        var time = new Microsoft.Extensions.Time.Testing.FakeTimeProvider();
+        var gate = new TableReadConcurrencyGate(time);
+        var options = new GatewayOptions { DataSources = new SqlDataSourceOptions { MaxConcurrentReadsPerUserAndTable = 1, TableReadWaitTimeoutMs = 1000 } };
+        var blocking = new CapturingExecutor { Gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously) };
+        var running = CreateService(blocking, options, gate).ExecuteTableQueryAsync(CreateUser(), Table, 100, 0, null, null, null);
+        await blocking.Entered.Task.WaitAsync(TimeSpan.FromSeconds(5));
+
+        var waiting = CreateService(new CapturingExecutor(), options, gate).ExecuteTableQueryAsync(CreateUser(), Table, 100, 0, null, null, null);
+        waiting.IsCompleted.ShouldBeFalse();
+        time.Advance(TimeSpan.FromSeconds(1));
+
+        var ex = await Should.ThrowAsync<GatewayThrottledException>(() => waiting);
+        ex.RetryAfterSeconds.ShouldBeGreaterThan(0);
+        blocking.Gate!.SetResult();
+        await running;
     }
 
     [Fact]

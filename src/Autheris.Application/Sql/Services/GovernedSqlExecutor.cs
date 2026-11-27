@@ -617,7 +617,7 @@ public sealed partial class GovernedSqlExecutor
             await RecordDmlAuditAsync(tenantId, user, dsName, dmlContext, AuditEventTypes.WebSqlDmlIntent, "ALLOW", compiled, affectedRows: null, reason: null, synthetic: false, clientValues: clientValues).ConfigureAwait(false);
         }
 
-        var leases = AcquireReadLeases(user, tenantId, rewrite);
+        var leases = await AcquireReadLeasesAsync(user, tenantId, rewrite, ct).ConfigureAwait(false);
 
         try
         {

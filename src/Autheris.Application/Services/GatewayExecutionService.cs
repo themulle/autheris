@@ -306,7 +306,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
 
         // O10: bound concurrent reads of the same table by the same user (each slow read holds a database worker).
         var maxConcurrentReads = _options?.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
-        using var readLease = AcquireReadLease(tenantId, userSid, table, maxConcurrentReads, metadata.Table.SourceName);
+        using var readLease = await AcquireReadLeaseAsync(tenantId, userSid, table, maxConcurrentReads, metadata.Table.SourceName, ct).ConfigureAwait(false);
 
         IReadOnlyList<IReadOnlyDictionary<string, object?>> rawRows;
         bool rlsPushdownAlreadyOccurred = false;
@@ -661,7 +661,7 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         return resolved;
     }
 
-    private IDisposable? AcquireReadLease(TenantId tenantId, Sid userSid, TableIdentifier table, int maxConcurrentReads, string? dataSource = null)
+    private async ValueTask<IDisposable?> AcquireReadLeaseAsync(TenantId tenantId, Sid userSid, TableIdentifier table, int maxConcurrentReads, string? dataSource, CancellationToken ct)
     {
         if (_concurrencyGate == null || maxConcurrentReads <= 0)
         {
@@ -669,7 +669,8 @@ public sealed partial class GatewayExecutionService : IGatewayExecutionService, 
         }
 
         var key = $"{tenantId.Value}|{userSid.Value}|{table.ToQualifiedName()}".ToLowerInvariant();
-        var lease = _concurrencyGate.TryEnter(key, maxConcurrentReads);
+        var wait = TimeSpan.FromMilliseconds(_options?.DataSources?.TableReadWaitTimeoutMs ?? 0);
+        var lease = await _concurrencyGate.EnterAsync(key, maxConcurrentReads, wait, ct).ConfigureAwait(false);
         if (lease == null)
         {
             _usageRecorder?.Record(
