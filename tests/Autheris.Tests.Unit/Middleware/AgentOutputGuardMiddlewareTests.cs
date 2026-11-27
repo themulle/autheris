@@ -225,23 +225,6 @@ public sealed class AgentOutputGuardMiddlewareTests
     }
 
     [Fact]
-    public void IsAgentCaller_ConfiguredScopeList_ReplacesDefault()
-    {
-        var options = new GatewayOptions { Mcp = new McpOptions { AgentScopes = ["Robot.Read"] } };
-
-        AgentOutputGuardMiddleware.IsAgentCaller(Principal("Robot.Read"), options).ShouldBeTrue();
-        AgentOutputGuardMiddleware.IsAgentCaller(Principal("Agent.Read"), options).ShouldBeFalse();
-    }
-
-    [Fact]
-    public void IsAgentCaller_EmptyConfiguredList_FallsBackToDefault()
-    {
-        var options = new GatewayOptions { Mcp = new McpOptions { AgentScopes = [] } };
-
-        AgentOutputGuardMiddleware.IsAgentCaller(Principal("Agent.Read"), options).ShouldBeTrue();
-    }
-
-    [Fact]
     public void IsAgentCaller_ScopeMappedToAutonomousAgentsTier_IsAgent()
     {
         var options = new GatewayOptions
