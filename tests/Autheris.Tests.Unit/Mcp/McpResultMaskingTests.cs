@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Linq;
 using System.Text.Json;
+using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Procedures.Interfaces;
@@ -48,11 +49,14 @@ public sealed class McpResultMaskingTests
     public async Task Report_FromTaskRun_AfterAwait_IsVisibleToScope()
     {
         using var scope = McpResultMasking.Begin();
-        await Task.Run(async () =>
+        var gate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var child = Task.Run(async () =>
         {
-            await Task.Delay(5);
+            await gate.Task;
             McpResultMasking.Report(true);
         });
+        gate.SetResult();
+        await child;
         scope.Outcome.ShouldBe(true);
     }
 
@@ -99,12 +103,22 @@ public sealed class McpResultMaskingTests
     [Fact]
     public async Task ConcurrentScopes_AreIsolated()
     {
-        var results = await Task.WhenAll(Enumerable.Range(0, 64).Select(async i =>
+        const int Count = 64;
+        var reported = 0;
+        var allReported = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var results = await Task.WhenAll(Enumerable.Range(0, Count).Select(async i =>
         {
             using var scope = McpResultMasking.Begin();
             await Task.Yield();
             McpResultMasking.Report(i % 2 == 0);
-            await Task.Delay(5);
+
+            // Every scope has reported before any scope reads its outcome, so all 64 holders are live at the same time.
+            if (Interlocked.Increment(ref reported) == Count)
+            {
+                allReported.SetResult();
+            }
+
+            await allReported.Task;
             await Task.Yield();
             return (Expected: i % 2 == 0, Actual: scope.Outcome);
         }));
