@@ -34,24 +34,28 @@ internal sealed class ClientListHarness
         TargetSqlDialect dialect,
         ClientListShapes? shapes = null,
         StatementPermissions statements = StatementPermissions.ReadOnly,
-        string tenant = "acme") => new()
+        string tenant = "acme",
+        ClientNullShapes? nulls = null,
+        TrinoSqlEngine.Governance.ITableCatalog? catalog = null) => new()
     {
         TargetDialect = dialect,
         AllowExperimentalDialect = true,
         TokenGuards = SqlTokenSecurityOptions.Strict,
         Statements = statements,
         ClientLists = shapes ?? ClientListShapes.Empty,
+        ClientNulls = nulls ?? ClientNullShapes.Empty,
         Policy = new GovernancePolicy
         {
             RowFilters = RowFilters,
             Masks = Masks,
-            Catalog = DmlCompileTests.CatalogFor(dialect),
+            Catalog = catalog ?? DmlCompileTests.CatalogFor(dialect),
             Tenant = new TenantBinding("__autheris_tenant", tenant, SqlParameterType.String)
         }
     };
 
-    public CompiledSql Compile(TargetSqlDialect dialect, string sql, ClientListShapes? shapes = null, StatementPermissions statements = StatementPermissions.ReadOnly) =>
-        Engine.Compile(sql.AsMemory(), Request(dialect, shapes, statements).WithTestWritePermit(sql), CancellationToken.None);
+    public CompiledSql Compile(TargetSqlDialect dialect, string sql, ClientListShapes? shapes = null, StatementPermissions statements = StatementPermissions.ReadOnly,
+        ClientNullShapes? nulls = null, TrinoSqlEngine.Governance.ITableCatalog? catalog = null) =>
+        Engine.Compile(sql.AsMemory(), Request(dialect, shapes, statements, nulls: nulls, catalog: catalog).WithTestWritePermit(sql), CancellationToken.None);
 
     public static List<BoundParameter> ListSlots(CompiledSql compiled, string name) =>
         compiled.Parameters.Where(p => p.Origin == ParameterOrigin.ClientNamed && p.ListIndex is not null

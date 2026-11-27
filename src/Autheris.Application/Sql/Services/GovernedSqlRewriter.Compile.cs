@@ -102,6 +102,7 @@ public sealed partial class GovernedSqlRewriter
         long enforcedMaxRows,
         IReadOnlySet<string> allowedFunctions,
         ClientListShapes? clientLists,
+        ClientNullShapes? clientNulls,
         IReadOnlySet<string>? gatewayLikePatternParameters,
         bool bindPageOffset = false,
         long? pageOffset = null,
@@ -119,6 +120,7 @@ public sealed partial class GovernedSqlRewriter
         }
 
         return CompileRequestFactory.Create(policy, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists,
+            clientNulls: clientNulls,
             timeZoneConversionAvailable: _timeZoneState?.IsAvailable(targetSqlDialect) ?? false,
             translateDateFunctions: true, gatewayLikePatternParameters: gatewayLikePatternParameters,
             bindPageOffset: bindPageOffset, pageOffset: pageOffset, maxOffset: maxOffset);

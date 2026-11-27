@@ -38,6 +38,15 @@ public sealed class McpQueryGuideTests
     }
 
     [Fact]
+    public void Build_QuerySqlEnabled_DocumentsOptionalFilterAndTimestampForms()
+    {
+        var guide = McpQueryGuideBuilder.Build(SwitchesFrom(), new GraphQLOptions());
+
+        guide.ShouldContain("(@p IS NULL OR col = @p)");
+        guide.ShouldContain("converted to UTC");
+    }
+
+    [Fact]
     public void Build_DefaultEnabledFeatures_CoversFullGraphQlDialectAndEnabledTools()
     {
         var switches = SwitchesFrom();

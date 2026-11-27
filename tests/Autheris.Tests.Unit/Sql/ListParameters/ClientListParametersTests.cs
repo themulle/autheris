@@ -71,4 +71,56 @@ public class ClientListParametersTests
         ClientListParameters.RejectForFederation(new Dictionary<string, object?>());
         ClientListParameters.RejectForFederation(new Dictionary<string, object?> { ["a"] = "x", ["b"] = 1L, ["c"] = Json("5"), ["d"] = null });
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void NullShapes_contains_only_referenced_null_scalars()
+    {
+        var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["Region"] = null, ["db"] = DBNull.Value, ["js"] = Json("null"), ["value"] = "x", ["unused"] = null
+        };
+        var nulls = ClientListParameters.NullShapes(values, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "region", "db", "js", "value", "absent" });
+
+        nulls.Contains("region").ShouldBeTrue();
+        nulls.Contains("db").ShouldBeTrue();
+        nulls.Contains("js").ShouldBeTrue();
+        nulls.Contains("value").ShouldBeFalse();
+        nulls.Contains("unused").ShouldBeFalse();
+        nulls.Contains("absent").ShouldBeFalse();
+        nulls.Canonical.ShouldBe("db;js;region;");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void NullShapes_ignores_lists_and_unreferenced()
+    {
+        var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["ids"] = List(1, 2), ["other"] = null };
+
+        ClientListParameters.NullShapes(values, new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "ids" }).Canonical.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Absent_param_is_not_a_null_shape()
+    {
+        var present = ClientListParameters.NullShapes(new Dictionary<string, object?> { ["a"] = null }, new HashSet<string> { "a", "b" });
+        var absent = ClientListParameters.NullShapes(new Dictionary<string, object?>(), new HashSet<string> { "a", "b" });
+
+        present.Contains("b").ShouldBeFalse();
+        absent.Canonical.ShouldBeEmpty();
+        absent.ShouldBeSameAs(ClientNullShapes.Empty);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Invalid_null_shape_name_is_refused()
+    {
+        var name = "bad name;x";
+        var ex = Should.Throw<ClientListException>(() =>
+            ClientListParameters.NullShapes(new Dictionary<string, object?> { [name] = null }, new HashSet<string> { name }));
+
+        ex.Code.ShouldBe(GovernedSqlErrorCodes.ListParamPosition);
+        ex.Message.ShouldNotContain(name);
+    }
 }
