@@ -381,7 +381,7 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task Errors_UnknownVsDeniedMetric_AreByteIdentical()
+    public async Task Errors_TwoUnknownMetrics_AreByteIdentical()
     {
         await SeedCatalogAndConsentAsync();
         var client = Client();

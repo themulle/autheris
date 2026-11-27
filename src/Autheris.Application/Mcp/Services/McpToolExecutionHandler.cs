@@ -254,7 +254,7 @@ public sealed partial class McpToolExecutionHandler : IMcpToolExecutionHandler
                 McpResultMasking.Report(result.Data.Count > 0 && result.Columns.Any(c => c.Masked));
                 return JsonSerializer.Serialize(result, JsonOpts);
             }
-            catch (Exception ex) when (McpToolError.TryMapQueryDatasetFailure(ex, out var mappedError))
+            catch (Exception ex) when (!(ex is OperationCanceledException && ct.IsCancellationRequested) && McpToolError.TryMapQueryDatasetFailure(ex, out var mappedError))
             {
                 // Fixed codes and texts only: the exception message can carry policy details (denied reasons, hidden table or column names).
                 return mappedError;

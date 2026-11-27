@@ -77,11 +77,9 @@ public class McpIntegrationTests : IClassFixture<McpIntegrationTests.HostFixture
         simulationError.ShouldBeTrue(simulation);
         simulation.ShouldContain("DATASET_NOT_FOUND");
 
-        // query_customers returns a _provenance footnote, or a structured error without a data source (SEC M-17), never mock data.
+        // query_customers is a curated tool the caller has no grant for: the one answer of every denied tool, never mock data.
         var (_, customers) = await McpTestClient.CallAsync(client, "query_customers", new { });
-        (customers.Contains("_provenance", StringComparison.Ordinal) ||
-         customers.Contains("EXECUTION_FAILED", StringComparison.Ordinal) ||
-         customers.Contains("TOOL_NOT_AVAILABLE", StringComparison.Ordinal)).ShouldBeTrue(customers);
+        customers.ShouldContain("TOOL_NOT_AVAILABLE");
         customers.ShouldNotContain("Erika Mustermann");
     }
 
