@@ -57,6 +57,9 @@ internal sealed class OptionalFilterReducer : SqlAstRewriter
         return acc;
     }
 
+    // The pagination clause holds only the limit and the (bound) page offset slot; no optional filter lives there.
+    public override SqlNode VisitPaginationClause(PaginationClause node) => node;
+
     private Expression Reduce(BinaryExpression original, Expression left, Expression right)
     {
         if (TryIsNullParameter(left, out var leftName))

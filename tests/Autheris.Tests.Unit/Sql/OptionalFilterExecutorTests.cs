@@ -15,18 +15,41 @@ public sealed class OptionalFilterExecutorTests
 {
     private const string Optional = "SELECT id FROM orders WHERE (@region IS NULL OR status = @region)";
 
+    // An unsupplied @name stays literal text, which the parser refuses (a plain argument error) before any reduction can run; a bind-time
+    // missing parameter is the other accepted refusal. Either way nothing executes.
+    private static async Task AssertRefusedAsync(Func<Task> action)
+    {
+        var ex = await Should.ThrowAsync<Exception>(action);
+        (ex is ArgumentException or MissingClientParameterException).ShouldBeTrue(ex.GetType().Name);
+    }
+
     [Fact]
     [Trait("Category", "Security")]
     public async Task Absent_param_is_not_a_null_shape()
     {
         await using var f = await CreateAsync();
 
-        // an absent parameter stays a missing parameter: it is never read as NULL, so it never drops the predicate
-        await Should.ThrowAsync<MissingClientParameterException>(() => f.IdsAsync(Optional, new Dictionary<string, object?>()));
+        // an absent parameter is never read as NULL, so it never drops the predicate: the statement is refused
+        await AssertRefusedAsync(() => f.IdsAsync(Optional, new Dictionary<string, object?>()));
 
         // an explicit NULL is the null shape
         var ids = await f.IdsAsync(Optional, new Dictionary<string, object?> { ["region"] = null });
         ids.ShouldBeEmpty();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Absent_param_in_optional_filter_without_param_in_other_branch_is_missing()
+    {
+        await using var f = await CreateAsync();
+
+        // the other branch holds no parameter, so a reduction would drop every reference to the absent one: it must still be refused
+        await AssertRefusedAsync(() =>
+            f.IdsAsync("SELECT id FROM orders WHERE (@region IS NULL OR id = 1)", new Dictionary<string, object?>()));
+        await AssertRefusedAsync(() =>
+            f.IdsAsync("SELECT id FROM orders WHERE (@region IS NULL OR id = 1) AND id > @min", new Dictionary<string, object?> { ["min"] = 0 }));
+        await AssertRefusedAsync(() =>
+            f.IdsAsync("SELECT id FROM orders WHERE (id = 1 OR @region IS NULL) AND id > @min", new Dictionary<string, object?> { ["min"] = null }));
     }
 
     [Fact]

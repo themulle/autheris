@@ -214,8 +214,8 @@ internal sealed class GovernedResultCachePipeline : IDisposable
         string format = "json",
         bool participate = true,
         Func<DbDataReader, CancellationToken, Task>? writer = null,
-        CancellationToken ct = default,
-        IReadOnlyDictionary<string, object?>? parameters = null)
+        IReadOnlyDictionary<string, object?>? parameters = null,
+        CancellationToken ct = default)
     {
         var run = new CachePipelineRun();
         var request = new GovernedSqlQueryRequest(
