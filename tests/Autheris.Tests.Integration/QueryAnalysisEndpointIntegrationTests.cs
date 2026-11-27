@@ -11,8 +11,8 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
-using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
+using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
@@ -28,7 +28,7 @@ using Xunit;
 /// </summary>
 public sealed class QueryAnalysisEndpointIntegrationTests : IClassFixture<GovernedWebSqlIntegrationTests.HostFixture>
 {
-    private const string Table = "ledger_masked";
+    private const string Table = "payroll";
     private readonly GovernedWebSqlIntegrationTests.HostFixture _factory;
 
     public QueryAnalysisEndpointIntegrationTests(GovernedWebSqlIntegrationTests.HostFixture factory) => _factory = factory;
@@ -37,40 +37,46 @@ public sealed class QueryAnalysisEndpointIntegrationTests : IClassFixture<Govern
     {
         var client = factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-WEBSQL");
-        client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant_alpha");
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant_123");
         return client;
     }
 
+    private static readonly SemaphoreSlim RegistrationGate = new(1, 1);
+    private static bool _registered;
+
+    // The physical table "payroll" is seeded by the host; its ssn column is masked by a catalog masking rule (the consent bypass of the host
+    // does not matter for a catalog rule). Registered once per class.
     private async Task RegisterAsync()
     {
-        using var scope = _factory.Services.CreateScope();
-        var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
-        var id = new TableIdentifier("default", "public", Table);
-        await repo.UpsertTableMetadataAsync(new TableMetadata
+        await RegistrationGate.WaitAsync();
+        try
         {
-            Table = new Table { Id = Guid.NewGuid(), DisplayName = Table, TableName = Table, SchemaName = "public", SourceName = "default", SourceType = "PostgreSql" },
-            Identifier = id,
-            Columns = new[] { "id", "note", "ssn", "tenant_id" }.Select(c => new TableColumn { ColumnName = c, DataType = "varchar" }).ToList()
-        });
-        var meta = await repo.GetTableMetadataAsync(id);
-        await repo.CreateConsentAsync(new Consent
+            if (_registered)
+            {
+                return;
+            }
+
+            using var scope = _factory.Services.CreateScope();
+            var tableRepo = scope.ServiceProvider.GetRequiredService<ITableMetadataRepository>();
+            await tableRepo.UpsertTableMetadataAsync(new TableMetadata
+            {
+                Table = new Table { Id = Guid.NewGuid(), DisplayName = Table, TableName = Table, SchemaName = "public", SourceName = "default", SourceType = "PostgreSql" },
+                Identifier = new TableIdentifier("default", "public", Table),
+                Columns =
+                [
+                    new TableColumn { ColumnName = "id", DataType = "varchar" },
+                    new TableColumn { ColumnName = "ssn", DataType = "varchar" },
+                    new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }
+                ],
+                ColumnClassifications = TableMetadataClassificationTestExtensions.PiiFor("ssn"),
+                ColumnMaskingRules = new Dictionary<string, MaskingRule> { ["ssn"] = new MaskingRule { RuleType = "REDACT", Replacement = "XXX" } }
+            });
+            _registered = true;
+        }
+        finally
         {
-            TableId = meta!.Table.Id,
-            TableIdentifier = id,
-            TenantId = new TenantId("tenant_alpha"),
-            Effect = ConsentEffect.Allow,
-            GranteeType = GranteeType.User,
-            GranteeSid = new Sid("S-1-5-21-WEBSQL"),
-            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
-            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
-            ColumnRules =
-            [
-                new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear },
-                new ConsentColumnRule { ColumnName = "note", AccessLevel = ColumnAccessLevel.Clear },
-                new ConsentColumnRule { ColumnName = "tenant_id", AccessLevel = ColumnAccessLevel.Clear },
-                new ConsentColumnRule { ColumnName = "ssn", AccessLevel = ColumnAccessLevel.Mask }
-            ]
-        });
+            RegistrationGate.Release();
+        }
     }
 
     private static Task<HttpResponseMessage> AnalyzeAsync(HttpClient client, string sql) =>
@@ -86,10 +92,10 @@ public sealed class QueryAnalysisEndpointIntegrationTests : IClassFixture<Govern
 
     [Trait("Category", "Security")]
     [Theory]
-    [InlineData("SELECT pg_sleep(1) FROM ledger_masked")]
-    [InlineData("SELECT id FROM ledger_masked TABLESAMPLE BERNOULLI (10)")]
-    [InlineData("SELECT id FROM ledger_masked /* a /* b */ c */")]
-    [InlineData("SELECT id FROM ledger_masked WHERE ssn = 'x'")]
+    [InlineData("SELECT pg_sleep(1) FROM payroll")]
+    [InlineData("SELECT id FROM payroll TABLESAMPLE BERNOULLI (10)")]
+    [InlineData("SELECT id FROM payroll /* a /* b */ c */")]
+    [InlineData("SELECT id FROM payroll WHERE ssn = 'x'")]
     public async Task Analyze_Sql_SameCodeAsExecute_RealPostgres(string sql)
     {
         await RegisterAsync();
@@ -127,7 +133,7 @@ public sealed class QueryAnalysisEndpointIntegrationTests : IClassFixture<Govern
             }));
         var client = Client(counted);
 
-        foreach (var sql in new[] { "SELECT id FROM ledger_masked", "SELECT pg_sleep(1) FROM ledger_masked", "SELECT id FROM ledger_masked WHERE ssn = 'x'" })
+        foreach (var sql in new[] { "SELECT id FROM payroll", "SELECT pg_sleep(1) FROM payroll", "SELECT id FROM payroll WHERE ssn = 'x'" })
         {
             (await AnalyzeAsync(client, sql)).StatusCode.ShouldBe(HttpStatusCode.OK);
         }
