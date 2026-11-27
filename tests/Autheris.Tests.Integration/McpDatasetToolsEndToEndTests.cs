@@ -79,6 +79,10 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
 
             // query_sql runs through the governed WebSQL pipeline, which answers SQL_ENDPOINT_DISABLED unless it is enabled.
             builder.UseSetting("Gateway:WebSql:Enabled", "true");
+
+            // The described list, aggregate and connection queries are priced per requested row; the Standard tier default budget is too small for them.
+            builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxTokensCapacity", "10000");
+            builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxCostPerQuery", "10000");
         }
 
         protected override void Dispose(bool disposing)
@@ -98,6 +102,7 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
             Table = new Table { Id = tableId, DisplayName = "mcp_cranes", TableName = "mcp_cranes", SchemaName = "main", SourceType = "PostgreSql", SourceName = "default", Description = "Crane fleet" },
             Identifier = Cranes,
             PrimaryKeyColumns = ["id"],
+            ReplaceKeyDefinition = true,
             Columns = new List<TableColumn>
             {
                 new() { ColumnName = "id", DataType = "integer", Description = "Key" },
@@ -475,6 +480,7 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
                 Table = new Table { Id = Guid.NewGuid(), DisplayName = id.TableName, TableName = id.TableName, SchemaName = "main", SourceType = "PostgreSql", SourceName = "default", Description = id.TableName },
                 Identifier = id,
                 PrimaryKeyColumns = primaryKey,
+                ReplaceKeyDefinition = true,
                 Columns = columns.Select(c => new TableColumn { ColumnName = c.Name, DataType = c.Type, Description = c.Name }).ToList()
             });
         }
@@ -573,7 +579,9 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
 
         var field = connection.GetProperty("field").GetString()!;
         var (_, text) = await CallRawAsync(client, "query_graphql", new { query = $"{{ {field}(first: 2) {{ edges {{ node {{ label }} }} }} }}" });
-        text.ShouldContain("KEYSET_PAGINATION_UNAVAILABLE");
+        // The runtime refuses the connection of a masked key the same way describe_dataset reports it: no rows are returned.
+        text.ShouldContain("FILTER_ON_MASKED_COLUMN", Case.Insensitive, text);
+        text.ShouldNotContain("\"edges\"", Case.Insensitive);
     }
 
     [Fact]
