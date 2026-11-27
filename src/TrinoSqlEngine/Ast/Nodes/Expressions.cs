@@ -94,6 +94,12 @@ public sealed record ParenthesizedExpression(Expression Expression) : Expression
 
 public sealed record PageOffsetParameterExpression : Expression;
 
+/// <summary>
+/// A keyset continuation value bound as a slot (<see cref="Emit.ParameterOrigin.KeysetSeek"/>). <paramref name="Index"/> is the position in the
+/// server-issued key tuple; the value itself never lives in the tree or in SQL text.
+/// </summary>
+public sealed record KeysetSeekParameterExpression(int Index, SqlParameterType Type, string? ColumnType) : Expression;
+
 public sealed record BinaryExpression(
     Expression Left,
     BinaryOperator Operator,

@@ -38,6 +38,9 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
 
                 builder.Append(context.BindPolicy(policyParameter, escapeLikePattern: context.EmittingLikePattern && !policyParameter.IsLikePattern));
                 break;
+            case KeysetSeekParameterExpression keysetSeek:
+                builder.Append(context.BindKeysetValue(keysetSeek.Index, keysetSeek.Type, keysetSeek.ColumnType));
+                break;
             case ColumnReference col:
                 FormatQualifiedName(ref builder, col.Name, context);
                 break;

@@ -70,6 +70,7 @@ public static class RowPolicyErrorGuard
                     or PolicyParameterExpression
                     or NamedBindMarkerExpression
                     or PageOffsetParameterExpression
+                    or KeysetSeekParameterExpression
                     or CurrentDateTimeExpression
                     or TypedLiteralExpression
                     or IntervalLiteralExpression
@@ -248,6 +249,7 @@ public static class RowPolicyErrorGuard
                     or PolicyParameterExpression
                     or NamedBindMarkerExpression
                     or PageOffsetParameterExpression
+                    or KeysetSeekParameterExpression
                     or CurrentDateTimeExpression
                     or TypedLiteralExpression
                     or IntervalLiteralExpression
@@ -332,7 +334,8 @@ public static class RowPolicyErrorGuard
 
     private static bool IsAllowedStrict(Expression expression) => expression switch
     {
-        ColumnReference or ParameterReference or NamedBindMarkerExpression or PolicyParameterExpression or PageOffsetParameterExpression
+        ColumnReference or ParameterReference or NamedBindMarkerExpression or PolicyParameterExpression or PageOffsetParameterExpression or KeysetSeekParameterExpression
+                    or KeysetSeekParameterExpression
             or ParenthesizedExpression or CurrentDateTimeExpression or TypedLiteralExpression or IntervalLiteralExpression
             or GroupingOperationExpression or PositionExpression or ExtractExpression or RowValueExpression or ArrayConstructorExpression
             or IsDistinctFromExpression or BetweenExpression or CaseExpression or InListExpression or InSubqueryExpression
@@ -551,6 +554,7 @@ public static class RowPolicyErrorGuard
                     or NamedBindMarkerExpression
                     or PolicyParameterExpression
                     or PageOffsetParameterExpression
+                    or KeysetSeekParameterExpression
                     or CurrentDateTimeExpression
                     or TypedLiteralExpression
                     or IntervalLiteralExpression:

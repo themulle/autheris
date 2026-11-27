@@ -7,7 +7,7 @@ using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Governance;
 
 /// <summary>Origin of a bound value (plan 4.2). It decides how the binder and the plan cache treat the value.</summary>
-public enum ParameterOrigin { ClientNamed, ClientPositional, QueryLiteral, Tenant, Policy, Mask, PageOffset }
+public enum ParameterOrigin { ClientNamed, ClientPositional, QueryLiteral, Tenant, Policy, Mask, PageOffset, KeysetSeek }
 
 /// <summary>The value family a client bind must conform to because the statement compares it with a typed column under a row policy (checked by the binder).</summary>
 public enum BindFamily { Numeric, Temporal, Boolean, Text }

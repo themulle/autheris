@@ -846,7 +846,7 @@ public sealed partial class SecurityCoverageVerifier
                     throw new SecurityCoverageException("An injected security predicate contains a raw literal value.");
                 case MaskExpression:
                     break;
-                case ColumnReference or ParameterReference or PolicyParameterExpression or PageOffsetParameterExpression
+                case ColumnReference or ParameterReference or PolicyParameterExpression or PageOffsetParameterExpression or KeysetSeekParameterExpression
                     or TypedLiteralExpression or IntervalLiteralExpression or CurrentDateTimeExpression:
                     break;
                 case ParenthesizedExpression p:

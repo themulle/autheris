@@ -501,4 +501,49 @@ public class CompiledSqlBinderTests
         await Assert.ThrowsAsync<InvalidOperationException>(() => new CheckedDmlExecutor(_binder).ExecuteAsync(connection, compiled, new Dictionary<string, object?>(), IsolationLevel.Unspecified));
         Assert.Equal(0, await CountAsync(connection));
     }
+
+    private sealed class InferredNpgsqlParameter : TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecParameter
+    {
+        public BinderMutationTests.FakeNpgsqlDbType NpgsqlDbType { get; set; } = BinderMutationTests.FakeNpgsqlDbType.Text;
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetSeekSlot_NullValue_FailsClosed()
+    {
+        var compiled = Compiled("SELECT 1", Param(0, null, SqlParameterType.Int64, ParameterOrigin.KeysetSeek, "keyset:0"));
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
+
+        Assert.Throws<System.Security.SecurityException>(() => _binder.Bind(cmd, compiled, new Dictionary<string, object?>()));
+        Assert.Empty(cmd.Parameters);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetSeekSlot_PostgreSql_ServerInferred()
+    {
+        var compiled = Compiled("SELECT 1",
+            new BoundParameter("$1", "$1", 0, "6f9619ff-8b86-d011-b42d-00c04fc964ff", SqlParameterType.String, ParameterOrigin.KeysetSeek, "keyset:0", "uuid"))
+            with { Dialect = TargetSqlDialect.PostgreSql };
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand(() => new InferredNpgsqlParameter());
+
+        new PostgreSqlCompiledSqlBinder().Bind(cmd, compiled, new Dictionary<string, object?>());
+
+        var parameter = Assert.IsType<InferredNpgsqlParameter>(cmd.Parameters[0]);
+        Assert.Equal(BinderMutationTests.FakeNpgsqlDbType.Unknown, parameter.NpgsqlDbType);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetSeekSlot_SqlServerVarcharColumn_BindsAnsi()
+    {
+        var compiled = Compiled("SELECT 1",
+            new BoundParameter("@p0", "@p0", 0, "abc", SqlParameterType.String, ParameterOrigin.KeysetSeek, "keyset:0", "varchar(20)"));
+        using var cmd = new TrinoSqlEngine.Tests.Compiler.BinderMutationTests.RecCommand();
+
+        _binder.Bind(cmd, compiled, new Dictionary<string, object?>());
+
+        Assert.Equal(DbType.AnsiString, cmd.Parameters[0].DbType);
+        Assert.Equal("abc", cmd.Parameters[0].Value);
+    }
 }

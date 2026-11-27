@@ -321,4 +321,33 @@ public class CompiledSqlTemplateRuleTests
         Assert.NotEqual(baseline, Material(Request() with { AllowRecursiveCte = true }));
         Assert.NotEqual(baseline, Material(Request() with { MaxRecursionDepth = 7 }));
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Rebind_KeysetValues_MissingOrMistyped_FailsClosed()
+    {
+        var template = Template("k", "SELECT 1",
+            Slot(0, ParameterOrigin.KeysetSeek, "keyset:0", type: SqlParameterType.Int32),
+            Slot(1, ParameterOrigin.KeysetSeek, "keyset:1", type: SqlParameterType.String));
+
+        var ok = template.Rebind(Values(), keysetValues: ImmutableArray.Create<object>(5, "x"));
+        Assert.Equal(5, ok.Parameters[0].Value);
+        Assert.Equal("x", ok.Parameters[1].Value);
+
+        Assert.Throws<SecurityException>(() => template.Rebind(Values()));
+        Assert.Throws<SecurityException>(() => template.Rebind(Values(), keysetValues: ImmutableArray.Create<object>(5)));
+        Assert.Throws<SecurityException>(() => template.Rebind(Values(), keysetValues: ImmutableArray.Create<object>(5L, "x")));
+        Assert.Throws<SecurityException>(() => template.Rebind(Values(), keysetValues: ImmutableArray.Create<object>(5, 6)));
+        Assert.Throws<SecurityException>(() => template.Rebind(Values(), keysetValues: default(ImmutableArray<object>)));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Rebind_KeysetValuesWithoutSlots_FailsClosed()
+    {
+        var withoutSlot = Template("k", "SELECT 1");
+
+        Assert.Throws<SecurityException>(() => withoutSlot.Rebind(Values(), keysetValues: ImmutableArray.Create<object>(1)));
+        Assert.Empty(withoutSlot.Rebind(Values()).Parameters);
+    }
 }

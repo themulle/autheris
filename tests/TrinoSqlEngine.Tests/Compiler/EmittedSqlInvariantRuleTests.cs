@@ -403,4 +403,35 @@ public class EmittedSqlInvariantRuleTests
         Assert.Equal(second, ranges[0].Start);
         Assert.Equal(first, ranges[1].Start);
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetSeek_WithPageOffset_Rejected()
+    {
+        var seek = P("@p1", ParameterOrigin.KeysetSeek);
+        Check("SELECT [a] FROM [t] WHERE [a] > @p1", parameters: ImmutableArray.Create(seek));
+
+        var offset = P("@p2", ParameterOrigin.PageOffset);
+        Violation("SELECT [a] FROM [t] WHERE [a] > @p1 OFFSET @p2 ROWS", "invalid-keyset-seek", 0, parameters: ImmutableArray.Create(seek, offset));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetSeek_OnDml_Rejected()
+    {
+        var seek = P("@p1", ParameterOrigin.KeysetSeek);
+        foreach (var statementClass in new[] { SqlStatementClass.Insert, SqlStatementClass.Update, SqlStatementClass.Delete, SqlStatementClass.Merge })
+        {
+            Violation("SELECT [a] FROM [t] WHERE [a] > @p1", "invalid-keyset-seek", 0, parameters: ImmutableArray.Create(seek), statementClass: statementClass);
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetSeek_MoreThanEightSlots_Rejected()
+    {
+        var nine = Enumerable.Range(1, 9).Select(i => P($"@p{i}", ParameterOrigin.KeysetSeek)).ToImmutableArray();
+        var sql = "SELECT [a] FROM [t] WHERE [a] > " + string.Join(" AND [a] > ", nine.Select(p => p.Marker));
+        Violation(sql, "invalid-keyset-seek", 0, parameters: nine);
+    }
 }

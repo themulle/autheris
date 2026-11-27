@@ -59,6 +59,8 @@ internal static class ConformanceAstFixtures
             new Dictionary<string, PolicyValue> { ["m"] = new("const", SqlParameterType.String) }),
         // Server-only: AstSecurityVisitor injects the page-offset slot when CompileRequest.BindPageOffset is set (WP-SIMPL-51 D-51n).
         ["page-offset"] = () => Case(Select(Col("a")) with { Pagination = new PaginationClause(Offset: new PageOffsetParameterExpression(), Limit: new LiteralExpression(10, LiteralType.Integer)) }),
+        // Server-only: the keyset seek predicate is injected by the compiler; its value is bound per request and never appears in SQL text.
+        ["keyset-seek"] = () => Case(Select(Col("a"), new BinaryExpression(Col("id"), BinaryOperator.GreaterThan, new KeysetSeekParameterExpression(0, SqlParameterType.Int32, "int")))),
         ["mask-geojitter"] = () => Case(Select(new MaskExpression(MaskKind.GeoJitter, Col("lat"), new MaskArguments(Decimals: 2), "double"))),
     };
 }

@@ -80,8 +80,30 @@ public sealed record CompiledSqlTemplate(
         return slots.MoveToImmutable();
     }
 
+    private const string KeysetSourcePrefix = "keyset:";
+
+    private static object KeysetValueFor(SqlSlot slot, ImmutableArray<object>? keysetValues)
+    {
+        if (keysetValues is not { IsDefault: false } values
+            || slot.SourceName is null
+            || !slot.SourceName.StartsWith(KeysetSourcePrefix, StringComparison.Ordinal)
+            || !int.TryParse(slot.SourceName.AsSpan(KeysetSourcePrefix.Length), System.Globalization.NumberStyles.None, System.Globalization.CultureInfo.InvariantCulture, out int index)
+            || index >= values.Length)
+        {
+            throw new System.Security.SecurityException("A KeysetSeek slot requires a server-issued key value.");
+        }
+
+        object? value = values[index];
+        if (value is null || DbCommandCompiledSqlBinder.InferType(value) != slot.Type)
+        {
+            throw new System.Security.SecurityException("A keyset value does not match the type of its slot.");
+        }
+
+        return value;
+    }
+
     /// <summary>Rebinds the slots with the values of the current request.</summary>
-    public CompiledSql Rebind(IReadOnlyDictionary<string, PolicyValue> policyValues, long? pageOffset = null, long maxOffset = 1_000_000)
+    public CompiledSql Rebind(IReadOnlyDictionary<string, PolicyValue> policyValues, long? pageOffset = null, long maxOffset = 1_000_000, ImmutableArray<object>? keysetValues = null)
     {
         if (pageOffset.HasValue && (pageOffset.Value < 0 || pageOffset.Value > maxOffset))
         {
@@ -89,6 +111,7 @@ public sealed record CompiledSqlTemplate(
         }
 
         bool hasOffsetSlot = false;
+        bool hasKeysetSlot = false;
         var parameters = ImmutableArray.CreateBuilder<BoundParameter>(Slots.Length);
         foreach (var slot in Slots)
         {
@@ -102,6 +125,11 @@ public sealed record CompiledSqlTemplate(
                     throw new System.Security.SecurityException("A PageOffset slot requires a server-issued offset value.");
                 }
                 value = pageOffset.Value;
+            }
+            else if (slot.Origin is ParameterOrigin.KeysetSeek)
+            {
+                hasKeysetSlot = true;
+                value = KeysetValueFor(slot, keysetValues);
             }
             else if (slot.Origin is ParameterOrigin.Tenant or ParameterOrigin.Policy or ParameterOrigin.Mask)
             {
@@ -136,6 +164,11 @@ public sealed record CompiledSqlTemplate(
         if (pageOffset.HasValue && !hasOffsetSlot)
         {
             throw new System.Security.SecurityException("A page offset value was supplied for a template without a PageOffset slot.");
+        }
+
+        if (keysetValues.HasValue && !hasKeysetSlot)
+        {
+            throw new System.Security.SecurityException("Keyset values were supplied for a template without KeysetSeek slots.");
         }
 
         return new CompiledSql(Sql, parameters.ToImmutable(), Dialect, StatementClass, AppliedPredicates, CompilerVersion)
