@@ -251,18 +251,21 @@ public class SelectableSortOrderTests
         _h.Compile(dialect, "SELECT Status AS Region, Id FROM Orders ORDER BY CASE WHEN Region > 'a' THEN Region END, Id");
     }
 
-    [Theory]
-    [MemberData(nameof(AllDialectData))]
+    [Fact]
     [Trait("Category", "Security")]
-    public void OrderBy_AggregateOrderBy_Unchanged(TargetSqlDialect dialect)
+    public void OrderBy_AggregateOrderBy_Unchanged()
     {
-        // string_agg(... ORDER BY ...) inside the root ORDER BY is not re-scoped: a mixed-family key is refused there and in a projection alike
-        var inProjection = Record.Exception(() => _h.Compile(dialect,
-            "SELECT string_agg(Region, ',' ORDER BY CASE WHEN Id > 1 THEN Region ELSE Amount END) FROM Orders"));
-        var inRoot = Record.Exception(() => _h.Compile(dialect,
-            "SELECT Id FROM Orders GROUP BY Id ORDER BY max(string_agg(Region, ',' ORDER BY CASE WHEN Id > 1 THEN Region ELSE Amount END))"));
-        Assert.NotNull(inProjection);
-        Assert.NotNull(inRoot);
+        // array_agg(x ORDER BY ...) is the aggregate form the function allowlist accepts (PostgreSQL); the other dialects refuse the function or the clause
+        const TargetSqlDialect dialect = TargetSqlDialect.PostgreSql;
+        const string keyed = "CASE WHEN Id > 1 THEN Region END";
+
+        // controls: the bare aggregate and a keyed aggregate in a projection compile under the row policy
+        _h.Compile(dialect, "SELECT Id FROM Orders GROUP BY Id ORDER BY array_agg(Region ORDER BY Id)");
+        _h.Compile(dialect, $"SELECT array_agg(Region ORDER BY {keyed}) FROM Orders");
+        // the same key inside the root ORDER BY resolves as before the change (without the body scope), so it stays refused
+        Refused(dialect, $"SELECT Id FROM Orders GROUP BY Id ORDER BY length(string_agg(Region, ',' ORDER BY {keyed}))");
+        // a mixed-family key is refused there as well
+        Refused(dialect, "SELECT Id FROM Orders ORDER BY length(string_agg(Region, ',' ORDER BY CASE WHEN Id > 1 THEN Region ELSE Amount END))");
     }
 
     [Theory]
