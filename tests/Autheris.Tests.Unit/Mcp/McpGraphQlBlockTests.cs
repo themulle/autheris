@@ -74,6 +74,24 @@ public sealed class McpGraphQlBlockTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public void Describe_RequestableNotGranted_ConnectionFollowsAccessLabels()
+    {
+        var requestable = Column("id", null) with { ClearRequestable = ["analyst"] };
+        var masked = Column("id", "mask") with { ClearRequestable = ["analyst"] };
+
+        var notGranted = McpGraphQlBlock.Connection(Mapping(["id"]), [requestable])!;
+        var maskedKey = McpGraphQlBlock.Connection(Mapping(["id"]), [masked])!;
+
+        notGranted.Available.ShouldBeFalse();
+        notGranted.Reason.ShouldBe("no_usable_key");
+        maskedKey.Available.ShouldBeFalse();
+        maskedKey.Reason.ShouldBe("masked_key");
+        Json(notGranted).ShouldNotContain("analyst");
+        Json(maskedKey).ShouldNotContain("keyFields");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public void Connection_CompositeKey_OneHiddenOneMasked_IsNoUsableKey()
     {
         var result = McpGraphQlBlock.Connection(Mapping(["a", "b"]), [Column("a", "mask"), Column("b", null)]);

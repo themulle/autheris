@@ -137,6 +137,26 @@ public sealed class DescribeDatasetDenseSourcePerformanceTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public async Task DescribeDataset_ColumnPagingDoesNotChangeConnectionAvailability_DiscoveryPath()
+    {
+        var harness = DenseHarness.Create(hubRelationCount: 5, visibleChildCount: 5, transitiveNeighborCount: 5, goldenQueries: [], extraHubColumns: 10, withDiscovery: true);
+        var executor = harness.CreateExecutor();
+
+        async Task<string> ConnectionAsync(string arguments)
+        {
+            var json = await executor.ExecuteOperationAsync(DescribeTool(), arguments, Session());
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.GetProperty("graphQl").GetProperty("connection").GetRawText();
+        }
+
+        var full = await ConnectionAsync($$"""{"dataset":"{{DenseHarness.HubIdString}}"}""");
+        (await ConnectionAsync($$"""{"dataset":"{{DenseHarness.HubIdString}}","columnOffset":5,"columnLimit":2}""")).ShouldBe(full);
+        (await ConnectionAsync($$"""{"dataset":"{{DenseHarness.HubIdString}}","columns":["extra_0"]}""")).ShouldBe(full);
+        full.ShouldContain("\"available\":true");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public async Task BriefWithIncludeRelations_IsInvalidParams_SameForHiddenAndMissingDataset()
     {
         var harness = DenseHarness.Create(hubRelationCount: 5, visibleChildCount: 2, transitiveNeighborCount: 1, goldenQueries: [], withDiscovery: true);
@@ -455,7 +475,9 @@ public sealed class DescribeDatasetDenseSourcePerformanceTests
         };
 
         private static GraphQlTableMapping Mapping(TableIdentifier id, string root, IEnumerable<string> cols, IReadOnlyList<GraphQlRelationMapping> relations) =>
-            new(id, root, root, root + "_filter", root + "_order", cols.Select(c => new GraphQlColumnMapping(c, c, "String")).ToList(), relations);
+            new(id, root, root, root + "_filter", root + "_order", cols.Select(c => new GraphQlColumnMapping(c, c, "String")).ToList(), relations,
+                [], new GraphQlRootFieldSignature(root + "_aggregate", root + "_aggregate_result", []),
+                new GraphQlRootFieldSignature(root + "Connection", root + "Connection", [new McpGraphQlArgument("first", "Int")]), ["id"]);
     }
 
     private sealed class SpyVisibilityService(ICatalogVisibilityService inner) : ICatalogVisibilityService
