@@ -392,6 +392,7 @@ public sealed partial class GovernedSqlExecutor
         GovernedRewrite rewrite;
         IReadOnlyDictionary<string, object?> clientValues;
         ClientListShapes shapes;
+        ClientNullShapes nullShapes;
         try
         {
             // Scalars, and lists on the transports that may carry them; an object is a 400. The binder reads a client
@@ -399,7 +400,8 @@ public sealed partial class GovernedSqlExecutor
             var referenced = referencedNames as IReadOnlySet<string> ?? new HashSet<string>(referencedNames, StringComparer.OrdinalIgnoreCase);
             clientValues = BuildClientValues(request, referenced);
             shapes = ClientListParameters.Shapes(clientValues, referenced);
-            rewrite = await _rewriter.RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct, request.RowLimit, probeExtraRow: true, plannedTableRead: request.PlannedTableRead, gatewayLikePatternParameters: GovernedSqlExecutionService.GatewayParameterAliases(request.GatewayParameters), clientLists: shapes, page: request.Page, readOnlyRequired: request.ReadOnlyRequired, transport: request.Transport).ConfigureAwait(false);
+            nullShapes = ClientListParameters.NullShapes(clientValues, referenced);
+            rewrite = await _rewriter.RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct, request.RowLimit, probeExtraRow: true, plannedTableRead: request.PlannedTableRead, gatewayLikePatternParameters: GovernedSqlExecutionService.GatewayParameterAliases(request.GatewayParameters), clientLists: shapes, clientNulls: nullShapes, page: request.Page, readOnlyRequired: request.ReadOnlyRequired, transport: request.Transport).ConfigureAwait(false);
         }
         catch (Exception policyEx) when (IsAuditedRejection(policyEx, ct))
         {
@@ -458,7 +460,7 @@ public sealed partial class GovernedSqlExecutor
             throw;
         }
 
-        var cachePlan = await PlanResultCacheAsync(request, user, tenantId, rewrite, dmlContext, clientValues, sqlForRewrite, requestedDs, shapes, ct).ConfigureAwait(false);
+        var cachePlan = await PlanResultCacheAsync(request, user, tenantId, rewrite, dmlContext, clientValues, sqlForRewrite, requestedDs, shapes, ct, nullShapes).ConfigureAwait(false);
         var result = await ExecuteRewrittenAsync(request, user, tenantId, rewrite, dmlContext, clientValues, rowWriter, ct, cachePlan).ConfigureAwait(false);
         return (result, null, null);
     }

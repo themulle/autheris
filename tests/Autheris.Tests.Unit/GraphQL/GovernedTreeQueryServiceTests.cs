@@ -26,7 +26,7 @@ namespace Autheris.Tests.Unit.GraphQL;
 /// resolution memoization, fail-closed checks, pseudonymization, response limits and audit recording using an in-memory DB stub.
 /// Real multi-table/composite-join SQL execution tests live in <c>GovernedTreeQueryServiceIntegrationTests</c>.
 /// </summary>
-public sealed class GovernedTreeQueryServiceTests
+public sealed partial class GovernedTreeQueryServiceTests
 {
     private static readonly TableIdentifier Authors = new("blog", "main", "authors");
     private static readonly TableIdentifier Articles = new("blog", "main", "articles");

@@ -248,12 +248,21 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
                 throw new SecurityException("A PageOffset slot requires a server-issued bound value.");
             }
 
-            if (bound.RequiredFamily is { } family && bound.Origin == ParameterOrigin.ClientNamed && !ClientBindFamilyCheck.Conforms(family, value)
+            if (bound.RequiredFamily is { } family && bound.Origin == ParameterOrigin.ClientNamed
                 && !CompilerHooks.IsDisabled(SecurityControl.RowPolicyExpressionAllowlist))
             {
                 // The statement compares this client value with a typed column under a row policy; a value that does not convert would raise on
-                // whichever row is evaluated. Fixed message, no value.
-                throw new Ast.Security.RowPolicyExpressionRejectedException();
+                // whichever row is evaluated. Fixed message, no value. A temporal text is bound typed, never as text.
+                if (!ClientBindFamilyCheck.TryConform(family, value, ColumnBindAdapter.TemporalKind(Dialect, bound.ColumnType), out var conformed))
+                {
+                    throw new GovernedSqlException(GovernedSqlErrorCodes.DataError, Dialect);
+                }
+
+                if (!ReferenceEquals(conformed, value))
+                {
+                    value = conformed;
+                    type = InferType(conformed);
+                }
             }
 
             ValidateValue(bound, value);

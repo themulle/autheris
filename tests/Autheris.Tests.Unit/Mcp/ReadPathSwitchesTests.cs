@@ -202,4 +202,34 @@ public sealed class ReadPathSwitchesTests
         list.Clear();
         withList.IsToolEnabled("query_sql").ShouldBeFalse();
     }
+
+    [Theory]
+    [InlineData(false, "", true, true)] // Api off, every query tool on
+    [InlineData(true, "query_sql,query_dataset", true, true)] // GraphQL alone
+    [InlineData(true, "query_graphql,query_dataset", true, true)] // SQL alone
+    [InlineData(true, "query_graphql,query_sql", true, true)] // dataset alone with the REST data endpoint on
+    [InlineData(true, "query_graphql,query_sql", false, false)] // dataset alone without the REST data endpoint
+    [InlineData(true, "query_graphql,query_sql,query_dataset", true, false)] // nothing left
+    [Trait("Category", "Security")]
+    public void SEC_1209_Query_guide_enabled_iff_a_usable_query_tool_remains(bool api, string disabledCsv, bool restData, bool expected)
+    {
+        var disabled = disabledCsv.Length == 0 ? [] : disabledCsv.Split(',');
+        var s = From(new McpToolGroupOptions { Api = api }, disabled, restData);
+
+        s.IsResourceEnabled(McpResourceProvider.QueryGuideDocUri).ShouldBe(expected);
+        s.IsResourceEnabled(McpResourceProvider.QueryGuideDocUri.ToUpperInvariant()).ShouldBe(expected);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void SEC_1209_Query_guide_is_disabled_when_the_Query_group_is_off_and_other_api_docs_still_follow_Api()
+    {
+        var queryOff = From(new McpToolGroupOptions { Query = false });
+
+        queryOff.IsResourceEnabled(McpResourceProvider.QueryGuideDocUri).ShouldBeFalse();
+        queryOff.IsResourceEnabled("autheris://api/docs/endpoints").ShouldBeTrue();
+
+        var apiOff = From(new McpToolGroupOptions { Api = false });
+        apiOff.IsResourceEnabled("autheris://api/docs/endpoints").ShouldBeFalse();
+    }
 }

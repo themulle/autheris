@@ -186,6 +186,9 @@ public sealed partial class AdvisoryRegressionTests
         public Task<JsonDocument> ExecuteAsync(ClaimsPrincipal? principal, TreeQueryNode root, IReadOnlyDictionary<string, string[]>? requestHeaders, string operationId, CancellationToken ct = default)
             => throw new NotSupportedException();
 
+        public Task<long> CountAsync(ClaimsPrincipal? principal, TreeQueryNode root, IReadOnlyDictionary<string, string[]>? requestHeaders, string operationId, CancellationToken ct = default)
+            => throw new NotSupportedException();
+
         public IReadOnlyList<TreeMaskedColumn> GetMaskedColumns(ClaimsPrincipal? principal, TreeQueryNode root, string operationId)
             => [];
 

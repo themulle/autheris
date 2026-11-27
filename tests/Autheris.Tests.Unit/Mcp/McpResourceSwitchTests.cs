@@ -59,7 +59,7 @@ public sealed class McpResourceSwitchTests
         ["autheris://api/openapi.json", McpToolGroup.Api],
         ["autheris://api/docs/endpoints", McpToolGroup.Api],
         ["autheris://api/docs/mcp-tools", McpToolGroup.Api],
-        ["autheris://api/docs/query-guide", McpToolGroup.Api]
+        ["autheris://api/docs/query-guide", McpToolGroup.Query]
     ];
 
     [Theory]
@@ -145,7 +145,9 @@ public sealed class McpResourceSwitchTests
         var uris = ListedUris(Switches(Off(group)));
 
         uris.ShouldNotBeEmpty();
-        uris.ShouldNotContain(u => u.StartsWith(prefix, StringComparison.Ordinal));
+        uris.Where(u => u != McpResourceProvider.QueryGuideDocUri).ShouldNotContain(u => u.StartsWith(prefix, StringComparison.Ordinal));
+        // The query guide follows the query tools, so closing the Api group keeps it.
+        uris.ShouldContain(McpResourceProvider.QueryGuideDocUri);
     }
 
     [Fact]
@@ -247,5 +249,147 @@ public sealed class McpResourceSwitchTests
         var b = await Should.ThrowAsync<McpProtocolException>(() => GatewayMcpServer.ReadGuardedSemanticResourceAsync(sp, "glossary://nothing/here", closed, CancellationToken.None));
         a.ErrorCode.ShouldBe(b.ErrorCode);
         a.Message.Replace("glossary://finance/mrr", "<URI>", StringComparison.Ordinal).ShouldBe(b.Message.Replace("glossary://nothing/here", "<URI>", StringComparison.Ordinal));
+    }
+
+    // ---- Query guide and hint surfaces follow the enabled tools ----------------------------------------------------------------
+
+    private static ReadPathSwitches SwitchesOf(McpToolGroupOptions? tools = null, string[]? disabled = null, bool restData = true) =>
+        ReadPathSwitches.From(new GatewayOptions
+        {
+            Mcp = new McpOptions { Tools = tools ?? new McpToolGroupOptions(), DisabledTools = disabled?.ToList() },
+            RestApi = new RestApiOptions { DataEndpoint = new RestDataEndpointOptions { Enabled = restData } }
+        });
+
+    private static IReadOnlyList<CatalogDatasetSummary> Datasets(int count) =>
+        [.. Enumerable.Range(0, count).Select(i => new CatalogDatasetSummary($"d{i % 3}.public.t{i}", $"d{i % 3}", "public", $"t{i}", "sql", "internal", "x", true))];
+
+    private static async Task<string> SummaryAsync(IReadPathSwitches? switches, int datasets = 51)
+    {
+        var (provider, discovery, _) = Provider(switches);
+        discovery.ListDatasetsAsync(Arg.Any<RequestContext>(), Arg.Any<CancellationToken>()).Returns(Datasets(datasets));
+        return (await provider.ReadAsync("autheris://catalog/summary", Session)).Text;
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task SEC_1209_Guide_read_when_no_query_tool_matches_unknown_uri()
+    {
+        foreach (var switches in new[] { SwitchesOf(Off(McpToolGroup.Query)), SwitchesOf(disabled: ["query_graphql", "query_sql", "query_dataset"]) })
+        {
+            var (provider, discovery, dispatcher) = Provider(switches);
+            var guide = McpResourceProvider.QueryGuideDocUri;
+            var unknownUri = "autheris://api/docs/unknown";
+
+            var closed = await Should.ThrowAsync<McpResourceNotFoundException>(async () => await provider.ReadAsync(guide, Session));
+            var (plain, _, _) = Provider(Switches());
+            var unknown = await Should.ThrowAsync<McpResourceNotFoundException>(async () => await plain.ReadAsync(unknownUri, Session));
+
+            closed.Message.Replace(guide, "<URI>", StringComparison.Ordinal).ShouldBe(unknown.Message.Replace(unknownUri, "<URI>", StringComparison.Ordinal));
+            discovery.ReceivedCalls().ShouldBeEmpty();
+            dispatcher.ReceivedCalls().ShouldBeEmpty();
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void SEC_1209_Guide_not_listed_when_no_query_tool_enabled()
+    {
+        ListedUris(SwitchesOf(Off(McpToolGroup.Query))).ShouldNotContain(McpResourceProvider.QueryGuideDocUri);
+        ListedUris(SwitchesOf(new McpToolGroupOptions { Catalog = false, Query = false, Api = false, Access = false })).ShouldBeEmpty();
+        ListedUris(SwitchesOf(Off(McpToolGroup.Api))).ShouldContain(McpResourceProvider.QueryGuideDocUri);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task SEC_1209_Catalog_summary_tip_names_only_enabled_tools()
+    {
+        var all = await SummaryAsync(SwitchesOf());
+        all.ShouldContain("`find_relevant_tables` or `search_catalog`");
+        all.ShouldContain("`describe_dataset`");
+        all.ShouldNotContain("brief");
+
+        var schemaOnly = await SummaryAsync(SwitchesOf(disabled: ["find_relevant_tables", "search_catalog", "describe_dataset"]));
+        schemaOnly.ShouldContain("`get_table_schema`");
+        schemaOnly.ShouldNotContain("find_relevant_tables");
+        schemaOnly.ShouldNotContain("describe_dataset");
+
+        var none = await SummaryAsync(SwitchesOf(disabled: ["find_relevant_tables", "search_catalog", "describe_dataset", "get_table_schema"]));
+        none.ShouldNotContain("Tip");
+        none.ShouldContain("Total Datasets: 51");
+
+        (await SummaryAsync(null, 51)).ShouldNotContain("Tip");
+    }
+
+    public static IEnumerable<object[]> HintSets() =>
+    [
+        ["defaults", new McpToolGroupOptions(), Array.Empty<string>(), true],
+        ["api off", Off(McpToolGroup.Api), Array.Empty<string>(), true],
+        ["query off", Off(McpToolGroup.Query), Array.Empty<string>(), true],
+        ["all groups off", new McpToolGroupOptions { Catalog = false, Query = false, Api = false, Access = false }, Array.Empty<string>(), true],
+        ["access off", Off(McpToolGroup.Access), Array.Empty<string>(), true],
+        ["sql only", new McpToolGroupOptions(), new[] { "query_graphql", "query_dataset" }, true],
+        ["no discovery or schema tools", new McpToolGroupOptions(), new[] { "describe_dataset", "get_my_permissions", "find_relevant_tables", "get_table_schema", "sample_rows", "get_data_lineage", "search_catalog" }, true],
+        ["rest data endpoint off", new McpToolGroupOptions(), Array.Empty<string>(), false]
+    ];
+
+    [Theory]
+    [MemberData(nameof(HintSets))]
+    [Trait("Category", "Security")]
+    public async Task SEC_1209_No_disabled_tool_is_named_in_hint_surfaces(string label, McpToolGroupOptions groups, string[] disabledTools, bool restData)
+    {
+        var switches = SwitchesOf(groups, disabledTools, restData);
+        var texts = new Dictionary<string, string> { ["instructions"] = McpDatasetTools.BuildServerInstructions(switches) };
+        var args = new Dictionary<string, string?> { ["dataset"] = "sales.public.orders" };
+        foreach (var prompt in new[] { "explore_dataset", "audit_access_compliance" })
+        {
+            if (switches.IsPromptEnabled(prompt))
+            {
+                texts[prompt] = ((TextContentBlock)GatewayMcpServer.BuildPrompt(prompt, args, switches).Messages[0].Content).Text;
+            }
+        }
+
+        if (switches.IsResourceEnabled("autheris://catalog/summary"))
+        {
+            texts["summary"] = await SummaryAsync(switches);
+        }
+
+        foreach (var r in GatewayMcpServer.FilterResources(GatewayMcpServer.NativeResourceList(), switches))
+        {
+            texts["resource " + r.Uri] = r.Name + " " + r.Description;
+        }
+
+        texts["query_graphql description"] = McpDatasetTools.Definitions(switches).Single(t => t.Name == McpDatasetTools.QueryGraphQl).Description;
+
+        var guideEnabled = switches.IsResourceEnabled(McpResourceProvider.QueryGuideDocUri);
+        if (guideEnabled)
+        {
+            var dispatcher = new ApiDispatcherService(gatewayOptions: Microsoft.Extensions.Options.Options.Create(new GatewayOptions()), switches: switches);
+            texts["guide"] = await dispatcher.GetQueryGuideDocumentationAsync(CancellationToken.None);
+        }
+
+        var forbidden = McpToolGroups.BuiltInNames.Where(n => !switches.IsToolEnabled(n)).ToList();
+        if (!restData) forbidden.Add(McpDatasetTools.QueryDataset);
+        forbidden.AddRange(
+        [
+            "request_access", "admin_plan_access", "admin_apply_access", "admin_register_datasource",
+            "admin_set_dataset_state", "admin_resolve_principal", "admin_set_dataset_catalog"
+        ]);
+        foreach (var (surface, text) in texts)
+        {
+            foreach (var name in forbidden)
+            {
+                System.Text.RegularExpressions.Regex.IsMatch(text, $@"\b{System.Text.RegularExpressions.Regex.Escape(name)}\b")
+                    .ShouldBeFalse($"{label}: {name} is named in {surface}");
+            }
+
+            // No catalog-derived number and no brief recommendation in the startup text.
+            if (surface == "instructions")
+            {
+                text.ShouldNotContain("brief: true");
+            }
+        }
+
+        texts["instructions"].Contains(McpResourceProvider.QueryGuideDocUri, StringComparison.Ordinal).ShouldBe(guideEnabled, label);
+        texts.Keys.Any(k => k == "resource " + McpResourceProvider.QueryGuideDocUri).ShouldBe(guideEnabled, label);
     }
 }

@@ -289,8 +289,9 @@ public static class AnalyticsEndpoints
             SafeErrorResults.LogFailure(httpContext, ex, ex.ErrorCode);
             return SafeErrorResults.BadRequest(ex.ErrorCode, "The semantic metric query parameters are invalid.", httpContext);
         }
-        catch (KeyNotFoundException ex)
+        catch (Exception ex) when (ex is KeyNotFoundException or GatewayForbiddenException or TableNotFoundException)
         {
+            // An unknown metric and a metric the caller may not read answer identically; the true reason stays in the audit row.
             SafeErrorResults.LogFailure(httpContext, ex, "METRIC_NOT_FOUND");
             return SafeErrorResults.Problem(StatusCodes.Status404NotFound, "METRIC_NOT_FOUND", "One or more requested metrics were not found in the semantic catalog.", httpContext);
         }

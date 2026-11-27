@@ -396,6 +396,43 @@ public class CompiledSqlBinderTests
         Assert.Equal("DELETE FROM t", cmd.CommandText);
     }
 
+    [Theory]
+    [InlineData(null, "1,2,3,4")]
+    [InlineData("EU", "1,2,3")]
+    [InlineData("US", "4")]
+    [InlineData("ZZ", "")]
+    public async Task Optional_filter_executes_on_duckdb_with_and_without_a_value(string? region, string expected)
+    {
+        await using var connection = new DuckDBConnection("Data Source=:memory:");
+        await connection.OpenAsync();
+        await using (var create = connection.CreateCommand())
+        {
+            create.CommandText =
+                "CREATE SCHEMA dbo; CREATE TABLE dbo.\"Orders\" (\"Id\" INTEGER, \"TenantId\" VARCHAR, \"Region\" VARCHAR, \"Status\" VARCHAR, \"Amount\" DECIMAL(18,2), \"Email\" VARCHAR);" +
+                "INSERT INTO dbo.\"Orders\" VALUES (1,'acme','EU','b',10.0,'a'),(2,'acme','EU','c',30.0,'b'),(3,'acme','EU','a',20.0,'c'),(4,'acme','US','d',5.0,'d'),(5,'other','EU','z',99.0,'e');";
+            await create.ExecuteNonQueryAsync();
+        }
+
+        const string sql = "SELECT id FROM orders WHERE (__param_region IS NULL OR region = __param_region) ORDER BY id";
+        var nulls = region is null ? ClientNullShapes.Create(["region"]) : ClientNullShapes.Empty;
+        var compiled = new ClientListHarness().Compile(TargetSqlDialect.DuckDb, sql, nulls: nulls);
+        var values = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase) { ["region"] = region };
+
+        await using var command = connection.CreateCommand();
+        new DuckDbCompiledSqlBinder().Bind(command, compiled, values);
+        var ids = new List<long>();
+        await using (var reader = await command.ExecuteReaderAsync())
+        {
+            while (await reader.ReadAsync())
+            {
+                ids.Add(Convert.ToInt64(reader.GetValue(0)));
+            }
+        }
+
+        // the tenant predicate is injected whatever the filter: the other tenant's row 5 never appears
+        Assert.Equal(expected.Length == 0 ? [] : expected.Split(',').Select(long.Parse).ToArray(), ids);
+    }
+
     private static async Task<DuckDBConnection> OpenTableAsync()
     {
         var connection = new DuckDBConnection("Data Source=:memory:");

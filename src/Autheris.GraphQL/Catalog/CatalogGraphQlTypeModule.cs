@@ -896,6 +896,7 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
                 }
             }
 
+            await Autheris.GraphQL.Interceptors.DatasetFactsCollector.RecordTreeRootAsync(ctx, treeService, principal, queryNode, opId, isTruncated).ConfigureAwait(false);
             return list;
         }
         catch (AggregationColumnUnavailableException)

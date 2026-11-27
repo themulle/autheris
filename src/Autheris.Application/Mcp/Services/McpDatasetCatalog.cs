@@ -1139,6 +1139,27 @@ public sealed partial class McpDatasetCatalog : IMcpDatasetCatalog
     }
 
     /// <summary>Dataset ids use the same <c>domain.schema.table</c> form as catalog objects.</summary>
+    /// <summary>Persisted catalog tags of an already catalog-visible table, bounded for response extensions (blank tags dropped).</summary>
+    public static IReadOnlyList<string> BoundedTags(TableMetadata table, int maxCount, int maxLength)
+    {
+        ArgumentNullException.ThrowIfNull(table);
+        var tags = new List<string>(Math.Min(table.CatalogTags.Count, maxCount));
+        foreach (var tag in table.CatalogTags)
+        {
+            if (tags.Count >= maxCount)
+            {
+                break;
+            }
+
+            if (!string.IsNullOrWhiteSpace(tag))
+            {
+                tags.Add(tag.Length > maxLength ? tag[..maxLength] : tag);
+            }
+        }
+
+        return tags;
+    }
+
     public static string DatasetId(TableIdentifier id) => $"{id.Domain}.{id.Schema}.{id.TableName}".ToLowerInvariant();
 
     /// <summary>

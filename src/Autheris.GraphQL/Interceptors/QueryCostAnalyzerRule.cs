@@ -666,6 +666,13 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
 
                     cost = SafeAdd(cost, (int)Math.Min((long)int.MaxValue, (long)multiplier * effectiveRows));
 
+                    // A selected totalCount runs an extra count statement (a scan when the filter cannot use an index), priced once per
+                    // connection field regardless of the page size.
+                    if (isConnection && field.SelectionSet != null && SelectsTotalCount(field.SelectionSet, fragments, maxSpreadExpansions))
+                    {
+                        cost = SafeAdd(cost, (int)Math.Min((long)int.MaxValue, (long)multiplier * TotalCountSurchargeRows));
+                    }
+
                     if (field.SelectionSet != null)
                     {
                         // SEC M-9 / CRIT-02: Multiply nested list selection costs by effectiveRows using saturating arithmetic
@@ -792,6 +799,57 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
         }
 
         return cost;
+    }
+
+    /// <summary>Row-equivalents added per connection field that selects <c>totalCount</c>, scaled by the field's list multiplier.</summary>
+    internal const int TotalCountSurchargeRows = 10;
+
+    /// <summary>
+    /// True when the connection selection could make the resolver count: it walks aliases, inline fragments and fragment spreads and ignores
+    /// @skip/@include, so a conditional total is still priced. When the walk exceeds its bound the field counts as selecting it.
+    /// </summary>
+    private static bool SelectsTotalCount(
+        SelectionSetNode selectionSet,
+        IReadOnlyDictionary<string, FragmentDefinitionNode> fragments,
+        int maxSpreadExpansions)
+    {
+        var visited = new HashSet<string>(StringComparer.Ordinal);
+        var budget = maxSpreadExpansions;
+        return Walk(selectionSet);
+
+        bool Walk(SelectionSetNode set)
+        {
+            foreach (var selection in set.Selections)
+            {
+                switch (selection)
+                {
+                    case FieldNode f when f.Name.Value == "totalCount":
+                        return true;
+                    case InlineFragmentNode inline:
+                        if (Walk(inline.SelectionSet))
+                        {
+                            return true;
+                        }
+                        break;
+                    case FragmentSpreadNode spread:
+                        if (--budget < 0)
+                        {
+                            return true;
+                        }
+                        if (!fragments.TryGetValue(spread.Name.Value, out var def))
+                        {
+                            break;
+                        }
+                        if (visited.Add(spread.Name.Value) && Walk(def.SelectionSet))
+                        {
+                            return true;
+                        }
+                        break;
+                }
+            }
+
+            return false;
+        }
     }
 
     // The default page of a catalog table field (argument default of "first").

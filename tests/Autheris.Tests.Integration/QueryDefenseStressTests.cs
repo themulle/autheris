@@ -308,6 +308,9 @@ public class QueryDefenseStressTests : IClassFixture<QueryDefenseStressTests.Hos
     {
         public IntegrationHost CatalogAccessHost { get; } = CreateCatalogAccessHost();
 
+        /// <summary>Same catalog as <see cref="CatalogAccessHost"/>, but the caller may read every column of finance_table_1.</summary>
+        public IntegrationHost FullyVisibleHost { get; } = CreateCatalogAccessHost(fullyVisible: true);
+
         protected override void ConfigureHostConfiguration(IConfigurationBuilder config)
         {
             config.AddInMemoryCollection(BaseSettings());
@@ -318,6 +321,7 @@ public class QueryDefenseStressTests : IClassFixture<QueryDefenseStressTests.Hos
             if (disposing)
             {
                 CatalogAccessHost.Dispose();
+                FullyVisibleHost.Dispose();
             }
 
             base.Dispose(disposing);
@@ -334,7 +338,7 @@ public class QueryDefenseStressTests : IClassFixture<QueryDefenseStressTests.Hos
             ["Gateway:GraphQL:EnableIntrospection"] = "true",
         };
 
-        private static IntegrationHost CreateCatalogAccessHost() =>
+        private static IntegrationHost CreateCatalogAccessHost(bool fullyVisible = false) =>
             new(
                 BaseSettings(),
                 configureTestServices: services =>
@@ -363,6 +367,31 @@ public class QueryDefenseStressTests : IClassFixture<QueryDefenseStressTests.Hos
                                     new TableColumn { ColumnName = "created_at", DataType = "datetime" },
                                 ]
                             };
+                            if (fullyVisible &&
+                                string.Equals(id.Domain, "finance", StringComparison.OrdinalIgnoreCase) &&
+                                string.Equals(id.Schema, "dbo", StringComparison.OrdinalIgnoreCase) &&
+                                string.Equals(id.TableName, "finance_items", StringComparison.OrdinalIgnoreCase))
+                            {
+                                // The relation target of finance_table_1: the caller sees it completely too.
+                                string[] childColumns = ["id", "parent_id", "product_name", "price", "sensitive_note"];
+                                var childMeta = new TableMetadata
+                                {
+                                    Identifier = id,
+                                    Table = meta.Table,
+                                    Columns = [.. childColumns.Select(c => new TableColumn { ColumnName = c, DataType = "varchar" })]
+                                };
+                                return new ResolvedTableAccess(
+                                    childMeta,
+                                    TableAccessDecision.Allowed(
+                                        id,
+                                        childColumns.ToDictionary(c => c, _ => ColumnAccessLevel.Clear, StringComparer.OrdinalIgnoreCase),
+                                        null,
+                                        hasUnconstrainedColumnAllow: false),
+                                    new TenantId("T1"),
+                                    new Sid("S-1-5-21-test-analyst"),
+                                    principal);
+                            }
+
                             if (string.Equals(id.Domain, "finance", StringComparison.OrdinalIgnoreCase) &&
                                 string.Equals(id.Schema, "dbo", StringComparison.OrdinalIgnoreCase) &&
                                 string.Equals(id.TableName, "finance_table_1", StringComparison.OrdinalIgnoreCase))
@@ -376,7 +405,7 @@ public class QueryDefenseStressTests : IClassFixture<QueryDefenseStressTests.Hos
                                             ["id"] = ColumnAccessLevel.Clear,
                                             ["name"] = ColumnAccessLevel.Clear,
                                             ["amount"] = ColumnAccessLevel.Clear,
-                                            ["email"] = ColumnAccessLevel.Deny,
+                                            ["email"] = fullyVisible ? ColumnAccessLevel.Clear : ColumnAccessLevel.Deny,
                                             ["created_at"] = ColumnAccessLevel.Clear,
                                         },
                                         null,

@@ -126,7 +126,7 @@ public sealed class GraphQlPagingEngineTests
         {
             User = new ClaimsPrincipal(new ClaimsIdentity([new Claim(ClaimTypes.Name, "alice"), new Claim("tenant_id", "T1")], "TestAuth"))
         };
-        services.AddSingleton<IHttpContextAccessor>(new HttpContextAccessor { HttpContext = ctx });
+        services.AddSingleton<IHttpContextAccessor>(new FixedHttpContextAccessor(ctx));
         services.AddSingleton(Options.Create(new GatewayOptions()));
 
         return await services
@@ -339,7 +339,6 @@ public sealed class GraphQlPagingEngineTests
     [InlineData("Production", "{ unknown_table(first: 5000) { id } }")]
     [InlineData("Development", "{ sales_dbo_customers(first: 5000) { id unknown_col } }")]
     [InlineData("Production", "{ sales_dbo_customers(first: 5000) { id unknown_col } }")]
-    [InlineData("Production", "{ sales_dbo_customers(first: 5) { id unknown_col } }")]
     [Trait("Category", "Security")]
     public async Task CostBudget_UnknownFieldAtAnyCost_AnswersShieldedValidationError(string env, string query)
     {
@@ -348,6 +347,19 @@ public sealed class GraphQlPagingEngineTests
         errors.Count.ShouldBe(1, json);
         errors[0].Code.ShouldBe("GRAPHQL_VALIDATION_FAILED");
         json.ShouldBe(ValidationBody);
+        _nodes.ShouldBeEmpty();
+    }
+
+    [Theory]
+    [InlineData("Development")]
+    [InlineData("Production")]
+    public async Task UnknownColumnInRange_OnFullyVisibleTable_AnswersUnknownField(string env)
+    {
+        // #1188: the caller may read every column of sales_dbo_customers, so an unknown column is named precisely.
+        var (json, errors) = await RunAsync(env, "{ sales_dbo_customers(first: 5) { id unknown_col } }");
+
+        errors.Count.ShouldBe(1, json);
+        errors[0].Code.ShouldBe("UNKNOWN_FIELD");
         _nodes.ShouldBeEmpty();
     }
 

@@ -286,6 +286,28 @@ public sealed class UcProvisioningStore(
         return result;
     }
 
+    public async Task<IReadOnlyList<TenantId>> ListFeedbackTenantsAsync(string dataSource, CancellationToken ct)
+    {
+        var source = RequireDataSource(dataSource);
+        await using var conn = await _repository.OpenConnectionAsync(ct).ConfigureAwait(false);
+        await using var cmd = conn.CreateCommand();
+        cmd.CommandText = "SELECT DISTINCT tenant_id FROM " + Feedback + " WHERE data_source = @dataSource AND state <> @revoked ORDER BY tenant_id";
+        cmd.AddBound("@dataSource", source);
+        cmd.AddBound("@revoked", UcGrantState.Revoked.ToStored());
+        var result = new List<TenantId>();
+        await using var reader = await cmd.ExecuteReaderAsync(ct).ConfigureAwait(false);
+        while (await reader.ReadAsync(ct).ConfigureAwait(false))
+        {
+            // A stored tenant that is not a valid, writable tenant is never acted on.
+            if (TenantId.TryParse(reader.GetString(0), out var tenant) && !TenantId.IsReserved(tenant))
+            {
+                result.Add(tenant);
+            }
+        }
+
+        return result;
+    }
+
     public async Task<IReadOnlyDictionary<Guid, UcGrantFeedback>> GetFeedbackAsync(TenantId tenant, IReadOnlyCollection<Guid> consentIds, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(consentIds);

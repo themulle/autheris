@@ -79,6 +79,8 @@ internal static class McpQueryGuideBuilder
         if (Tool(switches, McpDatasetTools.QuerySql))
         {
             sb.AppendLine($"- **SQL Query Tool:** `{McpDatasetTools.QuerySql}` executes governed SQL queries. Pass values in `parameters` bound to `@name` placeholders (`IN (@ids)` for a list); a statement rejected with `SQL_LITERAL_NOT_PERMITTED` is resent with the value as a parameter; a `cursor` call repeats the same `parameters`.");
+            sb.AppendLine("- **Optional Filters:** `(@p IS NULL OR col = @p)` is an optional filter: JSON `null` drops it, an absent parameter is an error.");
+            sb.AppendLine("- **Timestamp Parameters:** Date-time strings may end in `Z` or `+HH:mm`; they are converted to UTC.");
         }
 
         if (switches is not null && switches.RestDataEndpointEnabled && Tool(switches, McpDatasetTools.QueryDataset))
@@ -115,6 +117,7 @@ internal static class McpQueryGuideBuilder
         sb.AppendLine();
         sb.AppendLine(string.Create(CultureInfo.InvariantCulture,
             $"- **Page Size (`first`):** Defaults to `100`; maximum `{gql.MaxResponseRows}` rows per response."));
+        sb.AppendLine("- **Total (`totalCount`):** Rows matching `where` under your row rules, independent of `first`/`after`. It runs an extra count statement and adds to the query cost, so select it only when needed (for example on the first page). It is `null` when the count could not be determined.");
         sb.AppendLine("- **Keyset Cursor (`after`):** Pass `pageInfo.endCursor` from the previous response. Cursors are HMAC-signed and bound to the query's `orderBy` key.");
         sb.AppendLine(string.Create(CultureInfo.InvariantCulture,
             $"- **Offset Bound:** `MaxAllowedOffset` is `{gql.MaxAllowedOffset}`."));

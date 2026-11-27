@@ -21,6 +21,9 @@ public sealed class UcProvisioningState
 
     /// <summary>Reported foreign findings per data source and securable.</summary>
     public ConcurrentDictionary<string, HashSet<string>> ReportedForeign { get; } = new(StringComparer.Ordinal);
+
+    /// <summary>Ledger privileges of data sources without a provisioning section that were already audited.</summary>
+    public ConcurrentDictionary<string, byte> ReportedOrphans { get; } = new(StringComparer.Ordinal);
 }
 
 public sealed partial class UcProvisioningReconciler
