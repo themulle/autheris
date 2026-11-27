@@ -203,11 +203,13 @@ public static class McpDatasetTools
     public static bool IsHiddenFromReadOnlySession(string? toolName) =>
         string.Equals(toolName, RequestAccess, StringComparison.OrdinalIgnoreCase);
 
+    internal const string QueryGraphQlResultSentence = " The result is the POST /graphql body. A failure answers {error:{code,message}, errors:[...]} with the GraphQL errors list; data next to errors is a normal result.";
+
     public static IEnumerable<McpToolDefinition> Definitions()
     {
         yield return new McpToolDefinition(
             Name: QueryGraphQl,
-            Description: "Default tool for reading data. Runs a read-only GraphQL query against the gateway: filter (where), sort (orderBy), page (first, offset) and follow relations between datasets. Get the field names and an example query from describe_dataset. The result is the POST /graphql body. A failure answers {error:{code,message}, errors:[...]} with the GraphQL errors list; data next to errors is a normal result.",
+            Description: "Default tool for reading data. Runs a read-only GraphQL query against the gateway: filter (where), sort (orderBy), page (first, offset) and follow relations between datasets. Get the field names and an example query from describe_dataset." + QueryGraphQlResultSentence,
             InputJsonSchema: """
             {
               "type": "object",

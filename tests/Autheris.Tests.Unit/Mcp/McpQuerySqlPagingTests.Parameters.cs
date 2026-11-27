@@ -186,7 +186,7 @@ public sealed partial class McpQuerySqlPagingTests
         var bound = new List<IReadOnlyList<object?>>();
         var (handler, _, executedSql) = CreatePipeline(maxResultRows: 5, boundValues: bound);
 
-        var json = await handler.ExecuteToolAsync(QuerySqlTool, """{"query":"SELECT id, name FROM sales.public.orders WHERE (@n IS NULL OR name <> @n) ORDER BY id","parameters":{"n":null}}""", CreateSession());
+        var json = await handler.ExecuteToolAsync(QuerySqlTool, """{"sql":"SELECT id, name FROM sales.public.orders WHERE (@n IS NULL OR name <> @n) ORDER BY id","parameters":{"n":null}}""", CreateSession());
 
         ErrorCode(json).ShouldBeNull();
         executedSql.ShouldNotBeEmpty();

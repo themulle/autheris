@@ -67,6 +67,9 @@ public sealed partial class McpHttpContractEndToEndTests : IClassFixture<McpHttp
             builder.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
             builder.UseSetting("Gateway:Mcp:MaxResultRows", Cap.ToString(System.Globalization.CultureInfo.InvariantCulture));
             builder.UseSetting("Gateway:Mcp:MaxTokensPerCall", "128000");
+            builder.UseSetting("Gateway:GraphQL:MaxAllowedComplexity", "10000");
+            builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxCostPerQuery", "100000");
+            builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxTokensCapacity", "100000");
             builder.UseSetting("Gateway:WebSql:Enabled", "true");
             builder.UseSetting("Gateway:WebSql:AllowedDataSources:0", "default");
         }

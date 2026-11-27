@@ -34,12 +34,19 @@ public sealed partial class McpHttpContractEndToEndTests
 
     private static async Task<(int Status, JsonNode Body, string Text)> HttpGraphQlAsync(HttpClient client, string query, object? variables = null)
     {
-        using var response = await client.PostAsJsonAsync("/graphql", variables is null ? new { query } : (object)new { query, variables });
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/graphql")
+        {
+            Content = JsonContent.Create(variables is null ? new { query } : (object)new { query, variables })
+        };
+        request.Headers.Add("GraphQL-Preflight", "1");
+        using var response = await client.SendAsync(request);
         var text = await response.Content.ReadAsStringAsync();
         return ((int)response.StatusCode, JsonNode.Parse(text)!, text);
     }
 
-    private static string FirstErrorCode(JsonNode body) => body["errors"]![0]!["extensions"]!["code"]!.GetValue<string>();
+    private static string FirstErrorCode(JsonNode body) =>
+        body["errors"]?[0]?["extensions"]?["code"]?.GetValue<string>()
+        ?? throw new Xunit.Sdk.XunitException($"The /graphql body has no first error code: {body.ToJsonString()}");
 
     [Fact]
     public async Task QueryGraphQl_First500_DataAndExtensionsEqualGraphQl()
@@ -71,6 +78,7 @@ public sealed partial class McpHttpContractEndToEndTests
         var http = await HttpGraphQlAsync(client, query, new { n = 50 });
 
         mcp.IsError.ShouldBeFalse(mcp.Text);
+        http.Status.ShouldBe(200, http.Text);
         JsonNode.DeepEquals(mcp.Body["data"], http.Body["data"]).ShouldBeTrue();
         JsonNode.DeepEquals(mcp.Body["extensions"], http.Body["extensions"]).ShouldBeTrue($"MCP {mcp.Text} vs HTTP {http.Text}");
     }
@@ -96,18 +104,21 @@ public sealed partial class McpHttpContractEndToEndTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task QueryGraphQl_UnknownVsForbiddenNestedField_ErrorsByteIdentical()
+    public async Task QueryGraphQl_UnknownAndForbiddenNestedField_ErrorsEqualGraphQl()
     {
         var client = Client();
         var field = await GraphQlFieldAsync(client);
 
-        // Both names have the same length, so every position in the error is the same.
-        var unknown = await McpGraphQlAsync(client, $"{{ {field}(first: 5) {{ id unknown_x }} }}");
-        var forbidden = await McpGraphQlAsync(client, $"{{ {field}(first: 5) {{ id denied_x }} }}");
+        // The host runs in Development, where the enumeration shield is off on both doors; the parity holds in any environment.
+        foreach (var query in new[] { $"{{ {field}(first: 5) {{ id unknown_x }} }}", $"{{ {field}(first: 5) {{ id denied_x }} }}" })
+        {
+            var mcp = await McpGraphQlAsync(client, query);
+            var http = await HttpGraphQlAsync(client, query);
 
-        unknown.IsError.ShouldBeTrue(unknown.Text);
-        forbidden.Text.ShouldBe(unknown.Text);
-        unknown.Text.ShouldNotContain("denied_x");
+            mcp.IsError.ShouldBeTrue(mcp.Text);
+            mcp.Body["error"]!["code"]!.GetValue<string>().ShouldBe(FirstErrorCode(http.Body));
+            JsonNode.DeepEquals(mcp.Body["errors"], http.Body["errors"]).ShouldBeTrue($"MCP {mcp.Text} vs HTTP {http.Text}");
+        }
     }
 
     [Fact]

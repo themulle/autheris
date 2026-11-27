@@ -197,7 +197,8 @@ internal sealed class McpAccessHints(IReadPathSwitches? switches, bool mcpEnable
 
     public string QueryGraphQlDescription() =>
         "Default tool for reading data. Runs a read-only GraphQL query against the gateway: filter (where), sort (orderBy), page (first, offset) and follow relations between datasets."
-        + (Tool(McpDatasetTools.DescribeDataset) ? " Get the field names and an example query from describe_dataset." : string.Empty);
+        + (Tool(McpDatasetTools.DescribeDataset) ? " Get the field names and an example query from describe_dataset." : string.Empty)
+        + McpDatasetTools.QueryGraphQlResultSentence;
 
     private static string NumberedPrompt(string intro, List<string> steps) =>
         steps.Count == 0

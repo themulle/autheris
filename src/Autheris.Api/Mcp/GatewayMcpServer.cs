@@ -451,6 +451,13 @@ public static class GatewayMcpServer
         // The registry lookup ignores case, so the error envelope is shaped by the registered name, not by the spelling the caller sent.
         var canonicalName = services.GetService<IMcpToolRegistry>()?.FindTool(toolName)?.Name ?? toolName;
         McpToolCallResult result;
+        // In-process executions (GraphQL) share this HttpContext; the marker keeps them off the transport's status and headers.
+        var transport = services.GetRequiredService<IHttpContextAccessor>().HttpContext;
+        if (transport is not null)
+        {
+            transport.Items[Autheris.Application.Mcp.McpTransportItems.ToolCallKey] = true;
+        }
+
         try
         {
             result = await guardrail.ExecuteToolWithGuardrailAsync(
@@ -474,6 +481,10 @@ public static class GatewayMcpServer
             await McpToolFailureRecorder.RecordDenyAsync(
                 services.GetService<Autheris.Application.Audit.IAuditWriter>(), services.GetService<TimeProvider>(), logger, session, toolName, code, ct).ConfigureAwait(false);
             return ToolError(McpToolError.Fail(code).ContentJson, canonicalName);
+        }
+        finally
+        {
+            transport?.Items.Remove(Autheris.Application.Mcp.McpTransportItems.ToolCallKey);
         }
 
         // The guardrail classified the result once; a failed result is always an error result, a successful one never is.
