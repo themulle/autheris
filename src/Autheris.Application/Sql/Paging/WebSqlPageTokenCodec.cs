@@ -153,7 +153,7 @@ public sealed class WebSqlPageTokenCodec : IWebSqlPageTokenCodec
             || size <= 0 || size > MaxPageSize
             || pageNumber <= 0
             || logicalOffset < 0
-            || logicalOffset != (pageNumber - 1) * (long)size)
+            || pageNumber != (logicalOffset / size) + 1)
         {
             return null;
         }

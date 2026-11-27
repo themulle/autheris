@@ -370,4 +370,31 @@ public sealed partial class WebSqlPagingTokenTests
         Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, token));
         WebSqlPageTokenCodec.MaxTokenLength.ShouldBe(1024);
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void V1ResumeToken_AtArbitraryOffset_StillDecodes_AndV2RulesUnchanged()
+    {
+        var (codec, _, _) = CreateCodec();
+        var user = CreateUser();
+        var tenant = new TenantId("tenant-1");
+
+        // A v1 resume token at an offset that is no multiple of the page size decodes, the number derived from the offset.
+        string v1 = codec.EncodeToken(KeysetSql, null, user, tenant, "crm", "WebSql", 103, 100, 2, TimeSpan.FromMinutes(15));
+        var decodedV1 = codec.DecodeToken(v1, KeysetSql, null, user, tenant, "crm", "WebSql", MaxOffset);
+        decodedV1.Offset.ShouldBe(103);
+        decodedV1.PageNumber.ShouldBe(2);
+
+        // A v2 token follows the same derivation: an unaligned offset beyond the window decodes with the derived number ...
+        var decodedV2 = DecodeKeyset(codec, KeysetToken(codec, offset: 20_037, size: 100, page: 201));
+        decodedV2.Offset.ShouldBe(20_037);
+        decodedV2.PageNumber.ShouldBe(201);
+
+        // ... a number that disagrees with the offset is refused at the encoder and at the decoder, and v2 stays beyond the window only.
+        codec.EncodeKeysetToken(KeysetSql, null, user, tenant, "crm", "WebSql", 20_037, 100, 202, ShapeHash, [1L], TimeSpan.FromMinutes(15)).ShouldBeNull();
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, Forge(codec, new WebSqlPageTokenPayload(2, 20_037, 100, 202, FutureExp, ShapeHash, ["l:1"]))));
+        codec.EncodeKeysetToken(KeysetSql, null, user, tenant, "crm", "WebSql", 9_999, 100, 100, ShapeHash, [1L], TimeSpan.FromMinutes(15))
+            .ShouldNotBeNull();
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, KeysetToken(codec, offset: 9_999, size: 100, page: 100)));
+    }
 }

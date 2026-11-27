@@ -1,6 +1,7 @@
 namespace Autheris.Application.Sql.Paging;
 
 using System;
+using System.Collections.Generic;
 using System.Collections.Immutable;
 using System.Collections.ObjectModel;
 using System.Data.Common;
@@ -19,10 +20,15 @@ internal sealed class KeysetCaptureReader : ResultCacheRowReader, IDbColumnSchem
     private readonly ImmutableArray<int> _keyOrdinals;
     private readonly object[] _buffer;
     private readonly object?[] _keys;
+    private readonly List<object?[]>? _perRowKeys;
     private object?[]? _current;
 
-    public KeysetCaptureReader(DbDataReader inner, TrinoSqlEngine.KeysetKeyInfo key)
+    /// <param name="inner">The reader whose rows are delivered.</param>
+    /// <param name="key">The compiler-resolved keyset shape.</param>
+    /// <param name="retainEveryRow">True keeps the key values of every delivered row, so a transport that shortens the page afterwards can resume after the last row it kept.</param>
+    public KeysetCaptureReader(DbDataReader inner, TrinoSqlEngine.KeysetKeyInfo key, bool retainEveryRow = false)
     {
+        _perRowKeys = retainEveryRow ? new List<object?[]>() : null;
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         Key = key ?? throw new ArgumentNullException(nameof(key));
         _keyOrdinals = key.OutputOrdinals;
@@ -41,6 +47,13 @@ internal sealed class KeysetCaptureReader : ResultCacheRowReader, IDbColumnSchem
     /// meaningful once the rows were delivered.
     /// </summary>
     public object?[]? LastKeyValues => RowsRead > 0 ? _keys : null;
+
+    /// <summary>
+    /// The key values of the <paramref name="rowsDelivered"/>-th delivered row (1-based, so the last row a shortened page kept); null when
+    /// every-row retention was not requested or fewer rows were delivered.
+    /// </summary>
+    public object?[]? KeyValuesOfRow(int rowsDelivered) =>
+        _perRowKeys is not null && rowsDelivered >= 1 && rowsDelivered <= _perRowKeys.Count ? _perRowKeys[rowsDelivered - 1] : null;
 
     public bool HasMoreRows => (_inner as IRowLimitProbe)?.HasMoreRows ?? false;
 
@@ -83,6 +96,8 @@ internal sealed class KeysetCaptureReader : ResultCacheRowReader, IDbColumnSchem
         {
             _keys[i] = _buffer[_keyOrdinals[i]];
         }
+
+        _perRowKeys?.Add((object?[])_keys.Clone());
 
         return true;
     }

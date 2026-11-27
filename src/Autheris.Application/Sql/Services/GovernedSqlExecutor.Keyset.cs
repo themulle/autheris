@@ -30,7 +30,7 @@ public sealed partial class GovernedSqlExecutor
             }
         }
 
-        return new KeysetCaptureReader(inner, key);
+        return new KeysetCaptureReader(inner, key, retainEveryRow: string.Equals(request.Transport, SqlTransports.Mcp, StringComparison.Ordinal));
     }
 
     /// <summary>
@@ -68,7 +68,41 @@ public sealed partial class GovernedSqlExecutor
             request.Transport ?? "WebSql",
             nextOffset,
             page.Size,
-            page.Number + 1,
+            checked((int)((nextOffset / page.Size) + 1)),
+            key.ShapeHash,
+            values,
+            TimeSpan.FromMinutes(_options.Value.WebSql.Paging?.TokenLifetimeMinutes ?? 15));
+    }
+
+    /// <summary>
+    /// The keyset token that resumes after the first <paramref name="rowsKept"/> rows of a page whose transport shortened it: the key values
+    /// are those of the last row that page kept, not of the last row read. Null when the statement is not keyset-eligible, the capture did
+    /// not retain that row, or the token cannot be signed; the caller then issues no continuation.
+    /// </summary>
+    private string? TryEncodeKeysetResumeToken(
+        GovernedSqlQueryRequest request,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        KeysetCaptureReader? capture,
+        int rowsKept)
+    {
+        if (capture?.Key is not { } key || request.Page is not { } page
+            || capture.KeyValuesOfRow(rowsKept) is not { } values
+            || values.Length != key.Columns.Length)
+        {
+            return null;
+        }
+
+        return _pageTokenCodec.EncodeKeysetToken(
+            request.Sql,
+            request.Parameters,
+            user,
+            tenantId,
+            PageTokenSourceBinding(request, tenantId),
+            request.Transport ?? "WebSql",
+            page.Offset + rowsKept,
+            page.Size,
+            checked((int)(((page.Offset + rowsKept) / page.Size) + 1)),
             key.ShapeHash,
             values,
             TimeSpan.FromMinutes(_options.Value.WebSql.Paging?.TokenLifetimeMinutes ?? 15));

@@ -169,7 +169,6 @@ public sealed partial class GovernedSqlExecutor
             {
                 if (rowsKept < 1
                     || rowsKept >= request.Page.Size
-                    || request.Page.Offset + rowsKept > maxResumeOffset
                     || user.GetUserSid() == null)
                 {
                     return null;
@@ -177,7 +176,11 @@ public sealed partial class GovernedSqlExecutor
 
                 try
                 {
-                    return EncodePageToken(request, user, tenantId, request.Page.Offset + rowsKept);
+                    // Past the offset window, or on a keyset page, only a keyset token can resume; it is minted from the key values of the
+                    // last row that was kept, never from the last row read.
+                    return request.Keyset is not null || request.Page.Offset + rowsKept > maxResumeOffset
+                        ? TryEncodeKeysetResumeToken(request, user, tenantId, keysetCapture, rowsKept)
+                        : EncodePageToken(request, user, tenantId, request.Page.Offset + rowsKept);
                 }
                 catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or OverflowException)
                 {
