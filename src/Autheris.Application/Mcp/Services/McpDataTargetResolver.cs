@@ -40,7 +40,7 @@ internal static class McpDataTargetResolver
         try
         {
             var engine = sqlEngine ?? FastSqlEngine.Default;
-            return MapResolvedSqlTables(engine.Analyze(sql.AsMemory()), defaultDataSourceName);
+            return MapResolvedSqlTables(engine.Analyze(McpSqlPlaceholders.NeutralizeForAnalysis(sql).AsMemory()), defaultDataSourceName);
         }
         catch (Exception ex)
         {
