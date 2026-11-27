@@ -256,5 +256,18 @@ public sealed class CatalogGraphQlMapTests : IDisposable
         (await _map.ResolveDocumentTablesAsync($"{{ crm_dbo_customers {{ id }} }}{padding}")).ShouldBeNull();
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task GroupsRootField_ResolvesTable_DoesNotWalkRowAsEntity()
+    {
+        // The flat <table>_groups root maps to its table through the shared suffix helper; its row type is not the entity type, so the
+        // selection below it is never walked as entity columns or relations. An unknown table stays unresolvable (fail closed).
+        var tables = await _map.ResolveDocumentTablesAsync("{ g: crm_dbo_orders_groups(limit: 5) { id count total: amount_sum customer_orders } }");
+
+        tables.ShouldBe([Orders]);
+        (await _map.ResolveDocumentTablesAsync("{ crm_dbo_unknown_groups { count } }")).ShouldBeNull();
+        (await _map.ResolveDocumentTablesAsync("{ crm_dbo_orders_aggregate_x { count } }")).ShouldBeNull();
+    }
+
     public void Dispose() => _map.Dispose();
 }
