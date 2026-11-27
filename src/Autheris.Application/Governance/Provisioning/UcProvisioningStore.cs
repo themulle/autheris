@@ -23,7 +23,7 @@ public enum UcLedgerState
     /// <summary>No consent wants the privilege any more; it is removed on the next successful call.</summary>
     RevokePending = 2,
 
-    /// <summary>The add failed after the maximum number of attempts; it is retried only after the configuration changes.</summary>
+    /// <summary>The add failed after the maximum number of attempts; it is retried at the longest backoff and reported as failed.</summary>
     Failed = 3
 }
 
