@@ -98,7 +98,7 @@ public sealed class Issue1198TableRootsOnlyScopeIntegrationTests : IClassFixture
     public async Task Graphql_restricted_scope_allows_list_aggregate_connection_mix()
     {
         var (status, body) = await PostAsync(Caller(),
-            "{ default_main_air1(first: 2) { id } default_main_air1_aggregate { __typename } default_main_air1Connection(first: 2) { __typename } __typename }");
+            "{ default_main_air1(first: 2) { id } default_main_air1_aggregate(aggregates: [{ fn: COUNT, alias: \"n\" }]) { count } default_main_air1Connection(first: 2) { totalCount } __typename }");
         status.ShouldBe(HttpStatusCode.OK, body);
         using var doc = JsonDocument.Parse(body);
         doc.RootElement.TryGetProperty("errors", out _).ShouldBeFalse(body);
@@ -145,7 +145,8 @@ public sealed class Issue1198TableRootsOnlyScopeIntegrationTests : IClassFixture
         var client = Caller(scope, scopeArray);
         await using var mcp = await McpTestClient.ConnectAsync(client);
 
-        var (rejected, rejectedPayload) = await McpTestClient.CallJsonAsync(mcp, "query_graphql", new { query = "{ catalog { __typename } }" });
+        var (rejected, rejectedPayload) = await McpTestClient.CallJsonAsync(mcp, "query_graphql",
+            new { query = "{ default_main_air1(first: 2) { id } catalog { __typename } }" });
         rejected.ShouldBeTrue(rejectedPayload.ToString());
         rejectedPayload.ToString().ShouldContain(Code);
 
