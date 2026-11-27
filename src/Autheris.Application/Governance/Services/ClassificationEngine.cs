@@ -24,7 +24,18 @@ public sealed class ClassificationEngine : IClassificationEngine
     private readonly IClassificationProposalStore? _proposalStore;
     private readonly IEnumerable<IGovernanceWorkflowHook>? _hooks;
     private readonly ILogger<ClassificationEngine> _logger;
-    private readonly ConcurrentDictionary<string, Regex> _regexCache = new(StringComparer.OrdinalIgnoreCase);
+    private readonly ConcurrentDictionary<string, Regex> _regexCache = new(StringComparer.Ordinal);
+    private readonly Func<Regex, string, bool> _isMatch;
+
+    /// <summary>Upper bound for a single pattern evaluation; a timeout is treated fail-closed, never as "no match".</summary>
+    internal static readonly TimeSpan DefaultRegexMatchTimeout = TimeSpan.FromSeconds(1);
+
+    private enum RegexMatchOutcome
+    {
+        NoMatch,
+        Match,
+        TimedOut
+    }
 
     public ClassificationEngine(
         IOptionsMonitor<GatewayOptions> gatewayOptions,
@@ -32,7 +43,19 @@ public sealed class ClassificationEngine : IClassificationEngine
         IClassificationAiProvider? aiProvider = null,
         IClassificationProposalStore? proposalStore = null,
         IEnumerable<IGovernanceWorkflowHook>? hooks = null)
+        : this(gatewayOptions, logger, static (regex, input) => regex.IsMatch(input), aiProvider, proposalStore, hooks)
     {
+    }
+
+    internal ClassificationEngine(
+        IOptionsMonitor<GatewayOptions> gatewayOptions,
+        ILogger<ClassificationEngine> logger,
+        Func<Regex, string, bool> isMatch,
+        IClassificationAiProvider? aiProvider = null,
+        IClassificationProposalStore? proposalStore = null,
+        IEnumerable<IGovernanceWorkflowHook>? hooks = null)
+    {
+        _isMatch = isMatch ?? throw new ArgumentNullException(nameof(isMatch));
         _gatewayOptions = gatewayOptions ?? throw new ArgumentNullException(nameof(gatewayOptions));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _aiProvider = aiProvider;
@@ -136,12 +159,19 @@ public sealed class ClassificationEngine : IClassificationEngine
         if (config.RuleBasedMappings != null)
         {
             var tableFullName = context.TableIdentifier.ToQualifiedName();
+            var mappingIndex = 0;
             foreach (var (pattern, owner) in config.RuleBasedMappings)
             {
-                if (IsRegexMatch(tableFullName, pattern))
+                switch (MatchPattern(tableFullName, pattern))
                 {
-                    return owner;
+                    case RegexMatchOutcome.Match:
+                        return owner;
+                    case RegexMatchOutcome.TimedOut:
+                        _logger.LogWarning("Owner rule-based mapping {MappingIndex} timed out; owner left unresolved.", mappingIndex);
+                        return null;
                 }
+
+                mappingIndex++;
             }
         }
 
@@ -158,20 +188,57 @@ public sealed class ClassificationEngine : IClassificationEngine
         foreach (var col in columns)
         {
             var matchedCategories = new List<PiiCategoryDefinition>();
+            List<string>? timedOutKeys = null;
 
             foreach (var category in options.PiiCategories)
             {
                 foreach (var pattern in category.NamePatterns)
                 {
-                    if (IsRegexMatch(col.ColumnName, pattern))
+                    var outcome = MatchPattern(col.ColumnName, pattern);
+                    if (outcome == RegexMatchOutcome.NoMatch)
                     {
-                        matchedCategories.Add(category);
-                        break;
+                        continue;
                     }
+
+                    matchedCategories.Add(category);
+                    if (outcome == RegexMatchOutcome.TimedOut)
+                    {
+                        (timedOutKeys ??= new List<string>()).Add(category.Key);
+                        _logger.LogWarning(
+                            "Classification regex timed out for PII category {CategoryKey}; treated as matched and flagged for review.",
+                            LogSanitizer.Sanitize(category.Key));
+                    }
+
+                    break;
                 }
             }
 
-            if (matchedCategories.Count == 1)
+            if (timedOutKeys is not null)
+            {
+                var highest = matchedCategories[0];
+                foreach (var cat in matchedCategories)
+                {
+                    if (cat.DefaultSensitivityRank > highest.DefaultSensitivityRank)
+                    {
+                        highest = cat;
+                    }
+                }
+
+                var level = FindSensitivityLevelByRank(highest.DefaultSensitivityRank, options.SensitivityLevels);
+                result.Add(new ColumnClassificationProposal(
+                    col.ColumnName,
+                    col.DataType,
+                    level.Key,
+                    level.Rank,
+                    highest.Key,
+                    highest.DefaultMaskingRule,
+                    Confidence: 0.65,
+                    IsDisputed: true,
+                    Reasoning: $"Regex evaluation timed out for PII category(ies) ({string.Join(", ", timedOutKeys)}); treated as matched and flagged for review",
+                    ProposedProtectionClass: options.ResolveProtectionClass(level.Key, level.Rank),
+                    ProposedMaskCategory: ResolveMaskCategory(highest)));
+            }
+            else if (matchedCategories.Count == 1)
             {
                 var matched = matchedCategories[0];
                 var level = FindSensitivityLevelByRank(matched.DefaultSensitivityRank, options.SensitivityLevels);
@@ -241,16 +308,28 @@ public sealed class ClassificationEngine : IClassificationEngine
         return result;
     }
 
-    private bool IsRegexMatch(string input, string pattern)
+    internal static Regex CreatePatternRegex(string pattern, TimeSpan timeout)
     {
-        var regex = _regexCache.GetOrAdd(pattern, p => new Regex(p, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled, TimeSpan.FromMilliseconds(50)));
         try
         {
-            return regex.IsMatch(input);
+            return new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.NonBacktracking, timeout);
+        }
+        catch (NotSupportedException)
+        {
+            return new Regex(pattern, RegexOptions.IgnoreCase | RegexOptions.CultureInvariant | RegexOptions.Compiled, timeout);
+        }
+    }
+
+    private RegexMatchOutcome MatchPattern(string input, string pattern)
+    {
+        var regex = _regexCache.GetOrAdd(pattern, static p => CreatePatternRegex(p, DefaultRegexMatchTimeout));
+        try
+        {
+            return _isMatch(regex, input) ? RegexMatchOutcome.Match : RegexMatchOutcome.NoMatch;
         }
         catch (RegexMatchTimeoutException)
         {
-            return false;
+            return RegexMatchOutcome.TimedOut;
         }
     }
 
