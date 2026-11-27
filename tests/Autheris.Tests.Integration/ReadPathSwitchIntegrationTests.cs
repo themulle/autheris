@@ -342,7 +342,7 @@ public sealed class ReadPathMcpSwitchIntegrationTests : IClassFixture<ReadPathMc
         disabled.IsError.ShouldBe(true);
         disabled.IsError.ShouldBe(unknown.IsError);
         Normalise(disabled, "query_sql").ShouldBe(Normalise(unknown, "zzz_never_registered"));
-        Normalise(disabled, "query_sql").ShouldContain("is not registered or allowed");
+        Normalise(disabled, "query_sql").ShouldContain("TOOL_NOT_AVAILABLE");
     }
 
     private static string Normalise(CallToolResult r, string name) =>

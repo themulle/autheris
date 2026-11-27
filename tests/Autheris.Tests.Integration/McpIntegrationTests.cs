@@ -75,13 +75,13 @@ public class McpIntegrationTests : IClassFixture<McpIntegrationTests.HostFixture
         var (simulationError, simulation) = await McpTestClient.CallAsync(client, "simulate_query",
             new { query = @"query { table(domain: ""finance"", name: ""finance_table_1"", first: 15) { id name } }" });
         simulationError.ShouldBeTrue(simulation);
-        simulation.ShouldContain("fail-closed");
+        simulation.ShouldContain("DATASET_NOT_FOUND");
 
-        // query_customers returns a _provenance footnote, or a structured error without a data source (SEC M-17), never mock data.
-        var (_, customers) = await McpTestClient.CallAsync(client, "query_customers", new { });
-        (customers.Contains("_provenance", StringComparison.Ordinal) ||
-         customers.Contains("EXECUTION_FAILED", StringComparison.Ordinal) ||
-         customers.Contains("FORBIDDEN", StringComparison.Ordinal)).ShouldBeTrue(customers);
+        // query_customers is a curated tool whose GraphQL operation the caller cannot read: the governed GraphQL errors come back
+        // as EXECUTION_FAILED (filtered like /graphql), never mock data.
+        var (customersError, customers) = await McpTestClient.CallAsync(client, "query_customers", new { });
+        customersError.ShouldBeTrue(customers);
+        customers.ShouldContain("\"code\":\"EXECUTION_FAILED\"");
         customers.ShouldNotContain("Erika Mustermann");
     }
 

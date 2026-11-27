@@ -143,11 +143,11 @@ public sealed class McpServerTests
         var result = await guardrail.ExecuteToolWithGuardrailAsync(request, session);
 
         // Assert
-        result.IsSuccess.ShouldBeTrue();
+        result.IsSuccess.ShouldBeFalse();
         result.TruncatedDueToBudget.ShouldBeTrue();
-        result.ContentJson.ShouldContain("[TRUNCATED DUE TO MCP TOKEN BUDGET]");
-        using var parsed = JsonDocument.Parse(result.ContentJson);
-        parsed.RootElement.GetProperty("_meta").GetProperty("truncated").GetBoolean().ShouldBeTrue();
+        var error = Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Error(result.ContentJson);
+        error.GetProperty("code").GetString().ShouldBe("TOKEN_BUDGET_EXCEEDED");
+        error.GetProperty("hint").GetString().ShouldNotBeNullOrWhiteSpace();
     }
 
     [Fact]
@@ -251,8 +251,7 @@ public sealed class McpServerTests
         var result = await guardrail.ExecuteToolWithGuardrailAsync(request, session);
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage.ShouldNotBeNull();
-        result.ErrorMessage.ShouldContain("denied");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("TOOL_NOT_AVAILABLE");
 
         await auditRepo.Received(1).RecordAuditEventAsync(
             Arg.Is<AuditLogEntry>(e =>
@@ -361,7 +360,7 @@ public sealed class McpServerTests
         result.IsSuccess.ShouldBeFalse();
         result.ErrorMessage.ShouldNotBeNull();
         result.ErrorMessage.ShouldNotContain("Four-Eyes");
-        result.ErrorMessage.ShouldContain("denied");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("TOOL_NOT_AVAILABLE");
 
         // Step-up approval must NOT be requested!
         await stepUpService.DidNotReceiveWithAnyArgs().RequestStepUpApprovalAsync(
@@ -408,7 +407,7 @@ public sealed class McpServerTests
 
         result.IsSuccess.ShouldBeFalse();
         result.ErrorMessage.ShouldNotBeNull();
-        result.ErrorMessage.ShouldContain("not accessible");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("TOOL_NOT_AVAILABLE");
 
         await auditRepo.Received(1).RecordAuditEventAsync(
             Arg.Is<AuditLogEntry>(e =>

@@ -56,7 +56,7 @@ public partial class ProcedureExecutionSecurityTests
         string hiddenResult = await CallAsync(hidden, "get_orders");
         string unknownResult = await CallAsync(unknown, "nope");
 
-        hiddenResult.ShouldContain("\"code\":\"NOT_FOUND\"");
+        hiddenResult.ShouldContain("\"code\":\"RESOURCE_NOT_FOUND\"");
         unknownResult.ShouldBe(hiddenResult);
         AssertSameDenialAudit(hidden, unknown);
     }

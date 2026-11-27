@@ -41,10 +41,10 @@ public sealed class McpRecursiveCteGuardrailTests
 
         forbidden.ErrorMessage.ShouldBe(existing.ErrorMessage);
         existing.IsSuccess.ShouldBeFalse();
-        existing.ErrorMessage.ShouldStartWith("SQL_CONSTRUCT_NOT_SUPPORTED");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(existing).ShouldBe("SQL_CONSTRUCT_NOT_SUPPORTED");
         unknown.ErrorMessage.ShouldBe(existing.ErrorMessage);
-        existing.ErrorMessage.ShouldNotContain("orders", Case.Insensitive);
-        existing.ErrorMessage.ShouldNotContain("ghost", Case.Insensitive);
+        existing.ErrorMessage!.ShouldNotContain("orders", Case.Insensitive);
+        existing.ErrorMessage!.ShouldNotContain("ghost", Case.Insensitive);
     }
 
     [Fact]

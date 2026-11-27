@@ -57,7 +57,7 @@ public sealed class GuardrailErrorShapeTests
         var shapes = new[]
         {
             McpToolError.Serialize("INVALID_PARAMS", "m"),
-            McpToolError.Serialize("FORBIDDEN", "m", "tenant", "tool"),
+            McpToolError.Serialize("FORBIDDEN", "m"),
             """{"isError":true,"error":{"code":"X","message":"m"}}""",
             // Relayed protocol shapes (NL-SC-29): OData, Iceberg, Backstage, JSON-RPC and the Envoy pass-through.
             """{"error":{"code":"NotFound","message":"m"}}""",
