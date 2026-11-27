@@ -58,6 +58,41 @@ public sealed class GraphQlEnumerationShieldTests
         return result.ToJson();
     }
 
+    [Theory]
+    [InlineData("and: { note: { eq: \"x\" } }")]
+    [InlineData("or: { note: { eq: \"x\" } }")]
+    [InlineData("and: [{ note: { eq: \"x\" } }]")]
+    [InlineData("or: [{ note: { eq: \"x\" } }]")]
+    [Trait("Category", "Security")]
+    public void SingleObjectAndOr_WhereColumnsAreCollected(string where)
+    {
+        var id = new Autheris.Domain.Common.TableIdentifier("shop", "main", "orders");
+        var table = new Autheris.GraphQL.Catalog.CatalogTableType(
+            id, "Orders", "orders", "OrdersFilter", "OrdersOrderBy", new Autheris.Domain.Model.TableMetadata { Identifier = id },
+            [new Autheris.GraphQL.Catalog.CatalogColumnField("note", "note_col", Autheris.GraphQL.Catalog.CatalogFieldType.String, "varchar", true)],
+            []);
+        var node = HotChocolate.Language.Utf8GraphQLParser.Syntax.ParseValueLiteral("{ " + where + " }");
+        var req = new System.Collections.Generic.HashSet<string>();
+        var clear = new System.Collections.Generic.HashSet<string>();
+
+        GraphQlEnumerationShieldMiddleware.TryCollectWhereFilter(node, table, req, clear).ShouldBeTrue();
+
+        req.ShouldBe(["note_col"]);
+        clear.ShouldBe(["note_col"]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void ScalarAndOr_IsNotCollected()
+    {
+        var id = new Autheris.Domain.Common.TableIdentifier("shop", "main", "orders");
+        var table = new Autheris.GraphQL.Catalog.CatalogTableType(
+            id, "Orders", "orders", "OrdersFilter", "OrdersOrderBy", new Autheris.Domain.Model.TableMetadata { Identifier = id }, [], []);
+        var node = HotChocolate.Language.Utf8GraphQLParser.Syntax.ParseValueLiteral("{ and: 5 }");
+
+        GraphQlEnumerationShieldMiddleware.TryCollectWhereFilter(node, table, [], []).ShouldBeFalse();
+    }
+
     [Fact]
     public async Task Production_UnknownField_DeniedTable_AndDeniedColumn_AreIndistinguishable()
     {

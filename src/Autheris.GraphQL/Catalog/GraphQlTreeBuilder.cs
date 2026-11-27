@@ -410,6 +410,15 @@ public static class GraphQlTreeBuilder
         return ParseObjectFilter(objNode, table, context);
     }
 
+    private static IReadOnlyList<IValueNode> ReadLogicalMembers(IValueNode literal, string name) => literal switch
+    {
+        NullValueNode => throw new GatewayInvalidQueryException($"The '{name}' filter argument cannot be null."),
+        ListValueNode list => list.Items,
+        // GraphQL list input coercion: a single object is a one-member list.
+        ObjectValueNode obj => [obj],
+        _ => throw new GatewayInvalidQueryException($"The '{name}' filter argument must be a list."),
+    };
+
     internal static TreeFilter? ParseObjectFilter(
         ObjectValueNode objNode,
         CatalogTableType table,
@@ -428,71 +437,69 @@ public static class GraphQlTreeBuilder
 
             if (string.Equals(fieldName, "and", StringComparison.OrdinalIgnoreCase))
             {
-                if (valLiteral is ListValueNode listNode)
+                var andItems = new List<TreeFilter>();
+                foreach (var item in ReadLogicalMembers(valLiteral, "and"))
                 {
-                    var andItems = new List<TreeFilter>();
-                    foreach (var item in listNode.Items)
+                    var itemLiteral = item is VariableNode ivn ? ResolveVariableLiteral(ivn, context) : item;
+                    if (itemLiteral is NullValueNode)
                     {
-                        var itemLiteral = item is VariableNode ivn ? ResolveVariableLiteral(ivn, context) : item;
-                        if (itemLiteral is NullValueNode)
-                        {
-                            // a null member is rejected, never silently dropped.
-                            throw new GatewayInvalidQueryException("The 'and' filter members cannot be null.");
-                        }
-
-                        if (itemLiteral is ObjectValueNode ovn)
-                        {
-                            var parsed = ParseObjectFilter(ovn, table, context);
-                            if (parsed != null) andItems.Add(parsed);
-                        }
+                        // a null member is rejected, never silently dropped.
+                        throw new GatewayInvalidQueryException("The 'and' filter members cannot be null.");
                     }
-                    if (andItems.Count > 0) items.Add(new TreeAndFilter(andItems));
+
+                    if (itemLiteral is ObjectValueNode ovn)
+                    {
+                        var parsed = ParseObjectFilter(ovn, table, context);
+                        if (parsed != null) andItems.Add(parsed);
+                    }
+                    else
+                    {
+                        throw new GatewayInvalidQueryException("The 'and' filter members must be objects.");
+                    }
                 }
+                if (andItems.Count > 0) items.Add(new TreeAndFilter(andItems));
                 continue;
             }
 
             if (string.Equals(fieldName, "or", StringComparison.OrdinalIgnoreCase))
             {
-                if (valLiteral is NullValueNode)
+                var members = ReadLogicalMembers(valLiteral, "or");
+                if (members.Count == 0)
                 {
-                    throw new GatewayInvalidQueryException("The 'or' filter argument cannot be null.");
+                    items.Add(new TreeOrFilter([]));
                 }
-
-                if (valLiteral is ListValueNode listNode)
+                else
                 {
-                    if (listNode.Items.Count == 0)
+                    var orItems = new List<TreeFilter>();
+                    var orIsNeutral = false;
+                    foreach (var item in members)
                     {
-                        items.Add(new TreeOrFilter([]));
-                    }
-                    else
-                    {
-                        var orItems = new List<TreeFilter>();
-                        var orIsNeutral = false;
-                        foreach (var item in listNode.Items)
+                        var itemLiteral = item is VariableNode ivn ? ResolveVariableLiteral(ivn, context) : item;
+                        if (itemLiteral is NullValueNode)
                         {
-                            var itemLiteral = item is VariableNode ivn ? ResolveVariableLiteral(ivn, context) : item;
-                            if (itemLiteral is NullValueNode)
-                            {
-                                // a null member is rejected like 'or: null', never silently dropped.
-                                throw new GatewayInvalidQueryException("The 'or' filter members cannot be null.");
-                            }
+                            // a null member is rejected like 'or: null', never silently dropped.
+                            throw new GatewayInvalidQueryException("The 'or' filter members cannot be null.");
+                        }
 
-                            if (itemLiteral is ObjectValueNode ovn)
+                        if (itemLiteral is ObjectValueNode ovn)
+                        {
+                            var parsed = ParseObjectFilter(ovn, table, context);
+                            if (parsed != null)
                             {
-                                var parsed = ParseObjectFilter(ovn, table, context);
-                                if (parsed != null)
-                                {
-                                    orItems.Add(parsed);
-                                }
-                                else
-                                {
-                                    // #319: an empty member matches every row, so the whole 'or' is neutral (TRUE OR x is TRUE).
-                                    orIsNeutral = true;
-                                }
+                                orItems.Add(parsed);
+                            }
+                            else
+                            {
+                                // #319: an empty member matches every row, so the whole 'or' is neutral (TRUE OR x is TRUE).
+                                orIsNeutral = true;
                             }
                         }
-                        if (!orIsNeutral && orItems.Count > 0) items.Add(new TreeOrFilter(orItems));
+                        else
+                        {
+                            throw new GatewayInvalidQueryException("The 'or' filter members must be objects.");
+                        }
                     }
+                    if (!orIsNeutral && orItems.Count > 0) items.Add(new TreeOrFilter(orItems));
                 }
                 continue;
             }
