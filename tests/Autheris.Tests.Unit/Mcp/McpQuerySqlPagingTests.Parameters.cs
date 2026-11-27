@@ -244,7 +244,7 @@ public sealed partial class McpQuerySqlPagingTests
         var first = await handler.ExecuteToolAsync(QuerySqlTool, Args(ParamSql, new { n = "zzz" }), session);
         var cursor = JsonDocument.Parse(first).RootElement.GetProperty("cursor").GetString()!;
 
-        var tampered = cursor[..^1] + (cursor[^1] == 'A' ? 'B' : 'A');
+        var tampered = FlipMidMacChar(cursor);
         var tamperedCode = ErrorCode(await handler.ExecuteToolAsync(QuerySqlTool, Args(ParamSql, new { n = "zzz" }, tampered), session));
         tamperedCode.ShouldBe("INVALID_PARAMS");
 

@@ -96,7 +96,10 @@ public sealed partial class McpQuerySqlPagingTests
         int webSqlMaxAllowedRows = 0,
         bool withDemoSource = false,
         List<IReadOnlyList<object?>>? boundValues = null,
-        List<CapturingSqlService>? capture = null)
+        List<CapturingSqlService>? capture = null,
+        int maxOffset = 10_000,
+        Action<IGovernedSqlExecutionService>? captureService = null,
+        Action<WebSqlPageTokenCodec>? captureCodec = null)
     {
         var time = new FakeTimeProvider(new DateTimeOffset(2026, 11, 24, 4, 0, 0, TimeSpan.Zero));
         var options = new GatewayOptions
@@ -110,7 +113,7 @@ public sealed partial class McpQuerySqlPagingTests
                 MaxAllowedRows = webSqlMaxAllowedRows,
                 Paging = new WebSqlPagingOptions
                 {
-                    MaxOffset = 10_000,
+                    MaxOffset = maxOffset,
                     TokenLifetimeMinutes = 15
                 }
             },
@@ -223,6 +226,8 @@ public sealed partial class McpQuerySqlPagingTests
 
         var capturing = new CapturingSqlService(sqlService);
         capture?.Add(capturing);
+        captureService?.Invoke(sqlService);
+        captureCodec?.Invoke(codec);
         var handler = new McpToolExecutionHandler(
             capturing,
             new StubDataQueryService(),
