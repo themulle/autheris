@@ -133,6 +133,22 @@ public sealed partial class ProductExposureTests
         result.Rows[0]["order_id"].ShouldBe("***");
         result.Rows[0]["email"].ShouldBe("***");
         result.Rows[0]["note"].ShouldBe("n1");
+        result.HasMaskedValues.ShouldBeTrue();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ProcedureProduct_NoColumnReturned_HasNoMaskedValues()
+    {
+        var grant = ClearGrant();
+        grant["order_id"] = ColumnAccessLevel.Deny;
+        grant["email"] = ColumnAccessLevel.Deny;
+        grant["note"] = ColumnAccessLevel.Deny;
+        var service = await CreateAsync(grant);
+
+        var result = await service.ExecuteAsync("get_orders", Inputs(), Caller(), Tenant);
+
+        result.HasMaskedValues.ShouldBeFalse();
     }
 
     [Fact]

@@ -116,6 +116,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
 
             var request = new DatasetQueryRequest(table.Value, select, filter, orderBy, limit, offset, SqlTransports.Mcp);
             var envelope = await _dataQueryService.ExecuteQueryAsync(request, effectiveContext, ct).ConfigureAwait(false);
+            McpResultMasking.Report(envelope?.Data.Count > 0 && envelope.Columns.Any(c => c.Masked));
             return JsonSerializer.Serialize(envelope, JsonOpts);
         }
 
@@ -123,6 +124,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
         if (normEndpoint.Equals("/api/v1/catalog/datasets", StringComparison.OrdinalIgnoreCase))
         {
             if (!CatalogBranchAllowed) return UnknownEndpoint(endpoint, method);
+            McpResultMasking.Report(false);
             if (_catalogDiscoveryService == null)
             {
                 return SerializeError("ServiceUnavailable", 503, "CatalogDiscoveryService is not registered.");
@@ -136,6 +138,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
         if (normEndpoint.StartsWith("/api/v1/catalog/datasets/", StringComparison.OrdinalIgnoreCase))
         {
             if (!CatalogBranchAllowed) return UnknownEndpoint(endpoint, method);
+            McpResultMasking.Report(false);
             if (_catalogDiscoveryService == null)
             {
                 return SerializeError("ServiceUnavailable", 503, "CatalogDiscoveryService is not registered.");
@@ -157,6 +160,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
         if (normEndpoint.StartsWith("/api/v1/catalog/search", StringComparison.OrdinalIgnoreCase))
         {
             if (!CatalogBranchAllowed) return UnknownEndpoint(endpoint, method);
+            McpResultMasking.Report(false);
             if (_catalogDiscoveryService == null)
             {
                 return SerializeError("ServiceUnavailable", 503, "CatalogDiscoveryService is not registered.");
@@ -172,6 +176,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
         if (normEndpoint.StartsWith("/api/v1/catalog/datasources", StringComparison.OrdinalIgnoreCase))
         {
             if (!CatalogBranchAllowed) return UnknownEndpoint(endpoint, method);
+            McpResultMasking.Report(false);
             if (_catalogDiscoveryService == null)
             {
                 return SerializeError("ServiceUnavailable", 503, "CatalogDiscoveryService is not registered.");
@@ -211,6 +216,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
                 effectiveContext.TenantId,
                 ct).ConfigureAwait(false);
 
+            McpResultMasking.Report(sqlResult?.HasPolicyMaskedValues == true);
             return JsonSerializer.Serialize(sqlResult, JsonOpts);
         }
 
@@ -218,6 +224,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
         if (normEndpoint.Equals("/api/v1/governance/me/access", StringComparison.OrdinalIgnoreCase))
         {
             if (!AccessBranchAllowed) return UnknownEndpoint(endpoint, method);
+            McpResultMasking.Report(false);
             var accessInfo = new
             {
                 subjectId = effectiveContext.SubjectId.Value,

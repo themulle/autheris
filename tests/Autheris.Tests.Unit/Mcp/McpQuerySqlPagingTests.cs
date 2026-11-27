@@ -267,6 +267,20 @@ public sealed class McpQuerySqlPagingTests
         seenIds.ShouldBe([1, 2, 3, 4, 5]);
     }
 
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("SELECT id, name, email FROM sales.public.orders ORDER BY id", true)]
+    [InlineData("SELECT id, name FROM sales.public.orders ORDER BY id", false)]
+    public async Task QuerySql_ReportsPolicyMaskingOfTheProjection(string sql, bool expected)
+    {
+        var (handler, _, _) = CreatePipeline(maxResultRows: 5, maskEmail: true);
+        using var scope = McpResultMasking.Begin();
+
+        await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql }), CreateSession());
+
+        scope.Outcome.ShouldBe(expected);
+    }
+
     [Fact]
     public async Task QuerySql_MaskedColumn_RemainsMaskedOnEveryPage()
     {

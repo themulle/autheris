@@ -283,6 +283,8 @@ public static class McpSemanticTools
                 new MetricQueryRequest(metrics, groupBy, whereClause, timeGranularity, Limit: limit),
                 ct).ConfigureAwait(false);
 
+            // Aggregation on a masked column is refused by the governed service, so a returned result carries no masked values.
+            McpResultMasking.Report(false);
             return JsonSerializer.Serialize(result, IndentedOptions);
         }
         catch (GatewaySecurityException secEx)

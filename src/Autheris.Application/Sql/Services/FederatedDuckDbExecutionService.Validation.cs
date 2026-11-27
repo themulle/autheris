@@ -16,6 +16,9 @@ using TrinoSqlEngine.Analysis;
 
 public sealed partial class FederatedDuckDbExecutionService
 {
+    private static System.Collections.Immutable.ImmutableArray<bool> MaskedColumnFlags(Autheris.Application.Olap.OlapQueryResult result, CrossSourcePlan plan) =>
+        System.Collections.Immutable.ImmutableArray.CreateRange(result.Columns.Select(c => IsMaskedByName(c, plan)));
+
     private static bool IsMaskedByName(string columnName, CrossSourcePlan plan)
     {
         bool foundMatch = false;

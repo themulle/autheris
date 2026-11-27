@@ -287,6 +287,29 @@ public sealed class LakehouseAndProcedureGovernedPathsSecurityTests
         result.Columns.ShouldBeEmpty();
     }
 
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData(true, 1, true)]
+    [InlineData(true, 0, false)]
+    [InlineData(false, 1, false)]
+    public async Task ProcedureResult_HasMaskedValues_FollowsTheReturnedMaskedColumns(bool includeSalary, int rowCount, bool expected)
+    {
+        var sources = new Dictionary<string, ResultColumnSource>(StringComparer.OrdinalIgnoreCase)
+        {
+            ["order_id"] = new("sales", "orders", "order_id"),
+            ["salary"] = new("sales", "orders", "salary")
+        };
+        string[] columns = includeSalary ? ["order_id", "salary"] : ["order_id"];
+        var f = NewProc(sources, columns);
+        var rows = Enumerable.Range(0, rowCount).Select(_ => new object?[] { 1, "x" }[..columns.Length]).ToList();
+        f.Invoker.ExecuteReadAsync(Arg.Any<ProcedureDefinition>(), Arg.Any<IReadOnlyDictionary<string, object?>>(), Arg.Any<ProcedureSecurityContext>(), Arg.Any<int>(), Arg.Any<CancellationToken>())
+            .Returns(new RawProcedureResult(columns, rows, false));
+
+        var result = await f.Create().ExecuteAsync("get_orders", Inputs, ProcUser(), Tenant1);
+
+        result.HasMaskedValues.ShouldBe(expected);
+    }
+
     // ------------------------------------------------------------------ Low: role before health, client IP
 
     [Fact]

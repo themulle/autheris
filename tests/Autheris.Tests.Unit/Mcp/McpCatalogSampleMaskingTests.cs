@@ -168,6 +168,7 @@ public sealed class McpCatalogSampleMaskingTests
         var restSamples = await restArtifacts.GetSamplesAsync(callerPrincipal, TableId.ToString());
         var restDescribe = await discoveryService.GetAsync(TableId, DiscoveryTestBuilder.Caller(callerPrincipal, Tenant));
         var mcpDescribe = await mcp.DescribeDatasetAsync(callerPrincipal, TableId.ToString());
+        using var maskingScope = McpResultMasking.Begin();
         var mcpSample = await mcp.SampleRowsAsync(callerPrincipal, TableId.ToString(), 5);
 
         restDescribe.ShouldNotBeNull();
@@ -180,6 +181,7 @@ public sealed class McpCatalogSampleMaskingTests
         restSamples.Payload!.Samples[0].ContainsKey("ssn").ShouldBeFalse();
         restSamples.Payload.Samples[0]["email"]?.ToString().ShouldNotBe("alice@corp.test");
         mcpSample.Rows[0].ContainsKey("ssn").ShouldBeFalse();
+        maskingScope.Outcome.ShouldBe(true);
         mcpSample.Rows[0]["email"]?.ToString().ShouldNotBe("alice@corp.test");
 
         var restEmailStats = restDescribe.Columns.Single(c => c.Name == "email").Statistics!;
