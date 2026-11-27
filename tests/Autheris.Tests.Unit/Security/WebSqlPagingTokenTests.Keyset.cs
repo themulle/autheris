@@ -1,0 +1,345 @@
+namespace Autheris.Tests.Unit.Security;
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Security.Claims;
+using System.Text;
+using System.Text.Json;
+using Autheris.Application.Sql.Paging;
+using Autheris.Application.Sql.Services;
+using Autheris.Domain.Common;
+using Shouldly;
+using TrinoSqlEngine.Ast.Emit;
+using Xunit;
+
+[Trait("Category", "Security")]
+public sealed partial class WebSqlPagingTokenTests
+{
+    // ---- Keyset (v2) tokens ----
+
+    private const string KeysetSql = "SELECT id FROM crm.customers ORDER BY id";
+    private const string ShapeHash = "0123456789abcdef";
+    private const long MaxOffset = 10_000;
+
+    private static string KeysetToken(
+        WebSqlPageTokenCodec codec,
+        ClaimsPrincipal? user = null,
+        string tenant = "tenant-1",
+        string dataSource = "crm",
+        string transport = "WebSql",
+        string sql = KeysetSql,
+        long offset = 20_000,
+        int size = 100,
+        int page = 201,
+        IReadOnlyList<object?>? keys = null,
+        TimeSpan? lifetime = null) =>
+        codec.EncodeKeysetToken(
+            sql,
+            null,
+            user ?? CreateUser(),
+            new TenantId(tenant),
+            dataSource,
+            transport,
+            offset,
+            size,
+            page,
+            ShapeHash,
+            keys ?? [123L],
+            lifetime ?? TimeSpan.FromMinutes(15))!;
+
+    private static WebSqlDecodedPageToken DecodeKeyset(
+        WebSqlPageTokenCodec codec,
+        string token,
+        ClaimsPrincipal? user = null,
+        string tenant = "tenant-1",
+        string dataSource = "crm",
+        string transport = "WebSql",
+        string sql = KeysetSql,
+        IReadOnlyDictionary<string, object?>? parameters = null) =>
+        codec.DecodeToken(token, sql, parameters, user ?? CreateUser(), new TenantId(tenant), dataSource, transport, MaxOffset);
+
+    private static string Forge(WebSqlPageTokenCodec codec, WebSqlPageTokenPayload payload) =>
+        codec.Seal(payload, KeysetSql, null, "user-1", "tenant-1", "crm", "WebSql");
+
+    private static long FutureExp => DateTimeOffset.UtcNow.AddMinutes(10).ToUnixTimeSeconds();
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetToken_RoundTrip()
+    {
+        var (codec, _, _) = CreateCodec();
+        var guid = Guid.NewGuid();
+        string token = KeysetToken(codec, keys: [123L, "abc", guid]);
+
+        var decoded = DecodeKeyset(codec, token);
+
+        decoded.Offset.ShouldBe(20_000);
+        decoded.Size.ShouldBe(100);
+        decoded.PageNumber.ShouldBe(201);
+        decoded.Keyset.ShouldNotBeNull();
+        decoded.Keyset!.ShapeHash.ShouldBe(ShapeHash);
+        decoded.Keyset.Values.ShouldBe([(object)123L, "abc", guid]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void V1Token_BytesUnchanged_NoKeysetFields()
+    {
+        var (codec, _, _) = CreateCodec();
+        string token = codec.EncodeToken(KeysetSql, null, CreateUser(), new TenantId("tenant-1"), "crm", "WebSql", 100, 100, 2, TimeSpan.FromMinutes(15));
+        string json = Encoding.UTF8.GetString(System.Buffers.Text.Base64Url.DecodeFromChars(token.Split('.')[0]));
+        json.ShouldNotContain("\"h\"");
+        json.ShouldNotContain("\"k\"");
+        json.ShouldStartWith("{\"v\":1,\"o\":100,\"n\":100,\"p\":2,\"exp\":");
+        DecodeKeyset(codec, token).Keyset.ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetToken_TamperedKeyValue_Rejected()
+    {
+        var (codec, _, _) = CreateCodec();
+        string token = KeysetToken(codec);
+        var parts = token.Split('.');
+        var payload = JsonSerializer.Deserialize<WebSqlPageTokenPayload>(System.Buffers.Text.Base64Url.DecodeFromChars(parts[0]))!;
+        var tampered = payload with { k = ["i8:1"] };
+        string forged = System.Buffers.Text.Base64Url.EncodeToString(JsonSerializer.SerializeToUtf8Bytes(tampered)) + "." + parts[1];
+
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, forged));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetToken_TamperedShapeHash_Rejected()
+    {
+        var (codec, _, _) = CreateCodec();
+        string token = KeysetToken(codec);
+        var parts = token.Split('.');
+        var payload = JsonSerializer.Deserialize<WebSqlPageTokenPayload>(System.Buffers.Text.Base64Url.DecodeFromChars(parts[0]))!;
+        var tampered = payload with { h = "fedcba9876543210" };
+        string forged = System.Buffers.Text.Base64Url.EncodeToString(JsonSerializer.SerializeToUtf8Bytes(tampered)) + "." + parts[1];
+
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, forged));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetToken_TamperedVersion_Rejected()
+    {
+        var (codec, _, _) = CreateCodec();
+        string token = KeysetToken(codec);
+        var parts = token.Split('.');
+        var payload = JsonSerializer.Deserialize<WebSqlPageTokenPayload>(System.Buffers.Text.Base64Url.DecodeFromChars(parts[0]))!;
+        var tampered = payload with { v = 1 };
+        string forged = System.Buffers.Text.Base64Url.EncodeToString(JsonSerializer.SerializeToUtf8Bytes(tampered)) + "." + parts[1];
+
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, forged));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetToken_OtherCaller_Rejected()
+    {
+        var (codec, _, _) = CreateCodec();
+        string token = KeysetToken(codec);
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, token, user: CreateUser("user-2")));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetToken_OtherTenant_Rejected()
+    {
+        var (codec, _, _) = CreateCodec();
+        string token = KeysetToken(codec);
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, token, tenant: "tenant-2"));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetToken_OtherDataSource_Rejected()
+    {
+        var (codec, _, _) = CreateCodec();
+        string token = KeysetToken(codec);
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, token, dataSource: "erp"));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetToken_OtherTransport_Rejected()
+    {
+        var (codec, _, _) = CreateCodec();
+        string token = KeysetToken(codec);
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, token, transport: "Mcp"));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetToken_OtherStatementOrParams_Rejected()
+    {
+        var (codec, _, _) = CreateCodec();
+        string token = KeysetToken(codec);
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, token, sql: KeysetSql + " DESC"));
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, token, parameters: new Dictionary<string, object?> { ["a"] = 1 }));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetToken_Expired_Rejected()
+    {
+        var (codec, _, _) = CreateCodec();
+        string token = KeysetToken(codec, lifetime: TimeSpan.FromSeconds(-10));
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, token));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetToken_ErrorsAreIndistinguishable()
+    {
+        var (codec, _, _) = CreateCodec();
+        string token = KeysetToken(codec);
+        var messages = new[]
+        {
+            Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, token, user: CreateUser("user-2"))).Message,
+            Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, KeysetToken(codec, lifetime: TimeSpan.FromSeconds(-10)))).Message,
+            Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, Forge(codec, new WebSqlPageTokenPayload(2, 20_000, 100, 201, FutureExp, ShapeHash, ["zz:1"])))).Message,
+            Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, Forge(codec, new WebSqlPageTokenPayload(9, 20_000, 100, 201, FutureExp)))).Message
+        };
+        messages.Distinct().Count().ShouldBe(1);
+        messages[0].ShouldBe(GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.PagingTokenInvalid));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetToken_OffsetAtOrBelowMaxOffset_Rejected()
+    {
+        var (codec, _, _) = CreateCodec();
+        // o == MaxOffset (page 101 * 100 -> offset 10_000) and below.
+        string atMax = KeysetToken(codec, offset: 10_000, page: 101);
+        string below = KeysetToken(codec, offset: 100, page: 2);
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, atMax));
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, below));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetToken_AtOrBelowMaxOffset_Rejected()
+    {
+        var (codec, _, _) = CreateCodec();
+        string justAbove = KeysetToken(codec, offset: 10_100, page: 102);
+        DecodeKeyset(codec, justAbove).Keyset.ShouldNotBeNull();
+        string atMax = KeysetToken(codec, offset: 10_000, page: 101);
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, atMax));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void V1Token_BeyondMaxOffset_StillRejected()
+    {
+        var (codec, _, _) = CreateCodec();
+        string token = codec.EncodeToken(KeysetSql, null, CreateUser(), new TenantId("tenant-1"), "crm", "WebSql", 20_000, 100, 201, TimeSpan.FromMinutes(15));
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, token));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void V1Token_WithKeyField_Rejected()
+    {
+        var (codec, _, _) = CreateCodec();
+        string token = Forge(codec, new WebSqlPageTokenPayload(1, 100, 100, 2, FutureExp, null, ["i8:1"]));
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, token));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void V2Token_WithoutKeyField_Rejected()
+    {
+        var (codec, _, _) = CreateCodec();
+        string noKeys = Forge(codec, new WebSqlPageTokenPayload(2, 20_000, 100, 201, FutureExp, ShapeHash, null));
+        string noHash = Forge(codec, new WebSqlPageTokenPayload(2, 20_000, 100, 201, FutureExp, null, ["i8:1"]));
+        string emptyKeys = Forge(codec, new WebSqlPageTokenPayload(2, 20_000, 100, 201, FutureExp, ShapeHash, []));
+        string badHash = Forge(codec, new WebSqlPageTokenPayload(2, 20_000, 100, 201, FutureExp, "xyz", ["i8:1"]));
+        foreach (var t in new[] { noKeys, noHash, emptyKeys, badHash })
+        {
+            Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, t));
+        }
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData(0)]
+    [InlineData(3)]
+    [InlineData(-1)]
+    public void UnknownVersion_Rejected(int version)
+    {
+        var (codec, _, _) = CreateCodec();
+        string token = Forge(codec, new WebSqlPageTokenPayload(version, 100, 100, 2, FutureExp));
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, token));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetToken_NullKeyValue_NotIssued()
+    {
+        var (codec, _, _) = CreateCodec();
+        codec.EncodeKeysetToken(KeysetSql, null, CreateUser(), new TenantId("tenant-1"), "crm", "WebSql", 20_000, 100, 201, ShapeHash, [null], TimeSpan.FromMinutes(1)).ShouldBeNull();
+        codec.EncodeKeysetToken(KeysetSql, null, CreateUser(), new TenantId("tenant-1"), "crm", "WebSql", 20_000, 100, 201, ShapeHash, [1L, null], TimeSpan.FromMinutes(1)).ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetToken_UnsupportedType_NotIssued()
+    {
+        var (codec, _, _) = CreateCodec();
+        codec.EncodeKeysetToken(KeysetSql, null, CreateUser(), new TenantId("tenant-1"), "crm", "WebSql", 20_000, 100, 201, ShapeHash, [1.5d], TimeSpan.FromMinutes(1)).ShouldBeNull();
+        codec.EncodeKeysetToken(KeysetSql, null, CreateUser(), new TenantId("tenant-1"), "crm", "WebSql", 20_000, 100, 201, ShapeHash, [new byte[] { 1 }], TimeSpan.FromMinutes(1)).ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetToken_TooLong_NotIssued()
+    {
+        var (codec, _, _) = CreateCodec();
+        // 8 entries of 200 chars exceed 1024 once Base64-encoded.
+        object?[] keys = Enumerable.Range(0, 8).Select(_ => (object?)new string('x', 200)).ToArray();
+        codec.EncodeKeysetToken(KeysetSql, null, CreateUser(), new TenantId("tenant-1"), "crm", "WebSql", 20_000, 100, 201, ShapeHash, keys, TimeSpan.FromMinutes(1)).ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetToken_MoreThanEightValues_Rejected()
+    {
+        var (codec, _, _) = CreateCodec();
+        object?[] nine = Enumerable.Range(0, 9).Select(i => (object?)(long)i).ToArray();
+        codec.EncodeKeysetToken(KeysetSql, null, CreateUser(), new TenantId("tenant-1"), "crm", "WebSql", 20_000, 100, 201, ShapeHash, nine, TimeSpan.FromMinutes(1)).ShouldBeNull();
+        string forged = Forge(codec, new WebSqlPageTokenPayload(2, 20_000, 100, 201, FutureExp, ShapeHash, nine.Select(v => "i8:" + v).ToArray()));
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, forged));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetToken_PageNumberOverLimit_Rejected()
+    {
+        var (codec, _, _) = CreateCodec();
+        // Size over the 100_000 bound and an overflowing page number.
+        string bigSize = Forge(codec, new WebSqlPageTokenPayload(2, 100_001L * 1, 100_001, 2, FutureExp, ShapeHash, ["i8:1"]));
+        string overflow = Forge(codec, new WebSqlPageTokenPayload(2, 20_000, 100, int.MaxValue, FutureExp, ShapeHash, ["i8:1"]));
+        string negativeOffset = Forge(codec, new WebSqlPageTokenPayload(2, -100, 100, 0, FutureExp, ShapeHash, ["i8:1"]));
+        foreach (var t in new[] { bigSize, overflow, negativeOffset })
+        {
+            Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, t));
+        }
+
+        codec.EncodeKeysetToken(KeysetSql, null, CreateUser(), new TenantId("tenant-1"), "crm", "WebSql", 100_001, 100_001, 2, ShapeHash, [1L], TimeSpan.FromMinutes(1)).ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Token_Over1024Chars_Rejected()
+    {
+        var (codec, _, _) = CreateCodec();
+        string token = new string('a', 1025);
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, token));
+        WebSqlPageTokenCodec.MaxTokenLength.ShouldBe(1024);
+    }
+}

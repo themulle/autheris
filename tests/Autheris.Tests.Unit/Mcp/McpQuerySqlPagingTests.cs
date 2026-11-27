@@ -388,12 +388,44 @@ public sealed partial class McpQuerySqlPagingTests
 
         // Malformed inputs
         AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor = "" }), ownerSession));
-        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor = new string('x', 513) }), ownerSession));
+        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor = new string('x', 1025) }), ownerSession));
         AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, """{"query":"SELECT id, name FROM sales.public.orders ORDER BY id","cursor":123}""", ownerSession));
 
         // Expired token
         time.Advance(TimeSpan.FromMinutes(16));
         AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor }), ownerSession));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Cursor_Between512And1024_Accepted()
+    {
+        var (handler, _, _) = CreatePipeline(maxResultRows: 2);
+        var session = CreateSession("S-1-5-21-1055-OWNER", "tenant-1");
+        const string sql = "SELECT id, name FROM sales.public.orders ORDER BY id";
+
+        foreach (int length in new[] { 513, 600, 1024 })
+        {
+            var json = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor = new string('x', length) }), session);
+            using var doc = JsonDocument.Parse(json);
+            doc.RootElement.GetProperty("error").GetProperty("code").GetString().ShouldBe("INVALID_PARAMS");
+            // Passed the length gate and failed at token verification, not at the length check.
+            doc.RootElement.GetProperty("error").GetProperty("message").GetString().ShouldBe("Invalid or expired continuation cursor.");
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Cursor_Over1024_InvalidParams()
+    {
+        var (handler, _, _) = CreatePipeline(maxResultRows: 2);
+        var session = CreateSession("S-1-5-21-1055-OWNER", "tenant-1");
+        const string sql = "SELECT id, name FROM sales.public.orders ORDER BY id";
+
+        var json = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor = new string('x', 1025) }), session);
+        using var doc = JsonDocument.Parse(json);
+        doc.RootElement.GetProperty("error").GetProperty("code").GetString().ShouldBe("INVALID_PARAMS");
+        doc.RootElement.GetProperty("error").GetProperty("message").GetString().ShouldBe("Invalid continuation cursor.");
     }
 
     [Fact]

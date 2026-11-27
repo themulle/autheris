@@ -48,7 +48,7 @@ public sealed partial class McpToolExecutionHandler
             }
 
             cursor = cursorProp.GetString();
-            if (string.IsNullOrWhiteSpace(cursor) || cursor.Length > 512)
+            if (string.IsNullOrWhiteSpace(cursor) || cursor.Length > WebSqlPageTokenCodec.MaxTokenLength)
             {
                 return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, "Invalid continuation cursor.");
             }

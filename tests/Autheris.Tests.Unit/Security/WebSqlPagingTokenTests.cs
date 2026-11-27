@@ -2,6 +2,7 @@ namespace Autheris.Tests.Unit.Security;
 
 using System;
 using System.Collections.Generic;
+using System.Linq;
 using System.Security;
 using System.Security.Claims;
 using System.Text;
@@ -18,7 +19,7 @@ using TrinoSqlEngine.Ast.Emit;
 using Xunit;
 
 [Trait("Category", "Security")]
-public sealed class WebSqlPagingTokenTests
+public sealed partial class WebSqlPagingTokenTests
 {
     private sealed class TestSecretProvider(byte[] secret) : IKeyVaultSecretProvider
     {
@@ -516,8 +517,8 @@ public sealed class WebSqlPagingTokenTests
     [Trait("Category", "Security")]
     public void Oversized_RejectedBeforeDecode()
     {
-        string oversizedToken = new string('a', 513);
-        oversizedToken.Length.ShouldBeGreaterThan(512);
+        string oversizedToken = new string('a', WebSqlPageTokenCodec.MaxTokenLength + 1);
+        oversizedToken.Length.ShouldBeGreaterThan(1024);
     }
 
     [Fact]

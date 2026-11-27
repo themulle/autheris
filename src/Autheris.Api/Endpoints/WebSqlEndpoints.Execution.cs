@@ -248,7 +248,7 @@ public static partial class WebSqlEndpoints
                 }
             }
 
-            if (nextTok != null && nextTok.Length > 512)
+            if (nextTok != null && nextTok.Length > Autheris.Application.Sql.Paging.WebSqlPageTokenCodec.MaxTokenLength)
             {
                 await WriteWebSqlErrorAsync(httpContext, new TrinoSqlEngine.Ast.Emit.SqlPagingTokenInvalidException(), logger, ct);
                 return;
