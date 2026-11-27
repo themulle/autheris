@@ -494,6 +494,7 @@ internal static class ConnectionGraphQlTypes
                 EndCursor: edges.Count > 0 ? edges[^1].Cursor : null);
 
             ctx.ContextData["AutherisRowsReturned"] = edges.Count;
+            await Autheris.GraphQL.Interceptors.DatasetFactsCollector.RecordTreeRootAsync(ctx, treeService, principal, queryNode, opId, hasNextPage).ConfigureAwait(false);
             return new GraphQlConnection(edges, pageInfo, edges.Count);
         }
     }

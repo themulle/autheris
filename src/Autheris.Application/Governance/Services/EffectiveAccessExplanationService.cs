@@ -190,19 +190,20 @@ public sealed class EffectiveAccessExplanationService(
             }
         }
 
-        var activeRowFilters = new List<string>();
-        if (decision.ConsentFilterRecipe is { } recipe && Autheris.Application.Identity.Attributes.CallerAttributeRecipes.Names(recipe).Count > 0)
-        {
-            activeRowFilters.Add(AttributeRowFilterDescription);
-        }
-        else if (!string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
+        var activeRowFilters = new List<string>(RowFilterDisclosure.Describe(decision));
+        if (activeRowFilters.Count == 1
+            && ReferenceEquals(activeRowFilters[0], RowFilterDescription)
+            && !string.IsNullOrWhiteSpace(decision.CombinedRowFilterSql))
         {
             // The SQL (literal values, internal rules) is shown only to owners, delegates and governance admins, and never
             // to a read-only or restricted-scope token, whoever the user is (#708): an agent forwards results to a model provider.
             var canSeeDefinition = !principal.IsReadOnly()
                 && !restrictedScope
                 && (isAdmin || await IsOwnerOrDelegateAsync(userSid.Value, table, ct).ConfigureAwait(false));
-            activeRowFilters.Add(canSeeDefinition ? decision.CombinedRowFilterSql : RowFilterDescription);
+            if (canSeeDefinition)
+            {
+                activeRowFilters[0] = decision.CombinedRowFilterSql;
+            }
         }
 
         var applicableConsents = MatchingAllowConsents(activeConsents, table, now, userSid.Value, groupSids, roles, allUserSids).ToList();

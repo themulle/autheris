@@ -1,6 +1,7 @@
 namespace Autheris.Application.Analytics;
 
 using System;
+using Autheris.Application.Sql.Tree;
 using System.Collections.Generic;
 using Autheris.Domain.Exceptions;
 using Autheris.Domain.Interfaces;
@@ -136,6 +137,12 @@ public sealed record AggregationResult(
     AggregationGroupRow? Totals,
     AggregationMetadata Metadata)
 {
+    /// <summary>Catalog table, path and fixed-text row-filter facts of the decision that allowed this aggregation.</summary>
+    public DatasetAccessFacts? AccessFacts { get; init; }
+
+    /// <summary>True when <see cref="SuppressedGroupsCount"/> carries the real count (Privacy.ExposeSuppressedGroupsCount); false means it is a placeholder 0.</summary>
+    public bool SuppressedCountsExposed { get; init; }
+
     public bool Suppressed => Metadata.Suppressed;
     public int SuppressedGroupsCount => Metadata.SuppressedGroupsCount;
     public long SuppressedRowsCount => Metadata.SuppressedRowsCount;

@@ -1,6 +1,7 @@
 namespace Autheris.Application.Analytics;
 
 using System;
+using Autheris.Application.Sql.Tree;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
@@ -383,7 +384,11 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             Table: query.Table,
             Groups: visibleGroupRows,
             Totals: totalsRow,
-            Metadata: resultMetadata);
+            Metadata: resultMetadata)
+        {
+            AccessFacts = DatasetAccessFacts.From(query.Table, [], decision),
+            SuppressedCountsExposed = exposedSuppressedCounts
+        };
     }
 }
 
