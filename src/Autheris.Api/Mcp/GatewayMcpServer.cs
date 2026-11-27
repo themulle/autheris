@@ -471,13 +471,13 @@ public static class GatewayMcpServer
             logger?.LogError(ex, "MCP tool call failed with {Code}.", code);
             await McpToolFailureRecorder.RecordDenyAsync(
                 services.GetService<Autheris.Application.Audit.IAuditWriter>(), services.GetService<TimeProvider>(), logger, session, toolName, code, ct).ConfigureAwait(false);
-            return ToolError(McpToolError.Fail(code).ContentJson);
+            return ToolError(McpToolError.Fail(code).ContentJson, toolName);
         }
 
         // The guardrail classified the result once; a failed result is always an error result, a successful one never is.
         if (!result.IsSuccess)
         {
-            return ToolError(result.ErrorMessage ?? result.ContentJson);
+            return ToolError(result.ErrorMessage ?? result.ContentJson, toolName);
         }
 
         var meta = new System.Text.Json.Nodes.JsonObject
@@ -510,9 +510,9 @@ public static class GatewayMcpServer
     }
 
     /// <summary>An error result: the normalised envelope is both the text content and the structured content (one source, so they cannot diverge).</summary>
-    internal static CallToolResult ToolError(string? envelopeJson)
+    internal static CallToolResult ToolError(string? envelopeJson, string? toolName = null)
     {
-        var envelope = McpToolError.Normalize(envelopeJson);
+        var envelope = McpToolError.Normalize(envelopeJson, toolName);
         using var parsed = JsonDocument.Parse(envelope);
         return new CallToolResult
         {

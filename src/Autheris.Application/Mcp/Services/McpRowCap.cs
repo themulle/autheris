@@ -97,59 +97,6 @@ public static class McpRowCap
         return json;
     }
 
-    /// <summary>trims every list in the GraphQL <c>data</c> tree (root, nested, aliases, fragments all resolve to lists here).</summary>
-    public static string TrimGraphQl(string json, int cap)
-    {
-        if (!TryParse(json, out var node) || node is not JsonObject obj || obj["data"] is null)
-        {
-            return json;
-        }
-
-        var cut = false;
-        var stack = new Stack<JsonNode>();
-        stack.Push(obj["data"]!);
-        while (stack.Count > 0)
-        {
-            switch (stack.Pop())
-            {
-                case JsonArray array:
-                    if (array.Count > cap)
-                    {
-                        Cut(array, cap);
-                        cut = true;
-                    }
-
-                    foreach (var item in array)
-                    {
-                        if (item is not null)
-                        {
-                            stack.Push(item);
-                        }
-                    }
-
-                    break;
-                case JsonObject child:
-                    foreach (var property in child)
-                    {
-                        if (property.Value is not null)
-                        {
-                            stack.Push(property.Value);
-                        }
-                    }
-
-                    break;
-            }
-        }
-
-        if (!cut)
-        {
-            return json;
-        }
-
-        Flag(obj, cap);
-        return obj.ToJsonString(Relaxed);
-    }
-
     private static void Cut(JsonArray array, int cap)
     {
         for (var i = array.Count - 1; i >= cap; i--)

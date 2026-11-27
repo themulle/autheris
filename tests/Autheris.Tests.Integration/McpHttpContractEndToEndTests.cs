@@ -24,7 +24,7 @@ using Xunit;
 /// The MCP query tools answer the same payload and the same error code as the HTTP endpoint they mirror: the same request is sent to
 /// MCP and to <c>POST /api/v1/sql</c> as the same caller and the parsed bodies are compared.
 /// </summary>
-public sealed class McpHttpContractEndToEndTests : IClassFixture<McpHttpContractEndToEndTests.HostFixture>
+public sealed partial class McpHttpContractEndToEndTests : IClassFixture<McpHttpContractEndToEndTests.HostFixture>
 {
     private const string UserSid = "S-1-MCP-HTTP-USER";
     private const string Tenant = "tenant_http";
@@ -46,8 +46,8 @@ public sealed class McpHttpContractEndToEndTests : IClassFixture<McpHttpContract
         public HostFixture()
         {
             _dbPath = PostgresDataSource.Create("mcp_http", """
-                CREATE TABLE mcp_http_rows (id INTEGER PRIMARY KEY, label TEXT NOT NULL, secret TEXT NOT NULL);
-                INSERT INTO mcp_http_rows SELECT g, 'label-' || g, 's3cret-' || g FROM generate_series(1, 520) AS g;
+                CREATE TABLE mcp_http_rows (id INTEGER PRIMARY KEY, label TEXT NOT NULL, secret TEXT NOT NULL, denied_x TEXT NOT NULL);
+                INSERT INTO mcp_http_rows SELECT g, 'label-' || g, 's3cret-' || g, 'd-' || g FROM generate_series(1, 520) AS g;
                 """);
         }
 
@@ -84,7 +84,7 @@ public sealed class McpHttpContractEndToEndTests : IClassFixture<McpHttpContract
         var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
         var columns = new (string Name, ColumnAccessLevel Level)[]
         {
-            ("id", ColumnAccessLevel.Clear), ("label", ColumnAccessLevel.Clear), ("secret", ColumnAccessLevel.Mask)
+            ("id", ColumnAccessLevel.Clear), ("label", ColumnAccessLevel.Clear), ("secret", ColumnAccessLevel.Mask), ("denied_x", ColumnAccessLevel.Deny)
         };
         await repo.UpsertTableMetadataAsync(new TableMetadata
         {

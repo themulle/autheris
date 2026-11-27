@@ -207,7 +207,7 @@ public static class McpDatasetTools
     {
         yield return new McpToolDefinition(
             Name: QueryGraphQl,
-            Description: "Default tool for reading data. Runs a read-only GraphQL query against the gateway: filter (where), sort (orderBy), page (first, offset) and follow relations between datasets. Get the field names and an example query from describe_dataset.",
+            Description: "Default tool for reading data. Runs a read-only GraphQL query against the gateway: filter (where), sort (orderBy), page (first, offset) and follow relations between datasets. Get the field names and an example query from describe_dataset. The result is the POST /graphql body. A failure answers {error:{code,message}, errors:[...]} with the GraphQL errors list; data next to errors is a normal result.",
             InputJsonSchema: """
             {
               "type": "object",

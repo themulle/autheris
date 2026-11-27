@@ -92,6 +92,22 @@ public sealed class McpServerErrorEnvelopeTests
     }
 
     [Fact]
+    public async Task ToolError_QueryGraphQl_StructuredContentHasErrorAndErrors()
+    {
+        var envelope = McpToolError.SerializeGraphQl("""{"data":null,"errors":[{"message":"nope","path":["a"],"extensions":{"code":"GRAPHQL_COST_EXCEEDED"}}]}""");
+
+        var result = await Call(Returning(McpToolError.FailWith(envelope)), "query_graphql");
+        var other = await Call(Returning(McpToolError.FailWith(envelope)), "query_dataset");
+
+        result.IsError.ShouldBe(true);
+        Text(result).ShouldBe(envelope);
+        result.StructuredContent!.Value.GetRawText().ShouldBe(envelope);
+        result.StructuredContent!.Value.EnumerateObject().Select(p => p.Name).ShouldBe(["error", "errors"]);
+        result.StructuredContent!.Value.GetProperty("error").GetProperty("code").GetString().ShouldBe("GRAPHQL_COST_EXCEEDED");
+        JsonDocument.Parse(Text(other)).RootElement.EnumerateObject().Select(p => p.Name).ShouldBe(["error"]);
+    }
+
+    [Fact]
     public async Task LegacyFreeText_NormalizedToExecutionFailed()
     {
         var result = await Call(Returning(new McpToolCallResult(false, "{}", "Access denied to tool 'q' for tenant acme")));

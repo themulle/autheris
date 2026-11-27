@@ -43,7 +43,7 @@ public sealed class McpRowCapTests
         public List<Order> Orders => Enumerable.Range(0, Produced).Select(i => new Order { Id = i }).ToList();
     }
 
-    public static TheoryData<string> Tools => new() { "query_dataset", "call_procedure", "sample_rows", "query_graphql" };
+    public static TheoryData<string> Tools => new() { "query_dataset", "call_procedure", "sample_rows" };
 
     private static string RowsJson(string arrayName, int n, string countName) =>
         JsonSerializer.Serialize(new Dictionary<string, object?>
@@ -200,30 +200,20 @@ public sealed class McpRowCapTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task GraphQl_nested_list_and_alias_trimmed_to_cap()
+    public async Task GraphQl_nested_list_and_alias_NotTrimmed()
     {
-        // SEC-53-04
+        // query_graphql answers like POST /graphql: the guards are the cost rule, GraphQL:MaxResponseRows and the token budget, not Mcp:MaxResultRows.
         var f = await CreateAsync();
 
         var root = await RunAsync(f, "query_graphql",
             """{"query":"{ a: orders { id tags { name } } b: orders { id } }"}""");
 
         var data = root.GetProperty("data");
-        data.GetProperty("a").GetArrayLength().ShouldBe(Cap);
-        data.GetProperty("b").GetArrayLength().ShouldBe(Cap);
-        data.GetProperty("a")[0].GetProperty("tags").GetArrayLength().ShouldBe(Cap);
-        root.GetProperty("truncated").GetBoolean().ShouldBeTrue();
-    }
-
-    [Fact]
-    public async Task GraphQl_cap_applies_per_root_list()
-    {
-        var f = await CreateAsync();
-
-        var root = await RunAsync(f, "query_graphql", """{"query":"{ x: orders { id } y: orders { id } }"}""");
-
-        root.GetProperty("data").GetProperty("x").GetArrayLength().ShouldBe(Cap);
-        root.GetProperty("data").GetProperty("y").GetArrayLength().ShouldBe(Cap);
+        data.GetProperty("a").GetArrayLength().ShouldBe(Produced);
+        data.GetProperty("b").GetArrayLength().ShouldBe(Produced);
+        data.GetProperty("a")[0].GetProperty("tags").GetArrayLength().ShouldBe(Produced);
+        root.TryGetProperty("truncated", out _).ShouldBeFalse();
+        root.TryGetProperty("rowCap", out _).ShouldBeFalse();
     }
 
     [Fact]

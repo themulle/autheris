@@ -101,6 +101,9 @@ public static class McpErrorCodes
 
     internal const string DefaultMessage = "Tool execution failed.";
 
+    /// <summary>The fixed message of a query_graphql failure whose code is the GraphQL error code (not a catalogue code).</summary>
+    internal const string GraphQlErrorsMessage = "GraphQL execution returned errors.";
+
     // The GraphQL query simulator reads the same datasets as query_graphql and is answered alike.
     private const string SimulateQueryTool = "simulate_query";
 

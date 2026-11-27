@@ -58,7 +58,7 @@ internal static partial class McpQueryGuideBuilder
 
         if (Tool(switches, McpDatasetTools.QueryGraphQl))
         {
-            sb.AppendLine($"- **MCP GraphQL Tool:** `{McpDatasetTools.QueryGraphQl}` executes governed GraphQL queries directly.");
+            sb.AppendLine($"- **MCP GraphQL Tool:** `{McpDatasetTools.QueryGraphQl}` executes governed GraphQL queries directly. Results equal `POST {gql.EndpointPath}`; a failure answers `{{error:{{code,message}}, errors:[...]}}` with the GraphQL errors list, and data next to errors is a normal result.");
         }
 
         var discoveryTools = new List<string>();

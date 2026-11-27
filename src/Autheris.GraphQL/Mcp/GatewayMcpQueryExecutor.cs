@@ -598,35 +598,6 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             return Invalid("Only queries are allowed over MCP; mutations and subscriptions are not available.");
         }
 
-        var op = operations[0];
-        if (variableValues != null && variableValues.Count > 0 && op.VariableDefinitions.Count > 0)
-        {
-            // 4b.3: If query uses variables for limits without explicit defaults in the AST,
-            // augment the operation's variable definitions with default values from the provided runtime variables
-            // so that QueryCostAnalyzerRule can evaluate the actual requested limit instead of assuming worst-case rows.
-            bool modified = false;
-            var newVarDefs = new List<VariableDefinitionNode>();
-            foreach (var vDef in op.VariableDefinitions)
-            {
-                if (variableValues.TryGetValue(vDef.Variable.Name.Value, out var val) && TryExtractPositiveInt(val, out var numVal))
-                {
-                    if (numVal <= 100_000)
-                    {
-                        newVarDefs.Add(vDef.WithDefaultValue(new IntValueNode(numVal)));
-                        modified = true;
-                        continue;
-                    }
-                }
-                newVarDefs.Add(vDef);
-            }
-
-            if (modified)
-            {
-                var newOp = op.WithVariableDefinitions(newVarDefs);
-                document = document.WithDefinitions(document.Definitions.Select(d => ReferenceEquals(d, op) ? (IDefinitionNode)newOp : d).ToList());
-            }
-        }
-
         var executor = await _executorProvider.GetExecutorAsync(cancellationToken: cancellationToken).ConfigureAwait(false);
         var requestBuilder = OperationRequestBuilder.New()
             .SetDocument(document)
@@ -653,15 +624,9 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
 
         McpResultMasking.Report(HasMaskedFields(result.Extensions));
         var raw = FormatOperationResult(result);
-        var json = Capped(tool.Name, raw, McpRowCap.TrimGraphQl(raw, RowCap()));
-        if (result.Errors is not null && result.Errors.Any(e => string.Equals(e.Code, "TIMEOUT", StringComparison.OrdinalIgnoreCase)))
-        {
-            return CreateErrorResult(sessionContext.TenantId, tool.Name, "QUERY_TIMEOUT", "The query exceeded the maximum allowed execution duration.", json);
-        }
 
-        return result.Errors is null || result.Errors.Count == 0
-            ? json
-            : CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.ExecutionFailed, "GraphQL execution returned errors.", json);
+        // The body is what POST /graphql answers. Errors next to data are a normal result; without data the failure is the envelope.
+        return result.Errors is not { Count: > 0 } || result.Data is { IsValueNull: false } ? raw : McpToolError.SerializeGraphQl(raw);
     }
 
     private static object? ToVariableValue(JsonElement value) => value.ValueKind switch
@@ -797,33 +762,6 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         JsonValueKind.Null => null,
         _ => el.GetRawText()
     };
-
-    private static bool TryExtractPositiveInt(object? val, out int result)
-    {
-        result = 0;
-        if (val == null) return false;
-        if (val is int i) { result = i; return i > 0; }
-        if (val is long l && l <= int.MaxValue && l > 0) { result = (int)l; return true; }
-        if (val is JsonElement je)
-        {
-            if (je.ValueKind == JsonValueKind.Number && je.TryGetInt32(out var ji) && ji > 0)
-            {
-                result = ji;
-                return true;
-            }
-            if (je.ValueKind == JsonValueKind.String && int.TryParse(je.GetString(), out var js) && js > 0)
-            {
-                result = js;
-                return true;
-            }
-        }
-        if (int.TryParse(val.ToString(), out var parsed) && parsed > 0)
-        {
-            result = parsed;
-            return true;
-        }
-        return false;
-    }
 
     /// <summary>True when the GraphQL result carries the masked-fields extension, i.e. a column resolver returned a masked value.</summary>
     internal static bool HasMaskedFields(IReadOnlyDictionary<string, object?>? extensions) =>

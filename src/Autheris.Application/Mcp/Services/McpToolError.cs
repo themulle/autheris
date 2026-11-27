@@ -278,6 +278,83 @@ public static partial class McpToolError
         return Fail(GovernedSqlErrorCodes.SyntaxError);
     }
 
+    /// <summary>
+    /// The error envelope of a GraphQL result without usable data: <c>{"error":{"code","message"},"errors":[...]}</c>. The code is the code of
+    /// the first GraphQL error (<c>EXECUTION_FAILED</c> when it has none) and <c>errors</c> is that list verbatim, as the /graphql pipeline
+    /// (error filter and enumeration shield) produced it. A result without an errors array, or over the size limit, gives
+    /// <c>EXECUTION_FAILED</c> without <c>errors</c>. Never throws.
+    /// </summary>
+    public static string SerializeGraphQl(string? resultJson)
+    {
+        try
+        {
+            if (string.IsNullOrWhiteSpace(resultJson) || resultJson.Length > MaxNormalizeInputLength)
+            {
+                return Fallback();
+            }
+
+            using var doc = JsonDocument.Parse(resultJson, new JsonDocumentOptions { MaxDepth = 32 });
+            return doc.RootElement.ValueKind == JsonValueKind.Object && doc.RootElement.TryGetProperty("errors", out var errors)
+                ? NormalizeGraphQl(doc.RootElement, errors, FirstErrorCode(errors))
+                : Fallback();
+        }
+        catch (Exception ex) when (ex is JsonException or InvalidOperationException)
+        {
+            return Fallback();
+        }
+    }
+
+    private static string NormalizeGraphQl(JsonElement root, JsonElement errors)
+    {
+        // A relayed envelope names its code; it must be the code the first error carries, otherwise nothing of it is trusted.
+        var named = root.TryGetProperty("error", out var error) && error.ValueKind == JsonValueKind.Object ? StringMember(error, "code") : null;
+        var expected = errors.ValueKind == JsonValueKind.Array ? FirstErrorCode(errors) : null;
+        return expected is null || !string.Equals(named, expected, StringComparison.Ordinal)
+            ? Fallback()
+            : NormalizeGraphQl(root, errors, expected);
+    }
+
+    private static string NormalizeGraphQl(JsonElement root, JsonElement errors, string? code)
+    {
+        if (errors.ValueKind != JsonValueKind.Array || errors.GetArrayLength() == 0 || code is null)
+        {
+            return Fallback();
+        }
+
+        var message = McpErrorCodes.IsCatalogueCode(code) ? McpErrorCodes.FixedMessage(code) : McpErrorCodes.GraphQlErrorsMessage;
+        var buffer = new ArrayBufferWriter<byte>(512);
+        using (var w = new Utf8JsonWriter(buffer, WriterOptions))
+        {
+            w.WriteStartObject();
+            w.WriteStartObject("error");
+            w.WriteString("code", code);
+            w.WriteString("message", message);
+            w.WriteEndObject();
+            w.WritePropertyName("errors");
+            errors.WriteTo(w);
+            w.WriteEndObject();
+        }
+
+        return System.Text.Encoding.UTF8.GetString(buffer.WrittenSpan);
+    }
+
+    /// <summary>The code of the first GraphQL error (EXECUTION_FAILED when it names none); null when the list is not an array.</summary>
+    private static string? FirstErrorCode(JsonElement errors)
+    {
+        if (errors.ValueKind != JsonValueKind.Array)
+        {
+            return null;
+        }
+
+        foreach (var first in errors.EnumerateArray())
+        {
+            return first.ValueKind == JsonValueKind.Object && first.TryGetProperty("extensions", out var ext) && ext.ValueKind == JsonValueKind.Object
+                   && StringMember(ext, "code") is { } c && CodePattern().IsMatch(c) ? c : McpErrorCodes.ExecutionFailed;
+        }
+
+        return McpErrorCodes.ExecutionFailed;
+    }
+
     /// <summary>A failed admin tool result: the message is the fixed message of the code; the admin layer's own text stays in the audit row.</summary>
     public static McpToolCallResult FailAdmin(string? adminErrorText) => Fail(McpErrorCodes.AdminOperationRejected);
 
@@ -286,11 +363,17 @@ public static partial class McpToolError
     /// free text) is re-parsed and rebuilt from its catalogue code and the allowlisted typed members; the message is always the fixed
     /// message of the code. A code outside the catalogue, an unparseable or oversized body gives EXECUTION_FAILED. Idempotent, never throws.
     /// </summary>
-    public static string Normalize(string? json)
+    public static string Normalize(string? json) => Normalize(json, null);
+
+    /// <summary>
+    /// <see cref="Normalize(string?)"/> for the result of a named tool. Only the built-in <c>query_graphql</c> (ordinal name match) keeps
+    /// the root <c>errors</c> list of the GraphQL result; every other tool, and a missing name, drops it.
+    /// </summary>
+    public static string Normalize(string? json, string? toolName)
     {
         try
         {
-            return NormalizeCore(json);
+            return NormalizeCore(json, string.Equals(toolName, McpDatasetTools.QueryGraphQl, StringComparison.Ordinal));
         }
         catch (Exception ex) when (ex is not OutOfMemoryException)
         {
@@ -301,7 +384,7 @@ public static partial class McpToolError
     private static string Fallback() =>
         Write(McpErrorCodes.ExecutionFailed, McpErrorCodes.FixedMessage(McpErrorCodes.ExecutionFailed), null, null, null, null, null, null, null, null, null);
 
-    private static string NormalizeCore(string? json)
+    private static string NormalizeCore(string? json, bool keepGraphQlErrors)
     {
         if (string.IsNullOrWhiteSpace(json) || json.Length > MaxNormalizeInputLength)
         {
@@ -315,6 +398,11 @@ public static partial class McpToolError
             if (root.ValueKind != JsonValueKind.Object)
             {
                 return Fallback();
+            }
+
+            if (keepGraphQlErrors && root.TryGetProperty("errors", out var rootErrors))
+            {
+                return NormalizeGraphQl(root, rootErrors);
             }
 
             JsonElement source;

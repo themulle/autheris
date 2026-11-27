@@ -626,7 +626,10 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
             McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, wasMasked, false);
             await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", $"Tool execution returned an error result ({errorCode ?? "UNKNOWN"}).", wasMasked, false, 0, cancellationToken).ConfigureAwait(false);
-            var errorEnvelope = McpToolError.Normalize(rawDataJson);
+            // Only the GraphQL errors list of query_graphql is relayed; it is taken from the scrubbed copy so that masking covers it.
+            var errorEnvelope = string.Equals(tool.Name, McpDatasetTools.QueryGraphQl, StringComparison.Ordinal)
+                ? McpToolError.Normalize(scrubbedJson, tool.Name)
+                : McpToolError.Normalize(rawDataJson);
             return new McpToolCallResult(IsSuccess: false, ContentJson: errorEnvelope, ErrorMessage: errorEnvelope, IsMasked: wasMasked || policyOutcome == true);
         }
 
