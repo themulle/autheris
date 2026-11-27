@@ -65,6 +65,9 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
             builder.UseSetting("Gateway:DataSources:Connections:default:ConnectionString", _dbPath);
             builder.UseSetting("Gateway:Mcp:Enabled", "true");
             builder.UseSetting("Gateway:Mcp:EndpointPath", "/mcp");
+
+            // query_sql runs through the governed WebSQL pipeline, which answers SQL_ENDPOINT_DISABLED unless it is enabled.
+            builder.UseSetting("Gateway:WebSql:Enabled", "true");
         }
 
         protected override void Dispose(bool disposing)
