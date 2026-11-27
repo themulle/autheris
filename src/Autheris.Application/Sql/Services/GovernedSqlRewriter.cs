@@ -173,7 +173,8 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
         ClientNullShapes? clientNulls = null,
         SqlPageWindow? page = null,
         bool readOnlyRequired = false,
-        string? transport = null)
+        string? transport = null,
+        TrinoSqlEngine.KeysetSeek? keysetSeek = null)
     {
         if (string.IsNullOrWhiteSpace(rawSql))
         {
@@ -730,6 +731,7 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
 
         string? pagingUnavailable = null;
         bool bindPageOffset = false;
+        bool keysetPage = false;
         long? pageOffsetVal = null;
         long maxOffset = webSqlOptions.Paging?.MaxOffset ?? 10_000;
 
@@ -755,10 +757,17 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
 
             if (pagingUnavailable != null)
             {
-                if (page.Offset > 0)
+                if (page.Offset > 0 || keysetSeek != null)
                 {
                     throw new SqlPagingTokenInvalidException();
                 }
+            }
+            else if (keysetSeek != null)
+            {
+                // A keyset continuation has no offset slot: the seek predicate positions the page, the probe row still applies.
+                keysetPage = true;
+                enforcedMaxRows = page.Size + 1;
+                deliveredRowLimit = page.Size;
             }
             else
             {
@@ -767,6 +776,10 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
                 enforcedMaxRows = page.Size + 1;
                 deliveredRowLimit = page.Size;
             }
+        }
+        else if (keysetSeek != null)
+        {
+            throw new SqlPagingTokenInvalidException();
         }
 
         if (!targetDatabaseDialect.HasValue || !SqlDialectMapper.IsExecutable(targetDatabaseDialect.Value))
@@ -778,6 +791,12 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
             rawSql, decidedTableMetadata, decisions, targetDatabaseDialect.Value, tenantId, ct).ConfigureAwait(false);
 
         TargetSqlDialect targetSqlDialect = SqlDialectMapper.ToTargetDialect(targetDatabaseDialect.Value);
+
+        var keyset = page != null && pagingUnavailable == null ? KeysetCandidateFor(decidedTableMetadata, targetSqlDialect) : null;
+        if (keysetSeek != null && keyset == null)
+        {
+            throw new SqlPagingTokenInvalidException();
+        }
 
         EnforceEffectiveListMaximum(clientLists, targetSqlDialect, webSqlOptions);
 
@@ -812,7 +831,7 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
         };
 
         var policy = await policyFactory.CreateAsync(input, ct).ConfigureAwait(false);
-        var request = CreateCompileRequest(policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists, clientNulls, gatewayLikePatternParameters, bindPageOffset, pageOffsetVal, maxOffset);
+        var request = CreateCompileRequest(policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists, clientNulls, gatewayLikePatternParameters, bindPageOffset, pageOffsetVal, maxOffset, keyset, keysetSeek);
 
         // -------------------------------------------------------------
         // Stage 5: Compile (Security invariant 2). Engine exceptions propagate unwrapped: SqlCompilerErrorMapper maps them to
@@ -834,6 +853,6 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
             : null;
 
         var maskedAudit = decisions.Values.SelectMany(d => d.MaskedColumnsAudit).ToList();
-        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, callerAttributes, metadata, pagingUnavailable, bindPageOffset, indexHints, dmlMaxRowsCap, maskedAudit, mvGuard.HiddenCountColumnAlias, mvGuard.EffectiveMinGroupSize);
+        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, callerAttributes, metadata, pagingUnavailable, bindPageOffset, indexHints, dmlMaxRowsCap, maskedAudit, mvGuard.HiddenCountColumnAlias, mvGuard.EffectiveMinGroupSize, keysetPage);
     }
 }

@@ -44,7 +44,9 @@ public static class CompileRequestFactory
         long? pageOffset = null,
         long maxOffset = 1_000_000,
         IReadOnlySet<string>? gatewayLikePatternParameters = null,
-        TrinoSqlEngine.Ast.Emit.ClientNullShapes? clientNulls = null)
+        TrinoSqlEngine.Ast.Emit.ClientNullShapes? clientNulls = null,
+        TrinoSqlEngine.KeysetCandidate? keyset = null,
+        TrinoSqlEngine.KeysetSeek? keysetSeek = null)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(options);
@@ -86,6 +88,8 @@ public static class CompileRequestFactory
             BindPageOffset = bindPageOffset,
             PageOffset = pageOffset,
             MaxAllowedOffset = maxOffset,
+            Keyset = keyset,
+            KeysetSeek = keysetSeek,
             GatewayLikePatternParameters = gatewayLikePatternParameters ?? FrozenSet<string>.Empty
         };
     }

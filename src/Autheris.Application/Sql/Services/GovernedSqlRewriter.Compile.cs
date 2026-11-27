@@ -106,7 +106,9 @@ public sealed partial class GovernedSqlRewriter
         IReadOnlySet<string>? gatewayLikePatternParameters,
         bool bindPageOffset = false,
         long? pageOffset = null,
-        long maxOffset = 1_000_000)
+        long maxOffset = 1_000_000,
+        TrinoSqlEngine.KeysetCandidate? keyset = null,
+        TrinoSqlEngine.KeysetSeek? keysetSeek = null)
     {
         // A table that stage 3 admitted but the assembly dropped (no typed policy, catalog load failure, missing column)
         // is denied here with the same exception as every other "table not usable" cause, before the compiler could answer differently.
@@ -123,7 +125,7 @@ public sealed partial class GovernedSqlRewriter
             clientNulls: clientNulls,
             timeZoneConversionAvailable: _timeZoneState?.IsAvailable(targetSqlDialect) ?? false,
             translateDateFunctions: true, gatewayLikePatternParameters: gatewayLikePatternParameters,
-            bindPageOffset: bindPageOffset, pageOffset: pageOffset, maxOffset: maxOffset);
+            bindPageOffset: bindPageOffset, pageOffset: pageOffset, maxOffset: maxOffset, keyset: keyset, keysetSeek: keysetSeek);
     }
 
     private CompiledSql CompileStatement(string rawSql, CompileRequest request, CancellationToken ct)
@@ -131,6 +133,11 @@ public sealed partial class GovernedSqlRewriter
         try
         {
             return _sqlEngine.Compile(rawSql.AsMemory(), request, ct);
+        }
+        catch (TrinoSqlEngine.KeysetSeekRejectedException)
+        {
+            // The continuation no longer fits the statement (key masked, key changed, shape drift): the same answer as a bad token.
+            throw new SqlPagingTokenInvalidException();
         }
         catch (Exception ex) when (ex is SecurityException or TrinoSqlEngine.Ast.Builder.AstBuildException)
         {

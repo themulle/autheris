@@ -56,6 +56,15 @@ public sealed class WebSqlResultCacheKeyBuilderTests
         Hash(Input() with { Parameters = [Policy(0, value, SqlParameterType.String)] });
 
     [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetSeekSlot_Unkeyable()
+    {
+        var seek = new BoundParameter("@p2", "p2", 2, 42, SqlParameterType.Int32, ParameterOrigin.KeysetSeek);
+
+        WebSqlResultCacheKeyBuilder.TryBuild(Input() with { Parameters = [Policy(0, "tenant1"), Client(1, "city"), seek] }, out _).ShouldBeFalse();
+    }
+
+    [Fact]
     public void Same_input_gives_same_64_hex_key_and_carries_identity()
     {
         WebSqlResultCacheKeyBuilder.TryBuild(Input(), out var a).ShouldBeTrue();

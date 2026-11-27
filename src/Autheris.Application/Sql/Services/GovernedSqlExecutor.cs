@@ -24,6 +24,7 @@ using Autheris.Application.Sql.Errors;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Internal;
 using Autheris.Application.Sql.ListParameters;
+using Autheris.Application.Sql.Paging;
 using Autheris.Application.Sql.Synthetic;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -384,7 +385,8 @@ public sealed partial class GovernedSqlExecutor
 
             request = request with
             {
-                Page = new SqlPageWindow(decoded.Offset, decoded.Size, decoded.PageNumber)
+                Page = new SqlPageWindow(decoded.Offset, decoded.Size, decoded.PageNumber),
+                Keyset = decoded.Keyset
             };
         }
 
@@ -401,7 +403,8 @@ public sealed partial class GovernedSqlExecutor
             clientValues = BuildClientValues(request, referenced);
             shapes = ClientListParameters.Shapes(clientValues, referenced);
             nullShapes = ClientListParameters.NullShapes(clientValues, referenced);
-            rewrite = await _rewriter.RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct, request.RowLimit, probeExtraRow: true, plannedTableRead: request.PlannedTableRead, gatewayLikePatternParameters: GovernedSqlExecutionService.GatewayParameterAliases(request.GatewayParameters), clientLists: shapes, clientNulls: nullShapes, page: request.Page, readOnlyRequired: request.ReadOnlyRequired, transport: request.Transport).ConfigureAwait(false);
+            rewrite = await _rewriter.RewriteCoreAsync(sqlForRewrite, user, tenantId, requestedDs, dmlContext, ct, request.RowLimit, probeExtraRow: true, plannedTableRead: request.PlannedTableRead, gatewayLikePatternParameters: GovernedSqlExecutionService.GatewayParameterAliases(request.GatewayParameters), clientLists: shapes, clientNulls: nullShapes, page: request.Page, readOnlyRequired: request.ReadOnlyRequired, transport: request.Transport,
+                keysetSeek: request.Keyset is { } k ? new TrinoSqlEngine.KeysetSeek(k.ShapeHash, k.Values) : null).ConfigureAwait(false);
         }
         catch (Exception policyEx) when (IsAuditedRejection(policyEx, ct))
         {
@@ -500,6 +503,8 @@ public sealed partial class GovernedSqlExecutor
         bool executionFailed = false;
         bool servedFromCache = false;
         ResultCacheFill? cacheFill = null;
+        // The page statement (the cache may swap in the full statement below); its keyset shape seeds the next token.
+        var pageRewrite = rewrite;
 
         try
         {
@@ -546,6 +551,10 @@ public sealed partial class GovernedSqlExecutor
                 AddCallerAttributeAuditFields(fields, rewrite, compiled);
                 AddCompiledAuditFields(fields, compiled, clientValues);
                 AddResultCacheAuditFields(fields, cachePlan, cacheFill);
+                if (rewrite.KeysetPage)
+                {
+                    fields["keyset"] = true;
+                }
                 if (rewrite.MaskedColumnsAudit is { Count: > 0 })
                 {
                     fields["masked_columns"] = rewrite.MaskedColumnsAudit;
@@ -562,7 +571,7 @@ public sealed partial class GovernedSqlExecutor
                 }, ct).ConfigureAwait(false);
             }
 
-        if (await TryServeResultCacheAsync(request, user, tenantId, rewrite, cachePlan, cacheFill, rowWriter, ct).ConfigureAwait(false))
+        if (await TryServeResultCacheAsync(request, user, tenantId, rewrite, pageRewrite, cachePlan, cacheFill, rowWriter, ct).ConfigureAwait(false))
         {
             servedFromCache = true;
             return compiled.Sql;
@@ -735,6 +744,7 @@ public sealed partial class GovernedSqlExecutor
 
                 // the execution and the streaming of the rows run under the provider guard.
                 bool isTruncated = false;
+                KeysetCaptureReader? keysetCapture = null;
                 using var commandCancelReg = ct.CanBeCanceled
                     ? ct.Register(static state => { try { ((DbCommand)state!).Cancel(); } catch { } }, command)
                     : default;
@@ -754,7 +764,8 @@ public sealed partial class GovernedSqlExecutor
                             var info = new GovernedResultInfo(columns, reader.FieldCount == 0 ? ImmutableArray<bool>.Empty : maskArray);
                             var limitedReader = rewrite.DeliveredRowLimit > 0 ? new RowLimitedDataReader(reader, rewrite.DeliveredRowLimit) : null;
                             var toWrite = cacheFill is { IsLeader: true } ? await PrepareResultCacheReaderAsync(cacheFill, limitedReader ?? reader, info, ct).ConfigureAwait(false) : limitedReader ?? reader;
-                            await rowWriter(toWrite, info, ct).ConfigureAwait(false);
+                            keysetCapture = KeysetCaptureFor(request, pageRewrite, toWrite);
+                            await rowWriter(keysetCapture ?? (DbDataReader)toWrite, info, ct).ConfigureAwait(false);
                             if (limitedReader != null)
                             {
                                 deliveredOrAffectedRows = limitedReader.DeliveredRows;
@@ -769,7 +780,7 @@ public sealed partial class GovernedSqlExecutor
                     ct).ConfigureAwait(false);
 
                 await CommitResultCacheAsync(cacheFill, dsName, ct).ConfigureAwait(false);
-                NotifyPageOutcome(request, user, tenantId, rewrite, isTruncated);
+                NotifyPageOutcome(request, user, tenantId, rewrite, isTruncated, keysetCapture);
                 if (command is Autheris.Application.Usage.ISourceExecutionStatsProvider statsProvider &&
                     statsProvider.LastExecutionStats is { } sourceStats)
                 {

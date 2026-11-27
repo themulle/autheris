@@ -12,6 +12,10 @@ public static class WebSqlResultCacheReasons
     public const string PerUserCredentials = "per_user_credentials";
     public const string CallerNotBindable = "caller_not_bindable";
     public const string PagingUnavailable = "paging_unavailable";
+
+    /// <summary>The page continues a keyset token: it is never read from or written to the cache.</summary>
+    public const string KeysetPage = "keyset_page";
+
     public const string UnkeyableValue = "unkeyable_value";
     public const string NoConnection = "no_connection";
     public const string EpochUnavailable = "epoch_unavailable";

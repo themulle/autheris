@@ -24,6 +24,7 @@ using Autheris.Application.Sql.Errors;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Internal;
 using Autheris.Application.Sql.ListParameters;
+using Autheris.Application.Sql.Paging;
 using Autheris.Application.Sql.Synthetic;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -129,7 +130,7 @@ public sealed partial class GovernedSqlExecutor
             ? _options.Value.WebSql.DefaultDataSourceName
             : _dataSourceResolver.ResolveAllowedDataSource(request.DataSourceName, tenantId);
 
-    private void NotifyPageOutcome(GovernedSqlQueryRequest request, ClaimsPrincipal user, TenantId tenantId, GovernedRewrite? rewrite, bool isTruncated)
+    private void NotifyPageOutcome(GovernedSqlQueryRequest request, ClaimsPrincipal user, TenantId tenantId, GovernedRewrite? rewrite, bool isTruncated, KeysetCaptureReader? keysetCapture = null)
     {
         if (request.Page == null || request.OnPageOutcome == null)
         {
@@ -143,7 +144,11 @@ public sealed partial class GovernedSqlExecutor
         {
             long nextOffset = checked(request.Page.Offset + request.Page.Size);
             long maxOffset = _options.Value.WebSql.Paging?.MaxOffset ?? 10_000;
-            if (nextOffset > maxOffset)
+            if (TryEncodeKeysetNextToken(request, user, tenantId, keysetCapture, nextOffset, maxOffset) is { } keysetToken)
+            {
+                nextToken = keysetToken;
+            }
+            else if (nextOffset > maxOffset)
             {
                 pagingUnavailable = "offset_limit";
             }

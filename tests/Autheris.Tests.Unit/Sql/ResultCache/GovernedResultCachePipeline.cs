@@ -3,6 +3,7 @@ namespace Autheris.Tests.Unit.Sql.ResultCache;
 using System;
 using System.Collections.Generic;
 using System.Data.Common;
+using System.Linq;
 using System.Security.Claims;
 using System.Threading;
 using System.Threading.Tasks;
@@ -68,7 +69,8 @@ internal sealed class GovernedResultCachePipeline : IDisposable
         IQueryCostQuota? costQuota = null,
         ILogger<GovernedSqlExecutionService>? logger = null,
         bool withEpochServices = true,
-        ITableReadConcurrencyGate? gate = null)
+        ITableReadConcurrencyGate? gate = null,
+        IReadOnlyList<string>? primaryKey = null)
     {
         Rows = rows;
         Options = new GatewayOptions
@@ -106,9 +108,10 @@ internal sealed class GovernedResultCachePipeline : IDisposable
         Spy = new CountingCache(Cache);
         Source = () => ResultCacheFixtures.Rows(Rows);
 
-        var repo = new InMemoryTableMetadataRepository(CustomersTable("crm"), CustomersTable("dbo"), CustomersTable("public"));
+        var repo = new InMemoryTableMetadataRepository(CustomersTable("crm", primaryKey), CustomersTable("dbo", primaryKey), CustomersTable("public", primaryKey));
+        Repo = repo;
         var consents = new InMemoryConsentRepository();
-        var resolution = new AllowAllConsentResolution();
+        var resolution = Consent;
         Audit = new CapturingAuditWriter(this);
 
         IHostEnvironment env = new TestHostEnvironment("Development");
@@ -125,6 +128,16 @@ internal sealed class GovernedResultCachePipeline : IDisposable
                     if (command.CommandText.Contains("customers", StringComparison.OrdinalIgnoreCase))
                     {
                         Interlocked.Increment(ref _executions);
+                        var bound = command.BoundValues.ToArray();
+                        lock (Commands)
+                        {
+                            Commands.Add((command.CommandText, bound));
+                        }
+
+                        if (SourceFor is not null)
+                        {
+                            return Task.FromResult(SourceFor(command.CommandText, bound));
+                        }
                     }
 
                     return Task.FromResult(Source());
@@ -179,6 +192,16 @@ internal sealed class GovernedResultCachePipeline : IDisposable
     public GovernedSqlExecutionService Service { get; }
 
     public Func<DbDataReader> Source { get; set; }
+
+    /// <summary>When set, answers a source command from its text and bound values (for seek simulation).</summary>
+    public Func<string, object?[], DbDataReader>? SourceFor { get; set; }
+
+    /// <summary>The source commands that reached the connection: text and bound values.</summary>
+    public List<(string Sql, object?[] Values)> Commands { get; } = [];
+
+    public InMemoryTableMetadataRepository Repo { get; }
+
+    public AllowAllConsentResolution Consent { get; } = new();
 
     public List<AuditLogEntry> AuditEntries => Audit.Entries;
 
@@ -258,8 +281,9 @@ internal sealed class GovernedResultCachePipeline : IDisposable
         Governance.Dispose();
     }
 
-    private static TableMetadata CustomersTable(string schema) => new()
+    internal static TableMetadata CustomersTable(string schema, IReadOnlyList<string>? primaryKey = null) => new()
     {
+        PrimaryKeyColumns = primaryKey ?? [],
         Identifier = new TableIdentifier("crm", schema, "customers"),
         Table = new Table { TableName = "customers", SchemaName = schema, SourceName = "crm", SourceType = "PostgreSQL", IsActive = true, DataSourceType = DataSourceType.Sql },
         Columns =
@@ -362,6 +386,9 @@ internal sealed class SwitchableReadGate : ITableReadConcurrencyGate
 /// <summary>Allows every table with every column (consent is not what these tests exercise).</summary>
 internal sealed class AllowAllConsentResolution : IConsentResolutionService
 {
+    /// <summary>Columns the caller sees masked (empty: every column is clear).</summary>
+    public HashSet<string> Masked { get; } = new(StringComparer.OrdinalIgnoreCase);
+
     public TableAccessDecision ResolveAccess(
         Sid userSid,
         IReadOnlySet<Sid> subjectGroupSids,
@@ -371,7 +398,11 @@ internal sealed class AllowAllConsentResolution : IConsentResolutionService
         DatabaseDialect dialect = DatabaseDialect.SqlServer,
         IReadOnlySet<Sid>? allUserSids = null,
         IReadOnlySet<string>? callerScopes = null) =>
-        TableAccessDecision.Allowed(table, new Dictionary<string, ColumnAccessLevel>(), null, hasUnconstrainedColumnAllow: true);
+        TableAccessDecision.Allowed(
+            table,
+            Masked.ToDictionary(c => c, _ => ColumnAccessLevel.Mask, StringComparer.OrdinalIgnoreCase),
+            null,
+            hasUnconstrainedColumnAllow: true);
 }
 
 internal sealed class DelegatingConnectionFactory(Func<DbConnection> create) : ISqlConnectionFactory
