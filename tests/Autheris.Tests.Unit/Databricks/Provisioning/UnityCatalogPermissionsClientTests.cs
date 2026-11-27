@@ -379,6 +379,32 @@ public sealed class UnityCatalogPermissionsClientTests
             .ShouldContain("filter=applicationId eq \"" + appId + "\"");
     }
 
+    [Theory]
+    [InlineData("{\"privilege_assignments\":[{\"principal\":\"jane@example.com\",\"privileges\":[{\"privilege\":\"USE_CATALOG\",\"inherited_from_type\":\"METASTORE\"}]}]}", true)]
+    [InlineData("{\"privilege_assignments\":[{\"principal\":\"other@example.com\",\"privileges\":[{\"privilege\":\"USE_CATALOG\"}]}]}", false)]
+    [InlineData("{\"privilege_assignments\":[{\"principal\":\"jane@example.com\",\"privileges\":[{\"privilege\":\"BROWSE\"}]}]}", false)]
+    [InlineData("{}", false)]
+    public async Task Effective_catalog_access_counts_only_the_asked_principal(string body, bool expected)
+    {
+        var handler = Handler(r => r.Uri.AbsolutePath == "/api/2.1/unity-catalog/effective-permissions/catalog/main" ? Ok(body) : null);
+
+        var result = await Client(handler).HasEffectivePrivilegeAsync("dbx", UcSecurableType.Catalog, "main", "jane@example.com", ["USE_CATALOG", "ALL_PRIVILEGES"], CancellationToken.None);
+
+        result.ShouldBe(expected);
+        Uri.UnescapeDataString(handler.Requests.Single(r => r.Uri.AbsolutePath.Contains("effective-permissions", StringComparison.Ordinal)).Uri.Query)
+            .ShouldBe("?principal=jane@example.com");
+    }
+
+    [Fact]
+    public async Task Effective_check_outside_the_allowed_schemas_is_refused()
+    {
+        var handler = Handler(_ => Ok("{}"));
+
+        (await Should.ThrowAsync<UcProvisioningException>(() => Client(handler).HasEffectivePrivilegeAsync(
+            "dbx", UcSecurableType.Catalog, "other", "jane@example.com", ["USE_CATALOG"], CancellationToken.None))).Code.ShouldBe(UcErrorCodes.SecurableNotAllowed);
+        handler.Requests.ShouldBeEmpty();
+    }
+
     // ---- support ----
 
     private static UcPermissionChange Grant(string principal, string privilege) => new(principal, [privilege], []);

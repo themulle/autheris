@@ -1,0 +1,128 @@
+namespace Autheris.Application.Governance.Provisioning;
+
+using System;
+using System.Collections.Generic;
+using System.Linq;
+using System.Threading;
+using System.Threading.Tasks;
+using Autheris.Domain.Common;
+using Autheris.Domain.Options;
+
+public sealed partial class UcProvisioningReconciler
+{
+    public const string ProvisioningOffReason = "PROVISIONING_OFF";
+    public const string DryRunReason = "DRY_RUN";
+    public const string CatalogAccessMissingReason = "CATALOG_ACCESS_MISSING";
+
+    private static readonly string[] CatalogAccessPrivileges = [UcPrivileges.UseCatalog, "ALL_PRIVILEGES"];
+
+    /// <summary>
+    /// Writes the feedback of every active consent and marks consents that are no longer active as revoked. A consent is reported
+    /// provisioned only when all its privileges were confirmed by a read and its principal effectively holds <c>USE_CATALOG</c>.
+    /// Only changed rows are written.
+    /// </summary>
+    private async Task UpdateFeedbackAsync(
+        string dataSource,
+        DatabricksProvisioningMode mode,
+        TenantId tenant,
+        UcDesiredState desired,
+        UcApplyOutcome outcome,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        var existing = (await store.ListFeedbackAsync(tenant, dataSource, ct).ConfigureAwait(false)).ToDictionary(f => f.ConsentId);
+        var catalogAccess = new Dictionary<(string Catalog, string Principal), bool>();
+        var changed = new List<UcGrantFeedback>();
+        var active = new HashSet<Guid>();
+
+        foreach (var plan in desired.Consents)
+        {
+            active.Add(plan.Consent.Id);
+            existing.TryGetValue(plan.Consent.Id, out var before);
+            var (state, reason) = mode switch
+            {
+                DatabricksProvisioningMode.Off => (UcGrantState.Unsupported, (string?)ProvisioningOffReason),
+                _ when !plan.IsProvisionable => (UcGrantState.Unsupported, plan.UnsupportedReason),
+                DatabricksProvisioningMode.DryRun => (UcGrantState.Pending, DryRunReason),
+                _ => await EnforcedStateAsync(dataSource, plan, outcome, before, catalogAccess, ct).ConfigureAwait(false)
+            };
+
+            if (before is not null && before.State == state && string.Equals(before.ReasonCode, reason, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            changed.Add(new UcGrantFeedback(tenant, plan.Consent.Id, dataSource, state, reason, now, state == UcGrantState.Provisioned ? now : null));
+        }
+
+        foreach (var row in existing.Values)
+        {
+            if (!active.Contains(row.ConsentId) && row.State != UcGrantState.Revoked)
+            {
+                changed.Add(row with { State = UcGrantState.Revoked, ReasonCode = null, UpdatedAt = now, VerifiedAt = null });
+            }
+        }
+
+        if (changed.Count > 0)
+        {
+            await store.SaveFeedbackAsync(tenant, dataSource, _fencingToken, changed, [], ct).ConfigureAwait(false);
+        }
+    }
+
+    private async Task<(UcGrantState State, string? Reason)> EnforcedStateAsync(
+        string dataSource,
+        UcConsentPlan plan,
+        UcApplyOutcome outcome,
+        UcGrantFeedback? before,
+        Dictionary<(string Catalog, string Principal), bool> catalogAccess,
+        CancellationToken ct)
+    {
+        string? error = null;
+        foreach (var key in plan.Keys)
+        {
+            if (!outcome.Keys.TryGetValue(key, out var status))
+            {
+                return (UcGrantState.Pending, null);
+            }
+
+            if (status.Status == UcKeyStatus.Failed)
+            {
+                return (UcGrantState.Failed, status.ErrorCode ?? UcErrorCodes.Rejected);
+            }
+
+            if (status.Status != UcKeyStatus.Satisfied)
+            {
+                error ??= status.ErrorCode;
+            }
+        }
+
+        if (error is not null || plan.Keys.Any(k => outcome.Keys[k].Status != UcKeyStatus.Satisfied))
+        {
+            return (UcGrantState.Pending, error);
+        }
+
+        if (before?.State == UcGrantState.Provisioned)
+        {
+            return (UcGrantState.Provisioned, null);
+        }
+
+        // The provisioning principal never grants USE_CATALOG; without it the SELECT is not usable, so the consent is not effective.
+        var access = (plan.Catalog!, plan.Principal!);
+        if (!catalogAccess.TryGetValue(access, out var hasAccess))
+        {
+            try
+            {
+                hasAccess = await client.HasEffectivePrivilegeAsync(dataSource, UcSecurableType.Catalog, plan.Catalog!, plan.Principal!, CatalogAccessPrivileges, ct)
+                    .ConfigureAwait(false);
+            }
+            catch (UcProvisioningException ex)
+            {
+                return (UcGrantState.Pending, ex.Code);
+            }
+
+            catalogAccess[access] = hasAccess;
+        }
+
+        return hasAccess ? (UcGrantState.Provisioned, null) : (UcGrantState.Failed, CatalogAccessMissingReason);
+    }
+}
