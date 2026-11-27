@@ -180,12 +180,24 @@ public sealed partial class UcProvisioningReconciler(
                 "Data source {DataSource} holds {Count} Autheris-applied Unity Catalog privileges but has no provisioning section; restore the section with Mode Off to revoke them.",
                 source, rows.Count);
 
-            // Audited once per privilege and process: the privilege stays in Unity Catalog until the section is restored.
-            var fresh = rows.Where(row => _state.ReportedOrphans.TryAdd(source + "|" + row.Key, 0)).ToList();
+            // Audited once per privilege and process (again after a restart): the privilege stays in Unity Catalog until the section is
+            // restored. Recorded as reported only after the audit is saved; a failed write is retried next cycle.
+            var fresh = rows.Where(row => !_state.ReportedOrphans.ContainsKey(source + "|" + row.Key)).ToList();
             if (fresh.Count > 0)
             {
                 var audit = fresh.Select(row => Audit(TenantId.Platform, AuditEventTypes.GrantProvisioningFailed, "ORPHANED", source, row.Key, [], row.LastErrorCode)).ToList();
-                await store.SaveLedgerAsync(source, _fencingToken, [], audit, ct).ConfigureAwait(false);
+                try
+                {
+                    await store.SaveLedgerAsync(source, _fencingToken, [], audit, ct).ConfigureAwait(false);
+                    foreach (var row in fresh)
+                    {
+                        _state.ReportedOrphans.TryAdd(source + "|" + row.Key, 0);
+                    }
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException and not FencingTokenRejectedException)
+                {
+                    logger.LogWarning("Auditing orphaned Unity Catalog privileges of {DataSource} failed ({ExceptionType}).", source, ex.GetType().Name);
+                }
             }
         }
 
@@ -252,7 +264,7 @@ public sealed partial class UcProvisioningReconciler(
         var outcome = new UcApplyOutcome(keys, overdue, outstanding);
 
         await UpdateFeedbackAsync(name, provisioning.Mode, tenant, desired, outcome, now, ct).ConfigureAwait(false);
-        await RetireFormerTenantsAsync(name, tenant, outcome, now, ct).ConfigureAwait(false);
+        await RetireFormerTenantsAsync(name, tenant, desired, now, ct).ConfigureAwait(false);
         return outcome.OverdueRevokes;
     }
 

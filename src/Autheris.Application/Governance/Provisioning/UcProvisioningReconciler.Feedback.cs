@@ -38,6 +38,7 @@ public sealed partial class UcProvisioningReconciler
     {
         var existing = (await store.ListFeedbackAsync(tenant, dataSource, ct).ConfigureAwait(false)).ToDictionary(f => f.ConsentId);
         var catalogAccess = new Dictionary<(string Catalog, string Principal), string?>();
+        var catalogGrants = new Dictionary<string, IReadOnlyList<UcPrivilegeAssignment>>(StringComparer.Ordinal);
         var changed = new List<UcGrantFeedback>();
         var events = new List<UcFeedbackEvent>();
         var active = new HashSet<Guid>();
@@ -52,7 +53,7 @@ public sealed partial class UcProvisioningReconciler
                 _ when plan.PendingReason is { } pending => (UcGrantState.Pending, pending),
                 _ when !plan.IsProvisionable => (UcGrantState.Unsupported, plan.UnsupportedReason),
                 DatabricksProvisioningMode.DryRun => (UcGrantState.Pending, DryRunReason),
-                _ => await EnforcedStateAsync(dataSource, plan, outcome, before, catalogAccess, ct).ConfigureAwait(false)
+                _ => await EnforcedStateAsync(dataSource, plan, outcome, before, catalogAccess, catalogGrants, ct).ConfigureAwait(false)
             };
 
             if (before is not null && before.State == state && string.Equals(before.ReasonCode, reason, StringComparison.Ordinal))
@@ -103,27 +104,50 @@ public sealed partial class UcProvisioningReconciler
     private const int FeedbackChunk = 100;
 
     /// <summary>
-    /// Feedback of tenants that are no longer the data source's provisioning tenant (the tenant was changed): their privileges are
-    /// revoked like any unwanted privilege, so their feedback reads <c>REVOKE_PENDING</c> until nothing unwanted is left, then
+    /// Feedback of tenants that are no longer the data source's provisioning tenant (the tenant was changed). Their still-active
+    /// consents become <c>UNSUPPORTED</c> / <c>TENANT_NOT_PROVISIONED</c> (announced as failed when they were provisioned); their
+    /// ended consents read <c>REVOKE_PENDING</c> while any privilege outside the desired state is left in the ledger, then
     /// <c>REVOKED</c>.
     /// </summary>
-    private async Task RetireFormerTenantsAsync(string dataSource, TenantId tenant, UcApplyOutcome outcome, DateTimeOffset now, CancellationToken ct)
+    private async Task RetireFormerTenantsAsync(string dataSource, TenantId tenant, UcDesiredState desired, DateTimeOffset now, CancellationToken ct)
     {
-        var (state, reason) = outcome.RevokesOutstanding ? (UcGrantState.Pending, (string?)RevokePendingReason) : (UcGrantState.Revoked, null);
-        foreach (var former in await store.ListFeedbackTenantsAsync(dataSource, ct).ConfigureAwait(false))
+        var formers = (await store.ListFeedbackTenantsAsync(dataSource, ct).ConfigureAwait(false)).Where(t => t != tenant).ToList();
+        if (formers.Count == 0)
         {
-            if (former == tenant)
+            return;
+        }
+
+        // Protection does not count here: a former tenant's privilege is gone only when no row outside the desired state is left.
+        var undesiredLeft = (await store.ListLedgerAsync(dataSource, ct).ConfigureAwait(false)).Any(row => !desired.Privileges.ContainsKey(row.Key));
+        foreach (var former in formers)
+        {
+            var active = (await store.ListTableConsentsAsync(former, dataSource, now, ct).ConfigureAwait(false))
+                .Where(c => c.TenantId == former && c.IsActive(now))
+                .ToDictionary(c => c.Id);
+            var rows = new List<UcGrantFeedback>();
+            var events = new List<UcFeedbackEvent>();
+            foreach (var row in await store.ListFeedbackAsync(former, dataSource, ct).ConfigureAwait(false))
             {
-                continue;
+                var (state, reason) = active.ContainsKey(row.ConsentId)
+                    ? (UcGrantState.Unsupported, (string?)UcReasonCodes.TenantNotProvisioned)
+                    : undesiredLeft ? (UcGrantState.Pending, RevokePendingReason) : (UcGrantState.Revoked, null);
+                if (row.State == UcGrantState.Revoked || (row.State == state && string.Equals(row.ReasonCode, reason, StringComparison.Ordinal)))
+                {
+                    continue;
+                }
+
+                rows.Add(row with { State = state, ReasonCode = reason, UpdatedAt = now, VerifiedAt = null });
+                if (row.State == UcGrantState.Provisioned && active.TryGetValue(row.ConsentId, out var consent))
+                {
+                    events.Add(new UcFeedbackEvent(row.ConsentId, consent.TableIdentifier, false, now));
+                }
             }
 
-            var rows = (await store.ListFeedbackAsync(former, dataSource, ct).ConfigureAwait(false))
-                .Where(row => row.State != UcGrantState.Revoked && (row.State != state || !string.Equals(row.ReasonCode, reason, StringComparison.Ordinal)))
-                .Select(row => row with { State = state, ReasonCode = reason, UpdatedAt = now, VerifiedAt = null })
-                .ToList();
             foreach (var chunk in rows.Chunk(FeedbackChunk))
             {
-                await store.SaveFeedbackAsync(former, dataSource, _fencingToken, chunk, [], [], ct).ConfigureAwait(false);
+                var ids = chunk.Select(r => r.ConsentId).ToHashSet();
+                await store.SaveFeedbackAsync(former, dataSource, _fencingToken, chunk, [], events.Where(ev => ids.Contains(ev.ConsentId)).ToList(), ct)
+                    .ConfigureAwait(false);
             }
         }
     }
@@ -137,6 +161,7 @@ public sealed partial class UcProvisioningReconciler
         UcApplyOutcome outcome,
         UcGrantFeedback? before,
         Dictionary<(string Catalog, string Principal), string?> catalogAccess,
+        Dictionary<string, IReadOnlyList<UcPrivilegeAssignment>> catalogGrants,
         CancellationToken ct)
     {
         string? error = null;
@@ -174,7 +199,7 @@ public sealed partial class UcProvisioningReconciler
         {
             try
             {
-                verdict = await CatalogAccessAsync(dataSource, plan.Catalog!, plan.Principal!, ct).ConfigureAwait(false);
+                verdict = await CatalogAccessAsync(dataSource, plan.Catalog!, plan.Principal!, catalogGrants, ct).ConfigureAwait(false);
             }
             catch (UcProvisioningException ex)
             {
@@ -193,9 +218,15 @@ public sealed partial class UcProvisioningReconciler
     /// asked; reading them for another principal needs more than the provisioning principal holds, so a refusal is reported as
     /// unverified, never as provisioned.
     /// </summary>
-    private async Task<string?> CatalogAccessAsync(string dataSource, string catalog, string principal, CancellationToken ct)
+    private async Task<string?> CatalogAccessAsync(
+        string dataSource, string catalog, string principal, Dictionary<string, IReadOnlyList<UcPrivilegeAssignment>> catalogGrants, CancellationToken ct)
     {
-        var direct = await client.GetPermissionsAsync(dataSource, UcSecurableType.Catalog, catalog, ct).ConfigureAwait(false);
+        if (!catalogGrants.TryGetValue(catalog, out var direct))
+        {
+            direct = await client.GetPermissionsAsync(dataSource, UcSecurableType.Catalog, catalog, ct).ConfigureAwait(false);
+            catalogGrants[catalog] = direct;
+        }
+
         if (direct.Any(a => (string.Equals(a.Principal, principal, StringComparison.Ordinal) ||
                              string.Equals(a.Principal, AccountUsersGroup, StringComparison.OrdinalIgnoreCase)) &&
                             a.Privileges.Any(p => CatalogAccessPrivileges.Contains(p, StringComparer.Ordinal))))
@@ -209,7 +240,7 @@ public sealed partial class UcProvisioningReconciler
                 ? null
                 : CatalogAccessMissingReason;
         }
-        catch (UcProvisioningException ex) when (ex.Code is UcErrorCodes.Forbidden or UcErrorCodes.Rejected)
+        catch (UcProvisioningException ex) when (ex.Code == UcErrorCodes.Forbidden)
         {
             return CatalogAccessUnverifiedReason;
         }

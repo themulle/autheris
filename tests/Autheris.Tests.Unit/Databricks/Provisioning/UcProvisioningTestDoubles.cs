@@ -88,6 +88,11 @@ internal sealed class FakeUcStore : IUcProvisioningStore
         TenantId tenant, string dataSource, long fencingToken, IReadOnlyList<UcGrantFeedback> rows, IReadOnlyList<AuditLogEntry> audit,
         IReadOnlyList<UcFeedbackEvent> events, CancellationToken ct)
     {
+        if (rows.Any(r => r.Tenant != tenant))
+        {
+            throw new ArgumentException("Every feedback row must belong to the tenant.", nameof(rows));
+        }
+
         Events.AddRange(events);
         LastToken = fencingToken;
         foreach (var row in rows)

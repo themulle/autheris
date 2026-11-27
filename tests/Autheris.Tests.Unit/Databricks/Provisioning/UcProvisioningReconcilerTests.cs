@@ -210,6 +210,42 @@ public sealed class UcProvisioningReconcilerTests
     }
 
     [Fact]
+    public async Task Ended_consent_of_a_former_tenant_reads_revoke_pending_until_its_privileges_are_gone()
+    {
+        var consent = Grant(Now);
+        _store.Consents.Add(consent);
+        await RunAsync();
+        _store.Consents.Remove(consent);
+        _options.CurrentValue = Options(tenant: "beta");
+        _client.FailUpdates = UcErrorCodes.Unavailable;
+
+        await RunAsync();
+        _store.FeedbackOf(consent).ReasonCode.ShouldBe(UcProvisioningReconciler.RevokePendingReason);
+
+        _client.FailUpdates = null;
+        _time.Advance(TimeSpan.FromMinutes(10));
+        await RunAsync();
+        _store.FeedbackOf(consent).State.ShouldBe(UcGrantState.Revoked);
+    }
+
+    [Theory]
+    [InlineData("account users", "BROWSE", UcGrantState.Failed)]
+    [InlineData("analysts", "USE_CATALOG", UcGrantState.Provisioned)]
+    [InlineData("account users", "ALL_PRIVILEGES", UcGrantState.Provisioned)]
+    public async Task Direct_catalog_grants_settle_access_only_with_a_usable_privilege(string principal, string privilege, UcGrantState expected)
+    {
+        _client.CatalogAccess.Clear();
+        _client.EffectiveFailure = UcErrorCodes.Forbidden;
+        _client.Set(UcSecurableType.Catalog, "main", principal).Add(privilege);
+        var consent = Grant(Now);
+        _store.Consents.Add(consent);
+
+        await RunAsync();
+
+        _store.FeedbackOf(consent).State.ShouldBe(expected);
+    }
+
+    [Fact]
     public async Task Revoke_during_an_outage_stays_pending_becomes_overdue_and_completes_later()
     {
         var consent = Grant(Now);
@@ -604,7 +640,9 @@ public sealed class UcProvisioningReconcilerTests
 
         _client.Holds(UcSecurableType.Table, Table, "analysts", UcPrivileges.Select).ShouldBeFalse();
         _store.Ledger.ShouldBeEmpty();
-        _store.FeedbackOf(consent).State.ShouldBe(UcGrantState.Revoked);
+        _store.FeedbackOf(consent).State.ShouldBe(UcGrantState.Unsupported);
+        _store.FeedbackOf(consent).ReasonCode.ShouldBe(UcReasonCodes.TenantNotProvisioned);
+        _store.Events.ShouldContain(e => e.ConsentId == consent.Id && !e.Provisioned);
     }
 
     [Fact]
