@@ -794,6 +794,7 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
             throw new WebSqlPolicyException(SqlDialectMapper.UnsupportedDialectMessage);
         }
 
+        var clientSql = rawSql;
         (rawSql, var mvGuard) = await EnforceMetricViewGuardAsync(
             rawSql, decidedTableMetadata, decisions, targetDatabaseDialect.Value, tenantId, ct).ConfigureAwait(false);
 
@@ -838,7 +839,7 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
         // Stage 5: Compile (Security invariant 2). Engine exceptions propagate unwrapped: SqlCompilerErrorMapper maps them to
         // stable codes with fixed messages at every error surface, and no Exception.Message is copied into a new exception.
         // -------------------------------------------------------------
-        var compiled = CompileStatement(rawSql, request, ct);
+        var compiled = CompileStatement(rawSql, request, ct, ReferenceEquals(clientSql, rawSql));
 
         bool allowStatementText = _options.Value.Logging?.AllowStatementText ?? true;
         if (_options.Value.Logging?.LogGeneratedSql == true && allowStatementText && _logger != null && _logger.IsEnabled(LogLevel.Debug))

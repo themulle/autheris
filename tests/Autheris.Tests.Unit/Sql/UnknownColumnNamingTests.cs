@@ -155,16 +155,22 @@ public sealed class UnknownColumnNamingTests
         var unknown = await RewriteAsync(rewriter, "SELECT custmer_id FROM orders");
         var (unknownError, _) = await FailAsync(unknown);
 
-        // the same statement shape with the hidden column: the provider answers the same way (the column is not in the compile catalog)
-        var hiddenRewrite = await RewriteAsync(rewriter, "SELECT secret FROM orders").ContinueWith(t => t.IsFaulted ? null : t.Result);
-        var hiddenBody = hiddenRewrite is null ? null : Body((await FailAsync(hiddenRewrite)).Error);
+        // the same statement shape with the hidden column: either the rewrite refuses it (the exception is the body) or the provider does
+        string hiddenBody;
+        try
+        {
+            hiddenBody = Body((await FailAsync(await RewriteAsync(rewriter, "SELECT secret FROM orders"))).Error);
+        }
+        catch (Exception ex) when (ex is not Shouldly.ShouldAssertException)
+        {
+            hiddenBody = Body(ex);
+        }
+
         var unknownBody = Body(unknownError);
 
         unknownBody.ShouldContain("SQL_POLICY_DENIED");
-        if (hiddenBody is not null)
-        {
-            hiddenBody.ShouldBe(unknownBody);
-        }
+        unknownBody.ShouldContain("\"status\":403");
+        hiddenBody.ShouldNotBeNull().ShouldBe(unknownBody);
 
         foreach (var key in new[] { "\"line\"", "\"column\"", "\"hint\"", "\"columnName\"" })
         {
@@ -253,6 +259,15 @@ public sealed class UnknownColumnNamingTests
         }
 
         await Task.CompletedTask;
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void FirstUnresolvedReference_NotSafeToEcho_DoesNotFallThroughToALaterOne()
+    {
+        var catalog = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id" };
+
+        UnknownColumnResolver.TryFind(new UnknownColumnProbe("SELECT \"bad name\", later_col FROM orders", catalog), out _, out _, out _).ShouldBeFalse();
     }
 
     [Fact]

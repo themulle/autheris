@@ -19,7 +19,7 @@ public class AstBuildException : Exception
     }
 
     /// <summary>The <see cref="SqlConstructCatalog"/> label of the rejected construct, or <c>null</c> when it must stay unnamed.</summary>
-    public string? PublicConstruct { get; }
+    public string? PublicConstruct { get; private set; }
 
     /// <summary>1-based line of the construct in the client text, when known.</summary>
     public int? Line { get; private set; }
@@ -35,5 +35,20 @@ public class AstBuildException : Exception
             Line = line;
             Column = column;
         }
+    }
+
+    /// <summary>Makes the rejection unnamed again (the construct cannot be tied to the client text).</summary>
+    public void WithdrawPublicConstruct()
+    {
+        PublicConstruct = null;
+        Line = null;
+        Column = null;
+    }
+
+    /// <summary>Forgets the position (it was computed against text the client did not write).</summary>
+    public void DropPosition()
+    {
+        Line = null;
+        Column = null;
     }
 }

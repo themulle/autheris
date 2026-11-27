@@ -41,9 +41,11 @@ internal static class UnknownColumnResolver
                     continue;
                 }
 
+                // The first unresolved reference is the candidate. When it is not safe to echo, the denial stays: a later reference must not
+                // be reported in its place.
                 if (!PublicSqlName.TryCreate(candidate, out var safe))
                 {
-                    continue;
+                    return false;
                 }
 
                 name = safe;

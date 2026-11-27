@@ -166,6 +166,40 @@ public sealed class SqlConstructNamingTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public void RowPolicySubqueryWithEmitTimeConstruct_NotNamed()
+    {
+        // The client statement says nothing about JOIN ... USING; the row policy subquery does. The emit-time rejection must stay unnamed.
+        var (tree, _) = _engine.ParseExpression("EXISTS (SELECT 1 FROM dbo.Orders a JOIN dbo.Orders b USING (Id))".AsMemory(), SqlTokenSecurityOptions.None);
+        var expression = new SqlAstBuilder(new AstBuilderOptions { EnforceFunctionPolicy = false }).BuildStandaloneExpression(tree);
+        _rowFilters.Predicates[Orders] = PolicyPredicate.Create(expression, new Dictionary<string, PolicyValue>());
+
+        Exception? thrown = null;
+        foreach (var dialect in new[] { TargetSqlDialect.SqlServer, TargetSqlDialect.Oracle, TargetSqlDialect.Databricks, TargetSqlDialect.PostgreSql, TargetSqlDialect.DuckDb })
+        {
+            try
+            {
+                Compile("SELECT Id FROM dbo.Orders", dialect);
+            }
+            catch (Exception ex)
+            {
+                thrown = ex;
+                Assert.False(ex is AstBuildException { PublicConstruct: not null } || ex is SqlCompileNotSupportedException { PublicConstruct: not null },
+                    $"{dialect}: {ex.GetType().Name} named a construct that only the policy contains");
+            }
+        }
+
+        Assert.NotNull(thrown);
+    }
+
+    [Fact]
+    public void ClientEmitTimeConstruct_StaysNamed_WhenTheKeywordsAreInTheClientText()
+    {
+        var ex = Assert.Throws<AstBuildException>(() => Compile("SELECT Region, COUNT(Id) FROM dbo.Orders GROUP BY ALL", TargetSqlDialect.SqlServer));
+        Assert.Equal(SqlConstructCatalog.GroupByAll, ex.PublicConstruct);
+    }
+
+    [Fact]
     public void BuilderDefaultOptions_NeverNameConstruct()
     {
         var ex = BuildFailure("SELECT id FROM t TABLESAMPLE BERNOULLI (10)", new AstBuilderOptions { EnforceFunctionPolicy = false });

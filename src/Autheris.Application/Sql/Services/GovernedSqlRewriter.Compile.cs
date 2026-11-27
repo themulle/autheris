@@ -126,7 +126,7 @@ public sealed partial class GovernedSqlRewriter
             bindPageOffset: bindPageOffset, pageOffset: pageOffset, maxOffset: maxOffset);
     }
 
-    private CompiledSql CompileStatement(string rawSql, CompileRequest request, CancellationToken ct)
+    internal CompiledSql CompileStatement(string rawSql, CompileRequest request, CancellationToken ct, bool textIsClientText = true)
     {
         try
         {
@@ -134,10 +134,26 @@ public sealed partial class GovernedSqlRewriter
         }
         catch (Exception ex) when (ex is SecurityException or TrinoSqlEngine.Ast.Builder.AstBuildException)
         {
+            if (!textIsClientText)
+            {
+                // the compiler saw gateway-augmented text: a position would point into text the client did not write, so only the name stays.
+                DropPosition(ex);
+            }
+
             _logger?.Warning(ex, "WebSQL statement rejected by the SQL compiler.");
             throw;
         }
     }
 
     private IPAddress ResolveClientIp() => _clientIpResolver?.ResolveClientIp() ?? IPAddress.None;
+
+    private static void DropPosition(Exception ex)
+    {
+        switch (ex)
+        {
+            case TrinoSqlEngine.Ast.Security.FunctionNotPermittedException f: f.DropPosition(); break;
+            case TrinoSqlEngine.Ast.Builder.AstBuildException a: a.DropPosition(); break;
+            case TrinoSqlEngine.SqlCompileNotSupportedException n: n.DropPosition(); break;
+        }
+    }
 }

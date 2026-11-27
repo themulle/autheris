@@ -93,6 +93,10 @@ internal sealed class GovernedSqlCompiler
         if (!SqlConstructCatalog.Anchors.TryGetValue(label, out var keywords) || keywords.Length == 0
             || !SqlConstructLocator.TryLocateTokens(sql.ToString(), keywords, out int line, out int column))
         {
+            // An emit-time rejection (no builder position) can stem from a policy tree (a row-policy subquery, a mask). Without its keywords in the
+            // client text it cannot be shown to be the client's construct, so it stays unnamed.
+            if (ex is AstBuildException abe0) abe0.WithdrawPublicConstruct();
+            else if (ex is SqlCompileNotSupportedException nse0) nse0.WithdrawPublicConstruct();
             return;
         }
 

@@ -10,9 +10,9 @@ public sealed class FunctionNotPermittedException : SecurityException
 {
     public string FunctionName { get; }
 
-    public int? Line { get; }
+    public int? Line { get; private set; }
 
-    public int? Column { get; }
+    public int? Column { get; private set; }
 
     public FunctionNotPermittedException(string functionName, int? line, int? column)
         : base($"Function '{functionName}' is not permitted.")
@@ -20,5 +20,12 @@ public sealed class FunctionNotPermittedException : SecurityException
         FunctionName = functionName;
         Line = line;
         Column = column;
+    }
+
+    /// <summary>Forgets the position (it was computed against text the client did not write).</summary>
+    public void DropPosition()
+    {
+        Line = null;
+        Column = null;
     }
 }
