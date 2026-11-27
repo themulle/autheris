@@ -34,6 +34,25 @@ public static class UcReasonCodes
     public const string SchemaNotAllowed = "SCHEMA_NOT_ALLOWED";
     public const string PrincipalUnresolved = "PRINCIPAL_UNRESOLVED";
     public const string PrincipalAmbiguous = "PRINCIPAL_AMBIGUOUS";
+    public const string DenyPresent = "DENY_PRESENT";
+    public const string VirtualFilter = "VIRTUAL_FILTER";
+    public const string TableOwnedByOtherTenant = "TABLE_OWNED_BY_OTHER_TENANT";
+    public const string HiddenTable = "HIDDEN_TABLE";
+    public const string ColumnsUnknown = "COLUMNS_UNKNOWN";
+}
+
+/// <summary>
+/// Restrictions on a table that live outside the consent and the table metadata, resolved by the caller for the consent's
+/// tenant. Each flag must be true when it cannot be resolved (fail closed); <see cref="Unknown"/> sets all of them.
+/// </summary>
+/// <param name="HasDenyConsents">An active deny consent of the tenant covers the table (table, column or pattern deny).</param>
+/// <param name="HasMandatoryRowFilters">A virtual filter profile of the tenant may narrow rows of the table.</param>
+/// <param name="HasColumnClassifications">The table has classifications or mask overrides in the tenant's scope.</param>
+public sealed record UcTableRestrictions(bool HasDenyConsents, bool HasMandatoryRowFilters, bool HasColumnClassifications)
+{
+    public static UcTableRestrictions None { get; } = new(false, false, false);
+
+    public static UcTableRestrictions Unknown { get; } = new(true, true, true);
 }
 
 /// <summary>The table privilege a provisionable consent maps to; names are normalized (lower case).</summary>
@@ -56,26 +75,31 @@ public sealed record UcEligibility(UcTablePrivilege? Target, string? ReasonCode)
 
 /// <summary>
 /// Decides whether a consent can be expressed exactly as a Unity Catalog privilege. A table-wide <c>SELECT</c> carries no
-/// expiry, column, row or masking restriction, so the decision is an allowlist: only an allow data grant on one table, of the
+/// expiry, column, row or masking restriction, so the decision is an allowlist: only an allow data grant on one table without column
+/// rules (which clears every column, the whole-table case of the column set), of the
 /// provisioning tenant, without any column or row restriction on the consent or the table, below Confidential and inside an
 /// allowed schema is provisionable. Every other or unknown construct is unsupported and stays enforced by the gateway only.
 /// </summary>
 public static class UcProvisioningEligibility
 {
+    /// <summary>Decides one consent; the caller passes only active consents (validity window and revocation are not checked here).</summary>
     public static UcEligibility Evaluate(
         string dataSource,
         DatabricksDataSourceOptions? databricks,
         Consent consent,
         TableMetadata? table,
-        EffectiveProtection? protection)
+        EffectiveProtection? protection,
+        UcTableRestrictions restrictions)
     {
         ArgumentNullException.ThrowIfNull(consent);
+        ArgumentNullException.ThrowIfNull(restrictions);
         if (string.IsNullOrWhiteSpace(dataSource) || databricks?.Provisioning is not { } provisioning)
         {
             return UcEligibility.Unsupported(UcReasonCodes.DataSourceNotProvisioned);
         }
 
         return EvaluateConsent(provisioning, consent)
+            ?? EvaluateRestrictions(restrictions)
             ?? EvaluateTable(dataSource, databricks, consent, table)
             ?? EvaluateProtection(table!, protection)
             ?? EvaluateTarget(databricks, provisioning, table!);
@@ -110,7 +134,9 @@ public static class UcProvisioningEligibility
             return UcEligibility.Unsupported(UcReasonCodes.PatternGrant);
         }
 
-        if (consent.ColumnSetMode != ColumnSetMode.AllNonHidden || consent.TargetColumns is { Count: > 0 })
+        // A table consent without column rules clears every column whatever its column set mode (the mode only shapes pattern
+        // grants), so both defined modes describe the whole table here; an undefined mode or explicit target columns do not.
+        if (!Enum.IsDefined(consent.ColumnSetMode) || consent.TargetColumns is { Count: > 0 })
         {
             return UcEligibility.Unsupported(UcReasonCodes.ColumnSetNotSupported);
         }
@@ -133,11 +159,42 @@ public static class UcProvisioningEligibility
         return consent.WriteRules.Count > 0 ? UcEligibility.Unsupported(UcReasonCodes.WriteRules) : null;
     }
 
+    private static UcEligibility? EvaluateRestrictions(UcTableRestrictions restrictions)
+    {
+        if (restrictions.HasDenyConsents)
+        {
+            return UcEligibility.Unsupported(UcReasonCodes.DenyPresent);
+        }
+
+        if (restrictions.HasMandatoryRowFilters)
+        {
+            return UcEligibility.Unsupported(UcReasonCodes.VirtualFilter);
+        }
+
+        return restrictions.HasColumnClassifications ? UcEligibility.Unsupported(UcReasonCodes.ColumnProtection) : null;
+    }
+
     private static UcEligibility? EvaluateTable(string dataSource, DatabricksDataSourceOptions databricks, Consent consent, TableMetadata? table)
     {
         if (table is null || !table.Table.IsActive)
         {
             return UcEligibility.Unsupported(UcReasonCodes.TableNotFound);
+        }
+
+        if (!string.IsNullOrWhiteSpace(table.OwnerTenantId) &&
+            !string.Equals(table.OwnerTenantId.Trim(), consent.TenantId.Value, StringComparison.OrdinalIgnoreCase))
+        {
+            return UcEligibility.Unsupported(UcReasonCodes.TableOwnedByOtherTenant);
+        }
+
+        if (table.Table.DiscoveryHidden)
+        {
+            return UcEligibility.Unsupported(UcReasonCodes.HiddenTable);
+        }
+
+        if (table.Columns.Count == 0)
+        {
+            return UcEligibility.Unsupported(UcReasonCodes.ColumnsUnknown);
         }
 
         if (!string.Equals(table.Identifier.Domain, dataSource, StringComparison.OrdinalIgnoreCase) ||

@@ -1,6 +1,7 @@
 namespace Autheris.Infrastructure.Databricks.Provisioning;
 
 using System;
+using System.Collections.Generic;
 using System.ComponentModel.DataAnnotations;
 using System.Linq;
 using Autheris.Application.Governance.Provisioning;
@@ -21,6 +22,14 @@ public static class DatabricksProvisioningOptionsValidator
     public static void Validate(GatewayOptions options)
     {
         ArgumentNullException.ThrowIfNull(options);
+
+        // A provisioning principal never runs queries anywhere: the token cache is keyed by host and client id, so sharing a client
+        // id with any query principal on any Databricks source would run that source's queries with MANAGE.
+        var queryPrincipals = options.DataSources.Connections.Values
+            .Where(c => c?.Databricks is not null && DataSourceProvider.Is(c.Provider, DatabaseDialect.Databricks))
+            .SelectMany(c => QueryPrincipalIds(c!.Databricks!.Auth))
+            .ToHashSet(StringComparer.OrdinalIgnoreCase);
+
         foreach (var (name, connection) in options.DataSources.Connections)
         {
             if (connection?.Databricks?.Provisioning is not { } provisioning)
@@ -33,11 +42,11 @@ public static class DatabricksProvisioningOptionsValidator
                 throw Fail(name, "the Provisioning section is only valid on a Databricks data source.");
             }
 
-            Validate(name, connection.Databricks, provisioning, options.Databricks);
+            Validate(name, connection.Databricks, provisioning, options.Databricks, queryPrincipals);
         }
     }
 
-    private static void Validate(string name, DatabricksDataSourceOptions db, DatabricksProvisioningOptions provisioning, DatabricksOptions global)
+    private static void Validate(string name, DatabricksDataSourceOptions db, DatabricksProvisioningOptions provisioning, DatabricksOptions global, IReadOnlySet<string> queryPrincipals)
     {
         if (!Enum.IsDefined(provisioning.Mode))
         {
@@ -60,7 +69,7 @@ public static class DatabricksProvisioningOptionsValidator
         }
 
         ValidateAllowedSchemas(name, db, provisioning);
-        ValidateAuth(name, db, provisioning.Auth, global);
+        ValidateAuth(name, db, provisioning.Auth, global, queryPrincipals);
     }
 
     private static void ValidateAllowedSchemas(string name, DatabricksDataSourceOptions db, DatabricksProvisioningOptions provisioning)
@@ -89,7 +98,7 @@ public static class DatabricksProvisioningOptionsValidator
         }
     }
 
-    private static void ValidateAuth(string name, DatabricksDataSourceOptions db, DatabricksAuthOptions? auth, DatabricksOptions global)
+    private static void ValidateAuth(string name, DatabricksDataSourceOptions db, DatabricksAuthOptions? auth, DatabricksOptions global, IReadOnlySet<string> queryPrincipals)
     {
         if (auth is null || auth.Mode != DatabricksAuthMode.OAuthM2M)
         {
@@ -111,9 +120,9 @@ public static class DatabricksProvisioningOptionsValidator
             throw Fail(name, "Provisioning.Auth.ClientSecretRef must be a secret reference (e.g. 'kv://', 'vault:'); inline secrets are prohibited.");
         }
 
-        if (QueryPrincipalIds(db.Auth).Any(id => string.Equals(id, auth.ClientId.Trim(), StringComparison.OrdinalIgnoreCase)))
+        if (queryPrincipals.Contains(auth.ClientId.Trim()))
         {
-            throw Fail(name, "Provisioning.Auth.ClientId must differ from every principal that runs queries on the data source.");
+            throw Fail(name, "Provisioning.Auth.ClientId must differ from every principal that runs queries on any Databricks data source.");
         }
 
         if (!string.IsNullOrWhiteSpace(auth.TokenEndpoint) && !IsAllowedTokenEndpoint(auth.TokenEndpoint, db.Host, global))

@@ -260,7 +260,11 @@ public sealed partial class UnityCatalogPermissionsClient(
 
     private static string BuildUpdateBody(UcSecurableType type, IReadOnlyList<UcPermissionChange> changes)
     {
-        var addable = UcPrivileges.AddableOn(type);
+        // Catalogs are never changed; on a schema only USE_SCHEMA moves; on a table SELECT is added and any privilege may be removed.
+        var addable = UcPrivileges.AddableOn(type) ?? throw new UcProvisioningException(UcErrorCodes.PrivilegeNotAllowed);
+        Func<string, bool> removable = type == UcSecurableType.Table
+            ? static p => PrivilegeRegex().IsMatch(p)
+            : p => string.Equals(p, addable, StringComparison.Ordinal);
         using var stream = new MemoryStream();
         using (var w = new Utf8JsonWriter(stream))
         {
@@ -276,7 +280,7 @@ public sealed partial class UnityCatalogPermissionsClient(
                 w.WriteStartObject();
                 w.WriteString("principal", change.Principal);
                 WritePrivileges(w, "add", change.Add, p => string.Equals(p, addable, StringComparison.Ordinal));
-                WritePrivileges(w, "remove", change.Remove, p => PrivilegeRegex().IsMatch(p));
+                WritePrivileges(w, "remove", change.Remove, removable);
                 w.WriteEndObject();
             }
 
@@ -395,9 +399,8 @@ public sealed partial class UnityCatalogPermissionsClient(
         using var response = await SendOnceAsync(settings, token, method, pathAndQuery, body, ct).ConfigureAwait(false);
         if (response.StatusCode == HttpStatusCode.Unauthorized)
         {
-            // An expired or rotated credential: drop the cached token and the secret, then try exactly once more.
+            // An expired or rotated credential: drop only this principal's cached token (the secret is re-read on acquire), retry once.
             credentials.EvictToken(settings.Credentials, null);
-            credentials.InvalidateSecret(settings.Credentials);
             var refreshed = await AcquireTokenAsync(settings, ct).ConfigureAwait(false);
             using var retry = await SendOnceAsync(settings, refreshed, method, pathAndQuery, body, ct).ConfigureAwait(false);
             return await ReadResponseAsync(settings, retry, ct).ConfigureAwait(false);
@@ -416,6 +419,14 @@ public sealed partial class UnityCatalogPermissionsClient(
         {
             throw new UcProvisioningException(
                 ex.Code == DatabricksErrorCodes.Configuration ? UcErrorCodes.Configuration : UcErrorCodes.AuthFailed);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new UcProvisioningException(UcErrorCodes.Timeout);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException or JsonException or InvalidOperationException)
+        {
+            throw new UcProvisioningException(UcErrorCodes.AuthFailed);
         }
     }
 
@@ -436,7 +447,7 @@ public sealed partial class UnityCatalogPermissionsClient(
         {
             throw new UcProvisioningException(UcErrorCodes.Timeout);
         }
-        catch (HttpRequestException)
+        catch (Exception ex) when (ex is HttpRequestException or IOException)
         {
             throw new UcProvisioningException(UcErrorCodes.Unavailable);
         }
@@ -450,7 +461,20 @@ public sealed partial class UnityCatalogPermissionsClient(
             throw new UcProvisioningException(UcErrorCodes.Http);
         }
 
-        var bytes = await ReadBoundedAsync(response, ct).ConfigureAwait(false);
+        ReadOnlyMemory<byte> bytes;
+        try
+        {
+            bytes = await ReadBoundedAsync(response, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (!ct.IsCancellationRequested)
+        {
+            throw new UcProvisioningException(UcErrorCodes.Timeout);
+        }
+        catch (Exception ex) when (ex is HttpRequestException or IOException)
+        {
+            throw new UcProvisioningException(UcErrorCodes.Unavailable);
+        }
+
         if (response.IsSuccessStatusCode)
         {
             try

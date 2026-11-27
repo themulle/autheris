@@ -6,11 +6,15 @@ using System.Text.RegularExpressions;
 
 /// <summary>
 /// Strict naming rules for the Unity Catalog securables the provisioning path touches. A name segment is lower case ASCII
-/// letters, digits and underscores (1 to 255 characters); anything else is never provisioned, so no name needs quoting.
+/// letters, digits and underscores (1 to <see cref="MaxSegmentLength"/> characters); anything else is never provisioned, so no
+/// name needs quoting and a full table name fits <see cref="MaxFullNameLength"/>.
 /// </summary>
 public static partial class UcSecurableNames
 {
-    [GeneratedRegex(@"^[a-z0-9_]{1,255}\z", RegexOptions.CultureInvariant)]
+    public const int MaxSegmentLength = 128;
+    public const int MaxFullNameLength = (3 * MaxSegmentLength) + 2;
+
+    [GeneratedRegex(@"^[a-z0-9_]{1,128}\z", RegexOptions.CultureInvariant)]
     private static partial Regex SegmentRegex();
 
     public static bool IsValidSegment(string? segment) => segment is not null && SegmentRegex().IsMatch(segment);

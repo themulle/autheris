@@ -80,15 +80,14 @@ public sealed class UnityCatalogPermissionsClientTests
     }
 
     [Theory]
-    [InlineData(UcSecurableType.Schema, "main.sales", "USE_SCHEMA")]
-    [InlineData(UcSecurableType.Catalog, "main", "USE_CATALOG")]
-    [InlineData(UcSecurableType.Table, "main.sales.orders", "SELECT")]
-    public async Task Update_sends_one_patch_with_the_addable_privilege(UcSecurableType type, string fullName, string privilege)
+    [InlineData(UcSecurableType.Schema, "main.sales", "USE_SCHEMA", "USE_SCHEMA")]
+    [InlineData(UcSecurableType.Table, "main.sales.orders", "SELECT", "MODIFY")]
+    public async Task Update_sends_one_patch_with_the_addable_privilege(UcSecurableType type, string fullName, string privilege, string removed)
     {
         var handler = Handler(r => r.Method == HttpMethod.Patch ? Ok("{\"privilege_assignments\":[{\"principal\":\"analysts\",\"privileges\":[\"" + privilege + "\"]}]}") : null);
 
         var result = await Client(handler).UpdatePermissionsAsync(
-            "dbx", type, fullName, [new UcPermissionChange("analysts", [privilege], ["MODIFY"])], CancellationToken.None);
+            "dbx", type, fullName, [new UcPermissionChange("analysts", [privilege], [removed])], CancellationToken.None);
 
         result.Single().Privileges.ShouldBe([privilege]);
         var patch = handler.Requests.Single(r => r.Method == HttpMethod.Patch);
@@ -97,7 +96,55 @@ public sealed class UnityCatalogPermissionsClientTests
         var change = body.RootElement.GetProperty("changes")[0];
         change.GetProperty("principal").GetString().ShouldBe("analysts");
         change.GetProperty("add")[0].GetString().ShouldBe(privilege);
-        change.GetProperty("remove")[0].GetString().ShouldBe("MODIFY");
+        change.GetProperty("remove")[0].GetString().ShouldBe(removed);
+    }
+
+    [Theory]
+    [InlineData(UcSecurableType.Catalog, "main", "USE_CATALOG", false)]
+    [InlineData(UcSecurableType.Catalog, "main", "USE_CATALOG", true)]
+    [InlineData(UcSecurableType.Schema, "main.sales", "MODIFY", true)]
+    [InlineData(UcSecurableType.Schema, "main.sales", "ALL_PRIVILEGES", true)]
+    public async Task Catalogs_are_never_changed_and_schemas_only_lose_use_schema(UcSecurableType type, string fullName, string privilege, bool remove)
+    {
+        var handler = Handler(_ => Ok("{}"));
+        var change = remove ? new UcPermissionChange("analysts", [], [privilege]) : Grant("analysts", privilege);
+
+        (await Should.ThrowAsync<UcProvisioningException>(() => Client(handler).UpdatePermissionsAsync(
+            "dbx", type, fullName, [change], CancellationToken.None))).Code.ShouldBe(UcErrorCodes.PrivilegeNotAllowed);
+        handler.Requests.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Cached_query_principal_token_is_never_used_for_provisioning()
+    {
+        var cache = new DatabricksTokenCache();
+        cache.Set(Host, null, DatabricksAuthMode.OAuthM2M, "sp-id", string.Empty, "query-principal-token", DateTimeOffset.UtcNow.AddHours(1));
+        var handler = Handler(r => r.Uri.AbsolutePath == TablePath ? Ok("{\"privilege_assignments\":[]}") : null);
+
+        await Client(handler, cache).GetPermissionsAsync("dbx", UcSecurableType.Table, "main.sales.orders", CancellationToken.None);
+
+        handler.Requests.Single(r => r.Uri.AbsolutePath == TablePath).Authorization.ShouldBe("Bearer " + AccessToken);
+        handler.Requests.ShouldContain(r => r.Uri.AbsolutePath == "/oidc/v1/token");
+    }
+
+    [Fact]
+    public async Task Transport_failures_become_codes()
+    {
+        var handler = new FakeDatabricksHandler(r => r.Uri.AbsolutePath == "/oidc/v1/token" ? TokenOk() : throw new HttpRequestException("connection reset by 10.1.2.3"));
+
+        var ex = await Should.ThrowAsync<UcProvisioningException>(() => Client(handler).GetPermissionsAsync("dbx", UcSecurableType.Table, "main.sales.orders", CancellationToken.None));
+
+        ex.Code.ShouldBe(UcErrorCodes.Unavailable);
+        ex.Message.ShouldNotContain("10.1.2.3");
+    }
+
+    [Fact]
+    public async Task Token_endpoint_failure_becomes_an_auth_code()
+    {
+        var handler = new FakeDatabricksHandler(r => r.Uri.AbsolutePath == "/oidc/v1/token" ? Ok("not json") : Ok("{}"));
+
+        (await Should.ThrowAsync<UcProvisioningException>(() => Client(handler).GetPermissionsAsync("dbx", UcSecurableType.Table, "main.sales.orders", CancellationToken.None)))
+            .Code.ShouldBe(UcErrorCodes.AuthFailed);
     }
 
     [Theory]
@@ -107,6 +154,7 @@ public sealed class UnityCatalogPermissionsClientTests
     [InlineData(UcSecurableType.Schema, "main.sales", "SELECT")]
     [InlineData(UcSecurableType.Schema, "main.sales", "CREATE_TABLE")]
     [InlineData(UcSecurableType.Catalog, "main", "USE_SCHEMA")]
+    [InlineData(UcSecurableType.Catalog, "main", "USE_CATALOG")]
     public async Task Update_never_adds_any_other_privilege(UcSecurableType type, string fullName, string privilege)
     {
         var handler = Handler(_ => Ok("{}"));
@@ -344,10 +392,10 @@ public sealed class UnityCatalogPermissionsClientTests
     private static FakeDatabricksHandler Handler(Func<RecordedRequest, HttpResponseMessage?> routes) =>
         new(r => r.Uri.AbsolutePath == "/oidc/v1/token" ? TokenOk() : routes(r) ?? Json(HttpStatusCode.NotFound, "{}"));
 
-    private static UnityCatalogPermissionsClient Client(FakeDatabricksHandler handler)
+    private static UnityCatalogPermissionsClient Client(FakeDatabricksHandler handler, DatabricksTokenCache? cache = null)
     {
         var options = Microsoft.Extensions.Options.Options.Create(ProvisioningOptions());
-        var credentials = new DatabricksOboTokenProvider(new HttpClient(handler), options, new ProvisioningVault(), Env("Production"), new DatabricksTokenCache());
+        var credentials = new DatabricksOboTokenProvider(new HttpClient(handler), options, new ProvisioningVault(), Env("Production"), cache ?? new DatabricksTokenCache());
         return new UnityCatalogPermissionsClient(new HttpClient(handler), options, credentials);
     }
 

@@ -40,6 +40,15 @@ public sealed class UcProvisioningEligibilityTests
         Evaluate(Consent(c => Copy(c, granteeType: type)), Table()).IsProvisionable.ShouldBeTrue();
     }
 
+    [Theory]
+    [InlineData(ColumnSetMode.Explicit)]
+    [InlineData(ColumnSetMode.AllNonHidden)]
+    public void Table_consent_without_column_rules_is_provisionable_in_either_column_set_mode(ColumnSetMode mode)
+    {
+        // Without column rules the gateway clears every column of a table consent; the mode only shapes pattern grants.
+        Evaluate(Consent(c => Copy(c, columnSetMode: mode)), Table()).IsProvisionable.ShouldBeTrue();
+    }
+
     public static TheoryData<string, Func<Consent, Consent>> ConsentConstructs() => new()
     {
         { UcReasonCodes.GrantKindNotSupported, c => Copy(c, grantKind: PermissionGrantKind.Unmask) },
@@ -51,7 +60,6 @@ public sealed class UcProvisioningEligibilityTests
         { UcReasonCodes.GranteeNotSupported, c => Copy(c, granteeType: (GranteeType)8) },
         { UcReasonCodes.GranteeNotSupported, c => Copy(c, granteeSid: null) },
         { UcReasonCodes.PatternGrant, c => Copy(c, objectPattern: Source + ".sales.*") },
-        { UcReasonCodes.ColumnSetNotSupported, c => Copy(c, columnSetMode: ColumnSetMode.Explicit) },
         { UcReasonCodes.ColumnSetNotSupported, c => Copy(c, columnSetMode: (ColumnSetMode)7) },
         { UcReasonCodes.ColumnSetNotSupported, c => Copy(c, targetColumns: ["amount"]) },
         { UcReasonCodes.ColumnRules, c => With(c, x => x.ColumnRules = [new ConsentColumnRule { ColumnName = "amount", AccessLevel = ColumnAccessLevel.Clear }]) },
@@ -102,6 +110,38 @@ public sealed class UcProvisioningEligibilityTests
         var consent = Consent(c => Copy(c, table: table.Identifier));
 
         Evaluate(consent, table).ReasonCode.ShouldBe(reason);
+    }
+
+    [Theory]
+    [InlineData(true, false, false, UcReasonCodes.DenyPresent)]
+    [InlineData(false, true, false, UcReasonCodes.VirtualFilter)]
+    [InlineData(false, false, true, UcReasonCodes.ColumnProtection)]
+    [InlineData(true, true, true, UcReasonCodes.DenyPresent)]
+    public void Restrictions_outside_the_consent_make_it_unsupported(bool deny, bool virtualFilter, bool classified, string reason)
+    {
+        // A deny wins in the gateway; a virtual filter narrows rows; tenant-scoped classifications mask columns. UC can express none.
+        Evaluate(Consent(), Table(), restrictions: new UcTableRestrictions(deny, virtualFilter, classified)).ReasonCode.ShouldBe(reason);
+    }
+
+    [Fact]
+    public void Unresolved_restrictions_are_unsupported()
+    {
+        Evaluate(Consent(), Table(), restrictions: UcTableRestrictions.Unknown).IsProvisionable.ShouldBeFalse();
+    }
+
+    [Fact]
+    public void Table_owned_by_another_tenant_is_unsupported()
+    {
+        Evaluate(Consent(), Table() with { OwnerTenantId = "beta" }).ReasonCode.ShouldBe(UcReasonCodes.TableOwnedByOtherTenant);
+        Evaluate(Consent(), Table() with { OwnerTenantId = "ACME" }).IsProvisionable.ShouldBeTrue();
+    }
+
+    [Fact]
+    public void Hidden_table_or_table_without_known_columns_is_unsupported()
+    {
+        var hidden = Table();
+        Evaluate(Consent(), hidden with { Table = hidden.Table with { DiscoveryHidden = true } }).ReasonCode.ShouldBe(UcReasonCodes.HiddenTable);
+        Evaluate(Consent(), Table() with { Columns = [] }).ReasonCode.ShouldBe(UcReasonCodes.ColumnsUnknown);
     }
 
     [Fact]
@@ -164,9 +204,9 @@ public sealed class UcProvisioningEligibilityTests
     public void Data_source_without_provisioning_section_is_unsupported()
     {
         var databricks = new DatabricksDataSourceOptions { Catalog = "main" };
-        UcProvisioningEligibility.Evaluate(Source, databricks, Consent(), Table(), Protection())
+        UcProvisioningEligibility.Evaluate(Source, databricks, Consent(), Table(), Protection(), UcTableRestrictions.None)
             .ReasonCode.ShouldBe(UcReasonCodes.DataSourceNotProvisioned);
-        UcProvisioningEligibility.Evaluate(Source, null, Consent(), Table(), Protection())
+        UcProvisioningEligibility.Evaluate(Source, null, Consent(), Table(), Protection(), UcTableRestrictions.None)
             .ReasonCode.ShouldBe(UcReasonCodes.DataSourceNotProvisioned);
     }
 
@@ -179,8 +219,14 @@ public sealed class UcProvisioningEligibilityTests
 
     // ---- builders ----
 
-    private static UcEligibility Evaluate(Consent consent, TableMetadata? table, EffectiveProtection? protection = null, bool useDefaultProtection = true) =>
-        UcProvisioningEligibility.Evaluate(Source, Databricks(), consent, table, protection ?? (useDefaultProtection && table is not null ? Protection(table) : null));
+    private static UcEligibility Evaluate(
+        Consent consent,
+        TableMetadata? table,
+        EffectiveProtection? protection = null,
+        bool useDefaultProtection = true,
+        UcTableRestrictions? restrictions = null) =>
+        UcProvisioningEligibility.Evaluate(
+            Source, Databricks(), consent, table, protection ?? (useDefaultProtection && table is not null ? Protection(table) : null), restrictions ?? UcTableRestrictions.None);
 
     private static DatabricksDataSourceOptions Databricks() => new()
     {

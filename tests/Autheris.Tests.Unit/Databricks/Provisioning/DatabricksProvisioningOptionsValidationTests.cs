@@ -52,6 +52,41 @@ public sealed class DatabricksProvisioningOptionsValidationTests
     }
 
     [Fact]
+    public void Provisioning_principal_used_for_queries_on_another_source_is_rejected()
+    {
+        var options = Options(Provisioning());
+        var other = new DataSourceConnectionOptions
+        {
+            Provider = "databricks",
+            Databricks = new DatabricksDataSourceOptions
+            {
+                Host = DatabricksTestSupport.Host,
+                WarehouseId = "wh-2",
+                Auth = new DatabricksAuthOptions { ClientId = "prov-sp", ClientSecretRef = "kv://other" }
+            }
+        };
+        var withOther = new GatewayOptions
+        {
+            DataSources = new SqlDataSourceOptions
+            {
+                Connections = new Dictionary<string, DataSourceConnectionOptions>(options.DataSources.Connections) { ["other"] = other }
+            }
+        };
+
+        Should.Throw<ValidationException>(() => DatabricksProvisioningOptionsValidator.Validate(withOther)).Message.ShouldContain("differ");
+    }
+
+    [Fact]
+    public void M2m_section_with_obo_or_pat_settings_is_rejected()
+    {
+        var withObo = new DatabricksAuthOptions { ClientId = "prov-sp", ClientSecretRef = "kv://prov", Obo = new DatabricksOboOptions { ClientId = "x" } };
+        Should.Throw<ValidationException>(() => DatabricksProvisioningOptionsValidator.Validate(Options(Provisioning(auth: withObo))));
+
+        var withPat = new DatabricksAuthOptions { ClientId = "prov-sp", ClientSecretRef = "kv://prov", PatRef = "kv://pat" };
+        Should.Throw<ValidationException>(() => DatabricksProvisioningOptionsValidator.Validate(Options(Provisioning(auth: withPat))));
+    }
+
+    [Fact]
     public void Additional_principals_in_the_provisioning_auth_are_rejected()
     {
         var withTenants = new DatabricksAuthOptions

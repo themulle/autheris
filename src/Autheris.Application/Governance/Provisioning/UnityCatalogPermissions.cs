@@ -14,19 +14,22 @@ public enum UcSecurableType
     Table = 2
 }
 
-/// <summary>The privileges the provisioning path may add; one per securable kind.</summary>
+/// <summary>
+/// The privileges the provisioning path may change: <c>SELECT</c> on tables and <c>USE_SCHEMA</c> on schemas. Catalogs are only
+/// read; the provisioning principal holds <c>MANAGE</c> on the allowed schemas, never on a catalog.
+/// </summary>
 public static class UcPrivileges
 {
     public const string Select = "SELECT";
     public const string UseSchema = "USE_SCHEMA";
     public const string UseCatalog = "USE_CATALOG";
 
-    /// <summary>The only privilege Autheris adds on a securable of <paramref name="type"/>.</summary>
-    public static string AddableOn(UcSecurableType type) => type switch
+    /// <summary>The only privilege Autheris adds on a securable of <paramref name="type"/>; null for a catalog (never changed).</summary>
+    public static string? AddableOn(UcSecurableType type) => type switch
     {
         UcSecurableType.Table => Select,
         UcSecurableType.Schema => UseSchema,
-        UcSecurableType.Catalog => UseCatalog,
+        UcSecurableType.Catalog => null,
         _ => throw new ArgumentOutOfRangeException(nameof(type), type, "Unknown securable type.")
     };
 
@@ -107,7 +110,8 @@ public sealed class UcProvisioningException(string code, string? remoteErrorCode
 /// <summary>
 /// Reads and changes Unity Catalog privileges and resolves workspace principals for one provisioning-managed Databricks data
 /// source, as its dedicated provisioning principal. Every call is limited to the securables inside the data source's allowed
-/// schemas; updates may add only <see cref="UcPrivileges.AddableOn"/> of the securable kind.
+/// schemas. Updates change tables and schemas only: they may add only <see cref="UcPrivileges.AddableOn"/> of the securable
+/// kind, and remove any privilege on a table but only <c>USE_SCHEMA</c> on a schema.
 /// </summary>
 public interface IUnityCatalogPermissionsClient
 {
