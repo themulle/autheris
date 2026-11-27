@@ -186,4 +186,28 @@ public sealed class FlatAggregateResolverTests
         Errors(nested.Result).Select(e => e.Code).ShouldBe(Errors(flat.Result).Select(e => e.Code));
         flat.Queries.ShouldBeEmpty();
     }
+
+    [Fact]
+    public async Task TimeBucket_WithoutTimeZone_UsesConfiguredDefault_ExplicitZoneWins_SameAsNested()
+    {
+        static TypedAggregateTestHost BerlinHost()
+        {
+            var host = new TypedAggregateTestHost();
+            host.Analytics.Aggregation.DefaultTimeZone = "Europe/Berlin";
+            return host;
+        }
+
+        var flatDefault = await RunAsync(BerlinHost(), $"{{ {Root} {{ created(bucket: MONTH) count }} }}");
+        var nestedDefault = await RunAsync(BerlinHost(), $$"""
+            { {{NestedRoot}}(timeBuckets: [{ column: created, bucket: MONTH }], aggregates: [{ fn: COUNT, alias: "n" }]) { count } }
+            """);
+        var flatExplicit = await RunAsync(BerlinHost(), $"{{ {Root} {{ created(bucket: MONTH, timeZone: \"UTC\") count }} }}");
+
+        Errors(flatDefault.Result).ShouldBeEmpty();
+        Errors(nestedDefault.Result).ShouldBeEmpty();
+        Errors(flatExplicit.Result).ShouldBeEmpty();
+        flatDefault.Captured!.TimeBuckets!.Single().TimeZone.ShouldBe("Europe/Berlin");
+        nestedDefault.Captured!.TimeBuckets!.Single().TimeZone.ShouldBe("Europe/Berlin");
+        flatExplicit.Captured!.TimeBuckets!.Single().TimeZone.ShouldBe("UTC");
+    }
 }
