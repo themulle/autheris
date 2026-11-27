@@ -13,6 +13,8 @@ public sealed partial class UcProvisioningReconciler
     public const string ProvisioningOffReason = "PROVISIONING_OFF";
     public const string DryRunReason = "DRY_RUN";
     public const string CatalogAccessMissingReason = "CATALOG_ACCESS_MISSING";
+    public const string PlanningFailedReason = "PLANNING_FAILED";
+    public const string RevokePendingReason = "REVOKE_PENDING";
 
     private static readonly string[] CatalogAccessPrivileges = [UcPrivileges.UseCatalog, "ALL_PRIVILEGES"];
 
@@ -42,6 +44,7 @@ public sealed partial class UcProvisioningReconciler
             var (state, reason) = mode switch
             {
                 DatabricksProvisioningMode.Off => (UcGrantState.Unsupported, (string?)ProvisioningOffReason),
+                _ when plan.PendingReason is { } pending => (UcGrantState.Pending, pending),
                 _ when !plan.IsProvisionable => (UcGrantState.Unsupported, plan.UnsupportedReason),
                 DatabricksProvisioningMode.DryRun => (UcGrantState.Pending, DryRunReason),
                 _ => await EnforcedStateAsync(dataSource, plan, outcome, before, catalogAccess, ct).ConfigureAwait(false)
@@ -57,9 +60,16 @@ public sealed partial class UcProvisioningReconciler
 
         foreach (var row in existing.Values)
         {
-            if (!active.Contains(row.ConsentId) && row.State != UcGrantState.Revoked)
+            if (active.Contains(row.ConsentId))
             {
-                changed.Add(row with { State = UcGrantState.Revoked, ReasonCode = null, UpdatedAt = now, VerifiedAt = null });
+                continue;
+            }
+
+            // An ended consent is reported revoked only once nothing unwanted is left in Unity Catalog.
+            var (state, reason) = outcome.RevokesOutstanding ? (UcGrantState.Pending, (string?)RevokePendingReason) : (UcGrantState.Revoked, null);
+            if (row.State != state || !string.Equals(row.ReasonCode, reason, StringComparison.Ordinal))
+            {
+                changed.Add(row with { State = state, ReasonCode = reason, UpdatedAt = now, VerifiedAt = null });
             }
         }
 

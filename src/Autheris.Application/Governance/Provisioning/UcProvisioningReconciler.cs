@@ -70,9 +70,11 @@ public sealed class UcProvisioningService(
         var intervals = UcProvisioningReconciler.ProvisionedSources(options.CurrentValue)
             .Select(s => s.Provisioning.ReconcileIntervalSeconds)
             .ToList();
-        var interval = TimeSpan.FromSeconds(intervals.Count == 0 ? 60 : Math.Clamp(intervals.Min(), 10, 300));
+
+        // Always enabled: without any provisioning section the job only checks, every five minutes, that no ledger rows are left behind.
+        var interval = TimeSpan.FromSeconds(intervals.Count == 0 ? 300 : Math.Clamp(intervals.Min(), 10, 300));
         return new ClusterSchedule(
-            Enabled: intervals.Count > 0,
+            Enabled: true,
             Interval: interval,
             InitialDelay: TimeSpan.FromSeconds(30),
             LeaseTtl: interval * 5 > TimeSpan.FromMinutes(5) ? interval * 5 : TimeSpan.FromMinutes(5),
@@ -135,11 +137,26 @@ public sealed partial class UcProvisioningReconciler(
                     "Unity Catalog reconcile of data source {DataSource} ended without changes ({ExceptionType}, {Code}).",
                     name, ex.GetType().Name, (ex as UcProvisioningException)?.Code ?? "none");
                 UcProvisioningMetrics.Count("cycle", "failed");
+                overdue += await CountOverdueAsync(name, ct).ConfigureAwait(false);
             }
         }
 
         overdue += await CountOrphanedRowsAsync(sources.Select(s => s.Name), ct).ConfigureAwait(false);
         UcProvisioningMetrics.SetOverdueRevokes(overdue);
+    }
+
+    /// <summary>The overdue revokes of a source whose cycle failed, so the gauge never drops them.</summary>
+    private async Task<long> CountOverdueAsync(string name, CancellationToken ct)
+    {
+        try
+        {
+            return (await store.ListLedgerAsync(name, ct).ConfigureAwait(false))
+                .Count(row => row.State == UcLedgerState.RevokePending && row.Attempts >= OverdueRevokeAttempts);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return 0;
+        }
     }
 
     /// <summary>Ledger rows of data sources that are no longer provisioning-managed cannot be revoked by Autheris: they are overdue.</summary>
@@ -175,15 +192,37 @@ public sealed partial class UcProvisioningReconciler(
             ? await PlanOffAsync(name, tenant, now, ct).ConfigureAwait(false)
             : await PlanAsync(name, db, tenant, now, ct).ConfigureAwait(false);
 
-        // A revoke needs a stable consent set: when a second read differs (a renewal or revocation committed meanwhile), revokes wait
-        // for the next cycle so a consent missed by a read is never revoked.
-        var deferRevokes = provisioning.Mode != DatabricksProvisioningMode.DryRun &&
-                           ledger.Any(row => !desired.Privileges.ContainsKey(row.Key)) &&
+        // Revocation wins in every mode, a dry run included. A revoke needs a stable consent set: when a second read differs (a
+        // renewal or revocation committed meanwhile), revokes wait for the next cycle so a consent missed by a read is never revoked.
+        var unwanted = ledger.Count(row => IsUnwanted(row, desired));
+        var deferRevokes = provisioning.Mode != DatabricksProvisioningMode.Off && unwanted > 0 &&
                            !await ConsentSetIsStableAsync(name, tenant, desired, now, ct).ConfigureAwait(false);
-        var outcome = provisioning.Mode == DatabricksProvisioningMode.Enforce || provisioning.Mode == DatabricksProvisioningMode.Off
-            ? await ApplyAsync(name, tenant, desired, ledger, deferRevokes, now, ct).ConfigureAwait(false)
-            : DryRun(desired, ledger);
+        long overdue;
+        if (deferRevokes)
+        {
+            overdue = ledger.Count(row => row.State == UcLedgerState.RevokePending && row.Attempts >= OverdueRevokeAttempts);
+            UcProvisioningMetrics.Count("revoke", "deferred", unwanted);
+        }
+        else
+        {
+            overdue = await RevokeAsync(name, tenant, desired, ledger, now, ct).ConfigureAwait(false);
+        }
 
+        IReadOnlyDictionary<UcPrivilegeKey, (UcKeyStatus Status, string? ErrorCode)> keys = provisioning.Mode switch
+        {
+            DatabricksProvisioningMode.Enforce => await GrantAsync(name, tenant, desired, ledger.ToDictionary(row => row.Key), now, ct).ConfigureAwait(false),
+            DatabricksProvisioningMode.DryRun => desired.Privileges.Keys
+                .Where(k => !ledger.Any(row => row.Key == k && row.State == UcLedgerState.Applied))
+                .ToDictionary(k => k, _ => (UcKeyStatus.Planned, (string?)null)),
+            _ => new Dictionary<UcPrivilegeKey, (UcKeyStatus, string?)>()
+        };
+        if (provisioning.Mode == DatabricksProvisioningMode.DryRun)
+        {
+            UcProvisioningMetrics.Count("grant", "dry_run", keys.Count);
+        }
+
+        var outstanding = deferRevokes || (unwanted > 0 && (await store.ListLedgerAsync(name, ct).ConfigureAwait(false)).Any(row => IsUnwanted(row, desired)));
+        var outcome = new UcApplyOutcome(keys, overdue, outstanding);
         await UpdateFeedbackAsync(name, provisioning.Mode, tenant, desired, outcome, now, ct).ConfigureAwait(false);
         return outcome.OverdueRevokes;
     }
@@ -191,7 +230,7 @@ public sealed partial class UcProvisioningReconciler(
     private async Task<bool> ConsentSetIsStableAsync(string name, TenantId tenant, UcDesiredState desired, DateTimeOffset now, CancellationToken ct)
     {
         var again = (await store.ListTableConsentsAsync(tenant, name, now, ct).ConfigureAwait(false))
-            .Where(c => c.IsActive(now))
+            .Where(c => c.TenantId == tenant && c.IsActive(now))
             .Select(c => c.Id)
             .ToHashSet();
         var stable = again.SetEquals(desired.Consents.Select(p => p.Consent.Id));
@@ -207,7 +246,7 @@ public sealed partial class UcProvisioningReconciler(
     private async Task<UcDesiredState> PlanOffAsync(string name, TenantId tenant, DateTimeOffset now, CancellationToken ct)
     {
         var consents = await store.ListTableConsentsAsync(tenant, name, now, ct).ConfigureAwait(false);
-        var plans = consents.Where(c => c.IsActive(now))
+        var plans = consents.Where(c => c.TenantId == tenant && c.IsActive(now))
             .Select(c => new UcConsentPlan(c, [], ProvisioningOffReason, null, null))
             .ToList();
         return new UcDesiredState(new Dictionary<UcPrivilegeKey, UcDesiredPrivilege>(), plans);
@@ -217,7 +256,7 @@ public sealed partial class UcProvisioningReconciler(
     private async Task<UcDesiredState> PlanAsync(string name, DatabricksDataSourceOptions db, TenantId tenant, DateTimeOffset now, CancellationToken ct)
     {
         var consents = (await store.ListTableConsentsAsync(tenant, name, now, ct).ConfigureAwait(false))
-            .Where(c => c.IsActive(now))
+            .Where(c => c.TenantId == tenant && c.IsActive(now))
             .ToList();
         if (consents.Count == 0)
         {
@@ -226,14 +265,32 @@ public sealed partial class UcProvisioningReconciler(
 
         var patterns = (await context.GetActivePatternConsentsAsync(tenant, now, ct).ConfigureAwait(false)).Where(c => c.IsActive(now)).ToList();
         var virtualFilters = await context.HasMandatoryRowFiltersAsync(tenant, ct).ConfigureAwait(false);
-        var facts = new Dictionary<TableIdentifier, UcTableFacts>();
+        var facts = new Dictionary<TableIdentifier, UcTableFacts?>();
+        var uncertain = new Dictionary<Guid, string>();
         var evaluated = new List<(Consent, UcEligibility)>(consents.Count);
         foreach (var consent in consents)
         {
             if (!facts.TryGetValue(consent.TableIdentifier, out var table))
             {
-                table = await context.GetTableAsync(tenant, consent.TableIdentifier, ct).ConfigureAwait(false);
+                try
+                {
+                    table = await context.GetTableAsync(tenant, consent.TableIdentifier, ct).ConfigureAwait(false);
+                }
+                catch (Exception ex) when (ex is not OperationCanceledException)
+                {
+                    // One table's facts failing holds back only the consents on that table.
+                    logger.LogWarning("Reading the governance facts of a table on {DataSource} failed ({ExceptionType}).", name, ex.GetType().Name);
+                    table = null;
+                }
+
                 facts[consent.TableIdentifier] = table;
+            }
+
+            if (table is null)
+            {
+                uncertain[consent.Id] = PlanningFailedReason;
+                evaluated.Add((consent, UcEligibility.Unsupported(PlanningFailedReason)));
+                continue;
             }
 
             var restrictions = new UcTableRestrictions(
@@ -244,19 +301,38 @@ public sealed partial class UcProvisioningReconciler(
         }
 
         var resolutions = new Dictionary<(GranteeType, string), UcPrincipalResolution>();
+        var failedLookups = new Dictionary<(GranteeType, string), string>();
         foreach (var (consent, eligibility) in evaluated)
         {
-            if (!eligibility.IsProvisionable || UcProvisioningPlanner.NormalizeExternalId(consent.GranteeSid?.Value) is not { } externalId ||
-                resolutions.ContainsKey((consent.GranteeType, externalId)))
+            if (!eligibility.IsProvisionable || UcProvisioningPlanner.NormalizeExternalId(consent.GranteeSid?.Value) is not { } externalId)
             {
                 continue;
             }
 
-            resolutions[(consent.GranteeType, externalId)] = await client.ResolvePrincipalAsync(name, consent.GranteeType, externalId, ct).ConfigureAwait(false);
-            UcProvisioningMetrics.Count("resolve", "ok");
+            var principal = (consent.GranteeType, externalId);
+            if (!resolutions.ContainsKey(principal) && !failedLookups.ContainsKey(principal))
+            {
+                try
+                {
+                    var resolution = await client.ResolvePrincipalAsync(name, consent.GranteeType, externalId, ct).ConfigureAwait(false);
+                    resolutions[principal] = resolution;
+                    UcProvisioningMetrics.Count("resolve", resolution.Status.ToString().ToLowerInvariant());
+                }
+                catch (UcProvisioningException ex)
+                {
+                    // A failed lookup holds back only this principal's consents.
+                    failedLookups[principal] = ex.Code;
+                    UcProvisioningMetrics.Count("resolve", "failed");
+                }
+            }
+
+            if (failedLookups.TryGetValue(principal, out var code))
+            {
+                uncertain[consent.Id] = code;
+            }
         }
 
-        return UcProvisioningPlanner.BuildDesired(evaluated, resolutions);
+        return UcProvisioningPlanner.BuildDesired(evaluated, resolutions, uncertain);
     }
 
     private AuditLogEntry Audit(TenantId tenant, string eventType, string decision, string dataSource, UcPrivilegeKey key, IEnumerable<Guid> consentIds, string? errorCode = null, int? attempts = null) => new()

@@ -10,14 +10,27 @@ using Autheris.Domain.Options;
 /// <summary>One privilege the active consents want, with the resolved principal and every consent that wants it.</summary>
 public sealed record UcDesiredPrivilege(UcPrivilegeKey Key, string Principal, IReadOnlyList<Guid> ConsentIds);
 
-/// <summary>The planned outcome of one active consent: its privilege keys, or the reason it is not provisioned.</summary>
-public sealed record UcConsentPlan(Consent Consent, IReadOnlyList<UcPrivilegeKey> Keys, string? UnsupportedReason, string? Catalog, string? Principal)
+/// <summary>
+/// The planned outcome of one active consent: its privilege keys, the reason it is not provisioned, or (<see cref="PendingReason"/>)
+/// why it could not be planned in this cycle.
+/// </summary>
+public sealed record UcConsentPlan(
+    Consent Consent, IReadOnlyList<UcPrivilegeKey> Keys, string? UnsupportedReason, string? Catalog, string? Principal, string? PendingReason = null)
 {
-    public bool IsProvisionable => UnsupportedReason is null;
+    public bool IsProvisionable => UnsupportedReason is null && PendingReason is null;
 }
 
-/// <summary>The desired state of one data source: the wanted privileges and the plan of every active consent.</summary>
-public sealed record UcDesiredState(IReadOnlyDictionary<UcPrivilegeKey, UcDesiredPrivilege> Privileges, IReadOnlyList<UcConsentPlan> Consents);
+/// <summary>
+/// The desired state of one data source: the wanted privileges, the plan of every active consent, and the principals whose
+/// consents could not be planned this cycle (their ledger privileges are neither revoked nor counted as unwanted).
+/// </summary>
+public sealed record UcDesiredState(
+    IReadOnlyDictionary<UcPrivilegeKey, UcDesiredPrivilege> Privileges,
+    IReadOnlyList<UcConsentPlan> Consents,
+    IReadOnlySet<string>? Protected = null)
+{
+    public IReadOnlySet<string> ProtectedExternalIds { get; } = Protected ?? new HashSet<string>(StringComparer.Ordinal);
+}
 
 /// <summary>
 /// Pure planning steps of the reconciler. The desired state is derived from the active consents only (level triggered): approval,
@@ -63,14 +76,28 @@ public static class UcProvisioningPlanner
     /// </summary>
     public static UcDesiredState BuildDesired(
         IReadOnlyList<(Consent Consent, UcEligibility Eligibility)> evaluated,
-        IReadOnlyDictionary<(GranteeType Type, string ExternalId), UcPrincipalResolution> resolutions)
+        IReadOnlyDictionary<(GranteeType Type, string ExternalId), UcPrincipalResolution> resolutions,
+        IReadOnlyDictionary<Guid, string>? uncertain = null)
     {
         ArgumentNullException.ThrowIfNull(evaluated);
         ArgumentNullException.ThrowIfNull(resolutions);
         var wanted = new Dictionary<UcPrivilegeKey, (string Principal, List<Guid> Consents)>();
         var plans = new List<UcConsentPlan>(evaluated.Count);
+        var protectedIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var (consent, eligibility) in evaluated)
         {
+            if (uncertain is not null && uncertain.TryGetValue(consent.Id, out var pending))
+            {
+                // Not planned this cycle: nothing is granted for it, and nothing its principal holds is revoked.
+                plans.Add(new UcConsentPlan(consent, [], null, null, null, pending));
+                if (NormalizeExternalId(consent.GranteeSid?.Value) is { } held)
+                {
+                    protectedIds.Add(held);
+                }
+
+                continue;
+            }
+
             if (eligibility.Target is not { } target)
             {
                 plans.Add(new UcConsentPlan(consent, [], eligibility.ReasonCode ?? UcReasonCodes.DataSourceNotProvisioned, null, null));
@@ -114,7 +141,7 @@ public static class UcProvisioningPlanner
         var desired = wanted.ToDictionary(
             kv => kv.Key,
             kv => new UcDesiredPrivilege(kv.Key, kv.Value.Principal, kv.Value.Consents.Distinct().OrderBy(id => id).ToList()));
-        return new UcDesiredState(desired, plans);
+        return new UcDesiredState(desired, plans, protectedIds);
     }
 
     /// <summary>Exponential backoff from 30 seconds, capped at <paramref name="cap"/>.</summary>

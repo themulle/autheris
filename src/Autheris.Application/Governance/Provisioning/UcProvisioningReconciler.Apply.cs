@@ -25,41 +25,39 @@ public enum UcKeyStatus
     Planned = 3
 }
 
-/// <summary>The result of applying the desired state: the status of every wanted privilege and the number of overdue revokes.</summary>
-public sealed record UcApplyOutcome(IReadOnlyDictionary<UcPrivilegeKey, (UcKeyStatus Status, string? ErrorCode)> Keys, long OverdueRevokes);
+/// <summary>
+/// The result of one cycle for a data source: the status of every wanted privilege, the overdue revokes and whether privileges that
+/// nobody wants any more are still in place.
+/// </summary>
+public sealed record UcApplyOutcome(
+    IReadOnlyDictionary<UcPrivilegeKey, (UcKeyStatus Status, string? ErrorCode)> Keys,
+    long OverdueRevokes,
+    bool RevokesOutstanding);
 
 public sealed partial class UcProvisioningReconciler
 {
-    /// <summary>Dry run: nothing is changed; every wanted privilege is reported as planned.</summary>
-    private static UcApplyOutcome DryRun(UcDesiredState desired, IReadOnlyList<UcLedgerEntry> ledger)
+    /// <summary>Error codes of Unity Catalog that mean the securable itself no longer exists (nothing can be granted on it).</summary>
+    private static readonly HashSet<string> SecurableGoneCodes = new(StringComparer.Ordinal)
     {
-        var planned = desired.Privileges.Keys.ToDictionary(k => k, _ => (UcKeyStatus.Planned, (string?)null));
-        var revokes = ledger.Count(row => !desired.Privileges.ContainsKey(row.Key));
-        UcProvisioningMetrics.Count("grant", "dry_run", planned.Count);
-        UcProvisioningMetrics.Count("revoke", "dry_run", revokes);
-        return new UcApplyOutcome(planned, 0);
-    }
+        "TABLE_DOES_NOT_EXIST", "SCHEMA_DOES_NOT_EXIST", "CATALOG_DOES_NOT_EXIST"
+    };
 
-    /// <summary>Revokes what is no longer wanted, then grants what is missing; every change is confirmed by a read.</summary>
-    private async Task<UcApplyOutcome> ApplyAsync(
-        string dataSource, TenantId tenant, UcDesiredState desired, IReadOnlyList<UcLedgerEntry> ledger, bool deferRevokes, DateTimeOffset now, CancellationToken ct)
-    {
-        var byKey = ledger.ToDictionary(row => row.Key);
-        var overdue = deferRevokes
-            ? ledger.Count(row => row.State == UcLedgerState.RevokePending && row.Attempts >= OverdueRevokeAttempts)
-            : await RevokeAsync(dataSource, tenant, desired, ledger, now, ct).ConfigureAwait(false);
-        var keys = await GrantAsync(dataSource, tenant, desired, byKey, now, ct).ConfigureAwait(false);
-        return new UcApplyOutcome(keys, overdue);
-    }
+    /// <summary>A ledger row nobody wants: not desired, and its principal is not held back by an unfinished plan.</summary>
+    private static bool IsUnwanted(UcLedgerEntry row, UcDesiredState desired) =>
+        !desired.Privileges.ContainsKey(row.Key) && !desired.ProtectedExternalIds.Contains(row.PrincipalExternalId);
 
     // ---- revokes ----
 
+    /// <summary>
+    /// Removes every unwanted ledger privilege under the principal's current name and deletes the row only after a read confirms the
+    /// removal (or after Unity Catalog reports the securable itself gone). Failures keep the row as revoke-pending with backoff.
+    /// </summary>
     private async Task<long> RevokeAsync(
         string dataSource, TenantId tenant, UcDesiredState desired, IReadOnlyList<UcLedgerEntry> ledger, DateTimeOffset now, CancellationToken ct)
     {
         long overdue = 0;
-        var unwanted = ledger.Where(row => !desired.Privileges.ContainsKey(row.Key)).ToList();
-        foreach (var securable in unwanted.GroupBy(row => (row.SecurableType, row.FullName)))
+        var names = new Dictionary<string, string>(StringComparer.Ordinal);
+        foreach (var securable in ledger.Where(row => IsUnwanted(row, desired)).GroupBy(row => (row.SecurableType, row.FullName)))
         {
             var rows = securable.ToList();
             var due = rows.Where(row => row.State != UcLedgerState.RevokePending || row.NextAttemptAt is not { } next || next <= now).ToList();
@@ -69,38 +67,23 @@ public sealed partial class UcProvisioningReconciler
                 continue;
             }
 
-            string? error = null;
-            IReadOnlyList<UcPrivilegeAssignment> after = [];
-            try
+            var current = new Dictionary<UcLedgerEntry, string>();
+            foreach (var row in due)
             {
-                var changes = due.GroupBy(row => row.Principal, StringComparer.Ordinal)
-                    .Select(g => new UcPermissionChange(g.Key, [], g.Select(row => row.Privilege).Distinct(StringComparer.Ordinal).ToList()))
-                    .ToList();
-                foreach (var chunk in changes.Chunk(100))
-                {
-                    await client.UpdatePermissionsAsync(dataSource, securable.Key.SecurableType, securable.Key.FullName, chunk, ct).ConfigureAwait(false);
-                }
-
-                after = await client.GetPermissionsAsync(dataSource, securable.Key.SecurableType, securable.Key.FullName, ct).ConfigureAwait(false);
-            }
-            catch (UcProvisioningException ex) when (ex.Code != UcErrorCodes.NotFound)
-            {
-                error = ex.Code;
-            }
-            catch (UcProvisioningException)
-            {
-                // The securable no longer exists: nothing can still be granted on it.
+                current[row] = await CurrentNameAsync(dataSource, row, names, ct).ConfigureAwait(false);
             }
 
+            var (gone, errors, after) = await RemoveAsync(dataSource, securable.Key.SecurableType, securable.Key.FullName, due, current, ct).ConfigureAwait(false);
             var removed = new List<UcLedgerEntry>();
             var pending = new List<UcLedgerEntry>();
             var audit = new List<AuditLogEntry>();
             foreach (var row in due)
             {
-                if (error is null && !Holds(after, row.Principal, row.Privilege))
+                var error = errors.TryGetValue(current[row], out var code) ? code : null;
+                if (gone || (error is null && after is not null && !Holds(after, current[row], row.Privilege)))
                 {
                     removed.Add(row);
-                    audit.Add(Audit(tenant, AuditEventTypes.GrantDeprovisioned, "REVOKED", dataSource, row.Key, []));
+                    audit.Add(Audit(tenant, AuditEventTypes.GrantDeprovisioned, gone ? "SECURABLE_GONE" : "REVOKED", dataSource, row.Key, []));
                     continue;
                 }
 
@@ -136,27 +119,114 @@ public sealed partial class UcProvisioningReconciler
         return overdue;
     }
 
+    /// <summary>
+    /// One update for all principals; when it fails, one update per principal so a single bad principal blocks only its own rows.
+    /// Returns whether the securable is gone, the error code per principal and the confirming read (null when it failed).
+    /// </summary>
+    private async Task<(bool Gone, Dictionary<string, string> Errors, IReadOnlyList<UcPrivilegeAssignment>? After)> RemoveAsync(
+        string dataSource, UcSecurableType type, string fullName, IReadOnlyList<UcLedgerEntry> due, IReadOnlyDictionary<UcLedgerEntry, string> current, CancellationToken ct)
+    {
+        var changes = due.GroupBy(row => current[row], StringComparer.Ordinal)
+            .Select(g => new UcPermissionChange(g.Key, [], g.Select(row => row.Privilege).Distinct(StringComparer.Ordinal).ToList()))
+            .ToList();
+        var errors = new Dictionary<string, string>(StringComparer.Ordinal);
+        try
+        {
+            foreach (var chunk in changes.Chunk(100))
+            {
+                await client.UpdatePermissionsAsync(dataSource, type, fullName, chunk, ct).ConfigureAwait(false);
+            }
+        }
+        catch (UcProvisioningException ex) when (ex.Code == UcErrorCodes.NotFound && ex.RemoteErrorCode is { } remote && SecurableGoneCodes.Contains(remote))
+        {
+            return (true, errors, null);
+        }
+        catch (UcProvisioningException)
+        {
+            foreach (var change in changes)
+            {
+                try
+                {
+                    await client.UpdatePermissionsAsync(dataSource, type, fullName, [change], ct).ConfigureAwait(false);
+                }
+                catch (UcProvisioningException single)
+                {
+                    errors[change.Principal] = single.Code;
+                }
+            }
+        }
+
+        try
+        {
+            return (false, errors, await client.GetPermissionsAsync(dataSource, type, fullName, ct).ConfigureAwait(false));
+        }
+        catch (UcProvisioningException ex)
+        {
+            foreach (var change in changes)
+            {
+                errors.TryAdd(change.Principal, ex.Code);
+            }
+
+            return (false, errors, null);
+        }
+    }
+
+    /// <summary>
+    /// The name Unity Catalog uses for the row's principal now: a renamed group or user is resolved again by its external id, so the
+    /// removal and its confirming read target the current name. Service principals are named by their application id.
+    /// </summary>
+    private async Task<string> CurrentNameAsync(string dataSource, UcLedgerEntry row, Dictionary<string, string> cache, CancellationToken ct)
+    {
+        if (string.Equals(row.Principal, row.PrincipalExternalId, StringComparison.OrdinalIgnoreCase))
+        {
+            return row.Principal;
+        }
+
+        if (cache.TryGetValue(row.PrincipalExternalId, out var known))
+        {
+            return known;
+        }
+
+        var name = row.Principal;
+        try
+        {
+            var resolved = await client.ResolvePrincipalAsync(dataSource, GranteeType.Group, row.PrincipalExternalId, ct).ConfigureAwait(false);
+            if (resolved.Status == UcPrincipalResolutionStatus.NotFound)
+            {
+                resolved = await client.ResolvePrincipalAsync(dataSource, GranteeType.User, row.PrincipalExternalId, ct).ConfigureAwait(false);
+            }
+
+            name = resolved.Principal?.Name ?? row.Principal;
+        }
+        catch (UcProvisioningException)
+        {
+            // Keep the recorded name; a failing removal stays revoke-pending.
+        }
+
+        cache[row.PrincipalExternalId] = name;
+        return name;
+    }
+
     // ---- grants ----
 
     private async Task<Dictionary<UcPrivilegeKey, (UcKeyStatus Status, string? ErrorCode)>> GrantAsync(
         string dataSource, TenantId tenant, UcDesiredState desired, IReadOnlyDictionary<UcPrivilegeKey, UcLedgerEntry> ledger, DateTimeOffset now, CancellationToken ct)
     {
         var result = new Dictionary<UcPrivilegeKey, (UcKeyStatus, string?)>();
-        var renamed = new List<UcLedgerEntry>();
-        var renameAudit = new List<AuditLogEntry>();
+        var renamed = new List<(UcDesiredPrivilege Wanted, UcLedgerEntry Row)>();
         var todo = new List<UcDesiredPrivilege>();
         foreach (var wanted in desired.Privileges.Values)
         {
             ledger.TryGetValue(wanted.Key, out var row);
             if (row is { State: UcLedgerState.Applied })
             {
-                result[wanted.Key] = (UcKeyStatus.Satisfied, null);
-                if (!string.Equals(row.Principal, wanted.Principal, StringComparison.Ordinal))
+                if (string.Equals(row.Principal, wanted.Principal, StringComparison.Ordinal))
                 {
-                    // Same external id, new name: recorded as drift, never a silent re-grant.
-                    renamed.Add(row with { Principal = wanted.Principal, UpdatedAt = now });
-                    renameAudit.Add(Audit(tenant, AuditEventTypes.GrantProvisioningDrift, "PRINCIPAL_RENAMED", dataSource, wanted.Key, wanted.ConsentIds));
-                    UcProvisioningMetrics.DriftFindings.Add(1, new KeyValuePair<string, object?>("kind", "principal_renamed"));
+                    result[wanted.Key] = (UcKeyStatus.Satisfied, null);
+                }
+                else
+                {
+                    renamed.Add((wanted, row));
                 }
 
                 continue;
@@ -171,10 +241,7 @@ public sealed partial class UcProvisioningReconciler
             todo.Add(wanted);
         }
 
-        if (renamed.Count > 0)
-        {
-            await store.SaveLedgerAsync(dataSource, _fencingToken, renamed, renameAudit, ct).ConfigureAwait(false);
-        }
+        await ConfirmRenamesAsync(dataSource, tenant, renamed, result, now, ct).ConfigureAwait(false);
 
         // Schemas first: USE_SCHEMA before SELECT on the tables below.
         foreach (var securable in todo.GroupBy(w => (w.Key.SecurableType, w.Key.FullName)).OrderBy(g => g.Key.SecurableType == UcSecurableType.Table ? 1 : 0))
@@ -183,6 +250,56 @@ public sealed partial class UcProvisioningReconciler
         }
 
         return result;
+    }
+
+    /// <summary>
+    /// A principal renamed since its privilege was applied: the ledger follows the new name only after a read shows the privilege
+    /// under it (recorded as drift, never a silent re-grant). Until then the privilege counts as not confirmed.
+    /// </summary>
+    private async Task ConfirmRenamesAsync(
+        string dataSource,
+        TenantId tenant,
+        IReadOnlyList<(UcDesiredPrivilege Wanted, UcLedgerEntry Row)> renamed,
+        Dictionary<UcPrivilegeKey, (UcKeyStatus, string?)> result,
+        DateTimeOffset now,
+        CancellationToken ct)
+    {
+        foreach (var securable in renamed.GroupBy(r => (r.Row.SecurableType, r.Row.FullName)))
+        {
+            IReadOnlyList<UcPrivilegeAssignment>? actual = null;
+            try
+            {
+                actual = await client.GetPermissionsAsync(dataSource, securable.Key.SecurableType, securable.Key.FullName, ct).ConfigureAwait(false);
+            }
+            catch (UcProvisioningException ex)
+            {
+                foreach (var (wanted, _) in securable)
+                {
+                    result[wanted.Key] = (UcKeyStatus.Pending, ex.Code);
+                }
+
+                continue;
+            }
+
+            var rows = new List<UcLedgerEntry>();
+            var audit = new List<AuditLogEntry>();
+            foreach (var (wanted, row) in securable)
+            {
+                UcProvisioningMetrics.DriftFindings.Add(1, new KeyValuePair<string, object?>("kind", "principal_renamed"));
+                if (Holds(actual, wanted.Principal, wanted.Key.Privilege))
+                {
+                    rows.Add(row with { Principal = wanted.Principal, VerifiedAt = now, UpdatedAt = now });
+                    audit.Add(Audit(tenant, AuditEventTypes.GrantProvisioningDrift, "PRINCIPAL_RENAMED", dataSource, wanted.Key, wanted.ConsentIds));
+                    result[wanted.Key] = (UcKeyStatus.Satisfied, null);
+                }
+                else
+                {
+                    result[wanted.Key] = (UcKeyStatus.Pending, "PRINCIPAL_RENAMED");
+                }
+            }
+
+            await store.SaveLedgerAsync(dataSource, _fencingToken, rows, audit, ct).ConfigureAwait(false);
+        }
     }
 
     private async Task GrantSecurableAsync(
@@ -226,8 +343,9 @@ public sealed partial class UcProvisioningReconciler
         }
 
         // Intent before effect: the ledger lists the privilege before it can exist, so a crash never leaves it untracked.
-        var intents = needed.Select(w => Row(dataSource, w, ledger, now) with { State = ledger.TryGetValue(w.Key, out var r) && r.State == UcLedgerState.Failed ? UcLedgerState.Failed : UcLedgerState.Pending }).ToList();
+        var intents = needed.Select(w => Row(dataSource, w, ledger, now)).ToList();
         await store.SaveLedgerAsync(dataSource, _fencingToken, intents, [], ct).ConfigureAwait(false);
+        var tracked = intents.ToDictionary(r => r.Key);
 
         IReadOnlyList<UcPrivilegeAssignment> after;
         try
@@ -244,8 +362,7 @@ public sealed partial class UcProvisioningReconciler
         }
         catch (UcProvisioningException ex)
         {
-            var current = intents.ToDictionary(r => r.Key);
-            await RecordGrantFailuresAsync(dataSource, tenant, needed, current, result, ex.Code, now, ct).ConfigureAwait(false);
+            await RecordGrantFailuresAsync(dataSource, tenant, needed, tracked, result, ex.Code, now, ct).ConfigureAwait(false);
             return;
         }
 
@@ -260,7 +377,7 @@ public sealed partial class UcProvisioningReconciler
                 continue;
             }
 
-            applied.Add(Row(dataSource, w, ledger, now) with
+            applied.Add(tracked[w.Key] with
             {
                 State = UcLedgerState.Applied, Attempts = 0, NextAttemptAt = null, LastErrorCode = null, AppliedAt = now, VerifiedAt = now
             });
@@ -272,7 +389,7 @@ public sealed partial class UcProvisioningReconciler
         await store.SaveLedgerAsync(dataSource, _fencingToken, applied, audit, ct).ConfigureAwait(false);
         if (missing.Count > 0)
         {
-            await RecordGrantFailuresAsync(dataSource, tenant, missing, intents.ToDictionary(r => r.Key), result, UcErrorCodes.Rejected, now, ct).ConfigureAwait(false);
+            await RecordGrantFailuresAsync(dataSource, tenant, missing, tracked, result, UcErrorCodes.Rejected, now, ct).ConfigureAwait(false);
         }
     }
 
@@ -304,7 +421,7 @@ public sealed partial class UcProvisioningReconciler
             {
                 State = failed ? UcLedgerState.Failed : UcLedgerState.Pending,
                 Attempts = attempts,
-                NextAttemptAt = now + UcProvisioningPlanner.Backoff(attempts, GrantBackoffCap),
+                NextAttemptAt = now + (failed ? GrantBackoffCap : UcProvisioningPlanner.Backoff(attempts, GrantBackoffCap)),
                 LastErrorCode = code,
                 UpdatedAt = now
             });
@@ -320,10 +437,15 @@ public sealed partial class UcProvisioningReconciler
         await store.SaveLedgerAsync(dataSource, _fencingToken, rows, audit, ct).ConfigureAwait(false);
     }
 
-    private static UcLedgerEntry Row(string dataSource, UcDesiredPrivilege wanted, IReadOnlyDictionary<UcPrivilegeKey, UcLedgerEntry> ledger, DateTimeOffset now) =>
-        ledger.TryGetValue(wanted.Key, out var existing)
-            ? existing with { Principal = wanted.Principal, UpdatedAt = now }
-            : new UcLedgerEntry
+    /// <summary>
+    /// The intent row of a wanted privilege. A row that was being revoked starts a fresh grant (its revoke attempts do not count);
+    /// a failed row keeps its state until a confirming read.
+    /// </summary>
+    private static UcLedgerEntry Row(string dataSource, UcDesiredPrivilege wanted, IReadOnlyDictionary<UcPrivilegeKey, UcLedgerEntry> ledger, DateTimeOffset now)
+    {
+        if (!ledger.TryGetValue(wanted.Key, out var existing))
+        {
+            return new UcLedgerEntry
             {
                 DataSource = dataSource,
                 SecurableType = wanted.Key.SecurableType,
@@ -335,6 +457,18 @@ public sealed partial class UcProvisioningReconciler
                 CreatedAt = now,
                 UpdatedAt = now
             };
+        }
+
+        return existing.State switch
+        {
+            UcLedgerState.RevokePending => existing with
+            {
+                Principal = wanted.Principal, State = UcLedgerState.Pending, Attempts = 0, NextAttemptAt = null, LastErrorCode = null, UpdatedAt = now
+            },
+            UcLedgerState.Failed => existing with { Principal = wanted.Principal, UpdatedAt = now },
+            _ => existing with { Principal = wanted.Principal, State = UcLedgerState.Pending, UpdatedAt = now }
+        };
+    }
 
     private static bool Holds(IReadOnlyList<UcPrivilegeAssignment> assignments, string principal, string privilege) =>
         assignments.Any(a => string.Equals(a.Principal, principal, StringComparison.Ordinal) &&

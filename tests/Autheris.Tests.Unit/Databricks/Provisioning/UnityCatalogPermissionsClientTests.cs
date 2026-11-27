@@ -420,9 +420,10 @@ public sealed class UnityCatalogPermissionsClientTests
 
     private static UnityCatalogPermissionsClient Client(FakeDatabricksHandler handler, DatabricksTokenCache? cache = null)
     {
-        var options = Microsoft.Extensions.Options.Options.Create(ProvisioningOptions());
+        var gateway = ProvisioningOptions();
+        var options = Microsoft.Extensions.Options.Options.Create(gateway);
         var credentials = new DatabricksOboTokenProvider(new HttpClient(handler), options, new ProvisioningVault(), Env("Production"), cache ?? new DatabricksTokenCache());
-        return new UnityCatalogPermissionsClient(new HttpClient(handler), options, credentials);
+        return new UnityCatalogPermissionsClient(new HttpClient(handler), new StaticOptionsMonitor<GatewayOptions>(gateway), credentials);
     }
 
     private static GatewayOptions ProvisioningOptions() => Options(extra: connections =>

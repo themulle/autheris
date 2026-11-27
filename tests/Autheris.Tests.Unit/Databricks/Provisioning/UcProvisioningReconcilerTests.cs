@@ -191,7 +191,7 @@ public sealed class UcProvisioningReconcilerTests
 
         _store.Ledger.Values.ShouldAllBe(e => e.State == UcLedgerState.RevokePending && e.LastErrorCode == UcErrorCodes.Unavailable);
         _store.Audit.Count(a => a.EventType == AuditEventTypes.GrantProvisioningFailed && a.Decision == "REVOKE_OVERDUE").ShouldBe(2);
-        UcProvisioningMetrics.OverdueRevokes.ShouldBeGreaterThanOrEqualTo(2);
+        UcProvisioningMetrics.OverdueRevokes.ShouldBe(2);
 
         _client.FailUpdates = null;
         await RunAsync();
@@ -381,6 +381,7 @@ public sealed class UcProvisioningReconcilerTests
         _client.Calls.Clear();
 
         _client.Principals[GroupOid] = Group("analysts-eu");
+        _client.Rename("analysts", "analysts-eu");
         await RunAsync();
 
         _client.Calls.ShouldNotContain(c => c.StartsWith("patch:", StringComparison.Ordinal));
@@ -406,6 +407,123 @@ public sealed class UcProvisioningReconcilerTests
 
         _client.Calls.ShouldBeEmpty();
         _store.Ledger.ShouldBeEmpty();
+        _store.Feedback.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Renamed_group_whose_consent_ends_is_revoked_under_its_current_name()
+    {
+        var consent = Grant(Now);
+        _store.Consents.Add(consent);
+        await RunAsync();
+
+        _client.Principals[GroupOid] = Group("analysts-eu");
+        _client.Rename("analysts", "analysts-eu");
+        _store.Consents.Remove(consent);
+        await RunAsync();
+
+        _client.Holds(UcSecurableType.Table, Table, "analysts-eu", UcPrivileges.Select).ShouldBeFalse();
+        _store.Ledger.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Not_found_without_a_missing_securable_is_not_a_removal()
+    {
+        var consent = Grant(Now);
+        _store.Consents.Add(consent);
+        await RunAsync();
+        _store.Consents.Remove(consent);
+        _client.FailUpdates = UcErrorCodes.NotFound;
+        _client.FailRemote = "PRINCIPAL_DOES_NOT_EXIST";
+
+        await RunAsync();
+
+        _store.Ledger.Count.ShouldBe(2);
+        _store.Ledger.Values.ShouldAllBe(e => e.State == UcLedgerState.RevokePending);
+        _store.Audit.ShouldNotContain(a => a.EventType == AuditEventTypes.GrantDeprovisioned);
+    }
+
+    [Fact]
+    public async Task Securable_reported_gone_ends_its_ledger_rows()
+    {
+        var consent = Grant(Now);
+        _store.Consents.Add(consent);
+        await RunAsync();
+        _store.Consents.Remove(consent);
+        _client.FailUpdates = UcErrorCodes.NotFound;
+        _client.FailRemote = "TABLE_DOES_NOT_EXIST";
+
+        await RunAsync();
+
+        _store.Ledger.ShouldBeEmpty();
+        _store.Audit.Count(a => a.EventType == AuditEventTypes.GrantDeprovisioned && a.Decision == "SECURABLE_GONE").ShouldBe(2);
+    }
+
+    [Fact]
+    public async Task One_bad_principal_does_not_block_the_revokes_of_the_others()
+    {
+        _client.Principals[OtherOid] = Group("auditors", OtherOid);
+        _client.CatalogAccess.Add("auditors");
+        var first = Grant(Now);
+        var second = Grant(Now, grantee: OtherOid);
+        _store.Consents.AddRange([first, second]);
+        await RunAsync();
+
+        _store.Consents.Clear();
+        _client.FailPrincipal = "auditors";
+        await RunAsync();
+
+        _client.Holds(UcSecurableType.Table, Table, "analysts", UcPrivileges.Select).ShouldBeFalse();
+        _client.Holds(UcSecurableType.Table, Table, "auditors", UcPrivileges.Select).ShouldBeTrue();
+        _store.Ledger.Values.ShouldAllBe(e => e.PrincipalExternalId == OtherOid && e.State == UcLedgerState.RevokePending);
+        _store.FeedbackOf(first).ReasonCode.ShouldBe(UcProvisioningReconciler.RevokePendingReason);
+    }
+
+    [Fact]
+    public async Task Dry_run_still_revokes_what_autheris_applied()
+    {
+        var consent = Grant(Now);
+        _store.Consents.Add(consent);
+        await RunAsync();
+
+        _options.CurrentValue = Options(DatabricksProvisioningMode.DryRun);
+        _store.Consents.Remove(consent);
+        await RunAsync();
+
+        _store.Ledger.ShouldBeEmpty();
+        _client.Holds(UcSecurableType.Table, Table, "analysts", UcPrivileges.Select).ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task Virtual_filter_profiles_make_consents_unsupported()
+    {
+        _context.VirtualFilters = true;
+        var consent = Grant(Now);
+        _store.Consents.Add(consent);
+
+        await RunAsync();
+
+        _store.FeedbackOf(consent).ReasonCode.ShouldBe(UcReasonCodes.VirtualFilter);
+        _store.Ledger.ShouldBeEmpty();
+    }
+
+    [Fact]
+    public async Task Failing_principal_lookup_holds_back_only_that_principal()
+    {
+        var consent = Grant(Now);
+        _store.Consents.Add(consent);
+        await RunAsync();
+
+        _client.ResolveFailure = UcErrorCodes.RateLimited;
+        _store.Consents.Remove(consent);
+        var replacement = Grant(Now);
+        _store.Consents.Add(replacement);
+        _client.Calls.Clear();
+        await RunAsync();
+
+        _client.Calls.ShouldNotContain(c => c.StartsWith("patch:", StringComparison.Ordinal));
+        _store.Ledger.Count.ShouldBe(2);
+        _store.FeedbackOf(replacement).ReasonCode.ShouldBe(UcErrorCodes.RateLimited);
     }
 
     [Fact]
@@ -424,7 +542,7 @@ public sealed class UcProvisioningReconcilerTests
 
         await RunAsync();
 
-        UcProvisioningMetrics.OverdueRevokes.ShouldBeGreaterThanOrEqualTo(1);
+        UcProvisioningMetrics.OverdueRevokes.ShouldBe(1);
         _store.Ledger.Count.ShouldBe(1);
     }
 }

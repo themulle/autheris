@@ -29,7 +29,7 @@ internal sealed class FakeUcStore : IUcProvisioningStore
 
     private Task<IReadOnlyList<Consent>> ListNow(TenantId tenant, string dataSource) =>
         Task.FromResult<IReadOnlyList<Consent>>(Consents
-            .Where(c => c.TenantId == tenant && !c.IsRevoked && !c.IsPatternGrant &&
+            .Where(c => !c.IsRevoked && !c.IsPatternGrant &&
                         string.Equals(c.TableIdentifier.Domain, dataSource, StringComparison.OrdinalIgnoreCase))
             .ToList());
 
@@ -98,8 +98,27 @@ internal sealed class FakeUcClient : IUnityCatalogPermissionsClient
     public HashSet<string> CatalogAccess { get; } = new(StringComparer.Ordinal);
     public List<string> Calls { get; } = [];
 
-    /// <summary>When set, every update fails with this code.</summary>
+    /// <summary>When set, every update fails with this code (and <see cref="FailRemote"/> as the Databricks error code).</summary>
     public string? FailUpdates { get; set; }
+
+    public string? FailRemote { get; set; }
+
+    /// <summary>Updates that contain this principal fail as Unity Catalog does for an unknown principal.</summary>
+    public string? FailPrincipal { get; set; }
+
+    public string? ResolveFailure { get; set; }
+
+    /// <summary>Renames a principal the way Unity Catalog does: its privileges move with it.</summary>
+    public void Rename(string from, string to)
+    {
+        foreach (var byPrincipal in Grants.Values)
+        {
+            if (byPrincipal.Remove(from, out var set))
+            {
+                byPrincipal[to] = set;
+            }
+        }
+    }
 
     /// <summary>When set, updates succeed but change nothing (the read then misses the privilege).</summary>
     public bool IgnoreUpdates { get; set; }
@@ -116,7 +135,12 @@ internal sealed class FakeUcClient : IUnityCatalogPermissionsClient
         Calls.Add("patch:" + fullName + ":" + string.Join(",", changes.Select(c => c.Principal + "+" + string.Join("|", c.Add) + "-" + string.Join("|", c.Remove))));
         if (FailUpdates is { } code)
         {
-            throw new UcProvisioningException(code);
+            throw new UcProvisioningException(code, FailRemote);
+        }
+
+        if (FailPrincipal is { } bad && changes.Any(ch => ch.Principal == bad))
+        {
+            throw new UcProvisioningException(UcErrorCodes.NotFound, "PRINCIPAL_DOES_NOT_EXIST");
         }
 
         if (!IgnoreUpdates)
@@ -142,6 +166,10 @@ internal sealed class FakeUcClient : IUnityCatalogPermissionsClient
     public Task<UcPrincipalResolution> ResolvePrincipalAsync(string dataSource, GranteeType type, string externalId, CancellationToken ct)
     {
         Calls.Add("resolve:" + externalId);
+        if (ResolveFailure is { } failure)
+        {
+            throw new UcProvisioningException(failure);
+        }
         return Task.FromResult(Principals.TryGetValue(externalId, out var r) ? r : UcPrincipalResolution.NotFound);
     }
 

@@ -28,7 +28,7 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public sealed partial class UnityCatalogPermissionsClient(
     HttpClient http,
-    IOptions<GatewayOptions> options,
+    IOptionsMonitor<GatewayOptions> options,
     IDatabricksCredentialProvider credentials,
     ILogger<UnityCatalogPermissionsClient>? logger = null) : IUnityCatalogPermissionsClient
 {
@@ -256,7 +256,7 @@ public sealed partial class UnityCatalogPermissionsClient(
     private Settings ResolveSettings(string dataSource)
     {
         if (string.IsNullOrWhiteSpace(dataSource) ||
-            !options.Value.DataSources.Connections.TryGetValue(dataSource, out var connection) ||
+            !options.CurrentValue.DataSources.Connections.TryGetValue(dataSource, out var connection) ||
             connection is null ||
             !DataSourceProvider.Is(connection.Provider, DatabaseDialect.Databricks) ||
             connection.Databricks is not { Provisioning: { } provisioning } db ||
