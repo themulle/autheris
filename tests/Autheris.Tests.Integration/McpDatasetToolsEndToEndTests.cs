@@ -162,10 +162,13 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
         var result = await mcp.CallToolAsync(tool, args);
         result.IsError.ShouldNotBe(true, string.Concat(result.Content.OfType<ModelContextProtocol.Protocol.TextContentBlock>().Select(c => c.Text)));
         var meta = result.Meta.ShouldNotBeNull();
-        return (meta["isMasked"]!.GetValue<bool>(), meta.Select(p => p.Key).Order(StringComparer.Ordinal).ToArray());
+
+        // The MCP SDK adds its own keys under the reserved io.modelcontextprotocol/ prefix; only the gateway's own keys are compared.
+        return (meta["isMasked"]!.GetValue<bool>(), meta.Select(p => p.Key).Where(k => !k.StartsWith(SdkMetaPrefix, StringComparison.Ordinal)).Order(StringComparer.Ordinal).ToArray());
     }
 
     private static readonly string[] MetaKeys = ["estimatedTokens", "isMasked", "truncated"];
+    private const string SdkMetaPrefix = "io.modelcontextprotocol/";
 
     [Fact]
     [Trait("Category", "Security")]
