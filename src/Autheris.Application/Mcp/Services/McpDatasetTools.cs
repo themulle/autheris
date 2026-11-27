@@ -323,7 +323,7 @@ public static class McpDatasetTools
               "properties": {
                 "query": { "type": "string", "description": "SQL SELECT query to execute against the gateway." },
                 "limit": { "type": "integer", "minimum": 1, "description": "Optional maximum rows per page (capped server-side to Mcp:MaxResultRows)." },
-                "cursor": { "type": "string", "description": "Optional signed continuation cursor returned by a previous query_sql call." },
+                "cursor": { "type": "string", "description": "Signed continuation cursor (`next`) from a previous query_sql call. Paging is offset based up to the offset limit; a statement ordered by exactly the table's declared primary key then continues by key and can be read to the end; other ordered statements stop at the offset limit (`pagingUnavailable: offset_limit`)." },
                 "parameters": {
                   "type": ["object", "null"],
                   "description": "Optional named values bound to @name placeholders, as in POST /api/v1/sql: string, number, boolean or null; an array of scalars only as the single item of IN (@name) or NOT IN (@name). Values are bound, never inlined.",
