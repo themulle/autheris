@@ -74,11 +74,17 @@ public sealed partial class GovernedTreeQueryService : IGovernedTreeQueryService
     {
         public System.Collections.Concurrent.ConcurrentDictionary<(TableIdentifier Table, string Tenant, string UserSid), ResolvedTableAccess> AccessByTable { get; } = new();
         public System.Collections.Concurrent.ConcurrentDictionary<(TableIdentifier Table, string Tenant, string UserSid, bool Allowed), byte> Audited { get; } = new();
+        public System.Collections.Concurrent.ConcurrentDictionary<string, OperationReadSlots> ReadSlots { get; } = new(StringComparer.Ordinal);
         public SemaphoreSlim Lock { get; } = new(1, 1);
         public DateTime CreatedAtUtc { get; } = DateTime.UtcNow;
 
         public void Dispose()
         {
+            foreach (var slots in ReadSlots.Values)
+            {
+                slots.Dispose();
+            }
+
             Lock.Dispose();
         }
     }
@@ -494,7 +500,7 @@ public sealed partial class GovernedTreeQueryService : IGovernedTreeQueryService
         var compiled = TreeSqlCompiler.Compile(primaryRootNode, treeAccess, dialect, _options.IsColumnMaskingDisabled);
 
         // 4. Bounded concurrency per user and root table, then one round trip.
-        using var lease = AcquireLease(rootAccess);
+        using var lease = await AcquireReadSlotAsync(memo, rootAccess, ct).ConfigureAwait(false);
         var stmtSw = System.Diagnostics.Stopwatch.StartNew();
         var statsBox = new UsageStatsBox();
         var json = await RunAsync(compiled, connOptions, dialect, rootAccess.Tenant, rootAccess.UserSid.Value, purpose: null, ct, statsBox).ConfigureAwait(false);
@@ -753,23 +759,6 @@ public sealed partial class GovernedTreeQueryService : IGovernedTreeQueryService
             GovernedQueryStages.DecisionDetails(access.Decision, path: "graphql_tree"), ct,
             usageRecorder: access.Decision.IsAllowed ? null : _usageRecorder,
             dataSource: access.Decision.IsAllowed ? null : access.Metadata.Table.SourceName, grants: access.Decision.Grants).ConfigureAwait(false);
-    }
-
-    private IDisposable? AcquireLease(ResolvedTableAccess rootAccess)
-    {
-        var max = _options.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
-        if (_concurrencyGate == null || max <= 0)
-        {
-            return null;
-        }
-        var key = $"{rootAccess.Tenant.Value}|{rootAccess.UserSid.Value}|{rootAccess.Metadata.Identifier.ToQualifiedName()}".ToLowerInvariant();
-        var lease = _concurrencyGate.TryEnter(key, max);
-        if (lease == null)
-        {
-            RecordTreeUsage(rootAccess, Autheris.Application.Usage.UsageOutcome.DenyRateLimit, 0, false, default);
-            throw new GatewayThrottledException(ThrottledRetryAfterSeconds);
-        }
-        return lease;
     }
 
     private async Task<string> RunAsync(
