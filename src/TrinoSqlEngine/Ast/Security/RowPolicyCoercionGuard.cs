@@ -187,9 +187,17 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog, bool evaluat
 
     private Fam OfColumn(ColumnReference column)
     {
-        // The root ORDER BY of a single query block: an unqualified name that is an output name is that projection (repeated names are unknown).
-        if (_orderByAliases is not null && column.Name.Parts.Count == 1 && _orderByAliases.TryGetValue(Fold(column.Name.Parts[0]), out var aliased)) return aliased;
+        // Inside an expression of the root ORDER BY, databases differ in whether an output alias or an input column of the same name binds: a name
+        // that is both is only accepted when both families agree. A bare ORDER BY element is never judged, so it needs no family.
+        string name = Fold(column.Name.Parts[^1]);
+        if (_orderByAliases is null || column.Name.Parts.Count != 1 || !_orderByAliases.TryGetValue(name, out var aliased)) return OfInputColumn(column);
+        if (!MayBeInputColumn(column.Name.Parts[0].Value)) return aliased;
+        var input = OfInputColumn(column);
+        return input == aliased ? input : Fam.Unknown;
+    }
 
+    private Fam OfInputColumn(ColumnReference column)
+    {
         if ((ResolveColumn(column) ?? ResolveOuterColumn(column)) is { } resolved) return OfType(resolved.DataType);
 
         var parts = column.Name.Parts;
@@ -300,6 +308,22 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog, bool evaluat
 
     public override SqlNode VisitOrderByClause(OrderByClause node)
     {
+        if (_orderByAliases is not null && !ReferenceEquals(node, _scopedOrderBy))
+        {
+            // A window or aggregate ORDER BY inside the root ORDER BY resolves as it did before: without the body scope and the output names.
+            var (savedAliases, scope) = (_orderByAliases, SuspendBlock());
+            _orderByAliases = null;
+            try
+            {
+                return base.VisitOrderByClause(node);
+            }
+            finally
+            {
+                _orderByAliases = savedAliases;
+                RestoreBlock(scope);
+            }
+        }
+
         if (!ReferenceEquals(node, _scopedOrderBy) || _scopedBody is not { } spec || !_outputs.TryGetValue(spec, out var outputs) || !PushLastBlock())
         {
             return base.VisitOrderByClause(node);

@@ -92,6 +92,12 @@ public class SelectableSortOrderTests
         Assert.Equal((plain as GovernedSqlException)?.Code, (inCase as GovernedSqlException)?.Code);
     }
 
+    private void Refused(TargetSqlDialect dialect, string sql)
+    {
+        var ex = Assert.Throws<RowPolicyExpressionRejectedException>(() => _h.Compile(dialect, sql));
+        Assert.Equal(GovernedSqlErrorCodes.RowPolicyExpressionNotAllowed, ex.Code);
+    }
+
     private const string SortSql = "SELECT id FROM orders ORDER BY CASE __param_sort WHEN 'region' THEN region END, " +
         "CASE __param_sort WHEN 'status' THEN status END, id";
 
@@ -163,12 +169,9 @@ public class SelectableSortOrderTests
     [Trait("Category", "Security")]
     public void OrderByCase_MixedFamilies_StillRefused(TargetSqlDialect dialect)
     {
-        Assert.Throws<RowPolicyExpressionRejectedException>(() => _h.Compile(dialect,
-            "SELECT Id FROM Orders ORDER BY CASE __param_sort WHEN 'region' THEN Region WHEN 'amount' THEN Amount END, Id"));
-        Assert.Throws<RowPolicyExpressionRejectedException>(() => _h.Compile(dialect,
-            "SELECT Id FROM Orders ORDER BY CASE WHEN Id > 1 THEN Region ELSE Amount END, Id"));
-        Assert.Throws<RowPolicyExpressionRejectedException>(() => _h.Compile(dialect,
-            "SELECT Id FROM Orders ORDER BY CASE WHEN Region > 1 THEN Id END"));
+        Refused(dialect, "SELECT Id FROM Orders ORDER BY CASE __param_sort WHEN 'region' THEN Region WHEN 'amount' THEN Amount END, Id");
+        Refused(dialect, "SELECT Id FROM Orders ORDER BY CASE WHEN Id > 1 THEN Region ELSE Amount END, Id");
+        Refused(dialect, "SELECT Id FROM Orders ORDER BY CASE WHEN Region > 1 THEN Id END");
     }
 
     [Theory]
@@ -176,8 +179,7 @@ public class SelectableSortOrderTests
     [Trait("Category", "Security")]
     public void OrderBy_SetOperationBody_CaseColumn_StillRefused(TargetSqlDialect dialect)
     {
-        Assert.Throws<RowPolicyExpressionRejectedException>(() => _h.Compile(dialect,
-            "SELECT Id, Region FROM Orders UNION ALL SELECT Id, Region FROM Orders ORDER BY CASE WHEN Region = 'a' THEN Region END"));
+        Refused(dialect, "SELECT Id, Region FROM Orders UNION ALL SELECT Id, Region FROM Orders ORDER BY CASE WHEN Region = 'a' THEN Region END");
     }
 
     [Theory]
@@ -188,11 +190,9 @@ public class SelectableSortOrderTests
         // an alias takes the family of the projection it names ...
         _h.Compile(dialect, "SELECT Region AS k, Id FROM Orders ORDER BY CASE __param_sort WHEN 'k' THEN k WHEN 'r' THEN Region END, Id");
         // ... never the family of a column that happens to share a name elsewhere: Amount is numeric, Region is text
-        Assert.Throws<RowPolicyExpressionRejectedException>(() => _h.Compile(dialect,
-            "SELECT Amount AS k, Id FROM Orders ORDER BY CASE WHEN Id > 1 THEN k ELSE Region END, Id"));
+        Refused(dialect, "SELECT Amount AS k, Id FROM Orders ORDER BY CASE WHEN Id > 1 THEN k ELSE Region END, Id");
         // repeated output names stay unknown
-        Assert.Throws<RowPolicyExpressionRejectedException>(() => _h.Compile(dialect,
-            "SELECT Region AS k, Region AS k FROM Orders ORDER BY CASE WHEN Id > 1 THEN k ELSE Region END"));
+        Refused(dialect, "SELECT Region AS k, Region AS k FROM Orders ORDER BY CASE WHEN Id > 1 THEN k ELSE Region END");
     }
 
     [Theory]
@@ -201,8 +201,7 @@ public class SelectableSortOrderTests
     public void OrderByCase_UnresolvableColumn_StillRefused(TargetSqlDialect dialect)
     {
         Assert.ThrowsAny<Exception>(() => _h.Compile(dialect, "SELECT Id FROM Orders ORDER BY CASE WHEN no_such = 'a' THEN Region ELSE Status END"));
-        Assert.Throws<RowPolicyExpressionRejectedException>(() => _h.Compile(dialect,
-            "SELECT Id FROM Orders ORDER BY CASE WHEN nope.Region = 'a' THEN nope.Region ELSE Status END"));
+        Refused(dialect, "SELECT Id FROM Orders ORDER BY CASE WHEN nope.Region = 'a' THEN nope.Region ELSE Status END");
     }
 
     [Theory]
@@ -224,13 +223,10 @@ public class SelectableSortOrderTests
     public void OrderBy_OuterScopeOrCorrelatedRowPolicyColumn_StillRefused(TargetSqlDialect dialect)
     {
         // a column of a source that is not in the body scope
-        Assert.Throws<RowPolicyExpressionRejectedException>(() => _h.Compile(dialect,
-            "SELECT Id FROM Orders AS o ORDER BY CASE WHEN x.Region = 'a' THEN x.Region ELSE o.Status END"));
+        Refused(dialect, "SELECT Id FROM Orders AS o ORDER BY CASE WHEN x.Region = 'a' THEN x.Region ELSE o.Status END");
         // the ORDER BY of a subquery or CTE is not the root ORDER BY: it keeps the unresolved families
-        Assert.Throws<RowPolicyExpressionRejectedException>(() => _h.Compile(dialect,
-            "SELECT Id FROM Orders WHERE Id IN (SELECT OrderId FROM Entitlements ORDER BY CASE WHEN Id > 1 THEN OrderId END)"));
-        Assert.Throws<RowPolicyExpressionRejectedException>(() => _h.Compile(dialect,
-            "WITH c AS (SELECT Id, Region FROM Orders ORDER BY CASE WHEN zz > 1 THEN Region END) SELECT Id FROM c"));
+        Refused(dialect, "SELECT Id FROM Orders WHERE Id IN (SELECT OrderId FROM Entitlements ORDER BY CASE WHEN Id > 1 THEN OrderId END)");
+        Refused(dialect, "WITH c AS (SELECT Id, Region FROM Orders ORDER BY CASE WHEN zz > 1 THEN Region END) SELECT Id FROM c");
     }
 
     [Theory]
@@ -239,7 +235,44 @@ public class SelectableSortOrderTests
     public void OrderBy_WindowAndAggregateOrderBy_Unchanged(TargetSqlDialect dialect)
     {
         // a window ORDER BY inside a projection and an aggregate ORDER BY resolve as before (the block scope is not re-entered for them)
-        Assert.Throws<RowPolicyExpressionRejectedException>(() => _h.Compile(dialect,
-            "SELECT Id, row_number() OVER (ORDER BY CASE WHEN Id > 1 THEN Region ELSE Amount END) AS rn FROM Orders"));
+        Refused(dialect, "SELECT Id, row_number() OVER (ORDER BY CASE WHEN Id > 1 THEN Region ELSE Amount END) AS rn FROM Orders");
+    }
+
+    [Theory]
+    [MemberData(nameof(AllDialectData))]
+    [Trait("Category", "Security")]
+    public void OrderByCase_AliasShadowingDifferentlyTypedColumn_StillRefused(TargetSqlDialect dialect)
+    {
+        // Region (text) is output as Amount, which is also a numeric input column: databases differ in which one binds inside an expression
+        Refused(dialect, "SELECT Region AS Amount, Id FROM Orders ORDER BY CASE WHEN Amount > 'a' THEN Id END");
+        // a bare element is not judged and keeps working with an alias
+        _h.Compile(dialect, "SELECT Region AS k, Id FROM Orders ORDER BY k, Id");
+        // a colliding alias of the same family is accepted
+        _h.Compile(dialect, "SELECT Status AS Region, Id FROM Orders ORDER BY CASE WHEN Region > 'a' THEN Region END, Id");
+    }
+
+    [Theory]
+    [MemberData(nameof(AllDialectData))]
+    [Trait("Category", "Security")]
+    public void OrderBy_AggregateOrderBy_Unchanged(TargetSqlDialect dialect)
+    {
+        // string_agg(... ORDER BY ...) inside the root ORDER BY is not re-scoped: a mixed-family key is refused there and in a projection alike
+        var inProjection = Record.Exception(() => _h.Compile(dialect,
+            "SELECT string_agg(Region, ',' ORDER BY CASE WHEN Id > 1 THEN Region ELSE Amount END) FROM Orders"));
+        var inRoot = Record.Exception(() => _h.Compile(dialect,
+            "SELECT Id FROM Orders GROUP BY Id ORDER BY max(string_agg(Region, ',' ORDER BY CASE WHEN Id > 1 THEN Region ELSE Amount END))"));
+        Assert.NotNull(inProjection);
+        Assert.NotNull(inRoot);
+    }
+
+    [Theory]
+    [MemberData(nameof(AllDialectData))]
+    [Trait("Category", "Security")]
+    public void OrderBy_WindowInsideRootOrderBy_Unchanged(TargetSqlDialect dialect)
+    {
+        Refused(dialect, "SELECT Id FROM Orders ORDER BY row_number() OVER (ORDER BY CASE WHEN Id > 1 THEN Region ELSE Amount END)");
+        Refused(dialect, "SELECT Id, row_number() OVER (ORDER BY CASE WHEN Id > 1 THEN Region ELSE Amount END) AS rn FROM Orders");
+        // a column that only resolves in the body scope stays unresolved inside the nested window ORDER BY
+        Refused(dialect, "SELECT Id FROM Orders ORDER BY row_number() OVER (ORDER BY CASE WHEN Id > 1 THEN Region END)");
     }
 }
