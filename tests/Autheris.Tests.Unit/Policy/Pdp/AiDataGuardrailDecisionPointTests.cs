@@ -265,7 +265,7 @@ public sealed class AiDataGuardrailDecisionPointTests
         var result = await Describe(h, OrdersArgs);
 
         result.IsSuccess.ShouldBeFalse();
-        result.ContentJson.ShouldBe("{}");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("DATASET_NOT_FOUND");
         await h.Executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
         await h.Pdp.Received(1).DecideAsync(
             Arg.Is<AccessRequest>(r => r.Object.Identifier == Orders && r.Transport == AccessTransport.Mcp && r.Operation == AccessOperation.Read),
@@ -386,7 +386,7 @@ public sealed class AiDataGuardrailDecisionPointTests
 
         viaGraphQl.IsSuccess.ShouldBeFalse();
         viaSimulate.IsSuccess.ShouldBeFalse();
-        viaSimulate.ErrorMessage!.Replace("simulate_query", "query_graphql").ShouldBe(viaGraphQl.ErrorMessage);
+        viaSimulate.ErrorMessage.ShouldBe(viaGraphQl.ErrorMessage);
         viaSimulate.ErrorMessage!.ShouldNotContain("orders");
         await h.Executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
     }
@@ -411,7 +411,7 @@ public sealed class AiDataGuardrailDecisionPointTests
         var result = await h.Guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("simulate_query", Args("query { no_such_field { x } }")), Session());
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("fail-closed");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("DATASET_NOT_FOUND");
         result.ErrorMessage!.ShouldNotContain("no_such_field");
         await h.Pdp.DidNotReceiveWithAnyArgs().DecideAsync(default!, default);
         await h.Executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
@@ -450,7 +450,7 @@ public sealed class AiDataGuardrailDecisionPointTests
         var result = await h.Guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("simulate_query", Args(OrdersDoc)), Session());
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("not accessible");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("DATASET_NOT_FOUND");
         await h.Executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
     }
 
@@ -465,8 +465,8 @@ public sealed class AiDataGuardrailDecisionPointTests
 
         viaGraphQl.IsSuccess.ShouldBeFalse();
         viaSimulate.IsSuccess.ShouldBeFalse();
-        viaSimulate.ErrorMessage!.ShouldContain("fail-closed");
-        viaSimulate.ErrorMessage!.Replace("simulate_query", "query_graphql").ShouldBe(viaGraphQl.ErrorMessage);
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(viaSimulate).ShouldBe("DATASET_NOT_FOUND");
+        viaSimulate.ErrorMessage.ShouldBe(viaGraphQl.ErrorMessage);
         await h.Executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
     }
 
@@ -478,7 +478,7 @@ public sealed class AiDataGuardrailDecisionPointTests
         var result = await h.Guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("simulate_query", Args("query { no_such_field { x } }")), Session());
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("fail-closed");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("DATASET_NOT_FOUND");
         await h.Executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
     }
 }

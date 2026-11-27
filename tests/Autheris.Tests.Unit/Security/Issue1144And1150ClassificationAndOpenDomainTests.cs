@@ -180,7 +180,7 @@ public sealed class Issue1144And1150ClassificationAndOpenDomainTests
             session);
 
         describeResult.IsSuccess.ShouldBeFalse();
-        (describeResult.ErrorMessage ?? string.Empty).ShouldContain("Access denied to tool 'describe_dataset' by ABAC security policy.");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(describeResult).ShouldBe("DATASET_NOT_FOUND");
 
         var access = await harness.Explainer.ExplainMyAccessAsync(principal, OrdersId);
         access.Decision.ShouldBe("DENIED");

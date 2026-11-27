@@ -339,11 +339,11 @@ public sealed class Issue820DescribeTokenBudgetTests
         var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpDatasetTools.DescribeDataset, Arguments()), Session());
 
         result.TruncatedDueToBudget.ShouldBeTrue();
-        using var doc = JsonDocument.Parse(result.ContentJson);
-        doc.RootElement.TryGetProperty("columns", out _).ShouldBeFalse();
-        var meta = doc.RootElement.GetProperty("_meta");
-        meta.GetProperty("reason").GetString().ShouldBe("TOKEN_BUDGET_EXCEEDED");
-        meta.GetProperty("note").GetString()!.ShouldContain("columnOffset 0");
+        result.IsSuccess.ShouldBeFalse();
+        var error = Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Error(result.ContentJson);
+        error.GetProperty("code").GetString().ShouldBe("TOKEN_BUDGET_EXCEEDED");
+        error.GetProperty("hint").GetString()!.ShouldContain("columnOffset 0");
+        result.ContentJson.ShouldNotContain("\"columns\"");
     }
 
     private static McpSessionContext Session() =>

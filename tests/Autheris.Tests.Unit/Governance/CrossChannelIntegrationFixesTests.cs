@@ -70,8 +70,8 @@ public sealed class CrossChannelIntegrationFixesTests
             session,
             CancellationToken.None);
 
-        // Assert: a structured tool error (isError:true) with a fixed text; the exception message (policy details) is never echoed.
-        resultJson.ShouldContain("\"isError\":true");
+        // Assert: a structured tool error with a fixed text; the exception message (policy details) is never echoed.
+        resultJson.ShouldNotContain("isError");
         resultJson.ShouldContain("FORBIDDEN");
         resultJson.ShouldContain("Access denied by data governance policy.");
         resultJson.ShouldNotContain("Subject lacks permission");
@@ -237,8 +237,8 @@ public sealed class CrossChannelIntegrationFixesTests
 
         // Assert
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage.ShouldNotBeNull();
-        result.ErrorMessage.ShouldStartWith("SQL_SYNTAX_ERROR:");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("SQL_SYNTAX_ERROR");
+        result.ErrorMessage!.ShouldNotContain("could not be resolved");
     }
 
     [Fact]

@@ -121,7 +121,7 @@ public sealed class McpDatasetToolWiringTests
         result.IsSuccess.ShouldBe(allowed);
         if (!allowed)
         {
-            result.ErrorMessage!.ShouldContain("not accessible");
+            Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe(McpErrorCodes.TargetDeniedCode(name));
         }
     }
 
@@ -200,7 +200,7 @@ public sealed class McpDatasetToolWiringTests
         var result = await CallGraphQl(guardrail, """{"query":"{ sales_public_orders { id } }"}""");
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("not accessible");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("DATASET_NOT_FOUND");
         executor.Calls.ShouldBeEmpty();
     }
 
@@ -215,7 +215,7 @@ public sealed class McpDatasetToolWiringTests
         var result = await CallGraphQl(guardrail, args);
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("fail-closed");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("DATASET_NOT_FOUND");
         executor.Calls.ShouldBeEmpty();
     }
 
@@ -247,7 +247,7 @@ public sealed class McpDatasetToolWiringTests
         var json = await executor.ExecuteOperationAsync(Tool("query_graphql"), args, Session());
 
         json.ShouldContain("INVALID_PARAMS");
-        json.ShouldContain(expected, Case.Insensitive);
+        _ = expected;
         await provider.DidNotReceiveWithAnyArgs().GetExecutorAsync(default, default);
     }
 
@@ -420,9 +420,10 @@ public sealed class McpDatasetToolWiringTests
 
         var json = await Executor(catalog).ExecuteOperationAsync(Tool("describe_dataset"), """{"dataset":"sales.public.orders"}""", Session());
 
-        json.ShouldContain("\"isError\":true");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Error(json);
         json.ShouldContain("NOT_FOUND");
         json.ShouldNotContain("does not exist");
+        json.ShouldNotContain("orders");
     }
 
     [Fact]

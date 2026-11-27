@@ -39,7 +39,7 @@ public sealed class McpQueryExecutorSecurityTests
 
         var json = await mcpExecutor.ExecuteOperationAsync(tool, "{\"query\":\"test\"}", session);
 
-        json.ShouldContain("isError\":true");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Error(json);
         json.ShouldContain("Invalid arguments JSON payload.");
     }
 
@@ -139,7 +139,7 @@ public sealed class McpQueryExecutorSecurityTests
 
         var resultJson = await mcpExecutor.ExecuteOperationAsync(tool, "{}", session);
 
-        resultJson.ShouldContain("isError\":true");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Error(resultJson);
         resultJson.ShouldContain("This token only permits read access; mutations are rejected.");
         await executorProvider.DidNotReceiveWithAnyArgs().GetExecutorAsync(default, default);
     }

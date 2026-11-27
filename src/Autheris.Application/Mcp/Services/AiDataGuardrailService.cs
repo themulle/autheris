@@ -180,7 +180,17 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             }
 
             await RecordAuditEventAsync(request.ToolName, sessionContext, "DENY", denyDetails, false, false, 0, cancellationToken).ConfigureAwait(false);
-            return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Tool '{request.ToolName}' is not registered or allowed.");
+            return McpToolError.Fail(McpErrorCodes.ToolNotAvailable);
+        }
+
+        // The admin-role check precedes the input guardrail: an unknown tool and a hidden admin tool answer alike, with or without
+        // injection text in the arguments.
+        if (McpAdminTools.IsAdminTool(tool.Name) && !McpAdminTools.CanUseAdminTools(sessionContext, _options.Value.IsMcpAuthBypassed))
+        {
+            activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
+            McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
+            await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", $"Tool execution denied: Admin tool '{tool.Name}' requires the ClusterAdmin role (and a read/write session).", false, false, 0, cancellationToken).ConfigureAwait(false);
+            return McpToolError.Fail(McpErrorCodes.ToolNotAvailable);
         }
 
         var promptEvaluation = _promptGuardrail.EvaluatePrompt(request.ToolName, request.ArgumentsJson);
@@ -204,19 +214,11 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                     TenantId: sessionContext.TenantId), cancellationToken).ConfigureAwait(false);
             }
 
-            return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Execution blocked: Prompt injection or jailbreak pattern detected ({promptEvaluation.AttackType}).");
+            return McpToolError.Fail(McpErrorCodes.RequestBlocked);
         }
 
         if (McpAdminTools.IsAdminTool(tool.Name))
         {
-            if (!McpAdminTools.CanUseAdminTools(sessionContext, _options.Value.IsMcpAuthBypassed))
-            {
-                activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
-                McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
-                await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", $"Tool execution denied: Admin tool '{tool.Name}' requires the ClusterAdmin role (and a read/write session).", false, false, 0, cancellationToken).ConfigureAwait(false);
-                return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Access denied: Tool '{tool.Name}' requires the ClusterAdmin role (and a read/write session).");
-            }
-
             if (_accessPlanningService != null)
             {
                 var adminResult = await McpAdminTools.ExecuteAdminToolAsync(tool.Name, request.ArgumentsJson ?? "{}", sessionContext, _accessPlanningService, _datasetCatalogAdmin, cancellationToken).ConfigureAwait(false);
@@ -237,7 +239,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                     false,
                     Math.Max(1, (adminResult.ContentJson?.Length ?? 0) / 4),
                     cancellationToken).ConfigureAwait(false);
-                return adminResult;
+                return adminResult.IsSuccess ? adminResult : McpToolError.FailAdmin(adminResult.ErrorMessage);
             }
         }
 
@@ -253,22 +255,25 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             }
 
             // MCP-08: doc tools run under the same per-call token budget as dataset tools.
-            scrubbedDocJson = ApplyTokenBudget(tool.Name, scrubbedDocJson, out var docTokens, out var docTruncated);
+            scrubbedDocJson = ApplyTokenBudget(tool.Name, scrubbedDocJson, out var docTokens, out var docTruncated, out var docBudgetFailed);
             await RecordAuditEventAsync(tool.Name, sessionContext, isError ? "DENY" : "ALLOW",
                 isError ? $"Doc tool returned error ({docErr ?? "ERROR"})." : "Document MCP tool executed successfully under AI guardrails.",
                 docWasMasked, docTruncated, docTokens, cancellationToken).ConfigureAwait(false);
-            return new McpToolCallResult(IsSuccess: !isError, ContentJson: scrubbedDocJson, ErrorMessage: isError ? scrubbedDocJson : null, EstimatedTokens: docTokens, IsMasked: docWasMasked, TruncatedDueToBudget: docTruncated);
+            var docFailed = isError || docBudgetFailed;
+            var docContent = isError ? McpToolError.Normalize(rawDocJson) : scrubbedDocJson;
+            return new McpToolCallResult(IsSuccess: !docFailed, ContentJson: docContent, ErrorMessage: docFailed ? docContent : null, EstimatedTokens: docTokens, IsMasked: docWasMasked, TruncatedDueToBudget: docTruncated);
         }
 
         if (string.Equals(tool.Name, McpDatasetTools.SampleRows, StringComparison.OrdinalIgnoreCase))
         {
             if (!McpDatasetTools.TryGetStringArgument(request.ArgumentsJson, "dataset", out var dsArg) || string.IsNullOrWhiteSpace(dsArg))
             {
-                return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Missing or invalid required argument 'dataset' for tool '{tool.Name}'.");
+                return McpToolError.Fail(McpErrorCodes.InvalidParams, "Missing or invalid required argument 'dataset'.");
             }
         }
 
         string? sqlSyntaxError = null;
+        Exception? sqlFailure = null;
         IReadOnlyList<TableIdentifier>? resolvedTables;
         bool unresolvedDescribeGraphQlField = false;
         if (string.Equals(tool.Name, McpDatasetTools.DescribeDataset, StringComparison.OrdinalIgnoreCase))
@@ -279,11 +284,11 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             int provided = (hasDataset ? 1 : 0) + (hasGraphQlField ? 1 : 0) + (hasSqlName ? 1 : 0);
             if (provided > 1)
             {
-                return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Invalid arguments for tool '{tool.Name}': specify only one of 'dataset', 'graphQlField', or 'sqlName'.");
+                return McpToolError.Fail(McpErrorCodes.InvalidParams, "Invalid arguments: specify only one of 'dataset', 'graphQlField', or 'sqlName'.");
             }
             if (provided == 0)
             {
-                return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Missing or invalid required argument 'dataset', 'graphQlField', or 'sqlName' for tool '{tool.Name}'.");
+                return McpToolError.Fail(McpErrorCodes.InvalidParams, "Missing or invalid required argument 'dataset', 'graphQlField', or 'sqlName'.");
             }
 
             if (hasSqlName)
@@ -312,7 +317,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                     activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
                     McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
                     await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", "Access denied by access policy: DEFAULT_DENY", false, false, 0, cancellationToken).ConfigureAwait(false);
-                    return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Access denied to tool '{tool.Name}' by ABAC security policy.");
+                    return McpToolError.Fail(McpErrorCodes.TargetDeniedCode(tool.Name));
                 }
             }
             else
@@ -328,9 +333,15 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         else if (string.Equals(tool.Name, McpDatasetTools.QuerySql, StringComparison.OrdinalIgnoreCase))
         {
             var sql = McpDatasetTools.TryGetStringArgument(request.ArgumentsJson, "query", out var s) ? s : null;
-            var (tables, syntaxErr) = await McpDataTargetResolver.TryResolveSqlTablesAsync(sql, _sqlEngine, _options.Value.WebSql?.DefaultDataSourceName, cancellationToken).ConfigureAwait(false);
+            if (string.IsNullOrWhiteSpace(sql))
+            {
+                return McpToolError.Fail(McpErrorCodes.InvalidParams, "Missing required argument 'query'.");
+            }
+
+            var (tables, syntaxErr, failure) = await McpDataTargetResolver.TryResolveSqlTablesWithFailureAsync(sql, _sqlEngine, _options.Value.WebSql?.DefaultDataSourceName, cancellationToken).ConfigureAwait(false);
             resolvedTables = tables;
             sqlSyntaxError = syntaxErr;
+            sqlFailure = failure;
         }
         else
         {
@@ -345,7 +356,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
             McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
             await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", constructMessage, false, false, 0, cancellationToken).ConfigureAwait(false);
-            return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: constructMessage);
+            return McpToolError.Fail(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.ConstructNotSupported);
         }
 
         if (sqlSyntaxError != null)
@@ -354,7 +365,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
             _logger.LogWarning("SQL syntax error in MCP tool '{ToolName}': target data table could not be resolved: {Error}", tool.Name, sqlSyntaxError);
             await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", $"SQL_SYNTAX_ERROR: target data table could not be resolved: {sqlSyntaxError}", false, false, 0, cancellationToken).ConfigureAwait(false);
-            return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"SQL_SYNTAX_ERROR: target data table could not be resolved: {sqlSyntaxError}");
+            return McpToolError.FailSql(sqlFailure);
         }
 
         bool isSelfAccessTool = string.Equals(tool.Name, McpDatasetTools.DescribeMyAccess, StringComparison.OrdinalIgnoreCase) ||
@@ -367,7 +378,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
             _logger.LogWarning("Zero-Trust Fail-Closed: Could not determine target table for MCP tool '{ToolName}'. Denying automated AI agent execution.", tool.Name);
             await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", "Unresolvable target table for data access tool (fail-closed).", false, false, 0, cancellationToken).ConfigureAwait(false);
-            return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Access denied to tool '{tool.Name}': target data table could not be resolved (fail-closed).");
+            return McpToolError.Fail(McpErrorCodes.TargetDeniedCode(tool.Name));
         }
 
         IReadOnlyList<TableIdentifier> abacTables = resolvedTables ?? [new TableIdentifier("mcp", "tool", tool.Name.ToLowerInvariant())];
@@ -407,7 +418,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                 McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
                 _logger.LogWarning("Zero-Trust Fail-Closed: Could not resolve the tables behind MCP tool '{ToolName}'. Denying execution.", tool.Name);
                 await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", "Tool execution denied: the tables behind the call could not be resolved (fail-closed).", false, false, 0, cancellationToken).ConfigureAwait(false);
-                return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Access denied to tool '{tool.Name}': target dataset is not accessible.");
+                return McpToolError.Fail(McpErrorCodes.TargetDeniedCode(tool.Name));
             }
 
             // The decision point decides the real tables behind the call before dataset metadata checks.
@@ -452,7 +463,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                 McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
                 _logger.LogWarning("Tool '{ToolName}' targets inactive table '{Table}'. Denying execution.", tool.Name, resolvedTable);
                 await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", $"Tool execution denied: target table {resolvedTable} is inactive.", false, false, 0, cancellationToken).ConfigureAwait(false);
-                return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Access denied to tool '{tool.Name}': target dataset is not accessible.");
+                return McpToolError.Fail(McpErrorCodes.TargetDeniedCode(tool.Name));
             }
         }
 
@@ -600,11 +611,12 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
             McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, wasMasked, false);
             await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", $"Tool execution returned an error result ({errorCode ?? "UNKNOWN"}).", wasMasked, false, 0, cancellationToken).ConfigureAwait(false);
-            return new McpToolCallResult(IsSuccess: false, ContentJson: scrubbedJson, ErrorMessage: scrubbedJson, IsMasked: wasMasked || policyOutcome == true);
+            var errorEnvelope = McpToolError.Normalize(rawDataJson);
+            return new McpToolCallResult(IsSuccess: false, ContentJson: errorEnvelope, ErrorMessage: errorEnvelope, IsMasked: wasMasked || policyOutcome == true);
         }
 
         scrubbedJson = await InspectOutputAsync(tool.Name, scrubbedJson, sessionContext, cancellationToken, m => wasMasked |= m).ConfigureAwait(false);
-        scrubbedJson = ApplyTokenBudget(tool.Name, scrubbedJson, out var estimatedTokens, out var truncated, argsJson);
+        scrubbedJson = ApplyTokenBudget(tool.Name, scrubbedJson, out var estimatedTokens, out var truncated, out var budgetFailed, argsJson);
 
         await RecordAuditEventAsync(tool.Name, sessionContext, "ALLOW", "Tool executed successfully under AI guardrails.", wasMasked, truncated, estimatedTokens, cancellationToken).ConfigureAwait(false);
 
@@ -615,7 +627,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         McpDiagnostics.RecordTokenUsage(estimatedTokens, "output", tool.Name);
         McpDiagnostics.RecordGuardrailVerdict(verdict, tool.Name, wasMasked, false);
 
-        return new McpToolCallResult(IsSuccess: true, ContentJson: scrubbedJson, EstimatedTokens: estimatedTokens, IsMasked: wasMasked || (policyOutcome ?? (_queryExecutor != null && McpResultMasking.IsGovernedDataTool(tool))), TruncatedDueToBudget: truncated);
+        return new McpToolCallResult(IsSuccess: !budgetFailed, ContentJson: scrubbedJson, ErrorMessage: budgetFailed ? scrubbedJson : null, EstimatedTokens: estimatedTokens, IsMasked: wasMasked || (policyOutcome ?? (_queryExecutor != null && McpResultMasking.IsGovernedDataTool(tool))), TruncatedDueToBudget: truncated);
     }
 
     /// <summary>Audit and metric label of a resource read (the audit row names the URI where a tool call names the tool).</summary>
@@ -647,7 +659,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
                 ReasonCode: PolicyDeniedEvent.DefaultReasonCode), cancellationToken).ConfigureAwait(false);
         }
 
-        return new McpToolCallResult(IsSuccess: false, ContentJson: "{}", ErrorMessage: $"Access denied to tool '{tool.Name}' by ABAC security policy.");
+        return McpToolError.Fail(McpErrorCodes.TargetDeniedCode(tool.Name));
     }
 
     public async ValueTask<McpToolCallResult> ReadResourceWithGuardrailAsync(

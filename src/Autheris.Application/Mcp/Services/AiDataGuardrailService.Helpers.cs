@@ -372,13 +372,14 @@ public sealed partial class AiDataGuardrailService
     /// <summary>
     /// Applies the per-call token budget (MCP-08): a catalog result above <c>Mcp.MaxTokensPerCall</c> is shortened by whole datasets or, for
     /// <c>describe_dataset</c>, whole columns (issue #820; <paramref name="argumentsJson"/> carries the column cursor), any other result is
-    /// replaced by a truncation notice. Shared by dataset tools and doc tools so no tool skips the budget.
+    /// replaced by the <c>TOKEN_BUDGET_EXCEEDED</c> error envelope (<paramref name="failed"/> is then true). Shared by dataset tools and doc tools so no tool skips the budget.
     /// </summary>
-    private string ApplyTokenBudget(string toolName, string json, out int estimatedTokens, out bool truncated, string? argumentsJson = null)
+    private string ApplyTokenBudget(string toolName, string json, out int estimatedTokens, out bool truncated, out bool failed, string? argumentsJson = null)
     {
         int maxTokens = _options.Value.Mcp.MaxTokensPerCall > 0 ? _options.Value.Mcp.MaxTokensPerCall : 4096;
         estimatedTokens = Math.Max(1, json.Length / 4);
         truncated = false;
+        failed = false;
 
         if (estimatedTokens > maxTokens)
         {
@@ -392,14 +393,11 @@ public sealed partial class AiDataGuardrailService
             }
             else if (json.Length > maxChars)
             {
-                json = JsonSerializer.Serialize(new
+                json = McpToolError.Serialize(new McpToolErrorBody(McpErrorCodes.TokenBudgetExceeded, McpErrorCodes.FixedMessage(McpErrorCodes.TokenBudgetExceeded))
                 {
-                    _meta = new
-                    {
-                        truncated = true, reason = "TOKEN_BUDGET_EXCEEDED", warning = "[TRUNCATED DUE TO MCP TOKEN BUDGET]",
-                        maxTokens, note = McpBudgetShortening.NoticeNote(toolName, argumentsJson)
-                    }
+                    Hint = McpBudgetShortening.NoticeNote(toolName, argumentsJson)
                 });
+                failed = true;
                 estimatedTokens = Math.Max(1, json.Length / 4);
                 truncated = true;
             }

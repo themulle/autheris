@@ -672,11 +672,12 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
     {
         SqlCompilerErrorMapper.TryMap(exception, out var mapped);
         SqlCompilerErrorMapper.RecordOutcome(mapped);
-        return CreateErrorResult(tenantId, toolName, mapped.Code, mapped.Title, hint: mapped.Hint);
+        return McpToolError.Serialize(McpToolError.FromSql(exception, mapped));
     }
 
     /// <summary>
-    /// M-17: Structured error result for MCP tool invocations (deny, execution failure, unavailable).
+    /// Structured error result for MCP tool invocations (deny, execution failure, unavailable). The envelope carries neither the tenant nor
+    /// the tool name, so <paramref name="tenantId"/> and <paramref name="toolName"/> are not written.
     /// </summary>
     internal static string CreateErrorResult(string tenantId, string toolName, string code, string message, string? graphQLResultJson = null, int? retryAfterSeconds = null, string? hint = null)
     {
@@ -694,12 +695,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             }
         }
 
-        return JsonSerializer.Serialize(new McpToolErrorPayload(
-            tenantId,
-            toolName,
-            IsError: true,
-            new McpToolError(code, message, retryAfterSeconds, hint),
-            graphQL), CamelCaseJsonOptions);
+        return McpToolError.Serialize(new McpToolErrorBody(code, message) { RetryAfterSeconds = retryAfterSeconds, Hint = hint, GraphQL = graphQL });
     }
 
     private async Task<string?> TryExecuteTableFastPathAsync(
@@ -904,30 +900,3 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         return CreateErrorResult(tenantId, toolName, code, ex.Message, retryAfterSeconds: ex.RetryAfterSeconds);
     }
 }
-
-/// <summary>
-/// M-17: Error codes for structured MCP tool error results.
-/// </summary>
-public static class McpErrorCodes
-{
-    public const string Forbidden = "FORBIDDEN";
-    public const string InvalidParams = "INVALID_PARAMS";
-    public const string ExecutionFailed = "EXECUTION_FAILED";
-    public const string NotAvailable = "NOT_AVAILABLE";
-    public const string NotFound = "NOT_FOUND";
-}
-
-internal sealed record McpToolError(
-    string Code,
-    string Message,
-    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    int? RetryAfterSeconds = null,
-    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    string? Hint = null);
-
-internal sealed record McpToolErrorPayload(
-    string TenantId,
-    string Tool,
-    bool IsError,
-    McpToolError Error,
-    JsonElement? GraphQL);

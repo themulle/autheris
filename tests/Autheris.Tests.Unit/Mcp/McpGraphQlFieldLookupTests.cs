@@ -223,7 +223,7 @@ public sealed class McpGraphQlFieldLookupTests
             Session);
 
         using var doc = JsonDocument.Parse(wrongCase);
-        doc.RootElement.GetProperty("isError").GetBoolean().ShouldBeTrue();
+        doc.RootElement.TryGetProperty("isError", out _).ShouldBeFalse();
         doc.RootElement.GetProperty("error").GetProperty("code").GetString().ShouldBe("NOT_FOUND");
     }
 
@@ -246,7 +246,7 @@ public sealed class McpGraphQlFieldLookupTests
 
         invisibleJson.ShouldBe(unknownJson);
         using var doc = JsonDocument.Parse(invisibleJson);
-        doc.RootElement.GetProperty("isError").GetBoolean().ShouldBeTrue();
+        doc.RootElement.TryGetProperty("isError", out _).ShouldBeFalse();
         doc.RootElement.GetProperty("error").GetProperty("code").GetString().ShouldBe("NOT_FOUND");
     }
 
@@ -372,7 +372,7 @@ public sealed class McpGraphQlFieldLookupTests
         var json = await executor.ExecuteOperationAsync(Tool(toolName), args, Session);
 
         using var doc = JsonDocument.Parse(json);
-        doc.RootElement.GetProperty("isError").GetBoolean().ShouldBeTrue();
+        doc.RootElement.TryGetProperty("isError", out _).ShouldBeFalse();
         doc.RootElement.GetProperty("error").GetProperty("code").GetString().ShouldBe("INVALID_PARAMS");
     }
 }

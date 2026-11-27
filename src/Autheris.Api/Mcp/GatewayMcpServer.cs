@@ -14,6 +14,7 @@ using Autheris.Domain.Model;
 using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Logging;
 using ModelContextProtocol;
 using ModelContextProtocol.AspNetCore;
 using ModelContextProtocol.Protocol;
@@ -438,14 +439,36 @@ public static class GatewayMcpServer
     {
         var session = Caller(services);
         var guardrail = services.GetRequiredService<IAiDataGuardrailService>();
-        var result = await guardrail.ExecuteToolWithGuardrailAsync(
-            new McpToolCallRequest(toolName, argumentsJson, session.SessionId), session, ct).ConfigureAwait(false);
-
-        // SEC M-17: structured executor error results are tool errors (isError:true).
-        if (!result.IsSuccess || AiDataGuardrailService.TryGetExecutorError(result.ContentJson, out _))
+        McpToolCallResult result;
+        try
         {
-            var message = result.ErrorMessage ?? (result.IsSuccess ? result.ContentJson : null) ?? "Tool execution failed";
-            return new CallToolResult { Content = [new TextContentBlock { Text = message }], IsError = true };
+            result = await guardrail.ExecuteToolWithGuardrailAsync(
+                new McpToolCallRequest(toolName, argumentsJson, session.SessionId), session, ct).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex) when (ex is not McpProtocolException)
+        {
+            // The one exit of every tool failure: no exception text or SDK message reaches the client.
+            var code = ex switch
+            {
+                OperationCanceledException or TimeoutException => McpErrorCodes.QueryTimeout,
+                Autheris.Domain.Exceptions.GatewaySecurityException or UnauthorizedAccessException or System.Security.SecurityException => McpErrorCodes.TargetDeniedCode(toolName),
+                _ => McpErrorCodes.InternalError
+            };
+            var logger = services.GetService<ILoggerFactory>()?.CreateLogger(typeof(GatewayMcpServer));
+            logger?.LogError(ex, "MCP tool call failed with {Code}.", code);
+            await McpToolFailureRecorder.RecordDenyAsync(
+                services.GetService<Autheris.Application.Common.Interfaces.IAuditLogRepository>(), logger, session, toolName, code, ct).ConfigureAwait(false);
+            return ToolError(McpToolError.Fail(code).ContentJson);
+        }
+
+        // The guardrail classified the result once; a failed result is always an error result, a successful one never is.
+        if (!result.IsSuccess)
+        {
+            return ToolError(result.ErrorMessage ?? result.ContentJson);
         }
 
         return new CallToolResult
@@ -458,6 +481,19 @@ public static class GatewayMcpServer
                 ["estimatedTokens"] = result.EstimatedTokens,
                 ["truncated"] = result.TruncatedDueToBudget
             }
+        };
+    }
+
+    /// <summary>An error result: the normalised envelope is both the text content and the structured content (one source, so they cannot diverge).</summary>
+    internal static CallToolResult ToolError(string? envelopeJson)
+    {
+        var envelope = McpToolError.Normalize(envelopeJson);
+        using var parsed = JsonDocument.Parse(envelope);
+        return new CallToolResult
+        {
+            Content = [new TextContentBlock { Text = envelope }],
+            IsError = true,
+            StructuredContent = parsed.RootElement.Clone()
         };
     }
 

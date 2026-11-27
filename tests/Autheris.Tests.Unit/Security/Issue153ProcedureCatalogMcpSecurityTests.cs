@@ -343,7 +343,7 @@ public sealed class Issue153ProcedureCatalogMcpSecurityTests
             JsonSerializer.Serialize(new { procedure_name = "ProcWrite" }),
             readOnlySession);
 
-        writeResultJson.ShouldContain("\"isError\":true");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Error(writeResultJson);
         writeResultJson.ShouldContain("\"code\":\"FORBIDDEN\"");
         writeResultJson.ShouldContain("read access");
     }

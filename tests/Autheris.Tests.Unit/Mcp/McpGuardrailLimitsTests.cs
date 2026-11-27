@@ -81,9 +81,9 @@ public sealed class McpGuardrailLimitsTests
 
         var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpDocTools.SearchDocs, """{"query":"x"}"""), Session());
 
-        result.IsSuccess.ShouldBeTrue();
+        result.IsSuccess.ShouldBeFalse();
         result.TruncatedDueToBudget.ShouldBeTrue();
         result.ContentJson.Length.ShouldBeLessThan(4000);
-        result.ContentJson.ShouldContain("TOKEN_BUDGET_EXCEEDED");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("TOKEN_BUDGET_EXCEEDED");
     }
 }

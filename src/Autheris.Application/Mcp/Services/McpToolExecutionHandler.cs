@@ -649,8 +649,8 @@ public sealed partial class McpToolExecutionHandler : IMcpToolExecutionHandler
         // argument is looked at; never NOT_AVAILABLE, which would reveal the feature.
         if (_procedureCatalog == null || _procedureExecutionService == null)
         {
-            return CreateMcpError(sessionContext.TenantId, McpDatasetTools.CallProcedure, "NOT_FOUND",
-                $"Tool '{McpDatasetTools.CallProcedure}' is not registered or allowed.");
+            return CreateMcpError(sessionContext.TenantId, McpDatasetTools.CallProcedure, McpErrorCodes.ToolNotAvailable,
+                McpErrorCodes.FixedMessage(McpErrorCodes.ToolNotAvailable));
         }
 
         // Same parsing as the guardrail's ABAC and four-eyes targets, so the checked procedure is the one that runs.
@@ -833,7 +833,7 @@ public sealed partial class McpToolExecutionHandler : IMcpToolExecutionHandler
     }
 
     private static string CreateMcpError(string tenantId, string tool, string code, string message) =>
-        McpToolError.Serialize(code, message, tenantId, tool);
+        McpToolError.Serialize(code, message);
 
     private static string SerializeBoundedList<T>(IReadOnlyList<T> items, Func<IReadOnlyList<T>, object> envelope)
     {

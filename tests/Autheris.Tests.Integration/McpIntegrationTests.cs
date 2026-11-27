@@ -75,13 +75,14 @@ public class McpIntegrationTests : IClassFixture<McpIntegrationTests.HostFixture
         var (simulationError, simulation) = await McpTestClient.CallAsync(client, "simulate_query",
             new { query = @"query { table(domain: ""finance"", name: ""finance_table_1"", first: 15) { id name } }" });
         simulationError.ShouldBeTrue(simulation);
-        simulation.ShouldContain("fail-closed");
+        simulation.ShouldContain("DATASET_NOT_FOUND");
 
         // query_customers returns a _provenance footnote, or a structured error without a data source (SEC M-17), never mock data.
         var (_, customers) = await McpTestClient.CallAsync(client, "query_customers", new { });
         (customers.Contains("_provenance", StringComparison.Ordinal) ||
          customers.Contains("EXECUTION_FAILED", StringComparison.Ordinal) ||
-         customers.Contains("FORBIDDEN", StringComparison.Ordinal)).ShouldBeTrue(customers);
+         customers.Contains("FORBIDDEN", StringComparison.Ordinal) ||
+         customers.Contains("TOOL_NOT_AVAILABLE", StringComparison.Ordinal)).ShouldBeTrue(customers);
         customers.ShouldNotContain("Erika Mustermann");
     }
 

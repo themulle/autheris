@@ -11,6 +11,7 @@ using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.State.Caching.Services;
+using Autheris.Application.Mcp.Services;
 using Autheris.Application.ConsentRequests;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.Lineage;
@@ -481,7 +482,7 @@ public sealed class GraphQlSubscriptionAndFederationSecurityTests
         json.ShouldNotContain("Diabetes");
 
         using var doc = JsonDocument.Parse(json);
-        doc.RootElement.GetProperty("isError").GetBoolean().ShouldBeTrue();
+        doc.RootElement.EnumerateObject().Select(p => p.Name).ShouldBe(["error"]);
         doc.RootElement.GetProperty("error").GetProperty("code").GetString().ShouldBe(expectedCode);
     }
 
