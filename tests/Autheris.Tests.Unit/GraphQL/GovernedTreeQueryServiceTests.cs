@@ -34,15 +34,27 @@ public sealed class GovernedTreeQueryServiceTests
 
     private const string StubConnectionString = "Host=stub;Database=test;";
 
-    private sealed class CountingFactory(string? stubReaderJson = null) : ISqlConnectionFactory
+    private sealed class CountingFactory(string? stubReaderJson = null, Func<Task>? onOpen = null) : ISqlConnectionFactory
     {
-        public int Opened { get; private set; }
+        private int _opened;
 
-        public Task<DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default)
+        public int Opened => Volatile.Read(ref _opened);
+
+        public async Task<DbConnection> CreateOpenConnectionAsync(DataSourceConnectionOptions options, CancellationToken ct = default)
         {
-            Opened++;
-            return Task.FromResult<DbConnection>(new StubJsonDbConnection(stubReaderJson ?? "[]"));
+            Interlocked.Increment(ref _opened);
+            if (onOpen is not null)
+            {
+                await onOpen().ConfigureAwait(false);
+            }
+
+            return new StubJsonDbConnection(stubReaderJson ?? "[]");
         }
+    }
+
+    private sealed class FullGate : ITableReadConcurrencyGate
+    {
+        public IDisposable? TryEnter(string key, int maxConcurrent) => null;
     }
 
     private static TableMetadata Meta(TableIdentifier id, string sourceName, params (string Name, string Type)[] columns) => new()
@@ -84,7 +96,8 @@ public sealed class GovernedTreeQueryServiceTests
         Microsoft.Extensions.Logging.ILogger<GovernedTreeQueryService>? logger = null,
         bool unbackedBlogSource = false,
         string provider = "PostgreSql",
-        string? stubReaderJson = null)
+        string? stubReaderJson = null,
+        Func<Task>? onOpen = null)
     {
         var access = new Dictionary<TableIdentifier, ResolvedTableAccess>
         {
@@ -107,6 +120,7 @@ public sealed class GovernedTreeQueryServiceTests
             DataSources = new SqlDataSourceOptions
             {
                 MaxConcurrentReadsPerUserAndTable = options.DataSources.MaxConcurrentReadsPerUserAndTable,
+                TableReadWaitTimeoutMs = options.DataSources.TableReadWaitTimeoutMs,
                 Connections = new Dictionary<string, DataSourceConnectionOptions>(StringComparer.OrdinalIgnoreCase)
                 {
                     ["blog"] = new() { Provider = provider, ConnectionString = StubConnectionString },
@@ -121,7 +135,7 @@ public sealed class GovernedTreeQueryServiceTests
         }
 
         var audit = Substitute.For<IAuditLogRepository>();
-        var factory = new CountingFactory(stubReaderJson);
+        var factory = new CountingFactory(stubReaderJson, onOpen);
         var service = new GovernedTreeQueryService(
             resolver, factory, audit, masking ?? Substitute.For<IColumnMaskingProvider>(), Options.Create(effectiveOptions), gate, logger: logger);
         return new Fixture { Service = service, Resolver = resolver, Audit = audit, Factory = factory };
@@ -435,12 +449,82 @@ public sealed class GovernedTreeQueryServiceTests
     [Fact]
     public async Task ConcurrencyGateFull_Throttles()
     {
-        var gate = Substitute.For<ITableReadConcurrencyGate>();
-        gate.TryEnter(Arg.Any<string>(), Arg.Any<int>()).Returns((IDisposable?)null);
+        var gate = new FullGate();
         var fixture = Create(options: new GatewayOptions { DataSources = new SqlDataSourceOptions { MaxConcurrentReadsPerUserAndTable = 1 } }, gate: gate);
 
         await Should.ThrowAsync<GatewayThrottledException>(() => fixture.ExecuteAsync(DefaultTenantCaller.Principal(), AuthorsWithArticles(), null));
         fixture.Factory.Opened.ShouldBe(0);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task SixRootsSameOperation_LimitFour_AllSucceed()
+    {
+        var gate = new TableReadConcurrencyGate();
+        var running = 0;
+        var peak = 0;
+        var fourEntered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fixture = Create(
+            options: new GatewayOptions { DataSources = new SqlDataSourceOptions { MaxConcurrentReadsPerUserAndTable = 4, TableReadWaitTimeoutMs = 0 } },
+            gate: gate,
+            onOpen: async () =>
+            {
+                var now = Interlocked.Increment(ref running);
+                int seen;
+                while (now > (seen = Volatile.Read(ref peak)) && Interlocked.CompareExchange(ref peak, now, seen) != seen)
+                {
+                }
+
+                if (now == 4)
+                {
+                    fourEntered.TrySetResult();
+                }
+
+                await release.Task;
+                Interlocked.Decrement(ref running);
+            });
+        var opId = "op-six-roots";
+
+        var roots = Enumerable.Range(0, 6)
+            .Select(_ => fixture.ExecuteAsync(DefaultTenantCaller.Principal(), new TreeQueryNode(Authors, ["id"]), null, opId))
+            .ToArray();
+        await fourEntered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+        release.SetResult();
+
+        await Task.WhenAll(roots).WaitAsync(TimeSpan.FromSeconds(10));
+        peak.ShouldBeLessThanOrEqualTo(4);
+        fixture.Factory.Opened.ShouldBe(6);
+
+        // Every slot went back to the gate: a later operation with no wait gets all four at once.
+        await Should.NotThrowAsync(() => fixture.ExecuteAsync(DefaultTenantCaller.Principal(), new TreeQueryNode(Authors, ["id"]), null, "op-after"));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task OtherUsersOperation_CannotBorrowSlots()
+    {
+        // A different operation has its own slot pool: it never inherits slots a sibling operation of the same user holds.
+        var gate = new TableReadConcurrencyGate();
+        var entered = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var release = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
+        var fixture = Create(
+            options: new GatewayOptions { DataSources = new SqlDataSourceOptions { MaxConcurrentReadsPerUserAndTable = 1, TableReadWaitTimeoutMs = 0 } },
+            gate: gate,
+            onOpen: async () =>
+            {
+                entered.TrySetResult();
+                await release.Task;
+            });
+
+        var holder = fixture.ExecuteAsync(DefaultTenantCaller.Principal(), new TreeQueryNode(Authors, ["id"]), null, "op-holder");
+        await entered.Task.WaitAsync(TimeSpan.FromSeconds(10));
+
+        await Should.ThrowAsync<GatewayThrottledException>(() =>
+            fixture.ExecuteAsync(DefaultTenantCaller.Principal(), new TreeQueryNode(Authors, ["id"]), null, "op-other"));
+
+        release.SetResult();
+        await holder;
     }
 
     [Fact]

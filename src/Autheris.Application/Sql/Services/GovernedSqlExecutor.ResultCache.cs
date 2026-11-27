@@ -426,7 +426,7 @@ public sealed partial class GovernedSqlExecutor
         }
 
         // A hit skips the connection and the provider guard only; the per-user and per-table read limit applies like on a miss.
-        var leases = AcquireReadLeases(user, tenantId, rewrite);
+        var leases = await AcquireReadLeasesAsync(user, tenantId, rewrite, ct).ConfigureAwait(false);
         try
         {
             fill.Served = true;
@@ -444,7 +444,7 @@ public sealed partial class GovernedSqlExecutor
     }
 
     /// <summary>Takes the per-user and per-table read leases, or throws the throttled error when one is exhausted. Null when no limit applies.</summary>
-    private List<IDisposable>? AcquireReadLeases(ClaimsPrincipal user, TenantId tenantId, GovernedRewrite rewrite)
+    private async ValueTask<List<IDisposable>?> AcquireReadLeasesAsync(ClaimsPrincipal user, TenantId tenantId, GovernedRewrite rewrite, CancellationToken ct)
     {
         var maxConcurrentReads = _options.Value.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
         if (_concurrencyGate == null || maxConcurrentReads <= 0 || rewrite.AccessedTables.Count == 0)
@@ -455,24 +455,16 @@ public sealed partial class GovernedSqlExecutor
         var userSid = user.FindFirst(ClaimTypes.PrimarySid)?.Value
                       ?? user.FindFirst("sub")?.Value
                       ?? "anonymous";
-        var leases = new List<IDisposable>(rewrite.AccessedTables.Count);
-        try
+        var keys = new List<string>(rewrite.AccessedTables.Count);
+        foreach (var table in rewrite.AccessedTables)
         {
-            foreach (var table in rewrite.AccessedTables)
-            {
-                var key = $"{tenantId.Value}|{userSid}|{table.ToQualifiedName()}".ToLowerInvariant();
-                var lease = _concurrencyGate.TryEnter(key, maxConcurrentReads)
-                            ?? throw new GatewayThrottledException(ThrottledRetryAfterSeconds);
-                leases.Add(lease);
-            }
-        }
-        catch
-        {
-            DisposeLeases(leases);
-            throw;
+            keys.Add($"{tenantId.Value}|{userSid}|{table.ToQualifiedName()}".ToLowerInvariant());
         }
 
-        return leases;
+        var wait = TimeSpan.FromMilliseconds(_options.Value.DataSources?.TableReadWaitTimeoutMs ?? 0);
+        var lease = await _concurrencyGate.EnterAsync(keys, maxConcurrentReads, wait, ct).ConfigureAwait(false)
+                    ?? throw new GatewayThrottledException(ThrottledRetryAfterSeconds);
+        return [lease];
     }
 
     private static void DisposeLeases(List<IDisposable>? leases)
