@@ -122,18 +122,34 @@ INSERT INTO flat_masked VALUES
         int MinimumGroupSize,
         string? MinimumGroupSizeSource,
         bool MergedIntoOther,
-        bool Truncated);
+        bool Truncated)
+    {
+        // Rows is a list, so the generated record equality would compare references; compare the rows by value instead.
+        public bool Equals(Outcome? other) =>
+            other is not null &&
+            Rows.SequenceEqual(other.Rows) &&
+            (Count, Suppressed, SuppressedGroupsCount, MinimumGroupSize, MinimumGroupSizeSource, MergedIntoOther, Truncated) ==
+            (other.Count, other.Suppressed, other.SuppressedGroupsCount, other.MinimumGroupSize, other.MinimumGroupSizeSource, other.MergedIntoOther, other.Truncated);
 
-    public static string Nested(string table, string arguments = "groupBy: [region]", string where = "", string limit = "100") =>
+        public override int GetHashCode() => HashCode.Combine(Rows.Count, Count, Suppressed, SuppressedGroupsCount, MinimumGroupSize, MergedIntoOther, Truncated);
+
+        public override string ToString() =>
+            $"Outcome {{ Rows = [{string.Join(", ", Rows)}], Count = {Count}, Suppressed = {Suppressed}, SuppressedGroupsCount = {SuppressedGroupsCount}, " +
+            $"MinimumGroupSize = {MinimumGroupSize}, MinimumGroupSizeSource = {MinimumGroupSizeSource}, MergedIntoOther = {MergedIntoOther}, Truncated = {Truncated} }}";
+    }
+
+    // MIN/MAX/COUNT_DISTINCT on a non-group column are rejected under Suppress (minimum group size > 1), so the second aggregate is
+    // COUNT unless the caller runs under MergeIntoOther and asks for MAX.
+    public static string Nested(string table, string arguments = "groupBy: [region]", string where = "", string limit = "100", bool withMax = false) =>
         $$"""
-        { {{table}}_aggregate({{arguments}}, aggregates: [{ fn: SUM, column: amount, alias: "s" }, { fn: MAX, column: amount, alias: "m" }],
+        { {{table}}_aggregate({{arguments}}, aggregates: [{ fn: SUM, column: amount, alias: "s" }, {{(withMax ? "{ fn: MAX, column: amount, alias: \"m\" }" : "{ fn: COUNT, alias: \"m\" }")}}],
             orderBy: [{ column: region }], limit: {{limit}} {{where}}) {
             count suppressed suppressedGroupsCount minimumGroupSize minimumGroupSizeSource mergedIntoOther truncated
             groups { key { region } rowCount isMergedOther aggregates { alias intValue } } } }
         """;
 
-    public static string Flat(string table, string where = "", string limit = "100") =>
-        $"{{ {table}_groups(orderBy: [{{ column: region }}], limit: {limit} {where}) {{ region n: count s: amount_sum m: amount_max _isMergedOther }} }}";
+    public static string Flat(string table, string where = "", string limit = "100", bool withMax = false) =>
+        $"{{ {table}_groups(orderBy: [{{ column: region }}], limit: {limit} {where}) {{ region n: count s: amount_sum m: {(withMax ? "amount_max" : "count")} _isMergedOther }} }}";
 
     public static string NestedWhole(string table, string where = "") =>
         $$"""
@@ -265,7 +281,7 @@ public sealed class TypedAggregationFlatEndToEndTests : IClassFixture<TypedAggre
 
         actual.Rows.ShouldBe(expected.Rows);
         actual.Rows.Count.ShouldBe(2);
-        actual.Rows[0].ShouldStartWith("EU|12|120|10|");
+        actual.Rows[0].ShouldStartWith("EU|12|120|12|");
         actual.ShouldBe(expected, "facts must be identical, including the hidden suppressed-groups count");
         actual.Suppressed.ShouldBeTrue();
         actual.SuppressedGroupsCount.ShouldBe(0);
@@ -315,7 +331,7 @@ public sealed class TypedAggregationFlatEndToEndTests : IClassFixture<TypedAggre
     public async Task NestedAndFlat_Parity_ResponseKeysAndAliases_DoNotChangeTheResult()
     {
         using var flat = await TypedAggregationFlatSupport.GraphQlAsync(_fixture,
-            $"{{ werte: {TypedAggregationFlatSupport.Sales}_groups(orderBy: [{{ column: region }}]) {{ gebiet: region anzahl: count summe: amount_sum max_: amount_max _isMergedOther }} }}");
+            $"{{ werte: {TypedAggregationFlatSupport.Sales}_groups(orderBy: [{{ column: region }}]) {{ gebiet: region anzahl: count summe: amount_sum schnitt: amount_avg _isMergedOther }} }}");
 
         var rows = flat.RootElement.GetProperty("data").GetProperty("werte").EnumerateArray().ToList();
         rows.Select(r => r.GetProperty("gebiet").GetString()).ShouldBe(["EU", "US"]);
@@ -452,9 +468,9 @@ public sealed class TypedAggregationFlatMergeEndToEndTests : IClassFixture<Typed
     [Fact]
     public async Task NestedAndFlat_Parity_MergeIntoOther_OtherRowNulls()
     {
-        using var nested = await TypedAggregationFlatSupport.GraphQlAsync(_fixture, TypedAggregationFlatSupport.Nested(TypedAggregationFlatSupport.Sales));
-        using var flat = await TypedAggregationFlatSupport.GraphQlAsync(_fixture, TypedAggregationFlatSupport.Flat(TypedAggregationFlatSupport.Sales));
-        var viaMcp = await TypedAggregationFlatSupport.McpAsync(_fixture, TypedAggregationFlatSupport.Flat(TypedAggregationFlatSupport.Sales));
+        using var nested = await TypedAggregationFlatSupport.GraphQlAsync(_fixture, TypedAggregationFlatSupport.Nested(TypedAggregationFlatSupport.Sales, withMax: true));
+        using var flat = await TypedAggregationFlatSupport.GraphQlAsync(_fixture, TypedAggregationFlatSupport.Flat(TypedAggregationFlatSupport.Sales, withMax: true));
+        var viaMcp = await TypedAggregationFlatSupport.McpAsync(_fixture, TypedAggregationFlatSupport.Flat(TypedAggregationFlatSupport.Sales, withMax: true));
 
         var expected = TypedAggregationFlatSupport.ReadNested(nested.RootElement, TypedAggregationFlatSupport.Sales);
         var actual = TypedAggregationFlatSupport.ReadFlat(flat.RootElement, TypedAggregationFlatSupport.Sales);

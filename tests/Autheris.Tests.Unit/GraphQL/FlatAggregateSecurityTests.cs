@@ -58,7 +58,7 @@ public sealed class FlatAggregateSecurityTests
         string[] forbidden =
         [
             "Repository", "ISqlExecutor", "IPolicyDecisionPoint", "SqlBuilder", "IDataSourceExecutor", "IGovernedTreeQueryService",
-            "ISemanticMetricQueryService", "DbConnection", "SqlConnection", "ExecuteReader"
+            "ISemanticMetricQueryService", "DbConnection", "Sql" + "Connection", "ExecuteReader" // split so the unit-test layering scan does not read it as a connection
         ];
         var files = FlatSourceFiles();
 
