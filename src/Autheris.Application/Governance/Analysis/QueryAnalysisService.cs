@@ -63,6 +63,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
         IRateLimiterService? rateLimiterService = null,
         IOptions<QueryAnalysisSettings>? queryAnalysisSettings = null,
         IConfiguration? configuration = null,
+        // Optional only so unit tests can construct the service without it; production composition always supplies the check.
         ISqlCompileParityCheck? compileCheck = null)
     {
         _compileCheck = compileCheck;
@@ -180,7 +181,7 @@ public sealed partial class QueryAnalysisService : IQueryAnalysisService
             targetPrincipal = null;
         }
 
-        if (targetPrincipal != null && _compileCheck != null)
+        if (targetPrincipal != null)
         {
             EnsureTargetInCallerTenant(callerPrincipal, targetPrincipal);
         }
