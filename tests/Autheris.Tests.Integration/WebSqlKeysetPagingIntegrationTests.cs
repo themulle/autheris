@@ -164,8 +164,13 @@ public sealed class WebSqlKeysetPagingIntegrationTests : IClassFixture<WebSqlKey
         });
     }
 
-    private Task RegisterItemsAsync(string table = "ks_items") =>
-        RegisterAsync(table, ["id"], [new("id", "integer"), new("name", "varchar"), new("tenant_id", "varchar")]);
+    /// <summary>Registers ks_items, the only table with a name column (the non-key ORDER BY test needs it).</summary>
+    private Task RegisterItemsAsync() =>
+        RegisterAsync("ks_items", ["id"], [new("id", "integer"), new("name", "varchar"), new("tenant_id", "varchar")]);
+
+    /// <summary>Registers a table that has exactly the columns id and tenant_id; a registered column the table lacks is denied by the policy.</summary>
+    private Task RegisterIdTableAsync(string table) =>
+        RegisterAsync(table, ["id"], [new("id", "integer"), new("tenant_id", "varchar")]);
 
     private async Task<PageResult> PostAsync(string sid, string sql, string? next = null, string resultCache = "bypass", string tenant = Tenant)
     {
@@ -271,7 +276,7 @@ public sealed class WebSqlKeysetPagingIntegrationTests : IClassFixture<WebSqlKey
     [Fact]
     public async Task InsertBetweenPages_NoSkipNoDuplicate()
     {
-        await RegisterItemsAsync("ks_live");
+        await RegisterIdTableAsync("ks_live");
         const string sql = "SELECT id FROM ks_live ORDER BY id";
 
         var inserted = false;
@@ -298,7 +303,7 @@ public sealed class WebSqlKeysetPagingIntegrationTests : IClassFixture<WebSqlKey
     [Trait("Category", "Security")]
     public async Task RowFilterAppliesOnEveryPage()
     {
-        await RegisterItemsAsync("ks_mixed");
+        await RegisterIdTableAsync("ks_mixed");
 
         var pages = await ReadAllPagesAsync("S-1-5-21-KS-MIXED", "SELECT id FROM ks_mixed ORDER BY id");
 
@@ -418,7 +423,7 @@ public sealed class WebSqlKeysetPagingIntegrationTests : IClassFixture<WebSqlKey
     [Fact]
     public async Task ResultCacheOn_FirstPageCachedContinuationBypassed()
     {
-        await RegisterItemsAsync("ks_cache");
+        await RegisterIdTableAsync("ks_cache");
         const string sql = "SELECT id FROM ks_cache ORDER BY id";
         const string sid = "S-1-5-21-KS-CACHE";
 
@@ -456,7 +461,7 @@ public sealed class WebSqlKeysetPagingIntegrationTests : IClassFixture<WebSqlKey
     [Trait("Category", "Security")]
     public async Task ResultCacheOn_ContinuationBypassed_NoCrossUserLeak()
     {
-        await RegisterItemsAsync("ks_cache");
+        await RegisterIdTableAsync("ks_cache");
         const string sql = "SELECT id FROM ks_cache ORDER BY id";
 
         var owner = await ReadAllPagesAsync("S-1-5-21-KS-LEAK-A", sql, resultCache: "default");
