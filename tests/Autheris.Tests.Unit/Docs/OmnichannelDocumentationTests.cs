@@ -122,7 +122,7 @@ public sealed class OmnichannelDocumentationTests
         var resources = await compiler.GetSemanticResourcesAsync("finance");
         resources.Count.ShouldBe(4); // 1 glossary + 3 columns
 
-        var colResource = resources.FirstOrDefault(r => r.Uri == "dbt://models/mrr/columns/revenue_amount/docs");
+        var colResource = resources.FirstOrDefault(r => r.Uri == "dbt://models/finance/dbo/mrr/columns/revenue_amount/docs");
         colResource.ShouldNotBeNull();
         colResource.Text.ShouldContain("# Column Documentation: mrr.revenue_amount");
         colResource.Text.ShouldContain("Net MRR in EUR.");
