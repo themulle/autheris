@@ -18,6 +18,7 @@ using Autheris.Domain.Options;
 using Autheris.Infrastructure.Persistence;
 using Microsoft.AspNetCore.Hosting;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
@@ -121,7 +122,14 @@ public sealed class QueryAnalysisEndpointIntegrationTests : IClassFixture<Govern
     {
         await RegisterAsync();
         var counter = new CountingConnectionFactory();
+        // The derived host would otherwise create a fresh, empty governance database; pin it to the shared one so the table is registered.
+        var governance = _factory.Services.GetRequiredService<IConfiguration>()["Gateway:GovernanceDb:ConnectionString"]
+            ?? throw new InvalidOperationException("The shared host has no governance connection string.");
         using var counted = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Gateway:GovernanceDb:ConnectionString", governance);
+            builder.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(
+                new Dictionary<string, string?> { ["Gateway:GovernanceDb:ConnectionString"] = governance }));
             builder.ConfigureServices(services =>
             {
                 foreach (var descriptor in services.Where(d => d.ServiceType == typeof(ISqlConnectionFactory)).ToList())
@@ -130,7 +138,15 @@ public sealed class QueryAnalysisEndpointIntegrationTests : IClassFixture<Govern
                 }
 
                 services.AddSingleton<ISqlConnectionFactory>(counter);
-            }));
+
+                // The start-up data source warm-up pings every configured source through this factory from a background service. That open is
+                // not part of the analyze path, so the warm-up is removed from the derived host; any remaining open is the analysis itself.
+                foreach (var warmup in services.Where(d => d.ImplementationType?.Name == "DataSourceConnectionWarmup").ToList())
+                {
+                    services.Remove(warmup);
+                }
+            });
+        });
         var client = Client(counted);
 
         foreach (var sql in new[] { "SELECT id FROM payroll", "SELECT pg_sleep(1) FROM payroll", "SELECT id FROM payroll WHERE ssn = 'x'" })
