@@ -120,6 +120,15 @@ public sealed partial class GovernedSqlExecutor
         (!(error is OperationCanceledException && ct.IsCancellationRequested) &&
          (error is ArgumentException || SqlCompilerErrorMapper.TryMap(error, out _)));
 
+    /// <summary>
+    /// The data source a page token binds to. It is derived from the request (the named source, else the configured default), never from
+    /// the rewrite's resolved source, so the request that continues a page verifies against the same value the issuing request bound.
+    /// </summary>
+    private string PageTokenSourceBinding(GovernedSqlQueryRequest request, TenantId tenantId) =>
+        string.IsNullOrWhiteSpace(request.DataSourceName)
+            ? _options.Value.WebSql.DefaultDataSourceName
+            : _dataSourceResolver.ResolveAllowedDataSource(request.DataSourceName, tenantId);
+
     private void NotifyPageOutcome(GovernedSqlQueryRequest request, ClaimsPrincipal user, TenantId tenantId, GovernedRewrite? rewrite, bool isTruncated)
     {
         if (request.Page == null || request.OnPageOutcome == null)
@@ -144,7 +153,7 @@ public sealed partial class GovernedSqlExecutor
             }
             else
             {
-                string sourceId = rewrite?.DataSourceName ?? _options.Value.WebSql.DefaultDataSourceName;
+                string sourceId = PageTokenSourceBinding(request, tenantId);
                 nextToken = _pageTokenCodec.EncodeToken(
                     request.Sql,
                     request.Parameters,
