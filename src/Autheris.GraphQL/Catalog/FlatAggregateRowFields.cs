@@ -50,7 +50,7 @@ public static class FlatAggregateRowFields
     public static string RootFieldName(CatalogTableType table)
     {
         ArgumentNullException.ThrowIfNull(table);
-        return AggregateTypeNames.For(table.TypeName).GroupsField;
+        return table.TypeName + AggregateTypeNames.GroupsFieldSuffix;
     }
 
     public static IReadOnlyList<FlatAggregateRowField> For(CatalogTableType table) => Get(table).Fields;

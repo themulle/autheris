@@ -189,7 +189,7 @@ public sealed partial class CostAndQuotaMiddleware
             var meta = AggregateRootResolution.Resolve(rootName, metadataLookup, out var baseName);
             if (meta is null)
             {
-                // An unresolvable root maps to the empty visible set (deny), never to "no restriction".
+                // An unresolvable root stays on the empty visible set (conservative surcharge), never on "no restriction".
                 byTableKey[rootName] = EmptyVisibleColumns;
                 continue;
             }
