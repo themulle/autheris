@@ -71,16 +71,15 @@ public sealed partial class GovernedTreeQueryServiceTests
     [Fact]
     public async Task CountAsync_GateFull_Throttles()
     {
-        var gate = Substitute.For<Autheris.Application.Common.Interfaces.ITableReadConcurrencyGate>();
+        var gate = new ToggleGate();
         var fixture = Create(
             options: new Autheris.Domain.Options.GatewayOptions { DataSources = new Autheris.Domain.Options.SqlDataSourceOptions { MaxConcurrentReadsPerUserAndTable = 1 } },
             gate: gate,
             stubReaderJson: "3");
         var opId = "op-count-gate";
         var root = new TreeQueryNode(Authors, ["id"]);
-        gate.TryEnter(Arg.Any<string>(), Arg.Any<int>()).Returns(Substitute.For<IDisposable>());
-        (await fixture.ExecuteAsync(DefaultTenantCaller.Principal(), root, null, opId)).Dispose();
-        gate.TryEnter(Arg.Any<string>(), Arg.Any<int>()).Returns((IDisposable?)null);
+                (await fixture.ExecuteAsync(DefaultTenantCaller.Principal(), root, null, opId)).Dispose();
+        gate.Full = true;
 
         await Should.ThrowAsync<GatewayThrottledException>(() => fixture.Service.CountAsync(DefaultTenantCaller.Principal(), root, null, opId));
     }
@@ -103,5 +102,19 @@ public sealed partial class GovernedTreeQueryServiceTests
 
         await Should.ThrowAsync<ArgumentException>(() =>
             fixture.Service.CountAsync(DefaultTenantCaller.Principal(), new TreeQueryNode(Authors, ["id"]), null, " "));
+    }
+
+    private sealed class ToggleGate : Autheris.Application.Common.Interfaces.ITableReadConcurrencyGate
+    {
+        public bool Full { get; set; }
+
+        public IDisposable? TryEnter(string key, int maxConcurrent) => Full ? null : new Releaser();
+
+        private sealed class Releaser : IDisposable
+        {
+            public void Dispose()
+            {
+            }
+        }
     }
 }
