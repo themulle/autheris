@@ -94,7 +94,8 @@ public sealed partial class UcProvisioningReconciler(
     IUnityCatalogPermissionsClient client,
     IUcTableContextSource context,
     ILogger<UcProvisioningReconciler> logger,
-    TimeProvider? timeProvider = null) : IClusterScheduledJob
+    TimeProvider? timeProvider = null,
+    UcProvisioningState? state = null) : IClusterScheduledJob
 {
     public const int MaxGrantAttempts = 5;
     public const int OverdueRevokeAttempts = 3;
@@ -103,6 +104,7 @@ public sealed partial class UcProvisioningReconciler(
     private static readonly TimeSpan RevokeBackoffCap = TimeSpan.FromMinutes(5);
 
     private readonly TimeProvider _time = timeProvider ?? TimeProvider.System;
+    private readonly UcProvisioningState _state = state ?? new UcProvisioningState();
     private long _fencingToken;
 
     /// <summary>The configured provisioning sections (name, Databricks options, provisioning options).</summary>
@@ -223,6 +225,12 @@ public sealed partial class UcProvisioningReconciler(
 
         var outstanding = deferRevokes || (unwanted > 0 && (await store.ListLedgerAsync(name, ct).ConfigureAwait(false)).Any(row => IsUnwanted(row, desired)));
         var outcome = new UcApplyOutcome(keys, overdue, outstanding);
+
+        if (provisioning.Mode == DatabricksProvisioningMode.Enforce)
+        {
+            await CheckDriftAsync(name, tenant, provisioning, desired, now, ct).ConfigureAwait(false);
+        }
+
         await UpdateFeedbackAsync(name, provisioning.Mode, tenant, desired, outcome, now, ct).ConfigureAwait(false);
         return outcome.OverdueRevokes;
     }

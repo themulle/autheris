@@ -82,6 +82,7 @@ public static class GatewayStorageServiceExtensions
         services.AddDatabricksStatementExecution();
         // Issue #1122: the Unity Catalog reconciler (idles unless a Databricks data source has a provisioning section).
         services.AddScoped<Autheris.Application.Governance.Provisioning.IUcTableContextSource, Autheris.Application.Governance.Provisioning.UcTableContextSource>();
+        services.AddSingleton<Autheris.Application.Governance.Provisioning.UcProvisioningState>();
         services.AddScoped<Autheris.Application.Governance.Provisioning.UcProvisioningReconciler>();
         services.AddHostedService<Autheris.Application.Governance.Provisioning.UcProvisioningService>();
         services.AddSingleton<ISqlConnectionFactory, SqlConnectionFactory>();

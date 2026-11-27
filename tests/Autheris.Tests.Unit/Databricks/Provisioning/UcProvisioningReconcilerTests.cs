@@ -26,6 +26,7 @@ public sealed class UcProvisioningReconcilerTests
     private readonly FakeUcClient _client = new();
     private readonly FakeUcContext _context = new();
     private readonly StaticOptionsMonitor<GatewayOptions> _options = new(Options());
+    private readonly UcProvisioningState _state = new();
 
     public UcProvisioningReconcilerTests()
     {
@@ -38,7 +39,7 @@ public sealed class UcProvisioningReconcilerTests
     private DateTimeOffset Now => _time.GetUtcNow();
 
     private Task RunAsync(long fencingToken = 1) =>
-        new UcProvisioningReconciler(_options, _store, _client, _context, NullLogger<UcProvisioningReconciler>.Instance, _time)
+        new UcProvisioningReconciler(_options, _store, _client, _context, NullLogger<UcProvisioningReconciler>.Instance, _time, _state)
             .ExecuteAsync(new ClusterJobContext(fencingToken, null!), CancellationToken.None);
 
     [Fact]
