@@ -48,8 +48,8 @@ public sealed class CatalogSearchJoinRelationsTests
 
     private static IReadOnlySet<string> Own(params string[] columns) => new HashSet<string>(columns, StringComparer.OrdinalIgnoreCase);
 
-    private static GraphQlRelationMapping Rel(TableIdentifier target, string own, string theirs, bool reverse = false) =>
-        new("f", target, true, [own], [theirs], reverse);
+    private static GraphQlRelationMapping Rel(TableIdentifier target, string own, string theirs, bool isList = false) =>
+        new("f", target, isList, [own], [theirs]);
 
     private static IReadOnlyList<TableRelationship> Resolve(
         IReadOnlyList<GraphQlRelationMapping>? stored,
@@ -80,7 +80,7 @@ public sealed class CatalogSearchJoinRelationsTests
     {
         var rows = Rows(Tbl(Orders, ["id"]), Tbl(Invoices, ["order_id"]));
 
-        var r = Resolve([Rel(Invoices, "id", "order_id", reverse: true)], null, rows, Own("id")).ShouldHaveSingleItem();
+        var r = Resolve([Rel(Invoices, "id", "order_id", isList: true)], null, rows, Own("id")).ShouldHaveSingleItem();
 
         (r.FromTable, r.FromColumn, r.ToTable, r.ToColumn, r.Incoming).ShouldBe((Orders, "id", Invoices, "order_id", true));
     }
@@ -126,7 +126,7 @@ public sealed class CatalogSearchJoinRelationsTests
         var rows = Rows(Tbl(Orders, ["customer_id"]), Tbl(Customers, ["customer_id"]));
 
         var result = Resolve(
-            [Rel(Customers, "customer_id", "customer_id"), Rel(Customers, "CUSTOMER_ID", "customer_id", reverse: true)],
+            [Rel(Customers, "customer_id", "customer_id"), Rel(Customers, "CUSTOMER_ID", "customer_id", isList: true)],
             Naming(("customer_id", Customers)),
             rows,
             Own("customer_id"));

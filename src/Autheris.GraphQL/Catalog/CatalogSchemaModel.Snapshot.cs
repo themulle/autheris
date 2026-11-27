@@ -441,8 +441,7 @@ public sealed partial class CatalogSchemaModel
                     isList,
                     rel.JoinKeysChild,
                     rel.JoinKeysParent,
-                    revCardinality,
-                    IsReverse: true));
+                    revCardinality));
             }
 
             finalTables.Add(new CatalogTableType(

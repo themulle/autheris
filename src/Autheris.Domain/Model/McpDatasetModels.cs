@@ -235,7 +235,7 @@ public sealed record GraphQlColumnMapping(string ColumnName, string Field, strin
 
 /// <param name="Columns">Join columns of the owning table, ordered (catalog names).</param>
 /// <param name="TargetColumns">Matching join columns of <paramref name="Target"/>, same order.</param>
-public sealed record GraphQlRelationMapping(string Field, TableIdentifier Target, bool IsList, IReadOnlyList<string>? Columns = null, IReadOnlyList<string>? TargetColumns = null, bool IsReverse = false);
+public sealed record GraphQlRelationMapping(string Field, TableIdentifier Target, bool IsList, IReadOnlyList<string>? Columns = null, IReadOnlyList<string>? TargetColumns = null);
 
 /// <summary>Result of the MCP <c>sample_rows</c> tool: rows as returned by the governed read path (masked, row filtered) or synthetic generator.</summary>
 public sealed record McpDatasetSample(

@@ -195,7 +195,7 @@ public sealed class JoinRelationsIntegrationSecurityTests : IClassFixture<JoinRe
 
         var relation = hits.Single(h => h.GetProperty("table").GetString() == "dom_a.main.orders_a").GetProperty("join_relations").EnumerateArray()
             .Single(r => r.GetProperty("target_table").GetString() == "dom_a.main.customers_a");
-        relation.GetProperty("direction").GetString().ShouldBeOneOf("outgoing", "incoming");
+        relation.GetProperty("direction").GetString().ShouldBe("outgoing");
         relation.GetProperty("join_condition").GetString().ShouldBe("orders_a.customer_id = customers_a.id");
     }
 

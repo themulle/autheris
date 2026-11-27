@@ -194,7 +194,7 @@ public sealed class CatalogSchemaModelTests
         // Parent forward relation (1:N => isList = true)
         var forwardRel = Assert.Single(parentModel.Relations);
         Assert.Equal("customer_orders", forwardRel.RelationName);
-        Assert.True(forwardRel.IsList && !forwardRel.IsReverse);
+        Assert.True(forwardRel.IsList);
         Assert.Equal(childId, forwardRel.TargetTableIdentifier);
         Assert.Equal(["id"], forwardRel.ParentColumns);
         Assert.Equal(["customer_id"], forwardRel.ChildColumns);
@@ -202,7 +202,7 @@ public sealed class CatalogSchemaModelTests
         // Child reverse relation (N:1 => isList = false)
         var reverseRel = Assert.Single(childModel.Relations);
         Assert.Equal("customer_orders", reverseRel.RelationName);
-        Assert.True(!reverseRel.IsList && reverseRel.IsReverse);
+        Assert.False(reverseRel.IsList);
         Assert.Equal(parentId, reverseRel.TargetTableIdentifier);
         Assert.Equal(["customer_id"], reverseRel.ParentColumns);
         Assert.Equal(["id"], reverseRel.ChildColumns);

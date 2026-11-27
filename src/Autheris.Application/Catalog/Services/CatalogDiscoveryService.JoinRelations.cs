@@ -55,11 +55,10 @@ public sealed partial class CatalogDiscoveryService
         CatalogCaller caller,
         CancellationToken ct)
     {
-        var cleared = hits.Select(static h => h with { RelatedJoinPaths = [] }).ToList();
         var tableIds = hits.Where(static h => h.Kind == CatalogEntryKey.KindTable).Select(static h => h.TableIdentifier).Distinct().ToList();
         if (!query.ExpandRelations || visibility is null || tableIds.Count == 0)
         {
-            return cleared;
+            return ClearRelations(hits);
         }
 
         try
@@ -118,9 +117,12 @@ public sealed partial class CatalogDiscoveryService
         catch (Exception ex) when (ex is not OperationCanceledException)
         {
             logger.LogWarning("Catalog search join relations lookup failed ({ExceptionType}); join relations omitted.", ex.GetType().Name);
-            return cleared;
+            return ClearRelations(hits);
         }
     }
+
+    private static List<CatalogSearchHit> ClearRelations(IReadOnlyList<CatalogSearchHit> hits) =>
+        hits.Select(static h => h with { RelatedJoinPaths = [] }).ToList();
 
     private static async Task<IReadOnlyList<GraphQlRelationMapping>?> StoredRelationsAsync(
         IGraphQlCatalogMap? graphQlMap, ILogger logger, TableIdentifier id, CancellationToken ct)
@@ -194,7 +196,7 @@ public sealed partial class CatalogDiscoveryService
             storedToVisibleTarget |= rows.TryGetValue(r.Target, out var targetRow) && targetRow.Shape == CatalogOutputShape.Full;
             if (r.Columns is [var from] && r.TargetColumns is [var to])
             {
-                candidates.Add(new TableRelationship(hit, from, r.Target, to, TableRelationshipType.ForeignKey, Incoming: r.IsReverse));
+                candidates.Add(new TableRelationship(hit, from, r.Target, to, TableRelationshipType.ForeignKey, Incoming: r.IsList));
             }
         }
 
@@ -208,7 +210,7 @@ public sealed partial class CatalogDiscoveryService
 
         var seen = new HashSet<(TableIdentifier, string, string)>();
         var result = new List<TableRelationship>();
-        foreach (var c in candidates)
+        foreach (var c in candidates.OrderBy(static c => c.Incoming))
         {
             if (!ownVisibleColumns.Contains(c.FromColumn)
                 || !rows.TryGetValue(c.ToTable, out var t)

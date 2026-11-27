@@ -144,7 +144,7 @@ public sealed class CatalogDiscoveryServiceRelationSecurityTests
 
         var relation = hit.RelatedJoinPaths.ShouldHaveSingleItem();
         (relation.FromTable, relation.FromColumn, relation.ToTable, relation.ToColumn).ShouldBe((Orders, "customer_id", Customers, "id"));
-        relation.Incoming.ShouldBeTrue();
+        relation.Incoming.ShouldBeFalse();
     }
 
     [Fact]
