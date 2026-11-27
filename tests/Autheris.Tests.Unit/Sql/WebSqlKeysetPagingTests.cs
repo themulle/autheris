@@ -9,6 +9,7 @@ using System.Linq;
 using System.Text.RegularExpressions;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Quota;
+using Autheris.Application.Sql;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.ResultCache;
 using Autheris.Application.Sql.Services;
@@ -32,9 +33,10 @@ public sealed class WebSqlKeysetPagingTests
         long maxOffset = 4,
         IReadOnlyList<string>? primaryKey = null,
         Microsoft.Extensions.Logging.ILogger<GovernedSqlExecutionService>? logger = null,
-        IQueryCostQuota? costQuota = null)
+        IQueryCostQuota? costQuota = null,
+        Autheris.Application.Common.Interfaces.ITableReadConcurrencyGate? gate = null)
     {
-        var pipeline = new GovernedResultCachePipeline(rows: rows, maxOffset: maxOffset, primaryKey: primaryKey ?? ["id"], logger: logger, costQuota: costQuota);
+        var pipeline = new GovernedResultCachePipeline(rows: rows, maxOffset: maxOffset, primaryKey: primaryKey ?? ["id"], logger: logger, costQuota: costQuota, gate: gate);
         pipeline.SourceFor = (_, values) => SeekRows(rows, values);
         return pipeline;
     }
@@ -156,7 +158,7 @@ public sealed class WebSqlKeysetPagingTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task KeysetPage_ProbeLimitIsPageSizePlusOne_AndRowLimitHolds()
+    public async Task KeysetPage_ProbeLimitIsPageSizePlusOne()
     {
         using var pipeline = Create(rows: 50, maxOffset: 4);
 
@@ -278,7 +280,7 @@ public sealed class WebSqlKeysetPagingTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task KeysetPage_BypassesResultCache_ReasonKeysetPage()
+    public async Task KeysetPage_BypassesResultCache()
     {
         using var pipeline = Create(maxOffset: 2);
 
@@ -295,7 +297,7 @@ public sealed class WebSqlKeysetPagingTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task PolicyNowMasksKey_ContinuationTokenInvalid()
+    public async Task Keyset_KeyMaskedAtContinuation_Rejected()
     {
         using var pipeline = Create(maxOffset: 2);
         var page2 = await pipeline.RunAsync(page: new SqlPageWindow(2, 2, 2));
@@ -303,7 +305,10 @@ public sealed class WebSqlKeysetPagingTests
 
         pipeline.Consent.Masked.Add("id");
 
-        await Should.ThrowAsync<Exception>(async () => await pipeline.RunAsync(nextToken: page2.Page.NextToken));
+        // ORDER BY on a column that is masked now is refused by the masked-column predicate check before any seek is evaluated
+        var commandsBefore = pipeline.Commands.Count;
+        await Should.ThrowAsync<WebSqlPolicyException>(async () => await pipeline.RunAsync(nextToken: page2.Page.NextToken));
+        pipeline.Commands.Count.ShouldBe(commandsBefore);
     }
 
     [Fact]
@@ -324,7 +329,7 @@ public sealed class WebSqlKeysetPagingTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task KeysetPage_AuditedLikeOffsetPage_StatementHashFromClientStatement()
+    public async Task KeysetPage_AuditStatementHashEqualsOffsetPage()
     {
         var quota = new ScriptedCostQuota();
         using var pipeline = Create(maxOffset: 2, costQuota: quota);
@@ -344,6 +349,34 @@ public sealed class WebSqlKeysetPagingTests
 
     private static string HashOf(string detailsJson) =>
         System.Text.Json.JsonDocument.Parse(detailsJson).RootElement.GetProperty("originalSqlHash").GetString()!;
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task KeysetPage_RunsCostAdmissionAndRateGuard()
+    {
+        var deny = false;
+        var quota = new ScriptedCostQuota(_ => deny ? QueryCostOutcome.OverCost : QueryCostOutcome.Admitted);
+        var gate = new SwitchableReadGate();
+        using var pipeline = Create(maxOffset: 2, costQuota: quota, gate: gate);
+        var page2 = await pipeline.RunAsync(page: new SqlPageWindow(2, 2, 2), participate: false);
+        var token = page2.Page!.NextToken.ShouldNotBeNull();
+
+        var admissions = quota.Estimates.Count;
+        var served = await pipeline.RunAsync(nextToken: token, participate: false);
+        served.Rows.Count.ShouldBe(2);
+        quota.Estimates.Count.ShouldBeGreaterThan(admissions);
+        gate.Active.ShouldBe(0);
+
+        var executed = pipeline.Commands.Count;
+        deny = true;
+        await Should.ThrowAsync<Exception>(async () => await pipeline.RunAsync(nextToken: token, participate: false));
+        pipeline.Commands.Count.ShouldBe(executed);
+
+        deny = false;
+        gate.Deny = true;
+        await Should.ThrowAsync<Autheris.Domain.Exceptions.GatewayThrottledException>(async () => await pipeline.RunAsync(nextToken: token, participate: false));
+        pipeline.Commands.Count.ShouldBe(executed);
+    }
 
     [Fact]
     [Trait("Category", "Security")]

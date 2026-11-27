@@ -18,6 +18,7 @@ internal sealed class KeysetCaptureReader : ResultCacheRowReader, IDbColumnSchem
     private readonly DbDataReader _inner;
     private readonly ImmutableArray<int> _keyOrdinals;
     private readonly object[] _buffer;
+    private readonly object?[] _keys;
     private object?[]? _current;
 
     public KeysetCaptureReader(DbDataReader inner, TrinoSqlEngine.KeysetKeyInfo key)
@@ -26,6 +27,7 @@ internal sealed class KeysetCaptureReader : ResultCacheRowReader, IDbColumnSchem
         Key = key ?? throw new ArgumentNullException(nameof(key));
         _keyOrdinals = key.OutputOrdinals;
         _buffer = new object[inner.FieldCount];
+        _keys = new object?[_keyOrdinals.Length];
     }
 
     /// <summary>The compiler-resolved keyset shape of the page statement the captured values belong to.</summary>
@@ -34,8 +36,11 @@ internal sealed class KeysetCaptureReader : ResultCacheRowReader, IDbColumnSchem
     /// <summary>Rows delivered through this reader.</summary>
     public int RowsRead { get; private set; }
 
-    /// <summary>The key values of the last delivered row, in key order; null until a row was read.</summary>
-    public object?[]? LastKeyValues { get; private set; }
+    /// <summary>
+    /// The key values of the last delivered row, in key order; null until a row was read. The array is reused for every row, so it is only
+    /// meaningful once the rows were delivered.
+    /// </summary>
+    public object?[]? LastKeyValues => RowsRead > 0 ? _keys : null;
 
     public bool HasMoreRows => (_inner as IRowLimitProbe)?.HasMoreRows ?? false;
 
@@ -74,13 +79,11 @@ internal sealed class KeysetCaptureReader : ResultCacheRowReader, IDbColumnSchem
         _inner.GetValues(_buffer);
         _current = _buffer;
         RowsRead++;
-        var keys = new object?[_keyOrdinals.Length];
-        for (var i = 0; i < keys.Length; i++)
+        for (var i = 0; i < _keys.Length; i++)
         {
-            keys[i] = _buffer[_keyOrdinals[i]];
+            _keys[i] = _buffer[_keyOrdinals[i]];
         }
 
-        LastKeyValues = keys;
         return true;
     }
 }

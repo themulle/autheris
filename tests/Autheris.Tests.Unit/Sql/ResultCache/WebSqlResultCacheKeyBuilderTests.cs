@@ -57,7 +57,7 @@ public sealed class WebSqlResultCacheKeyBuilderTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public void KeysetSeekSlot_Unkeyable()
+    public void KeyBuilder_KeysetSeekSlot_Unkeyable()
     {
         var seek = new BoundParameter("@p2", "p2", 2, 42, SqlParameterType.Int32, ParameterOrigin.KeysetSeek);
 

@@ -330,29 +330,35 @@ public sealed class WebSqlKeysetPagingIntegrationTests : IClassFixture<WebSqlKey
         guard.ShouldBe(3, "pages 1 to 3 are offset pages, the continuation past the limit is refused");
     }
 
+    /// <summary>
+    /// Keyset_KeyMaskedAtContinuation_Rejected / Keyset_MaskedKeyColumn_NotEligible: a statement ordered by a masked column is refused
+    /// outright, so the observable case is a key that becomes masked between pages. The token must not continue and no row is returned.
+    /// </summary>
     [Fact]
     [Trait("Category", "Security")]
-    public async Task MaskedPkColumn_StopsWithOffsetLimit()
+    public async Task MaskedPkAtContinuation_TokenRejected()
     {
-        await RegisterAsync("ks_masked", ["id"], [new("id", "varchar"), new("tenant_id", "varchar")],
-            new Dictionary<string, MaskingRule> { ["id"] = new() { RuleType = "REDACT", Replacement = "XXX" } });
+        Column[] columns = [new("id", "varchar"), new("tenant_id", "varchar")];
+        await RegisterAsync("ks_masked", ["id"], columns);
         const string sql = "SELECT id FROM ks_masked ORDER BY id";
 
         string? next = null;
-        PageResult last;
-        var guard = 0;
-        do
+        for (var i = 0; i < 3; i++)
         {
-            last = await PostAsync("S-1-5-21-KS-MASK", sql, next);
-            last.Status.ShouldBe(HttpStatusCode.OK, last.Body);
-            next = last.Next;
-            guard++;
+            var page = await PostAsync("S-1-5-21-KS-MASK", sql, next);
+            page.Status.ShouldBe(HttpStatusCode.OK, page.Body);
+            next = page.Next;
         }
-        while (next != null && guard < 20);
 
-        last.Next.ShouldBeNull();
-        last.PagingUnavailable.ShouldBe("offset_limit");
-        guard.ShouldBeLessThan(8, "a masked key never continues by key");
+        next.ShouldNotBeNull("the third page issues a keyset token");
+
+        await RegisterAsync("ks_masked", ["id"], columns,
+            new Dictionary<string, MaskingRule> { ["id"] = new() { RuleType = "REDACT", Replacement = "XXX" } });
+
+        var rejected = await PostAsync("S-1-5-21-KS-MASK", sql, next);
+
+        ((int)rejected.Status).ShouldBeInRange(400, 499, rejected.Body);
+        rejected.Body.ShouldNotContain("\"rows\"");
     }
 
     [Fact]

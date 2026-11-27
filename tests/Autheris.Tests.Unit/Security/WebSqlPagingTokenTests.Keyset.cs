@@ -139,7 +139,7 @@ public sealed partial class WebSqlPagingTokenTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public void KeysetToken_OtherCaller_Rejected()
+    public void KeysetToken_OtherUser_Rejected()
     {
         var (codec, _, _) = CreateCodec();
         string token = KeysetToken(codec);
@@ -239,6 +239,34 @@ public sealed partial class WebSqlPagingTokenTests
         var (codec, _, _) = CreateCodec();
         string token = codec.EncodeToken(KeysetSql, null, CreateUser(), new TenantId("tenant-1"), "crm", "WebSql", 20_000, 100, 201, TimeSpan.FromMinutes(15));
         Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, token));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void V2Token_WhereV1Expected_Rejected()
+    {
+        var (codec, _, _) = CreateCodec();
+        // a keyset token positioned inside the offset window is not a continuation a keyset page may issue
+        string inWindow = KeysetToken(codec, offset: 100, page: 2);
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, inWindow));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void V1Token_WhereKeysetRequired_Rejected()
+    {
+        var (codec, _, _) = CreateCodec();
+        string beyond = codec.EncodeToken(KeysetSql, null, CreateUser(), new TenantId("tenant-1"), "crm", "WebSql", 10_100, 100, 102, TimeSpan.FromMinutes(15));
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, beyond));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetPage_PageSizeOverMax_Rejected()
+    {
+        var (codec, _, _) = CreateCodec();
+        string oversized = Forge(codec, new WebSqlPageTokenPayload(2, 20_000_200, 100_001, 201, FutureExp, ShapeHash, ["i8:1"]));
+        Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, oversized));
     }
 
     [Fact]
