@@ -231,6 +231,7 @@ internal static class AggregateGraphQlTypes
 
             var result = await ctx.Service<IGovernedAggregationService>()
                 .ExecuteAggregationAsync(principal, query, ctx.RequestAborted).ConfigureAwait(false);
+            await Autheris.GraphQL.Interceptors.DatasetFactsCollector.RecordAggregateRootAsync(ctx, principal, result).ConfigureAwait(false);
             var bucketColumns = parsed.TimeBuckets?.Select(b => b.Column).ToHashSet(StringComparer.OrdinalIgnoreCase);
             return AggregateResultMapper.Map(result, table, parsed.GroupBy, parsed.Aggregates, bucketColumns);
         }

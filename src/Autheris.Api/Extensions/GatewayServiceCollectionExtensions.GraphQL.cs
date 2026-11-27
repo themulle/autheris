@@ -200,6 +200,7 @@ public static partial class GatewayServiceCollectionExtensions
             .UseRequest<Autheris.GraphQL.Interceptors.SchemaSunsettingExecutionMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.MaskedFieldsMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.SlowListsMiddleware>()
+            .UseRequest<Autheris.GraphQL.Interceptors.DatasetFactsMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.PaginationTruncationMiddleware>()
             .TryAddTypeInterceptor<Autheris.GraphQL.Catalog.CatalogSchemaBuildProgressTypeInterceptor>()
             .TryAddTypeInterceptor<Autheris.GraphQL.Federation.SubgraphFieldMaskingTypeInterceptor>()
