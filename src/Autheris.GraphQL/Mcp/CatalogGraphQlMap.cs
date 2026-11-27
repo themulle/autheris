@@ -687,7 +687,12 @@ public sealed class CatalogGraphQlMap : IGraphQlCatalogMap, IDisposable, IAsyncD
                 .ToArray(),
             entry.Relations
                 .Select(static r => new GraphQlRelationMapping(r.FieldName, r.TargetTableIdentifier, r.IsList, r.ParentColumns, r.ChildColumns))
-                .ToArray());
+                .ToArray(),
+            CatalogRootFieldSignatures.ListArguments(entry),
+            // The schema builder adds the aggregate field whenever aggregation is enabled, which production always does.
+            CatalogRootFieldSignatures.Aggregate(entry),
+            CatalogRootFieldSignatures.Connection(entry),
+            Autheris.Application.DataSources.Services.BulkStreamKey.TryResolve(entry.Metadata)?.Columns ?? []);
     }
 
     private static IReadOnlyList<TableIdentifier>? ResolveDocumentTablesCore(

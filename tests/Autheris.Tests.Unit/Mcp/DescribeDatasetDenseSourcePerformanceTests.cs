@@ -118,6 +118,52 @@ public sealed class DescribeDatasetDenseSourcePerformanceTests
     }
 
     [Fact]
+    public async Task IncludeRelationsOnly_ReturnsRelationsInGraphQlSection_NoOtherGraphQlMembers()
+    {
+        var harness = DenseHarness.Create(hubRelationCount: 20, visibleChildCount: 5, transitiveNeighborCount: 5, goldenQueries: [], withDiscovery: true);
+        var executor = harness.CreateExecutor();
+
+        var json = await executor.ExecuteOperationAsync(
+            DescribeTool(),
+            $$"""{"dataset":"{{DenseHarness.HubIdString}}","include":["relations"]}""",
+            Session());
+
+        using var doc = JsonDocument.Parse(json);
+        var gql = doc.RootElement.GetProperty("graphQl");
+        gql.EnumerateObject().Select(p => p.Name).ShouldBe(["relations"]);
+        gql.GetProperty("relations").GetArrayLength().ShouldBeGreaterThan(0);
+        doc.RootElement.GetProperty("columns").GetArrayLength().ShouldBe(0);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task BriefWithIncludeRelations_IsInvalidParams_SameForHiddenAndMissingDataset()
+    {
+        var harness = DenseHarness.Create(hubRelationCount: 5, visibleChildCount: 2, transitiveNeighborCount: 1, goldenQueries: [], withDiscovery: true);
+        var executor = harness.CreateExecutor();
+
+        async Task<string> RunAsync(string dataset, string include) => await executor.ExecuteOperationAsync(
+            DescribeTool(),
+            $$"""{"dataset":"{{dataset}}","brief":true,"include":["{{include}}"]}""",
+            Session());
+
+        var visible = await RunAsync(DenseHarness.HubIdString, "relations");
+        using (var doc = JsonDocument.Parse(visible))
+        {
+            doc.RootElement.GetProperty("isError").GetBoolean().ShouldBeTrue();
+            doc.RootElement.GetProperty("error").GetProperty("code").GetString().ShouldBe("INVALID_PARAMS");
+        }
+
+        (await RunAsync("dense.dbo.hidden_table", "relations")).ShouldBe(visible);
+        (await RunAsync("dense.dbo.no_such_table", "relations")).ShouldBe(visible);
+        (await RunAsync(DenseHarness.HubIdString, "graphql")).ShouldBe(visible);
+
+        var allowed = await executor.ExecuteOperationAsync(
+            DescribeTool(), $$"""{"dataset":"{{DenseHarness.HubIdString}}","brief":true,"include":["columns"]}""", Session());
+        JsonDocument.Parse(allowed).RootElement.TryGetProperty("error", out _).ShouldBeFalse();
+    }
+
+    [Fact]
     [Trait("Category", "Security")]
     public async Task DescribeDataset_RelationTerm_PreFiltersTargetsBeforeVisibilityLookup()
     {

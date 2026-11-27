@@ -139,7 +139,7 @@ public sealed class McpDatasetCatalogTests
         exampleQuery.ShouldContain("sales_public_orders(first: 10)");
         exampleQuery.ShouldContain("id amount");
         exampleQuery.ShouldNotContain("customer_email");
-        graphQl.Arguments.ShouldContain("where");
+        graphQl.Arguments!.ShouldContain("where");
         // The related payroll table is hidden from this caller, so its relation is not offered.
         graphQl.Relations.ShouldBeEmpty();
         result.Columns[1].GraphQlField.ShouldBe("amount");
@@ -163,6 +163,154 @@ public sealed class McpDatasetCatalogTests
             Orders, "sales_public_orders", "sales_public_orders", "sales_public_orders_filter", "sales_public_orders_order_by",
             [new GraphQlColumnMapping("id", "id", "Int"), new GraphQlColumnMapping("amount", "amount", "Decimal")],
             [new GraphQlRelationMapping("payroll_by_order", Payroll, IsList: false, own, target)]));
+
+    private static readonly McpGraphQlArgument[] OrdersListArgs =
+        [new("where", "sales_public_orders_filter"), new("orderBy", "[sales_public_orders_order_by!]"), new("first", "Int"), new("offset", "Int")];
+
+    private void MapOrdersWithSignatures(string[] own, string[] target, params string[] keys) =>
+        _graphQl.GetTableAsync(Orders, Arg.Any<CancellationToken>()).Returns(new GraphQlTableMapping(
+            Orders, "sales_public_orders", "sales_public_orders", "sales_public_orders_filter", "sales_public_orders_order_by",
+            [new GraphQlColumnMapping("id", "id", "Int"), new GraphQlColumnMapping("amount", "amount", "Decimal")],
+            [new GraphQlRelationMapping("payroll_by_order", Payroll, IsList: false, own, target)],
+            OrdersListArgs,
+            new GraphQlRootFieldSignature("sales_public_orders_aggregate", "sales_public_orders_aggregate_result", [new("aggregates", "[sales_public_orders_aggregate_input!]!")]),
+            new GraphQlRootFieldSignature("sales_public_ordersConnection", "sales_public_ordersConnection", [new("first", "Int"), new("after", "String")]),
+            keys));
+
+    private static McpDescribeNarrowing.Request Narrow(object? include = null, object? columns = null, int? offset = null, int? limit = null)
+    {
+        McpDescribeNarrowing.TryParse(include, columns, offset, limit, null, out var request).ShouldBeTrue();
+        return request;
+    }
+
+    private Task<McpDatasetDescription> DescribeAsync(McpDatasetCatalog catalog, ClaimsPrincipal user, string dataset, McpDescribeNarrowing.Request? narrowing) =>
+        catalog.DescribeDatasetAsync(user, dataset, graphQlField: null, sqlName: null, language: null, brief: false, narrowing);
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Describe_RelationsOnly_HiddenTargetStillOmitted()
+    {
+        MapOrdersRelation(["id"], ["salary_secret"]);
+
+        var result = await DescribeAsync(Catalog(), User(), "sales.public.orders", Narrow("relations"));
+
+        result.GraphQl!.Relations.ShouldBeEmpty();
+        var json = System.Text.Json.JsonSerializer.Serialize(result);
+        json.ShouldNotContain("salary_secret");
+        json.ShouldNotContain("payroll");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Describe_RelationsOnly_EqualsRelationsOfFullBlock_ForAdmin()
+    {
+        MapOrdersRelation(["id"], ["id"]);
+        var catalog = Catalog(AdminView());
+        var admin = User("GovernanceAdmin");
+
+        var only = await DescribeAsync(catalog, admin, "sales.public.orders", Narrow("relations"));
+        var full = await DescribeAsync(catalog, admin, "sales.public.orders", Narrow("graphql,relations"));
+
+        System.Text.Json.JsonSerializer.Serialize(only.GraphQl!.Relations).ShouldBe(System.Text.Json.JsonSerializer.Serialize(full.GraphQl!.Relations));
+        only.GraphQl.Relations.ShouldHaveSingleItem();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Describe_RelationsOnly_HiddenJoinColumn_PairsNull()
+    {
+        MapOrdersRelation(["id", "ghost"], ["id", "amount"]);
+
+        var result = await DescribeAsync(Catalog(AdminView()), User("GovernanceAdmin"), "sales.public.orders", Narrow("relations"));
+
+        result.GraphQl!.Relations.ShouldHaveSingleItem().Columns.ShouldBeNull();
+    }
+
+    [Fact]
+    public async Task Describe_RelationsOnly_NoOtherGraphQlMembers()
+    {
+        MapOrdersWithSignatures(["id"], ["id"], "id");
+
+        var result = await DescribeAsync(Catalog(AdminView()), User("GovernanceAdmin"), "sales.public.orders", Narrow("relations"));
+
+        var json = System.Text.Json.JsonSerializer.Serialize(result, McpResultJson.Options);
+        using var doc = System.Text.Json.JsonDocument.Parse(json);
+        doc.RootElement.GetProperty("graphQl").EnumerateObject().Select(p => p.Name).ShouldBe(["relations"]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Describe_GraphQlMapNull_RelationsOnly_NoGraphQlBlock()
+    {
+        var result = await DescribeAsync(Catalog(), User(), "sales.public.orders", Narrow("relations"));
+
+        result.GraphQl.ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Describe_HiddenTable_AllIncludeCombinations_SameNotFound()
+    {
+        MapOrdersWithSignatures(["id"], ["id"], "id");
+        var catalog = Catalog();
+
+        async Task<string> Outcome(string dataset, McpDescribeNarrowing.Request? narrowing)
+        {
+            var ex = await Should.ThrowAsync<Exception>(() => DescribeAsync(catalog, User(), dataset, narrowing));
+            return ex.GetType().FullName + "|" + ex.Message;
+        }
+
+        var baseline = await Outcome("hr.public.payroll", null);
+        foreach (var include in new object?[] { "relations", "graphql", "columns", "graphql,relations" })
+        {
+            (await Outcome("hr.public.payroll", Narrow(include))).ShouldBe(baseline);
+            (await Outcome("hr.public.missing", Narrow(include))).ShouldBe(baseline.Replace("payroll", "missing"));
+        }
+    }
+
+    [Fact]
+    public async Task DescribeDataset_GraphQlBlock_NamesAggregateConnectionAndVariables()
+    {
+        MapOrdersWithSignatures([], [], "id");
+
+        var graphQl = (await Catalog().DescribeDatasetAsync(User(), "sales.public.orders")).GraphQl.ShouldNotBeNull();
+
+        graphQl.Variables!.Select(v => (v.Name, v.Type)).ShouldBe(OrdersListArgs.Select(v => (v.Name, v.Type)));
+        graphQl.Aggregate!.Field.ShouldBe("sales_public_orders_aggregate");
+        graphQl.Aggregate.Variables.ShouldHaveSingleItem().Type.ShouldBe("[sales_public_orders_aggregate_input!]!");
+        graphQl.Connection!.Available.ShouldBeTrue();
+        graphQl.Connection.Field.ShouldBe("sales_public_ordersConnection");
+        graphQl.Connection.KeyFields.ShouldBe(["id"]);
+        graphQl.Connection.Reason.ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task DescribeDataset_ColumnPagingDoesNotChangeConnectionAvailability()
+    {
+        MapOrdersWithSignatures([], [], "id");
+        var catalog = Catalog();
+
+        var full = (await DescribeAsync(catalog, User(), "sales.public.orders", null)).GraphQl!.Connection;
+        var paged = (await DescribeAsync(catalog, User(), "sales.public.orders", Narrow(offset: 1, limit: 1))).GraphQl!.Connection;
+        var named = (await DescribeAsync(catalog, User(), "sales.public.orders", Narrow(columns: "amount"))).GraphQl!.Connection;
+
+        var expected = System.Text.Json.JsonSerializer.Serialize(full, McpResultJson.Options);
+        System.Text.Json.JsonSerializer.Serialize(paged, McpResultJson.Options).ShouldBe(expected);
+        System.Text.Json.JsonSerializer.Serialize(named, McpResultJson.Options).ShouldBe(expected);
+        full!.Available.ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task DescribeDataset_NoKeyColumns_ConnectionUnavailable()
+    {
+        MapOrdersWithSignatures([], []);
+
+        var connection = (await Catalog().DescribeDatasetAsync(User(), "sales.public.orders")).GraphQl!.Connection.ShouldNotBeNull();
+
+        connection.Available.ShouldBeFalse();
+        connection.Reason.ShouldBe("no_usable_key");
+    }
 
     [Fact]
     public async Task Describe_RelationColumns_AllVisible_ListsPairsInOrder()

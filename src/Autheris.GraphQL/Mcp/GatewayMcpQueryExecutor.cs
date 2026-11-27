@@ -376,6 +376,11 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
                     return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, PersistedToolValidator.InvalidArgumentsCode);
                 }
 
+                if ((Bool("brief") ?? false) && parsedNarrowing.ConflictsWithBrief)
+                {
+                    return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, PersistedToolValidator.InvalidArgumentsCode);
+                }
+
                 describeNarrowing = parsedNarrowing;
             }
 
