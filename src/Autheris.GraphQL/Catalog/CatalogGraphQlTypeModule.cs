@@ -32,6 +32,7 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
     private readonly Microsoft.Extensions.Logging.ILogger<CatalogGraphQlTypeModule>? _logger;
     private readonly TimeSpan _refreshInterval;
     private readonly bool _aggregationEnabled;
+    private readonly string _defaultBucketTimeZone;
     private readonly bool _crossSourceEnabled;
     private readonly bool _metricsEnabled;
     private readonly object _timerLock = new();
@@ -156,8 +157,10 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
         IEpochValidationService? epochService = null,
         TimeProvider? timeProvider = null,
         IEventBus? eventBus = null,
-        Autheris.Application.Catalog.ICatalogSnapshotProvider? snapshotProvider = null)
+        Autheris.Application.Catalog.ICatalogSnapshotProvider? snapshotProvider = null,
+        string defaultBucketTimeZone = AggregationOptions.UtcTimeZoneId)
     {
+        _defaultBucketTimeZone = defaultBucketTimeZone;
         _transportResolver = transportResolver;
         _epochService = epochService;
         _timeProvider = timeProvider ?? TimeProvider.System;
@@ -555,7 +558,7 @@ public sealed partial class CatalogGraphQlTypeModule : ITypeModule, IDisposable,
 
         if (_aggregationEnabled)
         {
-            AggregateGraphQlTypes.RegisterTable(tableTypes, table);
+            AggregateGraphQlTypes.RegisterTable(tableTypes, table, _defaultBucketTimeZone);
         }
 
         ConnectionGraphQlTypes.RegisterTable(tableTypes, table);

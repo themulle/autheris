@@ -81,7 +81,7 @@ internal static class AggregateGraphQlTypes
         }));
     }
 
-    public static void RegisterTable(List<ITypeSystemMember> types, CatalogTableType table)
+    public static void RegisterTable(List<ITypeSystemMember> types, CatalogTableType table, string defaultTimeZone)
     {
         var names = AggregateTypeNames.For(table.TypeName);
         var columnEnum = AggregateColumnEnum.Build(table);
@@ -113,7 +113,7 @@ internal static class AggregateGraphQlTypes
             d.Description($"Time-bucketed group-by specification for {table.TypeName}.");
             d.Field("column").Type(NonNull(names.Column));
             d.Field("bucket").Type(NonNull(AggregateTypeNames.TimeBucketInterval));
-            d.Field("timeZone").Type(new NamedTypeNode("String")).DefaultValue(new StringValueNode("UTC"));
+            d.Field("timeZone").Type(new NamedTypeNode("String")).DefaultValue(new StringValueNode(defaultTimeZone));
         }));
 
         types.Add(new InputObjectType(d =>
