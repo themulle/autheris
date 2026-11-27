@@ -275,6 +275,12 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
         var (hiddenError, hidden) = await CallAsync(client, "query_graphql", new { query = $"{{ {field}(first: 10) {{ serial_number owner_email }} }}" });
         hidden.ToString().ShouldNotContain("x.test");
 
+        // #1188: the caller may not read every column of this table, so a typo in a column name stays the shielded answer and
+        // names neither the field nor a precise code (same shield as over /graphql).
+        var (_, typo) = await CallRawAsync(client, "query_graphql", new { query = $"{{ {field}(first: 10) {{ serial_number no_such_column_1188 }} }}" });
+        typo.ShouldNotContain("no_such_column_1188");
+        typo.ShouldNotContain("UNKNOWN_FIELD");
+
         // simulate_query resolves the same gateway-schema field from its AST and returns the estimate.
         var (simError, simulation) = await CallRawAsync(client, "simulate_query", new { query = $"{{ {field}(first: 10) {{ serial_number tonnage }} }}" });
         simError.ShouldBeFalse(simulation);
