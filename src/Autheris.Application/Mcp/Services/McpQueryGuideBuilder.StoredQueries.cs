@@ -11,7 +11,7 @@ internal static partial class McpQueryGuideBuilder
         """;
 
     internal const string ConnectionExample = """
-        query PaidOrdersConnection($filter: orders_filter! = {}, $dir: AutherisSortDirection! = ASC, $first: Int, $after: String) {
+        query PaidOrdersConnection($filter: orders_filter! = {}, $dir: AutherisSortDirection! = ASC, $first: Int = 10, $after: String) {
           ordersConnection(where: { and: [{ status: { eq: "PAID" } }, $filter] }, orderBy: [{ id: $dir }], first: $first, after: $after) {
             edges { node { id status amount } }
             pageInfo { hasNextPage endCursor }
@@ -37,7 +37,7 @@ internal static partial class McpQueryGuideBuilder
         - **Operand variables:** A variable used as an operand binds its value. A `null` operand on `eq`, `neq`, `gt`, `gte`, `lt`, `lte`, `contains`, `startsWith` or `endsWith` matches no row; `null` on `in`, `nin`, `isNull` or on a whole column filter is rejected. To make a condition optional, put the whole `where` or a whole `and` member in a variable, never only the operand.
         - **Fixed condition plus optional filter:** `where: { and: [{ status: { eq: "PAID" } }, $filter] }` with `$filter: orders_filter! = {}`. Pass `{}` or omit `$filter` for no extra filter; a `null` member inside `and` or `or` is rejected.
         - **Selectable sort order:** Pass `orderBy` as one variable (`$orderBy: [orders_order_by!]`; `null` or omitted means the default key order), or only the direction (`orderBy: [{ id: $dir }]` with `$dir: AutherisSortDirection! = ASC`). A connection accepts only key columns (section 3), so there the caller chooses the direction; on the root list also the column.
-        - **Paging:** On the root list use `$first: Int` and `$offset: Int`. On a connection use `$first: Int` and `$after: String`; `null` means the default page size and the first page. Pass `pageInfo.endCursor` as `$after` and keep the other variables unchanged (section 2).
+        - **Paging:** On the root list use `$first: Int = 50` and `$offset: Int`. On a connection use `$first: Int = 10` and `$after: String` (`null` means the first page). Always declare a default for the page size: a page size variable without a default is priced as the largest possible page, which the query cost analysis rejects. Keep pages small: the cost of a page counts against the caller's per-query budget, which depends on the caller's tier. Pass `pageInfo.endCursor` as `$after` and keep the other variables unchanged (section 2).
         - **Aggregates:** `groupBy`, `timeBuckets`, `aggregates`, `where`, `orderBy` and `limit` all take variables. `null` means no grouping or time buckets, the default order, the default `limit` of `100`, or no filter; `aggregates` is required.
 
         Root list with optional filter, selectable order and offset paging:

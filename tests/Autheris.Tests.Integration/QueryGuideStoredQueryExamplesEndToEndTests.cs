@@ -35,13 +35,12 @@ public sealed class QueryGuideStoredQueryExamplesEndToEndTests : IClassFixture<Q
         protected override IReadOnlyCollection<string> RequiredGraphQlFields =>
             [.. base.RequiredGraphQlFields, Field, Field + "_aggregate"];
 
-        // The guide examples page with a default of 50 rows; lift the per-query cost budget so that default fits (budget only, no auth or masking change).
+        // The default Standard per-query budget (250) is below the cost of one guide example page (a 10-row connection prices at 1380);
+        // lift the budget for this fixture only (budget only, no auth or masking change).
         protected override void ConfigureHost(Microsoft.AspNetCore.Hosting.IWebHostBuilder builder)
         {
             builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxTokensCapacity", "10000");
             builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxCostPerQuery", "10000");
-            // The connection example nests edges/node/aggregates deeper than the Standard tier's default depth of 10.
-            builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxComplexityDepth", "30");
         }
 
         protected override void SeedExtraData(NpgsqlConnection connection)
@@ -60,6 +59,7 @@ public sealed class QueryGuideStoredQueryExamplesEndToEndTests : IClassFixture<Q
                 Table = new Table { Id = Guid.NewGuid(), DisplayName = "orders", TableName = "orders", SchemaName = "main", SourceType = "PostgreSql", SourceName = "default" },
                 Identifier = OrdersId,
                 PrimaryKeyColumns = ["id"],
+                ReplaceKeyDefinition = true,
                 Columns =
                 [
                     new TableColumn { ColumnName = "id", DataType = "integer" },
