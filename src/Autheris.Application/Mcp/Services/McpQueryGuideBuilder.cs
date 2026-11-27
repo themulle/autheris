@@ -80,7 +80,7 @@ internal static partial class McpQueryGuideBuilder
 
         if (Tool(switches, McpDatasetTools.QuerySql))
         {
-            sb.AppendLine($"- **SQL Query Tool:** `{McpDatasetTools.QuerySql}` executes governed SQL queries (input `sql`, `dataSource`, `page.size`, `next`, `parameters`; the result is the `POST /api/v1/sql` body). Pass values in `parameters` bound to `@name` placeholders (`IN (@ids)` for a list); a statement rejected with `SQL_LITERAL_NOT_PERMITTED` is resent with the value as a parameter; a `next` call repeats the same `parameters`.");
+            sb.AppendLine($"- **SQL Query Tool:** `{McpDatasetTools.QuerySql}` executes governed SQL queries (input `sql`, `dataSource`, `page.size`, `next`, `parameters`; the result has the same fields as the governed SQL HTTP body). Pass values in `parameters` bound to `@name` placeholders (`IN (@ids)` for a list); a statement rejected with `SQL_LITERAL_NOT_PERMITTED` is resent with the value as a parameter; a `next` call repeats the same `parameters`.");
             sb.AppendLine("- **Optional Filters:** `(@p IS NULL OR col = @p)` is an optional filter: JSON `null` drops it, an absent parameter is an error.");
             sb.AppendLine("- **Timestamp Parameters:** Date-time strings may end in `Z` or `+HH:mm`; they are converted to UTC.");
         }

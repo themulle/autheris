@@ -42,7 +42,7 @@ internal static partial class McpQueryGuideBuilder
         sb.AppendLine("- **HTTP:** `POST /api/v1/sql` with a JSON body `{ \"sql\", \"parameters\", \"dataSource\", \"page\", \"next\", \"resultCache\" }`, or the statement alone as `text/plain` or `application/sql`. The OpenAPI document is `GET /api/v1/sql/openapi.json`.");
         if (Tool(switches, McpDatasetTools.QuerySql))
         {
-            sb.AppendLine($"- **MCP Tool:** `{McpDatasetTools.QuerySql}` takes `query` and optional `limit` and `cursor`; it takes no `parameters`. While `hasMore` is true, call it again with the returned `cursor`.");
+            sb.AppendLine($"- **MCP Tool:** `{McpDatasetTools.QuerySql}` takes the same fields as the HTTP body (`sql`, `parameters`, `dataSource`, `page.size`, `next`; no `resultCache`) and returns the same body. While a `next` is returned, call it again with that `next` and the same statement and parameters.");
         }
 
         if (Tool(switches, McpDatasetTools.ListDatasets))
