@@ -123,6 +123,14 @@ public sealed class ReadPathSwitches : IReadPathSwitches
     public bool IsResourceEnabled(string resourceUri)
     {
         if (resourceUri is null) return true;
+        // The query guide documents the query dialects, so it follows the query tools and not the Api group.
+        if (string.Equals(resourceUri, McpResourceProvider.QueryGuideDocUri, StringComparison.OrdinalIgnoreCase))
+        {
+            return IsToolEnabled(McpDatasetTools.QueryGraphQl)
+                || IsToolEnabled(McpDatasetTools.QuerySql)
+                || (RestDataEndpointEnabled && IsToolEnabled(McpDatasetTools.QueryDataset));
+        }
+
         // The dataset resource is rendered by describe_dataset, so it also follows that tool's DisabledTools entry.
         if (resourceUri.StartsWith("autheris://datasets/", StringComparison.OrdinalIgnoreCase))
         {

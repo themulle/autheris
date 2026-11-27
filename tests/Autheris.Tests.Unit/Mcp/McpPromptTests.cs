@@ -3,6 +3,8 @@ namespace Autheris.Tests.Unit.Mcp;
 using System.Collections.Generic;
 using System.Linq;
 using Autheris.Api.Mcp;
+using Autheris.Application.Mcp.Services;
+using Autheris.Domain.Options;
 using ModelContextProtocol;
 using ModelContextProtocol.Protocol;
 using Shouldly;
@@ -90,5 +92,51 @@ public sealed class McpPromptTests
         Should.Throw<McpProtocolException>(() => GatewayMcpServer.BuildPrompt(
                 "explore_dataset", Args(("dataset", "sales.public.orders"), ("extra", "x"))))
             .ErrorCode.ShouldBe(McpErrorCode.InvalidParams);
+    }
+
+    private static string PromptText(string prompt, ReadPathSwitches? switches) =>
+        ((TextContentBlock)GatewayMcpServer.BuildPrompt(prompt, Args(("dataset", "sales.public.orders")), switches).Messages[0].Content).Text;
+
+    private static ReadPathSwitches Switches(params string[] disabled) =>
+        ReadPathSwitches.From(new GatewayOptions { Mcp = new McpOptions { DisabledTools = [.. disabled] } });
+
+    [Fact]
+    public void Explore_prompt_names_only_enabled_tools()
+    {
+        var all = PromptText("explore_dataset", Switches());
+        all.ShouldContain("1. Call describe_dataset or get_my_permissions for 'sales.public.orders'");
+        all.ShouldContain("2. Call sample_rows");
+        all.ShouldContain("3. Recommend the best query strategy (query_graphql, query_sql or query_dataset)");
+        all.ShouldContain(McpResourceProvider.QueryGuideDocUri);
+
+        var sqlOnly = PromptText("explore_dataset", Switches("query_graphql", "query_dataset", "sample_rows", "describe_dataset"));
+        sqlOnly.ShouldContain("1. Call get_my_permissions for");
+        sqlOnly.ShouldContain("2. Recommend the best query strategy (query_sql)");
+        sqlOnly.ShouldNotContain("query_graphql");
+        sqlOnly.ShouldNotContain("query_dataset");
+        sqlOnly.ShouldNotContain("sample_rows");
+        sqlOnly.ShouldNotContain("describe_dataset");
+    }
+
+    [Fact]
+    public void Audit_prompt_omits_get_data_lineage_when_disabled()
+    {
+        PromptText("audit_access_compliance", Switches()).ShouldContain("3. Inspect data lineage via get_data_lineage");
+
+        var off = PromptText("audit_access_compliance", Switches("get_data_lineage"));
+        off.ShouldNotContain("get_data_lineage");
+        off.ShouldNotContain("3.");
+        off.ShouldContain("sales.public.orders");
+    }
+
+    [Fact]
+    public void Prompts_without_switches_name_no_tool()
+    {
+        foreach (var prompt in new[] { "explore_dataset", "audit_access_compliance" })
+        {
+            var text = PromptText(prompt, null);
+            text.ShouldContain("sales.public.orders");
+            foreach (var name in McpToolGroups.BuiltInNames) text.ShouldNotContain(name);
+        }
     }
 }
