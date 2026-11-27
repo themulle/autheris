@@ -773,8 +773,8 @@ public sealed class CatalogGraphQlMap : IGraphQlCatalogMap, IDisposable, IAsyncD
                     if (walk.Model.TablesByQueryFieldName.TryGetValue(field.Name.Value, out table))
                     {
                     }
-                    else if (field.Name.Value.EndsWith("_aggregate", StringComparison.Ordinal) &&
-                             walk.Model.TablesByQueryFieldName.TryGetValue(field.Name.Value[..^10], out table))
+                    else if (AggregateTypeNames.TryGetAggregateRootBase(field.Name.Value, out var aggregateBase) &&
+                             walk.Model.TablesByQueryFieldName.TryGetValue(aggregateBase, out table))
                     {
                         isAggregate = true;
                     }

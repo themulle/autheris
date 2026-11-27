@@ -186,24 +186,11 @@ public sealed partial class CostAndQuotaMiddleware
 
         foreach (var rootName in rootFieldNames)
         {
-            var meta = metadataLookup(rootName);
-            string? baseName = null;
+            var meta = AggregateRootResolution.Resolve(rootName, metadataLookup, out var baseName);
             if (meta is null)
             {
-                if (rootName.EndsWith("_aggregate", StringComparison.OrdinalIgnoreCase))
-                {
-                    baseName = rootName[..^10];
-                    meta = metadataLookup(baseName);
-                }
-                else if (rootName.EndsWith("Connection", StringComparison.Ordinal))
-                {
-                    baseName = rootName[..^10];
-                    meta = metadataLookup(baseName);
-                }
-            }
-
-            if (meta is null)
-            {
+                // An unresolvable root maps to the empty visible set (deny), never to "no restriction".
+                byTableKey[rootName] = EmptyVisibleColumns;
                 continue;
             }
 
@@ -248,7 +235,7 @@ public sealed partial class CostAndQuotaMiddleware
         return key => byTableKey.TryGetValue(key, out var cols) ? cols : EmptyVisibleColumns;
     }
 
-    private static List<string> CollectRootFieldNames(DocumentNode doc)
+    internal static List<string> CollectRootFieldNames(DocumentNode doc)
     {
         var names = new List<string>();
         var fragments = new Dictionary<string, FragmentDefinitionNode>(StringComparer.Ordinal);

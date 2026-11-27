@@ -427,7 +427,7 @@ public sealed partial class QueryCostAnalyzerRule : IDocumentValidatorRule
                 // (groups, key, aggregates) is not multiplied again because the field cost already models the whole result.
                 if (fieldDef != null && IsTypedAggregateField(field.Name.Value, fieldDef))
                 {
-                    cost = SafeAdd(cost, AggregateFieldCost(field, variableDefinitions, variableValues, currentDepth, currentType, schema));
+                    cost = SafeAdd(cost, AggregateFieldCost(field, variableDefinitions, variableValues, currentDepth, currentType, schema, fragments, fieldDef));
                     continue;
                 }
 

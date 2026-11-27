@@ -297,4 +297,15 @@ public sealed class McpQueryGuideTests
         guide.ShouldContain("timeZone: \"America/New_York\"");
         guide.ShouldNotContain("timeZone: \"UTC\"");
     }
+
+    [Fact]
+    public void Guide_DocumentsFlatGroupsShape_AndExtensionsLocation()
+    {
+        var guide = McpQueryGuideBuilder.Build(SwitchesFrom(), new GraphQLOptions());
+
+        guide.ShouldContain("<tableField>_groups");
+        guide.ShouldContain("demo_main_auftraege_groups(orderBy: [{column: region}], limit: 10) { region anzahl: count summe: betrag_sum }");
+        guide.ShouldContain("extensions.autherisAggregation.<responseKey>");
+        guide.ShouldContain("`_isMergedOther`");
+    }
 }

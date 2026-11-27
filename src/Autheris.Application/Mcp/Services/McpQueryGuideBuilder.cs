@@ -195,6 +195,14 @@ internal static class McpQueryGuideBuilder
         sb.AppendLine("}");
         sb.AppendLine("```");
         sb.AppendLine();
+        sb.AppendLine("**Flat rows (`<tableField>_groups`):** the same governed aggregation with the selection as the spec, returning one flat row per group. Selected column fields are the group columns, `count` and `<column>_sum|avg|min|max|count_distinct` are the aggregates (alias them freely), `_isMergedOther` marks the merged OTHER row, and `where`, `orderBy` (`{ column: <col> | alias: \"<responseKey>\" }`) and `limit` work as above. Selecting no column returns one whole-table row. The k-anonymity facts are not part of the rows; they are in `extensions.autherisAggregation.<responseKey>` (`count`, `suppressed`, `suppressedGroupsCount`, `minimumGroupSize`, `minimumGroupSizeSource`, `mergedIntoOther`, `truncated`).");
+        sb.AppendLine();
+        sb.AppendLine("```graphql");
+        sb.AppendLine("query {");
+        sb.AppendLine("  demo_main_auftraege_groups(orderBy: [{column: region}], limit: 10) { region anzahl: count summe: betrag_sum }");
+        sb.AppendLine("}");
+        sb.AppendLine("```");
+        sb.AppendLine();
     }
 
     private static void AppendMaskedColumnsAndRestrictedScopes(StringBuilder sb, IReadPathSwitches? switches)
