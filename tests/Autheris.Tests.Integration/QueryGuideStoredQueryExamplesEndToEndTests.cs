@@ -40,6 +40,8 @@ public sealed class QueryGuideStoredQueryExamplesEndToEndTests : IClassFixture<Q
         {
             builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxTokensCapacity", "10000");
             builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxCostPerQuery", "10000");
+            // The connection example nests edges/node/aggregates deeper than the Standard tier's default depth of 10.
+            builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxComplexityDepth", "30");
         }
 
         protected override void SeedExtraData(NpgsqlConnection connection)
