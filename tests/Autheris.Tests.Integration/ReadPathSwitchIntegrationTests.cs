@@ -363,6 +363,13 @@ public sealed class ReadPathMcpSwitchIntegrationTests : IClassFixture<ReadPathMc
         disabled.Message.Replace("autheris://api/openapi.json", "<URI>", StringComparison.Ordinal)
             .ShouldBe(unknown.Message.Replace("autheris://api/unknown-xyz.json", "<URI>", StringComparison.Ordinal));
 
+        // The query guide follows the query tools: with Query off it is unlisted and answers like an unknown URI.
+        resources.ShouldNotContain("autheris://api/docs/query-guide");
+        var guide = await Should.ThrowAsync<McpException>(async () => await client.ReadResourceAsync("autheris://api/docs/query-guide"));
+        var unknownDoc = await Should.ThrowAsync<McpException>(async () => await client.ReadResourceAsync("autheris://api/docs/unknown-xyz"));
+        guide.Message.Replace("autheris://api/docs/query-guide", "<URI>", StringComparison.Ordinal)
+            .ShouldBe(unknownDoc.Message.Replace("autheris://api/docs/unknown-xyz", "<URI>", StringComparison.Ordinal));
+
         // explore_dataset needs Catalog and Query: unlisted while Query is off; audit_access_compliance (Access, Catalog) stays.
         var prompts = (await client.ListPromptsAsync()).Select(p => p.Name).ToList();
         prompts.ShouldNotContain("explore_dataset");
@@ -415,6 +422,84 @@ public sealed class ReadPathMcpDocumentationLeakIntegrationTests : IClassFixture
         }
 
         all.ShouldContain("### `list_datasets`");
+    }
+}
+
+/// <summary>Query group off: the query guide is unlisted, a read equals an unknown URI, and the instructions name no query tool.</summary>
+public sealed class ReadPathMcpQueryOffIntegrationTests : IClassFixture<ReadPathMcpQueryOffIntegrationTests.HostFixture>
+{
+    private readonly WebApplicationFactory<Program> _factory;
+
+    public ReadPathMcpQueryOffIntegrationTests(HostFixture factory)
+    {
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder) =>
+            ReadPathHost.Configure(builder, ("Gateway:Mcp:Tools:Query", "false"));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task SEC_1209_Query_off_guide_unlisted_and_read_equals_unknown_uri()
+    {
+        await using var client = await ReadPathHost.ConnectAsync(_factory);
+
+        (await client.ListResourcesAsync()).Select(r => r.Uri).ShouldNotContain("autheris://api/docs/query-guide");
+        var guide = await Should.ThrowAsync<McpException>(async () => await client.ReadResourceAsync("autheris://api/docs/query-guide"));
+        var unknown = await Should.ThrowAsync<McpException>(async () => await client.ReadResourceAsync("autheris://api/docs/unknown-xyz"));
+        guide.Message.Replace("autheris://api/docs/query-guide", "<URI>", StringComparison.Ordinal)
+            .ShouldBe(unknown.Message.Replace("autheris://api/docs/unknown-xyz", "<URI>", StringComparison.Ordinal));
+
+        client.ServerInstructions.ShouldNotBeNull();
+        foreach (var tool in new[] { "query_graphql", "query_sql", "query_dataset" }) client.ServerInstructions.ShouldNotContain(tool);
+        client.ServerInstructions.ShouldNotContain("query-guide");
+    }
+}
+
+/// <summary>Api group off, Query on: the query guide is listed, readable and named in the instructions; the API documents stay closed.</summary>
+public sealed class ReadPathMcpApiOffIntegrationTests : IClassFixture<ReadPathMcpApiOffIntegrationTests.HostFixture>
+{
+    private const string Guide = "autheris://api/docs/query-guide";
+
+    private readonly WebApplicationFactory<Program> _factory;
+
+    public ReadPathMcpApiOffIntegrationTests(HostFixture factory)
+    {
+        _factory = factory;
+    }
+
+    public sealed class HostFixture : IntegrationHost
+    {
+        protected override void ConfigureWebHost(IWebHostBuilder builder) =>
+            ReadPathHost.Configure(builder, ("Gateway:Mcp:Tools:Api", "false"));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task SEC_1209_Api_off_query_on_guide_listed_readable_and_named()
+    {
+        await using var client = await ReadPathHost.ConnectAsync(_factory);
+
+        var uris = (await client.ListResourcesAsync()).Select(r => r.Uri).ToList();
+        uris.ShouldContain(Guide);
+        client.ServerInstructions.ShouldNotBeNull();
+        client.ServerInstructions.ShouldContain(Guide);
+        client.ServerInstructions.ShouldNotContain("invoke_api");
+        client.ServerInstructions.ShouldNotContain("describe_api");
+
+        var text = string.Join("\n", (await client.ReadResourceAsync(Guide)).Contents.OfType<TextResourceContents>().Select(c => c.Text));
+        text.ShouldContain("# Autheris Agent Query Guide");
+        text.ShouldNotContain("invoke_api");
+        text.ShouldNotContain("describe_api");
+
+        foreach (var closed in new[] { "autheris://api/openapi.json", "autheris://api/docs/endpoints", "autheris://api/docs/mcp-tools" })
+        {
+            uris.ShouldNotContain(closed);
+            await Should.ThrowAsync<McpException>(async () => await client.ReadResourceAsync(closed));
+        }
     }
 }
 

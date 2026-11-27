@@ -26,7 +26,7 @@ using Shouldly;
 using Xunit;
 
 [Collection("CatalogRelation")]
-public sealed class CatalogGraphQlConnectionTests
+public sealed partial class CatalogGraphQlConnectionTests
 {
     private readonly ITableMetadataRepository _metadataRepo = Substitute.For<ITableMetadataRepository>();
     private readonly ITableRelationRepository _relationRepo = Substitute.For<ITableRelationRepository>();

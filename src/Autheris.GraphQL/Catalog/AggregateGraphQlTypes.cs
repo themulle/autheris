@@ -1,16 +1,9 @@
-using System.Security.Claims;
 using Autheris.Application.Analytics;
-using Autheris.Application.Common.Interfaces;
-using Autheris.Application.Sql.Tree;
-using Autheris.Domain.Options;
 using HotChocolate;
 using HotChocolate.Language;
 using HotChocolate.Resolvers;
 using HotChocolate.Types;
 using HotChocolate.Types.Descriptors;
-using Microsoft.AspNetCore.Http;
-using Microsoft.Extensions.DependencyInjection;
-using Microsoft.Extensions.Options;
 
 namespace Autheris.GraphQL.Catalog;
 
@@ -169,6 +162,8 @@ internal static class AggregateGraphQlTypes
             d.Field("mergedIntoOther").Type(NonNull("Boolean")).Resolve(ctx => ctx.Parent<AggregateResultDto>().MergedIntoOther);
             d.Field("truncated").Type(NonNull("Boolean")).Resolve(ctx => ctx.Parent<AggregateResultDto>().Truncated);
         }));
+
+        FlatAggregateGraphQlTypes.RegisterTable(types, table);
     }
 
     public static IObjectFieldDescriptor AddQueryField(IObjectTypeDescriptor query, CatalogTableType table)
@@ -186,62 +181,22 @@ internal static class AggregateGraphQlTypes
             .Resolve(async ctx => await ResolveAsync(ctx, table).ConfigureAwait(false));
     }
 
-    internal static async Task<AggregateResultDto> ResolveAsync(IResolverContext ctx, CatalogTableType table)
-    {
-        var principal = Autheris.GraphQL.Security.GraphQlCallerPrincipal.Resolve(ctx);
-        if (principal.Identity?.IsAuthenticated != true)
-        {
-            throw AggregateErrors.Create("UNAUTHORIZED", AggregateErrors.UnauthorizedMessage);
-        }
-
-        var analytics = ctx.Services.GetService<IOptions<AnalyticsOptions>>()?.Value ?? new AnalyticsOptions();
-
-        try
-        {
-            IValueNode? Argument(string name) => ctx.Selection.Arguments.TryGetValue(name, out var a) ? a.ValueLiteral : null;
-            IValueNode? Variable(string name) => ctx.Variables.TryGetValue<IValueNode>(name, out var node) ? node : null;
-
-            var parsed = AggregateArgumentParser.Parse(
-                table,
-                Argument("groupBy"),
-                Argument("aggregates"),
-                Argument("orderBy"),
-                Argument("limit"),
-                analytics.Aggregation,
-                Variable,
-                Argument("timeBuckets") ?? Argument("time_buckets"));
-
-            var whereLiteral = Argument("where") is VariableNode v ? Variable(v.Name.Value) : Argument("where");
-            TableFilterClause? where = null;
-            if (whereLiteral is ObjectValueNode { Fields.Count: > 0 } whereObject &&
-                GraphQlTreeBuilder.ParseObjectFilter(whereObject, table, ctx) is { } filter)
+    internal static Task<AggregateResultDto> ResolveAsync(IResolverContext ctx, CatalogTableType table) =>
+        AggregateExecutionCore.ExecuteAsync(
+            ctx,
+            table,
+            (analytics, variable) =>
             {
-                where = TreeFilterClauseBuilder.Build(filter, ResolveColumn(table));
-            }
-
-            var query = new AggregationQuery(
-                Table: table.Metadata.Identifier,
-                GroupBy: parsed.GroupBy.Select(c => c.ColumnName).ToList(),
-                Aggregates: parsed.Aggregates.Select(a => new AggregateSelection(a.Function, a.Column?.ColumnName, a.Alias)).ToList(),
-                Where: where,
-                OrderBy: parsed.OrderBy.Count == 0 ? null : parsed.OrderBy,
-                Limit: parsed.Limit,
-                Transport: "graphql",
-                TimeBuckets: parsed.TimeBuckets);
-
-            var result = await ctx.Service<IGovernedAggregationService>()
-                .ExecuteAggregationAsync(principal, query, ctx.RequestAborted).ConfigureAwait(false);
-            var bucketColumns = parsed.TimeBuckets?.Select(b => b.Column).ToHashSet(StringComparer.OrdinalIgnoreCase);
-            return AggregateResultMapper.Map(result, table, parsed.GroupBy, parsed.Aggregates, bucketColumns);
-        }
-        catch (Exception ex) when (ex is not OperationCanceledException && AggregateFailureMapper.ForAggregate(ex) is { } mapped)
-        {
-            throw mapped;
-        }
-    }
-
-    private static Func<string, ColumnRef?> ResolveColumn(CatalogTableType table) => name =>
-        table.Columns.FirstOrDefault(c => string.Equals(c.ColumnName, name, StringComparison.OrdinalIgnoreCase)) is { } column
-            ? new ColumnRef(column.ColumnName, GraphQlTreeBuilder.ToKind(column.FieldType), ColumnValueKinds.IsDateOnly(column.DataType))
-            : null;
+                IValueNode? Argument(string name) => ctx.Selection.Arguments.TryGetValue(name, out var a) ? a.ValueLiteral : null;
+                return AggregateArgumentParser.Parse(
+                    table,
+                    Argument("groupBy"),
+                    Argument("aggregates"),
+                    Argument("orderBy"),
+                    Argument("limit"),
+                    analytics,
+                    variable,
+                    Argument("timeBuckets") ?? Argument("time_buckets"));
+            },
+            (result, parsed, bucketColumns) => AggregateResultMapper.Map(result, table, parsed.GroupBy, parsed.Aggregates, bucketColumns));
 }

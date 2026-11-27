@@ -214,6 +214,7 @@ internal sealed class GovernedResultCachePipeline : IDisposable
         string format = "json",
         bool participate = true,
         Func<DbDataReader, CancellationToken, Task>? writer = null,
+        IReadOnlyDictionary<string, object?>? parameters = null,
         CancellationToken ct = default)
     {
         var run = new CachePipelineRun();
@@ -223,6 +224,7 @@ internal sealed class GovernedResultCachePipeline : IDisposable
             Transport: SqlTransports.WebSql,
             Page: page,
             NextToken: nextToken,
+            Parameters: parameters,
             OnPageOutcome: outcome => run.Page = outcome)
         {
             ResultCache = participate ? new WebSqlResultCacheRequest(mode, format, outcome => run.Outcomes.Add(outcome)) : null,

@@ -235,6 +235,15 @@ internal sealed class GovernedSqlCompiler
 
         secured = CompilerHooks.Current.InterceptInjected(secured);
 
+        // 6b. optional filters (@p IS NULL OR X) are reduced by the null-ness of the parameter. Every guard above judged the unreduced
+        // tree, so the verdict is independent of the values; the coverage proof below runs on the reduced tree. SELECT only.
+        if (secured is SelectStatement)
+        {
+            Pass("optional-filters");
+            secured = (SqlStatement)new OptionalFilterReducer(request.ClientNulls) { CancellationToken = token }.Visit(secured);
+            CheckBudget(request, clock, token);
+        }
+
         if (expander is not null && !listsBeforeGuards)
         {
             Pass("lists");

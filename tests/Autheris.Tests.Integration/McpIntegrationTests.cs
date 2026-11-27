@@ -107,6 +107,29 @@ public class McpIntegrationTests : IClassFixture<McpIntegrationTests.HostFixture
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task SEC_1209_Unauthenticated_initialize_is_rejected_and_discloses_no_version()
+    {
+        using var closedFactory = _factory.WithWebHostBuilder(builder =>
+        {
+            builder.UseSetting("Gateway:Insecure:danger_bypass_mcp_auth", "false");
+            builder.UseSetting("Gateway:Insecure:danger_allow_anonymous_access", "false");
+        });
+
+        var client = closedFactory.CreateClient();
+        var initPayload = """{"jsonrpc":"2.0","id":1,"method":"initialize","params":{}}""";
+        using var request = new HttpRequestMessage(HttpMethod.Post, "/mcp") { Content = new StringContent(initPayload, Encoding.UTF8, "application/json") };
+        request.Headers.Accept.ParseAdd("application/json");
+        request.Headers.Accept.ParseAdd("text/event-stream");
+        var response = await client.SendAsync(request);
+
+        response.StatusCode.ShouldBe(HttpStatusCode.Unauthorized);
+        var body = await response.Content.ReadAsStringAsync();
+        body.ShouldNotContain("serverInfo");
+        body.ShouldNotContain(Autheris.Api.Hosting.ModuleLoader.ResolveHostVersion());
+    }
+
+    [Fact]
     public async Task M09_McpStreamableHttp_OversizedBody_IsRejectedWith413()
     {
         var client = _factory.CreateClient();

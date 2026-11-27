@@ -74,6 +74,60 @@ public static partial class TreeSqlCompiler
     }
 
     /// <summary>
+    /// Compiles <c>SELECT COUNT(*)</c> (returned as text) over the root table with exactly the predicates of the page statement:
+    /// tenant column, row policy or secured source, and the node's filter. Relations, ordering and paging are not part of a count.
+    /// </summary>
+    public static CompiledTreeQuery CompileCount(
+        TreeQueryNode root,
+        IReadOnlyDictionary<TableIdentifier, TreeTableAccess> access,
+        DatabaseDialect dialect,
+        bool maskingDisabled = false)
+    {
+        ArgumentNullException.ThrowIfNull(root);
+        ArgumentNullException.ThrowIfNull(access);
+
+        if (!SupportsTreeCompile(dialect))
+        {
+            throw new NotSupportedException($"Dialect '{dialect}' does not support single-statement JSON queries.");
+        }
+
+        if (root.Relations.Count > 0)
+        {
+            throw new ArgumentException("A count query does not take relations.", nameof(root));
+        }
+
+        var context = new CompileContext(dialect, access, maskingDisabled);
+        var plan = Prepare(root, context, path: []);
+        var target = Q(context, TargetAlias);
+        var sb = new StringBuilder("SELECT ");
+        sb.Append(dialect switch
+        {
+            DatabaseDialect.SqlServer => "CAST(COUNT_BIG(*) AS NVARCHAR(20))",
+            DatabaseDialect.PostgreSql => "CAST(COUNT(*) AS TEXT)",
+            _ => "CAST(COUNT(*) AS STRING)"
+        });
+
+        var securedSource = plan.Access.SecuredSource;
+        if (securedSource != null)
+        {
+            sb.Append(" FROM (").Append(BindSecuredSource(context, securedSource)).Append(')');
+        }
+        else
+        {
+            sb.Append(" FROM ").Append(dialect.FormatTableIdentifier(plan.Access.Metadata.Identifier));
+        }
+
+        sb.Append(" AS ").Append(target);
+        var where = BuildInnerPredicates(plan, context, null, null);
+        if (where.Count > 0)
+        {
+            sb.Append(" WHERE ").Append(string.Join(" AND ", where));
+        }
+
+        return new CompiledTreeQuery(sb.ToString(), context.Parameters, []);
+    }
+
+    /// <summary>
     /// Runs the validation phase of <see cref="Compile"/> (column, filter and required-filter-column checks) without emitting SQL and
     /// without consulting any secured source, so policy-independent client errors surface before row-policy support checks.
     /// </summary>

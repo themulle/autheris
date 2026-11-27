@@ -155,4 +155,67 @@ public sealed class McpDescribeNarrowingTests
 
         McpDescribeNarrowing.TryParse(null, names, null, null, null, out _).ShouldBeFalse();
     }
+
+    [Fact]
+    public void Apply_RelationsWithoutGraphQl_ReturnsGraphQlSectionWithOnlyRelations()
+    {
+        var result = McpDescribeNarrowing.Apply(Sample(), Parse(include: "relations"));
+
+        result.GraphQl.ShouldNotBeNull();
+        result.GraphQl!.Relations.Select(r => r.Field).ShouldBe(["customer", "lines"]);
+        result.GraphQl.Endpoint.ShouldBeNull();
+        result.GraphQl.QueryField.ShouldBeNull();
+        result.GraphQl.TypeName.ShouldBeNull();
+        result.GraphQl.FilterType.ShouldBeNull();
+        result.GraphQl.OrderByType.ShouldBeNull();
+        result.GraphQl.Arguments.ShouldBeNull();
+        result.GraphQl.ExampleQuery.ShouldBeNull();
+        result.GraphQl.Variables.ShouldBeNull();
+        result.GraphQl.Aggregate.ShouldBeNull();
+        result.GraphQl.Connection.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Apply_RelationsWithoutGraphQl_AppliesRelationTerm()
+    {
+        var result = McpDescribeNarrowing.Apply(Sample(), Parse(include: "relations", relations: "line"));
+
+        result.GraphQl!.Relations.Select(r => r.Field).ShouldBe(["lines"]);
+    }
+
+    [Fact]
+    public void Apply_NeitherGraphQlNorRelations_DropsGraphQl()
+    {
+        McpDescribeNarrowing.Apply(Sample(), Parse(include: "columns,keys")).GraphQl.ShouldBeNull();
+    }
+
+    [Fact]
+    public void Request_WantsRelations_IndependentOfGraphQl()
+    {
+        Parse(include: "relations").WantsRelations.ShouldBeTrue();
+        Parse(include: "relations").WantsGraphQl.ShouldBeFalse();
+        Parse(include: "relations").WantsGraphQlBlock.ShouldBeTrue();
+        Parse(include: "graphql").WantsRelations.ShouldBeFalse();
+        Parse(include: "graphql").WantsGraphQlBlock.ShouldBeTrue();
+        Parse(include: "columns").WantsGraphQlBlock.ShouldBeFalse();
+        Parse().WantsRelations.ShouldBeTrue();
+    }
+
+    [Theory]
+    [InlineData("graphql", true)]
+    [InlineData("relations", true)]
+    [InlineData("columns,keys", false)]
+    public void Request_ConflictsWithBrief_OnlyForGraphQlOrRelations(string include, bool expected)
+    {
+        Parse(include: include).ConflictsWithBrief.ShouldBe(expected);
+        Parse().ConflictsWithBrief.ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void TryParse_UnknownInclude_StillRejected_WithRelations()
+    {
+        McpDescribeNarrowing.TryParse("relations,joins", null, null, null, null, out _).ShouldBeFalse();
+        McpDescribeNarrowing.TryParse(42, null, null, null, null, out _).ShouldBeFalse();
+    }
 }

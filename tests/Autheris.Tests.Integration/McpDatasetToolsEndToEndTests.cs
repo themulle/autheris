@@ -31,8 +31,11 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
 {
     private const string UserSid = "S-1-5-MCP-E2E-USER";
     private const string Tenant = "tenant_mcp";
+    private const string RestrictedSid = "S-1-5-MCP-E2E-RESTRICTED";
     private static readonly TableIdentifier Cranes = new("default", "main", "mcp_cranes");
+    private static readonly TableIdentifier Ledger = new("default", "main", "mcp_ledger");
     private static readonly TableIdentifier Vault = new("default", "main", "mcp_vault");
+    private static readonly TableIdentifier KeyVault = new("default", "main", "mcp_keyvault");
 
     private readonly WebApplicationFactory<Program> _factory;
 
@@ -55,6 +58,10 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
                 CREATE TABLE mcp_error_col (id INTEGER PRIMARY KEY, error TEXT);
                 INSERT INTO mcp_error_col VALUES (1,'boom');
                 CREATE TABLE mcp_unconsented (id INTEGER PRIMARY KEY);
+                CREATE TABLE mcp_ledger (entry TEXT NOT NULL, amount INTEGER NOT NULL);
+                INSERT INTO mcp_ledger VALUES ('rent',10),('fuel',20),('tolls',30);
+                CREATE TABLE mcp_keyvault (id INTEGER PRIMARY KEY, label TEXT NOT NULL);
+                INSERT INTO mcp_keyvault VALUES (1,'alpha'),(2,'beta'),(3,'gamma');
                 """);
         }
 
@@ -72,6 +79,10 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
 
             // query_sql runs through the governed WebSQL pipeline, which answers SQL_ENDPOINT_DISABLED unless it is enabled.
             builder.UseSetting("Gateway:WebSql:Enabled", "true");
+
+            // The described list, aggregate and connection queries are priced per requested row; the Standard tier default budget is too small for them.
+            builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxTokensCapacity", "10000");
+            builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxCostPerQuery", "10000");
         }
 
         protected override void Dispose(bool disposing)
@@ -90,6 +101,8 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
         {
             Table = new Table { Id = tableId, DisplayName = "mcp_cranes", TableName = "mcp_cranes", SchemaName = "main", SourceType = "PostgreSql", SourceName = "default", Description = "Crane fleet" },
             Identifier = Cranes,
+            PrimaryKeyColumns = ["id"],
+            ReplaceKeyDefinition = true,
             Columns = new List<TableColumn>
             {
                 new() { ColumnName = "id", DataType = "integer", Description = "Key" },
@@ -275,6 +288,12 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
         var (hiddenError, hidden) = await CallAsync(client, "query_graphql", new { query = $"{{ {field}(first: 10) {{ serial_number owner_email }} }}" });
         hidden.ToString().ShouldNotContain("x.test");
 
+        // #1188: the caller may not read every column of this table, so a typo in a column name stays the shielded answer and
+        // names neither the field nor a precise code (same shield as over /graphql).
+        var (_, typo) = await CallRawAsync(client, "query_graphql", new { query = $"{{ {field}(first: 10) {{ serial_number no_such_column_1188 }} }}" });
+        typo.ShouldNotContain("no_such_column_1188");
+        typo.ShouldNotContain("UNKNOWN_FIELD");
+
         // simulate_query resolves the same gateway-schema field from its AST and returns the estimate.
         var (simError, simulation) = await CallRawAsync(client, "simulate_query", new { query = $"{{ {field}(first: 10) {{ serial_number tonnage }} }}" });
         simError.ShouldBeFalse(simulation);
@@ -453,5 +472,143 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
                 new ConsentColumnRule { ColumnName = "error", AccessLevel = ColumnAccessLevel.Clear }
             ]
         });
+    }
+
+    private async Task SeedTableAsync(TableIdentifier id, IReadOnlyList<string> primaryKey, IReadOnlyList<(string Name, string Type)> columns,
+        string sid, IReadOnlyList<(string Name, ColumnAccessLevel Level)> grants, bool upsertTable = true)
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
+        if (upsertTable)
+        {
+            await repo.UpsertTableMetadataAsync(new TableMetadata
+            {
+                Table = new Table { Id = Guid.NewGuid(), DisplayName = id.TableName, TableName = id.TableName, SchemaName = "main", SourceType = "PostgreSql", SourceName = "default", Description = id.TableName },
+                Identifier = id,
+                PrimaryKeyColumns = primaryKey,
+                ReplaceKeyDefinition = true,
+                Columns = columns.Select(c => new TableColumn { ColumnName = c.Name, DataType = c.Type, Description = c.Name }).ToList()
+            });
+        }
+
+        var meta = await repo.GetTableMetadataAsync(id);
+        await repo.CreateConsentAsync(new Consent
+        {
+            TableId = meta!.Table.Id,
+            TableIdentifier = id,
+            TenantId = new TenantId(Tenant),
+            Effect = ConsentEffect.Allow,
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid(sid),
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+            ColumnRules = grants.Select(g => new ConsentColumnRule { ColumnName = g.Name, AccessLevel = g.Level }).ToList()
+        });
+    }
+
+    private HttpClient ClientFor(string sid)
+    {
+        var client = _factory.CreateClient();
+        client.DefaultRequestHeaders.Add("X-Test-User-Sid", sid);
+        client.DefaultRequestHeaders.Add("X-Test-Roles", "Reader");
+        client.DefaultRequestHeaders.Add("X-Test-Tenant", Tenant);
+        return client;
+    }
+
+    [Fact]
+    public async Task Agent_WritesListAggregateAndConnectionQueries_OnlyFromTheDescription()
+    {
+        await SeedCatalogAndConsentAsync();
+        await SeedTableAsync(Ledger, [], [("entry", "varchar"), ("amount", "integer")], UserSid,
+            [("entry", ColumnAccessLevel.Clear), ("amount", ColumnAccessLevel.Clear)]);
+        var client = Client();
+
+        var (_, firstLook) = await CallAsync(client, "describe_dataset", new { dataset = "default.main.mcp_cranes" });
+        var field = firstLook.GetProperty("graphQl").GetProperty("queryField").GetString()!;
+        // The key and column fields come from the built schema, so describe again once it has caught up with the seeded catalog.
+        await RefreshGraphQlSchemaAsync(field);
+        var (_, cranes) = await CallAsync(client, "describe_dataset", new { dataset = "default.main.mcp_cranes" });
+        var graphQl = cranes.GetProperty("graphQl");
+        var variables = graphQl.GetProperty("variables").EnumerateArray().ToDictionary(v => v.GetProperty("name").GetString()!, v => v.GetProperty("type").GetString()!);
+        var aggregate = graphQl.GetProperty("aggregate");
+        var aggregateInput = aggregate.GetProperty("variables").EnumerateArray().Single(v => v.GetProperty("name").GetString() == "aggregates").GetProperty("type").GetString()!;
+        var connection = graphQl.GetProperty("connection");
+        connection.GetProperty("available").GetBoolean().ShouldBeTrue();
+        connection.GetProperty("keyFields").EnumerateArray().Select(k => k.GetString()).ShouldBe(["id"]);
+        await RefreshGraphQlSchemaAsync(field);
+
+        var (listError, list) = await CallAsync(client, "query_graphql", new
+        {
+            query = $"query L($w: {variables["where"]}) {{ {field}(where: $w, first: 10) {{ serial_number }} }}",
+            variables = new { w = new { crane_type = new { eq = "Mobilkran" } } }
+        });
+        listError.ShouldBeFalse(list.ToString());
+        list.GetProperty("data").GetProperty(field).GetArrayLength().ShouldBe(2);
+
+        var (aggError, agg) = await CallAsync(client, "query_graphql", new
+        {
+            query = $"query A($a: {aggregateInput}) {{ {aggregate.GetProperty("field").GetString()}(aggregates: $a) {{ count }} }}",
+            variables = new { a = new[] { new { fn = "COUNT", alias = "n" } } }
+        });
+        aggError.ShouldBeFalse(agg.ToString());
+
+        var connectionField = connection.GetProperty("field").GetString()!;
+        var (connError, conn) = await CallAsync(client, "query_graphql", new
+        {
+            query = $"{{ {connectionField}(first: 2) {{ edges {{ node {{ serial_number }} }} pageInfo {{ hasNextPage endCursor }} }} }}"
+        });
+        connError.ShouldBeFalse(conn.ToString());
+        conn.GetProperty("data").GetProperty(connectionField).GetProperty("edges").GetArrayLength().ShouldBe(2);
+
+        var (_, ledger) = await CallAsync(client, "describe_dataset", new { dataset = "default.main.mcp_ledger" });
+        var ledgerConnection = ledger.GetProperty("graphQl").GetProperty("connection");
+        ledgerConnection.GetProperty("available").GetBoolean().ShouldBeFalse();
+        ledgerConnection.GetProperty("reason").GetString().ShouldBe("no_usable_key");
+        ledgerConnection.TryGetProperty("keyFields", out _).ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Describe_MaskedKeyTable_ReportsMaskedKey_AndRuntimeRejectsTheConnection()
+    {
+        await SeedTableAsync(KeyVault, ["id"], [("id", "integer"), ("label", "varchar")], UserSid,
+            [("id", ColumnAccessLevel.Mask), ("label", ColumnAccessLevel.Clear)]);
+        var client = Client();
+
+        var (_, firstLook) = await CallAsync(client, "describe_dataset", new { dataset = "default.main.mcp_keyvault" });
+        await RefreshGraphQlSchemaAsync(firstLook.GetProperty("graphQl").GetProperty("queryField").GetString()!);
+        var (_, vault) = await CallAsync(client, "describe_dataset", new { dataset = "default.main.mcp_keyvault" });
+        var connection = vault.GetProperty("graphQl").GetProperty("connection");
+        connection.GetProperty("available").GetBoolean().ShouldBeFalse();
+        connection.GetProperty("reason").GetString().ShouldBe("masked_key");
+        connection.TryGetProperty("keyFields", out _).ShouldBeFalse();
+
+        var field = connection.GetProperty("field").GetString()!;
+        var (_, text) = await CallRawAsync(client, "query_graphql", new { query = $"{{ {field}(first: 2) {{ edges {{ node {{ label }} }} }} }}" });
+        // The runtime refuses the connection of a masked key the same way describe_dataset reports it: no rows are returned.
+        text.ShouldContain("FILTER_ON_MASKED_COLUMN", Case.Insensitive, text);
+        text.ShouldNotContain("\"edges\"", Case.Insensitive);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Describe_DeniedKeyColumn_ReportsTheSameAsAKeylessTable()
+    {
+        await SeedTableAsync(Ledger, [], [("entry", "varchar"), ("amount", "integer")], RestrictedSid,
+            [("entry", ColumnAccessLevel.Clear), ("amount", ColumnAccessLevel.Clear)]);
+        await SeedCatalogAndConsentAsync();
+        await SeedTableAsync(Cranes, ["id"], [], RestrictedSid,
+            [("serial_number", ColumnAccessLevel.Clear), ("crane_type", ColumnAccessLevel.Clear), ("tonnage", ColumnAccessLevel.Clear)], upsertTable: false);
+        var client = ClientFor(RestrictedSid);
+
+        var (_, cranes) = await CallAsync(client, "describe_dataset", new { dataset = "default.main.mcp_cranes" });
+        var (_, ledger) = await CallAsync(client, "describe_dataset", new { dataset = "default.main.mcp_ledger" });
+
+        static string Shape(JsonElement c) =>
+            $"{c.GetProperty("available").GetBoolean()}|{c.GetProperty("reason").GetString()}|{c.TryGetProperty("keyFields", out _)}";
+        var denied = cranes.GetProperty("graphQl").GetProperty("connection");
+        Shape(denied).ShouldBe(Shape(ledger.GetProperty("graphQl").GetProperty("connection")));
+        Shape(denied).ShouldBe("False|no_usable_key|False");
+        cranes.ToString().ShouldNotContain("owner_email");
     }
 }

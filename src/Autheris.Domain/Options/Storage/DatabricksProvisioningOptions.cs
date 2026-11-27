@@ -38,12 +38,17 @@ public sealed class DatabricksProvisioningOptions
     /// <summary>Off (revoke only), DryRun (plan and audit, no changes) or Enforce (apply and revoke).</summary>
     public DatabricksProvisioningMode Mode { get; init; } = DatabricksProvisioningMode.Off;
 
-    /// <summary>The single tenant whose consents are provisioned on this data source; consents of other tenants are not.</summary>
+    /// <summary>
+    /// The single tenant whose consents are provisioned on this data source; consents of other tenants are not. Changing it revokes
+    /// the former tenant's privileges in the next cycles.
+    /// </summary>
     public string? Tenant { get; init; }
 
     /// <summary>
     /// The schemas (<c>catalog.schema</c>) whose tables may be provisioned. The catalog must be the data source catalog. The
-    /// provisioning principal needs <c>MANAGE</c> on exactly these schemas; securables outside them are never changed.
+    /// provisioning principal needs <c>MANAGE</c> on exactly these schemas; securables outside them are never changed. Before a schema
+    /// is removed from this list (or the section removed), set <see cref="Mode"/> to Off until the ledger of the data source is empty:
+    /// privileges outside the list can no longer be revoked and stay overdue.
     /// </summary>
     public IReadOnlyList<string> AllowedSchemas { get; init; } = [];
 

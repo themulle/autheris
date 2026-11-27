@@ -90,9 +90,10 @@ public sealed partial class QueryCostAnalyzerRule
             return true;
         }
 
-        return fieldName.EndsWith("_aggregate", StringComparison.Ordinal) &&
-               UnwrapType(definition.Type) is INameProvider { Name: var typeName } &&
-               typeName.EndsWith("_aggregate_result", StringComparison.Ordinal);
+        return IsFlatGroupsField(fieldName, definition) ||
+               (fieldName.EndsWith("_aggregate", StringComparison.Ordinal) &&
+                UnwrapType(definition.Type) is INameProvider { Name: var typeName } &&
+                typeName.EndsWith("_aggregate_result", StringComparison.Ordinal));
     }
 
     private TableMetadata? ResolveTableMetadata(string primaryName, string? fallbackName = null)
@@ -130,15 +131,79 @@ public sealed partial class QueryCostAnalyzerRule
         IReadOnlyDictionary<string, object?>? variableValues,
         int currentDepth = 1,
         IObjectTypeDefinition? currentType = null,
-        ISchemaDefinition? schema = null)
+        ISchemaDefinition? schema = null,
+        IReadOnlyDictionary<string, FragmentDefinitionNode>? fragments = null,
+        IOutputFieldDefinition? fieldDefinition = null)
     {
         // queryMetrics has no typed groupBy/aggregates list: it keeps the generic cost of a payload field via the base weight only.
         double cost = _aggregateFieldCostWeight;
 
-        var groupBy = field.Arguments.FirstOrDefault(a => string.Equals(a.Name.Value, "groupBy", StringComparison.Ordinal));
-        cost += (groupBy is null ? 0 : (TryListItems(groupBy.Value, variableDefinitions, variableValues, out var groupItems) ? groupItems.Count : _maxGroupByColumns))
-                * AggregationCostCalculator.GroupByColumnWeight;
+        IValueNode? groupByValue;
+        if (fieldDefinition is not null && IsFlatGroupsField(field.Name.Value, fieldDefinition))
+        {
+            var flatTable = fieldDefinition.Features.Get<CatalogRootFieldFeature>()?.Table;
+            if (!TryFlatAggregateCost(field, fragments, flatTable, out var flatCost, out groupByValue))
+            {
+                return SafeAdd(_maxAllowedCost, 1000);
+            }
 
+            cost += flatCost;
+        }
+        else
+        {
+            var groupBy = field.Arguments.FirstOrDefault(a => string.Equals(a.Name.Value, "groupBy", StringComparison.Ordinal));
+            groupByValue = groupBy?.Value;
+            cost += (groupBy is null ? 0 : (TryListItems(groupBy.Value, variableDefinitions, variableValues, out var groupItems) ? groupItems.Count : _maxGroupByColumns))
+                    * AggregationCostCalculator.GroupByColumnWeight;
+            cost += NestedAggregatesCost(field, variableDefinitions, variableValues);
+        }
+
+        int totalCost = (int)Math.Min(int.MaxValue, Math.Ceiling(cost));
+        bool isRootField = currentDepth <= 1 || (currentType != null && schema != null && currentType == schema.QueryType);
+
+        if (isRootField &&
+            !string.Equals(field.Name.Value, "queryMetrics", StringComparison.OrdinalIgnoreCase) &&
+            _costOptions is not null &&
+            _costOptions.UnindexedRootListSurchargeMultiplier > 1.0)
+        {
+            var baseName = AggregateTypeNames.TryGetAggregateRootBase(field.Name.Value, out var aggregateBase)
+                ? aggregateBase
+                : field.Name.Value;
+            var tableMeta = ResolveTableMetadata(baseName, field.Name.Value);
+            if (tableMeta is not null)
+            {
+                var visibleSet = ResolveVisibleColumns(baseName, tableMeta);
+                var visibleList = visibleSet?.ToList();
+                var timeBuckets = field.Arguments.FirstOrDefault(a => string.Equals(a.Name.Value, "timeBuckets", StringComparison.Ordinal));
+                var whereArg = field.Arguments.FirstOrDefault(a => string.Equals(a.Name.Value, "where", StringComparison.Ordinal));
+                var groupByAsOrder = IndexUsabilityEvaluator.ExtractGroupByAsOrder(groupByValue, timeBuckets?.Value, variableValues, variableDefinitions);
+                var filterColumns = IndexUsabilityEvaluator.ExtractFilterColumns(whereArg, variableValues, variableDefinitions);
+
+                bool hasUsableIndex = (groupByAsOrder.Count > 0 || (filterColumns is not null && filterColumns.Count > 0)) &&
+                    IndexUsabilityEvaluator.HasUsableIndex(tableMeta, visibleList, groupByAsOrder, filterColumns);
+
+                if (!hasUsableIndex)
+                {
+                    totalCost = (int)Math.Min((long)int.MaxValue, (long)Math.Ceiling(totalCost * _costOptions.UnindexedRootListSurchargeMultiplier));
+                    if (_indexHints is not null)
+                    {
+                        var rootKey = field.Alias?.Value ?? field.Name.Value;
+                        var helpfulCols = IndexUsabilityEvaluator.BuildHelpfulIndexColumns(tableMeta, visibleSet, filterColumns, groupByAsOrder);
+                        _indexHints.Add(new GraphQlIndexHint(rootKey, GraphQlIndexHint.NoUsableIndexReason, helpfulCols));
+                    }
+                }
+            }
+        }
+
+        return totalCost;
+    }
+
+    private double NestedAggregatesCost(
+        FieldNode field,
+        IReadOnlyList<VariableDefinitionNode>? variableDefinitions,
+        IReadOnlyDictionary<string, object?>? variableValues)
+    {
+        double cost = 0;
         var aggregates = field.Arguments.FirstOrDefault(a => string.Equals(a.Name.Value, "aggregates", StringComparison.Ordinal));
         if (aggregates is null)
         {
@@ -161,44 +226,7 @@ public sealed partial class QueryCostAnalyzerRule
             cost += _maxAggregates * AggregationCostCalculator.CountDistinctWeight;
         }
 
-        int totalCost = (int)Math.Min(int.MaxValue, Math.Ceiling(cost));
-        bool isRootField = currentDepth <= 1 || (currentType != null && schema != null && currentType == schema.QueryType);
-
-        if (isRootField &&
-            !string.Equals(field.Name.Value, "queryMetrics", StringComparison.OrdinalIgnoreCase) &&
-            _costOptions is not null &&
-            _costOptions.UnindexedRootListSurchargeMultiplier > 1.0)
-        {
-            var baseName = field.Name.Value.EndsWith("_aggregate", StringComparison.OrdinalIgnoreCase)
-                ? field.Name.Value[..^"_aggregate".Length]
-                : field.Name.Value;
-            var tableMeta = ResolveTableMetadata(baseName, field.Name.Value);
-            if (tableMeta is not null)
-            {
-                var visibleSet = ResolveVisibleColumns(baseName, tableMeta);
-                var visibleList = visibleSet?.ToList();
-                var timeBuckets = field.Arguments.FirstOrDefault(a => string.Equals(a.Name.Value, "timeBuckets", StringComparison.Ordinal));
-                var whereArg = field.Arguments.FirstOrDefault(a => string.Equals(a.Name.Value, "where", StringComparison.Ordinal));
-                var groupByAsOrder = IndexUsabilityEvaluator.ExtractGroupByAsOrder(groupBy?.Value, timeBuckets?.Value, variableValues, variableDefinitions);
-                var filterColumns = IndexUsabilityEvaluator.ExtractFilterColumns(whereArg, variableValues, variableDefinitions);
-
-                bool hasUsableIndex = (groupByAsOrder.Count > 0 || (filterColumns is not null && filterColumns.Count > 0)) &&
-                    IndexUsabilityEvaluator.HasUsableIndex(tableMeta, visibleList, groupByAsOrder, filterColumns);
-
-                if (!hasUsableIndex)
-                {
-                    totalCost = (int)Math.Min((long)int.MaxValue, (long)Math.Ceiling(totalCost * _costOptions.UnindexedRootListSurchargeMultiplier));
-                    if (_indexHints is not null)
-                    {
-                        var rootKey = field.Alias?.Value ?? field.Name.Value;
-                        var helpfulCols = IndexUsabilityEvaluator.BuildHelpfulIndexColumns(tableMeta, visibleSet, filterColumns, groupByAsOrder);
-                        _indexHints.Add(new GraphQlIndexHint(rootKey, GraphQlIndexHint.NoUsableIndexReason, helpfulCols));
-                    }
-                }
-            }
-        }
-
-        return totalCost;
+        return cost;
     }
 
     private static bool TryListItems(

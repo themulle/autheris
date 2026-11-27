@@ -483,10 +483,10 @@ public sealed class UnityCatalogPermissionsClientTests
 
     [Theory]
     [InlineData("{\"privilege_assignments\":[{\"principal\":\"jane@example.com\",\"privileges\":[{\"privilege\":\"USE_CATALOG\",\"inherited_from_type\":\"METASTORE\"}]}]}", true)]
-    [InlineData("{\"privilege_assignments\":[{\"principal\":\"other@example.com\",\"privileges\":[{\"privilege\":\"USE_CATALOG\"}]}]}", false)]
+    [InlineData("{\"privilege_assignments\":[{\"principal\":\"account users\",\"privileges\":[{\"privilege\":\"USE_CATALOG\"}]}]}", true)]
     [InlineData("{\"privilege_assignments\":[{\"principal\":\"jane@example.com\",\"privileges\":[{\"privilege\":\"BROWSE\"}]}]}", false)]
     [InlineData("{}", false)]
-    public async Task Effective_catalog_access_counts_only_the_asked_principal(string body, bool expected)
+    public async Task Effective_catalog_access_counts_group_assignments_of_the_scoped_response(string body, bool expected)
     {
         var handler = Handler(r => r.Uri.AbsolutePath == "/api/2.1/unity-catalog/effective-permissions/catalog/main" ? Ok(body) : null);
 

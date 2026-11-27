@@ -415,6 +415,7 @@ public class CompileApiTests
             [nameof(CompileRequest.CompileTimeout)] = baseRequest with { CompileTimeout = TimeSpan.FromSeconds(9) },
             [nameof(CompileRequest.MaxExpansionFactor)] = baseRequest with { MaxExpansionFactor = 3 },
             [nameof(CompileRequest.ClientLists)] = baseRequest with { ClientLists = ClientListHarness.Shapes(("ids", 3)) },
+            [nameof(CompileRequest.ClientNulls)] = baseRequest with { ClientNulls = ClientNullShapes.Create(new[] { "p" }) },
             [nameof(CompileRequest.TimeZoneConversionAvailable)] = baseRequest with { TimeZoneConversionAvailable = true },
             [nameof(CompileRequest.AllowRecursiveCte)] = baseRequest with { AllowRecursiveCte = true },
             [nameof(CompileRequest.MaxRecursionDepth)] = baseRequest with { MaxRecursionDepth = 7 },

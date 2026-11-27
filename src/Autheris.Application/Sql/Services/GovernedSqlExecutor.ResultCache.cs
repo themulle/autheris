@@ -99,7 +99,8 @@ public sealed partial class GovernedSqlExecutor
         string sqlForRewrite,
         string? requestedDs,
         ClientListShapes shapes,
-        CancellationToken ct)
+        CancellationToken ct,
+        ClientNullShapes? nullShapes = null)
     {
         var cache = _resultCache;
         if (request.ResultCache is not { } participation || cache is null || !cache.Limits.Enabled)
@@ -117,7 +118,7 @@ public sealed partial class GovernedSqlExecutor
         var plan = new ResultCachePlan(participation, TimeSpan.FromSeconds(ttlSeconds));
         try
         {
-            return await BuildResultCachePlanAsync(plan, cache, connOptions, request, user, tenantId, rewrite, dmlContext, clientValues, sqlForRewrite, requestedDs, shapes, ct).ConfigureAwait(false);
+            return await BuildResultCachePlanAsync(plan, cache, connOptions, request, user, tenantId, rewrite, dmlContext, clientValues, sqlForRewrite, requestedDs, shapes, nullShapes, ct).ConfigureAwait(false);
         }
         catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
         {
@@ -139,6 +140,7 @@ public sealed partial class GovernedSqlExecutor
         string sqlForRewrite,
         string? requestedDs,
         ClientListShapes shapes,
+        ClientNullShapes? nullShapes,
         CancellationToken ct)
     {
         string dsName = rewrite.DataSourceName;
@@ -169,7 +171,7 @@ public sealed partial class GovernedSqlExecutor
                     sqlForRewrite, user, tenantId, requestedDs, new DmlAuditContext(), ct, fullLimit, probeExtraRow: true,
                     plannedTableRead: request.PlannedTableRead,
                     gatewayLikePatternParameters: GovernedSqlExecutionService.GatewayParameterAliases(request.GatewayParameters),
-                    clientLists: shapes, page: null, readOnlyRequired: request.ReadOnlyRequired, transport: request.Transport).ConfigureAwait(false);
+                    clientLists: shapes, clientNulls: nullShapes, page: null, readOnlyRequired: request.ReadOnlyRequired, transport: request.Transport).ConfigureAwait(false);
             }
             catch (Exception ex) when (ex is not OperationCanceledException and not OutOfMemoryException)
             {

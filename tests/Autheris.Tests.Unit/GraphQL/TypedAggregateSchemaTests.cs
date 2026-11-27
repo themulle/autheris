@@ -53,6 +53,8 @@ public sealed class TypedAggregateSchemaTests
     [InlineData("aggregate_key")]
     [InlineData("aggregate_group")]
     [InlineData("aggregate_result")]
+    [InlineData("groups")]
+    [InlineData("group_row")]
     public async Task Aggregate_TableNamedLikeAGeneratedAggregateType_IsOmittedWithNameCollision(string suffix)
     {
         var x = Table("sales", "dbo", "x");
@@ -78,6 +80,25 @@ public sealed class TypedAggregateSchemaTests
         a.Tables.Select(t => t.TypeName).ShouldBe(b.Tables.Select(t => t.TypeName));
         a.OmittedTables.Select(o => o.Table).ShouldBe(b.OmittedTables.Select(o => o.Table));
         a.Fingerprint().ShouldBe(b.Fingerprint());
+    }
+
+    [Fact]
+    public async Task GroupsField_Exists_OnlyWhenAggregationEnabled()
+    {
+        var enabled = (await new TypedAggregateTestHost().BuildAsync()).Schema.ToString();
+        var disabled = (await new TypedAggregateTestHost { AggregationEnabled = false }.BuildAsync()).Schema.ToString();
+
+        enabled.ShouldContain("sales_dbo_orders_groups(");
+        enabled.ShouldContain("type sales_dbo_orders_group_row");
+        disabled.ShouldNotContain("sales_dbo_orders_groups");
+        disabled.ShouldNotContain("sales_dbo_orders_group_row");
+        AggregateTypeNames.TryGetAggregateRootBase("t_groups", out var groups).ShouldBeTrue();
+        groups.ShouldBe("t");
+        AggregateTypeNames.TryGetAggregateRootBase("t_aggregate", out var nested).ShouldBeTrue();
+        nested.ShouldBe("t");
+        AggregateTypeNames.TryGetAggregateRootBase("t_rows", out _).ShouldBeFalse();
+        AggregateTypeNames.For("t").All().ShouldContain("t_groups");
+        AggregateTypeNames.For("t").All().ShouldContain("t_group_row");
     }
 
     [Fact]

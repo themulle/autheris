@@ -142,7 +142,22 @@ public sealed class GraphQlEnumerationShieldMiddleware
             return;
         }
 
+        // #1188: a validation or variable coercion failure that names only catalog tables the caller may read with every column
+        // answers a precise error code in every environment; anything else keeps the shielded answer below.
+        if (await GraphQlValidationErrorDisclosure.TryBuildPreciseResultAsync(context, result, errors, validationFailed).ConfigureAwait(false) is { } precise)
+        {
+            context.Result = precise;
+            return;
+        }
+
+        // #1220: a variable coercion failure carries no location and no names; it is answered as is only when the document names
+        // nothing but catalog tables the caller may read with every column, otherwise it gets the shielded answer.
+        bool coercionMustShield = !validationFailed
+            && GraphQlValidationErrorDisclosure.IsVariableCoercionResult(errors)
+            && !await GraphQlValidationErrorDisclosure.IsCoercionAnswerSafeAsync(context).ConfigureAwait(false);
+
         bool mustShield = validationFailed
+            || coercionMustShield
             || (!isDevelopment && errors.Any(e => e.Code is not null && CatalogAccessCodes.Contains(e.Code)));
 
         if (!mustShield)
@@ -257,7 +272,7 @@ public sealed class GraphQlEnumerationShieldMiddleware
         return CatalogCostEvaluation.Allowed;
     }
 
-    private static DocumentNode? ExtractDocument(RequestContext context)
+    internal static DocumentNode? ExtractDocument(RequestContext context)
     {
         if (context.OperationDocumentInfo?.Document is { } doc) return doc;
         if (context.Request.Document is IOperationDocumentNodeProvider np) return np.Document;
@@ -265,7 +280,7 @@ public sealed class GraphQlEnumerationShieldMiddleware
         catch { return null; }
     }
 
-    private static (ClaimsPrincipal? Principal, IReadOnlyDictionary<string, string[]>? Headers) ExtractCaller(RequestContext context)
+    internal static (ClaimsPrincipal? Principal, IReadOnlyDictionary<string, string[]>? Headers) ExtractCaller(RequestContext context)
     {
         var hc = (context.ContextData.TryGetValue("HttpContext", out var hcObj) && hcObj is HttpContext h) ? h : context.RequestServices.GetService<IHttpContextAccessor>()?.HttpContext;
         var principal = (context.ContextData.TryGetValue(nameof(ClaimsPrincipal), out var cpObj) && cpObj is ClaimsPrincipal cp) ? cp : hc?.User;
@@ -285,7 +300,7 @@ public sealed class GraphQlEnumerationShieldMiddleware
     private static string? ReadStringArgument(FieldNode field, string argName) =>
         field.Arguments.FirstOrDefault(a => string.Equals(a.Name.Value, argName, StringComparison.Ordinal))?.Value is StringValueNode svn ? svn.Value : null;
 
-    private static bool TryCollectRootCatalogField(
+    internal static bool TryCollectRootCatalogField(
         FieldNode rootField, CatalogTableType table, CatalogSchemaModel schemaModel,
         Dictionary<string, FragmentDefinitionNode> fragments, Dictionary<TableIdentifier, CatalogTableType> catalogTables,
         Dictionary<TableIdentifier, HashSet<string>> requestedColumns, Dictionary<TableIdentifier, HashSet<string>> clearRequiredColumns)
@@ -325,7 +340,30 @@ public sealed class GraphQlEnumerationShieldMiddleware
             return true;
         }
 
+        if (string.Equals(fieldName, FlatAggregateRowFields.RootFieldName(table), StringComparison.Ordinal))
+            return TryCollectFlatGroupsField(rootField, table, fragments, catalogTables, requestedColumns, clearRequiredColumns);
+
         return TryCollectTableField(rootField, table, schemaModel, fragments, catalogTables, requestedColumns, clearRequiredColumns, 0);
+    }
+
+    /// <summary>The flat <c>_groups</c> field: group columns count as read columns; count, merged marker, aggregates and typename add none.</summary>
+    private static bool TryCollectFlatGroupsField(
+        FieldNode rootField, CatalogTableType table, Dictionary<string, FragmentDefinitionNode> fragments,
+        Dictionary<TableIdentifier, CatalogTableType> catalogTables,
+        Dictionary<TableIdentifier, HashSet<string>> requestedColumns, Dictionary<TableIdentifier, HashSet<string>> clearRequiredColumns)
+    {
+        EnsureTableSets(table, catalogTables, requestedColumns, clearRequiredColumns, out var reqCols, out var clearCols);
+        if (!TryCollectWhereAndOrderColumns(rootField, table, reqCols, clearCols) || rootField.SelectionSet is null) return false;
+        foreach (var rowField in SelectFields(rootField.SelectionSet, fragments))
+        {
+            if (string.Equals(rowField.Name.Value, "__typename", StringComparison.Ordinal)) continue;
+            if (FlatAggregateRowFields.Find(table, rowField.Name.Value) is not { } classified) return false;
+            if (classified.Role != FlatAggregateRowFieldRole.Column) continue;
+            reqCols.Add(classified.Column!.ColumnName);
+            clearCols.Add(classified.Column.ColumnName);
+        }
+
+        return true;
     }
 
     private static bool TryCollectTableField(

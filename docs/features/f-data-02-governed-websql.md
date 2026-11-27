@@ -152,23 +152,42 @@ curl -X DELETE http://localhost:8080/v1/statement/20261008_080000_00002_def456 \
 
 ### 4.3 Standard WebSQL JSON Endpoint (`POST /api/v1/sql`)
 
+The example is a stored statement with a list parameter, run with values (demo data set). The statement text stays fixed; only `parameters` change between runs.
+
 ```bash
 curl -X POST http://localhost:8080/api/v1/sql \
   -H "Authorization: Bearer <user-token>" \
   -H "Content-Type: application/json" \
   -d '{
-    "sql": "SELECT order_id, total_amount FROM sales.dbo.orders LIMIT 10"
+    "sql": "SELECT id, status, amount, created_at FROM finance.public.invoices WHERE status IN (@statuses) AND amount >= @minAmount ORDER BY id",
+    "parameters": { "statuses": ["PAID", "PENDING"], "minAmount": 100 },
+    "dataSource": "finance",
+    "page": { "size": 50 }
   }'
-
-# Response:
-# {
-#   "columns": ["order_id", "total_amount"],
-#   "rows": [
-#     { "order_id": "ORD-1001", "total_amount": 1450.00 }
-#   ],
-#   "rowCount": 1
-# }
 ```
+
+The answer (values are illustrative, `next` is an opaque string):
+
+```json
+{
+  "columns": [
+    { "name": "id", "type": "integer", "nullable": false, "masked": false },
+    { "name": "status", "type": "varchar", "nullable": true, "masked": false },
+    { "name": "amount", "type": "decimal(12,2)", "nullable": true, "masked": false },
+    { "name": "created_at", "type": "timestamp(3) with time zone", "nullable": true, "masked": false }
+  ],
+  "rows": [
+    { "id": 1, "status": "PENDING", "amount": 147.42, "created_at": "2026-03-01T12:00:00Z" },
+    { "id": 2, "status": "PAID", "amount": 284.84, "created_at": "2026-03-01T12:05:00Z" }
+  ],
+  "rowCount": 50,
+  "truncated": true,
+  "page": { "number": 1, "offset": 0, "size": 50 },
+  "next": "<opaque token>"
+}
+```
+
+For the next page send the same body with `"next": "<value of next>"` instead of `page`.
 
 ---
 
@@ -191,6 +210,76 @@ The body is written explicitly and never contains the SQL text, an `instance` wi
 
 WebSQL adds no ordering of its own. A user `ORDER BY` on a column without an index sorts the whole table in the source and can hit the timeout on large tables; this is by design. Remedy: add an index on the ordering column in the source, narrow the query, or raise `WebSql:ExecutionTimeoutSeconds`.
 
+### 4.5 WebSQL Reference (`POST /api/v1/sql`)
+
+The same content is served to agents in the query guide (`autheris://api/docs/query-guide`, shown only while `Gateway:WebSql:Enabled` is `true`). The OpenAPI document is `GET /api/v1/sql/openapi.json`; it requires authentication and answers like an unknown route while WebSQL is disabled.
+
+#### 4.5.1 Entry points
+
+- HTTP: `POST /api/v1/sql` with a JSON body `{ "sql", "parameters", "dataSource", "page", "next", "resultCache" }`, or the statement alone as `text/plain` or `application/sql`.
+- MCP: `query_sql` takes `query` and optional `limit` and `cursor`; it takes no `parameters`. While `hasMore` is true, call it again with the returned `cursor`. `list_datasets` returns each table's `sqlName` (`<catalog>.<schema>.<table>`).
+
+#### 4.5.2 Dialect and names
+
+- Trino grammar, one statement per request. Only `SELECT` is accepted unless `Gateway:WebSql:AllowDml` is enabled; DML is then governed like reads.
+- Use `LIMIT n`, not `TOP n`. Name tables `<dataSource>.<schema>.<table>`, or `<schema>.<table>` in the request's `dataSource` (or the default data source). Physical database- or server-qualified names are refused (`INVALID_IDENTIFIER_QUALIFICATION`).
+
+#### 4.5.3 Parameters and lists
+
+- Write `@name` in the statement and pass the value in `parameters` under `name` or `@name`. Names ignore case; two spellings of one name are refused (400 `BAD_REQUEST`). Inside a string literal or a quoted identifier, `@name` is text.
+- Values are string, number, boolean or null; an object is refused (400). Every `@name` in the statement needs a value.
+- A JSON array is a list parameter. It is allowed only as the single item of `IN (@ids)` or `NOT IN (@ids)` (`SQL_LIST_PARAM_POSITION`). All elements have one type: string, number or boolean (`SQL_LIST_PARAM_TYPE`). No element is null (`SQL_LIST_PARAM_NULL`). At most `MaxListParameterValues` distinct values (1000 by default, fewer on some data sources) and `MaxListParameters` lists (8) per request (`SQL_LIST_PARAM_TOO_LARGE`).
+- Parameter names starting with `__` or with another gateway-internal prefix are reserved and refused (403 `SQL_POLICY_VIOLATION`).
+- `LIMIT`, `OFFSET` and `FETCH` take integer literals only; a parameter in their place is not supported. Use `page.size` to choose the rows per call.
+
+#### 4.5.4 Paging (`page`, `next`)
+
+- Request a page with `"page": { "size": n }` (1 to `MaxAllowedRows`, else 400 `BAD_REQUEST`). The answer carries `page` (`number`, `offset`, `size`) and, while more rows exist, `next`.
+- For the following page send the same `sql`, `parameters` and `dataSource` with `"next": "<token>"` (at most 512 characters). `page` may be left out; if sent, its `size` must match. The token is signed and bound to the statement, the parameter values, the caller, the tenant, the data source and the transport, and it expires after `Paging:TokenLifetimeMinutes` (15). Otherwise: 400 `SQL_PAGING_TOKEN_INVALID`.
+- A paged statement needs a top-level `ORDER BY` and no `LIMIT` or `OFFSET` of its own. End the `ORDER BY` with a unique column (for example the primary key); the gateway adds no ordering.
+- `pagingUnavailable` says why there is no `next`: `order_by_required`, `statement_has_limit` or `federated` (the rows come back unpaged under the normal row limit); `offset_limit` (the next offset would exceed `Paging:MaxOffset`, 10000); `caller_not_bindable` (the caller has no stable identity).
+- Paging is refused together with `wait_timeout` and for statements other than `SELECT` (400 `SQL_PAGING_UNSUPPORTED`).
+
+#### 4.5.5 Refusals
+
+- Masked columns come back masked (`columns[].masked: true`). They cannot be used in `WHERE`, `JOIN ... ON` or `ORDER BY` (403 `FILTER_ON_MASKED_COLUMN`), nor grouped or aggregated (403 `AGGREGATION_ON_MASKED_COLUMN`).
+- Only functions the gateway permits for the data source's dialect are accepted; any other function is refused (403 `SQL_POLICY_VIOLATION`).
+- Comments (`--` and `/* */`) are accepted and never sent to the data source; a nested block comment is a syntax error. Optimizer hints are not passed on.
+
+#### 4.5.6 Time stamps and time zones
+
+- Date-time values are written in ISO 8601 with a `Z` suffix, for example `2026-03-01T12:00:00Z`. Values of `timestamp with time zone` columns are converted to UTC; values without a zone are written as stored, also with `Z`.
+- `convert_timezone(from_zone, to_zone, ts)` and `convert_timezone(to_zone, zoned_ts)` return the wall-clock time in `to_zone`. Zones are IANA names (`Europe/Berlin`), given as string literals or scalar parameters. The result is a `timestamp` without zone, so it is also written with `Z`, although it is local time in `to_zone`. At most 8 calls per statement. Errors: `SQL_TIMEZONE_INVALID` (400), `SQL_TIMEZONE_ARGUMENT` (422), `SQL_FUNCTION_UNSUPPORTED_DIALECT` (422).
+
+#### 4.5.7 Limits and response fields
+
+- Statements up to `MaxQueryLength` characters (64000 by default); request bodies up to 2 MB. Execution stops after `ExecutionTimeoutSeconds` (30 by default; 504 `SQL_TIMEOUT`).
+- Without `LIMIT` at most `DefaultMaxRows` rows (1000 by default); a `LIMIT` above `MaxAllowedRows` (10000 by default) is capped. `truncated: true` (and the header `X-Autheris-Truncated: true`) means that more rows existed.
+- Response: `columns` (`name`, `type` as a Trino type name, `nullable`, `masked`), `rows` (objects by column name; arrays in column order with `?format=arrays`), `rowCount`, `truncated`, and when present `page`, `next`, `pagingUnavailable`, `resultCache` and `indexHints`. `indexHints` lists tables read without a usable index (`reason: NO_USABLE_INDEX`) and the columns an index would help with.
+
+#### 4.5.8 Errors
+
+Errors are RFC 9457 problem details (`Content-Type: application/problem+json`) with the members `type` (`urn:autheris:error:<CODE>`), `title`, `status`, `detail`, `code`, `traceId`, `correlationId` and `instance`; some also carry the optional members `line`, `column`, `limit`, `hint` or `retryAfterSeconds`. Branch on `code`, never on `detail`.
+
+```json
+{
+  "type": "urn:autheris:error:SQL_PAGING_TOKEN_INVALID",
+  "title": "Bad Request",
+  "status": 400,
+  "detail": "The paging token is not valid for this request.",
+  "code": "SQL_PAGING_TOKEN_INVALID",
+  "traceId": "0HN..."
+}
+```
+
+| Status | Codes |
+|---|---|
+| 400 | `SQL_SYNTAX_ERROR`, `SQL_PARAMETER_MISSING`, `SQL_LIST_PARAM_*`, `SQL_PAGING_TOKEN_INVALID`, `SQL_PAGING_UNSUPPORTED`, `BAD_REQUEST` |
+| 403 | `SQL_POLICY_DENIED`, `SQL_POLICY_VIOLATION`, `FILTER_ON_MASKED_COLUMN`, `AGGREGATION_ON_MASKED_COLUMN` |
+| 422 | `SQL_CONSTRUCT_NOT_SUPPORTED`, `SQL_LIMIT_EXCEEDED`, `SQL_TIMEZONE_ARGUMENT` |
+| 429 | `RATE_LIMIT_EXCEEDED`, `QUERY_COST_QUOTA_EXCEEDED` (with `Retry-After`) |
+| 504 | `SQL_TIMEOUT` |
+
 ---
 
 ## 5. Configuration Example
@@ -201,12 +290,15 @@ WebSQL adds no ordering of its own. A user `ORDER BY` on a column without an ind
     "WebSql": {
       "Enabled": true,
       "DefaultDataSourceName": "default",
-      "AllowedDataSources": ["sales", "finance", "analytics"],
-      "MaxResultRows": 5000,
+      "DefaultMaxRows": 1000,
+      "MaxAllowedRows": 10000,
+      "MaxQueryLength": 64000,
+      "MaxListParameterValues": 1000,
+      "MaxListParameters": 8,
       "AllowDml": false,
       "MaxAffectedRows": 1000,
-      "RejectUnfilteredDml": true,
-      "ExecutionTimeoutSeconds": 30
+      "ExecutionTimeoutSeconds": 30,
+      "Paging": { "MaxOffset": 10000, "TokenLifetimeMinutes": 15 }
     },
     "RowLimits": {
       "Trino": { "DefaultMaxRows": 5000, "MaxAllowedRows": 25000 },

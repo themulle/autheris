@@ -168,6 +168,47 @@ public sealed partial class McpQuerySqlPagingTests
         executedSql.ShouldBeEmpty();
     }
 
+    private const string OptionalSql = "SELECT id, name FROM sales.public.orders WHERE (@n IS NULL OR name <> @n) ORDER BY id";
+
+    [Fact]
+    public async Task QuerySql_JsonNullParameter_DropsTheOptionalFilter()
+    {
+        var bound = new List<IReadOnlyList<object?>>();
+        var (handler, _, executedSql) = CreatePipeline(maxResultRows: 5, boundValues: bound);
+
+        var json = await handler.ExecuteToolAsync(QuerySqlTool, """{"query":"SELECT id, name FROM sales.public.orders WHERE (@n IS NULL OR name <> @n) ORDER BY id","parameters":{"n":null}}""", CreateSession());
+
+        ErrorCode(json).ShouldBeNull();
+        executedSql.ShouldNotBeEmpty();
+        executedSql.ShouldAllBe(sql => !sql.Contains("<>", StringComparison.Ordinal) && !sql.Contains("IS NULL", StringComparison.OrdinalIgnoreCase));
+        Flatten(bound).ShouldAllBe(v => v != null);
+    }
+
+    [Fact]
+    public async Task QuerySql_SuppliedValue_KeepsTheOptionalFilter()
+    {
+        var (handler, _, executedSql) = CreatePipeline(maxResultRows: 5);
+
+        var json = await handler.ExecuteToolAsync(QuerySqlTool, Args(OptionalSql, new { n = "x" }), CreateSession());
+
+        ErrorCode(json).ShouldBeNull();
+        executedSql.ShouldNotBeEmpty();
+        executedSql.ShouldAllBe(sql => sql.Contains("<>", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task QuerySql_AbsentParameter_InOptionalFilter_IsStillRefused()
+    {
+        var (handler, _, executedSql) = CreatePipeline(maxResultRows: 5);
+
+        // an absent parameter is never read as NULL: it must not drop the predicate
+        var mcp = await TryRunAsync(handler, Args(OptionalSql, new { other = "x" }));
+
+        mcp.Error.ShouldBeOfType<TrinoSqlEngine.SqlSyntaxErrorException>();
+        executedSql.ShouldBeEmpty();
+    }
+
     [Fact]
     [Trait("Category", "Security")]
     public async Task QuerySql_ListOutsideIn_MapsToListParamPosition()
@@ -244,7 +285,7 @@ public sealed partial class McpQuerySqlPagingTests
         var first = await handler.ExecuteToolAsync(QuerySqlTool, Args(ParamSql, new { n = "zzz" }), session);
         var cursor = JsonDocument.Parse(first).RootElement.GetProperty("cursor").GetString()!;
 
-        var tampered = cursor[..^1] + (cursor[^1] == 'A' ? 'B' : 'A');
+        var tampered = FlipMidMacChar(cursor);
         var tamperedCode = ErrorCode(await handler.ExecuteToolAsync(QuerySqlTool, Args(ParamSql, new { n = "zzz" }, tampered), session));
         tamperedCode.ShouldBe("INVALID_PARAMS");
 

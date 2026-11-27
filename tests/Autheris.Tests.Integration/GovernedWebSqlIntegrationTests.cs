@@ -267,6 +267,16 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
     [InlineData("SELECT a.id FROM masked_orders a JOIN masked_orders b ON a.ssn = b.ssn")]
     public async Task WebSql_MaskedColumnInNonProjectionPosition_ReturnsFilterOnMaskedColumnWithoutColumnName(string sql)
     {
+        var (status, body) = await PostMaskedAsync(sql, null);
+
+        status.ShouldBe(HttpStatusCode.Forbidden);
+        body.ShouldContain("FILTER_ON_MASKED_COLUMN");
+        body.ShouldContain("Masked columns cannot be used in filters, joins, or ordering.");
+        body.ShouldNotContain("ssn");
+    }
+
+    private async Task<(HttpStatusCode Status, string Body)> PostMaskedAsync(string sql, Dictionary<string, object?>? parameters)
+    {
         await RegisterTableAsync(
             "masked_orders",
             new Dictionary<string, MaskingRule> { ["ssn"] = new MaskingRule { RuleType = "REDACT", Replacement = "XXX" } },
@@ -280,14 +290,36 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
         var client = _factory.CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-WEBSQL");
         client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant_123");
+        var response = await client.PostAsJsonAsync("/api/v1/sql", new { sql, parameters });
+        return (response.StatusCode, await response.Content.ReadAsStringAsync());
+    }
 
-        var response = await client.PostAsJsonAsync("/api/v1/sql", new { sql });
-        response.StatusCode.ShouldBe(HttpStatusCode.Forbidden);
+    [Theory]
+    [InlineData("SELECT id FROM masked_orders ORDER BY CASE @sort WHEN 'ssn' THEN ssn END, id", "ssn")]
+    [InlineData("SELECT id FROM masked_orders ORDER BY CASE WHEN ssn IS NULL THEN 0 ELSE 1 END, id", "id")]
+    [Trait("Category", "Security")]
+    public async Task SelectableSort_MaskedColumn_Returns403(string sql, string sort)
+    {
+        var (status, body) = await PostMaskedAsync(sql, sort == "ssn" ? new Dictionary<string, object?> { ["sort"] = sort } : null);
 
-        var body = await response.Content.ReadAsStringAsync();
+        status.ShouldBe(HttpStatusCode.Forbidden);
         body.ShouldContain("FILTER_ON_MASKED_COLUMN");
-        body.ShouldContain("Masked columns cannot be used in filters, joins, or ordering.");
         body.ShouldNotContain("ssn");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task OptionalFilter_MaskedColumnInBranch_IsRefusedForNullAndValue()
+    {
+        const string sql = "SELECT id FROM masked_orders WHERE (@s IS NULL OR ssn = @s)";
+
+        var forNull = await PostMaskedAsync(sql, new Dictionary<string, object?> { ["s"] = null });
+        var forValue = await PostMaskedAsync(sql, new Dictionary<string, object?> { ["s"] = "123" });
+
+        forNull.Status.ShouldBe(HttpStatusCode.Forbidden);
+        forValue.Status.ShouldBe(HttpStatusCode.Forbidden);
+        forNull.Body.ShouldContain("FILTER_ON_MASKED_COLUMN");
+        forValue.Body.ShouldContain("FILTER_ON_MASKED_COLUMN");
     }
 
     [Fact]

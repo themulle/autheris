@@ -40,6 +40,34 @@ public sealed class TypedAggregateSdlTests
     }
 
     [Fact]
+    public async Task GroupRowType_HasTypedFields_AndBucketArgsOnDateTimeOnly()
+    {
+        var sdl = await SdlAsync();
+
+        var block = TypeBlock(sdl, "sales_dbo_orders_group_row");
+        block.ShouldContain("region: String");
+        block.ShouldContain("count: Long!");
+        block.ShouldContain("_isMergedOther: Boolean!");
+        block.ShouldContain("amount_sum: Decimal");
+        block.ShouldContain("amount_avg: Decimal");
+        block.ShouldContain("qty_sum: Long");
+        block.ShouldContain("region_min: String");
+        block.ShouldContain("created_max: DateTime");
+        block.ShouldContain("is_vip_count_distinct: Long");
+        block.ShouldNotContain("region_sum");
+        block.ShouldNotContain("is_vip_sum");
+        Regex.IsMatch(block, @"created\(\s*bucket: TimeBucketInterval,?\s*timeZone: String\s*\): String").ShouldBeTrue();
+        block.ShouldNotContain("region(");
+        block.ShouldNotContain("amount(");
+        var start = sdl.IndexOf("sales_dbo_orders_groups(", StringComparison.Ordinal);
+        var signature = sdl[start..sdl.IndexOf("[sales_dbo_orders_group_row!]!", start, StringComparison.Ordinal)];
+        signature.ShouldContain("where: sales_dbo_orders_filter");
+        signature.ShouldContain("orderBy: [sales_dbo_orders_aggregate_order_by!]");
+        signature.ShouldContain("limit: Int = 100");
+        signature.ShouldNotContain("groupBy");
+    }
+
+    [Fact]
     public async Task AggregateResultCount_HasDescriptionStatingSourceRowSemantics()
     {
         var sdl = await SdlAsync();

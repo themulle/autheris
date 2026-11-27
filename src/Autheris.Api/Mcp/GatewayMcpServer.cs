@@ -44,7 +44,7 @@ public static class GatewayMcpServer
 
         services.AddMcpServer(o =>
             {
-                o.ServerInfo = new Implementation { Name = ServerName, Version = "2.0.0" };
+                o.ServerInfo = BuildServerInfo();
                 o.ServerInstructions = McpDatasetTools.BuildServerInstructions(ReadPathSwitches.From(options));
             })
             .WithHttpTransport(t => t.SessionMode = HttpServerSessionMode.Stateless)
@@ -343,6 +343,21 @@ public static class GatewayMcpServer
         }
     ];
 
+    /// <summary>The MCP <c>serverInfo</c>: the host release version (no build metadata, <c>0.0.0-dev</c> without a release build).</summary>
+    internal static Implementation BuildServerInfo() => new() { Name = ServerName, Version = ResolveServerVersion() };
+
+    private static string ResolveServerVersion()
+    {
+        try
+        {
+            return Autheris.Api.Hosting.ModuleLoader.ResolveHostVersion();
+        }
+        catch (InvalidOperationException)
+        {
+            return "0.0.0-dev";
+        }
+    }
+
     public static GetPromptResult BuildPrompt(string promptName, IReadOnlyDictionary<string, string?>? arguments, IReadPathSwitches? switches = null)
     {
         // A gated prompt answers exactly like an unknown one (115 ST-115-14).
@@ -372,10 +387,7 @@ public static class GatewayMcpServer
                         Role = ModelContextProtocol.Protocol.Role.User,
                         Content = new TextContentBlock
                         {
-                            Text = $"I need to explore the dataset '{ds}'. Please:\n" +
-                                   $"1. Call describe_dataset or get_my_permissions for '{ds}' to view accessible columns, data types, and masking rules.\n" +
-                                   $"2. Call sample_rows with count=5 to inspect representative records.\n" +
-                                   $"3. Recommend the best query strategy (query_sql, query_dataset, or query_graphql) including pagination and filter criteria."
+                            Text = McpDatasetTools.BuildExplorePromptText(switches, ds)
                         }
                     }
                 ]
@@ -392,10 +404,7 @@ public static class GatewayMcpServer
                     Role = ModelContextProtocol.Protocol.Role.User,
                     Content = new TextContentBlock
                     {
-                        Text = $"Perform an access and compliance audit on dataset '{ds}' for the current caller:\n" +
-                               $"1. Check effective authorization and row-level security constraints.\n" +
-                               $"2. List all columns with their sensitivity classifications and masking states (clear, mask, deny).\n" +
-                               $"3. Inspect data lineage via get_data_lineage to identify downstream consumers and potential compliance risks."
+                        Text = McpDatasetTools.BuildAuditPromptText(switches, ds)
                     }
                 }
             ]
@@ -471,16 +480,27 @@ public static class GatewayMcpServer
             return ToolError(result.ErrorMessage ?? result.ContentJson);
         }
 
+        var meta = new System.Text.Json.Nodes.JsonObject
+        {
+            ["isMasked"] = result.IsMasked,
+            ["estimatedTokens"] = result.EstimatedTokens,
+            ["truncated"] = result.TruncatedDueToBudget
+        };
+        if (result.TruncatedDueToBudget)
+        {
+            meta["truncationReason"] = "TOKEN_BUDGET";
+        }
+
+        if (result.ReturnedRows is { } returnedRows)
+        {
+            meta["returnedRows"] = returnedRows;
+        }
+
         return new CallToolResult
         {
             Content = [new TextContentBlock { Text = result.ContentJson }],
             IsError = false,
-            Meta = new System.Text.Json.Nodes.JsonObject
-            {
-                ["isMasked"] = result.IsMasked,
-                ["estimatedTokens"] = result.EstimatedTokens,
-                ["truncated"] = result.TruncatedDueToBudget
-            }
+            Meta = meta
         };
     }
 

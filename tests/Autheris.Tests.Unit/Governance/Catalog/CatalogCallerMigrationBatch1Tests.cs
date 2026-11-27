@@ -191,7 +191,7 @@ public sealed class CatalogCallerMigrationBatch1Tests
         var compiler = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance, consentRepo: new StubConsentRepository([consent]));
 
         var scoped = await compiler.GetSemanticResourcesAsync("sales", UserWithSid());
-        scoped.ShouldContain(r => r.Uri == "glossary://sales/orders");
+        scoped.ShouldContain(r => r.Uri == "glossary://sales/dbo/orders");
         scoped.ShouldNotContain(r => r.Uri.Contains("payroll", StringComparison.OrdinalIgnoreCase));
 
         var item = await compiler.ReadSemanticResourceAsync(UserWithSid(), "glossary://sales/orders");

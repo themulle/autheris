@@ -296,6 +296,32 @@ public sealed class McpDatasetToolWiringTests
         instructions.ShouldContain("describe_dataset");
     }
 
+    [Fact]
+    [Trait("Category", "Security")]
+    public void SEC_1209_ServerInfo_version_is_release_version_without_build_metadata()
+    {
+        var version = Autheris.Api.Mcp.GatewayMcpServer.BuildServerInfo().Version;
+
+        version.ShouldBe(Autheris.Api.Hosting.ModuleLoader.ResolveHostVersion());
+        version.ShouldNotBe("2.0.0");
+        version.ShouldNotContain("+");
+        version.ShouldNotBeNullOrWhiteSpace();
+    }
+
+    [Fact]
+    public void AddGatewayMcpServer_wires_the_release_version_and_the_enabled_tool_instructions()
+    {
+        var services = new Microsoft.Extensions.DependencyInjection.ServiceCollection();
+        Autheris.Api.Mcp.GatewayMcpServer.AddGatewayMcpServer(services, new GatewayOptions { Mcp = new McpOptions { Enabled = true } });
+        using var provider = Microsoft.Extensions.DependencyInjection.ServiceCollectionContainerBuilderExtensions.BuildServiceProvider(services);
+
+        var options = Microsoft.Extensions.DependencyInjection.ServiceProviderServiceExtensions
+            .GetRequiredService<IOptions<ModelContextProtocol.Server.McpServerOptions>>(provider).Value;
+
+        options.ServerInfo!.Version.ShouldBe(Autheris.Api.Hosting.ModuleLoader.ResolveHostVersion());
+        options.ServerInstructions!.ShouldContain(McpResourceProvider.QueryGuideDocUri);
+    }
+
     private static GatewayMcpQueryExecutor Executor(IMcpDatasetCatalog catalog, IGatewayExecutionService? gateway = null) => new(
         PassiveExecutorProvider,
         gateway ?? new StubGatewayExecutionService(),

@@ -83,7 +83,8 @@ public sealed class McpAccessHintTests
             ["Endpoints"] = JsonSerializer.Serialize(list.Endpoints ?? []),
             ["DatasetAccess"] = JsonSerializer.Serialize(description.OtherAccess ?? []),
             ["ListDescription"] = McpDatasetTools.Definitions(sw).Single(t => t.Name == McpDatasetTools.ListDatasets).Description,
-            ["Instructions"] = McpDatasetTools.BuildServerInstructions(sw)
+            ["Instructions"] = McpDatasetTools.BuildServerInstructions(sw),
+            ["QueryGraphQlDescription"] = McpDatasetTools.Definitions(sw).Single(t => t.Name == McpDatasetTools.QueryGraphQl).Description
         };
     }
 
@@ -233,5 +234,94 @@ public sealed class McpAccessHintTests
         public bool IsResourceEnabled(string resourceUri) => false;
         public bool IsPromptEnabled(string promptName) => false;
         public void RecordDropped(string toolName) { }
+    }
+
+    [Fact]
+    public void Instructions_name_the_query_guide_when_Api_is_off_and_Query_is_on()
+    {
+        var api = new McpToolGroupOptions { Api = false };
+        var text = McpDatasetTools.BuildServerInstructions(ReadPathSwitches.From(new GatewayOptions { Mcp = new McpOptions { Tools = api } }));
+
+        text.ShouldContain(McpResourceProvider.QueryGuideDocUri);
+        text.ShouldNotContain("invoke_api");
+        text.ShouldNotContain("describe_api");
+
+        var queryOff = new McpToolGroupOptions { Query = false };
+        McpDatasetTools.BuildServerInstructions(ReadPathSwitches.From(new GatewayOptions { Mcp = new McpOptions { Tools = queryOff } }))
+            .ShouldNotContain("query-guide");
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public void SEC_1209_Instructions_have_no_count_and_no_brief_recommendation()
+    {
+        var text = McpDatasetTools.BuildServerInstructions(ReadPathSwitches.From(Opts()));
+
+        System.Text.RegularExpressions.Regex.IsMatch(text, @"\d[\d,]*\+? datasets").ShouldBeFalse();
+        text.ShouldNotContain("brief: true");
+        text.ShouldNotContain("brief:true");
+        text.ShouldNotContain("(brief");
+        text.ShouldNotContain("10,000");
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public void SEC_1209_Null_switches_name_no_tool()
+    {
+        var hints = new McpAccessHints(null);
+        var texts = new[]
+        {
+            McpDatasetTools.BuildServerInstructions(null),
+            McpDatasetTools.BuildExplorePromptText(null, "a.b.c"),
+            McpDatasetTools.BuildAuditPromptText(null, "a.b.c"),
+            hints.CatalogSummaryTip() ?? string.Empty,
+            hints.QueryGraphQlDescription()
+        };
+
+        foreach (var text in texts)
+        {
+            foreach (var name in McpToolGroups.BuiltInNames.Where(n => n != McpDatasetTools.QueryGraphQl))
+            {
+                text.ShouldNotContain(name);
+            }
+        }
+
+        McpDatasetTools.BuildServerInstructions(null).ShouldNotContain("query-guide");
+        hints.CatalogSummaryTip().ShouldBeNull();
+    }
+
+    [Theory]
+    [InlineData(false, "default for reading data")]
+    [InlineData(true, "Query data with query_sql.")]
+    public void Instructions_state_one_query_tool_rule(bool sqlOnly, string expected)
+    {
+        var text = McpDatasetTools.BuildServerInstructions(ReadPathSwitches.From(Opts(disabled: sqlOnly ? ["query_graphql", "query_dataset"] : [])));
+
+        text.ShouldContain(expected);
+        if (!sqlOnly) text.ShouldContain("query_sql when you need SQL or a query GraphQL cannot express");
+    }
+
+    [Fact]
+    public void Instructions_without_GraphQL_do_not_call_a_tool_the_default()
+    {
+        var text = McpDatasetTools.BuildServerInstructions(ReadPathSwitches.From(Opts(disabled: "query_graphql")));
+
+        text.ShouldNotContain("default");
+        text.ShouldNotContain("GraphQL");
+        text.ShouldContain("use query_sql when you need SQL;");
+    }
+
+    [Trait("Category", "Security")]
+    [Fact]
+    public void SEC_1209_Query_graphql_description_omits_disabled_describe_dataset()
+    {
+        var on = new McpAccessHints(ReadPathSwitches.From(Opts())).QueryGraphQlDescription();
+        var off = new McpAccessHints(ReadPathSwitches.From(Opts(disabled: "describe_dataset"))).QueryGraphQlDescription();
+
+        on.ShouldContain("describe_dataset");
+        on.ShouldStartWith("Default tool for reading data.");
+        off.ShouldNotContain("describe_dataset");
+        McpDatasetTools.Definitions(ReadPathSwitches.From(Opts(disabled: "describe_dataset"))).Single(t => t.Name == McpDatasetTools.QueryGraphQl)
+            .Description.ShouldBe(off);
     }
 }

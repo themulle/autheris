@@ -67,6 +67,13 @@ internal sealed class FakeUcStore : IUcProvisioningStore
         return Task.CompletedTask;
     }
 
+    public Task<IReadOnlyList<TenantId>> ListFeedbackTenantsAsync(string dataSource, CancellationToken ct) =>
+        Task.FromResult<IReadOnlyList<TenantId>>(Feedback.Values
+            .Where(f => f.DataSource == dataSource && f.State != UcGrantState.Revoked)
+            .Select(f => f.Tenant)
+            .Distinct()
+            .ToList());
+
     public Task<IReadOnlyList<UcGrantFeedback>> ListFeedbackAsync(TenantId tenant, string dataSource, CancellationToken ct) =>
         Task.FromResult<IReadOnlyList<UcGrantFeedback>>(Feedback.Values.Where(f => f.Tenant == tenant && f.DataSource == dataSource).ToList());
 
@@ -81,6 +88,11 @@ internal sealed class FakeUcStore : IUcProvisioningStore
         TenantId tenant, string dataSource, long fencingToken, IReadOnlyList<UcGrantFeedback> rows, IReadOnlyList<AuditLogEntry> audit,
         IReadOnlyList<UcFeedbackEvent> events, CancellationToken ct)
     {
+        if (rows.Any(r => r.Tenant != tenant))
+        {
+            throw new ArgumentException("Every feedback row must belong to the tenant.", nameof(rows));
+        }
+
         Events.AddRange(events);
         LastToken = fencingToken;
         foreach (var row in rows)
@@ -161,10 +173,18 @@ internal sealed class FakeUcClient : IUnityCatalogPermissionsClient
         return Task.FromResult(Read(type, fullName));
     }
 
+    /// <summary>When set, the effective-permissions read fails with this code (as for a principal without elevated catalog rights).</summary>
+    public string? EffectiveFailure { get; set; }
+
     public Task<bool> HasEffectivePrivilegeAsync(
         string dataSource, UcSecurableType type, string fullName, string principal, IReadOnlyCollection<string> privileges, CancellationToken ct)
     {
         Calls.Add("effective:" + fullName + ":" + principal);
+        if (EffectiveFailure is { } failure)
+        {
+            throw new UcProvisioningException(failure);
+        }
+
         return Task.FromResult(CatalogAccess.Contains(principal));
     }
 
@@ -237,7 +257,8 @@ internal static class UcProvisioningScenario
     public const string GroupOid = "8b0c4b5e-6f0e-4a63-9a5e-1b2a4f9d7c11";
     public const string OtherOid = "0f9d7c11-1b2a-4f9d-9a5e-8b0c4b5e6f0e";
 
-    public static GatewayOptions Options(DatabricksProvisioningMode mode = DatabricksProvisioningMode.Enforce, DatabricksDriftMode drift = DatabricksDriftMode.Report) => new()
+    public static GatewayOptions Options(
+        DatabricksProvisioningMode mode = DatabricksProvisioningMode.Enforce, DatabricksDriftMode drift = DatabricksDriftMode.Report, string tenant = "acme") => new()
     {
         DataSources = new SqlDataSourceOptions
         {
@@ -255,7 +276,7 @@ internal static class UcProvisioningScenario
                         {
                             Mode = mode,
                             DriftMode = drift,
-                            Tenant = "acme",
+                            Tenant = tenant,
                             AllowedSchemas = ["main.sales"],
                             Auth = new DatabricksAuthOptions { ClientId = "prov-sp", ClientSecretRef = "kv://prov" }
                         }
