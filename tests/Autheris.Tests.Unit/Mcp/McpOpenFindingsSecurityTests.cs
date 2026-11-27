@@ -329,24 +329,9 @@ public sealed class McpOpenFindingsSecurityTests
         await provider.DidNotReceiveWithAnyArgs().ReadAsync(default!, default!, default);
     }
 
-    private sealed class GuideProvider(bool enabled) : IMcpResourceProvider
-    {
-        public int Reads { get; private set; }
-
-        public bool IsNativeResource(string uri) => true;
-
-        public bool IsResourceEnabled(string uri) => enabled;
-
-        public Task<McpResourceContent> ReadAsync(string uri, McpSessionContext session, CancellationToken ct = default)
-        {
-            Reads++;
-            return Task.FromResult(new McpResourceContent(uri, "text/markdown", "# guide"));
-        }
-    }
-
     [Fact]
     [Trait("Category", "Security")]
-    public async Task SEC_1209_Guide_keeps_abac_guard()
+    public async Task SEC_1209_Guide_is_static_doc_with_api_describe_target_and_closed_gate_never_reads()
     {
         // The guide is a static API document like openapi.json: its guard target stays the API description object and the guardrail
         // treats it exactly like the other static documents. The target is neither widened nor removed, and a closed gate never reaches the guardrail.
@@ -657,5 +642,20 @@ public sealed class McpOpenFindingsSecurityTests
         AiDataGuardrailService.TryGetExecutorError(json, out var code).ShouldBeTrue();
         code.ShouldBe("INVALID_PARAMS");
         json.ShouldNotContain("needle-");
+    }
+
+    private sealed class GuideProvider(bool enabled) : IMcpResourceProvider
+    {
+        public int Reads { get; private set; }
+
+        public bool IsNativeResource(string uri) => true;
+
+        public bool IsResourceEnabled(string uri) => enabled;
+
+        public Task<McpResourceContent> ReadAsync(string uri, McpSessionContext session, CancellationToken ct = default)
+        {
+            Reads++;
+            return Task.FromResult(new McpResourceContent(uri, "text/markdown", "# guide"));
+        }
     }
 }
