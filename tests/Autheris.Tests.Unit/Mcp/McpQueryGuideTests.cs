@@ -43,6 +43,7 @@ public sealed class McpQueryGuideTests
         var guide = McpQueryGuideBuilder.Build(SwitchesFrom(), new GraphQLOptions());
 
         guide.ShouldContain("(@p IS NULL OR col = @p)");
+        guide.ShouldContain("ORDER BY CASE @sort WHEN");
         guide.ShouldContain("converted to UTC");
     }
 

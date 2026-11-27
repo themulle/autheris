@@ -469,6 +469,19 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
         Ids(rows).ShouldBe(new List<int> { 1, 6 });
     }
 
+    [SparkTheory]
+    [InlineData("region", new[] { 1, 6, 2 })]
+    [InlineData("status", new[] { 6, 1, 2 })]
+    [InlineData("unknown", new[] { 1, 2, 6 })]
+    [InlineData(null, new[] { 1, 2, 6 })]
+    public async Task SelectableSort_OrdersByChosenKey(string? sort, int[] expected)
+    {
+        RequireSpark();
+        var rows = await RunAsync("SELECT id FROM orders ORDER BY CASE __param_sort WHEN 'region' THEN region END, CASE __param_sort WHEN 'status' THEN status END, id", "acme",
+            new Dictionary<string, object?> { ["sort"] = sort }, nulls: sort is null ? ClientNullShapes.Create(["sort"]) : null);
+        Ids(rows).ShouldBe(expected.ToList());
+    }
+
     [SparkFact]
     public async Task ClientNamedParameter_And_PlanCacheRebinding()
     {

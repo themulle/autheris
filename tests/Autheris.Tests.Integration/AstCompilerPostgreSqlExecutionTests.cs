@@ -470,6 +470,27 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
         Ids(rows).ShouldBe(new List<int> { 1, 6 });
     }
 
+    [Theory]
+    [InlineData("region", new[] { 1, 6, 2 })]
+    [InlineData("status", new[] { 6, 1, 2 })]
+    [InlineData("unknown", new[] { 1, 2, 6 })]
+    [InlineData(null, new[] { 1, 2, 6 })]
+    public async Task SelectableSort_OrdersByChosenKey(string? sort, int[] expected)
+    {
+        var rows = await RunAsync("SELECT id FROM orders ORDER BY CASE __param_sort WHEN 'region' THEN region END, CASE __param_sort WHEN 'status' THEN status END, id", "acme",
+            new Dictionary<string, object?> { ["sort"] = sort }, nulls: sort is null ? ClientNullShapes.Create(["sort"]) : null);
+        Ids(rows).ShouldBe(expected.ToList());
+    }
+
+    [Fact]
+    public async Task SelectableSort_UnderRowPolicy_OrdersOnlyPolicyRows()
+    {
+        // the sort runs over the rows the tenant predicate lets through; the other tenant's row 5 never appears
+        const string sql = "SELECT id FROM orders ORDER BY CASE __param_sort WHEN 'region' THEN region END, CASE __param_sort WHEN 'status' THEN status END, id";
+        Ids(await RunAsync(sql, "acme", new Dictionary<string, object?> { ["sort"] = "status" })).ShouldBe(new List<int> { 6, 1, 2 });
+        Ids(await RunAsync(sql, "other", new Dictionary<string, object?> { ["sort"] = "status" })).ShouldBe(new List<int> { 5 });
+    }
+
     [Fact]
     public async Task ClientNamedParameter_IsBoundPositionally()
     {
