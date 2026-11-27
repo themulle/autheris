@@ -63,6 +63,16 @@ function randInt(min, max) {
   return Math.floor(Math.random() * (max - min + 1)) + min;
 }
 
+// True when the GraphQL response has no errors and data.<field> is a list (the per-table root fields return lists).
+function hasRows(res, field) {
+  try {
+    const body = JSON.parse(res.body);
+    return !(body.errors && body.errors.length > 0) && !!body.data && Array.isArray(body.data[field]);
+  } catch (e) {
+    return false;
+  }
+}
+
 // Generate unique UUID v4 string
 function generateUuid() {
   return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function(c) {
@@ -128,10 +138,10 @@ export default function () {
       const payload = JSON.stringify({
         query: `
           query LakehouseOrders($first: Int) {
-            table(domain: "lakehouse", name: "orders", schema: "dbo", first: $first) {
-              tableName
-              totalCount
-              jsonRows
+            lakehouse_dbo_orders(first: $first) {
+              orderId
+              amount
+              orderDate
             }
           }
         `,
@@ -141,30 +151,28 @@ export default function () {
       const res = http.post(TARGET_URL, payload, { headers: baseHeaders });
       check(res, {
         'lakehouse query status is 200': (r) => r.status === 200,
-        'lakehouse query returns jsonRows': (r) => r.body.includes('jsonRows'),
+        'lakehouse query returns rows': (r) => hasRows(r, 'lakehouse_dbo_orders'),
       });
       parseGraphQLResponse(res, latencyLakehouse);
     } else {
       const first = randInt(10, 50);
-      const after = randInt(0, 500);
+      const offset = randInt(0, 500);
 
       const payload = JSON.stringify({
         query: `
-          query SimpleInvoices($first: Int, $after: Int) {
-            table(domain: "finance", name: "invoices", schema: "public", first: $first, after: $after) {
-              tableName
-              totalCount
-              jsonRows
+          query SimpleInvoices($first: Int, $offset: Int) {
+            finance_public_invoices(first: $first, offset: $offset) {
+              id name amount email iban salary department status
             }
           }
         `,
-        variables: { first, after },
+        variables: { first, offset },
       });
 
       const res = http.post(TARGET_URL, payload, { headers: baseHeaders });
       check(res, {
         'simple query status is 200': (r) => r.status === 200,
-        'simple query returns jsonRows': (r) => r.body.includes('jsonRows'),
+        'simple query returns rows': (r) => hasRows(r, 'finance_public_invoices'),
       });
       parseGraphQLResponse(res, latencySimple);
     }
@@ -175,52 +183,42 @@ export default function () {
   // --------------------------------------------------------------------------
   else if (randSelector < 65) {
     const first = randInt(10, 30);
-    const after = randInt(0, 100);
+    const offset = randInt(0, 100);
 
     const query = SQLSERVER_ENABLED
       ? `
-        query CrossDatabaseTriDb($first: Int, $after: Int) {
-          postgresInvoices: table(domain: "finance", name: "invoices", schema: "public", first: $first, after: $after) {
-            tableName
-            totalCount
-            jsonRows
+        query CrossDatabaseTriDb($first: Int, $offset: Int) {
+          postgresInvoices: finance_public_invoices(first: $first, offset: $offset) {
+            id name amount email iban salary department status
           }
-          postgresItems: table(domain: "finance", name: "finance_items", schema: "public", first: $first, after: $after) {
-            tableName
-            totalCount
-            jsonRows
+          postgresItems: finance_public_finance_items(first: $first, offset: $offset) {
+            id parent_id product_name price
           }
-          sqlServerOrders: table(domain: "crm", name: "orders", schema: "dbo", first: $first, after: $after) {
-            tableName
-            totalCount
-            jsonRows
+          sqlServerOrders: crm_dbo_orders(first: $first, offset: $offset) {
+            id order_number customer_name email total_amount status
           }
         }
       `
       : `
-        query CrossDatabaseBiDb($first: Int, $after: Int) {
-          postgresInvoices: table(domain: "finance", name: "invoices", schema: "public", first: $first, after: $after) {
-            tableName
-            totalCount
-            jsonRows
+        query CrossDatabaseBiDb($first: Int, $offset: Int) {
+          postgresInvoices: finance_public_invoices(first: $first, offset: $offset) {
+            id name amount email iban salary department status
           }
-          postgresItems: table(domain: "finance", name: "finance_items", schema: "public", first: $first, after: $after) {
-            tableName
-            totalCount
-            jsonRows
+          postgresItems: finance_public_finance_items(first: $first, offset: $offset) {
+            id parent_id product_name price
           }
         }
       `;
 
-    const payload = JSON.stringify({ query, variables: { first, after } });
+    const payload = JSON.stringify({ query, variables: { first, offset } });
     const res = http.post(TARGET_URL, payload, { headers: baseHeaders });
     const checks = {
       'cross-db query status is 200': (r) => r.status === 200,
-      'cross-db postgres data present': (r) => r.body.includes('postgresInvoices'),
-      'cross-db items data present': (r) => r.body.includes('postgresItems'),
+      'cross-db postgres data present': (r) => hasRows(r, 'postgresInvoices'),
+      'cross-db items data present': (r) => hasRows(r, 'postgresItems'),
     };
     if (SQLSERVER_ENABLED) {
-      checks['cross-db sqlserver data present'] = (r) => r.body.includes('sqlServerOrders');
+      checks['cross-db sqlserver data present'] = (r) => hasRows(r, 'sqlServerOrders');
     }
     check(res, checks);
     parseGraphQLResponse(res, latencyCrossDb);
@@ -238,10 +236,9 @@ export default function () {
       const payload = JSON.stringify({
         query: `
           query InvoicesPaged($first: Int) {
-            table(domain: "finance", name: "invoices", first: $first) {
-              tableName
-              totalCount
-              jsonRows
+            finance_public_invoices(first: $first) {
+              id name amount email iban salary department status
+              created_at
             }
           }
         `,
@@ -251,7 +248,7 @@ export default function () {
       const res = http.post(TARGET_URL, payload, { headers: baseHeaders });
       check(res, {
         'complex query status is 200': (r) => r.status === 200,
-        'complex items present': (r) => r.body.includes('jsonRows'),
+        'complex items present': (r) => hasRows(r, 'finance_public_invoices'),
       });
       parseGraphQLResponse(res, latencyComplex);
     } else {
@@ -265,7 +262,10 @@ export default function () {
               tableName
               displayName
               sensitivity
-              columns
+              columns {
+                name
+                dataType
+              }
             }
           }
         `,
@@ -274,7 +274,7 @@ export default function () {
       const res = http.post(TARGET_URL, payload, { headers: baseHeaders });
       check(res, {
         'catalog query status is 200': (r) => r.status === 200,
-        'catalog lists tables': (r) => r.body.includes('catalog'),
+        'catalog lists tables': (r) => hasRows(r, 'catalog'),
       });
       parseGraphQLResponse(res, latencyComplex);
     }
@@ -341,10 +341,10 @@ export default function () {
       const payload = JSON.stringify({
         query: `
           query HugeResponse {
-            table(domain: "finance", name: "invoices", schema: "public", first: 99999) {
-              tableName
-              totalCount
-              jsonRows
+            finance_public_invoices(first: 99999) {
+              id
+              name
+              amount
             }
           }
         `,
@@ -359,9 +359,9 @@ export default function () {
       const payload = JSON.stringify({
         query: `
           query BlockedAccess {
-            table(domain: "finance", name: "invoices", schema: "public", first: 10) {
-              tableName
-              jsonRows
+            finance_public_invoices(first: 10) {
+              id
+              name
             }
           }
         `,
@@ -376,9 +376,8 @@ export default function () {
       const payload = JSON.stringify({
         query: `
           query ProbingSecretTable {
-            table(domain: "shadow", name: "secret_vault", schema: "dbo", first: 10) {
-              tableName
-              jsonRows
+            shadow_dbo_secret_vault(first: 10) {
+              id
             }
           }
         `,
