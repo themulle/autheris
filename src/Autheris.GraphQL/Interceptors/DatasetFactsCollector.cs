@@ -147,7 +147,7 @@ public sealed class DatasetFactsCollector
             return null;
         }
 
-        var caller = new CatalogCaller(principal, GraphQlCallerPrincipal.ResolveContextTenantId(ctx, ctx.Services.GetService<IHttpContextAccessor>()), CatalogChannel.GraphQl);
+        var caller = new CatalogCaller(principal, ResolveTenant(ctx, principal), CatalogChannel.GraphQl);
         var batch = await visibility.FindVisibleManyAsync(caller, [table], ctx.RequestAborted).ConfigureAwait(false);
         if (!batch.Rows.TryGetValue(table, out var row))
         {
@@ -155,5 +155,14 @@ public sealed class DatasetFactsCollector
         }
 
         return new VisibleDataset(McpDatasetCatalog.DatasetId(row.Table.Identifier), McpDatasetCatalog.BoundedTags(row.Table, MaxTags, MaxTagLength));
+    }
+
+    // Same tenant the governed tree read decided access with (the principal's tenant claim); the HTTP context is only a fallback.
+    private static TenantId ResolveTenant(IResolverContext ctx, ClaimsPrincipal? principal)
+    {
+        var tenant = principal.GetTenantId();
+        return string.IsNullOrWhiteSpace(tenant.Value)
+            ? GraphQlCallerPrincipal.ResolveContextTenantId(ctx, ctx.Services.GetService<IHttpContextAccessor>())
+            : tenant;
     }
 }
