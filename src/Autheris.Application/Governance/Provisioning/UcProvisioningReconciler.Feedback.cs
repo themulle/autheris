@@ -13,6 +13,10 @@ public sealed partial class UcProvisioningReconciler
     public const string ProvisioningOffReason = "PROVISIONING_OFF";
     public const string DryRunReason = "DRY_RUN";
     public const string CatalogAccessMissingReason = "CATALOG_ACCESS_MISSING";
+    public const string CatalogAccessUnverifiedReason = "CATALOG_ACCESS_UNVERIFIED";
+
+    /// <summary>The workspace group every account user and service principal belongs to.</summary>
+    public const string AccountUsersGroup = "account users";
     public const string PlanningFailedReason = "PLANNING_FAILED";
     public const string RevokePendingReason = "REVOKE_PENDING";
 
@@ -33,7 +37,7 @@ public sealed partial class UcProvisioningReconciler
         CancellationToken ct)
     {
         var existing = (await store.ListFeedbackAsync(tenant, dataSource, ct).ConfigureAwait(false)).ToDictionary(f => f.ConsentId);
-        var catalogAccess = new Dictionary<(string Catalog, string Principal), bool>();
+        var catalogAccess = new Dictionary<(string Catalog, string Principal), string?>();
         var changed = new List<UcGrantFeedback>();
         var events = new List<UcFeedbackEvent>();
         var active = new HashSet<Guid>();
@@ -106,7 +110,7 @@ public sealed partial class UcProvisioningReconciler
         UcConsentPlan plan,
         UcApplyOutcome outcome,
         UcGrantFeedback? before,
-        Dictionary<(string Catalog, string Principal), bool> catalogAccess,
+        Dictionary<(string Catalog, string Principal), string?> catalogAccess,
         CancellationToken ct)
     {
         string? error = null;
@@ -140,21 +144,48 @@ public sealed partial class UcProvisioningReconciler
 
         // The provisioning principal never grants USE_CATALOG; without it the SELECT is not usable, so the consent is not effective.
         var access = (plan.Catalog!, plan.Principal!);
-        if (!catalogAccess.TryGetValue(access, out var hasAccess))
+        if (!catalogAccess.TryGetValue(access, out var verdict))
         {
             try
             {
-                hasAccess = await client.HasEffectivePrivilegeAsync(dataSource, UcSecurableType.Catalog, plan.Catalog!, plan.Principal!, CatalogAccessPrivileges, ct)
-                    .ConfigureAwait(false);
+                verdict = await CatalogAccessAsync(dataSource, plan.Catalog!, plan.Principal!, ct).ConfigureAwait(false);
             }
             catch (UcProvisioningException ex)
             {
                 return (UcGrantState.Pending, ex.Code);
             }
 
-            catalogAccess[access] = hasAccess;
+            catalogAccess[access] = verdict;
         }
 
-        return hasAccess ? (UcGrantState.Provisioned, null) : (UcGrantState.Failed, CatalogAccessMissingReason);
+        return verdict is null ? (UcGrantState.Provisioned, null) : (UcGrantState.Failed, verdict);
+    }
+
+    /// <summary>
+    /// Null when the principal can use the catalog, otherwise the reason. The catalog's direct grants are readable by every catalog
+    /// user: a grant to the principal itself or to <see cref="AccountUsersGroup"/> settles it. Otherwise the effective permissions are
+    /// asked; reading them for another principal needs more than the provisioning principal holds, so a refusal is reported as
+    /// unverified, never as provisioned.
+    /// </summary>
+    private async Task<string?> CatalogAccessAsync(string dataSource, string catalog, string principal, CancellationToken ct)
+    {
+        var direct = await client.GetPermissionsAsync(dataSource, UcSecurableType.Catalog, catalog, ct).ConfigureAwait(false);
+        if (direct.Any(a => (string.Equals(a.Principal, principal, StringComparison.Ordinal) ||
+                             string.Equals(a.Principal, AccountUsersGroup, StringComparison.OrdinalIgnoreCase)) &&
+                            a.Privileges.Any(p => CatalogAccessPrivileges.Contains(p, StringComparer.Ordinal))))
+        {
+            return null;
+        }
+
+        try
+        {
+            return await client.HasEffectivePrivilegeAsync(dataSource, UcSecurableType.Catalog, catalog, principal, CatalogAccessPrivileges, ct).ConfigureAwait(false)
+                ? null
+                : CatalogAccessMissingReason;
+        }
+        catch (UcProvisioningException ex) when (ex.Code is UcErrorCodes.Forbidden or UcErrorCodes.Rejected)
+        {
+            return CatalogAccessUnverifiedReason;
+        }
     }
 }

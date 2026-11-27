@@ -409,6 +409,35 @@ public sealed class UcProvisioningReconcilerTests
     }
 
     [Fact]
+    public async Task Catalog_grant_to_account_users_settles_catalog_access_without_reading_effective_permissions()
+    {
+        _client.CatalogAccess.Clear();
+        _client.EffectiveFailure = UcErrorCodes.Forbidden;
+        _client.Set(UcSecurableType.Catalog, "main", "account users").Add(UcPrivileges.UseCatalog);
+        var consent = Grant(Now);
+        _store.Consents.Add(consent);
+
+        await RunAsync();
+
+        _store.FeedbackOf(consent).State.ShouldBe(UcGrantState.Provisioned);
+        _client.Calls.ShouldNotContain(c => c.StartsWith("effective:", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public async Task Catalog_access_that_cannot_be_read_is_unverified_not_provisioned()
+    {
+        _client.CatalogAccess.Clear();
+        _client.EffectiveFailure = UcErrorCodes.Forbidden;
+        var consent = Grant(Now);
+        _store.Consents.Add(consent);
+
+        await RunAsync();
+
+        _store.FeedbackOf(consent).State.ShouldBe(UcGrantState.Failed);
+        _store.FeedbackOf(consent).ReasonCode.ShouldBe(UcProvisioningReconciler.CatalogAccessUnverifiedReason);
+    }
+
+    [Fact]
     public async Task Renamed_group_is_recorded_as_drift_without_a_new_grant()
     {
         _store.Consents.Add(Grant(Now));

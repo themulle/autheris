@@ -106,7 +106,7 @@ public sealed partial class UnityCatalogPermissionsClient(
         {
             var url = pageToken is null ? path : path + "&page_token=" + Uri.EscapeDataString(pageToken);
             using var doc = await SendAsync(settings, HttpMethod.Get, url, null, ct).ConfigureAwait(false);
-            if (ReadEffectivePrivileges(doc.RootElement, principal).Overlaps(privileges))
+            if (ReadEffectivePrivileges(doc.RootElement).Overlaps(privileges))
             {
                 return true;
             }
@@ -417,7 +417,7 @@ public sealed partial class UnityCatalogPermissionsClient(
         return result;
     }
 
-    private static HashSet<string> ReadEffectivePrivileges(JsonElement root, string principal)
+    private static HashSet<string> ReadEffectivePrivileges(JsonElement root)
     {
         var result = new HashSet<string>(StringComparer.Ordinal);
         if (root.ValueKind != JsonValueKind.Object)
@@ -437,9 +437,9 @@ public sealed partial class UnityCatalogPermissionsClient(
 
         foreach (var item in assignments.EnumerateArray())
         {
-            // Only the assignment of the asked principal counts, whatever else the service returns.
-            if (!string.Equals(ReadString(item, "principal"), principal, StringComparison.Ordinal) ||
-                !item.TryGetProperty("privileges", out var list) || list.ValueKind != JsonValueKind.Array)
+            // The response is already scoped to the asked principal; privileges it holds through a group are listed under the group's
+            // name (for example "account users"), so every returned assignment counts.
+            if (!item.TryGetProperty("privileges", out var list) || list.ValueKind != JsonValueKind.Array)
             {
                 continue;
             }

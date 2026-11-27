@@ -161,10 +161,18 @@ internal sealed class FakeUcClient : IUnityCatalogPermissionsClient
         return Task.FromResult(Read(type, fullName));
     }
 
+    /// <summary>When set, the effective-permissions read fails with this code (as for a principal without elevated catalog rights).</summary>
+    public string? EffectiveFailure { get; set; }
+
     public Task<bool> HasEffectivePrivilegeAsync(
         string dataSource, UcSecurableType type, string fullName, string principal, IReadOnlyCollection<string> privileges, CancellationToken ct)
     {
         Calls.Add("effective:" + fullName + ":" + principal);
+        if (EffectiveFailure is { } failure)
+        {
+            throw new UcProvisioningException(failure);
+        }
+
         return Task.FromResult(CatalogAccess.Contains(principal));
     }
 
