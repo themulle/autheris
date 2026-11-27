@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Integration;
 
 using System;
+using System.Collections.Generic;
 using System.Linq;
 using System.Net;
 using System.Net.Http.Json;
@@ -11,6 +12,7 @@ using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
 using Microsoft.AspNetCore.Mvc.Testing;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
@@ -71,6 +73,28 @@ public sealed class WebSqlUnknownColumnIntegrationTests : IClassFixture<Governed
         });
     }
 
+    // WithWebHostBuilder re-runs the fixture's host configuration, which clones a brand-new (empty) governance database. The derived host would
+    // therefore not see the table metadata and consent registered above and fail closed. It is pinned to the fixture's governance database instead.
+    private WebApplicationFactory<Program> EnforcingHost()
+    {
+        var governance = _factory.Services.GetRequiredService<IConfiguration>()["Gateway:GovernanceDb:ConnectionString"]
+            ?? throw new InvalidOperationException("The shared host has no governance connection string.");
+        var overrides = new Dictionary<string, string?>
+        {
+            ["Gateway:Insecure:danger_bypass_consent_checks"] = "false",
+            ["Gateway:GovernanceDb:ConnectionString"] = governance,
+        };
+        return _factory.WithWebHostBuilder(b =>
+        {
+            foreach (var pair in overrides)
+            {
+                b.UseSetting(pair.Key, pair.Value);
+            }
+
+            b.ConfigureAppConfiguration((_, config) => config.AddInMemoryCollection(overrides));
+        });
+    }
+
     [Fact]
     public async Task UnknownColumn_RealPostgres_NamedWhenFullyVisible()
     {
@@ -94,7 +118,7 @@ public sealed class WebSqlUnknownColumnIntegrationTests : IClassFixture<Governed
         // The shared host bypasses consent checks, so every column is visible there and nothing can be hidden. This host enforces consents:
         // the caller holds Clear rules for id, note and tenant_id only, so ssn is hidden from this caller.
         await RegisterAsync("ledger", ["id", "note", "ssn", "tenant_id"], clearColumns: ["id", "note", "tenant_id"]);
-        await using var enforcing = _factory.WithWebHostBuilder(b => b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "false"));
+        await using var enforcing = EnforcingHost();
 
         var allowed = await PostSqlAsync("SELECT id, note FROM ledger", enforcing);   // control: the consent is honoured on this host
         allowed.Status.ShouldBe(HttpStatusCode.OK, allowed.Body);
