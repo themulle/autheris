@@ -47,6 +47,18 @@ public interface IGovernedTreeQueryService
         CancellationToken ct = default) => ExecuteAsync(principal, root, requestHeaders, operationId, ct);
 
     /// <summary>
+    /// Counts the root rows the caller may read under the tenant column, row policy and <c>root.Where</c>; relations, order and paging are
+    /// ignored. Uses the access decision memoized by a preceding <see cref="ExecuteAsync(ClaimsPrincipal?, TreeQueryNode, IReadOnlyDictionary{string, string[]}?, string, CancellationToken)"/>
+    /// of the same operation and never resolves a new one: without it the call is refused.
+    /// </summary>
+    Task<long> CountAsync(
+        ClaimsPrincipal? principal,
+        TreeQueryNode root,
+        IReadOnlyDictionary<string, string[]>? requestHeaders,
+        string operationId,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Lists the columns of <paramref name="root"/> that are masked for the caller, using the access decisions memoized
     /// by a preceding <see cref="ExecuteAsync"/> of the same operation. Empty when nothing is masked or no decision exists.
     /// </summary>

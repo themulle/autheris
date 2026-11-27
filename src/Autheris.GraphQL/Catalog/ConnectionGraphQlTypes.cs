@@ -117,7 +117,7 @@ internal static class ConnectionGraphQlTypes
                 .Resolve(ctx => ctx.Parent<GraphQlConnection>().PageInfo);
             d.Field("totalCount")
                 .Type<IntType>()
-                .Description("Identifies the total count of items in the connection.")
+                .Description("Total number of rows matching the filter for the caller; computed only when selected.")
                 .Resolve(ctx => ctx.Parent<GraphQlConnection>().TotalCount);
         }));
     }
@@ -450,6 +450,12 @@ internal static class ConnectionGraphQlTypes
             throw deferredError;
         }
 
+        int? totalCount = null;
+        if (first > 0 && !keysetUnavailable && IsTotalCountSelected(ctx))
+        {
+            totalCount = await TryCountAsync(ctx, treeService, principal, queryNode, whereFilter, headers, opId).ConfigureAwait(false);
+        }
+
         using (doc)
         {
             var root = doc.RootElement.Clone();
@@ -495,7 +501,49 @@ internal static class ConnectionGraphQlTypes
 
             ctx.ContextData["AutherisRowsReturned"] = edges.Count;
             await Autheris.GraphQL.Interceptors.DatasetFactsCollector.RecordTreeRootAsync(ctx, treeService, principal, queryNode, opId, hasNextPage).ConfigureAwait(false);
-            return new GraphQlConnection(edges, pageInfo, edges.Count);
+            return new GraphQlConnection(edges, pageInfo, totalCount);
+        }
+    }
+
+    private static bool IsTotalCountSelected(IResolverContext ctx)
+    {
+        foreach (var selection in ctx.Operation.GetSelectionSet(ctx.Selection).Selections)
+        {
+            if (selection.Field.Name == "totalCount" && selection.IsIncluded(ctx.IncludeConditionFlags))
+            {
+                return true;
+            }
+        }
+
+        return false;
+    }
+
+    /// <summary>
+    /// Counts the rows matching the caller's <c>where</c> under the same access decision as the page. The count filter is the
+    /// parsed <c>where</c> only (never the seek predicate), so every page reports the same total. A failed count yields null, never a
+    /// wrong number; only a cancelled request is propagated.
+    /// </summary>
+    private static async Task<int?> TryCountAsync(
+        IResolverContext ctx,
+        IGovernedTreeQueryService treeService,
+        ClaimsPrincipal principal,
+        TreeQueryNode queryNode,
+        TreeFilter? whereFilter,
+        IReadOnlyDictionary<string, string[]>? headers,
+        string opId)
+    {
+        var countNode = queryNode with { Relations = [], Where = whereFilter, OrderBy = [], Offset = 0, Limit = 0, ExecutionLimit = null };
+        try
+        {
+            var count = await treeService.CountAsync(principal, countNode, headers, opId, ctx.RequestAborted).ConfigureAwait(false);
+            return (int)Math.Clamp(count, 0L, int.MaxValue);
+        }
+        catch (Exception ex) when (!ctx.RequestAborted.IsCancellationRequested)
+        {
+            ctx.Services.GetService<Microsoft.Extensions.Logging.ILoggerFactory>()
+                ?.CreateLogger(typeof(ConnectionGraphQlTypes))
+                .LogDebug("The total count of '{Table}' could not be determined ({ExceptionType}).", queryNode.Table.ToQualifiedName(), ex.GetType().Name);
+            return null;
         }
     }
 
