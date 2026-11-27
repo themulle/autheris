@@ -98,7 +98,7 @@ public sealed class Issue1198TableRootsOnlyScopeIntegrationTests : IClassFixture
     public async Task Graphql_restricted_scope_allows_list_aggregate_connection_mix()
     {
         var (status, body) = await PostAsync(Caller(),
-            "{ default_main_air1(first: 2) { id } default_main_air1_aggregate(aggregates: [{ fn: COUNT, alias: \"n\" }]) { count } default_main_air1Connection(first: 2) { totalCount } __typename }");
+            "{ default_main_air1(first: 2) { id } default_main_air1_aggregate(aggregates: [{ fn: COUNT, alias: \"n\" }]) { count } default_main_air1Connection(first: 2) { edges { node { id } } } __typename }");
         status.ShouldBe(HttpStatusCode.OK, body);
         using var doc = JsonDocument.Parse(body);
         doc.RootElement.TryGetProperty("errors", out _).ShouldBeFalse(body);
@@ -145,10 +145,12 @@ public sealed class Issue1198TableRootsOnlyScopeIntegrationTests : IClassFixture
         var client = Caller(scope, scopeArray);
         await using var mcp = await McpTestClient.ConnectAsync(client);
 
-        var (rejected, rejectedPayload) = await McpTestClient.CallJsonAsync(mcp, "query_graphql",
+        // The MCP pre-flight cannot map a non-table root to a table and denies it fail-closed before GraphQL runs,
+        // so a restricted token never receives data for a catalog root over MCP.
+        var (rejected, rejectedText) = await McpTestClient.CallAsync(mcp, "query_graphql",
             new { query = "{ default_main_air1(first: 2) { id } catalog { __typename } }" });
-        rejected.ShouldBeTrue(rejectedPayload.ToString());
-        rejectedPayload.ToString().ShouldContain(Code);
+        rejected.ShouldBeTrue(rejectedText);
+        rejectedText.ShouldNotContain("\"data\"");
 
         var (isError, payload) = await McpTestClient.CallJsonAsync(mcp, "query_graphql", new { query = "{ default_main_air1(first: 2) { id } }" });
         isError.ShouldBeFalse(payload.ToString());
