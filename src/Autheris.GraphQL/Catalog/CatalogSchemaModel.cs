@@ -36,7 +36,8 @@ public sealed record CatalogRelationField(
     bool IsList,
     IReadOnlyList<string> ParentColumns,
     IReadOnlyList<string> ChildColumns,
-    RelationCardinality Cardinality = RelationCardinality.OneToMany);
+    RelationCardinality Cardinality = RelationCardinality.OneToMany,
+    bool IsReverse = false);
 
 public sealed record CatalogTableType(
     TableIdentifier Identifier,

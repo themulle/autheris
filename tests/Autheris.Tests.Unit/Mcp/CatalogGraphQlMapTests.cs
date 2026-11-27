@@ -87,6 +87,18 @@ public sealed class CatalogGraphQlMapTests : IDisposable
     }
 
     [Fact]
+    public async Task GetTableAsync_ReverseRelation_CarriesIsReverse_OwnColumnsFirst()
+    {
+        var forward = (await _map.GetTableAsync(Customers))!.Relations.ShouldHaveSingleItem();
+        forward.IsReverse.ShouldBeFalse();
+
+        var reverse = (await _map.GetTableAsync(Orders))!.Relations.ShouldHaveSingleItem();
+        reverse.IsReverse.ShouldBeTrue();
+        reverse.Columns.ShouldBe(["customer_id"]);
+        reverse.TargetColumns.ShouldBe(["id"]);
+    }
+
+    [Fact]
     public async Task GetTable_CrossSourceRelation_IsNotListedAndNamesNoOmittedTarget()
     {
         // BUG #75 (S-9): the MCP view is derived from the same model, so an omitted relation never shows up.

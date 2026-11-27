@@ -144,9 +144,11 @@ internal static class CatalogSearchDocumentBuilder
 
             string? targetTable = null;
             string? targetCol = null;
+            var fromMeta = false;
 
             if (col.Meta != null && col.Meta.TryGetValue("foreign_key_table", out var fkt))
             {
+                fromMeta = true;
                 targetTable = fkt;
                 col.Meta.TryGetValue("foreign_key_column", out targetCol);
             }
@@ -172,7 +174,7 @@ internal static class CatalogSearchDocumentBuilder
                 FromColumn: col.ColumnName,
                 ToTable: refTable,
                 ToColumn: targetCol ?? col.ColumnName,
-                Type: TableRelationshipType.ForeignKey));
+                Type: fromMeta ? TableRelationshipType.ForeignKey : TableRelationshipType.SemanticInferred));
         }
 
         return list;

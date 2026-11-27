@@ -686,7 +686,7 @@ public sealed class CatalogGraphQlMap : IGraphQlCatalogMap, IDisposable, IAsyncD
                 .Select(static c => new GraphQlColumnMapping(c.ColumnName, c.FieldName, CatalogGraphQlTypeModule.GetScalarName(c.FieldType)))
                 .ToArray(),
             entry.Relations
-                .Select(static r => new GraphQlRelationMapping(r.FieldName, r.TargetTableIdentifier, r.IsList, r.ParentColumns, r.ChildColumns))
+                .Select(static r => new GraphQlRelationMapping(r.FieldName, r.TargetTableIdentifier, r.IsList, r.ParentColumns, r.ChildColumns, r.IsReverse))
                 .ToArray());
     }
 
