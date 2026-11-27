@@ -52,6 +52,9 @@ public interface IGovernedTreeQueryService
     /// </summary>
     IReadOnlyList<TreeMaskedColumn> GetMaskedColumns(ClaimsPrincipal? principal, TreeQueryNode root, string operationId);
 
+    /// <summary>Access facts of every table read by <paramref name="root"/>, from the memo of a preceding execute; empty when unavailable.</summary>
+    IReadOnlyList<DatasetAccessFacts> GetDatasetFacts(ClaimsPrincipal? principal, TreeQueryNode root, string operationId) => [];
+
     /// <summary>
     /// Cleans up any cached table access decisions, locks, and audit tracking for the given GraphQL operation.
     /// </summary>

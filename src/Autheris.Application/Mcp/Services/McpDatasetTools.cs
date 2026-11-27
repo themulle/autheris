@@ -202,7 +202,8 @@ public static class McpDatasetTools
               "required": ["query"],
               "properties": {
                 "query": { "type": "string", "description": "One GraphQL query operation, e.g. query { sales_public_orders(where: { status: { eq: \"open\" } }, first: 20) { id amount } }." },
-                "variables": { "type": "object", "additionalProperties": true, "description": "Optional values for the variables of the query." }
+                "variables": { "type": "object", "additionalProperties": true, "description": "Optional values for the variables of the query." },
+                "datasetFacts": { "type": "boolean", "description": "Optional. true adds extensions.autheris.roots: per root field the dataset, its tags, rowFilterApplied (a row filter defined by the data owner or by consent applies to you; it does not mean all rows are returned, and tenant isolation, virtual and mandatory filters are not reported) and truncated (the result was cut by a governed limit; the MCP response size cap is not included)." }
               }
             }
             """,
