@@ -299,7 +299,7 @@ public sealed class ResourceGroupAndObservabilityFeatureTests
         var compiler = new SemanticMcpCompiler(repo, NullLogger<SemanticMcpCompiler>.Instance, goldenService, options: Microsoft.Extensions.Options.Options.Create(new Autheris.Domain.Options.GatewayOptions { Insecure = new Autheris.Domain.Options.InsecureGettingStartedOptions { danger_bypass_mcp_auth = true } }));
 
         var resources = await compiler.GetSemanticResourcesAsync("finance");
-        var exampleResource = Assert.Single(resources, r => r.Uri == "examples://finance/customers");
+        var exampleResource = Assert.Single(resources, r => r.Uri == "examples://finance/dbo/customers");
 
         Assert.Equal("finance_customers_golden_queries", exampleResource.Name);
         Assert.Contains("Golden Queries & Verified Few-Shot Examples", exampleResource.Text);
