@@ -230,9 +230,9 @@ public sealed class WebSqlGuideExampleIntegrationTests : IClassFixture<WebSqlGui
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task Issue1201_OpenApi_GivenWebSqlDisabled_WhenAnonymousGet_ThenResponseEqualsEnabledAnonymousResponse()
+    public async Task Issue1201_OpenApi_GivenWebSqlDisabled_WhenAnonymousGet_ThenResponseEqualsUnknownProtectedRoute()
     {
-        // The route sits behind authentication, so an anonymous caller must not be able to tell whether WebSQL is enabled.
+        // The "protected route" is the enabled one: it sits behind authentication, so an anonymous caller must not be able to tell whether WebSQL is enabled.
         ResponseSnapshot disabled;
         using (var disabledHost = new IntegrationHost(Settings(_fixture.ConnectionString, webSqlEnabled: false, anonymous: false)))
         {
