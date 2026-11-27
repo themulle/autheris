@@ -65,6 +65,40 @@ public sealed class UcProvisioningReconcilerTests
     }
 
     [Fact]
+    public async Task Provisioned_and_failed_transitions_are_announced_once()
+    {
+        _client.CatalogAccess.Clear();
+        var consent = Grant(Now);
+        _store.Consents.Add(consent);
+
+        await RunAsync();
+        await RunAsync();
+        _client.CatalogAccess.Add("analysts");
+        await RunAsync();
+        await RunAsync();
+
+        _store.Events.Select(e => (e.ConsentId, e.Provisioned)).ShouldBe([(consent.Id, false), (consent.Id, true)]);
+        _store.Events.ShouldAllBe(e => e.Table.Equals(consent.TableIdentifier));
+    }
+
+    [Fact]
+    public async Task Transient_lookup_failure_neither_downgrades_nor_re_announces_a_provisioned_grant()
+    {
+        var consent = Grant(Now);
+        _store.Consents.Add(consent);
+        await RunAsync();
+
+        _client.ResolveFailure = UcErrorCodes.RateLimited;
+        await RunAsync();
+        _store.FeedbackOf(consent).State.ShouldBe(UcGrantState.Provisioned);
+
+        _client.ResolveFailure = null;
+        await RunAsync();
+
+        _store.Events.Count(e => e.ConsentId == consent.Id && e.Provisioned).ShouldBe(1);
+    }
+
+    [Fact]
     public async Task Second_cycle_without_changes_calls_nothing_in_unity_catalog()
     {
         _store.Consents.Add(Grant(Now));

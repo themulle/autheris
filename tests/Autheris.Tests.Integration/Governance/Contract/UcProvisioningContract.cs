@@ -97,7 +97,7 @@ public abstract class UcProvisioningContract : GovernanceContractBase
         var source = NewSource();
         var table = await SeedTableAsync(source, "orders");
         var consentA = await GrantAsync(table.Identifier, Store.TenantA);
-        await Repo.SaveFeedbackAsync(Store.TenantA, source, 1, [Feedback(Store.TenantA, consentA.Id, source, UcGrantState.Provisioned)], [], CancellationToken.None);
+        await Repo.SaveFeedbackAsync(Store.TenantA, source, 1, [Feedback(Store.TenantA, consentA.Id, source, UcGrantState.Provisioned)], [], [], CancellationToken.None);
 
         (await Repo.ListTableConsentsAsync(Store.TenantA, source, DateTimeOffset.UtcNow, CancellationToken.None)).Select(c => c.Id).ShouldBe([consentA.Id]);
         (await Repo.ListTableConsentsAsync(Store.TenantB, source, DateTimeOffset.UtcNow, CancellationToken.None)).ShouldBeEmpty();
@@ -114,15 +114,15 @@ public abstract class UcProvisioningContract : GovernanceContractBase
 
         var source = NewSource();
         var consentId = Guid.NewGuid();
-        await Repo.SaveFeedbackAsync(Store.TenantA, source, 1, [Feedback(Store.TenantA, consentId, source, UcGrantState.Provisioned)], [], CancellationToken.None);
+        await Repo.SaveFeedbackAsync(Store.TenantA, source, 1, [Feedback(Store.TenantA, consentId, source, UcGrantState.Provisioned)], [], [], CancellationToken.None);
 
         await Should.ThrowAsync<ArgumentException>(() =>
-            Repo.SaveFeedbackAsync(Store.TenantB, source, 1, [Feedback(Store.TenantA, consentId, source, UcGrantState.Failed)], [], CancellationToken.None));
+            Repo.SaveFeedbackAsync(Store.TenantB, source, 1, [Feedback(Store.TenantA, consentId, source, UcGrantState.Failed)], [], [], CancellationToken.None));
         await Should.ThrowAsync<ArgumentException>(() =>
-            Repo.SaveFeedbackAsync(Store.TenantA, source, 1, [Feedback(Store.TenantA, consentId, source)], [Audit(Store.TenantB, "uc")], CancellationToken.None));
+            Repo.SaveFeedbackAsync(Store.TenantA, source, 1, [Feedback(Store.TenantA, consentId, source)], [Audit(Store.TenantB, "uc")], [], CancellationToken.None));
 
         // The same consent id under another tenant is another row.
-        await Repo.SaveFeedbackAsync(Store.TenantB, source, 1, [Feedback(Store.TenantB, consentId, source, UcGrantState.Failed, "UC_FORBIDDEN")], [], CancellationToken.None);
+        await Repo.SaveFeedbackAsync(Store.TenantB, source, 1, [Feedback(Store.TenantB, consentId, source, UcGrantState.Failed, "UC_FORBIDDEN")], [], [], CancellationToken.None);
         (await Repo.GetFeedbackAsync(Store.TenantA, [consentId], CancellationToken.None))[consentId].State.ShouldBe(UcGrantState.Provisioned);
         (await Repo.GetFeedbackAsync(Store.TenantB, [consentId], CancellationToken.None))[consentId].ReasonCode.ShouldBe("UC_FORBIDDEN");
     }
@@ -137,7 +137,7 @@ public abstract class UcProvisioningContract : GovernanceContractBase
         await Should.ThrowAsync<ArgumentException>(() => Repo.ListTableConsentsAsync(TenantId.Platform, "dbx", DateTimeOffset.UtcNow, CancellationToken.None));
         await Should.ThrowAsync<ArgumentException>(() => Repo.ListFeedbackAsync(default, "dbx", CancellationToken.None));
         await Should.ThrowAsync<ArgumentException>(() => Repo.GetFeedbackAsync(TenantId.Platform, [Guid.NewGuid()], CancellationToken.None));
-        await Should.ThrowAsync<ArgumentException>(() => Repo.SaveFeedbackAsync(default, "dbx", 1, [], [], CancellationToken.None));
+        await Should.ThrowAsync<ArgumentException>(() => Repo.SaveFeedbackAsync(default, "dbx", 1, [], [], [], CancellationToken.None));
     }
 
     [RequiresContainerRuntimeFact]
@@ -159,8 +159,8 @@ public abstract class UcProvisioningContract : GovernanceContractBase
         stored.VerifiedAt.ShouldBe(Now);
 
         var consentId = Guid.NewGuid();
-        await Repo.SaveFeedbackAsync(Store.TenantA, source, 1, [Feedback(Store.TenantA, consentId, source)], [], CancellationToken.None);
-        await Repo.SaveFeedbackAsync(Store.TenantA, source, 1, [Feedback(Store.TenantA, consentId, source, UcGrantState.Provisioned)], [], CancellationToken.None);
+        await Repo.SaveFeedbackAsync(Store.TenantA, source, 1, [Feedback(Store.TenantA, consentId, source)], [], [], CancellationToken.None);
+        await Repo.SaveFeedbackAsync(Store.TenantA, source, 1, [Feedback(Store.TenantA, consentId, source, UcGrantState.Provisioned)], [], [], CancellationToken.None);
         (await Repo.ListFeedbackAsync(Store.TenantA, source, CancellationToken.None)).ShouldHaveSingleItem().State.ShouldBe(UcGrantState.Provisioned);
     }
 
@@ -218,7 +218,7 @@ public abstract class UcProvisioningContract : GovernanceContractBase
         // Feedback lookups above the batch size are split into batches, never truncated.
         var source = NewSource();
         var ids = Enumerable.Range(0, UcProvisioningStore.ConsentPageSize * 2 + 3).Select(_ => Guid.NewGuid()).ToList();
-        await Repo.SaveFeedbackAsync(Store.TenantA, source, 1, [Feedback(Store.TenantA, ids[0], source), Feedback(Store.TenantA, ids[^1], source)], [], CancellationToken.None);
+        await Repo.SaveFeedbackAsync(Store.TenantA, source, 1, [Feedback(Store.TenantA, ids[0], source), Feedback(Store.TenantA, ids[^1], source)], [], [], CancellationToken.None);
 
         var found = await Repo.GetFeedbackAsync(Store.TenantA, ids, CancellationToken.None);
         found.Keys.ShouldBe(new[] { ids[0], ids[^1] }, ignoreOrder: true);
@@ -283,7 +283,7 @@ public abstract class UcProvisioningContract : GovernanceContractBase
         await Should.ThrowAsync<Autheris.Application.State.FencingTokenRejectedException>(() =>
             Repo.DeleteLedgerAsync(source, 6, [Entry(source)], [], CancellationToken.None));
         await Should.ThrowAsync<Autheris.Application.State.FencingTokenRejectedException>(() =>
-            Repo.SaveFeedbackAsync(Store.TenantA, source, 6, [Feedback(Store.TenantA, Guid.NewGuid(), source)], [], CancellationToken.None));
+            Repo.SaveFeedbackAsync(Store.TenantA, source, 6, [Feedback(Store.TenantA, Guid.NewGuid(), source)], [], [], CancellationToken.None));
 
         (await Repo.ListLedgerAsync(source, CancellationToken.None)).ShouldHaveSingleItem().State.ShouldBe(UcLedgerState.Applied);
         await Repo.SaveLedgerAsync(source, 8, [Entry(source, "other")], [], CancellationToken.None);
@@ -320,13 +320,60 @@ public abstract class UcProvisioningContract : GovernanceContractBase
 
         var source = NewSource();
         var consentId = Guid.NewGuid();
-        await Repo.SaveFeedbackAsync(Store.TenantA, source, 1, [Feedback(Store.TenantA, consentId, source, UcGrantState.Provisioned)], [], CancellationToken.None);
+        await Repo.SaveFeedbackAsync(Store.TenantA, source, 1, [Feedback(Store.TenantA, consentId, source, UcGrantState.Provisioned)], [], [], CancellationToken.None);
 
         var broken = Audit(Store.TenantA, "uc:broken", traceId: "\0" + new string('x', 300));
         await Should.ThrowAsync<Exception>(() =>
-            Repo.SaveFeedbackAsync(Store.TenantA, source, 1, [Feedback(Store.TenantA, consentId, source, UcGrantState.Failed, "UC_FORBIDDEN")], [broken], CancellationToken.None));
+            Repo.SaveFeedbackAsync(Store.TenantA, source, 1, [Feedback(Store.TenantA, consentId, source, UcGrantState.Failed, "UC_FORBIDDEN")], [broken], [], CancellationToken.None));
 
         (await Repo.GetFeedbackAsync(Store.TenantA, [consentId], CancellationToken.None))[consentId].State.ShouldBe(UcGrantState.Provisioned);
+    }
+
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task Feedback_transitions_are_announced_as_consent_events_of_the_tenant()
+    {
+        if (!Store.IsAvailable) return;
+
+        var source = NewSource();
+        var table = await SeedTableAsync(source, "orders");
+        var consent = await GrantAsync(table.Identifier, Store.TenantA);
+        var before = (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 1000)).Events.Count;
+
+        await Repo.SaveFeedbackAsync(
+            Store.TenantA, source, 1, [Feedback(Store.TenantA, consent.Id, source, UcGrantState.Provisioned)], [],
+            [new UcFeedbackEvent(consent.Id, table.Identifier, true, Now)], CancellationToken.None);
+
+        var feed = (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 1000)).Events;
+        feed.Count.ShouldBe(before + 1);
+        var appended = feed.Last();
+        appended.Type.ShouldBe(Autheris.Application.ConsentRequests.Events.ConsentEventTypes.GrantProvisioned);
+        appended.PayloadJson.ShouldContain(consent.Id.ToString());
+        appended.PayloadJson.ShouldContain("PROVISIONED");
+        (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantB, 0, 1000)).Events.ShouldNotContain(e => e.PayloadJson.Contains(consent.Id.ToString()));
+    }
+
+    [RequiresContainerRuntimeFact]
+    [Trait("Category", "Security")]
+    public async Task Rejected_or_invalid_feedback_writes_append_no_event()
+    {
+        if (!Store.IsAvailable) return;
+
+        var source = NewSource();
+        var table = await SeedTableAsync(source, "orders");
+        var consent = await GrantAsync(table.Identifier, Store.TenantA);
+        await Repo.SaveLedgerAsync(source, 5, [], [Audit(Store.TenantA, "uc:" + source)], CancellationToken.None);
+        var since = (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, 0, 1000)).NextSince;
+
+        await Should.ThrowAsync<Autheris.Application.State.FencingTokenRejectedException>(() => Repo.SaveFeedbackAsync(
+            Store.TenantA, source, 4, [Feedback(Store.TenantA, consent.Id, source, UcGrantState.Provisioned)], [],
+            [new UcFeedbackEvent(consent.Id, table.Identifier, true, Now)], CancellationToken.None));
+        await Should.ThrowAsync<ArgumentException>(() => Repo.SaveFeedbackAsync(
+            Store.TenantA, source, 5, [], [], [new UcFeedbackEvent(consent.Id, table.Identifier, true, Now)], CancellationToken.None));
+
+        (await Store.ConsentEventOutbox.ReadFeedAsync(Store.TenantA, since, 1000)).Events
+            .ShouldNotContain(e => e.PayloadJson.Contains(consent.Id.ToString()));
+        (await Repo.GetFeedbackAsync(Store.TenantA, [consent.Id], CancellationToken.None)).ShouldBeEmpty();
     }
 
     [RequiresContainerRuntimeFact]
