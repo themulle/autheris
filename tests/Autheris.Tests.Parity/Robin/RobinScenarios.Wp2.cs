@@ -728,9 +728,8 @@ public sealed partial class RobinScenarios
         var r = await Analyze("SELEC id FRM parity_sales");
         NoRowValuesOrStackFrames(r.Body);
         r.Result.Ok();
-        using var doc = JsonDocument.Parse(r.Body);
-        (FindProperty(doc.RootElement, "isValid") ?? throw new XunitException("isValid missing")).ValueKind.ShouldBe(JsonValueKind.False);
-        ContainsString(doc.RootElement, "SQL_SYNTAX_ERROR").ShouldBeTrue("an invalid query is reported without the SQL_SYNTAX_ERROR diagnostic execution answers");
+        AssertAnalysisReportsInvalid(r, "SQL_SYNTAX_ERROR");
+        await AnalysisAgreesWithExecution();
     });
 
     [ParityFact]
