@@ -94,6 +94,23 @@ public sealed partial class McpQuerySqlPagingTests
 
         const string changed = "SELECT id, name FROM sales.public.orders ORDER BY id DESC";
         AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = changed, cursor = token }), session));
+
+        // The parameter half: a resume token minted for one set of bound values only continues that set.
+        Func<int, string?>? paramResume;
+        using (var scope = McpRowContinuation.Begin())
+        {
+            var paged = await handler.ExecuteToolAsync(QuerySqlTool, Args(ParamSql, new { n = "zzz" }), session);
+            ErrorCode(paged).ShouldBeNull(paged);
+            paramResume = scope.ResumeAfter;
+        }
+
+        var paramToken = paramResume!(2)!;
+        var same = await handler.ExecuteToolAsync(QuerySqlTool, Args(ParamSql, new { n = "zzz" }, paramToken), session);
+        ErrorCode(same).ShouldBeNull(same);
+        foreach (var variant in new object[] { new { n = "yyy" }, new { n = "zzz", extra = "x" }, new { N = "zzz" } })
+        {
+            AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, Args(ParamSql, variant, paramToken), session));
+        }
     }
 
     [Fact]

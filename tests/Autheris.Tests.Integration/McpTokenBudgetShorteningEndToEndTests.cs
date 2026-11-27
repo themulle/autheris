@@ -262,4 +262,25 @@ public sealed class McpTokenBudgetShorteningEndToEndTests : IClassFixture<McpTok
         isError.ShouldBeTrue();
         payload.GetProperty("error").GetProperty("code").GetString().ShouldBe("INVALID_PARAMS");
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task McpQuerySql_ShortenedCursor_WithOtherParameters_IsInvalidParams()
+    {
+        await SeedRowsAsync();
+        const string sql = "SELECT id, note FROM default.main.mcp_budget_rows WHERE id > @min ORDER BY id";
+        var (firstError, first, _) = await CallAsync(Client(), "query_sql", new { query = sql, parameters = new { min = 0 } });
+        firstError.ShouldBeFalse(first.ToString());
+        var cursor = first.GetProperty("next").GetString()!;
+
+        var (sameError, same, _) = await CallAsync(Client(), "query_sql", new { query = sql, parameters = new { min = 0 }, cursor });
+        sameError.ShouldBeFalse(same.ToString());
+
+        foreach (var other in new object[] { new { min = 1 }, new { min = 0, extra = 1 } })
+        {
+            var (isError, payload, _) = await CallAsync(Client(), "query_sql", new { query = sql, parameters = other, cursor });
+            isError.ShouldBeTrue(payload.ToString());
+            payload.GetProperty("error").GetProperty("code").GetString().ShouldBe("INVALID_PARAMS");
+        }
+    }
 }
