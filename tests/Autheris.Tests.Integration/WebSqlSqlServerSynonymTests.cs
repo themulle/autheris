@@ -140,17 +140,20 @@ public sealed class WebSqlSqlServerSynonymTests : IAsyncLifetime, IDisposable
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task Query_SynonymColumnNotDeclared_DeniedByCatalog()
+    public async Task Query_SynonymColumnNotDeclared_AnswersLikeUnknownColumn()
     {
         if (_host is null) return;
 
         // The base table has internal_note and the base object of price_list has internal_cost; neither is declared.
         // The table is sent as a derived table of its declared columns, so SQL Server itself rejects the undeclared column
-        // ("Invalid column name") and the caller receives the policy denial; no value of the column is ever read.
-        (await Should.ThrowAsync<GovernedSqlException>(() => QueryAsync("SELECT item_code, internal_note FROM dbo.items")))
-            .Code.ShouldBe("SQL_POLICY_DENIED");
-        (await Should.ThrowAsync<GovernedSqlException>(() => QueryAsync("SELECT item_code, internal_cost FROM dbo.price_list")))
-            .Code.ShouldBe("SQL_POLICY_DENIED");
+        // ("Invalid column name"), exactly as for a column that exists nowhere. The caller sees every declared column, so the gateway
+        // answers with its own token as an unknown column: that reveals nothing about the physical table. No value is ever read.
+        var note = await Should.ThrowAsync<SqlUnknownColumnException>(() => QueryAsync("SELECT item_code, internal_note FROM dbo.items"));
+        note.Code.ShouldBe("UNKNOWN_COLUMN");
+        note.ColumnName.ShouldBe("internal_note");
+        var cost = await Should.ThrowAsync<SqlUnknownColumnException>(() => QueryAsync("SELECT item_code, internal_cost FROM dbo.price_list"));
+        cost.Code.ShouldBe("UNKNOWN_COLUMN");
+        cost.ColumnName.ShouldBe("internal_cost");
 
         var star = await QueryAsync("SELECT * FROM dbo.items");
         star.Rows.ShouldNotBeEmpty();

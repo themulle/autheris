@@ -294,6 +294,23 @@ public sealed class UnknownColumnNamingTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public async Task UndeclaredPhysicalColumn_AndColumnThatExistsNowhere_AnswerIdentically()
+    {
+        // The catalog declares id, amount, secret (and tenant_id); "internal_note" is not declared. Whether the provider knows it physically
+        // is invisible to the caller: the name comes from the client text, the provider text is never read.
+        var rewrite = await RewriteAsync(Rewriter(), "SELECT internal_note FROM orders");
+        var (physical, _) = await FailAsync(rewrite, driverMessage: "Invalid column name 'internal_note'. The column exists on the base table but is not declared.");
+        var (nowhere, _) = await FailAsync(rewrite, driverMessage: "column \"internal_note\" does not exist");
+        Body(physical).ShouldBe(Body(nowhere));
+
+        // a column that exists nowhere gives the same body shape: only the caller's own token differs
+        var missing = await RewriteAsync(Rewriter(), "SELECT zz_missing FROM orders");
+        var (absent, _) = await FailAsync(missing);
+        Body(absent).ShouldBe(Body(physical).Replace("internal_note", "zz_missing", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public async Task ResolverException_StaysPolicyDenied()
     {
         var probe = new UnknownColumnProbe("SELEC ??? FROM", new HashSet<string>(StringComparer.OrdinalIgnoreCase));

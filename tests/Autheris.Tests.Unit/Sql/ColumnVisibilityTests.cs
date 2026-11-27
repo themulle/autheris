@@ -49,4 +49,25 @@ public sealed class ColumnVisibilityTests
     [Fact]
     public void DeniedDecision_IsNotFullyVisible() =>
         ColumnVisibility.IsFullyVisible(TableAccessDecision.Denied(Id, "no consent"), Meta()).ShouldBeFalse();
+
+    [Fact]
+    public void ConsentBypassDecision_ClearsEveryColumn_SoNothingIsHidden()
+    {
+        // the decision the access decision point builds when consent checks are bypassed: no column rules, unconstrained allow
+        var bypass = TableAccessDecision.Allowed(Id, new Dictionary<string, ColumnAccessLevel>(), rowFilterSql: null, hasUnconstrainedColumnAllow: true);
+
+        bypass.GetEffectiveColumnAccess("secret", Meta()).ShouldBe(ColumnAccessLevel.Clear);
+        ColumnVisibility.IsFullyVisible(bypass, Meta()).ShouldBeTrue();
+    }
+
+    [Fact]
+    public void ConsentWithClearRulesForSomeColumns_HidesTheOthers()
+    {
+        // the decision of a consent that lists Clear for id only: every other catalog column is Deny, so the table is not fully visible
+        var access = new Dictionary<string, ColumnAccessLevel>(System.StringComparer.OrdinalIgnoreCase) { ["id"] = ColumnAccessLevel.Clear };
+        var consent = TableAccessDecision.Allowed(Id, access, rowFilterSql: null, hasUnconstrainedColumnAllow: false);
+
+        consent.GetEffectiveColumnAccess("secret", Meta()).ShouldBe(ColumnAccessLevel.Deny);
+        ColumnVisibility.IsFullyVisible(consent, Meta()).ShouldBeFalse();
+    }
 }

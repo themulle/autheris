@@ -10,6 +10,7 @@ using Autheris.Application.Common.Interfaces;
 using Autheris.Domain.Common;
 using Autheris.Domain.Interfaces;
 using Autheris.Domain.Model;
+using Microsoft.AspNetCore.Mvc.Testing;
 using Microsoft.Extensions.DependencyInjection;
 using Shouldly;
 using Xunit;
@@ -24,9 +25,9 @@ public sealed class WebSqlUnknownColumnIntegrationTests : IClassFixture<Governed
 
     public WebSqlUnknownColumnIntegrationTests(GovernedWebSqlIntegrationTests.HostFixture factory) => _factory = factory;
 
-    private async Task<(HttpStatusCode Status, string Body)> PostSqlAsync(string sql)
+    private async Task<(HttpStatusCode Status, string Body)> PostSqlAsync(string sql, WebApplicationFactory<Program>? factory = null)
     {
-        var client = _factory.CreateClient();
+        var client = (factory ?? _factory).CreateClient();
         client.DefaultRequestHeaders.Add("X-Test-User-Sid", "S-1-5-21-WEBSQL");
         client.DefaultRequestHeaders.Add("X-Test-Tenant", "tenant_alpha");
         var response = await client.PostAsJsonAsync("/api/v1/sql", new { sql });
@@ -90,11 +91,15 @@ public sealed class WebSqlUnknownColumnIntegrationTests : IClassFixture<Governed
     [Fact]
     public async Task HiddenColumnTable_UnknownAndHidden_SameBody_RealPostgres()
     {
-        // the caller holds Clear rules for id, note and tenant_id only: ssn is hidden from this caller
+        // The shared host bypasses consent checks, so every column is visible there and nothing can be hidden. This host enforces consents:
+        // the caller holds Clear rules for id, note and tenant_id only, so ssn is hidden from this caller.
         await RegisterAsync("ledger", ["id", "note", "ssn", "tenant_id"], clearColumns: ["id", "note", "tenant_id"]);
+        await using var enforcing = _factory.WithWebHostBuilder(b => b.UseSetting("Gateway:Insecure:danger_bypass_consent_checks", "false"));
 
-        var unknown = await PostSqlAsync("SELECT nope FROM ledger");
-        var hidden = await PostSqlAsync("SELECT ssn FROM ledger");
+        var allowed = await PostSqlAsync("SELECT id, note FROM ledger", enforcing);   // control: the consent is honoured on this host
+        allowed.Status.ShouldBe(HttpStatusCode.OK, allowed.Body);
+        var unknown = await PostSqlAsync("SELECT nope FROM ledger", enforcing);
+        var hidden = await PostSqlAsync("SELECT ssn FROM ledger", enforcing);
 
         using var doc = JsonDocument.Parse(unknown.Body);
         doc.RootElement.GetProperty("code").GetString().ShouldBe("SQL_POLICY_DENIED");
