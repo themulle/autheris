@@ -13,9 +13,9 @@ using Autheris.Domain.Options;
 /// matching <see cref="McpAccessHints"/>: null switches fail closed for tool names, and disabled
 /// features or tools are never named.
 /// </summary>
-internal static class McpQueryGuideBuilder
+internal static partial class McpQueryGuideBuilder
 {
-    public static string Build(IReadPathSwitches? switches, GraphQLOptions? graphQlOptions = null, AggregationOptions? aggregationOptions = null)
+    public static string Build(IReadPathSwitches? switches, GraphQLOptions? graphQlOptions = null, AggregationOptions? aggregationOptions = null, WebSqlOptions? webSqlOptions = null)
     {
         var gql = graphQlOptions ?? new GraphQLOptions();
         var agg = aggregationOptions ?? new AggregationOptions();
@@ -40,6 +40,8 @@ internal static class McpQueryGuideBuilder
         {
             AppendSubscriptions(sb, gql);
         }
+
+        AppendSql(sb, switches, webSqlOptions);
 
         return sb.ToString();
     }

@@ -11,6 +11,7 @@ using Autheris.Domain.Options;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Routing;
+using Microsoft.Extensions.Options;
 
 public static partial class WebSqlEndpoints
 {
@@ -38,7 +39,7 @@ public static partial class WebSqlEndpoints
         var webSql = app.MapGroup("").WithIngressTransport(DataSourceTransportFlags.WebSql);
 
         // OpenAPI description of the endpoint (documentation only, no data).
-        webSql.MapGet("/api/v1/sql/openapi.json", () => Results.Json(BuildOpenApiSpec(gatewayOptions)))
+        webSql.MapGet("/api/v1/sql/openapi.json", (IOptionsMonitor<GatewayOptions> liveOptions) => GetOpenApiSpec(liveOptions.CurrentValue))
             .WithName("GetWebSqlOpenApiSpec")
             .RequireAuthorization()
             .WithAudit(AuditLevel.Summarized, AuditEventTypes.CatalogRead);
