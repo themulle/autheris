@@ -35,6 +35,13 @@ public sealed class QueryGuideStoredQueryExamplesEndToEndTests : IClassFixture<Q
         protected override IReadOnlyCollection<string> RequiredGraphQlFields =>
             [.. base.RequiredGraphQlFields, Field, Field + "_aggregate"];
 
+        // The guide examples page with a default of 50 rows; lift the per-query cost budget so that default fits (budget only, no auth or masking change).
+        protected override void ConfigureHost(Microsoft.AspNetCore.Hosting.IWebHostBuilder builder)
+        {
+            builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxTokensCapacity", "50000");
+            builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxCostPerQuery", "50000");
+        }
+
         protected override void SeedExtraData(NpgsqlConnection connection)
         {
             using var cmd = connection.CreateCommand();
