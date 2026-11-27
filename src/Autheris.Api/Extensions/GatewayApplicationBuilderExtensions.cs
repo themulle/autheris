@@ -123,6 +123,8 @@ public static class GatewayApplicationBuilderExtensions
         // (egress interceptors / audit below still operate on JSON).
         app.UseMiddleware<ParquetGraphQLResponseMiddleware>();
         app.UseMiddleware<GatewayExtensibilityMiddleware>();
+        // Agent tokens get the MCP output guardrails on GraphQL and WebSQL too; innermost, so egress interceptors and Parquet see guarded JSON.
+        app.UseMiddleware<AgentOutputGuardMiddleware>();
 
         return app;
     }
