@@ -120,6 +120,23 @@ public sealed class AggregationIndexPricingTests
         ]
     };
 
+    private static List<GraphQlIndexHint> ToHints(object? value)
+    {
+        var list = value.ShouldBeAssignableTo<IReadOnlyList<object?>>()!;
+        var result = new List<GraphQlIndexHint>(list.Count);
+        foreach (var item in list)
+        {
+            var d = item.ShouldBeAssignableTo<IReadOnlyDictionary<string, object?>>()!;
+            var cols = d["helpfulIndexColumns"].ShouldBeAssignableTo<IReadOnlyList<object?>>()!;
+            result.Add(new GraphQlIndexHint(
+                (string)d["root"]!,
+                (string)d["reason"]!,
+                cols.Select(c => (string)c!).ToList()));
+        }
+
+        return result;
+    }
+
     [Fact]
     [Trait("Category", "Security")]
     public async Task Aggregation_without_usable_index_gets_surcharge()
@@ -526,7 +543,7 @@ public sealed class AggregationIndexPricingTests
             result.Extensions.ShouldNotBeNull();
             var extAutheris = result.Extensions!["autheris"].ShouldBeAssignableTo<IReadOnlyDictionary<string, object?>>()!;
             extAutheris.ShouldContainKey("maskedFields");
-            var hints = extAutheris["indexHints"].ShouldBeAssignableTo<IReadOnlyList<GraphQlIndexHint>>()!;
+            var hints = ToHints(extAutheris["indexHints"]);
             hints.ShouldHaveSingleItem();
             hints[0].Root.ShouldBe("orders_aggregate");
             hints[0].HelpfulIndexColumns.ShouldBe(["region"]);
@@ -544,7 +561,7 @@ public sealed class AggregationIndexPricingTests
             deniedResult.Errors.ShouldBeEmpty();
             deniedResult.Extensions.ShouldNotBeNull();
             var deniedAutheris = deniedResult.Extensions!["autheris"].ShouldBeAssignableTo<IReadOnlyDictionary<string, object?>>()!;
-            var deniedHints = deniedAutheris["indexHints"].ShouldBeAssignableTo<IReadOnlyList<GraphQlIndexHint>>()!;
+            var deniedHints = ToHints(deniedAutheris["indexHints"]);
             deniedHints.ShouldHaveSingleItem();
             deniedHints[0].HelpfulIndexColumns.ShouldBeEmpty();
         }
@@ -639,8 +656,7 @@ public sealed class AggregationIndexPricingTests
             var connClearQuery = "{ ordersConnection(first: 10, where: { region: { eq: \"EU\" } }) { nodes { id } } }";
             var connClearResult = (OperationResult)await executor.ExecuteAsync(OperationRequestBuilder.New().SetDocument(connClearQuery).Build());
             connClearResult.Errors.ShouldBeEmpty();
-            var connClearHints = connClearResult.Extensions!["autheris"].ShouldBeAssignableTo<IReadOnlyDictionary<string, object?>>()!["indexHints"]
-                .ShouldBeAssignableTo<IReadOnlyList<GraphQlIndexHint>>()!;
+            var connClearHints = ToHints(connClearResult.Extensions!["autheris"].ShouldBeAssignableTo<IReadOnlyDictionary<string, object?>>()!["indexHints"]);
             connClearHints.ShouldHaveSingleItem();
             connClearHints[0].Root.ShouldBe("ordersConnection");
             connClearHints[0].HelpfulIndexColumns.ShouldBe(["region"]);
@@ -650,8 +666,7 @@ public sealed class AggregationIndexPricingTests
             var connDeniedQuery = "{ ordersConnection(first: 10, where: { region: { eq: \"EU\" }, secret_col: { eq: \"x\" } }) { nodes { id } } }";
             var connDeniedResult = (OperationResult)await executor.ExecuteAsync(OperationRequestBuilder.New().SetDocument(connDeniedQuery).Build());
             connDeniedResult.Errors.ShouldBeEmpty();
-            var connDeniedHints = connDeniedResult.Extensions!["autheris"].ShouldBeAssignableTo<IReadOnlyDictionary<string, object?>>()!["indexHints"]
-                .ShouldBeAssignableTo<IReadOnlyList<GraphQlIndexHint>>()!;
+            var connDeniedHints = ToHints(connDeniedResult.Extensions!["autheris"].ShouldBeAssignableTo<IReadOnlyDictionary<string, object?>>()!["indexHints"]);
             connDeniedHints.ShouldHaveSingleItem();
             connDeniedHints[0].HelpfulIndexColumns.ShouldBeEmpty();
 
@@ -660,8 +675,7 @@ public sealed class AggregationIndexPricingTests
             var anonQuery = "{ orders_aggregate(groupBy: [region], aggregates: [{ fn: COUNT, alias: \"c\" }]) { count } }";
             var anonResult = (OperationResult)await executor.ExecuteAsync(OperationRequestBuilder.New().SetDocument(anonQuery).Build());
             anonResult.Errors.ShouldBeEmpty();
-            var anonHints = anonResult.Extensions!["autheris"].ShouldBeAssignableTo<IReadOnlyDictionary<string, object?>>()!["indexHints"]
-                .ShouldBeAssignableTo<IReadOnlyList<GraphQlIndexHint>>()!;
+            var anonHints = ToHints(anonResult.Extensions!["autheris"].ShouldBeAssignableTo<IReadOnlyDictionary<string, object?>>()!["indexHints"]);
             anonHints.ShouldHaveSingleItem();
             anonHints[0].HelpfulIndexColumns.ShouldBeEmpty();
         }
