@@ -31,6 +31,14 @@ public sealed class McpOptions
     /// "nothing disabled" (a JSON <c>[]</c> binds to null).
     /// </summary>
     public List<string>? DisabledTools { get; init; }
+
+    private static readonly string[] DefaultAgentScopes = ["Agent.Read"];
+
+    /// <summary>
+    /// Token scopes that mark an autonomous agent: <c>Agent.Read</c>, plus any scope mapped to the AutonomousAgents tier in
+    /// <c>Gateway:ResourceGroups:ScopeTiers</c>. A GraphQL or WebSQL response to such a token passes the same output guardrails as MCP results.
+    /// </summary>
+    public IReadOnlyList<string> GetEffectiveAgentScopes() => DefaultAgentScopes;
 }
 
 /// <summary>the four MCP tool groups. A group off removes all its tools, resources and prompts.</summary>

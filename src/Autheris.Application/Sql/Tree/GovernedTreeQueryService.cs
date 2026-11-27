@@ -47,10 +47,25 @@ public interface IGovernedTreeQueryService
         CancellationToken ct = default) => ExecuteAsync(principal, root, requestHeaders, operationId, ct);
 
     /// <summary>
+    /// Counts the root rows the caller may read under the tenant column, row policy and <c>root.Where</c>; relations, order and paging are
+    /// ignored. Uses the access decision memoized by a preceding <see cref="ExecuteAsync(ClaimsPrincipal?, TreeQueryNode, IReadOnlyDictionary{string, string[]}?, string, CancellationToken)"/>
+    /// of the same operation and never resolves a new one: without it the call is refused.
+    /// </summary>
+    Task<long> CountAsync(
+        ClaimsPrincipal? principal,
+        TreeQueryNode root,
+        IReadOnlyDictionary<string, string[]>? requestHeaders,
+        string operationId,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Lists the columns of <paramref name="root"/> that are masked for the caller, using the access decisions memoized
     /// by a preceding <see cref="ExecuteAsync"/> of the same operation. Empty when nothing is masked or no decision exists.
     /// </summary>
     IReadOnlyList<TreeMaskedColumn> GetMaskedColumns(ClaimsPrincipal? principal, TreeQueryNode root, string operationId);
+
+    /// <summary>Access facts of every table read by <paramref name="root"/>, from the memo of a preceding execute; empty when unavailable.</summary>
+    IReadOnlyList<DatasetAccessFacts> GetDatasetFacts(ClaimsPrincipal? principal, TreeQueryNode root, string operationId) => [];
 
     /// <summary>
     /// Cleans up any cached table access decisions, locks, and audit tracking for the given GraphQL operation.

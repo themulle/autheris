@@ -73,4 +73,13 @@ public sealed class CallerAttributeDisclosureTests
         (await Service(literal, owner: false).ExplainMyAccessAsync(User(), Orders)).ActiveRowFilters.ShouldBe([EffectiveAccessExplanationService.RowFilterDescription]);
         (await Service(literal, owner: true).ExplainMyAccessAsync(User(), Orders)).ActiveRowFilters.ShouldBe(["cost_center = 'x'"]);
     }
+
+    [Fact]
+    public async Task DescribeMyAccess_OwnerStillSeesSql_AfterRefactor()
+    {
+        var literal = TableAccessDecision.Allowed(Orders, new Dictionary<string, ColumnAccessLevel> { ["id"] = ColumnAccessLevel.Clear }, rowFilterSql: "cost_center = 'x'", hasUnconstrainedColumnAllow: false);
+
+        (await Service(literal, owner: true).ExplainMyAccessAsync(User(), Orders)).ActiveRowFilters.ShouldBe(["cost_center = 'x'"]);
+        (await Service(literal, owner: false).ExplainMyAccessAsync(User(), Orders)).ActiveRowFilters.ShouldBe([EffectiveAccessExplanationService.RowFilterDescription]);
+    }
 }

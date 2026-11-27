@@ -1,6 +1,7 @@
 namespace Autheris.Application.Analytics;
 
 using System;
+using Autheris.Application.Sql.Tree;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
 using System.Globalization;
@@ -366,6 +367,7 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             ["is_allowed"] = true,
             ["group_by"] = groupByColumns,
             ["aggregates"] = resolvedAggregates.Select(a => a.EffectiveAlias).ToArray(),
+            ["aggregate_specs"] = resolvedAggregates.Select(a => $"{a.Function.ToString().ToLowerInvariant()}:{a.Column ?? "*"}").ToArray(),
             ["filter"] = query.Where?.SqlPredicate,
             ["filter_shape"] = AggregationNegationGuard.ExtractFilterShape(query.Where, metadata),
             ["minimum_group_size"] = effectiveMinGroupSize,
@@ -383,7 +385,11 @@ public sealed partial class GovernedAggregationService : IGovernedAggregationSer
             Table: query.Table,
             Groups: visibleGroupRows,
             Totals: totalsRow,
-            Metadata: resultMetadata);
+            Metadata: resultMetadata)
+        {
+            AccessFacts = DatasetAccessFacts.From(query.Table, [], decision),
+            SuppressedCountsExposed = exposedSuppressedCounts
+        };
     }
 }
 

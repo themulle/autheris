@@ -186,7 +186,7 @@ public static class ApiProblems
     }
 
     // NL-SC-27: the only extension members a problem body may carry, scalar values only.
-    private static readonly HashSet<string> AllowedExtensionKeys = new(StringComparer.Ordinal)
+    internal static readonly HashSet<string> AllowedExtensionKeys = new(StringComparer.Ordinal)
     {
         "retryAfterSeconds", "maxValidTo", "phase", "sunsetDate", "replacement", "limit", "discardedEvents",
         "scope", "metric", "period",

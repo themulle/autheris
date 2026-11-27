@@ -22,6 +22,7 @@ public static class CompileRequestFactory
 
     /// <param name="policy">The assembled policy; its DML guards must be <see cref="DmlGuardOptions.Strict"/> (CR-ADG-38).</param>
     /// <param name="options">The WebSQL options (validated here; the governed switches are not configurable per request).</param>
+    /// <param name="clientNulls">The value-free names of the referenced scalar client parameters whose value is null; part of the template cache key.</param>
     /// <param name="clientLists">The value-free shapes of the client lists the statement references; part of the template cache key.</param>
     /// <param name="timeZoneConversionAvailable">the node proved the conversion for<paramref name="dialect"/>; the default is false (fail closed).</param>
     /// <param name="gatewayLikePatternParameters">Aliases of the gateway-owned parameters of a planned read; the only non-literal SQL Server LIKE patterns admitted.</param>
@@ -42,7 +43,8 @@ public static class CompileRequestFactory
         bool bindPageOffset = false,
         long? pageOffset = null,
         long maxOffset = 1_000_000,
-        IReadOnlySet<string>? gatewayLikePatternParameters = null)
+        IReadOnlySet<string>? gatewayLikePatternParameters = null,
+        TrinoSqlEngine.Ast.Emit.ClientNullShapes? clientNulls = null)
     {
         ArgumentNullException.ThrowIfNull(policy);
         ArgumentNullException.ThrowIfNull(options);
@@ -75,6 +77,7 @@ public static class CompileRequestFactory
             TranslateTrinoDateFunctions = translateDateFunctions,
             AllowedFunctions = allowedFunctions.ToFrozenSet(StringComparer.OrdinalIgnoreCase),
             ClientLists = clientLists ?? TrinoSqlEngine.Ast.Emit.ClientListShapes.Empty,
+            ClientNulls = clientNulls ?? TrinoSqlEngine.Ast.Emit.ClientNullShapes.Empty,
             TimeZoneConversionAvailable = timeZoneConversionAvailable,
             // Issue #277 (-11): the only place that reads the flag; every governed compile (WebSQL, MCP, subtree) goes through here.
             // Virtual filters, row-policy fragments and stored endpoints never build their own CompileRequest, so they cannot enable it.

@@ -166,9 +166,9 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
     };
 
     private async Task<List<object?[]>> RunAsync(string sql, string tenant, IReadOnlyDictionary<string, object?>? client = null,
-        Func<NpgsqlConnection, Task>? prepare = null, bool translateDates = false, int? commandTimeoutSeconds = null)
+        Func<NpgsqlConnection, Task>? prepare = null, bool translateDates = false, int? commandTimeoutSeconds = null, ClientNullShapes? nulls = null)
     {
-        var compiled = _engine.Compile(sql.AsMemory(), Request(tenant) with { TranslateTrinoDateFunctions = translateDates }, CancellationToken.None);
+        var compiled = _engine.Compile(sql.AsMemory(), Request(tenant) with { TranslateTrinoDateFunctions = translateDates, ClientNulls = nulls ?? ClientNullShapes.Empty }, CancellationToken.None);
         await using var conn = new NpgsqlConnection(_fx.ConnectionString);
         await conn.OpenAsync();
         if (prepare != null) await prepare(conn);
@@ -415,6 +415,59 @@ public sealed class AstCompilerPostgreSqlExecutionTests : IClassFixture<AstCompi
         // CR-ADG-25: the compiler refuses it; nothing reaches the database.
         Should.Throw<Exception>(() => _engine.Compile(sql.AsMemory(), Request("acme"), CancellationToken.None));
         await Task.CompletedTask;
+    }
+
+    private void EventsUnderRowPolicy() =>
+        _policies.Predicates[new TableIdentity("public", "events")] = PolicyPredicate.Create(
+            new BinaryExpression(Col("id"), BinaryOperator.GreaterThan, new PolicyParameterExpression("__pol_min", SqlParameterType.Int32)),
+            new Dictionary<string, PolicyValue> { ["__pol_min"] = new(0, SqlParameterType.Int32) });
+
+    [Theory]
+    [InlineData("2024-01-01T00:00:00Z", new[] { 2 })]
+    [InlineData("2024-03-14T22:00:00+02:00", new[] { 2 })]
+    [InlineData("2019-06-01T12:00:00+02:00", new[] { 1, 2 })]
+    [InlineData("2019-06-01T10:00:00Z", new[] { 1, 2 })]
+    [InlineData("2019-06-01", new[] { 1, 2 })]
+    public async Task TimestampParam_WithZAndOffset_BindsUnderRowPolicy(string since, int[] expected)
+    {
+        EventsUnderRowPolicy();
+
+        var rows = await RunAsync("SELECT id FROM events WHERE created_at >= __param_since", "acme", new Dictionary<string, object?> { ["since"] = since });
+
+        Ids(rows).ShouldBe(expected.ToList());
+    }
+
+    [Theory]
+    [InlineData("01/02/2026")]
+    [InlineData("2024-1-2")]
+    [InlineData(" 2024-01-01T00:00:00Z")]
+    [InlineData("2024-01-01T00:00:00+0200")]
+    [InlineData("2024-01-01T00:00:00+25:00")]
+    public async Task TimestampParam_WrongForm_IsSqlDataError(string since)
+    {
+        EventsUnderRowPolicy();
+
+        var ex = await Should.ThrowAsync<GovernedSqlException>(() =>
+            RunAsync("SELECT id FROM events WHERE created_at >= __param_since", "acme", new Dictionary<string, object?> { ["since"] = since }));
+
+        ex.Code.ShouldBe(GovernedSqlErrorCodes.DataError);
+        ex.Message.ShouldNotContain(since.Trim());
+    }
+
+    [Fact]
+    public async Task OptionalFilter_WithNull_ReturnsAllTenantRows()
+    {
+        var rows = await RunAsync("SELECT id FROM orders WHERE (__param_r IS NULL OR region = __param_r)", "acme",
+            new Dictionary<string, object?> { ["r"] = null }, nulls: ClientNullShapes.Create(["r"]));
+        Ids(rows).ShouldBe(new List<int> { 1, 2, 6 });
+    }
+
+    [Fact]
+    public async Task OptionalFilter_WithValue_Filters()
+    {
+        var rows = await RunAsync("SELECT id FROM orders WHERE (__param_r IS NULL OR region = __param_r)", "acme",
+            new Dictionary<string, object?> { ["r"] = "EU" });
+        Ids(rows).ShouldBe(new List<int> { 1, 6 });
     }
 
     [Fact]

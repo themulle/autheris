@@ -76,6 +76,45 @@ public sealed class CatalogGraphQlMapTests : IDisposable
         orders.Relations.ShouldHaveSingleItem().Target.ShouldBe(Customers);
     }
 
+    private static TableMetadata KeyedTable(string name, IReadOnlyList<string> primaryKey, params TableIndexDefinition[] indexes)
+    {
+        var meta = Table(new TableIdentifier("crm", "dbo", name), [new TableColumn { ColumnName = "id", DataType = "int" }, new TableColumn { ColumnName = "email", DataType = "varchar" }]);
+        return meta with { PrimaryKeyColumns = primaryKey, Indexes = indexes };
+    }
+
+    private static CatalogGraphQlMap MapOver(params TableMetadata[] tables) =>
+        new(new Autheris.Tests.Common.Fakes.InMemoryTableMetadataRepository(tables), new Autheris.Tests.Common.Fakes.InMemoryTableRelationRepository());
+
+    [Fact]
+    public async Task GetTable_ListsAggregateAndConnectionSignatures()
+    {
+        var orders = (await _map.GetTableAsync(Orders))!;
+
+        orders.ListArguments!.Select(a => (a.Name, a.Type)).ShouldBe(
+            [("where", "crm_dbo_orders_filter"), ("orderBy", "[crm_dbo_orders_order_by!]"), ("first", "Int"), ("offset", "Int")]);
+        orders.Aggregate!.Field.ShouldBe("crm_dbo_orders_aggregate");
+        orders.Aggregate.ResultType.ShouldBe("crm_dbo_orders_aggregate_result");
+        orders.Aggregate.Arguments.Select(a => a.Name).ShouldBe(["groupBy", "timeBuckets", "aggregates", "where", "orderBy", "limit"]);
+        orders.Aggregate.Arguments.Single(a => a.Name == "aggregates").Type.ShouldBe("[crm_dbo_orders_aggregate_input!]!");
+        orders.Connection!.Field.ShouldBe("crm_dbo_ordersConnection");
+        orders.Connection.ResultType.ShouldBe("crm_dbo_ordersConnection");
+        orders.Connection.Arguments.Select(a => (a.Name, a.Type)).ShouldBe(
+            [("first", "Int"), ("after", "String"), ("where", "crm_dbo_orders_filter"), ("orderBy", "[crm_dbo_orders_order_by!]")]);
+    }
+
+    [Fact]
+    public async Task GetTable_KeysetColumns_PrimaryKeyElseFirstUniqueIndexElseEmpty()
+    {
+        var map = MapOver(
+            KeyedTable("pk", ["id"]),
+            KeyedTable("uq", [], new TableIndexDefinition("ix_email", ["email"], true, null)),
+            KeyedTable("none", []));
+
+        (await map.GetTableAsync(new TableIdentifier("crm", "dbo", "pk")))!.KeysetColumns.ShouldBe(["id"]);
+        (await map.GetTableAsync(new TableIdentifier("crm", "dbo", "uq")))!.KeysetColumns.ShouldBe(["email"]);
+        (await map.GetTableAsync(new TableIdentifier("crm", "dbo", "none")))!.KeysetColumns.ShouldBeEmpty();
+    }
+
     [Fact]
     public async Task CatalogGraphQlMap_RelationColumns_OwnSideFirst_BothDirections()
     {
@@ -254,6 +293,19 @@ public sealed class CatalogGraphQlMapTests : IDisposable
         var padding = new string(' ', 70 * 1024);
 
         (await _map.ResolveDocumentTablesAsync($"{{ crm_dbo_customers {{ id }} }}{padding}")).ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task GroupsRootField_ResolvesTable_DoesNotWalkRowAsEntity()
+    {
+        // The flat <table>_groups root maps to its table through the shared suffix helper; its row type is not the entity type, so the
+        // selection below it is never walked as entity columns or relations. An unknown table stays unresolvable (fail closed).
+        var tables = await _map.ResolveDocumentTablesAsync("{ g: crm_dbo_orders_groups(limit: 5) { id count total: amount_sum customer_orders } }");
+
+        tables.ShouldBe([Orders]);
+        (await _map.ResolveDocumentTablesAsync("{ crm_dbo_unknown_groups { count } }")).ShouldBeNull();
+        (await _map.ResolveDocumentTablesAsync("{ crm_dbo_orders_aggregate_x { count } }")).ShouldBeNull();
     }
 
     public void Dispose() => _map.Dispose();

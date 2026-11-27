@@ -105,8 +105,8 @@ public sealed partial class UnityCatalogPermissionsClient(
         for (var page = 0; page < MaxPages; page++)
         {
             var url = pageToken is null ? path : path + "&page_token=" + Uri.EscapeDataString(pageToken);
-            using var doc = await SendAsync(settings, HttpMethod.Get, url, null, ct).ConfigureAwait(false);
-            if (ReadEffectivePrivileges(doc.RootElement, principal).Overlaps(privileges))
+            using var doc = await SendAsync(settings, HttpMethod.Get, url, null, ct, forbiddenIsExpected: true).ConfigureAwait(false);
+            if (ReadEffectivePrivileges(doc.RootElement).Overlaps(privileges))
             {
                 return true;
             }
@@ -152,14 +152,21 @@ public sealed partial class UnityCatalogPermissionsClient(
 
         var group = matches.Items[0];
         var displayName = ReadString(group, "displayName");
-        if (!SameId(ReadString(group, "externalId"), externalId) || !IsValidPrincipal(displayName))
+        if (!MatchesFilteredId(matches, "externalId", externalId) || !IsValidPrincipal(displayName))
         {
             return UcPrincipalResolution.NotFound;
         }
 
         // Unity Catalog names a group by its display name, which is neither unique nor immutable: it must name exactly this group.
-        var sameName = await ScimQueryAsync(settings, "Groups", "displayName eq \"" + EscapeScim(displayName!) + "\"", "id,displayName,externalId", ct).ConfigureAwait(false);
-        if (sameName.NotSingle is not null || !SameId(ReadString(sameName.Items[0], "externalId"), externalId))
+        // The SCIM id identifies it, because non-admin callers do not see the external id of the display-name match.
+        var scimId = ReadString(group, "id");
+        if (string.IsNullOrEmpty(scimId))
+        {
+            return UcPrincipalResolution.Ambiguous;
+        }
+
+        var sameName = await ScimQueryAsync(settings, "Groups", "displayName eq \"" + EscapeScim(displayName!) + "\"", "id,displayName", ct).ConfigureAwait(false);
+        if (sameName.NotSingle is not null || !string.Equals(ReadString(sameName.Items[0], "id"), scimId, StringComparison.Ordinal))
         {
             return UcPrincipalResolution.Ambiguous;
         }
@@ -176,7 +183,7 @@ public sealed partial class UnityCatalogPermissionsClient(
         }
 
         var userName = ReadString(matches.Items[0], "userName");
-        return SameId(ReadString(matches.Items[0], "externalId"), externalId) && IsValidPrincipal(userName)
+        return MatchesFilteredId(matches, "externalId", externalId) && IsValidPrincipal(userName)
             ? UcPrincipalResolution.Resolved(new UcPrincipal(GranteeType.User, userName!, externalId))
             : UcPrincipalResolution.NotFound;
     }
@@ -227,11 +234,21 @@ public sealed partial class UnityCatalogPermissionsClient(
         }
 
         // A total above the listed page means more matches exist than were returned: never pick one of them.
-        var truncated = root.TryGetProperty("totalResults", out var total) && total.TryGetInt32(out var totalResults) && totalResults > result.Count;
-        return new ScimMatches(result, truncated);
+        int? totalResults = null;
+        if (root.TryGetProperty("totalResults", out var total))
+        {
+            if (total.ValueKind != JsonValueKind.Number || !total.TryGetInt32(out var value))
+            {
+                throw new UcProvisioningException(UcErrorCodes.Protocol);
+            }
+
+            totalResults = value;
+        }
+
+        return new ScimMatches(result, totalResults > result.Count, totalResults);
     }
 
-    private sealed record ScimMatches(List<JsonElement> Items, bool Truncated)
+    private sealed record ScimMatches(List<JsonElement> Items, bool Truncated, int? TotalResults)
     {
         /// <summary>Null when exactly one match exists; otherwise the not-found or ambiguous outcome.</summary>
         public UcPrincipalResolution? NotSingle =>
@@ -245,6 +262,16 @@ public sealed partial class UnityCatalogPermissionsClient(
 
     private static bool SameId(string? actual, string expected) =>
         Guid.TryParse(actual, out var a) && Guid.TryParse(expected, out var e) && a == e;
+
+    /// <summary>
+    /// Whether the single match of a SCIM filter on <paramref name="property"/> carries the requested id. Workspace SCIM omits
+    /// <c>externalId</c> for callers without admin rights; an absent attribute is then trusted as the server's own filter match,
+    /// but only when the server also reports exactly one result. A present value must still be the requested id.
+    /// </summary>
+    private static bool MatchesFilteredId(ScimMatches matches, string property, string expected) =>
+        matches.Items[0].TryGetProperty(property, out var value)
+            ? value.ValueKind == JsonValueKind.String && SameId(value.GetString(), expected)
+            : matches.TotalResults == 1;
 
     private static string? ReadString(JsonElement element, string property) =>
         element.ValueKind == JsonValueKind.Object && element.TryGetProperty(property, out var value) && value.ValueKind == JsonValueKind.String
@@ -417,7 +444,7 @@ public sealed partial class UnityCatalogPermissionsClient(
         return result;
     }
 
-    private static HashSet<string> ReadEffectivePrivileges(JsonElement root, string principal)
+    private static HashSet<string> ReadEffectivePrivileges(JsonElement root)
     {
         var result = new HashSet<string>(StringComparer.Ordinal);
         if (root.ValueKind != JsonValueKind.Object)
@@ -437,9 +464,9 @@ public sealed partial class UnityCatalogPermissionsClient(
 
         foreach (var item in assignments.EnumerateArray())
         {
-            // Only the assignment of the asked principal counts, whatever else the service returns.
-            if (!string.Equals(ReadString(item, "principal"), principal, StringComparison.Ordinal) ||
-                !item.TryGetProperty("privileges", out var list) || list.ValueKind != JsonValueKind.Array)
+            // The response is already scoped to the asked principal; privileges it holds through a group are listed under the group's
+            // name (for example "account users"), so every returned assignment counts.
+            if (!item.TryGetProperty("privileges", out var list) || list.ValueKind != JsonValueKind.Array)
             {
                 continue;
             }
@@ -470,7 +497,8 @@ public sealed partial class UnityCatalogPermissionsClient(
 
     // ---- HTTP ----
 
-    private async Task<JsonDocument> SendAsync(Settings settings, HttpMethod method, string pathAndQuery, string? body, CancellationToken ct)
+    private async Task<JsonDocument> SendAsync(
+        Settings settings, HttpMethod method, string pathAndQuery, string? body, CancellationToken ct, bool forbiddenIsExpected = false)
     {
         var token = await AcquireTokenAsync(settings, ct).ConfigureAwait(false);
         using var response = await SendOnceAsync(settings, token, method, pathAndQuery, body, ct).ConfigureAwait(false);
@@ -480,10 +508,10 @@ public sealed partial class UnityCatalogPermissionsClient(
             credentials.EvictToken(settings.Credentials, null);
             var refreshed = await AcquireTokenAsync(settings, ct).ConfigureAwait(false);
             using var retry = await SendOnceAsync(settings, refreshed, method, pathAndQuery, body, ct).ConfigureAwait(false);
-            return await ReadResponseAsync(settings, retry, ct).ConfigureAwait(false);
+            return await ReadResponseAsync(settings, retry, forbiddenIsExpected, ct).ConfigureAwait(false);
         }
 
-        return await ReadResponseAsync(settings, response, ct).ConfigureAwait(false);
+        return await ReadResponseAsync(settings, response, forbiddenIsExpected, ct).ConfigureAwait(false);
     }
 
     private async Task<string> AcquireTokenAsync(Settings settings, CancellationToken ct)
@@ -530,7 +558,7 @@ public sealed partial class UnityCatalogPermissionsClient(
         }
     }
 
-    private async Task<JsonDocument> ReadResponseAsync(Settings settings, HttpResponseMessage response, CancellationToken ct)
+    private async Task<JsonDocument> ReadResponseAsync(Settings settings, HttpResponseMessage response, bool forbiddenIsExpected, CancellationToken ct)
     {
         var status = (int)response.StatusCode;
         if (status is >= 300 and < 400)
@@ -565,7 +593,10 @@ public sealed partial class UnityCatalogPermissionsClient(
         }
 
         var remoteCode = ReadRemoteErrorCode(bytes);
-        logger?.LogWarning("Unity Catalog call failed with HTTP {StatusCode} ({ErrorCode}).", status, remoteCode ?? "none");
+        if (!(forbiddenIsExpected && response.StatusCode == HttpStatusCode.Forbidden))
+        {
+            logger?.LogWarning("Unity Catalog call failed with HTTP {StatusCode} ({ErrorCode}).", status, remoteCode ?? "none");
+        }
         var code = response.StatusCode switch
         {
             HttpStatusCode.Unauthorized => UcErrorCodes.AuthFailed,
@@ -575,7 +606,9 @@ public sealed partial class UnityCatalogPermissionsClient(
             _ when status >= 500 => UcErrorCodes.Unavailable,
             _ => UcErrorCodes.Rejected
         };
-        if (code is UcErrorCodes.AuthFailed or UcErrorCodes.Forbidden)
+        // A refused read of another principal's effective permissions is expected (it needs rights the provisioning principal lacks)
+        // and says nothing about the token.
+        if (code == UcErrorCodes.AuthFailed || (code == UcErrorCodes.Forbidden && !forbiddenIsExpected))
         {
             credentials.EvictToken(settings.Credentials, null);
         }

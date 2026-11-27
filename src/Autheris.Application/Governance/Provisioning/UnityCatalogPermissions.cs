@@ -124,7 +124,8 @@ public interface IUnityCatalogPermissionsClient
 
     /// <summary>
     /// Whether <paramref name="principal"/> effectively holds one of <paramref name="privileges"/> on the securable (directly, inherited from
-    /// a parent securable or through a group), as the effective-permissions API reports it.
+    /// a parent securable or through a group), as the effective-permissions API reports it. Reading another principal's effective
+    /// permissions needs elevated rights on the securable; without them the call fails with <see cref="UcErrorCodes.Forbidden"/>.
     /// </summary>
     Task<bool> HasEffectivePrivilegeAsync(
         string dataSource, UcSecurableType type, string fullName, string principal, IReadOnlyCollection<string> privileges, CancellationToken ct);

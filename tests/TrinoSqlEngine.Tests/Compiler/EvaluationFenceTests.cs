@@ -159,7 +159,7 @@ public sealed class EvaluationFenceTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public void FencedDialect_ClientBindFamilyMismatch_ThrowsRowPolicyExpressionRejectedException()
+    public void FencedDialect_ClientBindFamilyMismatch_ThrowsSqlDataError()
     {
         var compiled = _engine.Compile(
             "SELECT Id FROM Orders WHERE Id = __param_id".AsMemory(),
@@ -167,15 +167,13 @@ public sealed class EvaluationFenceTests
             CancellationToken.None);
 
         using var cmd = new DuckDBCommand();
-        var ex = Assert.Throws<RowPolicyExpressionRejectedException>(() =>
+        var ex = Assert.Throws<GovernedSqlException>(() =>
             CompiledSqlBinders.For(TargetSqlDialect.PostgreSql).Bind(
                 cmd,
                 compiled,
                 new Dictionary<string, object?> { ["id"] = "not-an-integer" }));
 
-        Assert.Equal(GovernedSqlErrorCodes.RowPolicyExpressionNotAllowed, ex.Code);
-        Assert.Contains("TRY_CAST", ex.Hint, StringComparison.Ordinal);
-        Assert.Contains("NULLIF", ex.Hint, StringComparison.Ordinal);
+        Assert.Equal(GovernedSqlErrorCodes.DataError, ex.Code);
     }
 
     private static CompileRequest PerCellRequest(

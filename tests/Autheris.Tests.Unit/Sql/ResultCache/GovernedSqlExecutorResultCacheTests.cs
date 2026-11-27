@@ -283,6 +283,26 @@ public sealed class GovernedSqlExecutorResultCacheTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task Null_and_value_optional_filter_do_not_share_an_entry()
+    {
+        const string optionalSql = "SELECT id, name FROM crm.customers WHERE (@name IS NULL OR name = @name) ORDER BY id";
+        using var pipeline = new GovernedResultCachePipeline();
+        var nullName = new Dictionary<string, object?> { ["name"] = null };
+        var valueName = new Dictionary<string, object?> { ["name"] = "name1" };
+
+        var first = await pipeline.RunAsync(sql: optionalSql, parameters: nullName);
+        var second = await pipeline.RunAsync(sql: optionalSql, parameters: valueName);
+        var third = await pipeline.RunAsync(sql: optionalSql, parameters: nullName);
+
+        first.Outcomes.Select(o => o.Status).ShouldBe([WebSqlResultCacheStatus.Miss, WebSqlResultCacheStatus.Store]);
+        second.Outcomes.Select(o => o.Status).ShouldBe([WebSqlResultCacheStatus.Miss, WebSqlResultCacheStatus.Store]);
+        third.Outcomes.ShouldHaveSingleItem().Status.ShouldBe(WebSqlResultCacheStatus.Hit);
+        pipeline.Spy.Hashes[0].ShouldNotBe(pipeline.Spy.Hashes[1]);
+        pipeline.Spy.Hashes[0].ShouldBe(pipeline.Spy.Hashes[2]);
+    }
+
+    [Fact]
     public async Task Governance_change_after_store_gives_a_miss()
     {
         using var pipeline = new GovernedResultCachePipeline();

@@ -376,6 +376,11 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
                     return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, PersistedToolValidator.InvalidArgumentsCode);
                 }
 
+                if ((Bool("brief") ?? false) && parsedNarrowing.ConflictsWithBrief)
+                {
+                    return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, PersistedToolValidator.InvalidArgumentsCode);
+                }
+
                 describeNarrowing = parsedNarrowing;
             }
 
@@ -538,10 +543,22 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         }
 
         Dictionary<string, object?>? variableValues = null;
+        var datasetFacts = false;
         using (var args = JsonDocument.Parse(argumentsJson!))
         {
             foreach (var property in args.RootElement.EnumerateObject())
             {
+                if (string.Equals(property.Name, "datasetFacts", StringComparison.OrdinalIgnoreCase))
+                {
+                    if (property.Value.ValueKind is not (JsonValueKind.True or JsonValueKind.False or JsonValueKind.Null))
+                    {
+                        return Invalid("'datasetFacts' must be a boolean.");
+                    }
+
+                    datasetFacts = property.Value.ValueKind == JsonValueKind.True;
+                    continue;
+                }
+
                 if (!string.Equals(property.Name, "variables", StringComparison.OrdinalIgnoreCase) || property.Value.ValueKind == JsonValueKind.Null)
                 {
                     continue;
@@ -615,6 +632,14 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         if (variableValues != null)
         {
             requestBuilder.SetVariableValues(variableValues);
+        }
+
+        if (datasetFacts)
+        {
+            requestBuilder.SetExtensions(new Dictionary<string, object?>
+            {
+                ["autheris"] = new Dictionary<string, object?> { ["datasetFacts"] = true }
+            });
         }
 
         var executionResult = await executor.ExecuteAsync(requestBuilder.Build(), cancellationToken).ConfigureAwait(false);
