@@ -35,6 +35,7 @@ public sealed partial class UcProvisioningReconciler
         var existing = (await store.ListFeedbackAsync(tenant, dataSource, ct).ConfigureAwait(false)).ToDictionary(f => f.ConsentId);
         var catalogAccess = new Dictionary<(string Catalog, string Principal), bool>();
         var changed = new List<UcGrantFeedback>();
+        var events = new List<UcFeedbackEvent>();
         var active = new HashSet<Guid>();
 
         foreach (var plan in desired.Consents)
@@ -56,6 +57,12 @@ public sealed partial class UcProvisioningReconciler
             }
 
             changed.Add(new UcGrantFeedback(tenant, plan.Consent.Id, dataSource, state, reason, now, state == UcGrantState.Provisioned ? now : null));
+
+            // Consumers learn the transitions that matter to them: effective in Unity Catalog, or not achievable.
+            if (state is UcGrantState.Provisioned or UcGrantState.Failed && before?.State != state)
+            {
+                events.Add(new UcFeedbackEvent(plan.Consent.Id, plan.Consent.TableIdentifier, state == UcGrantState.Provisioned, now));
+            }
         }
 
         foreach (var row in existing.Values)
@@ -75,7 +82,7 @@ public sealed partial class UcProvisioningReconciler
 
         if (changed.Count > 0)
         {
-            await store.SaveFeedbackAsync(tenant, dataSource, _fencingToken, changed, [], ct).ConfigureAwait(false);
+            await store.SaveFeedbackAsync(tenant, dataSource, _fencingToken, changed, [], events, ct).ConfigureAwait(false);
         }
     }
 

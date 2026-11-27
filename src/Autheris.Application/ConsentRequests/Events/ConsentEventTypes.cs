@@ -22,6 +22,12 @@ public static class ConsentEventTypes
     public const string GrantExpiring = TypePrefix + "grant.expiring";
     public const string GrantRenewed = TypePrefix + "grant.renewed";
     public const string GrantExpired = TypePrefix + "grant.expired";
+
+    /// <summary>Issue #1122: the grant's Unity Catalog privileges were applied and confirmed by a read.</summary>
+    public const string GrantProvisioned = TypePrefix + "grant.provisioned";
+
+    /// <summary>Issue #1122: the grant's Unity Catalog privileges could not be applied (failed attempts or missing catalog access).</summary>
+    public const string GrantProvisioningFailed = TypePrefix + "grant.provisioning_failed";
 }
 
 public sealed record ConsentEventLinks(string Self, string? Events = null);

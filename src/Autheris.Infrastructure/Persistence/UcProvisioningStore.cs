@@ -6,6 +6,7 @@ using System.Globalization;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.ConsentRequests.Events;
 using Autheris.Application.Governance.Provisioning;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -313,10 +314,13 @@ public sealed class UcProvisioningStore(
         return result;
     }
 
-    public Task SaveFeedbackAsync(TenantId tenant, string dataSource, long fencingToken, IReadOnlyList<UcGrantFeedback> rows, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct)
+    public Task SaveFeedbackAsync(
+        TenantId tenant, string dataSource, long fencingToken, IReadOnlyList<UcGrantFeedback> rows, IReadOnlyList<AuditLogEntry> audit,
+        IReadOnlyList<UcFeedbackEvent> events, CancellationToken ct)
     {
         ArgumentNullException.ThrowIfNull(rows);
         ArgumentNullException.ThrowIfNull(audit);
+        ArgumentNullException.ThrowIfNull(events);
         var tenantValue = RequireTenant(tenant);
         var source = RequireDataSource(dataSource);
         if (rows.Any(r => r.Tenant != tenant) || audit.Any(a => a.TenantId != tenant))
@@ -338,22 +342,47 @@ public sealed class UcProvisioningStore(
             }
         }
 
-        return rows.Count == 0 && audit.Count == 0
-            ? Task.CompletedTask
-            : _repository.WriteWithAuditAsync(
+        if (events.Any(e => !rows.Any(r => r.ConsentId == e.ConsentId)))
+        {
+            throw new ArgumentException("Every feedback event must belong to a written feedback row.", nameof(events));
+        }
+
+        async Task WriteAsync(DbConnection conn, DbTransaction tx)
+        {
+            await FenceAsync(conn, tx, source, fencingToken, ct).ConfigureAwait(false);
+            foreach (var row in rows.OrderBy(r => r.ConsentId))
+            {
+                await UpsertFeedbackAsync(conn, tx, tenantValue, row with { DataSource = source }, ct).ConfigureAwait(false);
+            }
+        }
+
+        if (rows.Count == 0 && audit.Count == 0)
+        {
+            return Task.CompletedTask;
+        }
+
+        if (events.Count == 0)
+        {
+            return _repository.WriteWithAuditAsync(
                 async (conn, tx) =>
                 {
-                    await FenceAsync(conn, tx, source, fencingToken, ct).ConfigureAwait(false);
-                    foreach (var row in rows.OrderBy(r => r.ConsentId))
-                    {
-                        await UpsertFeedbackAsync(conn, tx, tenantValue, row with { DataSource = source }, ct).ConfigureAwait(false);
-                    }
-
+                    await WriteAsync(conn, tx).ConfigureAwait(false);
                     return true;
                 },
                 static applied => applied,
                 audit,
                 ct);
+        }
+
+        var writes = events
+            .Select(e => new UcProvisioningEventWrite(
+                e.Provisioned ? ConsentEventTypes.GrantProvisioned : ConsentEventTypes.GrantProvisioningFailed,
+                e.Provisioned ? "PROVISIONED" : "PROVISIONING_FAILED",
+                e.ConsentId,
+                e.Table,
+                e.OccurredAt))
+            .ToList();
+        return _repository.WriteWithAuditAndConsentEventsAsync(WriteAsync, audit, tenant, writes, ct);
     }
 
     // ---- writes ----

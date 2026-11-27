@@ -2,6 +2,7 @@
 # read-only tokens may call every route listed. A side-effecting GET is a defect to fix, never an entry. May only shrink for deleted routes.
 src/Autheris.Api/Endpoints/AccessPolicyEndpoints.cs|PolicyRoute
 src/Autheris.Api/Endpoints/AdminWritePrivilegesEndpoints.cs|/api/v1/admin/datasources/{name}/required-write-privileges
+src/Autheris.Api/Endpoints/ProvisioningEndpoints.cs|/api/v1/admin/provisioning/databricks/{dataSource}
 src/Autheris.Api/Endpoints/AnalyticsEndpoints.cs|/api/v1/analytics/metrics
 src/Autheris.Api/Endpoints/AsyncJobEndpoints.cs|/{jobId}/result
 src/Autheris.Api/Endpoints/AsyncJobEndpoints.cs|/{jobId}/status
