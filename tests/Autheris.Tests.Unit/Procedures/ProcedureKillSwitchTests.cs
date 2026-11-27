@@ -112,8 +112,8 @@ public sealed class ProcedureKillSwitchTests
 
         var result = await handler.ExecuteToolAsync(tool, "{}", session, CancellationToken.None);
 
-        result.ShouldContain("is not registered or allowed");
-        result.ShouldNotContain("NOT_AVAILABLE");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("TOOL_NOT_AVAILABLE");
+        result.ShouldNotContain("call_procedure");
         result.ShouldNotContain("INVALID_PARAMS");
     }
 

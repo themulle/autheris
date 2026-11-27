@@ -323,7 +323,9 @@ public sealed class ExternalCatalogSurfaceParityIntegrationTests : IClassFixture
 
         var (searchError, searchText) = await McpTestClient.CallAsync(mcp, "search_catalog", new { query = "orders" });
         searchError.ShouldBeFalse(searchText);
-        surfaces["mcp:search_catalog"] = Names(AllTables.Select(static t => t.TableName).Where(n => searchText.Contains(n, StringComparison.Ordinal)));
+        // Only the hits count: join_relations may name visible non-hit tables, so the whole response is not scanned for names.
+        using var searchDoc = JsonDocument.Parse(searchText);
+        surfaces["mcp:search_catalog"] = Names(searchDoc.RootElement.GetProperty("datasets").EnumerateArray().Select(static d => d.GetProperty("table").GetString()!));
 
         return surfaces;
     }

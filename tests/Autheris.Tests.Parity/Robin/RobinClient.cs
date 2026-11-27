@@ -133,11 +133,14 @@ public sealed class RobinClient(IParityHost host)
 
             if (root.ValueKind == JsonValueKind.Object)
             {
-                if (root.TryGetProperty("isError", out var isErr) && isErr.ValueKind == JsonValueKind.True)
+                var envelope = root.TryGetProperty("error", out var envelopeError) && envelopeError.ValueKind == JsonValueKind.Object;
+                if (envelope || (root.TryGetProperty("isError", out var isErr) && isErr.ValueKind == JsonValueKind.True))
                 {
                     status = status >= 400 ? status : 400;
                     string? code = null;
-                    if (root.TryGetProperty("graphQL", out var gql) && gql.ValueKind == JsonValueKind.Object &&
+                    JsonElement gql = default;
+                    var hasGraphQl = (envelope && envelopeError.TryGetProperty("graphQL", out gql)) || root.TryGetProperty("graphQL", out gql);
+                    if (hasGraphQl && gql.ValueKind == JsonValueKind.Object &&
                         gql.TryGetProperty("errors", out var gqlErrors) && gqlErrors.ValueKind == JsonValueKind.Array)
                     {
                         foreach (var e in gqlErrors.EnumerateArray())

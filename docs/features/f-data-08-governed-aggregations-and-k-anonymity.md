@@ -155,3 +155,28 @@ Full aggregation (multiple aggregate functions, ordering, typed filters, structu
 - **Masked Column Protection (`AGGREGATION_ON_MASKED_COLUMN`):** Columns subject to dynamic masking cannot be aggregated or grouped on, preventing statistical reconstruction of masked PII or financial fields.
 - **Post-Filter Cardinality Enforcement:** Group sizes are always evaluated after caller RLS filters, mandatory virtual filters, and user-supplied `where` clauses. Narrowing a query with a specific filter that reduces a bucket below $k$ rows suppresses the bucket.
 - **Merge-Into-Other Secondary Floor:** Under `SmallGroupStrategy.MergeIntoOther`, if the combined `"OTHER"` bucket itself contains fewer than $k$ rows, the `"OTHER"` bucket is also suppressed so single-group remainders cannot be inferred.
+
+---
+
+## 6. Scope: Which Channels Are k-Anonymous
+
+The minimum group size, the differencing guard (negated-filter restriction), noise and the privacy budget protect callers who receive **aggregates without row access**. They apply to these channels:
+
+| Channel | Minimum group size | Negated-filter restriction |
+|---|---|---|
+| REST `POST /api/v1/analytics/aggregate` | Yes | Yes (`AGG_NEGATED_FILTER_REJECTED`) |
+| GraphQL `<table>_aggregate` (also over MCP `query_graphql`) | Yes | Yes |
+| Semantic metrics (`queryMetrics`) | Yes | Yes |
+| Metric views, including over WebSQL (`POST /api/v1/sql`) | Yes | Yes (refused with `SQL_POLICY_VIOLATION`) |
+| WebSQL over base tables | **No** | **No** |
+
+**WebSQL over base tables is row-level access.** A WebSQL statement over a base table asks the policy decision point for the same `Read` permission as a row read and is subject to the same row rules, column masks, deny rules and consent. A caller who can run `SELECT … GROUP BY` over a table can therefore also read that table's rows, so WebSQL `GROUP BY`, `COUNT(*)`, window functions and similar constructs over base tables return groups of any size. Enforcing a minimum group size there would not protect anything. Masked columns still cannot be grouped, aggregated, filtered or ordered in WebSQL. A metric-scoped consent (`metric:<name>`) applies only to semantic metrics and does not grant WebSQL access to the underlying table.
+
+**Metric views over WebSQL** are the aggregate-only WebSQL channel and follow the governed aggregation rules:
+
+- The effective minimum group size is resolved like a governed aggregation: the maximum of `Privacy.DefaultMinGroupSize`, `TableMinimumGroupSizes`, the `Privacy.Datasets` override and the view's own `MinGroupSize`, with the same catalog-lowering rules. Catalog lowering is refused when no protection snapshot is available.
+- When the effective minimum group size is above 1, the view must declare an exposed, non-masked count measure (`MetricViewCountMeasure`); otherwise the statement is refused. Groups whose count is below the minimum are suppressed (`MergeIntoOther` is not applied to metric-view measures).
+- With `Privacy.RestrictNegatedFilters` enabled (default), negated predicates in `WHERE` on dimensions that are not grouped as bare columns are refused, and every dimension referenced in `HAVING` must be grouped. Refusals use the fixed metric-view message without SQL, column names or the group size.
+- The WebSQL result cache stores the already filtered result and keys on the effective minimum group size.
+
+To offer aggregate-only access to data, expose it through governed aggregations, semantic metrics or a metric view, and do not grant `Read` on the underlying base table.

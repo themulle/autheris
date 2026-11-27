@@ -2,6 +2,7 @@ namespace Autheris.Tests.Unit.Mcp;
 
 using System.Text.Json;
 using Autheris.Application.Catalog.Discovery;
+using Autheris.Application.Mcp.Services;
 using Autheris.GraphQL.Mcp;
 using Shouldly;
 using Xunit;

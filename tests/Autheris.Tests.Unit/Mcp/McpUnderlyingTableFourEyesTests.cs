@@ -130,7 +130,7 @@ public sealed class McpUnderlyingTableFourEyesTests
         var result = await CallProcedure(guardrail, """{"procedure_name":"GetData"}""");
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("not accessible");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("RESOURCE_NOT_FOUND");
         await executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
     }
 
@@ -172,7 +172,7 @@ public sealed class McpUnderlyingTableFourEyesTests
 
         // The decision point decides the real tables first: a table without catalog metadata is denied there (fail closed).
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("Access denied");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("RESOURCE_NOT_FOUND");
         await executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
     }
 
@@ -214,7 +214,7 @@ public sealed class McpUnderlyingTableFourEyesTests
         var result = await CallProcedure(Guardrail(executor), """{"procedure_name":"GetData"}""");
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("not accessible");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("RESOURCE_NOT_FOUND");
         await executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
     }
 
@@ -228,7 +228,7 @@ public sealed class McpUnderlyingTableFourEyesTests
         var result = await CallProcedure(guardrail, """{"procedure":"Harmless","procedure_name":"GetInactive"}""");
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("not accessible");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("RESOURCE_NOT_FOUND");
     }
 
     [Fact]
@@ -240,7 +240,7 @@ public sealed class McpUnderlyingTableFourEyesTests
         var result = await CallProcedure(guardrail, """{"procedure_name":"GetSecret","Procedure_Name":"Other"}""");
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("could not be resolved");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("RESOURCE_NOT_FOUND");
         await executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
     }
 
@@ -281,7 +281,7 @@ public sealed class McpUnderlyingTableFourEyesTests
         var result = await QueryMetrics(guardrail, """{"metrics":["revenue"]}""");
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("not accessible");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("METRIC_NOT_FOUND");
         await executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
     }
 
@@ -319,7 +319,7 @@ public sealed class McpUnderlyingTableFourEyesTests
         var result = await QueryMetrics(guardrail, args);
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("not accessible");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("METRIC_NOT_FOUND");
         await executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
     }
 
@@ -332,7 +332,7 @@ public sealed class McpUnderlyingTableFourEyesTests
         var result = await QueryMetrics(guardrail, """{"metrics":["revenue"]}""");
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("not accessible");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("METRIC_NOT_FOUND");
     }
 
     [Fact]
@@ -343,6 +343,6 @@ public sealed class McpUnderlyingTableFourEyesTests
         var result = await QueryMetrics(Guardrail(executor), """{"metrics":["revenue"]}""");
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("not accessible");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("METRIC_NOT_FOUND");
     }
 }

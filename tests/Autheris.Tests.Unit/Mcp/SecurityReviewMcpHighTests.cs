@@ -104,15 +104,15 @@ public sealed class SecurityReviewMcpHighTests
             new McpToolCallRequest("query_sql", SqlArgs(sql)), Session());
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("not accessible");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("SQL_POLICY_DENIED");
     }
 
     // W0-C2: the administrator role never bypasses the inactive-table gate.
     [Theory]
-    [InlineData("tenant-a", "GovernanceAdmin", "not accessible")]
-    [InlineData("default-tenant", "GovernanceAdmin", "not accessible")]
-    [InlineData("tenant-a", "tenant:ClusterAdmin", "not accessible")]
-    [InlineData("tenant-a", "ClusterAdmin", "not accessible")]
+    [InlineData("tenant-a", "GovernanceAdmin", "SQL_POLICY_DENIED")]
+    [InlineData("default-tenant", "GovernanceAdmin", "SQL_POLICY_DENIED")]
+    [InlineData("tenant-a", "tenant:ClusterAdmin", "SQL_POLICY_DENIED")]
+    [InlineData("tenant-a", "ClusterAdmin", "SQL_POLICY_DENIED")]
     public async Task QuerySql_CatalogVisibilityShortcut_FollowsTheCanonicalCallerClass(string tenant, string role, string expectedDenial)
     {
         var session = new McpSessionContext("s1", "agent", tenant, DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-1-ADM", Roles: [role], GroupSids: []);
@@ -122,7 +122,7 @@ public sealed class SecurityReviewMcpHighTests
             new McpToolCallRequest("query_sql", SqlArgs("SELECT * FROM sales.public.secret")), session);
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain(expectedDenial);
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe(expectedDenial);
     }
 
     [Theory]
@@ -135,7 +135,7 @@ public sealed class SecurityReviewMcpHighTests
             new McpToolCallRequest("query_sql", SqlArgs(sql)), Session());
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("could not be resolved");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("SQL_SYNTAX_ERROR");
         await executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
     }
 
@@ -163,7 +163,7 @@ public sealed class SecurityReviewMcpHighTests
             new McpToolCallRequest("query_sql", SqlArgs("SELECT * FROM sales.public.pub p JOIN sales.public.secret s ON s.id = p.id")), Session());
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("ABAC");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("SQL_POLICY_DENIED");
     }
 
     [Theory]
@@ -180,7 +180,7 @@ public sealed class SecurityReviewMcpHighTests
             new McpToolCallRequest("invoke_api", args), Session());
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("not accessible");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("DATASET_NOT_FOUND");
     }
 
     [Theory]
@@ -195,7 +195,7 @@ public sealed class SecurityReviewMcpHighTests
             new McpToolCallRequest("invoke_api", args), Session());
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("could not be resolved");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("DATASET_NOT_FOUND");
         await executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
     }
 
@@ -240,7 +240,7 @@ public sealed class SecurityReviewMcpHighTests
             new McpToolCallRequest(tool, "{}"), Session([role]));
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("Access denied");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("TOOL_NOT_AVAILABLE");
         planning.ReceivedCalls().ShouldBeEmpty();
     }
 
@@ -270,7 +270,7 @@ public sealed class SecurityReviewMcpHighTests
             new McpToolCallRequest(tool, "{}"), Session(["ClusterAdmin"], readOnly: true));
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("Access denied");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("TOOL_NOT_AVAILABLE");
         planning.ReceivedCalls().ShouldBeEmpty();
     }
 

@@ -38,7 +38,7 @@ public sealed class WebSqlValueWriterTests
     [InlineData("en-US")]
     public void Write_TemporalArms_AreInvariant(string culture)
     {
-        Render(new DateTime(2023, 6, 1, 8, 30, 0, DateTimeKind.Unspecified), culture).ShouldBe("\"2023-06-01T08:30:00Z\"");
+        Render(new DateTime(2023, 6, 1, 8, 30, 0, DateTimeKind.Unspecified), culture).ShouldBe("\"2023-06-01T08:30:00\"");
         Render(new DateTime(2023, 6, 1, 8, 30, 0, DateTimeKind.Utc).AddTicks(1234567), culture).ShouldBe("\"2023-06-01T08:30:00.1234567Z\"");
         Render(new DateTimeOffset(2023, 6, 1, 10, 30, 0, TimeSpan.FromHours(2)), culture).ShouldBe("\"2023-06-01T08:30:00Z\"");
         Render(new DateOnly(2023, 6, 1), culture).ShouldBe("\"2023-06-01\"");
@@ -54,11 +54,21 @@ public sealed class WebSqlValueWriterTests
     {
         foreach (var culture in new[] { "tr-TR", "de-DE" })
         {
-            Render(new DateTime(2023, 6, 1, 8, 30, 0), culture).ShouldBe("\"2023-06-01T08:30:00Z\"");
+            Render(new DateTime(2023, 6, 1, 8, 30, 0), culture).ShouldBe("\"2023-06-01T08:30:00\"");
             Render(new DateOnly(2023, 6, 1), culture).ShouldBe("\"2023-06-01\"");
             Render(new TimeOnly(8, 30, 15), culture).ShouldBe("\"08:30:15\"");
             Render(new DateTimeOffset(2023, 6, 1, 8, 30, 0, TimeSpan.Zero), culture).ShouldBe("\"2023-06-01T08:30:00Z\"");
         }
+    }
+
+    [Fact]
+    [Trait("Category", "SqlGate")]
+    public void Write_ZonelessTimestamp_IsNotLabelledAsUtcInstant()
+    {
+        // convert_timezone returns a zone-less wall-clock timestamp in the target zone.
+        var wallClock = new DateTime(2023, 6, 1, 10, 30, 0, DateTimeKind.Unspecified);
+        Render(wallClock, "en-US").ShouldBe("\"2023-06-01T10:30:00\"");
+        Render(DateTime.SpecifyKind(wallClock, DateTimeKind.Utc), "en-US").ShouldBe("\"2023-06-01T10:30:00Z\"");
     }
 
     [Fact]

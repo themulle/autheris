@@ -512,7 +512,7 @@ public sealed partial class McpQuerySqlPagingTests
     private static void AssertInvalidParams(string json)
     {
         using var doc = JsonDocument.Parse(json);
-        doc.RootElement.GetProperty("isError").GetBoolean().ShouldBeTrue();
+        doc.RootElement.TryGetProperty("isError", out _).ShouldBeFalse();
         doc.RootElement.GetProperty("error").GetProperty("code").GetString().ShouldBe("INVALID_PARAMS");
     }
 

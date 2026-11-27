@@ -129,9 +129,7 @@ public sealed class ProductWriteTests
 
     private static ITableReadConcurrencyGate Gate()
     {
-        var gate = Substitute.For<ITableReadConcurrencyGate>();
-        gate.TryEnter(default!, default).ReturnsForAnyArgs(new NoopDisposable());
-        return gate;
+        return Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance;
     }
 
     private static Dictionary<string, object?> Inputs() => new() { ["customer_id"] = 7 };

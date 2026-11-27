@@ -77,7 +77,7 @@ public class McpDatasetToolsIntegrationTests : IClassFixture<McpDatasetToolsInte
 
         var (missingError, missing) = await CallAsync(client, "describe_dataset", new { dataset = "no.such.table" });
         missingError.ShouldBeTrue();
-        missing.GetProperty("error").GetProperty("code").GetString().ShouldBe("NOT_FOUND");
+        missing.GetProperty("error").GetProperty("code").GetString().ShouldBe("DATASET_NOT_FOUND");
     }
 
     [Fact]

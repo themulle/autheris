@@ -30,9 +30,17 @@ using Xunit;
 [Collection("IndividualGrantLimits")]
 public sealed class CrossChannelIntegrationFixesTests
 {
-    [Fact]
-    public async Task McpToolExecutionHandler_QueryDataset_UnauthorizedAccessException_ReturnsCleanErrorPayload()
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task McpToolExecutionHandler_QueryDataset_UnauthorizedAccessException_ReturnsCleanErrorPayload(bool cancelled)
     {
+        using var cts = new CancellationTokenSource();
+        if (cancelled)
+        {
+            await cts.CancelAsync();
+        }
+
         // Arrange
         var sqlExecutionService = Substitute.For<IGovernedSqlExecutionService>();
         var dataQueryService = Substitute.For<IGovernedDataQueryService>();
@@ -45,7 +53,9 @@ public sealed class CrossChannelIntegrationFixesTests
             Arg.Any<DatasetQueryRequest>(),
             Arg.Any<RequestContext>(),
             Arg.Any<CancellationToken>())
-            .Returns<Task<DatasetQueryEnvelope>>(_ => throw new UnauthorizedAccessException("Subject lacks permission to access dataset 'sales.orders'."));
+            .Returns<Task<DatasetQueryEnvelope>>(_ => throw (cancelled
+                ? new OperationCanceledException("cancelled", new TimeoutException("db timeout"), cts.Token)
+                : new UnauthorizedAccessException("Subject lacks permission to access dataset 'sales.orders'.")));
 
         var handler = new McpToolExecutionHandler(
             sqlExecutionService,
@@ -64,19 +74,27 @@ public sealed class CrossChannelIntegrationFixesTests
         var session = new McpSessionContext("sess-1", "user-principal", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
 
         // Act
+        if (cancelled)
+        {
+            // A cancelled call is never answered with a mapped result (even when the cancellation carries a timeout as its cause).
+            await Should.ThrowAsync<OperationCanceledException>(async () =>
+                await handler.ExecuteToolAsync(toolDef, """{"dataset":"sales.public.orders"}""", session, cts.Token));
+            return;
+        }
+
         var resultJson = await handler.ExecuteToolAsync(
             toolDef,
             """{"dataset":"sales.public.orders"}""",
             session,
             CancellationToken.None);
 
-        // Assert: a structured tool error (isError:true) with a fixed text; the exception message (policy details) is never echoed.
-        resultJson.ShouldContain("\"isError\":true");
-        resultJson.ShouldContain("FORBIDDEN");
-        resultJson.ShouldContain("Access denied by data governance policy.");
+        // Assert: a structured tool error with a fixed text; the exception message (policy details) is never echoed.
+        resultJson.ShouldNotContain("isError");
+        resultJson.ShouldContain("DATASET_NOT_FOUND");
+        resultJson.ShouldContain("Dataset not found or not visible.");
         resultJson.ShouldNotContain("Subject lacks permission");
         AiDataGuardrailService.TryGetExecutorError(resultJson, out var code).ShouldBeTrue();
-        code.ShouldBe("FORBIDDEN");
+        code.ShouldBe("DATASET_NOT_FOUND");
     }
 
     // =========================================================================
@@ -237,8 +255,8 @@ public sealed class CrossChannelIntegrationFixesTests
 
         // Assert
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage.ShouldNotBeNull();
-        result.ErrorMessage.ShouldStartWith("SQL_SYNTAX_ERROR:");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("SQL_SYNTAX_ERROR");
+        result.ErrorMessage!.ShouldNotContain("could not be resolved");
     }
 
     [Fact]

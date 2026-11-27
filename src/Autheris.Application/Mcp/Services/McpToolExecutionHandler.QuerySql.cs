@@ -125,7 +125,7 @@ public sealed partial class McpToolExecutionHandler
         }
         catch (UnauthorizedAccessException)
         {
-            return CreateMcpError(sessionContext.TenantId, tool.Name, ForbiddenCode, AccessDeniedMessage);
+            return McpToolError.Serialize(TrinoSqlEngine.Ast.Emit.GovernedSqlErrorCodes.PolicyDenied, string.Empty);
         }
     }
 }

@@ -78,7 +78,8 @@ internal sealed class TypedAggregateTestHost
                 null,
                 null,
                 null,
-                AggregationEnabled))
+                AggregationEnabled,
+                defaultBucketTimeZone: Analytics.Aggregation.DefaultTimeZone))
             .BuildRequestExecutorAsync();
     }
 

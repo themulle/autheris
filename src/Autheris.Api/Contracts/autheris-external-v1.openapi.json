@@ -876,7 +876,22 @@
           "profileAssignmentId": { "type": "string", "format": "uuid", "nullable": true },
           "description": { "type": "string", "nullable": true },
           "grantKind": { "type": "string" },
-          "targetColumns": { "type": "array", "items": { "type": "string" }, "nullable": true }
+          "targetColumns": { "type": "array", "items": { "type": "string" }, "nullable": true },
+          "provisioning": {
+            "description": "Unity Catalog provisioning state, returned by GET /api/v1/consent/grants and /api/v1/consent/grants/{id}; absent when the grant's data source is not provisioning-managed and on other endpoints.",
+            "allOf": [{ "$ref": "#/components/schemas/GrantProvisioningDto" }],
+            "nullable": true
+          }
+        }
+      },
+      "GrantProvisioningDto": {
+        "type": "object",
+        "required": ["target", "state"],
+        "properties": {
+          "target": { "type": "string", "description": "databricks:{dataSource}" },
+          "state": { "type": "string", "enum": ["PENDING", "PROVISIONED", "UNSUPPORTED", "FAILED", "REVOKED"] },
+          "reasonCode": { "type": "string", "nullable": true },
+          "verifiedAt": { "type": "string", "format": "date-time", "nullable": true }
         }
       },
       "CreateConsentRequestBody": {

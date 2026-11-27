@@ -75,8 +75,13 @@ internal sealed class FakeUcStore : IUcProvisioningStore
             .Where(f => f.Tenant == tenant && consentIds.Contains(f.ConsentId))
             .ToDictionary(f => f.ConsentId));
 
-    public Task SaveFeedbackAsync(TenantId tenant, string dataSource, long fencingToken, IReadOnlyList<UcGrantFeedback> rows, IReadOnlyList<AuditLogEntry> audit, CancellationToken ct)
+    public List<UcFeedbackEvent> Events { get; } = [];
+
+    public Task SaveFeedbackAsync(
+        TenantId tenant, string dataSource, long fencingToken, IReadOnlyList<UcGrantFeedback> rows, IReadOnlyList<AuditLogEntry> audit,
+        IReadOnlyList<UcFeedbackEvent> events, CancellationToken ct)
     {
+        Events.AddRange(events);
         LastToken = fencingToken;
         foreach (var row in rows)
         {

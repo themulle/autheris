@@ -95,6 +95,7 @@ AI agents connected via the official Model Context Protocol server can invoke `s
       "join_relations": [
         {
           "target_table": "sales.public.customers",
+          "direction": "outgoing",
           "join_condition": "invoices.customer_id = customers.id"
         }
       ]

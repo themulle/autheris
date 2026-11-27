@@ -668,7 +668,7 @@ public static partial class McpDocTools
         var writer = DocAccessPolicy.ResolveWriter(caller, appId, out var denial);
         if (writer is null)
         {
-            return McpToolError.Serialize(denial.Code, denial.Reason);
+            return McpToolError.Serialize(denial.Code, string.Empty);
         }
 
         if (!DocumentRules.IsValidAppId(appId))
@@ -693,7 +693,7 @@ public static partial class McpDocTools
         }
         catch (DocValidationException ex)
         {
-            return McpToolError.Serialize(ex.Code, ex.Message);
+            return McpToolError.Serialize(ex.Code, string.Empty);
         }
 
         title = UntrustedMarkdownSanitizer.SanitizeTitle(title, 200);
@@ -743,7 +743,7 @@ public static partial class McpDocTools
 
         if (!result.Success)
         {
-            return McpToolError.Serialize(result.ErrorCode ?? "DOC_ERROR", result.Message);
+            return McpToolError.Serialize(result.ErrorCode ?? "DOC_ERROR", string.Empty);
         }
 
         return JsonSerializer.Serialize(result, IndentedOptions);

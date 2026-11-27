@@ -215,7 +215,8 @@ public sealed class SqlErrorSurfacesTests
 
         var error = JsonDocument.Parse(json).RootElement.GetProperty("error");
         error.GetProperty("code").GetString().ShouldBe("SQL_LIMIT_EXCEEDED");
-        json.ShouldNotContain("InListItems");
+        error.GetProperty("limit").GetString().ShouldBe("InListItems");
+        json.ShouldNotContain("The statement exceeds a resource limit: ");
     }
 
     [Fact]
@@ -230,7 +231,7 @@ public sealed class SqlErrorSurfacesTests
 
         var json = await executor.ExecuteOperationAsync(Tool(McpDatasetTools.DescribeDataset), """{"dataset":"a.b.c"}""", Session());
 
-        json.ShouldContain("isError\":true");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Error(json);
         json.ShouldNotContain(HostileMarker);
     }
 

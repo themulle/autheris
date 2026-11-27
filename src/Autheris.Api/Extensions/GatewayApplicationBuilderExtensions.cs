@@ -256,6 +256,7 @@ public static class GatewayApplicationBuilderExtensions
         app.MapTokenRevocationEndpoints(); // SEC M-14 (GAP-B)
         app.MapAuthzMigrationReportEndpoints();
         app.MapAdminWritePrivilegesEndpoints();
+        app.MapProvisioningEndpoints();
         app.MapTenantRegistryAdminEndpoints(); // M-A2: operator resolution of a tenant id collision
         app.MapTrustedDocumentAdminEndpointsWhenEnabled(gatewayOptions); // Issue #281
 

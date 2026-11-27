@@ -153,13 +153,15 @@ public sealed class McpSearchHitDatasetIdTests
         }
     }
 
-    [Fact]
-    public async Task SearchCatalog_JoinTarget_UsesFullIdentifier_JoinConditionKeepsTableNames()
+    [Theory]
+    [InlineData(false, "outgoing")]
+    [InlineData(true, "incoming")]
+    public async Task SearchCatalog_JoinTarget_UsesFullIdentifier_JoinConditionKeepsTableNames(bool incoming, string direction)
     {
         var discovery = Substitute.For<ICatalogDiscoveryService>();
         discovery.SearchCatalogDetailedAsync(Arg.Any<CatalogSearchQuery>(), Arg.Any<RequestContext>(), Arg.Any<CancellationToken>())
             .Returns(Task.FromResult<IReadOnlyList<CatalogSearchHit>>(
-                [Hit(LiveUnit, [new TableRelationship(LiveUnit, "crane_id", Crane, "id", TableRelationshipType.ForeignKey)])]));
+                [Hit(LiveUnit, [new TableRelationship(LiveUnit, "crane_id", Crane, "id", TableRelationshipType.ForeignKey, Incoming: incoming)])]));
 
         var json = await Handler(discovery).ExecuteToolAsync(Tool(McpDatasetTools.SearchCatalog), """{"query":"unit"}""", Session);
 
@@ -168,6 +170,8 @@ public sealed class McpSearchHitDatasetIdTests
         var join = hit.GetProperty("join_relations")[0];
         join.GetProperty("target_table").GetString().ShouldBe("fleet.live.crane");
         join.GetProperty("join_condition").GetString().ShouldBe("telematic_unit.crane_id = crane.id");
+        join.GetProperty("direction").GetString().ShouldBe(direction);
+        join.EnumerateObject().Select(p => p.Name).ShouldBe(["target_table", "direction", "join_condition"]);
     }
 
     [Fact]
