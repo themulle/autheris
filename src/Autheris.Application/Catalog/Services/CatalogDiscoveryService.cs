@@ -516,7 +516,7 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
                 .Select(h => h! with { AccessStatus = permittedById.TryGetValue(h!.TableIdentifier, out var row) ? LegacyAccessStatusOf(row) : null })
                 .Take(query.Limit);
 
-            return (await WithGraphQlFieldsAsync(tableHits, permittedById, ct).ConfigureAwait(false)).Concat(procHits).Take(query.Limit).ToList();
+            return (await WithJoinRelationsAsync(await WithGraphQlFieldsAsync(tableHits, permittedById, ct).ConfigureAwait(false), callerTables, query, context, ct).ConfigureAwait(false)).Concat(procHits).Take(query.Limit).ToList();
         }
 
         var fallbackHits = permitted
@@ -558,6 +558,7 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
             query.DomainFilter, query.Limit, mode, lang, Autheris.Application.Catalog.Discovery.DiscoverySurface.Search, query.AccessStatus);
         var objs = await _discovery!.SearchAsync(trimmed, searchOpts, CallerOf(context), ct).ConfigureAwait(false);
         var hits = new List<CatalogSearchHit>(objs.Count);
+        var own = new Dictionary<TableIdentifier, IReadOnlySet<string>>();
         foreach (var obj in objs)
         {
             // Procedures are added once below from the registered catalog (GRANTED, as list_datasets reports them), never twice.
@@ -569,8 +570,10 @@ public sealed partial class CatalogDiscoveryService : ICatalogDiscoveryService
             var hit = Autheris.Application.Catalog.Discovery.CatalogDiscoveryProjection.ToSearchHit(obj, mode, lang);
             if (_graphQlMap != null && obj.Columns.Count > 0)
                 hit = hit with { SuggestedGraphQlField = await _graphQlMap.GetRootFieldAsync(hit.TableIdentifier, ct).ConfigureAwait(false) };
+            own[hit.TableIdentifier] = Autheris.Application.Catalog.Discovery.DiscoveryColumnVisibility.VisibleColumns(obj).Select(static c => c.Name).ToHashSet(StringComparer.OrdinalIgnoreCase);
             hits.Add(hit);
         }
+        hits = await WithJoinRelationsAsync(hits, own, query, context, ct).ConfigureAwait(false);
         // Procedure hits report GRANTED (as list_datasets does); they are left out under any other access filter.
         var visibleProcs = query.AccessStatus is null or DiscoveryAccessState.Granted
             ? await GetVisibleProceduresAsync(context, ct).ConfigureAwait(false)

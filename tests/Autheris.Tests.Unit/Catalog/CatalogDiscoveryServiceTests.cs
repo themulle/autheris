@@ -205,7 +205,7 @@ public sealed class CatalogDiscoveryServiceTests
         {
             Identifier = new TableIdentifier("sales", "dbo", "customers"),
             Table = new Table { SchemaName = "dbo", TableName = "customers", DataSourceType = DataSourceType.HttpDeclarative, IsActive = true },
-            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }]
+            Columns = [new TableColumn { ColumnName = "id", DataType = "int" }, new TableColumn { ColumnName = "customer_id", DataType = "int" }]
         };
 
         _metadataRepository.StubAllTables([table, customers]);
@@ -245,6 +245,8 @@ public sealed class CatalogDiscoveryServiceTests
         results[0].TableIdentifier.TableName.ShouldBe("orders");
         results[0].RelatedJoinPaths.Count.ShouldBe(1);
         results[0].RelatedJoinPaths[0].ToTable.TableName.ShouldBe("customers");
+        // The join paths are recomputed from the caller's view (naming rule here, no stored relation), not taken from the engine hit.
+        results[0].RelatedJoinPaths[0].Type.ShouldBe(TableRelationshipType.SemanticInferred);
     }
 
     [Fact]

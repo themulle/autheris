@@ -336,6 +336,7 @@ public sealed partial class McpToolExecutionHandler : IMcpToolExecutionHandler
                 join_relations = h.RelatedJoinPaths.Select(r => new
                 {
                     target_table = McpDatasetCatalog.DatasetId(r.ToTable),
+                    direction = r.Incoming ? "incoming" : "outgoing",
                     join_condition = $"{h.TableIdentifier.TableName}.{r.FromColumn} = {r.ToTable.TableName}.{r.ToColumn}"
                 })
             }).ToList();
