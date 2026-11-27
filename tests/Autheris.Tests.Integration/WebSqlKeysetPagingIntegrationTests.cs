@@ -165,7 +165,7 @@ public sealed class WebSqlKeysetPagingIntegrationTests : IClassFixture<WebSqlKey
     }
 
     private Task RegisterItemsAsync(string table = "ks_items") =>
-        RegisterAsync(table, ["id"], [new("id", "integer"), new("tenant_id", "varchar")]);
+        RegisterAsync(table, ["id"], [new("id", "integer"), new("name", "varchar"), new("tenant_id", "varchar")]);
 
     private async Task<PageResult> PostAsync(string sid, string sql, string? next = null, string resultCache = "bypass", string tenant = Tenant)
     {
@@ -314,21 +314,26 @@ public sealed class WebSqlKeysetPagingIntegrationTests : IClassFixture<WebSqlKey
         await RegisterItemsAsync();
         const string sql = "SELECT id, name FROM ks_items ORDER BY name";
 
+        // Offset pages 1 to 3 (offsets 0, 10, 20) are reachable under MaxOffset=20. The last one is answered without a continuation and says why;
+        // a page beyond the limit cannot be requested because a non-key order gets no keyset token.
+        var pages = new List<PageResult>();
         string? next = null;
-        PageResult last;
-        var guard = 0;
         do
         {
-            last = await PostAsync("S-1-5-21-KS-NONKEY", sql, next);
-            last.Status.ShouldBe(HttpStatusCode.OK, last.Body);
-            next = last.Next;
-            guard++;
+            var page = await PostAsync("S-1-5-21-KS-NONKEY", sql, next);
+            page.Status.ShouldBe(HttpStatusCode.OK, page.Body);
+            pages.Add(page);
+            next = page.Next;
+            pages.Count.ShouldBeLessThan(20, "paging must terminate");
         }
-        while (next != null && guard < 20);
+        while (next != null);
 
-        last.Next.ShouldBeNull();
-        last.PagingUnavailable.ShouldBe("offset_limit");
-        guard.ShouldBe(3, "pages 1 to 3 are offset pages, the continuation past the limit is refused");
+        pages.Count.ShouldBe(3, "pages 1 to 3 are offset pages, the continuation past the limit is not issued");
+        pages[0].PagingUnavailable.ShouldBeNull();
+        pages[1].PagingUnavailable.ShouldBeNull();
+        pages[2].Next.ShouldBeNull();
+        pages[2].PagingUnavailable.ShouldBe("offset_limit");
+        pages.SelectMany(p => p.FirstColumn()).Distinct().Count().ShouldBe(PageSize * 3, "no row repeats across the offset pages");
     }
 
     /// <summary>
@@ -420,12 +425,22 @@ public sealed class WebSqlKeysetPagingIntegrationTests : IClassFixture<WebSqlKey
         // The early pages are offset pages: the same statement and page are served from the cache once it is stored.
         PageResult first = await PostAsync(sid, sql, resultCache: "default");
         first.Status.ShouldBe(HttpStatusCode.OK, first.Body);
+        first.ResultCache.Status.ShouldNotBe("ineligible", $"the first page must be cache-eligible; reason={first.ResultCache.Reason}; body={first.Body}");
         PageResult hit = first;
-        await WaitHelper.WaitUntil(async () =>
+        try
         {
-            hit = await PostAsync(sid, sql, resultCache: "default");
-            return hit.ResultCache.Status == "hit";
-        }, TimeSpan.FromSeconds(10), "resultCache.status=hit for the repeated first page", TimeSpan.FromMilliseconds(200));
+            await WaitHelper.WaitUntil(async () =>
+            {
+                hit = await PostAsync(sid, sql, resultCache: "default");
+                return hit.ResultCache.Status == "hit";
+            }, TimeSpan.FromSeconds(10), "resultCache.status=hit for the repeated first page", TimeSpan.FromMilliseconds(200));
+        }
+        catch (TimeoutException ex)
+        {
+            throw new InvalidOperationException(
+                $"No cache hit for the repeated first page; last status={hit.Status}, resultCache={hit.ResultCache.Status}/{hit.ResultCache.Reason}; first={first.ResultCache.Status}/{first.ResultCache.Reason}; body={hit.Body}", ex);
+        }
+
         hit.FirstColumn().ShouldBe(Ints(Enumerable.Range(1, PageSize)));
 
         // Continuation pages from the keyset token on never touch the cache.
