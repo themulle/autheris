@@ -45,6 +45,23 @@ public sealed class GovernedSqlExecutorResultCachePagingTests
         page3.Outcomes.ShouldHaveSingleItem().Status.ShouldBe(WebSqlResultCacheStatus.Hit);
     }
 
+    [Theory]
+    [InlineData(false)]
+    [InlineData(true)]
+    public async Task First_page_ordered_by_the_key_fills_then_hits_with_and_without_a_declared_key(bool declaredKey)
+    {
+        using var pipeline = new GovernedResultCachePipeline(rows: 75, maxOffset: 20, primaryKey: declaredKey ? ["id"] : null);
+        const string sql = GovernedResultCachePipeline.Sql;
+
+        var first = await pipeline.RunAsync(sql: sql, page: new SqlPageWindow(0, 10, 1));
+        var again = await pipeline.RunAsync(sql: sql, page: new SqlPageWindow(0, 10, 1));
+
+        first.Outcomes.Select(o => o.Status).ShouldBe([WebSqlResultCacheStatus.Miss, WebSqlResultCacheStatus.Store]);
+        again.Outcomes.ShouldHaveSingleItem().Status.ShouldBe(WebSqlResultCacheStatus.Hit);
+        again.Rows.Count.ShouldBe(10);
+        pipeline.Executions.ShouldBe(1);
+    }
+
     [Fact]
     public async Task Last_full_page_has_no_next_token()
     {
