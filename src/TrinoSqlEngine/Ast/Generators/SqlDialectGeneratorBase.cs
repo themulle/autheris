@@ -502,7 +502,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
                     if (!SupportsJoinUsing)
                     {
                         // ON l.c = r.c is not equivalent (USING merges the column), so the construct is rejected.
-                        throw UnsupportedConstruct("JOIN … USING", TargetDialect);
+                        throw UnsupportedConstruct("JOIN … USING", TargetDialect, TrinoSqlEngine.Ast.Builder.SqlConstructCatalog.JoinUsing);
                     }
 
                     builder.Append(" USING (");

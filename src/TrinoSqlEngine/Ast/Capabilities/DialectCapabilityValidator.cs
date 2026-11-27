@@ -27,7 +27,7 @@ public static class DialectCapabilityValidator
             switch (node)
             {
                 case LateralTableSource when !capabilities.SupportsLateral:
-                    throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "LATERAL");
+                    throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "LATERAL", TrinoSqlEngine.Ast.Builder.SqlConstructCatalog.Lateral);
                 case MergeStatement merge when capabilities.MergeShape == MergeClauseShape.OracleSingleClause:
                     ValidateSingleClauseMerge(merge);
                     break;
@@ -36,7 +36,7 @@ public static class DialectCapabilityValidator
                     // SQLE-03: a right-nested set operation arises only from INTERSECT precedence (parenthesized primaries are rejected by the
                     // builder); the emitter prints the operands flat, so a dialect that evaluates left to right would change the result.
                     // Exception: UNION of the same kind is associative, so the balanced INSERT check-option row tree (CR-ADG-44) stays valid.
-                    throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "INTERSECT mixed with UNION/EXCEPT");
+                    throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "INTERSECT mixed with UNION/EXCEPT", TrinoSqlEngine.Ast.Builder.SqlConstructCatalog.IntersectMixed);
                 case SetOperationQuery setOperation when capabilities.MaxCompoundSelectTerms is { } maxTerms:
                     int terms = CountTerms(setOperation);
                     if (terms > maxTerms)

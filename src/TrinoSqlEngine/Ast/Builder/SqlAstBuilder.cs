@@ -146,6 +146,7 @@ public sealed partial class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     private static AstBuildException Unsupported(string construct) =>
         new($"SQL construct {construct} is not supported by the AST compiler.");
 
+
     public override SqlNode VisitSingleStatement(SqlBaseParser.SingleStatementContext context)
     {
         using var _ = EnterScope();
@@ -275,7 +276,7 @@ public sealed partial class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         {
             SqlBaseLexer.ROWS => WindowFrameType.Rows,
             SqlBaseLexer.RANGE => WindowFrameType.Range,
-            _ => throw Unsupported("GROUPS window frames")
+            _ => throw Unsupported("GROUPS window frames", SqlConstructCatalog.GroupsWindowFrame, frame.Start)
         };
 
         return new WindowFrame(type, BuildFrameBound(extent.start), extent.end != null ? BuildFrameBound(extent.end) : null);
@@ -423,7 +424,7 @@ public sealed partial class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     {
         using var _ = EnterScope();
         // SQLE-02: CORRESPONDING changes the column matching; it is rejected instead of silently dropped.
-        if (context.corresponding() != null) throw Unsupported("CORRESPONDING");
+        if (context.corresponding() != null) throw Unsupported("CORRESPONDING", SqlConstructCatalog.Corresponding, context.corresponding().Start);
         var left = (QueryBody)Visit(context.left);
         var right = (QueryBody)Visit(context.right);
 
@@ -533,7 +534,7 @@ public sealed partial class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
 
         if (context.windowDefinition() is { Length: > 0 })
         {
-            throw Unsupported("WINDOW (named window definitions)");
+            throw Unsupported("WINDOW (named window definitions)", SqlConstructCatalog.WindowClause, context.WINDOW()?.Symbol);
         }
 
         GroupByClause? groupBy = null;
@@ -609,7 +610,7 @@ public sealed partial class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
 
         if (context.TABLESAMPLE() != null)
         {
-            throw Unsupported("TABLESAMPLE");
+            throw Unsupported("TABLESAMPLE", SqlConstructCatalog.TableSample, context.TABLESAMPLE().Symbol);
         }
 
         var pivotCtx = context.pivot();
@@ -617,7 +618,7 @@ public sealed partial class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         {
             if (pivotCtx.PIVOT() != null)
             {
-                throw Unsupported("PIVOT");
+                throw Unsupported("PIVOT", SqlConstructCatalog.Pivot, pivotCtx.PIVOT().Symbol);
             }
 
             var patternCtx = pivotCtx.patternRecognition();
@@ -625,7 +626,7 @@ public sealed partial class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
             {
                 if (patternCtx.MATCH_RECOGNIZE() != null)
                 {
-                    throw Unsupported("MATCH_RECOGNIZE");
+                    throw Unsupported("MATCH_RECOGNIZE", SqlConstructCatalog.MatchRecognize, patternCtx.MATCH_RECOGNIZE().Symbol);
                 }
 
                 return Visit(patternCtx.aliasedRelation());
@@ -768,11 +769,11 @@ public sealed partial class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
     }
 
     /// <summary>The table branch suffix (<c>t@branch</c>) has no governed meaning: it is rejected, never silently dropped.</summary>
-    private static void RejectBranch(SqlBaseParser.IdentifierContext? branch)
+    private void RejectBranch(SqlBaseParser.IdentifierContext? branch)
     {
         if (branch != null)
         {
-            throw Unsupported("a table branch (table@branch)");
+            throw Unsupported("a table branch (table@branch)", SqlConstructCatalog.TableBranch, branch.Start);
         }
     }
 
@@ -1377,9 +1378,9 @@ public sealed partial class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         EnsureFunctionAllowed(name, context);
 
         // Wunsch 4: modifiers the AST cannot represent yet are rejected instead of being dropped.
-        if (context.processingMode() != null) throw Unsupported("RUNNING/FINAL");
+        if (context.processingMode() != null) throw Unsupported("RUNNING/FINAL", SqlConstructCatalog.RunningOrFinal, context.processingMode().Start);
         if (context.label != null) throw Unsupported("label.* in function calls");
-        if (context.nullTreatment() != null) throw Unsupported("IGNORE/RESPECT NULLS");
+        if (context.nullTreatment() != null) throw Unsupported("IGNORE/RESPECT NULLS", SqlConstructCatalog.NullTreatment, context.nullTreatment().Start);
 
         var qName = ToSqlQualifiedName(context.qualifiedName());
         if (qName.Parts.Any(part => part.IsQuoted))
@@ -1396,7 +1397,7 @@ public sealed partial class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
             foreach (var arg in context.argument())
             {
                 // SQLE-14: a named argument would lose its name and be passed positionally: rejected.
-                if (arg is SqlBaseParser.NamedArgumentContext) throw Unsupported("named function arguments");
+                if (arg is SqlBaseParser.NamedArgumentContext) throw Unsupported("named function arguments", SqlConstructCatalog.NamedFunctionArguments, arg.Start);
                 var exprCtx = arg is SqlBaseParser.PositionalArgumentContext pos ? pos.expression() : null;
                 if (exprCtx != null)
                 {
@@ -1411,13 +1412,13 @@ public sealed partial class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         var overCtx = context.over();
         if (overCtx != null && overCtx.windowSpecification() == null)
         {
-            throw Unsupported("OVER <window name>");
+            throw Unsupported("OVER <window name>", SqlConstructCatalog.NamedWindowReference, overCtx.Start);
         }
 
         if (overCtx?.windowSpecification() != null)
         {
             var winSpec = overCtx.windowSpecification();
-            if (winSpec.existingWindowName != null) throw Unsupported("window inheritance");
+            if (winSpec.existingWindowName != null) throw Unsupported("window inheritance", SqlConstructCatalog.WindowInheritance, winSpec.existingWindowName.Start);
 
             var partitionExprs = winSpec._partition != null && winSpec._partition.Count > 0
                 ? winSpec._partition.Select(p => (Expression)Visit(p)).ToList().AsReadOnly()
@@ -1569,7 +1570,7 @@ public sealed partial class SqlAstBuilder : SqlBaseBaseVisitor<SqlNode>
         {
             foreach (var f in context.fieldConstructor())
             {
-                if (f.identifier() != null) throw Unsupported("ROW field names");   // SQLE-14: the names would be dropped
+                if (f.identifier() != null) throw Unsupported("ROW field names", SqlConstructCatalog.RowFieldNames, f.identifier().Start);   // SQLE-14: the names would be dropped
                 list.Add((Expression)Visit(f.expression()));
             }
         }

@@ -78,7 +78,7 @@ public sealed class DatabricksDialectGenerator : SqlDialectGeneratorBase
     {
         if (pagination.WithTies)
         {
-            throw UnsupportedConstruct("FETCH ... WITH TIES", TargetDialect);
+            throw UnsupportedConstruct("FETCH ... WITH TIES", TargetDialect, TrinoSqlEngine.Ast.Builder.SqlConstructCatalog.FetchWithTies);
         }
 
         if (pagination.Limit != null)
