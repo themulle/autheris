@@ -839,7 +839,23 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
         // Stage 5: Compile (Security invariant 2). Engine exceptions propagate unwrapped: SqlCompilerErrorMapper maps them to
         // stable codes with fixed messages at every error surface, and no Exception.Message is copied into a new exception.
         // -------------------------------------------------------------
-        var compiled = CompileStatement(rawSql, request, ct, ReferenceEquals(clientSql, rawSql));
+        CompiledSql compiled;
+        try
+        {
+            compiled = CompileStatement(rawSql, request, ct, ReferenceEquals(clientSql, rawSql));
+        }
+        catch (TrinoSqlEngine.Ast.Security.RowPolicyExpressionRejectedException)
+        {
+            // an unresolvable column reference must not answer with the guard's code (see UnresolvedColumnAnswer); any other cause keeps it
+            var answer = UnresolvedColumnAnswer(rawSql, ReferenceEquals(clientSql, rawSql), metadata.StatementType == SqlStatementType.Select && !isDml,
+                distinctCatalogs.Count, targetSqlDialect, decisions, decidedTableMetadata);
+            if (answer is null)
+            {
+                throw;
+            }
+
+            throw answer;
+        }
 
         bool allowStatementText = _options.Value.Logging?.AllowStatementText ?? true;
         if (_options.Value.Logging?.LogGeneratedSql == true && allowStatementText && _logger != null && _logger.IsEnabled(LogLevel.Debug))

@@ -17,7 +17,24 @@ using TrinoSqlEngine.Ast.Visitors;
 /// </summary>
 internal static class UnknownColumnResolver
 {
-    public static bool TryFind(UnknownColumnProbe probe, out string name, out int? line, out int? column)
+    /// <summary>What the client statement text says about a column reference that no catalog table, alias or CTE defines.</summary>
+    internal enum Finding
+    {
+        /// <summary>Every reference resolves to a catalog column or to a name the statement defines (or the text could not be read).</summary>
+        None,
+
+        /// <summary>An unresolved reference exists, but its spelling is not safe to echo.</summary>
+        NotEchoable,
+
+        /// <summary>The first unresolved reference, safe to echo.</summary>
+        Named
+    }
+
+    public static bool TryFind(UnknownColumnProbe probe, out string name, out int? line, out int? column) =>
+        Classify(probe, out name, out line, out column) == Finding.Named;
+
+    /// <summary>Like <see cref="TryFind"/>, but also tells an unresolved reference that must not be echoed from no unresolved reference at all.</summary>
+    public static Finding Classify(UnknownColumnProbe probe, out string name, out int? line, out int? column)
     {
         name = string.Empty;
         line = null;
@@ -45,7 +62,7 @@ internal static class UnknownColumnResolver
                 // be reported in its place.
                 if (!PublicSqlName.TryCreate(candidate, out var safe))
                 {
-                    return false;
+                    return Finding.NotEchoable;
                 }
 
                 name = safe;
@@ -55,7 +72,7 @@ internal static class UnknownColumnResolver
                     column = c;
                 }
 
-                return true;
+                return Finding.Named;
             }
         }
         catch (Exception)
@@ -63,7 +80,7 @@ internal static class UnknownColumnResolver
             // fail closed: the caller keeps the unnamed denial
         }
 
-        return false;
+        return Finding.None;
     }
 
     private sealed class Collector : SqlAstRewriter

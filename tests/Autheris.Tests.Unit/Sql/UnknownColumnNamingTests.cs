@@ -44,7 +44,7 @@ public sealed class UnknownColumnNamingTests
     };
 
     /// <param name="levels">per table name: column levels other than Clear; a table in <paramref name="deniedTables"/> has no allow decision.</param>
-    private static GovernedSqlRewriter Rewriter(
+    internal static GovernedSqlRewriter Rewriter(
         IReadOnlyDictionary<string, Dictionary<string, ColumnAccessLevel>>? levels = null,
         ISet<string>? deniedTables = null)
     {
@@ -73,7 +73,7 @@ public sealed class UnknownColumnNamingTests
             policyFactory: GovernedTestSupport.PolicyFactory(repo), typedPolicies: GovernedTestSupport.TypedPolicies());
     }
 
-    private static Task<GovernedRewrite> RewriteAsync(GovernedSqlRewriter rewriter, string sql) =>
+    internal static Task<GovernedRewrite> RewriteAsync(GovernedSqlRewriter rewriter, string sql) =>
         rewriter.RewriteCoreAsync(sql, GovernedSqlExecutorX1Tests.Writer(), new TenantId(Tenant), dataSourceName: null, dmlContext: null, CancellationToken.None);
 
     /// <summary>Executes the rewrite against a provider that rejects the column and returns the sanitized failure and the audit of the attempt.</summary>
@@ -87,7 +87,7 @@ public sealed class UnknownColumnNamingTests
     }
 
     /// <summary>The response body of a failure without its trace id: what the caller sees.</summary>
-    private static string Body(Exception ex)
+    internal static string Body(Exception ex)
     {
         SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
         Dictionary<string, object?>? ext = null;
