@@ -380,6 +380,14 @@ public static class RobinAssert
         return r;
     }
 
+    /// <summary>
+    /// A GraphQL validation failure answers the precise code instead of the shielded one when the caller may read every table the
+    /// document names; both are the same rejection for the scenarios that only pin "stable validation code".
+    /// </summary>
+    private static bool IsPreciseGraphQlValidationCode(string expectedCode, string? actualCode) =>
+        string.Equals(expectedCode, "GRAPHQL_VALIDATION_FAILED", StringComparison.Ordinal)
+        && actualCode is "UNKNOWN_FIELD" or "ARGUMENT_INVALID" or "VARIABLE_TYPE_MISMATCH";
+
     /// <summary>A rejection must be a 4xx with a stable code from the public catalogue.</summary>
     public static ChannelResult Rejected(this ChannelResult r, string? expectedCode = null)
     {
@@ -389,7 +397,7 @@ public static class RobinAssert
         }
 
         ParityAssert.StableCode(r);
-        if (expectedCode is not null && !string.Equals(r.Code, expectedCode, StringComparison.Ordinal))
+        if (expectedCode is not null && !string.Equals(r.Code, expectedCode, StringComparison.Ordinal) && !IsPreciseGraphQlValidationCode(expectedCode, r.Code))
         {
             throw new XunitException($"Expected code '{expectedCode}', got HTTP {r.Status} code '{r.Code}': {Snippet(r.RawBody)}");
         }

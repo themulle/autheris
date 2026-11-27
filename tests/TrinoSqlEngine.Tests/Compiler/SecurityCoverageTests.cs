@@ -442,11 +442,23 @@ public class SecurityCoverageTests
         {
             if (type == typeof(AstSecurityVisitor)) continue; // creates the nodes; never re-enters them (tested below)
             // Producers that run before an expression is wrapped in a SecurityPredicateExpression need constructor arguments.
-            if (type.Name is "PolicySubqueryTenantRewriter" or "PolicyShaper" or "PolicyColumnTypeAnnotator" or "LiteralColumnTypeAnnotator" or "IntegralOperandClassifier" or "RowPolicyCoercionGuard" or "ClientListExpander" or "TimeZoneCallValidator" or "PostCompileTableTargetAssertionVisitor") continue;
+            if (type.Name is "PolicySubqueryTenantRewriter" or "PolicyShaper" or "PolicyColumnTypeAnnotator" or "LiteralColumnTypeAnnotator" or "IntegralOperandClassifier" or "RowPolicyCoercionGuard" or "ClientListExpander" or "OptionalFilterReducer" or "TimeZoneCallValidator" or "PostCompileTableTargetAssertionVisitor") continue;
             var rewriter = (SqlAstRewriter)Activator.CreateInstance(type, BindingFlags.Default | BindingFlags.OptionalParamBinding, null, Array.Empty<object>(), null)!;
             var result = rewriter.Visit(stmt);
             Assert.True(ContainsStatementPredicate(result, injected), $"{type.Name} rewrote an injected security predicate");
         }
+    }
+
+    [Fact]
+    public void OptionalFilterReducer_DoesNotDescendIntoSecurityPredicate()
+    {
+        var inner = new BinaryExpression(
+            new UnaryExpression(UnaryOperator.IsNull, new ParameterReference("p", null, true)), BinaryOperator.Or, new BinaryExpression(Col("a"), Equal, Int(1)));
+        var injected = Pred(RootId, SecurityScope.Root, inner);
+        var stmt = WithInjected(injected, new BinaryExpression(Col("a"), Equal, Int(1)));
+
+        var result = new TrinoSqlEngine.Ast.Visitors.OptionalFilterReducer(TrinoSqlEngine.Ast.Emit.ClientNullShapes.Create(["p"])).Visit(stmt);
+        Assert.True(ContainsStatementPredicate(result, injected), "the reducer rewrote an injected security predicate");
     }
 
     [Fact]

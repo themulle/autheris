@@ -97,6 +97,9 @@ public sealed record CompileRequest
     /// <summary>Value-free shapes of the client list parameters the statement references; part of the cache key.</summary>
     public Ast.Emit.ClientListShapes ClientLists { get; init; } = Ast.Emit.ClientListShapes.Empty;
 
+    /// <summary>Names of the scalar client parameters whose value is null (value-free; part of the cache key through its canonical form).</summary>
+    public Ast.Emit.ClientNullShapes ClientNulls { get; init; } = Ast.Emit.ClientNullShapes.Empty;
+
     /// <summary>
     /// true only when the application proved time zone conversion for<see cref="TargetDialect"/> (registry self-test, and for
     /// DuckDB the ICU probe). The default is false (fail closed): every caller that does not pass the proof rejects the function. It is part

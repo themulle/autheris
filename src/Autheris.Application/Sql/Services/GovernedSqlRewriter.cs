@@ -170,6 +170,7 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
         bool probeExtraRow = false,
         bool plannedTableRead = false, IReadOnlySet<string>? gatewayLikePatternParameters = null,
         ClientListShapes? clientLists = null,
+        ClientNullShapes? clientNulls = null,
         SqlPageWindow? page = null,
         bool readOnlyRequired = false,
         string? transport = null)
@@ -811,7 +812,7 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
         };
 
         var policy = await policyFactory.CreateAsync(input, ct).ConfigureAwait(false);
-        var request = CreateCompileRequest(policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists, gatewayLikePatternParameters, bindPageOffset, pageOffsetVal, maxOffset);
+        var request = CreateCompileRequest(policy, decidedTargets, targetSqlDialect, webSqlOptions, isDml, enforcedMaxRows, allowedFunctions, clientLists, clientNulls, gatewayLikePatternParameters, bindPageOffset, pageOffsetVal, maxOffset);
 
         // -------------------------------------------------------------
         // Stage 5: Compile (Security invariant 2). Engine exceptions propagate unwrapped: SqlCompilerErrorMapper maps them to

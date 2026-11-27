@@ -24,7 +24,7 @@ internal sealed class ClientListExpander : SqlAstRewriter
     private static readonly BinaryExpression ConstantFalse = new(
         new LiteralExpression(1L, LiteralType.Integer), BinaryOperator.Equal, new LiteralExpression(0L, LiteralType.Integer));
 
-    private static readonly BinaryExpression ConstantTrue = new(
+    internal static readonly BinaryExpression ConstantTrue = new(
         new LiteralExpression(1L, LiteralType.Integer), BinaryOperator.Equal, new LiteralExpression(1L, LiteralType.Integer));
 
     private readonly ClientListShapes _shapes;

@@ -36,6 +36,14 @@ public static class McpDatasetTools
     public static string BuildServerInstructions(Autheris.Application.Mcp.Interfaces.IReadPathSwitches? switches)
         => new McpAccessHints(switches).ServerInstructions();
 
+    /// <summary>Text of the <c>explore_dataset</c> prompt; names only the tools the switches leave on (null switches name none).</summary>
+    public static string BuildExplorePromptText(Autheris.Application.Mcp.Interfaces.IReadPathSwitches? switches, string dataset)
+        => new McpAccessHints(switches).ExplorePromptText(dataset);
+
+    /// <summary>Text of the <c>audit_access_compliance</c> prompt; names only the tools the switches leave on (null switches name none).</summary>
+    public static string BuildAuditPromptText(Autheris.Application.Mcp.Interfaces.IReadPathSwitches? switches, string dataset)
+        => new McpAccessHints(switches).AuditPromptText(dataset);
+
     /// <summary>ABAC object for catalog listings (like <c>query_data_catalog</c>).</summary>
     public static readonly TableIdentifier CatalogTable = new("governance", "catalog", "datasets");
 
@@ -178,6 +186,10 @@ public static class McpDatasetTools
             {
                 yield return tool with { Description = new McpAccessHints(switches).ListDatasetsDescription() };
             }
+            else if (switches is not null && string.Equals(tool.Name, QueryGraphQl, StringComparison.Ordinal))
+            {
+                yield return tool with { Description = new McpAccessHints(switches).QueryGraphQlDescription() };
+            }
             else
             {
                 yield return dataClosed && string.Equals(tool.Name, DescribeApi, StringComparison.Ordinal)
@@ -195,14 +207,15 @@ public static class McpDatasetTools
     {
         yield return new McpToolDefinition(
             Name: QueryGraphQl,
-            Description: "Preferred way to query data. Runs a read-only GraphQL query against the gateway: filter (where), sort (orderBy), page (first, offset) and follow relations between datasets. Get the field names and an example query from describe_dataset.",
+            Description: "Default tool for reading data. Runs a read-only GraphQL query against the gateway: filter (where), sort (orderBy), page (first, offset) and follow relations between datasets. Get the field names and an example query from describe_dataset.",
             InputJsonSchema: """
             {
               "type": "object",
               "required": ["query"],
               "properties": {
                 "query": { "type": "string", "description": "One GraphQL query operation, e.g. query { sales_public_orders(where: { status: { eq: \"open\" } }, first: 20) { id amount } }." },
-                "variables": { "type": "object", "additionalProperties": true, "description": "Optional values for the variables of the query." }
+                "variables": { "type": "object", "additionalProperties": true, "description": "Optional values for the variables of the query." },
+                "datasetFacts": { "type": "boolean", "description": "Optional. true adds extensions.autheris.roots: per root field the dataset, its tags, rowFilterApplied (a row filter defined by the data owner or by consent applies to you; it does not mean all rows are returned, and tenant isolation, virtual and mandatory filters are not reported) and truncated (the result was cut by a governed limit; the MCP response size cap is not included)." }
               }
             }
             """,
@@ -323,7 +336,7 @@ public static class McpDatasetTools
 
         yield return new McpToolDefinition(
             Name: QueryDataset,
-            Description: "Queries a dataset (table) by identifier with optional column selection, filter expression, ordering, limit and offset." + McpErrorCodes.ErrorsSentence("DATASET_NOT_FOUND", "INVALID_QUERY", "REQUIRED_FILTER_COLUMN_MISSING", "TOKEN_BUDGET_EXCEEDED"),
+            Description: "Simple read of one dataset: queries a dataset (table) by identifier with optional column selection, filter expression, ordering, limit and offset." + McpErrorCodes.ErrorsSentence("DATASET_NOT_FOUND", "INVALID_QUERY", "REQUIRED_FILTER_COLUMN_MISSING", "TOKEN_BUDGET_EXCEEDED"),
             InputJsonSchema: """
             {
               "type": "object",

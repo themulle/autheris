@@ -17,6 +17,14 @@ public enum ColumnTypeClass
     Other
 }
 
+/// <summary>Whether a cataloged temporal column type carries a time zone (decides the typed bind of an offset timestamp).</summary>
+public enum ColumnTemporalKind
+{
+    Unknown,
+    WithoutZone,
+    WithZone
+}
+
 /// <summary>How a binder follows the catalog column type of a compared column (16 item 2, CR-ADG-09).</summary>
 public enum ColumnBindStyle
 {
@@ -43,6 +51,33 @@ public static class ColumnBindAdapter
     private static readonly Regex TypeRegex = new(
         @"\A\s*(?<name>[A-Za-z][A-Za-z0-9_ ]*?)\s*(?:\(\s*(?<arg>max|[0-9]{1,5})\s*(?:,\s*[0-9]{1,3})?\s*\))?\s*\z",
         RegexOptions.CultureInvariant | RegexOptions.IgnoreCase, TimeSpan.FromMilliseconds(100));
+
+    /// <summary>Classifies the catalog type of a column as with or without a zone; anything not listed is <see cref="ColumnTemporalKind.Unknown"/>.</summary>
+    public static ColumnTemporalKind TemporalKind(TargetSqlDialect dialect, string? columnType)
+    {
+        if (string.IsNullOrWhiteSpace(columnType) || columnType.Length > 128) return ColumnTemporalKind.Unknown;
+        var name = columnType.ToLowerInvariant();
+        int open;
+        while ((open = name.IndexOf('(', StringComparison.Ordinal)) >= 0)
+        {
+            int close = name.IndexOf(")", open, StringComparison.Ordinal);
+            if (close < 0) return ColumnTemporalKind.Unknown;
+            name = name.Remove(open, close - open + 1);
+        }
+
+        name = string.Join(' ', name.Split(' ', StringSplitOptions.RemoveEmptyEntries));
+        switch (name)
+        {
+            case "timestamptz" or "timestamp with time zone" or "timestamp with local time zone" or "datetimeoffset" or "timestamp_ltz":
+                return ColumnTemporalKind.WithZone;
+            case "timestamp" when dialect == TargetSqlDialect.Databricks:
+                return ColumnTemporalKind.WithZone;
+            case "timestamp" or "timestamp without time zone" or "datetime" or "datetime2" or "smalldatetime" or "date" or "timestamp_ntz":
+                return ColumnTemporalKind.WithoutZone;
+            default:
+                return ColumnTemporalKind.Unknown;
+        }
+    }
 
     public static ColumnTypeClass Classify(string? dataType) => Parse(dataType).Class;
 

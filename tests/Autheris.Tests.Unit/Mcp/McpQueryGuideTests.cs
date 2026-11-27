@@ -38,6 +38,15 @@ public sealed class McpQueryGuideTests
     }
 
     [Fact]
+    public void Build_QuerySqlEnabled_DocumentsOptionalFilterAndTimestampForms()
+    {
+        var guide = McpQueryGuideBuilder.Build(SwitchesFrom(), new GraphQLOptions());
+
+        guide.ShouldContain("(@p IS NULL OR col = @p)");
+        guide.ShouldContain("converted to UTC");
+    }
+
+    [Fact]
     public void Build_DefaultEnabledFeatures_CoversFullGraphQlDialectAndEnabledTools()
     {
         var switches = SwitchesFrom();
@@ -244,6 +253,13 @@ public sealed class McpQueryGuideTests
             Mcp = new McpOptions { Tools = new McpToolGroupOptions { Api = false } }
         });
         GatewayMcpServer.FilterResources(native, apiOff).Select(r => r.Uri)
+            .ShouldContain(McpResourceProvider.QueryGuideDocUri);
+
+        var queryOff = SwitchesFrom(new GatewayOptions
+        {
+            Mcp = new McpOptions { Tools = new McpToolGroupOptions { Query = false } }
+        });
+        GatewayMcpServer.FilterResources(native, queryOff).Select(r => r.Uri)
             .ShouldNotContain(McpResourceProvider.QueryGuideDocUri);
 
         var dispatcher = new ApiDispatcherService(

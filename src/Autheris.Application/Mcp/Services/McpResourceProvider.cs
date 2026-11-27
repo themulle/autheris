@@ -32,6 +32,7 @@ public sealed class McpResourceProvider : IMcpResourceProvider
     private readonly IApiDispatcherService _dispatcher;
 
     private readonly IReadPathSwitches? _switches;
+    private readonly McpAccessHints _hints;
     private readonly TimeProvider _timeProvider;
     private readonly Autheris.Application.Common.Quota.ICallerQueryLimitsService? _queryLimits;
 
@@ -46,6 +47,7 @@ public sealed class McpResourceProvider : IMcpResourceProvider
         _discovery = discovery ?? throw new ArgumentNullException(nameof(discovery));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _switches = switches;
+        _hints = new McpAccessHints(switches);
         _timeProvider = timeProvider ?? TimeProvider.System;
     }
 
@@ -151,7 +153,7 @@ public sealed class McpResourceProvider : IMcpResourceProvider
                     var sample = string.Join(", ", g.Take(3).Select(d => $"`{McpMarkdown.EscapeCell(d.Table)}`"));
                     sb.AppendLine($"| **{McpMarkdown.EscapeCell(g.Key)}** | {g.Count()} | {sample} |");
                 }
-                sb.AppendLine("\n> **Tip:** Use `find_relevant_tables` or `search_catalog` to discover tables for a specific use case, or use `get_table_schema` / `describe_dataset(brief: true)` for token-efficient schema retrieval.");
+                if (_hints.CatalogSummaryTip() is { } tip) sb.AppendLine("\n" + tip);
             }
             else
             {
