@@ -312,7 +312,7 @@ public static class McpDatasetTools
                 "limit": { "type": "integer", "minimum": 1, "description": "Optional maximum rows per page (capped server-side to Mcp:MaxResultRows)." },
                 "cursor": { "type": "string", "description": "Optional signed continuation cursor returned by a previous query_sql call." },
                 "parameters": {
-                  "type": "object",
+                  "type": ["object", "null"],
                   "description": "Optional named values bound to @name placeholders, as in POST /api/v1/sql: string, number, boolean or null; an array of scalars only as the single item of IN (@name) or NOT IN (@name). Values are bound, never inlined.",
                   "additionalProperties": { "type": ["string", "number", "boolean", "null", "array"], "items": { "type": ["string", "number", "boolean"] } }
                 }

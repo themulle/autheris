@@ -272,7 +272,7 @@ public sealed partial class McpQuerySqlPagingTests
         var props = doc.RootElement.GetProperty("properties");
 
         props.TryGetProperty("parameters", out var parameters).ShouldBeTrue();
-        parameters.GetProperty("type").GetString().ShouldBe("object");
+        parameters.GetProperty("type").EnumerateArray().Select(e => e.GetString()).ShouldBe(new[] { "object", "null" });
         doc.RootElement.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ShouldBe(["query"]);
         QuerySqlTool.Description!.ShouldContain("@name");
         QuerySqlTool.Description!.ShouldNotContain("inline", Case.Insensitive);
