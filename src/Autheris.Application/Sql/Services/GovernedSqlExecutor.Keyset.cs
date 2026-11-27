@@ -30,7 +30,7 @@ public sealed partial class GovernedSqlExecutor
             }
         }
 
-        return new KeysetCaptureReader(inner, key, retainEveryRow: string.Equals(request.Transport, SqlTransports.Mcp, StringComparison.Ordinal));
+        return new KeysetCaptureReader(inner, key, retainEveryRow: string.Equals(request.Transport, SqlTransports.Mcp, StringComparison.Ordinal), initialCapacity: request.Page.Size);
     }
 
     /// <summary>

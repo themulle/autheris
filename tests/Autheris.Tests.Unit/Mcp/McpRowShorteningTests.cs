@@ -102,6 +102,20 @@ public sealed class McpRowShorteningTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public void Shorten_KeepsResumeCursorsUpToTheCodecLimit_AndDropsLongerOnes()
+    {
+        var json = SqlPayload(400, out _);
+        var atLimit = new string('t', Autheris.Application.Sql.Paging.WebSqlPageTokenCodec.MaxTokenLength);
+
+        var kept = McpRowShortening.Shorten("query_sql", json, json.Length / 2, _ => atLimit);
+        JsonNode.Parse(kept.Json)!.AsObject()["cursor"]!.GetValue<string>().ShouldBe(atLimit);
+
+        var dropped = McpRowShortening.Shorten("query_sql", json, json.Length / 2, _ => atLimit + "t");
+        JsonNode.Parse(dropped.Json)!.AsObject().ContainsKey("cursor").ShouldBeFalse();
+    }
+
+    [Fact]
     public void Shorten_QuerySql_SetsRowCountHasMoreAndMintedCursor()
     {
         var calls = new List<int>();

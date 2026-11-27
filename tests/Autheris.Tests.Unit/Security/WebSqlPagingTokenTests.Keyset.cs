@@ -397,4 +397,35 @@ public sealed partial class WebSqlPagingTokenTests
             .ShouldNotBeNull();
         Should.Throw<SqlPagingTokenInvalidException>(() => DecodeKeyset(codec, KeysetToken(codec, offset: 9_999, size: 100, page: 100)));
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void KeysetToken_LongMultiColumnKey_Over512Chars_DecodesBeyondTheOffsetWindow()
+    {
+        var (codec, _, _) = CreateCodec();
+        object?[] keys = [new string('a', 120), new string('b', 120), new string('c', 120), new string('d', 120)];
+
+        string token = KeysetToken(codec, offset: 20_037, size: 100, page: 201, keys: keys);
+
+        token.Length.ShouldBeInRange(513, WebSqlPageTokenCodec.MaxTokenLength);
+        DecodeKeyset(codec, token).Keyset!.Values.Length.ShouldBe(4);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void DecodeToken_LengthGate_1024Reaches_1025IsRejected()
+    {
+        var (codec, _, _) = CreateCodec();
+        var user = CreateUser();
+        var tenant = new TenantId("tenant-1");
+        string valid = codec.EncodeToken(KeysetSql, null, user, tenant, "crm", "WebSql", 0, 100, 1, TimeSpan.FromMinutes(15));
+
+        // Padding a valid token to exactly 1024 characters breaks the encoding or MAC, so it fails there; one more character is refused by the gate.
+        string at = valid + new string('A', WebSqlPageTokenCodec.MaxTokenLength - valid.Length);
+        string over = at + "A";
+        at.Length.ShouldBe(WebSqlPageTokenCodec.MaxTokenLength);
+        Should.Throw<SqlPagingTokenInvalidException>(() => codec.DecodeToken(at, KeysetSql, null, user, tenant, "crm", "WebSql", MaxOffset));
+        Should.Throw<SqlPagingTokenInvalidException>(() => codec.DecodeToken(over, KeysetSql, null, user, tenant, "crm", "WebSql", MaxOffset));
+        codec.DecodeToken(valid, KeysetSql, null, user, tenant, "crm", "WebSql", MaxOffset).Offset.ShouldBe(0);
+    }
 }

@@ -26,9 +26,9 @@ internal sealed class KeysetCaptureReader : ResultCacheRowReader, IDbColumnSchem
     /// <param name="inner">The reader whose rows are delivered.</param>
     /// <param name="key">The compiler-resolved keyset shape.</param>
     /// <param name="retainEveryRow">True keeps the key values of every delivered row, so a transport that shortens the page afterwards can resume after the last row it kept.</param>
-    public KeysetCaptureReader(DbDataReader inner, TrinoSqlEngine.KeysetKeyInfo key, bool retainEveryRow = false)
+    public KeysetCaptureReader(DbDataReader inner, TrinoSqlEngine.KeysetKeyInfo key, bool retainEveryRow = false, int initialCapacity = 0)
     {
-        _perRowKeys = retainEveryRow ? new List<object?[]>() : null;
+        _perRowKeys = retainEveryRow ? new List<object?[]>(Math.Clamp(initialCapacity, 0, 4096)) : null;
         _inner = inner ?? throw new ArgumentNullException(nameof(inner));
         Key = key ?? throw new ArgumentNullException(nameof(key));
         _keyOrdinals = key.OutputOrdinals;

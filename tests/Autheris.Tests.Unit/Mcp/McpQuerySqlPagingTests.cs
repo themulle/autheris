@@ -466,7 +466,7 @@ public sealed partial class McpQuerySqlPagingTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task Cursor_Between512And1024_Accepted()
+    public async Task Cursor_Between512And1024_ReachesTokenVerification()
     {
         var (handler, _, _) = CreatePipeline(maxResultRows: 2);
         var session = CreateSession("S-1-5-21-1055-OWNER", "tenant-1");
