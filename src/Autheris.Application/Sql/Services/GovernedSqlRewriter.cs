@@ -175,6 +175,21 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
         await RewriteCoreAsync(rawSql, user, tenantId, dataSourceName: null, dmlContext: null, ct).ConfigureAwait(false);
     }
 
+    /// <summary>
+    /// Dry run for one data source and transport: the same rewrite and compile as execution, with no connection, cost admission,
+    /// quota charge or deny audit (the rewriter has none of those dependencies). Query analysis reports the verdict of this call.
+    /// </summary>
+    public async Task ValidateAsync(
+        string rawSql,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        string? dataSourceName,
+        string transport,
+        CancellationToken ct = default)
+    {
+        await RewriteCoreAsync(rawSql, user, tenantId, dataSourceName, dmlContext: null, ct, transport: transport).ConfigureAwait(false);
+    }
+
     /// <summary>The compiled statement of the governed pipeline (internal; the tests assert on the compiled text and its binds).</summary>
     internal async Task<CompiledSql> CompileAsync(string rawSql, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default) =>
         (await RewriteCoreAsync(rawSql, user, tenantId, dataSourceName: null, dmlContext: null, ct, transport: SqlTransports.WebSql).ConfigureAwait(false)).Compiled;
