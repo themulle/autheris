@@ -47,6 +47,16 @@ public sealed class McpQueryGuideTests
     }
 
     [Fact]
+    public void Build_Paging_DescribesTotalCountAsFilteredTotalWithCost()
+    {
+        var guide = McpQueryGuideBuilder.Build(SwitchesFrom(), new GraphQLOptions());
+
+        guide.ShouldContain("Rows matching `where` under your row rules");
+        guide.ShouldContain("adds to the query cost");
+        guide.ShouldContain("`null` when the count could not be determined");
+    }
+
+    [Fact]
     public void Build_DefaultEnabledFeatures_CoversFullGraphQlDialectAndEnabledTools()
     {
         var switches = SwitchesFrom();

@@ -117,6 +117,7 @@ internal static class McpQueryGuideBuilder
         sb.AppendLine();
         sb.AppendLine(string.Create(CultureInfo.InvariantCulture,
             $"- **Page Size (`first`):** Defaults to `100`; maximum `{gql.MaxResponseRows}` rows per response."));
+        sb.AppendLine("- **Total (`totalCount`):** Rows matching `where` under your row rules, independent of `first`/`after`. It runs an extra count statement and adds to the query cost, so select it only when needed (for example on the first page). It is `null` when the count could not be determined.");
         sb.AppendLine("- **Keyset Cursor (`after`):** Pass `pageInfo.endCursor` from the previous response. Cursors are HMAC-signed and bound to the query's `orderBy` key.");
         sb.AppendLine(string.Create(CultureInfo.InvariantCulture,
             $"- **Offset Bound:** `MaxAllowedOffset` is `{gql.MaxAllowedOffset}`."));
