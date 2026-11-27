@@ -75,4 +75,18 @@ public class SelectableSortOrderTests
         Assert.Equal(unknown.GetType(), hidden.GetType());
         Assert.Equal(unknown.Message, hidden.Message);
     }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Unknown_column_in_case_answers_like_plain_unknown()
+    {
+        // a table without tenant column or row policy: the row-policy guard does not judge it, so the comparison is between the two ORDER BY forms
+        var plain = Record.Exception(() => _h.Compile(TargetSqlDialect.SqlServer, "SELECT code FROM lookup ORDER BY no_such_column"));
+        var inCase = Record.Exception(() => _h.Compile(TargetSqlDialect.SqlServer,
+            "SELECT code FROM lookup ORDER BY CASE __param_sort WHEN 'x' THEN no_such_column END, code"));
+
+        Assert.Equal(plain?.GetType(), inCase?.GetType());
+        Assert.Equal(plain?.Message, inCase?.Message);
+        Assert.Equal((plain as GovernedSqlException)?.Code, (inCase as GovernedSqlException)?.Code);
+    }
 }

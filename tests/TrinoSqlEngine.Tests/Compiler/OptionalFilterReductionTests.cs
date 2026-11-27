@@ -75,6 +75,25 @@ public class OptionalFilterReductionTests
         Assert.DoesNotContain("amount", Where(mixed), StringComparison.OrdinalIgnoreCase);
     }
 
+    [Theory]
+    [MemberData(nameof(ClientListHarness.DialectData), MemberType = typeof(ClientListHarness))]
+    public void Bound_page_offset_slot_survives_in_the_null_and_the_value_shape(TargetSqlDialect dialect)
+    {
+        const string sql = "SELECT id FROM orders WHERE (__param_region IS NULL OR region = __param_region) ORDER BY id";
+
+        foreach (var nulls in new ClientNullShapes?[] { Null("region"), null })
+        {
+            var compiled = _h.Engine.Compile(sql.AsMemory(), _h.Request(dialect, nulls: nulls) with
+            {
+                BindPageOffset = true,
+                EnforcedMaxRows = 100,
+                PageOffset = 0
+            }, CancellationToken.None);
+
+            Assert.Single(compiled.Parameters, p => p.Origin == ParameterOrigin.PageOffset);
+        }
+    }
+
     [Fact]
     public void Chain_of_or_with_several_optional_parts_is_reduced()
     {

@@ -15,12 +15,12 @@ public sealed class OptionalFilterExecutorTests
 {
     private const string Optional = "SELECT id FROM orders WHERE (@region IS NULL OR status = @region)";
 
-    // An unsupplied @name stays literal text, which the parser refuses (a plain argument error) before any reduction can run; a bind-time
-    // missing parameter is the other accepted refusal. Either way nothing executes.
+    // An unsupplied @name stays literal text, which the parser refuses before any reduction can run: an argument error that wraps the syntax error.
     private static async Task AssertRefusedAsync(Func<Task> action)
     {
-        var ex = await Should.ThrowAsync<Exception>(action);
-        (ex is ArgumentException or MissingClientParameterException).ShouldBeTrue(ex.GetType().Name);
+        var ex = await Should.ThrowAsync<ArgumentException>(action);
+        ex.GetType().ShouldBe(typeof(ArgumentException));
+        ex.InnerException.ShouldBeOfType<SqlSyntaxErrorException>();
     }
 
     [Fact]

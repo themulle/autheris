@@ -38,7 +38,12 @@ public sealed class WebSqlOptionalFilterSortIntegrationTests
     {
         await using var f = await CreateAsync();
         if (f is null) return;
-        await Should.ThrowAsync<Exception>(() => f.IdsAsync(Optional, new Dictionary<string, object?>()));
+        var ex = await Should.ThrowAsync<ArgumentException>(() => f.IdsAsync(Optional, new Dictionary<string, object?>()));
+
+        // the client gets the syntax error answer (400), never rows and never a dropped predicate
+        SqlCompilerErrorMapper.TryMap(ex, out var mapped).ShouldBeTrue();
+        mapped.Status.ShouldBe(400);
+        mapped.Code.ShouldBe("SQL_SYNTAX_ERROR");
     }
 
     [RequiresContainerRuntimeFact]
