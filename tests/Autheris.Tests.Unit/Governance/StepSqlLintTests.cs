@@ -240,7 +240,8 @@ public sealed class StepSqlLintTests
                 (48, "deputy_relations"),
                 (49, "table_write_policies"),
                 (50, "external_system_role"),
-                (51, "consents_request_generation")
+                (51, "consents_request_generation"),
+                (52, "uc_provisioning")
             ]);
         }
     }
