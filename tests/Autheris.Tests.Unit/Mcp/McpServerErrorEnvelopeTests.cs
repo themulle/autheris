@@ -216,4 +216,21 @@ public sealed class McpServerErrorEnvelopeTests
         result.Meta!.ContainsKey("truncationReason").ShouldBeFalse();
         result.Meta.ContainsKey("returnedRows").ShouldBeFalse();
     }
+
+    [Fact]
+    public async Task CallGuardedTool_PageSizeCapped_MetaHasPageSizeCapped()
+    {
+        var result = await Call(Returning(new McpToolCallResult(true, """{"rows":[]}""", EstimatedTokens: 3, PageSizeCapped: true)));
+
+        result.Meta!["pageSizeCapped"]!.GetValue<bool>().ShouldBeTrue();
+        result.Meta["truncated"]!.GetValue<bool>().ShouldBeFalse();
+    }
+
+    [Fact]
+    public async Task CallGuardedTool_NotCapped_MetaHasNoPageSizeCapped()
+    {
+        var result = await Call(Returning(new McpToolCallResult(true, """{"rows":[]}""", EstimatedTokens: 3)));
+
+        result.Meta!.ContainsKey("pageSizeCapped").ShouldBeFalse();
+    }
 }

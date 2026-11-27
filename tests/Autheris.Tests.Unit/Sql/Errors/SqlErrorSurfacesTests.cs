@@ -211,7 +211,7 @@ public sealed class SqlErrorSurfacesTests
             Substitute.For<IRequestExecutorProvider>(), Substitute.For<IGatewayExecutionService>(),
             NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100), toolExecutionHandler: handler, persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
-        var json = await executor.ExecuteOperationAsync(Tool("query_sql"), """{"query":"SELECT 1"}""", Session());
+        var json = await executor.ExecuteOperationAsync(Tool("query_sql"), """{"sql":"SELECT 1"}""", Session());
 
         var error = JsonDocument.Parse(json).RootElement.GetProperty("error");
         error.GetProperty("code").GetString().ShouldBe("SQL_LIMIT_EXCEEDED");

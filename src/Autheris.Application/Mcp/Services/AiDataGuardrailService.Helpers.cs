@@ -315,7 +315,7 @@ public sealed partial class AiDataGuardrailService
         if (string.Equals(tool.Name, McpDatasetTools.QuerySql, StringComparison.OrdinalIgnoreCase))
         {
             var (tables, _) = await McpDataTargetResolver.TryResolveSqlTablesAsync(
-                McpDatasetTools.TryGetStringArgument(argumentsJson, "query", out var sql) ? sql : null,
+                McpDatasetTools.TryGetStringArgument(argumentsJson, "sql", out var sql) ? sql : null,
                 sqlEngine,
                 defaultDataSourceName,
                 ct).ConfigureAwait(false);
@@ -337,7 +337,7 @@ public sealed partial class AiDataGuardrailService
         if (string.Equals(tool.Name, McpDatasetTools.QuerySql, StringComparison.OrdinalIgnoreCase))
         {
             return McpDataTargetResolver.ResolveSqlTables(
-                McpDatasetTools.TryGetStringArgument(argumentsJson, "query", out var sql) ? sql : null,
+                McpDatasetTools.TryGetStringArgument(argumentsJson, "sql", out var sql) ? sql : null,
                 sqlEngine,
                 defaultDataSourceName);
         }

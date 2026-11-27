@@ -226,7 +226,7 @@ public sealed class McpResultEmptyMembersTests
             sql, Substitute.For<IGovernedDataQueryService>(), Substitute.For<ICatalogDiscoveryService>(), Substitute.For<IApiDispatcherService>(),
             Substitute.For<ILineageGraphStore>(), _metadata);
 
-        var json = await handler.ExecuteToolAsync(Tool(McpDatasetTools.QuerySql), """{"query":"SELECT id, note FROM sales.public.orders"}""", Session());
+        var json = await handler.ExecuteToolAsync(Tool(McpDatasetTools.QuerySql), """{"sql":"SELECT id, note FROM sales.public.orders"}""", Session());
 
         using var doc = JsonDocument.Parse(json);
         var root = doc.RootElement;

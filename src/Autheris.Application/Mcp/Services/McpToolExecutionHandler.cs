@@ -863,33 +863,4 @@ public sealed partial class McpToolExecutionHandler : IMcpToolExecutionHandler
 
         return principal;
     }
-
-    private sealed record McpSqlQueryResult(
-        string OriginalSql,
-        IReadOnlyList<string> Columns,
-        IReadOnlyList<IReadOnlyDictionary<string, object?>> Rows,
-        int RowCount,
-        long ElapsedMilliseconds,
-        bool Truncated,
-        bool HasMore,
-        string? Cursor,
-        GovernedSqlPageResponse? Page,
-        string? Next,
-        string? PagingUnavailable,
-        IReadOnlyList<WebSqlIndexHint>? IndexHints)
-    {
-        public static McpSqlQueryResult From(GovernedSqlResult result) => new(
-            OriginalSql: result.OriginalSql,
-            Columns: result.Columns,
-            Rows: result.Rows,
-            RowCount: result.RowCount,
-            ElapsedMilliseconds: result.ElapsedMilliseconds,
-            Truncated: result.Truncated,
-            HasMore: result.Next is not null || result.Truncated,
-            Cursor: result.Next,
-            Page: result.Page,
-            Next: result.Next,
-            PagingUnavailable: result.PagingUnavailable,
-            IndexHints: result.IndexHints);
-    }
 }

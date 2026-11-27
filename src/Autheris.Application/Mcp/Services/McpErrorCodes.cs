@@ -170,6 +170,7 @@ public static class McpErrorCodes
         (InvalidParams, "Fix the arguments and call again."),
         (GovernedSqlErrorCodes.SyntaxError, "Correct the statement at the given line and column."),
         (GovernedSqlErrorCodes.PolicyDenied, "Use only tables the dataset catalog lists for you."),
+        (GovernedSqlErrorCodes.PagingTokenInvalid, "Repeat the call without 'next' to restart; a 'next' is valid only with the same sql, parameters and dataSource."),
         (InvalidQuery, "Fix the filter, select or orderBy and call again."),
         (RequiredFilterColumnMissing, "Add a filter on the required column."),
         (MetricNotFound, "Use a metric name returned by the semantic catalog."),

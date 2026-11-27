@@ -248,7 +248,7 @@ public sealed class CrossChannelIntegrationFixesTests
         var guardrail = new AiDataGuardrailService(registry, options, logger, auditLog, decisionPoint: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AllowAll(), tableMetadataRepository: Autheris.Tests.Unit.TestSupport.PdpTestDoubles.AnyTable());
 
         var session = new McpSessionContext("sess-1", "user-principal", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow);
-        var request = new McpToolCallRequest(McpDatasetTools.QuerySql, """{"query":"SELECT FROM WHERE"}""");
+        var request = new McpToolCallRequest(McpDatasetTools.QuerySql, """{"sql":"SELECT FROM WHERE"}""");
 
         // Act
         var result = await guardrail.ExecuteToolWithGuardrailAsync(request, session);

@@ -315,15 +315,21 @@ public static class McpDatasetTools
 
         yield return new McpToolDefinition(
             Name: QuerySql,
-            Description: "Executes a governed SQL query with row-level security, column masking, and tenant isolation under the caller's context. Results are capped at Mcp:MaxResultRows; pass optional 'limit' and follow the returned 'cursor' (when 'hasMore' is true) to retrieve subsequent pages of a deterministic ORDER BY query. Pass values as named 'parameters' bound to @name placeholders instead of SQL literals; a cursor is only valid with the same query and parameters." + McpErrorCodes.ErrorsSentence("SQL_SYNTAX_ERROR", "SQL_POLICY_DENIED", "SQL_PARAMETER_MISSING", "QUERY_TIMEOUT", "TOKEN_BUDGET_EXCEEDED"),
+            Description: "Executes a governed SQL query with row-level security, column masking, and tenant isolation under the caller's context. The result is the POST /api/v1/sql body: typed 'columns' (name, type, nullable, masked), 'rows', 'rowCount', 'truncated', 'page' and 'next'. Without 'page' the query pages at Mcp:MaxResultRows; a 'page.size' above it is reduced (_meta.pageSizeCapped). A 'next' token (present when more rows exist) is followed with the same 'sql', 'parameters', 'dataSource' and 'page.size'; use a deterministic ORDER BY. Pass values as named 'parameters' bound to @name placeholders instead of SQL literals." + McpErrorCodes.ErrorsSentence("SQL_SYNTAX_ERROR", "SQL_POLICY_DENIED", "SQL_PARAMETER_MISSING", "SQL_PAGING_TOKEN_INVALID", "QUERY_TIMEOUT", "TOKEN_BUDGET_EXCEEDED"),
             InputJsonSchema: """
             {
               "type": "object",
-              "required": ["query"],
+              "required": ["sql"],
               "properties": {
-                "query": { "type": "string", "description": "SQL SELECT query to execute against the gateway." },
-                "limit": { "type": "integer", "minimum": 1, "description": "Optional maximum rows per page (capped server-side to Mcp:MaxResultRows)." },
-                "cursor": { "type": "string", "description": "Optional signed continuation cursor returned by a previous query_sql call." },
+                "sql": { "type": "string", "description": "SQL SELECT query to execute against the gateway." },
+                "dataSource": { "type": "string", "description": "Optional data source name, as in POST /api/v1/sql; default is the gateway's default source." },
+                "page": {
+                  "type": ["object", "null"],
+                  "description": "Optional page window, as in POST /api/v1/sql. 'size' above Mcp:MaxResultRows is reduced.",
+                  "properties": { "size": { "type": "integer", "minimum": 1, "description": "Rows per page." } },
+                  "additionalProperties": false
+                },
+                "next": { "type": "string", "description": "Optional signed continuation token from the 'next' of a previous query_sql result." },
                 "parameters": {
                   "type": ["object", "null"],
                   "description": "Optional named values bound to @name placeholders, as in POST /api/v1/sql: string, number, boolean or null; an array of scalars only as the single item of IN (@name) or NOT IN (@name). Values are bound, never inlined.",

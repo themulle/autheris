@@ -4,7 +4,7 @@ using System;
 using System.Globalization;
 using System.IO;
 using System.Text.Json;
-using Autheris.Api.Endpoints;
+using Autheris.Application.Sql;
 using Shouldly;
 using Xunit;
 

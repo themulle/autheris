@@ -319,13 +319,31 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         }
         else if (string.Equals(tool.Name, McpDatasetTools.QuerySql, StringComparison.OrdinalIgnoreCase))
         {
-            var sql = McpDatasetTools.TryGetStringArgument(request.ArgumentsJson, "query", out var s) ? s : null;
+            var sql = McpDatasetTools.TryGetStringArgument(request.ArgumentsJson, "sql", out var s) ? s : null;
             if (string.IsNullOrWhiteSpace(sql))
             {
-                return McpToolError.Fail(McpErrorCodes.InvalidParams, "Missing required argument 'query'.");
+                return McpToolError.Fail(McpErrorCodes.InvalidParams, "Missing required argument 'sql'.");
             }
 
-            var (tables, syntaxErr, failure) = await McpDataTargetResolver.TryResolveSqlTablesWithFailureAsync(sql, _sqlEngine, _options.Value.WebSql?.DefaultDataSourceName, cancellationToken).ConfigureAwait(false);
+            // The tables resolve against the data source the executor will use: the canonical name of an allowed explicit source, else the default.
+            var tableSource = _options.Value.WebSql?.DefaultDataSourceName;
+            if (McpDatasetTools.TryGetStringArgument(request.ArgumentsJson, "dataSource", out var requestedSource)
+                && !string.IsNullOrWhiteSpace(requestedSource))
+            {
+                if (!Autheris.Domain.Common.TenantId.TryParse(sessionContext.TenantId, out var sourceTenant)
+                    || !new Autheris.Application.Sql.Services.SqlDataSourceResolver(_options).TryResolveAllowedDataSource(requestedSource, sourceTenant, out var canonicalSource))
+                {
+                    activity?.SetTag(McpDiagnostics.GenAiGuardrailVerdictKey, "deny");
+                    McpDiagnostics.RecordGuardrailVerdict("deny", tool.Name, false, false);
+                    await RecordAuditEventAsync(tool.Name, sessionContext, "DENY", "The requested data source is not enabled for WebSQL.", false, false, 0, cancellationToken).ConfigureAwait(false);
+                    // The same answer POST /api/v1/sql gives for an unknown, disallowed or tenant-disallowed source; the name is never echoed.
+                    return McpToolError.FailSql(new Autheris.Application.Sql.WebSqlPolicyException("The requested data source is not enabled for WebSQL."));
+                }
+
+                tableSource = canonicalSource;
+            }
+
+            var (tables, syntaxErr, failure) = await McpDataTargetResolver.TryResolveSqlTablesWithFailureAsync(sql, _sqlEngine, tableSource, cancellationToken).ConfigureAwait(false);
             resolvedTables = tables;
             sqlSyntaxError = syntaxErr;
             sqlFailure = failure;
@@ -462,6 +480,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         string rawDataJson;
         bool? policyOutcome = null;
         Func<int, string?>? resumeAfter = null;
+        var pageSizeCapped = false;
         var argsJson = request.ArgumentsJson ?? "{}";
         if (tool.Name.Equals("get_golden_queries", StringComparison.OrdinalIgnoreCase) && _goldenQueryService != null)
         {
@@ -587,6 +606,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
             rawDataJson = await _queryExecutor.ExecuteOperationAsync(tool, argsJson, sessionContext, cancellationToken).ConfigureAwait(false);
             policyOutcome = maskingScope.Outcome;
             resumeAfter = continuationScope.ResumeAfter;
+            pageSizeCapped = continuationScope.PageSizeCapped;
         }
         else
         {
@@ -622,7 +642,7 @@ public sealed partial class AiDataGuardrailService : IAiDataGuardrailService
         McpDiagnostics.RecordTokenUsage(estimatedTokens, "output", tool.Name);
         McpDiagnostics.RecordGuardrailVerdict(verdict, tool.Name, wasMasked, false);
 
-        return new McpToolCallResult(IsSuccess: !budgetFailed, ContentJson: scrubbedJson, ErrorMessage: budgetFailed ? scrubbedJson : null, EstimatedTokens: estimatedTokens, IsMasked: wasMasked || (policyOutcome ?? (_queryExecutor != null && McpResultMasking.IsGovernedDataTool(tool))), TruncatedDueToBudget: truncated, ReturnedRows: budgetFailed ? null : returnedRows);
+        return new McpToolCallResult(IsSuccess: !budgetFailed, ContentJson: scrubbedJson, ErrorMessage: budgetFailed ? scrubbedJson : null, EstimatedTokens: estimatedTokens, IsMasked: wasMasked || (policyOutcome ?? (_queryExecutor != null && McpResultMasking.IsGovernedDataTool(tool))), TruncatedDueToBudget: truncated, ReturnedRows: budgetFailed ? null : returnedRows, PageSizeCapped: !budgetFailed && pageSizeCapped);
     }
 
     /// <summary>The audited block of a request refused by the input guardrail; the caller sees the fixed code only.</summary>

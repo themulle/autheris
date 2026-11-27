@@ -597,14 +597,14 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
 
         SourceSAllows("WebSql, Rest, GraphQL, OData, Trino");
         var before = await TakeAsync();
-        var (isError, text) = await McpTestClient.CallAsync(mcp, "query_sql", new { query = sql });
+        var (isError, text) = await McpTestClient.CallAsync(mcp, "query_sql", new { sql = sql });
         isError.ShouldBeTrue(text);
         text.ShouldContain("TRANSPORT_NOT_ALLOWED");
         text.ShouldNotContain("row-one");
         await AssertDeniedOnceAsync(before);
 
         SourceSAllows("Mcp");
-        var (controlError, controlText) = await McpTestClient.CallAsync(mcp, "query_sql", new { query = sql });
+        var (controlError, controlText) = await McpTestClient.CallAsync(mcp, "query_sql", new { sql = sql });
         controlError.ShouldBeFalse(controlText);
         controlText.ShouldContain("row-one");
     }
@@ -620,7 +620,7 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
         SourceSAllows("WebSql");
 
         var before = await TakeAsync();
-        var (isError, text) = await McpTestClient.CallAsync(mcp, "query_sql", new { query = "SELECT id FROM src_s.main.s_items" });
+        var (isError, text) = await McpTestClient.CallAsync(mcp, "query_sql", new { sql = "SELECT id FROM src_s.main.s_items" });
 
         isError.ShouldBeTrue(text);
         text.ShouldContain("TRANSPORT_NOT_ALLOWED");
@@ -654,7 +654,7 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
         await using var mcp = await McpTestClient.ConnectAsync(http);
         SourceSAllows("GraphQL");
 
-        var (isError, text) = await McpTestClient.CallAsync(mcp, "query_sql", new { query = "SELECT id FROM src_s.main.s_items" });
+        var (isError, text) = await McpTestClient.CallAsync(mcp, "query_sql", new { sql = "SELECT id FROM src_s.main.s_items" });
 
         isError.ShouldBeTrue(text);
         text.ShouldContain("TRANSPORT_NOT_ALLOWED");
@@ -697,7 +697,7 @@ public sealed class TransportEnforcementTests : IClassFixture<TransportEnforceme
         Expect((await BodyAsync(await client.SendAsync(Trino("SELECT id FROM src_s.main.s_items")))).Contains("TRANSPORT_NOT_ALLOWED", StringComparison.Ordinal), "Trino");
         Expect((await BodyAsync(await client.GetAsync("/api/v1/data/src_s/main/s_items"))).Contains("TRANSPORT_NOT_ALLOWED", StringComparison.Ordinal), "Rest");
         Expect((await BodyAsync(await client.GetAsync("/odata/v4/src_s/main/s_items"))).Contains("TRANSPORT_NOT_ALLOWED", StringComparison.Ordinal), "OData");
-        var (_, mcpText) = await McpTestClient.CallAsync(mcp, "query_sql", new { query = "SELECT id FROM src_s.main.s_items" });
+        var (_, mcpText) = await McpTestClient.CallAsync(mcp, "query_sql", new { sql = "SELECT id FROM src_s.main.s_items" });
         Expect(mcpText.Contains("TRANSPORT_NOT_ALLOWED", StringComparison.Ordinal), "Mcp");
         var gql = (await GraphQlAsync(client, $"{{ {SField}(first: 1) {{ id }} }}")).ToString();
         Expect(gql.Contains("TRANSPORT_NOT_ALLOWED", StringComparison.Ordinal), "GraphQL");

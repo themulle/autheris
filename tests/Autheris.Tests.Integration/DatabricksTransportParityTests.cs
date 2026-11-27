@@ -637,7 +637,7 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
             case "mcp":
             {
                 await using var mcp = await McpTestClient.ConnectAsync(client);
-                var (isError, payload) = await McpTestClient.CallJsonAsync(mcp, "query_sql", new { query = "SELECT id FROM dbx.default.orders_ci" });
+                var (isError, payload) = await McpTestClient.CallJsonAsync(mcp, "query_sql", new { sql = "SELECT id FROM dbx.default.orders_ci" });
                 isError.ShouldBeFalse(payload.ToString());
                 var items = payload.TryGetProperty("data", out var d) ? d :
                             payload.TryGetProperty("rows", out var r) ? r : default;
@@ -735,7 +735,7 @@ public sealed class DatabricksTransportParityTests : IClassFixture<SparkProxyFix
                 await using var mcp = await McpTestClient.ConnectAsync(client);
                 try
                 {
-                    var (isError, text) = await McpTestClient.CallAsync(mcp, "query_sql", new { query = "DELETE FROM dbx.default.orders" });
+                    var (isError, text) = await McpTestClient.CallAsync(mcp, "query_sql", new { sql = "DELETE FROM dbx.default.orders" });
                     return isError || text.Contains("NOT_SUPPORTED", StringComparison.OrdinalIgnoreCase) || text.Contains("DML_NOT_ALLOWED", StringComparison.OrdinalIgnoreCase) || text.Contains("error", StringComparison.OrdinalIgnoreCase);
                 }
                 catch

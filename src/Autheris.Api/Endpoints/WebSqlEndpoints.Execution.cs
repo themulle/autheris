@@ -396,16 +396,8 @@ public static partial class WebSqlEndpoints
                     w.WriteStartArray("columns");
                     for (int i = 0; i < fieldCount; i++)
                     {
-                        var col = info.Columns[i];
                         bool masked = i < info.MaskedColumns.Length && info.MaskedColumns[i];
-                        bool nullable = masked ? true : (col.AllowDbNull ?? true);
-                        string typeName = TrinoColumnTypes.Map(col, Array.Empty<object?>()).Name;
-                        w.WriteStartObject();
-                        w.WriteString("name", columnNames[i]);
-                        w.WriteString("type", typeName);
-                        w.WriteBoolean("nullable", nullable);
-                        w.WriteBoolean("masked", masked);
-                        w.WriteEndObject();
+                        WebSqlResultJson.WriteColumn(w, columnNames[i], info.Columns[i], masked);
                     }
                     w.WriteEndArray();
 
@@ -462,51 +454,14 @@ public static partial class WebSqlEndpoints
                 writer.WriteEndArray();
             }
 
-            writer.WriteNumber("rowCount", rowCount);
-            writer.WriteBoolean("truncated", truncated);
-
-            if (pageOutcome?.Page != null)
-            {
-                writer.WriteStartObject("page");
-                writer.WriteNumber("number", pageOutcome.Page.Number);
-                writer.WriteNumber("offset", pageOutcome.Page.Offset);
-                writer.WriteNumber("size", pageOutcome.Page.Size);
-                writer.WriteEndObject();
-            }
-
-            if (!string.IsNullOrEmpty(pageOutcome?.NextToken))
-            {
-                writer.WriteString("next", pageOutcome.NextToken);
-            }
-
-            if (!string.IsNullOrEmpty(pageOutcome?.PagingUnavailable))
-            {
-                writer.WriteString("pagingUnavailable", pageOutcome.PagingUnavailable);
-            }
+            WebSqlResultJson.WritePaging(writer, rowCount, truncated, pageOutcome?.Page, pageOutcome?.NextToken, pageOutcome?.PagingUnavailable);
 
             if (resultCacheOn && cacheOutcome is { } reportedCacheOutcome)
             {
                 WriteResultCacheField(writer, reportedCacheOutcome);
             }
 
-            if (indexHints is { Count: > 0 })
-            {
-                writer.WriteStartArray("indexHints");
-                foreach (var hint in indexHints)
-                {
-                    writer.WriteStartObject();
-                    writer.WriteString("table", hint.Table);
-                    writer.WriteString("reason", hint.Reason);
-                    writer.WriteStartArray("helpfulIndexColumns");
-                    foreach (var col in hint.HelpfulIndexColumns)
-                    {
-                        writer.WriteStringValue(col);
-                    }
-                    writer.WriteEndArray();
-                    writer.WriteEndObject();
-                }
-                writer.WriteEndArray();
-            }
+            WebSqlResultJson.WriteIndexHints(writer, indexHints);
 
             writer.WriteEndObject();
             if (truncated && !httpContext.Response.HasStarted)

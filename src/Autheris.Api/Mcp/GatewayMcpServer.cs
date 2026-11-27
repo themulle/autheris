@@ -496,6 +496,11 @@ public static class GatewayMcpServer
             meta["returnedRows"] = returnedRows;
         }
 
+        if (result.PageSizeCapped)
+        {
+            meta["pageSizeCapped"] = true;
+        }
+
         return new CallToolResult
         {
             Content = [new TextContentBlock { Text = result.ContentJson }],

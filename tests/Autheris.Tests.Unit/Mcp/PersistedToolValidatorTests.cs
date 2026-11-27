@@ -47,9 +47,9 @@ public sealed class PersistedToolValidatorTests
     }
 
     [Theory]
-    [InlineData("""{"query":"SELECT 1","parameters":null}""")]
-    [InlineData("""{"query":"SELECT 1","parameters":{"n":1,"l":[1,2]}}""")]
-    [InlineData("""{"query":"SELECT 1"}""")]
+    [InlineData("""{"sql":"SELECT 1","parameters":null}""")]
+    [InlineData("""{"sql":"SELECT 1","parameters":{"n":1,"l":[1,2]}}""")]
+    [InlineData("""{"sql":"SELECT 1"}""")]
     public void QuerySql_ParametersNullObjectOrAbsent_PassTheToolSchema(string json)
     {
         var querySql = McpDatasetTools.Definitions().Single(t => t.Name == McpDatasetTools.QuerySql);
@@ -184,4 +184,42 @@ public sealed class PersistedToolValidatorTests
             reason.ShouldNotContain("secretParam");
         }
     }
+
+    private bool ValidateQuerySql(string json)
+    {
+        var querySql = McpDatasetTools.Definitions().Single(t => t.Name == McpDatasetTools.QuerySql);
+        using var doc = JsonDocument.Parse(json);
+        return _validator.ValidateToolInvocation(querySql, doc.RootElement, out _);
+    }
+
+    [Theory]
+    [InlineData("""{"query":"SELECT 1"}""")]
+    [InlineData("""{"query":"SELECT 1","limit":5}""")]
+    [InlineData("""{"sql":"SELECT 1","cursor":"abc"}""")]
+    public void QuerySql_OldArgumentNamesQueryLimitCursor_FailTheToolSchema(string json) =>
+        ValidateQuerySql(json).ShouldBeFalse();
+
+    [Theory]
+    [InlineData("""{"sql":"SELECT 1","query":"SELECT 2"}""")]
+    [InlineData("""{"sql":"SELECT 1","limit":2}""")]
+    public void QuerySql_OldNamesBesideSql_AreInvalidParams(string json) =>
+        ValidateQuerySql(json).ShouldBeFalse();
+
+    [Theory]
+    [InlineData("""{"sql":"SELECT 1","page":{"number":2}}""")]
+    [InlineData("""{"sql":"SELECT 1","page":{"size":2,"offset":4}}""")]
+    public void QuerySql_PageWithNumberOrOffset_IsInvalidParams(string json) =>
+        ValidateQuerySql(json).ShouldBeFalse();
+
+    [Theory]
+    [InlineData("""{"sql":"SELECT 1","SQL":"SELECT 2"}""")]
+    [InlineData("""{"sql":"SELECT 1","sql":"SELECT 2"}""")]
+    public void QuerySql_DuplicateAndCaseVariantSql_IsInvalidParams(string json) =>
+        ValidateQuerySql(json).ShouldBeFalse();
+
+    [Theory]
+    [InlineData("""{"sql":"SELECT 1","dataSource":"sales","page":{"size":5},"next":"tok"}""")]
+    [InlineData("""{"sql":"SELECT 1","page":null}""")]
+    public void QuerySql_NewArgumentNames_PassTheToolSchema(string json) =>
+        ValidateQuerySql(json).ShouldBeTrue();
 }

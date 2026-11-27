@@ -200,7 +200,7 @@ public sealed class AiDataGuardrailDecisionPointTests
         var h = Create(Denied);
 
         var result = await h.Guardrail.ExecuteToolWithGuardrailAsync(
-            new McpToolCallRequest("query_sql", """{"query":"SELECT * FROM governance.catalog.t"}"""), Session());
+            new McpToolCallRequest("query_sql", """{"sql":"SELECT * FROM governance.catalog.t"}"""), Session());
 
         result.IsSuccess.ShouldBeFalse();
         await h.Executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);

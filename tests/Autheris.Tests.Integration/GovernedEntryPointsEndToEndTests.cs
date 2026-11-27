@@ -366,7 +366,7 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<GovernedEnt
 
         await using var mcp = await McpTestClient.ConnectAsync(Client());
         var (isError, text) = await McpTestClient.CallAsync(mcp, Autheris.Application.Mcp.Services.McpDatasetTools.QuerySql,
-            new { query = "SELECT id, name FROM main.ep_orders ORDER BY id" });
+            new { sql = "SELECT id, name FROM main.ep_orders ORDER BY id" });
 
         isError.ShouldBeFalse(text);
         ShouldBeAcmeOnly(text, "MCP SQL tool");
@@ -444,7 +444,7 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<GovernedEnt
         {
             var web = await WebSqlAsync(sql, parameters);
             web.Status.ShouldBe(HttpStatusCode.OK, web.Body);
-            var (isError, text) = await McpTestClient.CallAsync(mcp, Autheris.Application.Mcp.Services.McpDatasetTools.QuerySql, new { query = sql, parameters });
+            var (isError, text) = await McpTestClient.CallAsync(mcp, Autheris.Application.Mcp.Services.McpDatasetTools.QuerySql, new { sql = sql, parameters });
 
             isError.ShouldBeFalse(text);
             text.ShouldNotContain("other-row");
@@ -475,7 +475,7 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<GovernedEnt
             web.Status.ShouldNotBe(HttpStatusCode.OK, sql);
             web.Body.ShouldContain(code, customMessage: sql);
 
-            var (isError, text) = await McpTestClient.CallAsync(mcp, Autheris.Application.Mcp.Services.McpDatasetTools.QuerySql, new { query = sql, parameters });
+            var (isError, text) = await McpTestClient.CallAsync(mcp, Autheris.Application.Mcp.Services.McpDatasetTools.QuerySql, new { sql = sql, parameters });
             isError.ShouldBeTrue(text);
             McpErrorCode(text).ShouldBe(code, text);
         }
@@ -492,7 +492,7 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<GovernedEnt
         var web = await WebSqlAsync(sql, parameters);
         web.Status.ShouldNotBe(HttpStatusCode.OK, web.Body);
 
-        var (isError, text) = await McpTestClient.CallAsync(mcp, Autheris.Application.Mcp.Services.McpDatasetTools.QuerySql, new { query = sql, parameters });
+        var (isError, text) = await McpTestClient.CallAsync(mcp, Autheris.Application.Mcp.Services.McpDatasetTools.QuerySql, new { sql = sql, parameters });
         isError.ShouldBeTrue(text);
         text.ShouldNotContain("acme-row");
     }
@@ -507,23 +507,23 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<GovernedEnt
         var tool = Autheris.Application.Mcp.Services.McpDatasetTools.QuerySql;
         var parameters = new Dictionary<string, object?> { ["n"] = "zzz" };
 
-        var (firstError, first) = await McpTestClient.CallAsync(mcp, tool, new { query = sql, parameters, limit = 1 });
+        var (firstError, first) = await McpTestClient.CallAsync(mcp, tool, new { sql, parameters, page = new { size = 1 } });
         firstError.ShouldBeFalse(first);
         RowIds(first).ShouldBe([1]);
         using var firstDoc = System.Text.Json.JsonDocument.Parse(first);
-        var cursor = firstDoc.RootElement.GetProperty("cursor").GetString()!;
+        var cursor = firstDoc.RootElement.GetProperty("next").GetString()!;
 
-        var (secondError, second) = await McpTestClient.CallAsync(mcp, tool, new { query = sql, parameters, limit = 1, cursor });
+        var (secondError, second) = await McpTestClient.CallAsync(mcp, tool, new { sql, parameters, page = new { size = 1 }, next = cursor });
         secondError.ShouldBeFalse(second);
         RowIds(second).ShouldBe([2]);
 
         var tampered = cursor[..^1] + (cursor[^1] == 'A' ? 'B' : 'A');
-        var (_, tamperedText) = await McpTestClient.CallAsync(mcp, tool, new { query = sql, parameters, limit = 1, cursor = tampered });
+        var (_, tamperedText) = await McpTestClient.CallAsync(mcp, tool, new { sql, parameters, page = new { size = 1 }, next = tampered });
         var invalidCode = McpErrorCode(tamperedText);
         invalidCode.ShouldNotBeNull(tamperedText);
 
         var (changedError, changed) = await McpTestClient.CallAsync(mcp, tool,
-            new { query = sql, parameters = new Dictionary<string, object?> { ["n"] = "yyy" }, limit = 1, cursor });
+            new { sql, parameters = new Dictionary<string, object?> { ["n"] = "yyy" }, page = new { size = 1 }, next = cursor });
         changedError.ShouldBeTrue(changed);
         McpErrorCode(changed).ShouldBe(invalidCode);
     }
@@ -549,7 +549,7 @@ public sealed class GovernedEntryPointsEndToEndTests : IClassFixture<GovernedEnt
         {
             var web = await WebSqlAsync(sql, parameters);
             web.Status.ShouldBe(HttpStatusCode.OK, web.Body);
-            var (isError, text) = await McpTestClient.CallAsync(mcp, tool, new { query = sql, parameters });
+            var (isError, text) = await McpTestClient.CallAsync(mcp, tool, new { sql, parameters });
             isError.ShouldBeFalse(text);
             RowIds(text).ShouldBeEmpty();
             text.ShouldNotContain("other-row");

@@ -22,6 +22,10 @@ public sealed partial class McpQuerySqlPagingTests
 
         public bool ThrowPagingUnsupportedOnce { get; set; }
 
+        public Func<GovernedSqlQueryRequest, Exception?>? FailWith { get; set; }
+
+        public Func<GovernedSqlResult, GovernedSqlResult>? RewriteResult { get; set; }
+
         public ClaimsPrincipal? User { get; private set; }
 
         public TenantId Tenant { get; private set; }
@@ -37,20 +41,26 @@ public sealed partial class McpQuerySqlPagingTests
             return inner.ExecuteGovernedQueryAsync(request, user, tenantId, rowWriter, ct);
         }
 
-        public Task<GovernedSqlResult> ExecuteQueryBufferedAsync(
+        public async Task<GovernedSqlResult> ExecuteQueryBufferedAsync(
             GovernedSqlQueryRequest request,
             ClaimsPrincipal user,
             TenantId tenantId,
             System.Threading.CancellationToken ct = default)
         {
             Record(request, user, tenantId);
+            if (FailWith?.Invoke(request) is { } failure)
+            {
+                throw failure;
+            }
+
             if (ThrowPagingUnsupportedOnce && request.Page is not null)
             {
                 ThrowPagingUnsupportedOnce = false;
                 throw new TrinoSqlEngine.Ast.Emit.SqlPagingUnsupportedException();
             }
 
-            return inner.ExecuteQueryBufferedAsync(request, user, tenantId, ct);
+            var result = await inner.ExecuteQueryBufferedAsync(request, user, tenantId, ct).ConfigureAwait(false);
+            return RewriteResult?.Invoke(result) ?? result;
         }
 
         public Task ValidateAsync(string rawSql, ClaimsPrincipal user, TenantId tenantId, System.Threading.CancellationToken ct = default) =>
@@ -71,7 +81,7 @@ public sealed partial class McpQuerySqlPagingTests
 
     private static string Args(string query, object? parameters = null, string? cursor = null, int? limit = null)
     {
-        var map = new Dictionary<string, object?> { ["query"] = query };
+        var map = new Dictionary<string, object?> { ["sql"] = query };
         if (parameters is not null)
         {
             map["parameters"] = parameters;
@@ -79,12 +89,12 @@ public sealed partial class McpQuerySqlPagingTests
 
         if (cursor is not null)
         {
-            map["cursor"] = cursor;
+            map["next"] = cursor;
         }
 
         if (limit is not null)
         {
-            map["limit"] = limit;
+            map["page"] = new { size = limit };
         }
 
         return JsonSerializer.Serialize(map);
@@ -227,12 +237,12 @@ public sealed partial class McpQuerySqlPagingTests
         var (handler, _, executedSql) = CreatePipeline(maxResultRows: 5);
         var bodies = new[]
         {
-            """{"query":"SELECT id FROM sales.public.orders WHERE name = @a","parameters":"secret-7f3a"}""",
-            """{"query":"SELECT id FROM sales.public.orders WHERE name = @a","parameters":["secret-7f3a"]}""",
-            """{"query":"SELECT id FROM sales.public.orders WHERE name = @a","parameters":{"a":"secret-7f3a","A":"secret-7f3a"}}""",
-            """{"query":"SELECT id FROM sales.public.orders WHERE name = @a","parameters":{"a":"secret-7f3a","@a":"secret-7f3a"}}""",
-            """{"query":"SELECT id FROM sales.public.orders WHERE name = @a","parameters":{"a":"secret-7f3a","a":"secret-7f3a"}}""",
-            """{"query":"SELECT id FROM sales.public.orders WHERE name = @a","parameters":{"a":{"nested":"secret-7f3a"}}}"""
+            """{"sql":"SELECT id FROM sales.public.orders WHERE name = @a","parameters":"secret-7f3a"}""",
+            """{"sql":"SELECT id FROM sales.public.orders WHERE name = @a","parameters":["secret-7f3a"]}""",
+            """{"sql":"SELECT id FROM sales.public.orders WHERE name = @a","parameters":{"a":"secret-7f3a","A":"secret-7f3a"}}""",
+            """{"sql":"SELECT id FROM sales.public.orders WHERE name = @a","parameters":{"a":"secret-7f3a","@a":"secret-7f3a"}}""",
+            """{"sql":"SELECT id FROM sales.public.orders WHERE name = @a","parameters":{"a":"secret-7f3a","a":"secret-7f3a"}}""",
+            """{"sql":"SELECT id FROM sales.public.orders WHERE name = @a","parameters":{"a":{"nested":"secret-7f3a"}}}"""
         };
 
         foreach (var body in bodies)
@@ -269,7 +279,7 @@ public sealed partial class McpQuerySqlPagingTests
         var first = await handler.ExecuteToolAsync(QuerySqlTool, Args(ParamSql, new { n = "zzz" }), session);
         using var firstDoc = JsonDocument.Parse(first);
         firstDoc.RootElement.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("id").GetInt32()).ShouldBe([1, 2]);
-        var cursor = firstDoc.RootElement.GetProperty("cursor").GetString()!;
+        var cursor = firstDoc.RootElement.GetProperty("next").GetString()!;
 
         var second = await handler.ExecuteToolAsync(QuerySqlTool, Args(ParamSql, new { n = "zzz" }, cursor), session);
         using var secondDoc = JsonDocument.Parse(second);
@@ -283,11 +293,11 @@ public sealed partial class McpQuerySqlPagingTests
         var (handler, _, _) = CreatePipeline(maxResultRows: 2);
         var session = CreateSession();
         var first = await handler.ExecuteToolAsync(QuerySqlTool, Args(ParamSql, new { n = "zzz" }), session);
-        var cursor = JsonDocument.Parse(first).RootElement.GetProperty("cursor").GetString()!;
+        var cursor = JsonDocument.Parse(first).RootElement.GetProperty("next").GetString()!;
 
         var tampered = FlipMidMacChar(cursor);
         var tamperedCode = ErrorCode(await handler.ExecuteToolAsync(QuerySqlTool, Args(ParamSql, new { n = "zzz" }, tampered), session));
-        tamperedCode.ShouldBe("INVALID_PARAMS");
+        tamperedCode.ShouldBe("SQL_PAGING_TOKEN_INVALID");
 
         var variants = new object[]
         {
@@ -314,7 +324,7 @@ public sealed partial class McpQuerySqlPagingTests
 
         props.TryGetProperty("parameters", out var parameters).ShouldBeTrue();
         parameters.GetProperty("type").EnumerateArray().Select(e => e.GetString()).ShouldBe(new[] { "object", "null" });
-        doc.RootElement.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ShouldBe(["query"]);
+        doc.RootElement.GetProperty("required").EnumerateArray().Select(e => e.GetString()).ShouldBe(["sql"]);
         QuerySqlTool.Description!.ShouldContain("@name");
         QuerySqlTool.Description!.ShouldNotContain("inline", Case.Insensitive);
         parameters.GetProperty("description").GetString()!.ShouldContain("never inlined");
@@ -375,7 +385,7 @@ public sealed partial class McpQuerySqlPagingTests
         {
             Args(q, secret),
             Args(q, new { a = new { nested = secret } }),
-            "{\"query\":\"" + q + "\",\"parameters\":{\"a\":\"" + secret + "\",\"A\":\"" + secret + "\"}}",
+            "{\"sql\":\"" + q + "\",\"parameters\":{\"a\":\"" + secret + "\",\"A\":\"" + secret + "\"}}",
             Args(q, new { unsentName = secret }),
             Args(q, new { a = new[] { secret, secret } }),
             Args(qIn, new { a = new object?[] { secret, null } }),
@@ -415,14 +425,14 @@ public sealed partial class McpQuerySqlPagingTests
         var webParameters = new Dictionary<string, object?> { ["n"] = JsonDocument.Parse("\"zzz\"").RootElement.Clone() };
 
         var mcpFirst = await handler.ExecuteToolAsync(QuerySqlTool, Args(ParamSql, new { n = "zzz" }), session);
-        var cursor = JsonDocument.Parse(mcpFirst).RootElement.GetProperty("cursor").GetString()!;
+        var cursor = JsonDocument.Parse(mcpFirst).RootElement.GetProperty("next").GetString()!;
 
         var webResult = await capture[0].RunAsync(
             new GovernedSqlQueryRequest(ParamSql, Parameters: webParameters, Transport: SqlTransports.WebSql, Page: new SqlPageWindow(0, 2, 1)));
         webResult.Next.ShouldNotBeNullOrWhiteSpace();
 
-        ErrorCode(await handler.ExecuteToolAsync(QuerySqlTool, Args(ParamSql, new { n = "zzz" }, webResult.Next), session)).ShouldBe("INVALID_PARAMS");
-        ErrorCode(await handler.ExecuteToolAsync(QuerySqlTool, Args(ParamSql, new { N = "zzz" }, cursor), session)).ShouldBe("INVALID_PARAMS");
+        ErrorCode(await handler.ExecuteToolAsync(QuerySqlTool, Args(ParamSql, new { n = "zzz" }, webResult.Next), session)).ShouldBe("SQL_PAGING_TOKEN_INVALID");
+        ErrorCode(await handler.ExecuteToolAsync(QuerySqlTool, Args(ParamSql, new { N = "zzz" }, cursor), session)).ShouldBe("SQL_PAGING_TOKEN_INVALID");
     }
 
     [Fact]

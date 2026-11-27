@@ -137,7 +137,7 @@ public sealed class McpTokenBudgetShorteningEndToEndTests : IClassFixture<McpTok
 
         for (var page = 0; page < RowCount + 1; page++)
         {
-            var (isError, payload, meta) = await CallAsync(client, "query_sql", cursor is null ? new { query = sql } : (object)new { query = sql, cursor });
+            var (isError, payload, meta) = await CallAsync(client, "query_sql", cursor is null ? new { sql = sql } : (object)new { sql = sql, next = cursor });
             isError.ShouldBeFalse(payload.ToString());
             seen.AddRange(Ids(payload.GetProperty("rows")));
             if (page == 0)
@@ -206,7 +206,7 @@ public sealed class McpTokenBudgetShorteningEndToEndTests : IClassFixture<McpTok
     {
         await SeedWideAsync();
 
-        var (isError, payload, meta) = await CallAsync(Client(), "query_sql", new { query = "SELECT id, blob FROM default.main.mcp_budget_wide ORDER BY id" });
+        var (isError, payload, meta) = await CallAsync(Client(), "query_sql", new { sql = "SELECT id, blob FROM default.main.mcp_budget_wide ORDER BY id" });
 
         isError.ShouldBeTrue();
         payload.GetProperty("error").GetProperty("code").GetString().ShouldBe("TOKEN_BUDGET_EXCEEDED");
@@ -220,7 +220,7 @@ public sealed class McpTokenBudgetShorteningEndToEndTests : IClassFixture<McpTok
     {
         await SeedRowsAsync();
 
-        var (isError, payload, meta) = await CallAsync(Client(), "query_sql", new { query = "SELECT id, note, secret FROM default.main.mcp_budget_rows ORDER BY id" });
+        var (isError, payload, meta) = await CallAsync(Client(), "query_sql", new { sql = "SELECT id, note, secret FROM default.main.mcp_budget_rows ORDER BY id" });
 
         isError.ShouldBeFalse(payload.ToString());
         meta!.Value.GetProperty("truncated").GetBoolean().ShouldBeTrue();
@@ -234,11 +234,11 @@ public sealed class McpTokenBudgetShorteningEndToEndTests : IClassFixture<McpTok
     {
         await SeedRowsAsync();
         const string sql = "SELECT id, note FROM default.main.mcp_budget_rows ORDER BY id";
-        var (_, first, _) = await CallAsync(Client(), "query_sql", new { query = sql });
+        var (_, first, _) = await CallAsync(Client(), "query_sql", new { sql = sql });
         var cursor = first.GetProperty("next").GetString();
 
-        var (otherUserError, otherUser, _) = await CallAsync(Client("S-1-MCP-BUDGET-OTHER"), "query_sql", new { query = sql, cursor });
-        var (otherTenantError, otherTenant, _) = await CallAsync(Client(tenant: "tenant_other"), "query_sql", new { query = sql, cursor });
+        var (otherUserError, otherUser, _) = await CallAsync(Client("S-1-MCP-BUDGET-OTHER"), "query_sql", new { sql = sql, next = cursor });
+        var (otherTenantError, otherTenant, _) = await CallAsync(Client(tenant: "tenant_other"), "query_sql", new { sql = sql, next = cursor });
 
         otherUserError.ShouldBeTrue();
         otherTenantError.ShouldBeTrue();
@@ -252,15 +252,15 @@ public sealed class McpTokenBudgetShorteningEndToEndTests : IClassFixture<McpTok
     {
         await SeedRowsAsync();
         const string sql = "SELECT id, note FROM default.main.mcp_budget_rows ORDER BY id";
-        var (_, first, _) = await CallAsync(Client(), "query_sql", new { query = sql });
+        var (_, first, _) = await CallAsync(Client(), "query_sql", new { sql = sql });
         var cursor = first.GetProperty("next").GetString()!;
         var index = cursor.IndexOf('.', StringComparison.Ordinal) + 8;
         var tampered = cursor[..index] + (cursor[index] == 'A' ? 'B' : 'A') + cursor[(index + 1)..];
 
-        var (isError, payload, _) = await CallAsync(Client(), "query_sql", new { query = sql, cursor = tampered });
+        var (isError, payload, _) = await CallAsync(Client(), "query_sql", new { sql = sql, next = tampered });
 
         isError.ShouldBeTrue();
-        payload.GetProperty("error").GetProperty("code").GetString().ShouldBe("INVALID_PARAMS");
+        payload.GetProperty("error").GetProperty("code").GetString().ShouldBe("SQL_PAGING_TOKEN_INVALID");
     }
 
     [Fact]
@@ -269,18 +269,18 @@ public sealed class McpTokenBudgetShorteningEndToEndTests : IClassFixture<McpTok
     {
         await SeedRowsAsync();
         const string sql = "SELECT id, note FROM default.main.mcp_budget_rows WHERE id > @min ORDER BY id";
-        var (firstError, first, _) = await CallAsync(Client(), "query_sql", new { query = sql, parameters = new { min = 0 } });
+        var (firstError, first, _) = await CallAsync(Client(), "query_sql", new { sql = sql, parameters = new { min = 0 } });
         firstError.ShouldBeFalse(first.ToString());
         var cursor = first.GetProperty("next").GetString()!;
 
-        var (sameError, same, _) = await CallAsync(Client(), "query_sql", new { query = sql, parameters = new { min = 0 }, cursor });
+        var (sameError, same, _) = await CallAsync(Client(), "query_sql", new { sql = sql, parameters = new { min = 0 }, next = cursor });
         sameError.ShouldBeFalse(same.ToString());
 
         foreach (var other in new object[] { new { min = 1 }, new { min = 0, extra = 1 } })
         {
-            var (isError, payload, _) = await CallAsync(Client(), "query_sql", new { query = sql, parameters = other, cursor });
+            var (isError, payload, _) = await CallAsync(Client(), "query_sql", new { sql = sql, parameters = other, next = cursor });
             isError.ShouldBeTrue(payload.ToString());
-            payload.GetProperty("error").GetProperty("code").GetString().ShouldBe("INVALID_PARAMS");
+            payload.GetProperty("error").GetProperty("code").GetString().ShouldBe("SQL_PAGING_TOKEN_INVALID");
         }
     }
 }

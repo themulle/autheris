@@ -9,6 +9,9 @@ The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/).
 ### Added
 - `Analytics:Aggregation:DefaultTimeZone` (default `UTC`, validated at startup) sets the zone of a time bucket whose `timeZone` is omitted or null; an explicit `timeZone` still wins. The typed aggregate schema default and the MCP query guide follow the configured value (#1190).
 
+### Changed
+- MCP `query_sql` takes `sql`, `dataSource`, `parameters`, `page.size` and `next` and returns the `POST /api/v1/sql` body; `query_graphql` returns the `POST /graphql` body and errors without the MCP row cap; `_meta.pageSizeCapped` (#1208).
+
 ## [2.1.2] - 2026-11-27
 
 Full release: ships the `autheris-full` container image and the signed module archive (including the dbt module).

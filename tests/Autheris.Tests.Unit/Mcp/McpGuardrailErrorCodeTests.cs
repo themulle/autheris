@@ -180,9 +180,9 @@ public sealed class McpGuardrailErrorCodeTests
     {
         var rig = DatasetRig();
 
-        var unknown = await Bytes(rig.Call("query_sql", """{"query":"SELECT * FROM sales.public.ghost"}"""));
-        var denied = await Bytes(rig.Call("query_sql", """{"query":"SELECT * FROM sales.public.hidden"}"""));
-        var inactive = await Bytes(rig.Call("query_sql", """{"query":"SELECT * FROM sales.public.dormant"}"""));
+        var unknown = await Bytes(rig.Call("query_sql", """{"sql":"SELECT * FROM sales.public.ghost"}"""));
+        var denied = await Bytes(rig.Call("query_sql", """{"sql":"SELECT * FROM sales.public.hidden"}"""));
+        var inactive = await Bytes(rig.Call("query_sql", """{"sql":"SELECT * FROM sales.public.dormant"}"""));
 
         McpErrorEnvelopeAssert.Code(unknown).ShouldBe(GovernedSqlErrorCodes.PolicyDenied);
         McpErrorEnvelopeAssert.Message(unknown).ShouldBe(GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.PolicyDenied));
@@ -196,7 +196,7 @@ public sealed class McpGuardrailErrorCodeTests
     {
         var rig = DatasetRig();
 
-        foreach (var args in new[] { "{}", """{"query":""}""", """{"query":"   "}""" })
+        foreach (var args in new[] { "{}", """{"sql":""}""", """{"sql":"   "}""" })
         {
             var json = await Bytes(rig.Call("query_sql", args));
             McpErrorEnvelopeAssert.Code(json).ShouldBe("INVALID_PARAMS");
@@ -209,7 +209,7 @@ public sealed class McpGuardrailErrorCodeTests
     {
         var rig = DatasetRig();
 
-        var json = await Bytes(rig.Call("query_sql", """{"query":"WITH ghost_table AS (SELECT id FROM ghost_table) SELECT id FROM ghost_table"}"""));
+        var json = await Bytes(rig.Call("query_sql", """{"sql":"WITH ghost_table AS (SELECT id FROM ghost_table) SELECT id FROM ghost_table"}"""));
 
         McpErrorEnvelopeAssert.Code(json).ShouldBe(GovernedSqlErrorCodes.ConstructNotSupported);
         McpErrorEnvelopeAssert.Message(json).ShouldBe(GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.ConstructNotSupported));

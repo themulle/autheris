@@ -18,14 +18,12 @@ public sealed class McpRowShorteningTests
     {
         original = new JsonObject
         {
-            ["originalSql"] = "SELECT id, name FROM t ORDER BY id",
-            ["columns"] = new JsonArray("id", "name"),
+            ["columns"] = new JsonArray(
+                new JsonObject { ["name"] = "id", ["type"] = "integer", ["nullable"] = false, ["masked"] = false },
+                new JsonObject { ["name"] = "name", ["type"] = "varchar", ["nullable"] = true, ["masked"] = false }),
             ["rows"] = new JsonArray(Enumerable.Range(0, rows).Select(i => (JsonNode)Row(i)).ToArray()),
             ["rowCount"] = rows,
-            ["elapsedMilliseconds"] = 3,
-            ["truncated"] = true,
-            ["hasMore"] = true,
-            ["cursor"] = OriginalNext,
+            ["truncated"] = false,
             ["page"] = new JsonObject { ["number"] = 1, ["offset"] = 0, ["size"] = rows },
             ["next"] = OriginalNext,
         };
@@ -102,7 +100,7 @@ public sealed class McpRowShorteningTests
     }
 
     [Fact]
-    public void Shorten_QuerySql_SetsRowCountHasMoreAndMintedCursor()
+    public void Shorten_QuerySql_SetsRowCountAndMintedNext_NoHasMoreNoCursor()
     {
         var calls = new List<int>();
         var json = SqlPayload(50, out _);
@@ -111,12 +109,11 @@ public sealed class McpRowShorteningTests
 
         var result = JsonNode.Parse(outcome.Json)!.AsObject();
         result["rowCount"]!.GetValue<int>().ShouldBe(outcome.ReturnedRows);
-        result["hasMore"]!.GetValue<bool>().ShouldBeTrue();
+        result.ContainsKey("hasMore").ShouldBeFalse();
+        result.ContainsKey("cursor").ShouldBeFalse();
         result["next"]!.GetValue<string>().ShouldBe("tok" + outcome.ReturnedRows);
-        result["cursor"]!.GetValue<string>().ShouldBe("tok" + outcome.ReturnedRows);
         calls.ShouldContain(outcome.ReturnedRows);
         result["truncated"]!.GetValue<bool>().ShouldBeTrue();
-        result["originalSql"]!.GetValue<string>().ShouldBe("SELECT id, name FROM t ORDER BY id");
         result["page"]!["size"]!.GetValue<int>().ShouldBe(50);
     }
 
@@ -133,10 +130,58 @@ public sealed class McpRowShorteningTests
         var result = JsonNode.Parse(outcome.Json)!.AsObject();
         result.ContainsKey("next").ShouldBeFalse();
         result.ContainsKey("cursor").ShouldBeFalse();
-        result["hasMore"]!.GetValue<bool>().ShouldBeTrue();
+        result.ContainsKey("hasMore").ShouldBeFalse();
+        result["truncated"]!.GetValue<bool>().ShouldBeTrue();
 
         var minted = McpRowShortening.Shorten("query_sql", json, json.Length / 2, k => "fresh" + k);
         minted.Json.ShouldNotContain(OriginalNext);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void QuerySql_Shortened_RowCountIsK_NextReplaced_OriginalAbsent_TruncatedTrue_NoHasMoreNoCursor()
+    {
+        var json = SqlPayload(50, out _);
+
+        var outcome = McpRowShortening.Shorten("query_sql", json, json.Length / 2, k => "tok" + k);
+
+        var result = JsonNode.Parse(outcome.Json)!.AsObject();
+        result["rowCount"]!.GetValue<int>().ShouldBe(outcome.ReturnedRows);
+        result["rows"]!.AsArray().Count.ShouldBe(outcome.ReturnedRows);
+        result["next"]!.GetValue<string>().ShouldBe("tok" + outcome.ReturnedRows);
+        outcome.Json.ShouldNotContain(OriginalNext);
+        result["truncated"]!.GetValue<bool>().ShouldBeTrue();
+        result.ContainsKey("hasMore").ShouldBeFalse();
+        result.ContainsKey("cursor").ShouldBeFalse();
+        result["page"]!["size"]!.GetValue<int>().ShouldBe(50);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void QuerySql_ShortenedNonResumable_NoNextKey_TruncatedTrue_MetaTruncated()
+    {
+        var json = SqlPayload(50, out _);
+
+        var outcome = McpRowShortening.Shorten("query_sql", json, json.Length / 2, null);
+
+        outcome.Status.ShouldBe(McpRowShorteningStatus.Shortened);
+        var result = JsonNode.Parse(outcome.Json)!.AsObject();
+        result.ContainsKey("next").ShouldBeFalse();
+        result["truncated"]!.GetValue<bool>().ShouldBeTrue();
+        result.ContainsKey("hasMore").ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void QueryDataset_Shortened_StillHasMore()
+    {
+        var json = DatasetPayload(40);
+
+        var outcome = McpRowShortening.Shorten("query_dataset", json, json.Length / 2, null);
+
+        var result = JsonNode.Parse(outcome.Json)!.AsObject();
+        result["hasMore"]!.GetValue<bool>().ShouldBeTrue();
+        result["count"]!.GetValue<int>().ShouldBe(outcome.ReturnedRows);
     }
 
     [Fact]

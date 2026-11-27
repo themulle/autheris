@@ -392,7 +392,7 @@ public sealed class TypedAggregateRowPolicyTests
             persistedToolValidator: new PersistedToolValidator());
         var mcpJson = await executor.ExecuteOperationAsync(
             McpDatasetTools.Definitions().First(t => t.Name == "query_sql"),
-            """{"query":"SELECT 1"}""",
+            """{"sql":"SELECT 1"}""",
             new McpSessionContext("s1", "spn-1", "tenant-1", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, Roles: ["Reader"]));
         var mcpErr = JsonDocument.Parse(mcpJson).RootElement.GetProperty("error");
         mcpErr.GetProperty("code").GetString().ShouldBe("ROW_POLICY_EXPRESSION_NOT_ALLOWED");

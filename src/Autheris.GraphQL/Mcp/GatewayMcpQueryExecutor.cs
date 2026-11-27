@@ -211,7 +211,10 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             try
             {
                 var handled = await _toolExecutionHandler.ExecuteToolAsync(tool, argumentsJson, sessionContext, cancellationToken).ConfigureAwait(false);
-                return Capped(tool.Name, handled, McpRowCap.TrimRows(handled, RowCap()));
+                // query_sql pages before execution (page size capped, continuation stays valid), so it has no post-execution trim.
+                return string.Equals(tool.Name, McpDatasetTools.QuerySql, StringComparison.OrdinalIgnoreCase)
+                    ? handled
+                    : Capped(tool.Name, handled, McpRowCap.TrimRows(handled, RowCap()));
             }
             catch (Autheris.Application.Catalog.Discovery.DiscoveryStatusException ex)
             {

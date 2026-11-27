@@ -368,7 +368,7 @@ public sealed class ScopeQueryExecutionGuardPipelineTests : IDisposable
             AdditionalClaims: new Dictionary<string, string> { ["scp"] = "Agent.Read" });
 
         var querySqlTool = McpDatasetTools.Definitions().First(t => t.Name == McpDatasetTools.QuerySql);
-        await mcpHandler.ExecuteToolAsync(querySqlTool, """{"query":"SELECT id, name FROM sales.public.orders ORDER BY id"}""", session);
+        await mcpHandler.ExecuteToolAsync(querySqlTool, """{"sql":"SELECT id, name FROM sales.public.orders ORDER BY id"}""", session);
         sqlStub.Requests[^1].RowLimit.ShouldNotBeNull();
         sqlStub.Requests[^1].RowLimit!.Effective(50).ShouldBe(3);
 
@@ -376,7 +376,7 @@ public sealed class ScopeQueryExecutionGuardPipelineTests : IDisposable
         var mcpGate = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
         var mcpHeld = guard.RunAsync(mcpPrincipal, null, null, async (_, _) => { await mcpGate.Task; return true; });
 
-        var throttledSqlJson = await mcpHandler.ExecuteToolAsync(querySqlTool, """{"query":"SELECT id FROM sales.public.orders ORDER BY id"}""", session);
+        var throttledSqlJson = await mcpHandler.ExecuteToolAsync(querySqlTool, """{"sql":"SELECT id FROM sales.public.orders ORDER BY id"}""", session);
         Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Error(throttledSqlJson);
         throttledSqlJson.ShouldContain(ApiErrorCodes.ScopeConcurrencyExceeded);
 
@@ -462,7 +462,7 @@ public sealed class ScopeQueryExecutionGuardPipelineTests : IDisposable
             gatewayOptions: Options.Create(timeoutOptions),
             logger: NullLogger<McpToolExecutionHandler>.Instance,
             scopeGuard: timeoutGuard);
-        var timedSqlTask = slowSqlHandler.ExecuteToolAsync(querySqlTool, """{"query":"SELECT id FROM sales.public.orders ORDER BY id"}""", session);
+        var timedSqlTask = slowSqlHandler.ExecuteToolAsync(querySqlTool, """{"sql":"SELECT id FROM sales.public.orders ORDER BY id"}""", session);
         await slowSqlStarted.Task;
         timeoutTime.Advance(TimeSpan.FromSeconds(5));
         var timedSqlJson = await timedSqlTask;

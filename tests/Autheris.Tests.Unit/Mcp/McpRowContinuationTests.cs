@@ -79,4 +79,28 @@ public sealed class McpRowContinuationTests
         using var next = McpRowContinuation.Begin();
         next.ResumeAfter.ShouldBeNull();
     }
+
+    [Fact]
+    public void ReportPageSizeCapped_WithoutScope_IsNoOp()
+    {
+        Should.NotThrow(() => McpRowContinuation.ReportPageSizeCapped());
+
+        using var scope = McpRowContinuation.Begin();
+        scope.PageSizeCapped.ShouldBeFalse();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ReportPageSizeCapped_IsReadByScope()
+    {
+        using var scope = McpRowContinuation.Begin();
+        scope.PageSizeCapped.ShouldBeFalse();
+
+        await Task.Yield();
+        McpRowContinuation.ReportPageSizeCapped();
+
+        scope.PageSizeCapped.ShouldBeTrue();
+        using var other = McpRowContinuation.Begin();
+        other.PageSizeCapped.ShouldBeFalse();
+    }
 }
