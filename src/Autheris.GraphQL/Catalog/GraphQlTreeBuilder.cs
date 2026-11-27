@@ -452,6 +452,10 @@ public static class GraphQlTreeBuilder
                         var parsed = ParseObjectFilter(ovn, table, context);
                         if (parsed != null) andItems.Add(parsed);
                     }
+                    else
+                    {
+                        throw new GatewayInvalidQueryException("The 'and' filter members must be objects.");
+                    }
                 }
                 if (andItems.Count > 0) items.Add(new TreeAndFilter(andItems));
                 continue;
@@ -489,6 +493,10 @@ public static class GraphQlTreeBuilder
                                 // #319: an empty member matches every row, so the whole 'or' is neutral (TRUE OR x is TRUE).
                                 orIsNeutral = true;
                             }
+                        }
+                        else
+                        {
+                            throw new GatewayInvalidQueryException("The 'or' filter members must be objects.");
                         }
                     }
                     if (!orIsNeutral && orItems.Count > 0) items.Add(new TreeOrFilter(orItems));

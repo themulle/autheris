@@ -192,6 +192,14 @@ public sealed class GraphQlTreeBuilderNullParseTests
         Should.Throw<GatewayInvalidQueryException>(() => Parse("{ " + name + ": null }"))
             .Message.ShouldBe($"The '{name}' filter argument cannot be null.");
 
+    [Theory]
+    [InlineData("and")]
+    [InlineData("or")]
+    [Trait("Category", "Security")]
+    public void LogicalScalarMember_IsRejected(string name) =>
+        Should.Throw<GatewayInvalidQueryException>(() => Parse("{ " + name + ": [5] }"))
+            .Message.ShouldBe($"The '{name}' filter members must be objects.");
+
     [Fact]
     [Trait("Category", "Security")]
     public void AndScalar_IsRejected() =>

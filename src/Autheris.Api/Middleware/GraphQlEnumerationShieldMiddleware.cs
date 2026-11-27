@@ -391,7 +391,7 @@ public sealed class GraphQlEnumerationShieldMiddleware
         return orderArg is null || TryCollectOrderBy(orderArg.Value, table, reqCols, clearCols);
     }
 
-    private static bool TryCollectWhereFilter(IValueNode valueNode, CatalogTableType table, HashSet<string> reqCols, HashSet<string> clearCols)
+    internal static bool TryCollectWhereFilter(IValueNode valueNode, CatalogTableType table, HashSet<string> reqCols, HashSet<string> clearCols)
     {
         if (valueNode is NullValueNode or VariableNode) return true;
         if (valueNode is not ObjectValueNode obj) return false;
@@ -400,8 +400,14 @@ public sealed class GraphQlEnumerationShieldMiddleware
             var name = field.Name.Value;
             if (string.Equals(name, "and", StringComparison.OrdinalIgnoreCase) || string.Equals(name, "or", StringComparison.OrdinalIgnoreCase))
             {
-                if (field.Value is ListValueNode list && list.Items.Any(i => !TryCollectWhereFilter(i, table, reqCols, clearCols)))
-                    return false;
+                var ok = field.Value switch
+                {
+                    ListValueNode list => list.Items.All(i => TryCollectWhereFilter(i, table, reqCols, clearCols)),
+                    ObjectValueNode single => TryCollectWhereFilter(single, table, reqCols, clearCols),
+                    NullValueNode or VariableNode => true,
+                    _ => false,
+                };
+                if (!ok) return false;
                 continue;
             }
             if (string.Equals(name, "not", StringComparison.OrdinalIgnoreCase))
