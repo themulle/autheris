@@ -358,6 +358,22 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
 
         try
         {
+            // describe_my_access without a target reports the caller's own effective query limits.
+            if (string.Equals(tool.Name, McpDatasetTools.DescribeMyAccess, StringComparison.OrdinalIgnoreCase) &&
+                Text("dataset") is null && Text("table") is null && Text("graphQlField") is null && Text("sqlName") is null &&
+                !variables.ContainsKey("dataset") && !variables.ContainsKey("table") && !variables.ContainsKey("graphQlField") && !variables.ContainsKey("sqlName"))
+            {
+                var limitsService = _services?.GetService(typeof(Autheris.Application.Common.Quota.ICallerQueryLimitsService))
+                    as Autheris.Application.Common.Quota.ICallerQueryLimitsService;
+                if (limitsService is null)
+                {
+                    return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotAvailable, "The query limits are not available.");
+                }
+
+                var limits = await limitsService.ResolveAsync(principal, apiKey: null, sessionContext.ClientIp, cancellationToken).ConfigureAwait(false);
+                return JsonSerializer.Serialize(new { queryLimits = limits }, CamelCaseJsonOptions);
+            }
+
             McpDescribeNarrowing.Request? describeNarrowing = null;
             if (string.Equals(tool.Name, McpDatasetTools.DescribeDataset, StringComparison.OrdinalIgnoreCase))
             {
