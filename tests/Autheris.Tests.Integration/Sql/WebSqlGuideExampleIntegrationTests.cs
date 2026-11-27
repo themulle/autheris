@@ -230,15 +230,23 @@ public sealed class WebSqlGuideExampleIntegrationTests : IClassFixture<WebSqlGui
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task Issue1201_OpenApi_GivenWebSqlDisabled_WhenAnonymousGet_ThenResponseEqualsUnknownProtectedRoute()
+    public async Task Issue1201_OpenApi_GivenWebSqlDisabled_WhenAnonymousGet_ThenResponseEqualsEnabledAnonymousResponse()
     {
-        using var host = new IntegrationHost(Settings(_fixture.ConnectionString, webSqlEnabled: false, anonymous: false));
-        var client = host.CreateClient();
+        // The route sits behind authentication, so an anonymous caller must not be able to tell whether WebSQL is enabled.
+        ResponseSnapshot disabled;
+        using (var disabledHost = new IntegrationHost(Settings(_fixture.ConnectionString, webSqlEnabled: false, anonymous: false)))
+        {
+            disabled = await Snapshot(disabledHost.CreateClient(), OpenApiPath);
+        }
 
-        var spec = await Snapshot(client, OpenApiPath);
-        var unknown = await Snapshot(client, UnknownPath);
+        ResponseSnapshot enabled;
+        using (var enabledHost = new IntegrationHost(Settings(_fixture.ConnectionString, webSqlEnabled: true, anonymous: false)))
+        {
+            enabled = await Snapshot(enabledHost.CreateClient(), OpenApiPath);
+        }
 
-        spec.ShouldBe(unknown);
+        disabled.Status.ShouldBe(HttpStatusCode.Unauthorized);
+        disabled.ShouldBe(enabled);
     }
 
     private sealed record ResponseSnapshot(HttpStatusCode Status, string Body, string Headers);
@@ -252,7 +260,9 @@ public sealed class WebSqlGuideExampleIntegrationTests : IClassFixture<WebSqlGui
             .Where(h => !h.Key.Contains("date", StringComparison.OrdinalIgnoreCase)
                 && !h.Key.Contains("trace", StringComparison.OrdinalIgnoreCase)
                 && !h.Key.Contains("id", StringComparison.OrdinalIgnoreCase)
-                && !h.Key.Equals("Content-Length", StringComparison.OrdinalIgnoreCase))
+                && !h.Key.Equals("Content-Length", StringComparison.OrdinalIgnoreCase)
+                // Per-request SHA-256 over trace id, path and status added by the audit egress; it carries no route information.
+                && !h.Key.Equals("X-Audit-Lineage-Hash", StringComparison.OrdinalIgnoreCase))
             .OrderBy(h => h.Key, StringComparer.OrdinalIgnoreCase)
             .Select(h => h.Key + "=" + string.Join(",", h.Value));
         return new ResponseSnapshot(response.StatusCode, body, string.Join("\n", headers));
