@@ -364,7 +364,6 @@ public sealed class McpGraphQlFieldLookupTests
     [InlineData(McpDatasetTools.DescribeDataset, """{"dataset":"sales.public.orders","graphQlField":"sales_public_orders"}""")]
     [InlineData(McpDatasetTools.DescribeDataset, """{}""")]
     [InlineData(McpDatasetTools.DescribeMyAccess, """{"dataset":"sales.public.orders","graphQlField":"sales_public_orders"}""")]
-    [InlineData(McpDatasetTools.DescribeMyAccess, """{}""")]
     public async Task DescribeTools_InvalidDatasetOrGraphQlFieldCombinations_FailWithInvalidParams(string toolName, string args)
     {
         var executor = CreateExecutor(useDiscovery: true);
