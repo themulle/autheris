@@ -112,7 +112,7 @@ public sealed class SemanticMcpAndSimulatorTests
         var result = await simulator.SimulateQueryAsync(malformedQuery);
 
         result.IsAllowed.ShouldBeFalse();
-        result.BlockReason!.ShouldContain("Syntax");
+        result.BlockReason!.ShouldStartWith("GraphQL syntax error:");
     }
 
     [Fact]
