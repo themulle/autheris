@@ -38,7 +38,8 @@ public sealed record TableRelationship(
     TableIdentifier ToTable,
     string ToColumn,
     TableRelationshipType Type,
-    string? Description = null);
+    string? Description = null,
+    bool Incoming = false);
 
 /// <summary>
 /// Parameters for a catalog search query issued by an agent or API client.

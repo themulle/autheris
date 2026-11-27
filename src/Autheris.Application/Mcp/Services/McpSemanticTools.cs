@@ -68,7 +68,7 @@ public static class McpSemanticTools
 
         yield return new McpToolDefinition(
             Name: QueryMetrics,
-            Description: "Executes one or more governed dbt Semantic Layer business metrics with optional dimensions (groupBy), filter predicate, and time granularity. Enforces caller RLS, column masking, and k-anonymity minimum group size.",
+            Description: "Executes one or more governed dbt Semantic Layer business metrics with optional dimensions (groupBy), filter predicate, and time granularity. Enforces caller RLS, column masking, and k-anonymity minimum group size." + McpErrorCodes.ErrorsSentence("METRIC_NOT_FOUND", "INVALID_METRIC_QUERY", "TOKEN_BUDGET_EXCEEDED"),
             InputJsonSchema: """
             {
               "type": "object",
@@ -178,7 +178,7 @@ public static class McpSemanticTools
             : null;
         if (metric == null)
         {
-            return McpToolError.Serialize("NOT_FOUND", "The metric was not found in the semantic catalog.");
+            return McpToolError.Serialize(McpErrorCodes.MetricNotFound, string.Empty);
         }
 
         return JsonSerializer.Serialize(SemanticMetricCatalogProjection.ProjectOne(metric, principal), IndentedOptions);
@@ -272,12 +272,11 @@ public static class McpSemanticTools
             return McpToolError.Serialize("INVALID_PARAMS", "Argument 'metrics' is required.");
         }
 
-        TableFilterClause? whereClause = !string.IsNullOrWhiteSpace(whereSql)
-            ? TableFilterClause.FromTrinoText(whereSql, Array.Empty<string>())
-            : null;
-
         try
         {
+            TableFilterClause? whereClause = !string.IsNullOrWhiteSpace(whereSql)
+                ? TableFilterClause.FromTrinoText(whereSql, Array.Empty<string>())
+                : null;
             var result = await metricQueryService.QueryMetricsAsync(
                 principal,
                 new MetricQueryRequest(metrics, groupBy, whereClause, timeGranularity, Limit: limit),
@@ -287,10 +286,10 @@ public static class McpSemanticTools
             McpResultMasking.Report(false);
             return JsonSerializer.Serialize(result, IndentedOptions);
         }
-        catch (GatewaySecurityException secEx)
+        catch (Exception ex) when (ex is not TransportNotAllowedException and (GatewaySecurityException or GatewayInvalidQueryException or KeyNotFoundException or ArgumentException))
         {
-            // NL-SC-31/21: the stable code only; the exception message never reaches the result.
-            return McpToolError.Serialize(secEx.ErrorCode, "The request was denied by governance policy.");
+            // The stable code only: unknown, denied and unresolvable metrics are one answer, and the exception message never reaches the result.
+            return McpToolError.MapMetricQueryFailure(ex);
         }
     }
 }

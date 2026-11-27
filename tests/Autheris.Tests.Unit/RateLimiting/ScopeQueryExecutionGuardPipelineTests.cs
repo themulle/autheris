@@ -377,7 +377,7 @@ public sealed class ScopeQueryExecutionGuardPipelineTests : IDisposable
         var mcpHeld = guard.RunAsync(mcpPrincipal, null, null, async (_, _) => { await mcpGate.Task; return true; });
 
         var throttledSqlJson = await mcpHandler.ExecuteToolAsync(querySqlTool, """{"query":"SELECT id FROM sales.public.orders ORDER BY id"}""", session);
-        throttledSqlJson.ShouldContain("\"isError\":true");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Error(throttledSqlJson);
         throttledSqlJson.ShouldContain(ApiErrorCodes.ScopeConcurrencyExceeded);
 
         var mcpExecutor = new GatewayMcpQueryExecutor(
@@ -393,7 +393,7 @@ public sealed class ScopeQueryExecutionGuardPipelineTests : IDisposable
             new McpToolDefinition("query_graphql", "GQL", """{"type":"object","properties":{"query":{"type":"string"}}}""", ""),
             """{"query":"{ ping }"}""",
             session);
-        throttledGqlJson.ShouldContain("\"isError\":true");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Error(throttledGqlJson);
         throttledGqlJson.ShouldContain(ApiErrorCodes.ScopeConcurrencyExceeded);
 
         mcpGate.TrySetResult();
@@ -466,7 +466,7 @@ public sealed class ScopeQueryExecutionGuardPipelineTests : IDisposable
         await slowSqlStarted.Task;
         timeoutTime.Advance(TimeSpan.FromSeconds(5));
         var timedSqlJson = await timedSqlTask;
-        timedSqlJson.ShouldContain("\"isError\":true");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Error(timedSqlJson);
         timedSqlJson.ShouldContain("QUERY_TIMEOUT");
 
         var slowGqlStarted = new TaskCompletionSource(TaskCreationOptions.RunContinuationsAsynchronously);
@@ -485,7 +485,7 @@ public sealed class ScopeQueryExecutionGuardPipelineTests : IDisposable
         await slowGqlStarted.Task;
         timeoutTime.Advance(TimeSpan.FromSeconds(5));
         var timedGqlJson = await timedGqlTask;
-        timedGqlJson.ShouldContain("\"isError\":true");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Error(timedGqlJson);
         timedGqlJson.ShouldContain("QUERY_TIMEOUT");
     }
 

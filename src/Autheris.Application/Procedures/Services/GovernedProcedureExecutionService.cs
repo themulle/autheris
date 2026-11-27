@@ -180,7 +180,7 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
         List<IDisposable>? leases;
         try
         {
-            leases = AcquireLeases(decisions, user, tenantId);
+            leases = await AcquireLeasesAsync(decisions, user, tenantId, ct).ConfigureAwait(false);
         }
         catch (GatewayThrottledException)
         {
@@ -438,7 +438,7 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
     /// the SQL path (so both share one budget). A partial acquisition is rolled back. Limit greater than zero without a gate
     /// fails closed.
     /// </summary>
-    private List<IDisposable>? AcquireLeases(Dictionary<string, TableDecision> decisions, ClaimsPrincipal user, TenantId tenantId)
+    private async ValueTask<List<IDisposable>?> AcquireLeasesAsync(Dictionary<string, TableDecision> decisions, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct)
     {
         int max = _options.Value.DataSources?.MaxConcurrentReadsPerUserAndTable ?? 0;
         if (max <= 0)
@@ -460,24 +460,17 @@ public sealed partial class GovernedProcedureExecutionService : IProcedureExecut
             tableSet.Add(d.Meta.Identifier.ToQualifiedName());
         }
 
-        var tables = new List<string>(tableSet);
-        tables.Sort(StringComparer.Ordinal);
-        var leases = new List<IDisposable>(tables.Count);
-        try
+        var keys = new List<string>(tableSet.Count);
+        foreach (var table in tableSet)
         {
-            foreach (var table in tables)
-            {
-                var key = $"{tenantId.Value}|{sid}|{table}".ToLowerInvariant();
-                leases.Add(_concurrencyGate.TryEnter(key, max) ?? throw new GatewayThrottledException(2));
-            }
-        }
-        catch
-        {
-            ReleaseLeases(leases);
-            throw;
+            keys.Add($"{tenantId.Value}|{sid}|{table}".ToLowerInvariant());
         }
 
-        return leases;
+        // The gate orders the keys and shares one wait budget across them.
+        var wait = TimeSpan.FromMilliseconds(_options.Value.DataSources?.TableReadWaitTimeoutMs ?? 0);
+        var lease = await _concurrencyGate.EnterAsync(keys, max, wait, ct).ConfigureAwait(false)
+                    ?? throw new GatewayThrottledException(2);
+        return [lease];
     }
 
     private static void ReleaseLeases(List<IDisposable>? leases)

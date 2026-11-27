@@ -94,9 +94,7 @@ public sealed partial class ProductExposureTests
 
     private static ITableReadConcurrencyGate Gate()
     {
-        var gate = Substitute.For<ITableReadConcurrencyGate>();
-        gate.TryEnter(default!, default).ReturnsForAnyArgs(new NoopDisposable());
-        return gate;
+        return Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance;
     }
 
     private static ProcedureDefinition TestProcedureYaml(string yaml) => Autheris.Tests.Unit.Procedures.TestProcedureYaml.Definition(yaml);

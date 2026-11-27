@@ -20,6 +20,13 @@ public sealed class SqlDataSourceOptions
     /// </summary>
     [Range(0, 1000)] public int MaxConcurrentReadsPerUserAndTable { get; init; } = 4;
 
+    /// <summary>
+    /// How long a read waits in process for a free slot of <see cref="MaxConcurrentReadsPerUserAndTable"/> before it gets
+    /// 429 with Retry-After, in milliseconds. The wait holds no database worker and no pool connection. 0 means an
+    /// immediate 429. The maximum is 10000.
+    /// </summary>
+    [Range(0, 10000)] public int TableReadWaitTimeoutMs { get; init; } = 2000;
+
     public Dictionary<string, DataSourceConnectionOptions> Connections { get; init; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>

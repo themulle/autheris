@@ -25,6 +25,19 @@ public sealed class McpQueryGuideTests
         ReadPathSwitches.From(options ?? new GatewayOptions());
 
     [Fact]
+    public void Guide_ListsEnvelopeAndEveryActionableCode()
+    {
+        var guide = McpQueryGuideBuilder.Build(SwitchesFrom(), new GraphQLOptions());
+
+        guide.ShouldContain("## Tool Errors");
+        guide.ShouldContain("structuredContent");
+        foreach (var (code, _) in McpErrorCodes.AgentActionable)
+        {
+            guide.ShouldContain("`" + code + "`");
+        }
+    }
+
+    [Fact]
     public void Build_DefaultEnabledFeatures_CoversFullGraphQlDialectAndEnabledTools()
     {
         var switches = SwitchesFrom();
@@ -248,5 +261,40 @@ public sealed class McpQueryGuideTests
         content.Text.ShouldContain("# Autheris Agent Query Guide");
         content.Text.ShouldContain("_aggregate");
         content.Text.ShouldContain("timeBuckets");
+    }
+
+    [Fact]
+    public void Guide_DefaultConfig_TimeBucketExamplesShowUtc()
+    {
+        var guide = McpQueryGuideBuilder.Build(SwitchesFrom(), new GraphQLOptions());
+
+        guide.ShouldContain("timeZone: \"UTC\"");
+        guide.ShouldContain("`timeZone` defaults to `\"UTC\"` when omitted.");
+    }
+
+    [Fact]
+    public void Guide_BerlinDefault_BothExamplesShowBerlin_NoUtcLiteral()
+    {
+        var guide = McpQueryGuideBuilder.Build(SwitchesFrom(), new GraphQLOptions(), new AggregationOptions { DefaultTimeZone = "Europe/Berlin" });
+
+        guide.Split("timeZone: \"Europe/Berlin\"").Length.ShouldBeGreaterThanOrEqualTo(3);
+        guide.ShouldNotContain("timeZone: \"UTC\"");
+        guide.ShouldContain("`timeZone` defaults to `\"Europe/Berlin\"` when omitted.");
+    }
+
+    [Fact]
+    public async Task Dispatcher_GuideUsesAnalyticsDefaultTimeZone()
+    {
+        var analytics = new AnalyticsOptions();
+        analytics.Aggregation.DefaultTimeZone = "America/New_York";
+        var dispatcher = new ApiDispatcherService(
+            gatewayOptions: Options.Create(new GatewayOptions()),
+            switches: SwitchesFrom(),
+            analyticsOptions: Options.Create(analytics));
+
+        var guide = await dispatcher.GetQueryGuideDocumentationAsync();
+
+        guide.ShouldContain("timeZone: \"America/New_York\"");
+        guide.ShouldNotContain("timeZone: \"UTC\"");
     }
 }

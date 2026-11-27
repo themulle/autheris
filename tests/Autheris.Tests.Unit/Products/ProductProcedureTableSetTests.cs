@@ -85,7 +85,7 @@ public sealed class ProductProcedureTableSetTests
         asked.Clear();
         var product = await CallAsync("sales");
         product.IsSuccess.ShouldBeFalse();
-        product.ErrorMessage!.ShouldContain("not accessible");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(product).ShouldBe("RESOURCE_NOT_FOUND");
         asked.ShouldContain(id => ProductSource.IsProductSource(id.Domain));
         asked.ShouldNotContain(Plain);
     }

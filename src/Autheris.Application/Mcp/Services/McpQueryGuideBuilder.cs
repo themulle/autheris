@@ -15,9 +15,10 @@ using Autheris.Domain.Options;
 /// </summary>
 internal static class McpQueryGuideBuilder
 {
-    public static string Build(IReadPathSwitches? switches, GraphQLOptions? graphQlOptions = null)
+    public static string Build(IReadPathSwitches? switches, GraphQLOptions? graphQlOptions = null, AggregationOptions? aggregationOptions = null)
     {
         var gql = graphQlOptions ?? new GraphQLOptions();
+        var agg = aggregationOptions ?? new AggregationOptions();
         var sb = new StringBuilder();
 
         sb.AppendLine("# Autheris Agent Query Guide");
@@ -30,9 +31,10 @@ internal static class McpQueryGuideBuilder
         AppendOrdering(sb);
         AppendFilterOperators(sb);
 
-        AppendAggregationAndTimeBuckets(sb, gql);
+        AppendAggregationAndTimeBuckets(sb, gql, agg);
         AppendMaskedColumnsAndRestrictedScopes(sb, switches);
         AppendMetrics(sb);
+        AppendToolErrors(sb);
 
         if (gql.Subscriptions.Enabled)
         {
@@ -161,14 +163,15 @@ internal static class McpQueryGuideBuilder
         sb.AppendLine();
     }
 
-    private static void AppendAggregationAndTimeBuckets(StringBuilder sb, GraphQLOptions gql)
+    private static void AppendAggregationAndTimeBuckets(StringBuilder sb, GraphQLOptions gql, AggregationOptions agg)
     {
         sb.AppendLine("## 5. Aggregate Fields & Time Buckets (`_aggregate`)");
         sb.AppendLine();
         sb.AppendLine("Typed governed aggregation is exposed as `<tableField>_aggregate(groupBy, timeBuckets, aggregates, where, orderBy, limit)` with k-anonymity enforcement:");
         sb.AppendLine();
         sb.AppendLine("- **Aggregate Functions (`AggregateFn`):** `COUNT`, `COUNT_DISTINCT`, `SUM`, `AVG`, `MIN`, `MAX`");
-        sb.AppendLine("- **Time Buckets (`timeBuckets`):** `{ column: <timestampCol>, bucket: HOUR | DAY | WEEK | MONTH | QUARTER | YEAR, timeZone: \"UTC\" }`");
+        sb.AppendLine(string.Create(CultureInfo.InvariantCulture,
+            $"- **Time Buckets (`timeBuckets`):** `{{ column: <timestampCol>, bucket: HOUR | DAY | WEEK | MONTH | QUARTER | YEAR, timeZone: \"{agg.DefaultTimeZone}\" }}`; `timeZone` defaults to `\"{agg.DefaultTimeZone}\"` when omitted."));
         sb.AppendLine("- **Aggregate Ordering (`orderBy`):** `{ column: <col> | alias: \"<alias>\", direction: ASC | DESC }`");
         sb.AppendLine(string.Create(CultureInfo.InvariantCulture,
             $"- **Aggregation Bounds:** Max `{gql.Aggregation.MaxFieldsPerOperation}` aggregate selections per operation; `MaxAggregateRowBudget` is `{gql.MaxAggregateRowBudget}` rows."));
@@ -180,7 +183,8 @@ internal static class McpQueryGuideBuilder
         sb.AppendLine("query {");
         sb.AppendLine("  orders_aggregate(");
         sb.AppendLine("    groupBy: [status]");
-        sb.AppendLine("    timeBuckets: [{ column: createdAt, bucket: DAY, timeZone: \"UTC\" }]");
+        sb.AppendLine(string.Create(CultureInfo.InvariantCulture,
+            $"    timeBuckets: [{{ column: createdAt, bucket: DAY, timeZone: \"{agg.DefaultTimeZone}\" }}]"));
         sb.AppendLine("    aggregates: [{ fn: SUM, column: amount, alias: \"total_amount\" }, { fn: COUNT, alias: \"order_count\" }]");
         sb.AppendLine("    orderBy: [{ alias: \"total_amount\", direction: DESC }]");
         sb.AppendLine("    limit: 50");
@@ -212,6 +216,20 @@ internal static class McpQueryGuideBuilder
         sb.AppendLine("## Semantic Metrics (`queryMetrics`)");
         sb.AppendLine();
         sb.AppendLine("- The `queryMetrics` root field is enabled for querying governed semantic metrics.");
+        sb.AppendLine();
+    }
+
+    private static void AppendToolErrors(StringBuilder sb)
+    {
+        sb.AppendLine("## Tool Errors");
+        sb.AppendLine();
+        sb.AppendLine("A failed tool call is a result with `isError: true`. Its text and `structuredContent` are `{\"error\":{\"code\",\"message\"}}` with the optional members `detail`, `hint`, `line`, `column`, `limit`, `estimatedCost`, `maxAllowedCost` and `retryAfterSeconds`. The `message` is the fixed text of the `code`; act on the code:");
+        sb.AppendLine();
+        foreach (var (code, action) in McpErrorCodes.AgentActionable)
+        {
+            sb.Append("- `").Append(code).Append("`: ").AppendLine(action);
+        }
+
         sb.AppendLine();
     }
 

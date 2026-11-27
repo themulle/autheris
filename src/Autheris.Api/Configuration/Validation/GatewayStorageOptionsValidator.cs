@@ -44,6 +44,11 @@ public sealed class GatewayStorageOptionsValidator : IValidateOptions<GatewayOpt
             failures.Add("DataSources.MaxConcurrentReadsPerUserAndTable must be between 0 (disabled) and 1000.");
         }
 
+        if (opts.DataSources.TableReadWaitTimeoutMs is < 0 or > 10000)
+        {
+            failures.Add("DataSources.TableReadWaitTimeoutMs must be between 0 (no wait) and 10000.");
+        }
+
         // Nested data annotations are not evaluated: the scan cap must cover the row limit and stay bounded.
         var procedures = opts.SqlEndpoints.Procedures;
         int effectiveScanRows = procedures.EffectiveMaxScanRows;

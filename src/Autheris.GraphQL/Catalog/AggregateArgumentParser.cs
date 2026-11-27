@@ -96,7 +96,7 @@ internal static class AggregateArgumentParser
             {
                 if (item is ObjectValueNode objNode)
                 {
-                    var spec = ParseTimeBucketObject(objNode, columns, variable);
+                    var spec = ParseTimeBucketObject(objNode, columns, options.DefaultTimeZone, variable);
                     var col = columns.Values.First(c => string.Equals(c.ColumnName, spec.Column, StringComparison.OrdinalIgnoreCase));
                     if (!groupCols.Contains(col))
                     {
@@ -126,7 +126,7 @@ internal static class AggregateArgumentParser
                     throw AggregateErrors.ArgumentInvalid();
                 }
 
-                var spec = ParseTimeBucketObject(bObj, columns, variable);
+                var spec = ParseTimeBucketObject(bObj, columns, options.DefaultTimeZone, variable);
                 var col = columns.Values.First(c => string.Equals(c.ColumnName, spec.Column, StringComparison.OrdinalIgnoreCase));
                 if (!groupCols.Contains(col))
                 {
@@ -149,6 +149,7 @@ internal static class AggregateArgumentParser
     private static TimeBucketSpecification ParseTimeBucketObject(
         ObjectValueNode obj,
         IReadOnlyDictionary<string, CatalogColumnField> columns,
+        string defaultTimeZone,
         Func<string, IValueNode?> variable)
     {
         var fields = obj.Fields.ToDictionary(f => f.Name.Value, f => Resolve(f.Value, variable), StringComparer.Ordinal);
@@ -179,7 +180,7 @@ internal static class AggregateArgumentParser
             throw AggregateErrors.TimeBucketUnsupported(colField.FieldName, bucketStr);
         }
 
-        var timeZone = "UTC";
+        var timeZone = defaultTimeZone;
         if (fields.TryGetValue("timeZone", out var tzNode) && !IsAbsent(tzNode))
         {
             var resolvedTz = Resolve(tzNode, variable);

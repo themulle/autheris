@@ -411,8 +411,7 @@ public sealed class AdminMcpTwoPhaseTests
 
         // Assert
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage.ShouldNotBeNull();
-        result.ErrorMessage.ShouldContain("requires the ClusterAdmin role");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("TOOL_NOT_AVAILABLE");
     }
 
     [Fact]

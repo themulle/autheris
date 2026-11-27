@@ -5,7 +5,10 @@ using System.Collections.Generic;
 using System.Linq;
 using System.Threading;
 using System.Threading.Tasks;
+using Autheris.Application.Catalog.Interfaces;
+using Autheris.Application.Catalog.Services;
 using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Services;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
 using Autheris.GraphQL.Mcp;
@@ -84,6 +87,30 @@ public sealed class CatalogGraphQlMapTests : IDisposable
         var reverse = (await _map.GetTableAsync(Orders))!.Relations.ShouldHaveSingleItem();
         reverse.Columns.ShouldBe(["customer_id"]);
         reverse.TargetColumns.ShouldBe(["id"]);
+    }
+
+    [Fact]
+    public async Task RealMap_FkHolderIsOutgoing_ReferencedTableIsIncoming()
+    {
+        var customers = await _map.GetTableAsync(Customers);
+        var orders = await _map.GetTableAsync(Orders);
+        var rows = new[] { Customers, Orders }.ToDictionary(
+            static id => id,
+            id => new CatalogVisibleRow(
+                new TableMetadata
+                {
+                    Identifier = id,
+                    Table = new Table { TableName = id.TableName, SchemaName = id.Schema, IsActive = true, SourceName = "" },
+                    Columns = [new TableColumn { ColumnName = "id", DataType = "int" }, new TableColumn { ColumnName = "customer_id", DataType = "int" }]
+                },
+                CatalogOutputShape.Full));
+        IReadOnlySet<string> own = new HashSet<string>(["id", "customer_id"], StringComparer.OrdinalIgnoreCase);
+
+        var fromOrders = CatalogDiscoveryService.ResolveJoinRelations(Orders, orders!.Relations, null, own, rows, 3).ShouldHaveSingleItem();
+        var fromCustomers = CatalogDiscoveryService.ResolveJoinRelations(Customers, customers!.Relations, null, own, rows, 3).ShouldHaveSingleItem();
+
+        (fromOrders.FromColumn, fromOrders.ToTable, fromOrders.ToColumn, fromOrders.Incoming).ShouldBe(("customer_id", Customers, "id", false));
+        (fromCustomers.FromColumn, fromCustomers.ToTable, fromCustomers.ToColumn, fromCustomers.Incoming).ShouldBe(("id", Orders, "customer_id", true));
     }
 
     [Fact]

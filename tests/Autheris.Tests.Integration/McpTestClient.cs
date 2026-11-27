@@ -29,6 +29,14 @@ internal static class McpTestClient
         return (result.IsError == true, string.Concat(result.Content.OfType<TextContentBlock>().Select(c => c.Text)));
     }
 
+    /// <summary>Calls a tool and returns the whole result (error flag, content and structured content).</summary>
+    public static async Task<CallToolResult> CallResultAsync(McpClient client, string tool, object arguments)
+    {
+        var json = JsonSerializer.SerializeToElement(arguments);
+        var args = json.EnumerateObject().ToDictionary(p => p.Name, p => (object?)p.Value.Clone());
+        return await client.CallToolAsync(tool, args);
+    }
+
     /// <summary>Like <see cref="CallAsync"/> but parses the result text as JSON (throws with the text when it is not JSON).</summary>
     public static async Task<(bool IsError, JsonElement Payload)> CallJsonAsync(McpClient client, string tool, object arguments)
     {

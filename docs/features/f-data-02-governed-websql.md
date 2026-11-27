@@ -74,6 +74,7 @@ The federated path stages every referenced table into an embedded DuckDB and run
 - Each table is read through the governed reader of its source with the caller's row filter, masking and the arguments of mandatory Virtual Filters. **The predicates of the query itself (`WHERE`, `ON`) are not pushed to the sources**; they are evaluated in DuckDB after staging.
 - A table is therefore staged with all rows the caller may see, regardless of how selective the query is. Staging is bounded per query by `Gateway:WebSql:CrossSource`: `MaxTableCount` (default 5 tables), `MaxStagedRowsPerTable` (50,000), `MaxTotalStagedRows` (200,000), `MaxStagedBytesPerTable` (32 MiB) and `MaxTotalStagedBytes` (128 MiB). A table above `MaxStagedRowsPerTable` fails the query with `ROW_LIMIT_EXCEEDED`, the total row limit with `TOTAL_ROW_LIMIT_EXCEEDED`; results are never truncated silently.
 - Joins, aggregation and functions run with DuckDB semantics (for example case-sensitive string comparison), not with the collation of the source.
+- Timestamps are written as ISO 8601. A zone-less `timestamp` value (for example the result of `convert_timezone`, which is a wall-clock time in the target zone) is written without a `Z` suffix, for example `2023-06-01T10:30:00`; only values that are instants (`timestamp with time zone`, UTC) carry `Z`. Clients must not read a value without `Z` as UTC.
 
 ```json
 {

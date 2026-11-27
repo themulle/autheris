@@ -101,7 +101,8 @@ public static partial class GatewayServiceCollectionExtensions
             epochService: sp.GetService<IEpochValidationService>(),
             timeProvider: sp.GetService<TimeProvider>(),
             eventBus: sp.GetService<Autheris.Application.Common.Interfaces.IEventBus>(),
-            snapshotProvider: sp.GetService<IGovernanceRepository>() is null ? null : sp.GetService<Autheris.Application.Catalog.ICatalogSnapshotProvider>());
+            snapshotProvider: sp.GetService<IGovernanceRepository>() is null ? null : sp.GetService<Autheris.Application.Catalog.ICatalogSnapshotProvider>(),
+            defaultBucketTimeZone: (sp.GetService<Microsoft.Extensions.Options.IOptions<AnalyticsOptions>>()?.Value ?? new AnalyticsOptions()).Aggregation.DefaultTimeZone);
 
     internal static Autheris.GraphQL.Interceptors.QueryCostAnalyzerRule CreateQueryCostRule(
         GatewayOptions gatewayOptions,

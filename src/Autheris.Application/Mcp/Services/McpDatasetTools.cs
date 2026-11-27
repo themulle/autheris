@@ -303,7 +303,7 @@ public static class McpDatasetTools
 
         yield return new McpToolDefinition(
             Name: QuerySql,
-            Description: "Executes a governed SQL query with row-level security, column masking, and tenant isolation under the caller's context. Results are capped at Mcp:MaxResultRows; pass optional 'limit' and follow the returned 'cursor' (when 'hasMore' is true) to retrieve subsequent pages of a deterministic ORDER BY query. Pass values as named 'parameters' bound to @name placeholders instead of SQL literals; a cursor is only valid with the same query and parameters.",
+            Description: "Executes a governed SQL query with row-level security, column masking, and tenant isolation under the caller's context. Results are capped at Mcp:MaxResultRows; pass optional 'limit' and follow the returned 'cursor' (when 'hasMore' is true) to retrieve subsequent pages of a deterministic ORDER BY query. Pass values as named 'parameters' bound to @name placeholders instead of SQL literals; a cursor is only valid with the same query and parameters." + McpErrorCodes.ErrorsSentence("SQL_SYNTAX_ERROR", "SQL_POLICY_DENIED", "SQL_PARAMETER_MISSING", "QUERY_TIMEOUT", "TOKEN_BUDGET_EXCEEDED"),
             InputJsonSchema: """
             {
               "type": "object",
@@ -324,7 +324,7 @@ public static class McpDatasetTools
 
         yield return new McpToolDefinition(
             Name: QueryDataset,
-            Description: "Queries a dataset (table) by identifier with optional column selection, filter expression, ordering, limit and offset.",
+            Description: "Queries a dataset (table) by identifier with optional column selection, filter expression, ordering, limit and offset." + McpErrorCodes.ErrorsSentence("DATASET_NOT_FOUND", "INVALID_QUERY", "REQUIRED_FILTER_COLUMN_MISSING", "TOKEN_BUDGET_EXCEEDED"),
             InputJsonSchema: """
             {
               "type": "object",

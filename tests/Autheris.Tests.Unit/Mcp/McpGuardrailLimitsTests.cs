@@ -61,7 +61,7 @@ public sealed class McpGuardrailLimitsTests
         var json = await McpDocTools.ExecuteSearchDocsAsync(search, args, Session());
 
         using var doc = JsonDocument.Parse(json);
-        doc.RootElement.GetProperty("error").GetProperty("message").GetString()!.ShouldContain("limit");
+        doc.RootElement.GetProperty("error").GetProperty("detail").GetString()!.ShouldContain("limit");
         search.ReceivedCalls().ShouldBeEmpty();
     }
 
@@ -81,9 +81,9 @@ public sealed class McpGuardrailLimitsTests
 
         var result = await guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(McpDocTools.SearchDocs, """{"query":"x"}"""), Session());
 
-        result.IsSuccess.ShouldBeTrue();
+        result.IsSuccess.ShouldBeFalse();
         result.TruncatedDueToBudget.ShouldBeTrue();
         result.ContentJson.Length.ShouldBeLessThan(4000);
-        result.ContentJson.ShouldContain("TOKEN_BUDGET_EXCEEDED");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("TOKEN_BUDGET_EXCEEDED");
     }
 }

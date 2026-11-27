@@ -156,7 +156,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         if (McpRowCap.LimitArgument(tool.Name) is { } limitArgument
             && !McpRowCap.TryReadLimit(variables.GetValueOrDefault(limitArgument), out _))
         {
-            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, $"'{limitArgument}' must be a positive integer.");
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.InvalidParams, "The row limit argument must be a positive integer.");
         }
 
         // Pre-Flight Query Simulator Tool (F-AI-04)
@@ -178,13 +178,14 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             return await _scopeGuard.RunAsync(principal, apiKey: null, sessionContext.ClientIp, (_, scopedCt) =>
                 ExecuteOperationCoreAsync(tool, principal, sessionContext, variables, argumentsJson, scopedCt), cancellationToken).ConfigureAwait(false);
         }
-        catch (Autheris.Domain.Exceptions.ScopeConcurrencyExceededException)
+        catch (Autheris.Domain.Exceptions.ScopeConcurrencyExceededException ex)
         {
             return CreateErrorResult(
                 sessionContext.TenantId,
                 tool.Name,
-                "SCOPE_CONCURRENCY_EXCEEDED",
-                "Too many concurrent queries are active for this client scope. Retry later.");
+                McpErrorCodes.ScopeConcurrencyExceeded,
+                McpErrorCodes.FixedMessage(McpErrorCodes.ScopeConcurrencyExceeded),
+                retryAfterSeconds: ex.RetryAfterSeconds);
         }
         catch (TimeoutException)
         {
@@ -456,12 +457,12 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         catch (TableNotFoundException)
         {
             // Hidden and missing datasets look the same to the agent.
-            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotFound, "Dataset not found or not visible.");
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.DatasetNotFound, McpErrorCodes.FixedMessage(McpErrorCodes.DatasetNotFound));
         }
         catch (GatewayForbiddenException ex)
         {
             _logger.LogWarning(ex, "MCP tool '{ToolName}' was denied by governance policy.", tool.Name);
-            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.Forbidden, "Access denied by data governance policy.");
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.DatasetNotFound, McpErrorCodes.FixedMessage(McpErrorCodes.DatasetNotFound));
         }
         catch (ArgumentException ex)
         {
@@ -574,7 +575,8 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         }
         catch (SyntaxException ex)
         {
-            return Invalid($"The query could not be parsed: {ex.Message}");
+            _logger.LogWarning(ex, "GraphQL document of tool '{ToolName}' could not be parsed.", tool.Name);
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.GraphQlParseFailed, McpErrorCodes.FixedMessage(McpErrorCodes.GraphQlParseFailed));
         }
 
         var operations = document.Definitions.OfType<OperationDefinitionNode>().ToList();
@@ -692,11 +694,12 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
     {
         SqlCompilerErrorMapper.TryMap(exception, out var mapped);
         SqlCompilerErrorMapper.RecordOutcome(mapped);
-        return CreateErrorResult(tenantId, toolName, mapped.Code, mapped.Title, hint: mapped.Hint);
+        return McpToolError.Serialize(McpToolError.FromSql(exception, mapped));
     }
 
     /// <summary>
-    /// M-17: Structured error result for MCP tool invocations (deny, execution failure, unavailable).
+    /// Structured error result for MCP tool invocations (deny, execution failure, unavailable). The envelope carries neither the tenant nor
+    /// the tool name, so <paramref name="tenantId"/> and <paramref name="toolName"/> are not written.
     /// </summary>
     internal static string CreateErrorResult(string tenantId, string toolName, string code, string message, string? graphQLResultJson = null, int? retryAfterSeconds = null, string? hint = null)
     {
@@ -714,12 +717,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
             }
         }
 
-        return JsonSerializer.Serialize(new McpToolErrorPayload(
-            tenantId,
-            toolName,
-            IsError: true,
-            new McpToolError(code, message, retryAfterSeconds, hint),
-            graphQL), CamelCaseJsonOptions);
+        return McpToolError.Serialize(new McpToolErrorBody(code, message) { RetryAfterSeconds = retryAfterSeconds, Hint = hint, GraphQL = graphQL });
     }
 
     private async Task<string?> TryExecuteTableFastPathAsync(
@@ -842,7 +840,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
     {
         if (sessionContext.IsReadOnly)
         {
-            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotFound, "Unknown tool.");
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.ToolNotAvailable, McpErrorCodes.FixedMessage(McpErrorCodes.ToolNotAvailable));
         }
 
         if (_accessRequests is null)
@@ -874,7 +872,7 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
 
         if (!McpDatasetCatalog.TryParseDatasetId(Text("dataset"), out var id))
         {
-            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.NotFound, "Dataset not found or not visible.");
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, McpErrorCodes.DatasetNotFound, McpErrorCodes.FixedMessage(McpErrorCodes.DatasetNotFound));
         }
 
         try
@@ -897,14 +895,15 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
         }
         catch (Autheris.Application.ConsentRequests.ConsentRequestException ex)
         {
+            // The code only; the exception text (it can quote the request) stays out of the result.
             var code = ex.Code switch
             {
-                "NOT_FOUND" => McpErrorCodes.NotFound,
+                "NOT_FOUND" => McpErrorCodes.DatasetNotFound,
                 "FORBIDDEN" => McpErrorCodes.Forbidden,
                 "VALIDATION_ERROR" => McpErrorCodes.InvalidParams,
-                _ => ex.Code
+                _ => McpErrorCodes.IsCatalogueCode(ex.Code) ? ex.Code : McpErrorCodes.ExecutionFailed
             };
-            return CreateErrorResult(sessionContext.TenantId, tool.Name, code, ex.Message, retryAfterSeconds: ex.RetryAfterSeconds);
+            return CreateErrorResult(sessionContext.TenantId, tool.Name, code, McpErrorCodes.FixedMessage(code), retryAfterSeconds: ex.RetryAfterSeconds);
         }
         catch (Autheris.Application.Catalog.Discovery.DiscoveryStatusException ex)
         {
@@ -916,38 +915,11 @@ public sealed class GatewayMcpQueryExecutor : IMcpQueryExecutor
     {
         var code = ex.Kind switch
         {
-            Autheris.Application.Catalog.Discovery.DiscoveryFailureKind.Unauthenticated => "UNAUTHORIZED",
+            Autheris.Application.Catalog.Discovery.DiscoveryFailureKind.Unauthenticated => McpErrorCodes.Unauthorized,
             Autheris.Application.Catalog.Discovery.DiscoveryFailureKind.Forbidden => McpErrorCodes.Forbidden,
-            Autheris.Application.Catalog.Discovery.DiscoveryFailureKind.RateLimited => ex.Code,
+            Autheris.Application.Catalog.Discovery.DiscoveryFailureKind.RateLimited => McpErrorCodes.RateLimitExceeded,
             _ => McpErrorCodes.InvalidParams
         };
-        return CreateErrorResult(tenantId, toolName, code, ex.Message, retryAfterSeconds: ex.RetryAfterSeconds);
+        return CreateErrorResult(tenantId, toolName, code, McpErrorCodes.FixedMessage(code), retryAfterSeconds: ex.RetryAfterSeconds);
     }
 }
-
-/// <summary>
-/// M-17: Error codes for structured MCP tool error results.
-/// </summary>
-public static class McpErrorCodes
-{
-    public const string Forbidden = "FORBIDDEN";
-    public const string InvalidParams = "INVALID_PARAMS";
-    public const string ExecutionFailed = "EXECUTION_FAILED";
-    public const string NotAvailable = "NOT_AVAILABLE";
-    public const string NotFound = "NOT_FOUND";
-}
-
-internal sealed record McpToolError(
-    string Code,
-    string Message,
-    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    int? RetryAfterSeconds = null,
-    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
-    string? Hint = null);
-
-internal sealed record McpToolErrorPayload(
-    string TenantId,
-    string Tool,
-    bool IsError,
-    McpToolError Error,
-    JsonElement? GraphQL);

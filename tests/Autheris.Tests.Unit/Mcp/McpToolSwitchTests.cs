@@ -187,7 +187,7 @@ public sealed class McpToolSwitchTests
 
         var call = await rig.Guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("discovered_tool", "{}"), Session());
         call.IsSuccess.ShouldBeFalse();
-        call.ErrorMessage.ShouldBe("Tool 'discovered_tool' is not registered or allowed.");
+        McpErrorEnvelopeAssert.Code(call).ShouldBe("TOOL_NOT_AVAILABLE");
 
         var (open, _) = Build(Opts(allowed: ["List Orders"]));
         open.RegisterTool(new McpToolDefinition("discovered_tool", "d", """{"type":"object"}""", "query { x }"));
@@ -220,7 +220,8 @@ public sealed class McpToolSwitchTests
         var result = await rig.Guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest(name, """{"sql":"select 1"}"""), Session());
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage.ShouldBe($"Tool '{name}' is not registered or allowed.");
+        McpErrorEnvelopeAssert.Code(result).ShouldBe("TOOL_NOT_AVAILABLE");
+        result.ErrorMessage.ShouldBe(McpToolError.Fail(McpErrorCodes.ToolNotAvailable).ErrorMessage);
         await rig.Executor.DidNotReceiveWithAnyArgs().ExecuteOperationAsync(default!, default!, default!, default);
     }
 
@@ -268,8 +269,9 @@ public sealed class McpToolSwitchTests
         entry.Decision.ShouldBe("DENY");
         entry.DetailsJson.ShouldContain("disabled by configuration");
         entry.DetailsJson.ShouldContain("Query");
-        result.ErrorMessage.ShouldBe("Tool 'query_sql' is not registered or allowed.");
+        McpErrorEnvelopeAssert.Code(result).ShouldBe("TOOL_NOT_AVAILABLE");
         result.ErrorMessage!.ShouldNotContain("disabled");
+        result.ErrorMessage!.ShouldNotContain("query_sql");
         probe.Count("mcp_query").ShouldBe(1);
     }
 
@@ -344,7 +346,7 @@ public sealed class McpToolSwitchTests
         var result = await rig.Guardrail.ExecuteToolWithGuardrailAsync(new McpToolCallRequest("query_sql", "{}"), Session());
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage.ShouldBe("Tool 'query_sql' is not registered or allowed.");
+        McpErrorEnvelopeAssert.Code(result).ShouldBe("TOOL_NOT_AVAILABLE");
     }
 
     // ---- ST-115-10 / C-115-10: no oracle over both transports ---------------------------------------------------------------

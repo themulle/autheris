@@ -147,7 +147,7 @@ public sealed class McpOpenFindingsSecurityTests
             UserSession());
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("ABAC");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("DATASET_NOT_FOUND");
         ((global::Autheris.Tests.Common.Fakes.StubMcpQueryExecutor)executor).Calls.ShouldBeEmpty();
     }
 
@@ -162,7 +162,7 @@ public sealed class McpOpenFindingsSecurityTests
             UserSession());
 
         result.IsSuccess.ShouldBeFalse();
-        result.ErrorMessage!.ShouldContain("fail-closed");
+        Autheris.Tests.Unit.Mcp.McpErrorEnvelopeAssert.Code(result).ShouldBe("DATASET_NOT_FOUND");
         ((global::Autheris.Tests.Common.Fakes.StubMcpQueryExecutor)executor).Calls.ShouldBeEmpty();
     }
 

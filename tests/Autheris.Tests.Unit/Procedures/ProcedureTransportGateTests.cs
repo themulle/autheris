@@ -114,9 +114,7 @@ public sealed class ProcedureTransportGateTests
 
     private static ITableReadConcurrencyGate PermissiveGate()
     {
-        var g = Substitute.For<ITableReadConcurrencyGate>();
-        g.TryEnter(Arg.Any<string>(), Arg.Any<int>()).Returns(_ => Substitute.For<IDisposable>());
-        return g;
+        return Autheris.Tests.Unit.TestDoubles.GrantAllReadConcurrencyGate.Instance;
     }
 
     private static ClaimsPrincipal Caller() =>

@@ -51,16 +51,25 @@ internal static class McpDataTargetResolver
     internal static async Task<(IReadOnlyList<TableIdentifier>? Tables, string? SyntaxError)> TryResolveSqlTablesAsync(
         string? sql, ISqlEngine? sqlEngine, string? defaultDataSourceName, CancellationToken ct = default)
     {
+        var (tables, syntaxError, _) = await TryResolveSqlTablesWithFailureAsync(sql, sqlEngine, defaultDataSourceName, ct).ConfigureAwait(false);
+        return (tables, syntaxError);
+    }
+
+    /// <summary>As <see cref="TryResolveSqlTablesAsync"/>, plus the parse or analysis exception (for the governed error mapping; its text is never returned to a caller).</summary>
+    internal static async Task<(IReadOnlyList<TableIdentifier>? Tables, string? SyntaxError, Exception? Failure)> TryResolveSqlTablesWithFailureAsync(
+        string? sql, ISqlEngine? sqlEngine, string? defaultDataSourceName, CancellationToken ct = default)
+    {
         if (string.IsNullOrWhiteSpace(sql))
         {
-            return (null, "SQL query cannot be empty.");
+            return (null, "SQL query cannot be empty.", null);
         }
 
         try
         {
             var engine = sqlEngine ?? FastSqlEngine.Default;
             var metadata = await engine.AnalyzeAsync(McpSqlPlaceholders.NeutralizeForAnalysis(sql).AsMemory(), null, ct).ConfigureAwait(false);
-            return MapResolvedSqlTables(metadata, defaultDataSourceName);
+            var (tables, syntaxError) = MapResolvedSqlTables(metadata, defaultDataSourceName);
+            return (tables, syntaxError, null);
         }
         catch (OperationCanceledException) when (ct.IsCancellationRequested)
         {
@@ -68,7 +77,7 @@ internal static class McpDataTargetResolver
         }
         catch (Exception ex)
         {
-            return (null, ex.Message);
+            return (null, ex.Message, ex);
         }
     }
 

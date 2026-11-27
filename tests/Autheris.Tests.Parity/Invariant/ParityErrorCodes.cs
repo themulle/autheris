@@ -2,7 +2,7 @@ using System.Reflection;
 using Autheris.Api.Errors;
 using Autheris.Application.Analytics;
 using Autheris.Application.VirtualFilters.Federation;
-using Autheris.GraphQL.Mcp;
+using Autheris.Application.Mcp.Services;
 using TrinoSqlEngine.Ast.Emit;
 
 namespace Autheris.Tests.Parity.Invariant;

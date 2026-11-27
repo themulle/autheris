@@ -38,6 +38,12 @@ public sealed class AnalyticsOptionsValidator : IValidateOptions<AnalyticsOption
                 $"Analytics:Aggregation:MaxGroups must be between 1 and {AggregationOptions.UpperBoundMaxGroups}.");
         }
 
+        if (string.IsNullOrWhiteSpace(options.Aggregation.DefaultTimeZone)
+            || !TrinoSqlEngine.TimeZoneRegistry.Contains(options.Aggregation.DefaultTimeZone))
+        {
+            return ValidateOptionsResult.Fail("Analytics:Aggregation:DefaultTimeZone must be a recognized IANA time zone id.");
+        }
+
         if (options.Privacy is null)
         {
             return ValidateOptionsResult.Fail("Analytics:Privacy must not be null.");
