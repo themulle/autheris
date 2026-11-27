@@ -1,7 +1,7 @@
 namespace Autheris.Application.Mcp.Services;
 
 using System.Text.Json;
-using Autheris.Application.Common.Interfaces;
+using Autheris.Application.Audit;
 using Autheris.Application.Mcp.Diagnostics;
 using Autheris.Domain.Common;
 using Autheris.Domain.Model;
@@ -16,7 +16,8 @@ public static class McpToolFailureRecorder
     public const string FixedDetails = "Tool execution failed before the guardrail completed (fail-closed).";
 
     public static async Task RecordDenyAsync(
-        IAuditLogRepository? auditLog,
+        IAuditWriter? auditWriter,
+        TimeProvider? timeProvider,
         ILogger? logger,
         McpSessionContext session,
         string toolName,
@@ -26,14 +27,14 @@ public static class McpToolFailureRecorder
         try
         {
             McpDiagnostics.RecordGuardrailVerdict("deny", toolName, false, false);
-            if (auditLog is null)
+            if (auditWriter is null)
             {
                 return;
             }
 
             var actor = !string.IsNullOrWhiteSpace(session.UserSid) ? new Sid(session.UserSid) : new Sid(session.ServicePrincipalId);
             var tenant = TenantId.TryParse(session.TenantId, out var tid) ? tid : TenantId.Platform;
-            await auditLog.RecordAuditEventAsync(new AuditLogEntry
+            await auditWriter.RecordBestEffortAsync(new AuditLogEntry
             {
                 TenantId = tenant,
                 EventType = "MCP_TOOL_EXECUTION",
@@ -52,7 +53,7 @@ public static class McpToolFailureRecorder
                     isMasked = false,
                     truncated = false,
                     estimatedTokens = 0,
-                    timestamp = DateTimeOffset.UtcNow
+                    timestamp = (timeProvider ?? TimeProvider.System).GetUtcNow()
                 })
             }, ct).ConfigureAwait(false);
         }

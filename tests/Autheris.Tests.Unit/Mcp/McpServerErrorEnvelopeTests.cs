@@ -41,6 +41,7 @@ public sealed class McpServerErrorEnvelopeTests
         if (audit is not null)
         {
             services.AddSingleton<Autheris.Application.Common.Interfaces.IAuditLogRepository>(audit);
+            services.AddSingleton<Autheris.Application.Audit.IAuditWriter>(new Autheris.Application.Audit.AuditWriter(audit, Microsoft.Extensions.Logging.Abstractions.NullLogger<Autheris.Application.Audit.AuditWriter>.Instance));
         }
 
         return services.BuildServiceProvider();

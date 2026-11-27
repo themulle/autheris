@@ -96,6 +96,9 @@ public static class McpErrorCodes
     public const string RateLimitExceeded = "RATE_LIMIT_EXCEEDED";
 
     /// <summary>Generic fixed message for every code without a dedicated text.</summary>
+    /// <summary>The data source does not admit the MCP transport (same code and text as the HTTP surfaces).</summary>
+    public const string TransportNotAllowed = Autheris.Domain.Exceptions.TransportNotAllowedException.Code;
+
     internal const string DefaultMessage = "Tool execution failed.";
 
     // The GraphQL query simulator reads the same datasets as query_graphql and is answered alike.
@@ -134,6 +137,7 @@ public static class McpErrorCodes
         DocEmpty => "The document is empty.",
         DocTooLarge => "The document exceeds the size limit.",
         Unauthorized => "Authentication is required.",
+        TransportNotAllowed => "Access to the data source is not allowed over this transport.",
         ExecutionFailed => DefaultMessage,
         AggregationColumnUnavailable => "An aggregation column is not available.",
         AggregationRowCapExceeded => "The aggregation exceeds the row cap.",

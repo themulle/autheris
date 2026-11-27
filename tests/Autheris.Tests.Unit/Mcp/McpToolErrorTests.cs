@@ -121,6 +121,19 @@ public sealed class McpToolErrorTests
     }
 
     [Fact]
+    public void Normalize_TransportNotAllowed_KeepsCodeWithFixedText()
+    {
+        var mapped = new SqlErrorMapping(403, Autheris.Domain.Exceptions.TransportNotAllowedException.Code, "ignored upstream text");
+        var json = McpToolError.Normalize(McpToolError.Serialize(McpToolError.FromSql(null, mapped)));
+
+        using var doc = JsonDocument.Parse(json);
+        var error = doc.RootElement.GetProperty("error");
+        error.GetProperty("code").GetString().ShouldBe("TRANSPORT_NOT_ALLOWED");
+        error.GetProperty("message").GetString().ShouldBe("Access to the data source is not allowed over this transport.");
+        McpErrorCodes.IsCatalogueCode("TRANSPORT_NOT_ALLOWED").ShouldBeTrue();
+    }
+
+    [Fact]
     public void Normalize_IsIdempotent()
     {
         var foreign = """{"type":"urn:x","status":400,"code":"INVALID_QUERY","title":"upstream title"}""";

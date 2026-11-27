@@ -461,7 +461,7 @@ public static class GatewayMcpServer
             var logger = services.GetService<ILoggerFactory>()?.CreateLogger(typeof(GatewayMcpServer));
             logger?.LogError(ex, "MCP tool call failed with {Code}.", code);
             await McpToolFailureRecorder.RecordDenyAsync(
-                services.GetService<Autheris.Application.Common.Interfaces.IAuditLogRepository>(), logger, session, toolName, code, ct).ConfigureAwait(false);
+                services.GetService<Autheris.Application.Audit.IAuditWriter>(), services.GetService<TimeProvider>(), logger, session, toolName, code, ct).ConfigureAwait(false);
             return ToolError(McpToolError.Fail(code).ContentJson);
         }
 

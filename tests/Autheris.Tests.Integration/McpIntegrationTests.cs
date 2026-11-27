@@ -77,9 +77,11 @@ public class McpIntegrationTests : IClassFixture<McpIntegrationTests.HostFixture
         simulationError.ShouldBeTrue(simulation);
         simulation.ShouldContain("DATASET_NOT_FOUND");
 
-        // query_customers is a curated tool the caller has no grant for: the one answer of every denied tool, never mock data.
-        var (_, customers) = await McpTestClient.CallAsync(client, "query_customers", new { });
-        customers.ShouldContain("TOOL_NOT_AVAILABLE");
+        // query_customers is a curated tool whose GraphQL operation the caller cannot read: the governed GraphQL errors come back
+        // as EXECUTION_FAILED (filtered like /graphql), never mock data.
+        var (customersError, customers) = await McpTestClient.CallAsync(client, "query_customers", new { });
+        customersError.ShouldBeTrue(customers);
+        customers.ShouldContain("\"code\":\"EXECUTION_FAILED\"");
         customers.ShouldNotContain("Erika Mustermann");
     }
 
