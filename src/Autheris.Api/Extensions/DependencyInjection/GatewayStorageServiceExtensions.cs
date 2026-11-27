@@ -80,6 +80,10 @@ public static class GatewayStorageServiceExtensions
         // WP-X0j: Databricks is opened through the REST facade over the Statement Execution client. Wired but Experimental: it is not
         // admitted to WebSQL (SqlDialectMapper.IsExecutable, S-4) until a green G9 run.
         services.AddDatabricksStatementExecution();
+        // Issue #1122: the Unity Catalog reconciler (idles unless a Databricks data source has a provisioning section).
+        services.AddScoped<Autheris.Application.Governance.Provisioning.IUcTableContextSource, Autheris.Application.Governance.Provisioning.UcTableContextSource>();
+        services.AddScoped<Autheris.Application.Governance.Provisioning.UcProvisioningReconciler>();
+        services.AddHostedService<Autheris.Application.Governance.Provisioning.UcProvisioningService>();
         services.AddSingleton<ISqlConnectionFactory, SqlConnectionFactory>();
         services.AddSingleton<ISqlSourceDescriber, Autheris.Infrastructure.Persistence.SqlSourceDescriber>();
         services.AddSingleton<Autheris.Application.Sql.Interfaces.IProviderExecutionGuard>(

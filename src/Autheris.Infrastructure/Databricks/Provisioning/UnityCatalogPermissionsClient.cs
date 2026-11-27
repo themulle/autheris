@@ -28,7 +28,7 @@ using Microsoft.Extensions.Options;
 /// </summary>
 public sealed partial class UnityCatalogPermissionsClient(
     HttpClient http,
-    IOptions<GatewayOptions> options,
+    IOptionsMonitor<GatewayOptions> options,
     IDatabricksCredentialProvider credentials,
     ILogger<UnityCatalogPermissionsClient>? logger = null) : IUnityCatalogPermissionsClient
 {
@@ -82,6 +82,43 @@ public sealed partial class UnityCatalogPermissionsClient(
         var body = BuildUpdateBody(type, changes);
         using var doc = await SendAsync(settings, HttpMethod.Patch, path, body, ct).ConfigureAwait(false);
         return ReadAssignments(doc.RootElement);
+    }
+
+    public async Task<bool> HasEffectivePrivilegeAsync(
+        string dataSource, UcSecurableType type, string fullName, string principal, IReadOnlyCollection<string> privileges, CancellationToken ct)
+    {
+        ArgumentNullException.ThrowIfNull(privileges);
+        var settings = ResolveSettings(dataSource);
+        if (!Enum.IsDefined(type) || !UcSecurableNames.IsInsideAllowedSchemas(type, fullName, settings.AllowedSchemas))
+        {
+            throw new UcProvisioningException(UcErrorCodes.SecurableNotAllowed);
+        }
+
+        if (!IsValidPrincipal(principal) || privileges.Count == 0)
+        {
+            throw new UcProvisioningException(UcErrorCodes.InvalidRequest);
+        }
+
+        var path = "/api/2.1/unity-catalog/effective-permissions/" + UcPrivileges.ApiSegment(type) + "/" + Uri.EscapeDataString(fullName) +
+                   "?principal=" + Uri.EscapeDataString(principal);
+        string? pageToken = null;
+        for (var page = 0; page < MaxPages; page++)
+        {
+            var url = pageToken is null ? path : path + "&page_token=" + Uri.EscapeDataString(pageToken);
+            using var doc = await SendAsync(settings, HttpMethod.Get, url, null, ct).ConfigureAwait(false);
+            if (ReadEffectivePrivileges(doc.RootElement, principal).Overlaps(privileges))
+            {
+                return true;
+            }
+
+            pageToken = ReadPageToken(doc.RootElement);
+            if (pageToken is null)
+            {
+                return false;
+            }
+        }
+
+        throw new UcProvisioningException(UcErrorCodes.ResponseTooLarge);
     }
 
     public async Task<UcPrincipalResolution> ResolvePrincipalAsync(
@@ -219,7 +256,7 @@ public sealed partial class UnityCatalogPermissionsClient(
     private Settings ResolveSettings(string dataSource)
     {
         if (string.IsNullOrWhiteSpace(dataSource) ||
-            !options.Value.DataSources.Connections.TryGetValue(dataSource, out var connection) ||
+            !options.CurrentValue.DataSources.Connections.TryGetValue(dataSource, out var connection) ||
             connection is null ||
             !DataSourceProvider.Is(connection.Provider, DatabaseDialect.Databricks) ||
             connection.Databricks is not { Provisioning: { } provisioning } db ||
@@ -375,6 +412,46 @@ public sealed partial class UnityCatalogPermissionsClient(
             }
 
             result.Add(new UcPrivilegeAssignment(principal!, privileges));
+        }
+
+        return result;
+    }
+
+    private static HashSet<string> ReadEffectivePrivileges(JsonElement root, string principal)
+    {
+        var result = new HashSet<string>(StringComparer.Ordinal);
+        if (root.ValueKind != JsonValueKind.Object)
+        {
+            throw new UcProvisioningException(UcErrorCodes.Protocol);
+        }
+
+        if (!root.TryGetProperty("privilege_assignments", out var assignments) || assignments.ValueKind == JsonValueKind.Null)
+        {
+            return result;
+        }
+
+        if (assignments.ValueKind != JsonValueKind.Array)
+        {
+            throw new UcProvisioningException(UcErrorCodes.Protocol);
+        }
+
+        foreach (var item in assignments.EnumerateArray())
+        {
+            // Only the assignment of the asked principal counts, whatever else the service returns.
+            if (!string.Equals(ReadString(item, "principal"), principal, StringComparison.Ordinal) ||
+                !item.TryGetProperty("privileges", out var list) || list.ValueKind != JsonValueKind.Array)
+            {
+                continue;
+            }
+
+            foreach (var entry in list.EnumerateArray())
+            {
+                var privilege = entry.ValueKind == JsonValueKind.Object ? ReadString(entry, "privilege") : null;
+                if (privilege is not null && PrivilegeRegex().IsMatch(privilege))
+                {
+                    result.Add(privilege);
+                }
+            }
         }
 
         return result;

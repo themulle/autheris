@@ -241,6 +241,13 @@ public static class AuditEventTypes
     public const string DeputyRelationUpdated = "DEPUTY_RELATION_UPDATED";
     public const string DeputyRelationEnded = "DEPUTY_RELATION_ENDED";
 
+    // Provisioning of approved grants as Unity Catalog privileges (issue #1122): every applied, revoked, failed or repaired privilege is
+    // audited fail-closed with data source, securable, principal external id, privilege and the consents that wanted it.
+    public const string GrantProvisioned = "GRANT_PROVISIONED";
+    public const string GrantProvisioningFailed = "GRANT_PROVISIONING_FAILED";
+    public const string GrantDeprovisioned = "GRANT_DEPROVISIONED";
+    public const string GrantProvisioningDrift = "GRANT_PROVISIONING_DRIFT";
+
     public const string SelfGrant = "SELF_GRANT";
     public const string SelfGrantDenied = "SELF_GRANT_DENIED";
     public const string NotificationChannelChanged = "NOTIFICATION_CHANNEL_CHANGED";

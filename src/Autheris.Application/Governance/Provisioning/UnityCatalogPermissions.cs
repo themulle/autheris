@@ -123,6 +123,13 @@ public interface IUnityCatalogPermissionsClient
         string dataSource, UcSecurableType type, string fullName, IReadOnlyList<UcPermissionChange> changes, CancellationToken ct);
 
     /// <summary>
+    /// Whether <paramref name="principal"/> effectively holds one of <paramref name="privileges"/> on the securable (directly, inherited from
+    /// a parent securable or through a group), as the effective-permissions API reports it.
+    /// </summary>
+    Task<bool> HasEffectivePrivilegeAsync(
+        string dataSource, UcSecurableType type, string fullName, string principal, IReadOnlyCollection<string> privileges, CancellationToken ct);
+
+    /// <summary>
     /// Resolves a grantee through the workspace SCIM API: groups and users by external id (the identity provider object id),
     /// service principals by application id. Never by display name alone; zero or several matches are not resolved.
     /// </summary>
