@@ -41,6 +41,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
     private readonly TenantId? _catalogOwner;
     private readonly IReadPathSwitches? _switches;
     private readonly GraphQLOptions _graphQlOptions;
+    private readonly AggregationOptions? _aggregationOptions;
 
     // 115 A-5: what each branch reaches. Without switches (direct construction) everything is allowed, as before.
     private bool DataBranchAllowed => _switches is null || (_switches.RestDataEndpointEnabled && _switches.IsGroupEnabled(McpToolGroup.Query));
@@ -55,9 +56,11 @@ public sealed class ApiDispatcherService : IApiDispatcherService
         IDynamicOpenApiGenerator? openApiGenerator = null,
         ILogger<ApiDispatcherService>? logger = null,
         IOptions<GatewayOptions>? gatewayOptions = null,
-        IReadPathSwitches? switches = null)
+        IReadPathSwitches? switches = null,
+        IOptions<AnalyticsOptions>? analyticsOptions = null)
     {
         _switches = switches;
+        _aggregationOptions = analyticsOptions?.Value.Aggregation;
         _graphQlOptions = gatewayOptions?.Value.GraphQL ?? new GraphQLOptions();
         _catalogOwner = TenantResolver.EffectiveDefaultOf(gatewayOptions?.Value.Tenancy);
         _dataQueryService = dataQueryService;
@@ -342,7 +345,7 @@ public sealed class ApiDispatcherService : IApiDispatcherService
     }
 
     public Task<string> GetQueryGuideDocumentationAsync(CancellationToken ct = default) =>
-        Task.FromResult(McpQueryGuideBuilder.Build(_switches, _graphQlOptions));
+        Task.FromResult(McpQueryGuideBuilder.Build(_switches, _graphQlOptions, _aggregationOptions));
 
     private static object BuildEndpointDescription(string endpoint, string method, bool dataBranchAllowed)
     {

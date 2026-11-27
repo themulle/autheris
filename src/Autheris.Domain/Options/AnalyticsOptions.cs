@@ -68,6 +68,9 @@ public sealed class AggregationOptions
     public const int MaxTimeBucketedLimit = 1_000;
     public const double DefaultAggregateFieldCostWeight = 25.0;
 
+    /// <summary>IANA zone id used when no default time zone is configured.</summary>
+    public const string UtcTimeZoneId = "UTC";
+
     /// <summary>Maximum number of GROUP BY columns permitted in a single aggregation query.</summary>
     public int MaxGroupByColumns { get; set; } = DefaultMaxGroupByColumns;
 
@@ -79,6 +82,9 @@ public sealed class AggregationOptions
 
     /// <summary>Cost weight applied per aggregate field during query cost analysis.</summary>
     public double AggregateFieldCostWeight { get; set; } = DefaultAggregateFieldCostWeight;
+
+    /// <summary>#1190: IANA zone id for a time bucket whose timeZone is omitted or null (Analytics:Aggregation:DefaultTimeZone); an explicit timeZone always wins; validated at startup.</summary>
+    public string DefaultTimeZone { get; set; } = UtcTimeZoneId;
 }
 
 /// <summary>Minimum group size and differencing-protection settings (<c>Analytics:Privacy</c>).</summary>
