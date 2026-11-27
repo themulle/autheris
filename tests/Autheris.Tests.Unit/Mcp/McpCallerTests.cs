@@ -2,7 +2,12 @@ namespace Autheris.Tests.Unit.Mcp;
 
 using System.Collections.Generic;
 using System.Security.Claims;
+using System;
+using System.Linq;
 using Autheris.Api.Endpoints;
+using Autheris.Application.Mcp.Services;
+using Autheris.Domain.Model;
+using Autheris.Domain.Security;
 using Microsoft.AspNetCore.Http;
 using Shouldly;
 using Xunit;
@@ -47,5 +52,50 @@ public sealed class McpCallerTests
         var caller = Resolve(new Claim("department", "finance"));
         caller.AdditionalClaims.ShouldNotBeNull();
         caller.AdditionalClaims["department"].ShouldBe("finance");
+    }
+
+    [Fact]
+    public void Multiple_scp_claims_are_merged_not_dropped()
+    {
+        var caller = Resolve(new Claim("scp", "Agent.Read data.access.request"), new Claim("scp", "Sql.Write"), new Claim("scp", "Agent.Read"));
+
+        caller.AdditionalClaims.ShouldNotBeNull();
+        caller.AdditionalClaims["scp"].Split(' ').ShouldBe(["Agent.Read", "data.access.request", "Sql.Write"], ignoreOrder: true);
+    }
+
+    [Theory]
+    [InlineData("scp")]
+    [InlineData("http://schemas.microsoft.com/identity/claims/scope")]
+    [InlineData("scope")]
+    public void Every_scope_claim_type_keeps_all_values(string type)
+    {
+        var caller = Resolve(new Claim(type, "a.one"), new Claim(type, "b.two c.three"));
+
+        caller.AdditionalClaims.ShouldNotBeNull();
+        caller.AdditionalClaims[type].Split(' ').ShouldBe(["a.one", "b.two", "c.three"], ignoreOrder: true);
+    }
+
+    [Fact]
+    public void Merged_scopes_reach_session_principal_token_scopes()
+    {
+        var caller = Resolve(new Claim("scp", "Agent.Read"), new Claim("scp", "Other.Scope"));
+        var session = new McpSessionContext("s1", "client", "tenant_a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow,
+            UserSid: caller.UserSid, AdditionalClaims: caller.AdditionalClaims);
+
+        var principal = McpProtocolHandler.BuildPrincipalFromSession(session);
+
+        var scopes = TokenAccessScope.GetTokenScopes(principal);
+        scopes.ShouldContain("Agent.Read");
+        scopes.ShouldContain("Other.Scope");
+    }
+
+    [Fact]
+    public void Conflicting_non_scope_claim_is_still_dropped()
+    {
+        var caller = Resolve(new Claim("scp", "a.one"), new Claim("scp", "b.two"), new Claim("department", "x"), new Claim("department", "y"));
+
+        caller.AdditionalClaims.ShouldNotBeNull();
+        caller.AdditionalClaims.ShouldNotContainKey("department");
+        caller.AdditionalClaims.ShouldContainKey("scp");
     }
 }

@@ -68,6 +68,8 @@ internal static class GraphQlAndSwitchStartupChecks
                     "containing the approved operations (*.graphql / *.gql). Without a document store, the switch would have no effect.");
             }
         }
+
+        GraphQlTableRootsOnlyScopesStartup.ValidateAndReport(options, context.Logger);
     }
 
     internal static void FederationSigning(StartupCheckContext context)

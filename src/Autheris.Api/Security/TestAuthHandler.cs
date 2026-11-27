@@ -109,6 +109,15 @@ public sealed class TestAuthHandler : AuthenticationHandler<AuthenticationScheme
             claims.Add(new Claim("scp", scopeHeader.ToString().Trim()));
         }
 
+        if (headers.TryGetValue("X-Test-Scope-Array", out var scopeArrayHeader) && !string.IsNullOrWhiteSpace(scopeArrayHeader))
+        {
+            // A token whose 'scp' is a JSON array: one claim per ';' separated entry (for example Okta style tokens).
+            foreach (var entry in scopeArrayHeader.ToString().Split(';', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
+            {
+                claims.Add(new Claim("scp", entry));
+            }
+        }
+
         if (headers.TryGetValue("X-Test-Tier", out var tierHeader) && !string.IsNullOrWhiteSpace(tierHeader))
         {
             claims.Add(new Claim("tier", tierHeader.ToString().Trim()));

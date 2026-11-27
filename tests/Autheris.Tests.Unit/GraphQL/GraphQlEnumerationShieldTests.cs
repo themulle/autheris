@@ -94,6 +94,35 @@ public sealed class GraphQlEnumerationShieldTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public async Task Root_field_not_allowed_passes_through_unchanged_outside_development()
+    {
+        IHostEnvironment env = new TestHostEnvironment("Production");
+        var executor = await new ServiceCollection()
+            .AddSingleton(env)
+            .AddGraphQLServer()
+            .AddApplicationService<IHostEnvironment>()
+            .AddQueryType<ShieldQuery>()
+            .UseRequest<GraphQlEnumerationShieldMiddleware>()
+            .UseRequest(_ => context =>
+            {
+                context.Result = OperationResult.FromError(ErrorBuilder.New()
+                    .SetMessage("Root field 'catalog' is not allowed for this token; only table root fields are permitted.")
+                    .SetCode("ROOT_FIELD_NOT_ALLOWED").Build());
+                return default;
+            })
+            .UseDefaultPipeline()
+            .BuildRequestExecutorAsync();
+
+        await using var result = await executor.ExecuteAsync("{ catalog }");
+
+        var json = result.ToJson();
+        json.ShouldContain("ROOT_FIELD_NOT_ALLOWED");
+        json.ShouldContain("Root field 'catalog' is not allowed for this token");
+        json.ShouldNotContain(ErrorSanitizingFilter.ValidationMessage);
+    }
+
+    [Fact]
     public async Task Production_UnknownField_DeniedTable_AndDeniedColumn_AreIndistinguishable()
     {
         var executor = await CreateExecutorAsync("Production");
