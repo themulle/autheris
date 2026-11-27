@@ -161,8 +161,8 @@ public sealed class AttributeValidatingConsentRepository : IConsentRepository, I
         _inner.RevokeSystemConsentAsync(consentId, consentRequestId, revokedBySid, reason, ct);
 
     public Task<bool> RevokeSystemConsentByIdAsync(
-        TenantId tenantId, Guid consentId, Sid revokedBySid, string reason, SystemRevocationKind kind = SystemRevocationKind.Revoked, CancellationToken ct = default) =>
-        _inner.RevokeSystemConsentByIdAsync(tenantId, consentId, revokedBySid, reason, kind, ct);
+        TenantId tenantId, Guid consentId, Sid revokedBySid, string reason, SystemRevocationKind kind = SystemRevocationKind.Revoked, Guid? renewedConsentId = null, CancellationToken ct = default) =>
+        _inner.RevokeSystemConsentByIdAsync(tenantId, consentId, revokedBySid, reason, kind, renewedConsentId, ct);
 
     public Task<IReadOnlyList<Consent>> GetActiveGrantsForSubjectsAsync(TenantId tenantId, IReadOnlyCollection<Sid> subjects, DateTimeOffset atTime, int maxResults, CancellationToken ct = default) =>
         _inner.GetActiveGrantsForSubjectsAsync(tenantId, subjects, atTime, maxResults, ct);

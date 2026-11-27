@@ -9,6 +9,7 @@ using System.Threading;
 using System.Threading.Tasks;
 using Autheris.Application.Common.Interfaces;
 using Autheris.Application.ConsentRequests.Events;
+using Autheris.Application.ConsentRequests.ProfileAssignments;
 using Autheris.Application.Governance.Grants;
 using Autheris.Application.Governance.Grants.Records;
 using Autheris.Application.Governance.Requests;
@@ -31,8 +32,9 @@ using Xunit;
 
 /// <summary>
 /// Issue #1170: system revocations that end access (deprovisioning and the external-system revoke) append one grant.revoked per revoked
-/// grant in the revocation transaction, after every other write, with the thin payload and routing of the person revocation. The
-/// revocations of a grant renewal (superseded grant, compensation of a failed renewal) append none.
+/// grant in the revocation transaction, after every other write, with the thin payload and routing of the person revocation. Issue #1173:
+/// the supersede of a grant renewal appends grant.renewed for the renewed grant and nothing for the superseded one; the compensation of a
+/// failed renewal appends grant.revoked only when that grant.renewed was committed.
 /// </summary>
 [Trait("Category", "Security")]
 public sealed class SystemRevocationConsentEventTests
@@ -67,7 +69,7 @@ public sealed class SystemRevocationConsentEventTests
             nameof(IConsentRepository.GetActiveGrantsForSubjectsAsync) => Task.FromResult<IReadOnlyList<Consent>>([data, unmask]),
             nameof(IConsentRepository.RevokeSystemConsentByIdAsync) =>
                 repo.RevokeSystemConsentByIdAsync(
-                    (TenantId)args![0]!, (Guid)args[1]!, (Sid)args[2]!, (string)args[3]!, (SystemRevocationKind)args[4]!, (CancellationToken)args[5]!),
+                    (TenantId)args![0]!, (Guid)args[1]!, (Sid)args[2]!, (string)args[3]!, (SystemRevocationKind)args[4]!, (Guid?)args[5], (CancellationToken)args[6]!),
             _ => NullFake.UseDefault
         });
         var sut = new GrantRevocationService(
@@ -162,23 +164,432 @@ public sealed class SystemRevocationConsentEventTests
         await using var repo = CreateRepo(dialect, conn, []);
         var renewer = SelfGrantHarness.Actor("user:dg", "GovernanceAdmin");
 
-        // Successful renewal: the superseded grant is revoked through the real repository.
+        // Successful renewal: the superseded grant is revoked through the real repository and only grant.renewed is appended.
         var renewed = RenewableGrant();
         var success = new SelfGrantHarness(ProtectionClass.Internal) { Existing = renewed, RevokeThrough = repo };
         conn.EnqueueReader(RevokeTargetRow(SelfGrantHarness.Tenant.Value, isRevoked: false, renewed.ConsentRequestId));
+        conn.EnqueueReader(RevokeTargetRow(SelfGrantHarness.Tenant.Value, isRevoked: false, requestId: null));
+        conn.EnqueueReader(OriginRequestRow(renewed.ConsentRequestId!.Value, "INTERNAL", null));
         await success.Engine.RenewGrantAsync(RenewCommand(renewed, renewer));
         success.RevokedConsents.ShouldBe([renewed.Id]);
+        var afterSuccess = conn.Commands.Count;
+        Bound(EventInserts(conn).ShouldHaveSingleItem(), "@type").ShouldBe(ConsentEventTypes.GrantRenewed);
 
-        // Failed renewal: ending the original grant fails, the compensation revokes the renewed grant through the real repository.
+        // Failed renewal before the supersede commit: ending the original grant fails, the compensation revokes the renewed grant
+        // through the real repository. It was never announced, so nothing is appended and no event lock is taken.
         var original = RenewableGrant();
         var failed = new SelfGrantHarness(ProtectionClass.Internal) { Existing = original, RevokeThrough = repo, FailRevokeConsent = id => id == original.Id };
         conn.EnqueueReader(RevokeTargetRow(SelfGrantHarness.Tenant.Value, isRevoked: false, original.ConsentRequestId));
+        conn.EnqueueReader(new DataTable());
         await Should.ThrowAsync<InvalidOperationException>(() => failed.Engine.RenewGrantAsync(RenewCommand(original, renewer)));
         failed.RevokedConsents.ShouldBe([failed.CreatedConsents.ShouldHaveSingleItem().Id]);
 
-        success.RevocationKinds.Concat(failed.RevocationKinds).ShouldAllBe(k => k == SystemRevocationKind.Renewal);
+        success.RevocationKinds.ShouldBe([SystemRevocationKind.Renewal]);
+        failed.RevocationKinds.ShouldBe([SystemRevocationKind.RenewalRollback]);
+        var failedPath = conn.Commands.Skip(afterSuccess).ToList();
+        failedPath.ShouldNotContain(c => c.CommandText.Contains("INSERT INTO CONSENT_EVENTS", StringComparison.Ordinal) || IsEventLock(c));
         conn.Commands.Count(c => c.CommandText.TrimStart().StartsWith("UPDATE CONSENTS", StringComparison.Ordinal)).ShouldBe(2, dialect);
-        conn.Commands.ShouldNotContain(c => c.CommandText.Contains("CONSENT_EVENT", StringComparison.Ordinal) || IsEventLock(c));
+        conn.Commands.Count(IsEventLock).ShouldBe(1, dialect);
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task Successful_renewal_appends_one_grant_renewed_for_the_renewed_grant_as_the_last_write(string dialect)
+    {
+        var run = await RunSuccessfulRenewalAsync(dialect);
+
+        var appended = EventInserts(run.Conn).ShouldHaveSingleItem();
+        Bound(appended, "@type").ShouldBe(ConsentEventTypes.GrantRenewed);
+        Bound(appended, "@subjectId").ShouldBe(run.Harness.CreatedConsents.Single().Id.ToString("D"));
+        Bound(appended, "@tenant").ShouldBe(SelfGrantHarness.Tenant.Value);
+        EventInserts(run.Conn).ShouldNotContain(e => (string?)Bound(e, "@type") == ConsentEventTypes.GrantRevoked);
+        run.Harness.RevocationKinds.ShouldBe([SystemRevocationKind.Renewal]);
+        run.Conn.Commands.Count(c => c.CommandText.Contains("INSERT INTO CONSENT_EVENT_DELIVERIES", StringComparison.Ordinal)).ShouldBeGreaterThanOrEqualTo(1);
+        AssertEventAppendedLast(run.Conn, dialect, revocations: 1, expectEpochBump: true);
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task Grant_renewed_payload_has_exactly_the_thin_property_set_and_no_sensitive_fields(string dialect)
+    {
+        var run = await RunSuccessfulRenewalAsync(dialect);
+
+        var json = (string)Bound(EventInserts(run.Conn).Single(), "@payload")!;
+        using var doc = JsonDocument.Parse(json);
+        var root = doc.RootElement;
+        root.EnumerateObject().Select(p => p.Name).Order().ShouldBe(
+            new[] { "tenantId", "requestId", "grantId", "objectId", "status", "version", "workflowMode", "occurredAt", "links", "previousGrantId" }.Order());
+        root.GetProperty("status").GetString().ShouldBe("ACTIVE");
+        root.GetProperty("version").GetInt32().ShouldBe(1);
+        root.GetProperty("grantId").GetGuid().ShouldBe(run.Harness.CreatedConsents.Single().Id);
+        root.GetProperty("previousGrantId").GetGuid().ShouldBe(run.Old.Id);
+        root.GetProperty("requestId").GetGuid().ShouldBe(run.Old.ConsentRequestId!.Value);
+        root.GetProperty("workflowMode").GetString().ShouldBe("EXTERNAL");
+        json.ShouldNotContain("user:dg", Case.Insensitive);
+        json.ShouldNotContain("user:alice", Case.Insensitive);
+        json.ShouldNotContain("Quarterly renewal", Case.Insensitive);
+        json.ShouldNotContain("Renewed by approver", Case.Insensitive);
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task Renewal_routes_grant_renewed_only_to_the_origin_request_system_and_stored_tenant(string dialect)
+    {
+        var run = await RunSuccessfulRenewalAsync(dialect);
+
+        var routing = run.Conn.Commands.Where(c => c.CommandText.Contains("LEFT JOIN CONSENT_REQUESTS", StringComparison.Ordinal)).ToList();
+        var read = routing.ShouldHaveSingleItem();
+        read.CommandText.ShouldContain("c.tenant_id = @tenant");
+        read.CommandText.ShouldContain("r.tenant_id = c.tenant_id");
+        Bound(read, "@tenant").ShouldBe(SelfGrantHarness.Tenant.Value);
+        Bound(read, "@id").ShouldBe(run.Old.Id.ToString("D"));
+
+        var deliveries = run.Conn.Commands.Where(c =>
+            c.CommandText.Contains("INSERT INTO CONSENT_EVENT_DELIVERIES", StringComparison.Ordinal) && c.Parameters.Any(p => p.Name == "@externalSystemId")).ToList();
+        deliveries.ShouldHaveSingleItem();
+        Bound(deliveries[0], "@externalSystemId").ShouldBe(run.System.ToString("D"));
+        Bound(EventInserts(run.Conn).Single(), "@tenant").ShouldBe(SelfGrantHarness.Tenant.Value);
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task Renewal_whose_audit_fails_after_the_supersede_commit_appends_grant_revoked_for_the_renewed_grant(string dialect)
+    {
+        var run = await RunRenewalFailingAfterSupersedeAsync(dialect, auditFails: true);
+        AssertRenewedThenRevoked(run, dialect);
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task Renewal_failing_after_the_supersede_commit_appends_grant_revoked_for_the_renewed_grant(string dialect)
+    {
+        var run = await RunRenewalFailingAfterSupersedeAsync(dialect, auditFails: false);
+        AssertRenewedThenRevoked(run, dialect);
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task Renewal_rollback_after_a_concurrent_revocation_of_the_old_grant_appends_no_event(string dialect)
+    {
+        var conn = DialectKit.Of(dialect).NewConnection();
+        await using var repo = CreateRepo(dialect, conn, []);
+        var old = RenewableGrant();
+        var h = new SelfGrantHarness(ProtectionClass.Internal) { Existing = old, RevokeThrough = repo };
+
+        // A person revoked the old grant meanwhile: the supersede finds it revoked and fails, the compensation finds nothing announced.
+        conn.EnqueueReader(RevokeTargetRow(SelfGrantHarness.Tenant.Value, isRevoked: true, old.ConsentRequestId));
+        conn.EnqueueReader(RevokeTargetRow(SelfGrantHarness.Tenant.Value, isRevoked: false, requestId: null));
+        conn.EnqueueReader(new DataTable());
+        await Should.ThrowAsync<InvalidOperationException>(() => h.Engine.RenewGrantAsync(RenewCommand(old, SelfGrantHarness.Actor("user:dg", "GovernanceAdmin"))));
+
+        h.RevocationKinds.ShouldBe([SystemRevocationKind.Renewal, SystemRevocationKind.RenewalRollback]);
+        conn.Commands.ShouldNotContain(c => c.CommandText.Contains("INSERT INTO CONSENT_EVENTS", StringComparison.Ordinal) || IsEventLock(c));
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task Failed_renewal_rollback_leaves_only_grant_renewed(string dialect)
+    {
+        var conn = DialectKit.Of(dialect).NewConnection();
+        await using var repo = CreateRepo(dialect, conn, []);
+        var old = RenewableGrant();
+        SelfGrantHarness? holder = null;
+        var h = new SelfGrantHarness(ProtectionClass.Internal)
+        {
+            Existing = old,
+            RevokeThrough = repo,
+            ThrowAfterRevokeThrough = id => id == old.Id,
+            FailRevokeConsent = id => holder!.CreatedConsents.Count > 0 && id == holder.CreatedConsents[0].Id
+        };
+        holder = h;
+        EnqueueSupersede(conn, old, Guid.NewGuid());
+
+        await Should.ThrowAsync<InvalidOperationException>(() => h.Engine.RenewGrantAsync(RenewCommand(old, SelfGrantHarness.Actor("user:dg", "GovernanceAdmin"))));
+
+        Bound(EventInserts(conn).ShouldHaveSingleItem(), "@type").ShouldBe(ConsentEventTypes.GrantRenewed);
+        h.Audit.Entries.ShouldContain(e => e.EventType == AuditEventTypes.GrantRenewalRollbackFailed);
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task Repeated_renewal_rollback_appends_no_second_grant_revoked(string dialect)
+    {
+        var conn = DialectKit.Of(dialect).NewConnection();
+        await using var repo = CreateRepo(dialect, conn, []);
+        var renewedId = Guid.NewGuid();
+        var origin = Guid.NewGuid();
+        var actor = new Sid("user:dg");
+
+        conn.EnqueueReader(RevokeTargetRow(Tenant.Value, isRevoked: false, origin));
+        conn.EnqueueReader(ExistsRow(1));
+        conn.EnqueueReader(OriginRequestRow(origin, "INTERNAL", null));
+        (await repo.RevokeSystemConsentByIdAsync(Tenant, renewedId, actor, "Renewal rolled back.", SystemRevocationKind.RenewalRollback)).ShouldBeTrue();
+
+        conn.EnqueueReader(RevokeTargetRow(Tenant.Value, isRevoked: true, origin));
+        (await repo.RevokeSystemConsentByIdAsync(Tenant, renewedId, actor, "Renewal rolled back.", SystemRevocationKind.RenewalRollback)).ShouldBeFalse();
+
+        var appended = EventInserts(conn).ShouldHaveSingleItem();
+        Bound(appended, "@type").ShouldBe(ConsentEventTypes.GrantRevoked);
+        Bound(appended, "@subjectId").ShouldBe(renewedId.ToString("D"));
+        conn.Commands.Count(IsEventLock).ShouldBe(1, dialect);
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task Renewal_with_a_renewed_id_of_another_tenant_or_unknown_throws_and_appends_no_event(string dialect)
+    {
+        var conn = DialectKit.Of(dialect).NewConnection();
+        await using var repo = CreateRepo(dialect, conn, []);
+        var actor = new Sid("user:dg");
+
+        // The renewed grant belongs to another tenant.
+        conn.EnqueueReader(RevokeTargetRow(Tenant.Value, isRevoked: false, requestId: null));
+        conn.EnqueueReader(RevokeTargetRow("tenant-other", isRevoked: false, requestId: null));
+        var otherTenant = await Should.ThrowAsync<InvalidOperationException>(() =>
+            repo.RevokeSystemConsentByIdAsync(Tenant, Guid.NewGuid(), actor, "Renewed by approver.", SystemRevocationKind.Renewal, Guid.NewGuid()));
+
+        // The renewed grant does not exist.
+        conn.EnqueueReader(RevokeTargetRow(Tenant.Value, isRevoked: false, requestId: null));
+        conn.EnqueueReader(new DataTable());
+        var unknown = await Should.ThrowAsync<InvalidOperationException>(() =>
+            repo.RevokeSystemConsentByIdAsync(Tenant, Guid.NewGuid(), actor, "Renewed by approver.", SystemRevocationKind.Renewal, Guid.NewGuid()));
+
+        otherTenant.Message.ShouldNotContain("tenant-other");
+        unknown.Message.ShouldNotContain("Renewed by approver");
+        conn.Commands.ShouldNotContain(c =>
+            c.CommandText.TrimStart().StartsWith("UPDATE CONSENTS", StringComparison.Ordinal)
+            || c.CommandText.Contains("INSERT INTO CONSENT_EVENTS", StringComparison.Ordinal)
+            || IsEventLock(c));
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task Renewal_supersede_of_an_already_revoked_renewed_grant_throws_and_appends_no_event(string dialect)
+    {
+        var conn = DialectKit.Of(dialect).NewConnection();
+        await using var repo = CreateRepo(dialect, conn, []);
+        var actor = new Sid("user:dg");
+
+        conn.EnqueueReader(RevokeTargetRow(Tenant.Value, isRevoked: false, requestId: null));
+        conn.EnqueueReader(RevokeTargetRow(Tenant.Value, isRevoked: true, requestId: null));
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() =>
+            repo.RevokeSystemConsentByIdAsync(Tenant, Guid.NewGuid(), actor, "Renewed by approver.", SystemRevocationKind.Renewal, Guid.NewGuid()));
+
+        ex.Message.ShouldNotContain("Renewed by approver");
+        conn.Commands.ShouldNotContain(c =>
+            c.CommandText.TrimStart().StartsWith("UPDATE CONSENTS", StringComparison.Ordinal)
+            || c.CommandText.Contains("INSERT INTO CONSENT_EVENTS", StringComparison.Ordinal)
+            || IsEventLock(c));
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task Renewal_kind_requires_a_distinct_renewed_grant_id_and_other_kinds_reject_one(string dialect)
+    {
+        var conn = DialectKit.Of(dialect).NewConnection();
+        await using var repo = CreateRepo(dialect, conn, []);
+        var actor = new Sid("user:dg");
+        var id = Guid.NewGuid();
+
+        await Should.ThrowAsync<ArgumentException>(() => repo.RevokeSystemConsentByIdAsync(Tenant, id, actor, "r", SystemRevocationKind.Renewal, null));
+        await Should.ThrowAsync<ArgumentException>(() => repo.RevokeSystemConsentByIdAsync(Tenant, id, actor, "r", SystemRevocationKind.Renewal, Guid.Empty));
+        await Should.ThrowAsync<ArgumentException>(() => repo.RevokeSystemConsentByIdAsync(Tenant, id, actor, "r", SystemRevocationKind.Renewal, id));
+        await Should.ThrowAsync<ArgumentException>(() => repo.RevokeSystemConsentByIdAsync(Tenant, id, actor, "r", SystemRevocationKind.Revoked, Guid.NewGuid()));
+        await Should.ThrowAsync<ArgumentException>(() => repo.RevokeSystemConsentByIdAsync(Tenant, id, actor, "r", SystemRevocationKind.RenewalRollback, Guid.NewGuid()));
+        await Should.ThrowAsync<ArgumentOutOfRangeException>(() => repo.RevokeSystemConsentByIdAsync(Tenant, id, actor, "r", (SystemRevocationKind)99, null));
+
+        conn.Commands.ShouldBeEmpty();
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task Event_append_failures_do_not_leak_payload_or_reason_in_the_exception_message(string dialect)
+    {
+        var conn = DialectKit.Of(dialect).NewConnection();
+        await using var repo = CreateRepo(dialect, conn, []);
+        const string reason = "Reason-with-secret-justification";
+        var actor = new Sid("S-1-5-21-secret-actor");
+
+        // The superseded grant's routing row is missing: the renewal throws instead of degrading to an internal event.
+        conn.EnqueueReader(RevokeTargetRow(Tenant.Value, isRevoked: false, requestId: null));
+        conn.EnqueueReader(RevokeTargetRow(Tenant.Value, isRevoked: false, requestId: null));
+        var missingRouting = await Should.ThrowAsync<InvalidOperationException>(() =>
+            repo.RevokeSystemConsentByIdAsync(Tenant, Guid.NewGuid(), actor, reason, SystemRevocationKind.Renewal, Guid.NewGuid()));
+
+        // The same for the compensation of an announced renewal.
+        conn.EnqueueReader(RevokeTargetRow(Tenant.Value, isRevoked: false, requestId: null));
+        conn.EnqueueReader(ExistsRow(1));
+        var missingRollbackRouting = await Should.ThrowAsync<InvalidOperationException>(() =>
+            repo.RevokeSystemConsentByIdAsync(Tenant, Guid.NewGuid(), actor, reason, SystemRevocationKind.RenewalRollback));
+
+        foreach (var ex in new[] { missingRouting, missingRollbackRouting })
+        {
+            ex.Message.ShouldNotContain(reason);
+            ex.Message.ShouldNotContain(actor.Value);
+            ex.Message.ShouldNotContain("payload", Case.Insensitive);
+        }
+
+        EventInserts(conn).ShouldBeEmpty();
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task Profile_assignment_store_appends_one_grant_revoked_per_grant_with_origin_routing(string dialect)
+    {
+        var conn = DialectKit.Of(dialect).NewConnection();
+        await using var repo = CreateRepo(dialect, conn, []);
+        IProfileAssignmentStore store = repo;
+        var system = Guid.NewGuid();
+        var externalRequest = Guid.NewGuid();
+        var internalRequest = Guid.NewGuid();
+        var external = Grant(PermissionGrantKind.Data);
+        var internalGrant = Grant(PermissionGrantKind.Data);
+        conn.EnqueueReader(OriginRequestRow(externalRequest, "EXTERNAL", system));
+        conn.EnqueueReader(OriginRequestRow(internalRequest, "INTERNAL", null));
+        await using var tx = await conn.BeginTransactionAsync();
+
+        await store.AppendGrantRevokedEventsInTransactionAsync(
+            tx, Tenant, [new RevokedProfileGrant(external.Id, external.TableIdentifier), new RevokedProfileGrant(internalGrant.Id, internalGrant.TableIdentifier)], Now);
+
+        var inserts = EventInserts(conn);
+        inserts.Count.ShouldBe(2, dialect);
+        var firstLock = conn.Commands.FindIndex(IsEventLock);
+        conn.Commands.Take(firstLock).Count(c => c.CommandText.Contains("FROM CONSENTS c", StringComparison.Ordinal)).ShouldBe(2, dialect);
+        conn.Commands.Skip(firstLock).ShouldNotContain(c => c.CommandText.Contains("FROM CONSENTS c", StringComparison.Ordinal));
+        Bound(inserts[0], "@type").ShouldBe(ConsentEventTypes.GrantRevoked);
+        Bound(inserts[0], "@subjectId").ShouldBe(external.Id.ToString("D"));
+        var first = ReadThinGrantPayload(inserts[0]);
+        first.Status.ShouldBe("REVOKED");
+        first.WorkflowMode.ShouldBe("EXTERNAL");
+        first.RequestId.ShouldBe(externalRequest);
+        Bound(inserts[1], "@subjectId").ShouldBe(internalGrant.Id.ToString("D"));
+        var second = ReadThinGrantPayload(inserts[1]);
+        second.WorkflowMode.ShouldBe("INTERNAL");
+        second.RequestId.ShouldBe(internalRequest);
+        foreach (var insert in inserts)
+        {
+            ((string)Bound(insert, "@payload")!).ShouldNotContain("previousGrantId", Case.Insensitive);
+        }
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task Profile_assignment_store_appends_nothing_for_an_empty_list(string dialect)
+    {
+        var conn = DialectKit.Of(dialect).NewConnection();
+        await using var repo = CreateRepo(dialect, conn, []);
+        IProfileAssignmentStore store = repo;
+        await using var tx = await conn.BeginTransactionAsync();
+
+        await store.AppendGrantRevokedEventsInTransactionAsync(tx, Tenant, [], Now);
+
+        conn.Commands.ShouldBeEmpty(dialect);
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task Profile_assignment_store_reports_whether_the_conditional_revoke_matched(string dialect)
+    {
+        var conn = DialectKit.Of(dialect).NewConnection();
+        await using var repo = CreateRepo(dialect, conn, []);
+        IProfileAssignmentStore store = repo;
+        await using var tx = await conn.BeginTransactionAsync();
+
+        conn.NonQueryResult = 1;
+        (await store.MarkConsentRevokedInTransactionAsync(tx, Tenant, Guid.NewGuid(), Leaver, "reason", Now)).ShouldBeTrue(dialect);
+        conn.NonQueryResult = 0;
+        (await store.MarkConsentRevokedInTransactionAsync(tx, Tenant, Guid.NewGuid(), Leaver, "reason", Now)).ShouldBeFalse(dialect);
+
+        var updates = conn.Commands.Where(c => c.CommandText.TrimStart().StartsWith("UPDATE CONSENTS", StringComparison.Ordinal)).ToList();
+        updates.Count.ShouldBe(2, dialect);
+        updates.ShouldAllBe(u => u.CommandText.Contains("tenant_id", StringComparison.Ordinal), dialect);
+        updates.ShouldAllBe(u => u.Parameters.Any(p => (p.Value as string) == Tenant.Value), dialect);
+    }
+
+    [Theory]
+    [MemberData(nameof(Dialects))]
+    public async Task Profile_assignment_store_throws_without_routing_row_and_leaks_nothing(string dialect)
+    {
+        var conn = DialectKit.Of(dialect).NewConnection();
+        await using var repo = CreateRepo(dialect, conn, []);
+        IProfileAssignmentStore store = repo;
+        var grant = Grant(PermissionGrantKind.Data);
+        conn.EnqueueReader(new DataTable());
+        await using var tx = await conn.BeginTransactionAsync();
+
+        var ex = await Should.ThrowAsync<InvalidOperationException>(() => store.AppendGrantRevokedEventsInTransactionAsync(
+            tx, Tenant, [new RevokedProfileGrant(grant.Id, grant.TableIdentifier)], Now));
+
+        ex.Message.ShouldNotContain(Leaver.Value);
+        ex.Message.ShouldNotContain("payload", Case.Insensitive);
+        EventInserts(conn).ShouldBeEmpty();
+        conn.Commands.Any(IsEventLock).ShouldBeFalse(dialect);
+    }
+
+    private sealed record RenewalRun(RecordingDbConnection Conn, SelfGrantHarness Harness, Consent Old, Guid System);
+
+    private static void EnqueueSupersede(RecordingDbConnection conn, Consent old, Guid system)
+    {
+        conn.EnqueueReader(RevokeTargetRow(SelfGrantHarness.Tenant.Value, isRevoked: false, old.ConsentRequestId));
+        conn.EnqueueReader(RevokeTargetRow(SelfGrantHarness.Tenant.Value, isRevoked: false, requestId: null));
+        conn.EnqueueReader(OriginRequestRow(old.ConsentRequestId!.Value, "EXTERNAL", system));
+    }
+
+    private static async Task<RenewalRun> RunSuccessfulRenewalAsync(string dialect)
+    {
+        var conn = DialectKit.Of(dialect).NewConnection();
+        await using var repo = CreateRepo(dialect, conn, []);
+        var old = RenewableGrant();
+        var system = Guid.NewGuid();
+        var h = new SelfGrantHarness(ProtectionClass.Internal) { Existing = old, RevokeThrough = repo };
+        EnqueueSupersede(conn, old, system);
+        await h.Engine.RenewGrantAsync(RenewCommand(old, SelfGrantHarness.Actor("user:dg", "GovernanceAdmin")));
+        return new RenewalRun(conn, h, old, system);
+    }
+
+    private static async Task<RenewalRun> RunRenewalFailingAfterSupersedeAsync(string dialect, bool auditFails)
+    {
+        var conn = DialectKit.Of(dialect).NewConnection();
+        await using var repo = CreateRepo(dialect, conn, []);
+        var old = RenewableGrant();
+        var system = Guid.NewGuid();
+        var h = new SelfGrantHarness(ProtectionClass.Internal, auditFailure: auditFails ? new InvalidOperationException("audit down") : null)
+        {
+            Existing = old,
+            RevokeThrough = repo,
+            ThrowAfterRevokeThrough = auditFails ? null : id => id == old.Id
+        };
+        EnqueueSupersede(conn, old, system);
+
+        // The compensation: target of the renewed grant, the persisted grant.renewed lookup, then the routing read.
+        conn.EnqueueReader(RevokeTargetRow(SelfGrantHarness.Tenant.Value, isRevoked: false, old.ConsentRequestId));
+        conn.EnqueueReader(ExistsRow(1));
+        conn.EnqueueReader(OriginRequestRow(old.ConsentRequestId!.Value, "EXTERNAL", system));
+        await Should.ThrowAsync<InvalidOperationException>(() => h.Engine.RenewGrantAsync(RenewCommand(old, SelfGrantHarness.Actor("user:dg", "GovernanceAdmin"))));
+        return new RenewalRun(conn, h, old, system);
+    }
+
+    private static void AssertRenewedThenRevoked(RenewalRun run, string dialect)
+    {
+        var created = run.Harness.CreatedConsents.ShouldHaveSingleItem();
+        var inserts = EventInserts(run.Conn);
+        inserts.Count.ShouldBe(2, dialect);
+        inserts.Select(e => (string?)Bound(e, "@type")).ShouldBe([ConsentEventTypes.GrantRenewed, ConsentEventTypes.GrantRevoked]);
+        inserts.ShouldAllBe(e => (string?)Bound(e, "@subjectId") == created.Id.ToString("D"));
+        using var revoked = JsonDocument.Parse((string)Bound(inserts[1], "@payload")!);
+        revoked.RootElement.GetProperty("status").GetString().ShouldBe("REVOKED");
+        revoked.RootElement.TryGetProperty("previousGrantId", out _).ShouldBeFalse();
+        run.Harness.RevocationKinds.ShouldBe([SystemRevocationKind.Renewal, SystemRevocationKind.RenewalRollback]);
+        run.Conn.Commands.Count(IsEventLock).ShouldBe(2, dialect);
+        run.Conn.Commands.Count(c => c.CommandText.TrimStart().StartsWith("UPDATE CONSENTS", StringComparison.Ordinal)).ShouldBe(2, dialect);
+    }
+
+    private static DataTable ExistsRow(int value)
+    {
+        var table = new DataTable();
+        table.Columns.Add("announced", typeof(int));
+        table.Rows.Add(value);
+        return table;
     }
 
     private static Consent RenewableGrant() => new()

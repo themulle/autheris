@@ -351,11 +351,12 @@ public interface IConsentRepository
     /// System revocation of one consent by id, scoped to <paramref name="tenantId"/>: a consent of another tenant is never touched.
     /// Used by deprovisioning and grant renewal, which revoke grants regardless of kind or request linkage. Returns false when
     /// nothing was revoked. A <see cref="SystemRevocationKind.Revoked"/> revocation appends its grant.revoked consent event in the same
-    /// transaction; a <see cref="SystemRevocationKind.Renewal"/> revocation appends none, because access continues through the renewed
-    /// or the original grant. Implementations must override; the default fails closed.
+    /// transaction; a <see cref="SystemRevocationKind.Renewal"/> supersede appends grant.renewed for <paramref name="renewedConsentId"/> (required for
+    /// that kind, rejected for the others); a <see cref="SystemRevocationKind.RenewalRollback"/> appends grant.revoked only when the
+    /// grant was announced by a committed grant.renewed. Implementations must override; the default fails closed.
     /// </summary>
     Task<bool> RevokeSystemConsentByIdAsync(
-        TenantId tenantId, Guid consentId, Sid revokedBySid, string reason, SystemRevocationKind kind = SystemRevocationKind.Revoked, CancellationToken ct = default)
+        TenantId tenantId, Guid consentId, Sid revokedBySid, string reason, SystemRevocationKind kind = SystemRevocationKind.Revoked, Guid? renewedConsentId = null, CancellationToken ct = default)
         => throw new NotSupportedException("RevokeSystemConsentByIdAsync is not implemented by this repository.");
 
     /// <summary>

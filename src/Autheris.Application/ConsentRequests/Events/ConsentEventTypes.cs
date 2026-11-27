@@ -20,6 +20,7 @@ public static class ConsentEventTypes
     public const string RequestExpired = TypePrefix + "request.expired";
     public const string GrantRevoked = TypePrefix + "grant.revoked";
     public const string GrantExpiring = TypePrefix + "grant.expiring";
+    public const string GrantRenewed = TypePrefix + "grant.renewed";
     public const string GrantExpired = TypePrefix + "grant.expired";
 }
 
@@ -35,7 +36,8 @@ public sealed record ConsentThinEventPayload(
     string WorkflowMode,
     DateTimeOffset OccurredAt,
     ConsentEventLinks Links,
-    int? ReminderStage = null);
+    int? ReminderStage = null,
+    Guid? PreviousGrantId = null);
 
 public static class ConsentEventPayloads
 {

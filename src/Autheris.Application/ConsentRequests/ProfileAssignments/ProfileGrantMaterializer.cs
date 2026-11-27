@@ -340,6 +340,7 @@ public sealed class ProfileGrantMaterializer(
         var normalizedReason = string.IsNullOrWhiteSpace(reason) ? "PROFILE_ASSIGNMENT_REVOKED" : reason.Trim();
         var invalidatedTables = new HashSet<TableIdentifier>();
         var revokedCount = 0;
+        var revokedGrants = new List<RevokedProfileGrant>();
 
         await using var tx = await _store.BeginTransactionAsync(ct).ConfigureAwait(false);
         try
@@ -348,13 +349,17 @@ public sealed class ProfileGrantMaterializer(
                 .ConfigureAwait(false);
             foreach (var consent in activeConsents)
             {
-                if (consent.IsRevoked)
+                if (consent.IsRevoked || consent.TenantId != tenantId)
                 {
                     continue;
                 }
 
-                await _store.MarkConsentRevokedInTransactionAsync(tx.Transaction, consent.Id, actorSid, normalizedReason, now, ct)
-                    .ConfigureAwait(false);
+                // A consent revoked concurrently no longer matches the conditional update: no ledger, epoch, audit or event for it.
+                if (!await _store.MarkConsentRevokedInTransactionAsync(tx.Transaction, tenantId, consent.Id, actorSid, normalizedReason, now, ct)
+                        .ConfigureAwait(false))
+                {
+                    continue;
+                }
 
                 var objectId = consent.IsPatternGrant ? consent.ObjectPattern! : consent.TableIdentifier.ToString();
                 var revokeInput = new GrantRecordInput(
@@ -396,7 +401,14 @@ public sealed class ProfileGrantMaterializer(
                     })
                 }, ct).ConfigureAwait(false);
 
+                revokedGrants.Add(new RevokedProfileGrant(consent.Id, consent.TableIdentifier));
                 revokedCount++;
+            }
+
+            // The event lock is the last lock of the transaction; a failed append rolls everything back.
+            if (revokedGrants.Count > 0)
+            {
+                await _store.AppendGrantRevokedEventsInTransactionAsync(tx.Transaction, tenantId, revokedGrants, now, ct).ConfigureAwait(false);
             }
 
             await tx.CommitAsync(ct).ConfigureAwait(false);

@@ -152,7 +152,8 @@ public sealed class ProfileGrantMaterializerTests
         public Task<int> DecideAssignmentItemsAsync(DbTransaction transaction, Guid requestId, IReadOnlyCollection<string> targetOwnerSids, string decision, string decidedBy, DateTimeOffset decidedAt, bool decideAllPending, CancellationToken ct = default) => Task.FromResult(0);
         public Task<IReadOnlyList<Consent>> GetConsentsByProfileAssignmentAsync(DbTransaction? transaction, TenantId tenantId, Guid profileAssignmentId, CancellationToken ct = default) => Task.FromResult<IReadOnlyList<Consent>>([]);
         public Task<Consent?> GetConsentByIdInTransactionAsync(DbTransaction transaction, Guid consentId, CancellationToken ct = default) => Task.FromResult<Consent?>(null);
-        public Task MarkConsentRevokedInTransactionAsync(DbTransaction transaction, Guid consentId, Sid actorSid, string reason, DateTimeOffset now, CancellationToken ct = default) => Task.CompletedTask;
+        public Task<bool> MarkConsentRevokedInTransactionAsync(DbTransaction transaction, TenantId tenantId, Guid consentId, Sid actorSid, string reason, DateTimeOffset now, CancellationToken ct = default) => Task.FromResult(true);
+        public Task AppendGrantRevokedEventsInTransactionAsync(DbTransaction transaction, TenantId tenantId, IReadOnlyList<RevokedProfileGrant> revokedGrants, DateTimeOffset occurredAt, CancellationToken ct = default) => Task.CompletedTask;
         public Task AddApprovingOwnersInTransactionAsync(DbTransaction transaction, Consent consent, IReadOnlyCollection<string> ownerSids, CancellationToken ct = default) => Task.CompletedTask;
         public Task IncrementTableEpochInTransactionAsync(DbTransaction transaction, TableIdentifier table, CancellationToken ct = default) => Task.CompletedTask;
         public Task RecordAuditInTransactionAsync(DbTransaction transaction, AuditLogEntry entry, CancellationToken ct = default) => Task.CompletedTask;
