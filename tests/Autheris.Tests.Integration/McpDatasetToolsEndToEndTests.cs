@@ -183,6 +183,7 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
             Table = new Table { Id = Guid.NewGuid(), DisplayName = "mcp_paged_ledger", TableName = "mcp_paged_ledger", SchemaName = "main", SourceType = "PostgreSql", SourceName = "default", Description = "Paged ledger" },
             Identifier = PagedLedger,
             PrimaryKeyColumns = ["id"],
+            ReplaceKeyDefinition = true,
             Columns = new List<TableColumn>
             {
                 new() { ColumnName = "id", DataType = "integer", Description = "Key" },

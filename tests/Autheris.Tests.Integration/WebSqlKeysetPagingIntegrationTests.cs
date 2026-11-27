@@ -157,6 +157,7 @@ public sealed class WebSqlKeysetPagingIntegrationTests : IClassFixture<WebSqlKey
             Table = new Table { Id = Guid.NewGuid(), DisplayName = table, TableName = table, SchemaName = "public", SourceName = "default", SourceType = "PostgreSql" },
             Identifier = new TableIdentifier("default", "public", table),
             PrimaryKeyColumns = primaryKey,
+            ReplaceKeyDefinition = true,
             Columns = columns.Select(c => new TableColumn { ColumnName = c.Name, DataType = c.DataType }).ToList(),
             ColumnClassifications = masking == null ? new Dictionary<string, IReadOnlyList<ColumnClassification>>() : TableMetadataClassificationTestExtensions.PiiFor(masking.Keys.ToArray()),
             ColumnMaskingRules = masking ?? new Dictionary<string, MaskingRule>()
