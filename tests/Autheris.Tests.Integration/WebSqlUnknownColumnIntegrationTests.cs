@@ -113,25 +113,52 @@ public sealed class WebSqlUnknownColumnIntegrationTests : IClassFixture<Governed
 
     [Trait("Category", "Security")]
     [Fact]
-    public async Task HiddenColumnTable_UnknownAndHidden_SameBody_RealPostgres()
+    public async Task HiddenColumnTable_ProjectionIsNullified_FilterAnswersLikeUnknown_RealPostgres()
     {
         // The shared host bypasses consent checks, so every column is visible there and nothing can be hidden. This host enforces consents:
-        // the caller holds Clear rules for id, note and tenant_id only, so ssn is hidden from this caller.
+        // the caller holds Clear rules for id, note and tenant_id only, so ssn is a Deny column for this caller (seeded value 111-11-1111).
         await RegisterAsync("ledger", ["id", "note", "ssn", "tenant_id"], clearColumns: ["id", "note", "tenant_id"]);
         await using var enforcing = EnforcingHost();
 
         var allowed = await PostSqlAsync("SELECT id, note FROM ledger", enforcing);   // control: the consent is honoured on this host
         allowed.Status.ShouldBe(HttpStatusCode.OK, allowed.Body);
-        var unknown = await PostSqlAsync("SELECT nope FROM ledger", enforcing);
-        var hidden = await PostSqlAsync("SELECT ssn FROM ledger", enforcing);
 
-        using var doc = JsonDocument.Parse(unknown.Body);
-        doc.RootElement.GetProperty("code").GetString().ShouldBe("SQL_POLICY_DENIED");
-        unknown.Status.ShouldBe(hidden.Status);
-        WithoutTrace(unknown.Body).ShouldBe(WithoutTrace(hidden.Body));   // hidden equals non-existent: no name, no position, no hint
-        foreach (var key in new[] { "line", "column", "hint", "columnName" })
+        // Projection: a Deny column that is only projected is nullified by design, never returned.
+        var projected = await PostSqlAsync("SELECT ssn FROM ledger", enforcing);
+        projected.Status.ShouldBe(HttpStatusCode.OK, projected.Body);
+        projected.Body.ShouldNotContain("111-11-1111");
+        using (var doc = JsonDocument.Parse(projected.Body))
         {
-            doc.RootElement.TryGetProperty(key, out _).ShouldBeFalse(key);
+            var ssn = doc.RootElement.GetProperty("columns").EnumerateArray().Single(c => c.GetProperty("name").GetString() == "ssn");
+            ssn.GetProperty("masked").GetBoolean().ShouldBeTrue(projected.Body);
+            var values = doc.RootElement.GetProperty("rows").EnumerateArray()
+                .SelectMany(r => r.ValueKind == JsonValueKind.Object ? r.EnumerateObject().Select(p => p.Value) : r.EnumerateArray())
+                .ToList();
+            values.ShouldNotBeEmpty(projected.Body);
+            values.ShouldAllBe(v => v.ValueKind == JsonValueKind.Null, projected.Body);
+        }
+
+        // Filter: a Deny column in a predicate is refused, and the refusal must not tell it apart from a column that does not exist.
+        // If these two ever differ, that is a distinguishability finding tracked by #1278.
+        var unknown = await PostSqlAsync("SELECT id FROM ledger WHERE nope = 'x'", enforcing);
+        var hidden = await PostSqlAsync("SELECT id FROM ledger WHERE ssn = 'x'", enforcing);
+
+        unknown.Status.ShouldBe(HttpStatusCode.Forbidden, unknown.Body);
+        hidden.Status.ShouldBe(unknown.Status, hidden.Body);
+        using (var doc = JsonDocument.Parse(unknown.Body))
+        {
+            doc.RootElement.GetProperty("code").GetString().ShouldBe("SQL_POLICY_DENIED");
+            foreach (var key in new[] { "line", "column", "hint", "columnName" })
+            {
+                doc.RootElement.TryGetProperty(key, out _).ShouldBeFalse(key);
+            }
+        }
+
+        WithoutTrace(hidden.Body).ShouldBe(WithoutTrace(unknown.Body));   // hidden equals non-existent: same code, no name, no position, no hint
+        foreach (var body in new[] { unknown.Body, hidden.Body })
+        {
+            body.ShouldNotContain("nope");
+            body.ShouldNotContain("ssn");
         }
     }
 }
