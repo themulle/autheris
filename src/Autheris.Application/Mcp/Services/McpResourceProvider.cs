@@ -33,13 +33,16 @@ public sealed class McpResourceProvider : IMcpResourceProvider
 
     private readonly IReadPathSwitches? _switches;
     private readonly TimeProvider _timeProvider;
+    private readonly Autheris.Application.Common.Quota.ICallerQueryLimitsService? _queryLimits;
 
     public McpResourceProvider(
         ICatalogDiscoveryService discovery,
         IApiDispatcherService dispatcher,
         IReadPathSwitches? switches = null,
-        TimeProvider? timeProvider = null)
+        TimeProvider? timeProvider = null,
+        Autheris.Application.Common.Quota.ICallerQueryLimitsService? queryLimits = null)
     {
+        _queryLimits = queryLimits;
         _discovery = discovery ?? throw new ArgumentNullException(nameof(discovery));
         _dispatcher = dispatcher ?? throw new ArgumentNullException(nameof(dispatcher));
         _switches = switches;
@@ -232,10 +235,32 @@ public sealed class McpResourceProvider : IMcpResourceProvider
 
         if (Is(uri, QueryGuideDocUri))
         {
-            return new McpResourceContent(uri, Markdown, await _dispatcher.GetQueryGuideDocumentationAsync(ct).ConfigureAwait(false));
+            var guide = await _dispatcher.GetQueryGuideDocumentationAsync(ct).ConfigureAwait(false);
+            return new McpResourceContent(uri, Markdown, guide + await CallerLimitsSectionAsync(session, ct).ConfigureAwait(false));
         }
 
         throw new McpResourceNotFoundException(uri);
+    }
+
+    /// <summary>The caller's own limits, or nothing when the session is anonymous or the limits cannot be resolved (never the installation defaults).</summary>
+    private async Task<string> CallerLimitsSectionAsync(McpSessionContext session, CancellationToken ct)
+    {
+        var sid = session.UserSid ?? session.ServicePrincipalId;
+        if (_queryLimits is null || string.IsNullOrWhiteSpace(sid) || string.Equals(sid, AnonymousMcpClientSid, StringComparison.OrdinalIgnoreCase))
+        {
+            return string.Empty;
+        }
+
+        try
+        {
+            var principal = McpProtocolHandler.BuildPrincipalFromSession(session, _timeProvider)!;
+            var limits = await _queryLimits.ResolveAsync(principal, apiKey: null, session.ClientIp, ct).ConfigureAwait(false);
+            return McpCallerLimitsGuideSection.Render(limits);
+        }
+        catch (Exception ex) when (ex is not OperationCanceledException)
+        {
+            return string.Empty;
+        }
     }
 
     private static bool Is(string uri, string expected) => string.Equals(uri, expected, StringComparison.OrdinalIgnoreCase);
