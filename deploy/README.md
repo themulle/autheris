@@ -174,10 +174,10 @@ Die Umgebung wurde speziell für **Podman** entwickelt und beachtet alle Eigenhe
 Der Lastgenerator bildet ein realistisches Anwendungsszenario ab:
 
 - **60 % Einfache paginierte Abfragen**:
-  - GraphQL-Query: `table(domain: "finance", name: "invoices", schema: "public", first: 10..50, after: 0..500)`.
+  - GraphQL-Query: `finance_public_invoices(first: 10..50, offset: 0..500)`.
   - Testet RLS-Pushdown (`WHERE department = 'Finance'`) und dynamisches Column-Masking (`email`, `iban`, `salary`).
 - **20 % Komplexe Abfragen & Relationen**:
-  - GraphQL-Query: `table(domain: "finance", name: "invoices", first: 5..15) { tableName, totalCount, jsonRows }` mit Column-Masking.
+  - GraphQL-Query: `finance_public_invoices(first: 5..15) { … }` mit Column-Masking.
   - Dynamische Katalogabfragen (`catalog { domain, schema, tableName, columns }`) mit Rollen-Filterung.
 - **10 % Mutationen & Idempotenz**:
   - Consent-Antragsflow (`requestTableAccess(...)`).

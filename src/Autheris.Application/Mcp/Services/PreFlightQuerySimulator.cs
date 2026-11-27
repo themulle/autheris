@@ -55,7 +55,7 @@ public sealed class PreFlightQuerySimulator(ILogger<PreFlightQuerySimulator> log
                 AppliedMaskingRules: [],
                 ActiveRlsFilters: [],
                 OptimizationRecommendations: [],
-                BlockReason: $"GraphQL-Syntaxfehler: {ex.Message}"
+                BlockReason: $"GraphQL syntax error: {ex.Message}"
             ));
         }
 
