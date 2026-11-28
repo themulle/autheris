@@ -312,6 +312,9 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
 
     private static List<int> Ids(List<JsonNode?[]> rows) => rows.Select(r => r[0]!.GetValue<int>()).OrderBy(x => x).ToList();
 
+    /// <summary>The ids in the order the database returned them (<see cref="Ids"/> sorts, which would hide an ORDER BY).</summary>
+    private static List<int> OrderedIds(List<JsonNode?[]> rows) => rows.Select(r => r[0]!.GetValue<int>()).ToList();
+
     private void RequireSpark()
     {
         // CR-ADG-11: the image presence is decided at discovery (skip with a reason, failure on CI). A present image whose proxy does
@@ -467,6 +470,19 @@ public sealed class AstCompilerDatabricksSparkExecutionTests : IClassFixture<Spa
         var rows = await RunAsync("SELECT id FROM orders WHERE (__param_r IS NULL OR region = __param_r)", "acme",
             new Dictionary<string, object?> { ["r"] = "EU" });
         Ids(rows).ShouldBe(new List<int> { 1, 6 });
+    }
+
+    [SparkTheory]
+    [InlineData("region", new[] { 1, 6, 2 })]
+    [InlineData("status", new[] { 6, 1, 2 })]
+    [InlineData("unknown", new[] { 1, 2, 6 })]
+    [InlineData(null, new[] { 1, 2, 6 })]
+    public async Task SelectableSort_OrdersByChosenKey(string? sort, int[] expected)
+    {
+        RequireSpark();
+        var rows = await RunAsync("SELECT id FROM orders ORDER BY CASE __param_sort WHEN 'region' THEN region END, CASE __param_sort WHEN 'status' THEN status END, id", "acme",
+            new Dictionary<string, object?> { ["sort"] = sort }, nulls: sort is null ? ClientNullShapes.Create(["sort"]) : null);
+        OrderedIds(rows).ShouldBe(expected.ToList());
     }
 
     [SparkFact]
