@@ -63,6 +63,7 @@ public sealed partial class McpToolExecutionHandler : IMcpToolExecutionHandler
     private readonly ILogger<McpToolExecutionHandler> _logger;
     private readonly TimeProvider _timeProvider;
     private readonly Autheris.Application.Common.Quota.IScopeQueryExecutionGuard _scopeGuard;
+    private readonly Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? _catalogVisibility;
 
     public McpToolExecutionHandler(
         IGovernedSqlExecutionService sqlExecutionService,
@@ -81,8 +82,10 @@ public sealed partial class McpToolExecutionHandler : IMcpToolExecutionHandler
         ILogger<McpToolExecutionHandler>? logger = null,
         TimeProvider? timeProvider = null,
         Autheris.Application.Catalog.Visibility.IContainerCatalogService? containerCatalog = null,
-        Autheris.Application.Common.Quota.IScopeQueryExecutionGuard? scopeGuard = null)
+        Autheris.Application.Common.Quota.IScopeQueryExecutionGuard? scopeGuard = null,
+        Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService? catalogVisibility = null)
     {
+        _catalogVisibility = catalogVisibility;
         _containerCatalog = containerCatalog;
         _scopeGuard = scopeGuard ?? Autheris.Application.Common.Quota.NullScopeQueryExecutionGuard.Instance;
         _catalogOwner = TenantResolver.EffectiveDefaultOf(gatewayOptions?.Value.Tenancy);
@@ -876,9 +879,10 @@ public sealed partial class McpToolExecutionHandler : IMcpToolExecutionHandler
         GovernedSqlPageResponse? Page,
         string? Next,
         string? PagingUnavailable,
-        IReadOnlyList<WebSqlIndexHint>? IndexHints)
+        IReadOnlyList<WebSqlIndexHint>? IndexHints,
+        IReadOnlyDictionary<string, object?>? DatasetFacts = null)
     {
-        public static McpSqlQueryResult From(GovernedSqlResult result) => new(
+        public static McpSqlQueryResult From(GovernedSqlResult result, IReadOnlyDictionary<string, object?>? datasetFacts = null) => new(
             OriginalSql: result.OriginalSql,
             Columns: result.Columns,
             Rows: result.Rows,
@@ -890,6 +894,7 @@ public sealed partial class McpToolExecutionHandler : IMcpToolExecutionHandler
             Page: result.Page,
             Next: result.Next,
             PagingUnavailable: result.PagingUnavailable,
-            IndexHints: result.IndexHints);
+            IndexHints: result.IndexHints,
+            DatasetFacts: datasetFacts);
     }
 }

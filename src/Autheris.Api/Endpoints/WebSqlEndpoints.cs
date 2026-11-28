@@ -31,7 +31,8 @@ public static partial class WebSqlEndpoints
         string? DataSource,
         WebSqlPageRequest? Page = null,
         string? Next = null,
-        string? ResultCache = null);
+        string? ResultCache = null,
+        bool? DatasetFacts = null);
 
     public static IEndpointRouteBuilder MapWebSqlEndpoints(this IEndpointRouteBuilder app, GatewayOptions? gatewayOptions = null)
     {

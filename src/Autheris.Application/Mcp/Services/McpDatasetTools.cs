@@ -324,6 +324,7 @@ public static class McpDatasetTools
                 "query": { "type": "string", "description": "SQL SELECT query to execute against the gateway." },
                 "limit": { "type": "integer", "minimum": 1, "description": "Optional maximum rows per page (capped server-side to Mcp:MaxResultRows)." },
                 "cursor": { "type": "string", "description": "Optional signed continuation cursor returned by a previous query_sql call." },
+                "datasetFacts": { "type": "boolean", "description": "Optional. true adds datasetFacts: per table the statement reads (only tables you can see) the dataset, its tags and rowFilterApplied (a row filter defined by the data owner or by consent applies to you; it does not mean all rows are returned, and tenant isolation, virtual and mandatory filters are not reported), and truncated (the result was cut by a governed limit)." },
                 "parameters": {
                   "type": ["object", "null"],
                   "description": "Optional named values bound to @name placeholders, as in POST /api/v1/sql: string, number, boolean or null; an array of scalars only as the single item of IN (@name) or NOT IN (@name). Values are bound, never inlined.",

@@ -409,6 +409,7 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
         var decidedTargets = new Dictionary<TableIdentity, TableAccessTarget>();
         var tablesWithoutRls = new HashSet<TableIdentity>();
         var accessedTables = new List<TableIdentifier>();
+        var datasetFacts = new List<Autheris.Application.Sql.Tree.DatasetAccessFacts>();
         var virtualFilters = new Dictionary<string, IReadOnlyList<string>>(StringComparer.OrdinalIgnoreCase);
         var callerAttributes = new Dictionary<string, IReadOnlyList<CallerAttributeAuditEntry>>(StringComparer.OrdinalIgnoreCase);
         var accessedTableSet = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
@@ -631,6 +632,11 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
                 (decision, writePermit, dmlMaxRowsCap) = await AuthorizeDmlTargetAsync(user, tenantId, tableMeta, target, metadata, clientIp, transport, ct).ConfigureAwait(false);
             }
 
+            if (!isDml)
+            {
+                datasetFacts.Add(Autheris.Application.Sql.Tree.DatasetAccessFacts.From(resolvedId, [], decision));
+            }
+
             if (decision.AppliedVirtualFilters is { Count: > 0 } applied)
             {
                 // One audit key per table: the resolved qualified name (the other spellings of the same table would only multiply the record).
@@ -834,6 +840,6 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
             : null;
 
         var maskedAudit = decisions.Values.SelectMany(d => d.MaskedColumnsAudit).ToList();
-        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, callerAttributes, metadata, pagingUnavailable, bindPageOffset, indexHints, dmlMaxRowsCap, maskedAudit, mvGuard.HiddenCountColumnAlias, mvGuard.EffectiveMinGroupSize);
+        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, callerAttributes, metadata, pagingUnavailable, bindPageOffset, indexHints, dmlMaxRowsCap, maskedAudit, mvGuard.HiddenCountColumnAlias, mvGuard.EffectiveMinGroupSize, datasetFacts);
     }
 }

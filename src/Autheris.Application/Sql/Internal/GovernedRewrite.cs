@@ -23,7 +23,8 @@ internal sealed record GovernedRewrite(
     long? WriteMaxRowsPerStatement = null,
     IReadOnlyList<Autheris.Domain.Interfaces.MaskedColumnAuditEntry>? MaskedColumnsAudit = null,
     string? MetricViewHiddenCountAlias = null,
-    int MetricViewMinGroupSize = 0);
+    int MetricViewMinGroupSize = 0,
+    IReadOnlyList<Autheris.Application.Sql.Tree.DatasetAccessFacts>? DatasetFacts = null);
 
 /// <summary>
 /// Collects the DML classification during governance so that executed AND rejected DML can be audited.
