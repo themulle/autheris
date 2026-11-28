@@ -41,6 +41,18 @@ public sealed class ParserCacheGateTests
     }
 
     [Fact]
+    public void ParserCache_DefaultLimit_AcceptsTheRecordedNightlyRatios_AndRejectsAClearRegression()
+    {
+        // Recorded nightly cold/warm P99 ratios on the CI runners ranged from 55x to 95.4x (2026-11-18 to 2026-11-27); the warm
+        // denominator moves with the runner CPU while the cold parse stays within 1.8 to 3.7 ms.
+        var thresholds = new BenchThresholds();
+
+        ParserCacheGate.Check([Healthy(55)], thresholds).Passed.ShouldBeTrue();
+        ParserCacheGate.Check([Healthy(95.4)], thresholds).Passed.ShouldBeTrue();
+        ParserCacheGate.Check([Healthy(200)], thresholds).Violations.ShouldContain(v => v.Rule == "cold-warm-ratio-p99");
+    }
+
+    [Fact]
     public void ParserCache_ReportMissing_MissingData()
     {
         var verdict = ParserCacheGate.Check([], new BenchThresholds());
