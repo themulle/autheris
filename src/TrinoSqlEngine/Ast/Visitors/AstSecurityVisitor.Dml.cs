@@ -37,8 +37,40 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
 
     public override SqlNode VisitInsertStatement(InsertStatement node) => SecureInsertTyped(node);
 
+    /// <summary>
+    /// A client parameter tested with <c>IS NULL</c> inside an UPDATE/DELETE WHERE clause is the optional filter shape
+    /// <c>(@p IS NULL OR X)</c>: a NULL value collapses the predicate to always true and widens the statement to every row up to
+    /// the row cap. The refusal never depends on parameter values, so it applies to every client parameter, bounded or not.
+    /// </summary>
+    private static void RejectOptionalClientFilter(Expression? where, string operation)
+    {
+        if (where is null) return;
+
+        bool found = false;
+        AstReflection.Walk(where, node =>
+        {
+            if (node is UnaryExpression
+                {
+                    Operator: UnaryOperator.IsNull,
+                    Operand: ParameterReference { IsSynthetic: true, PositionalIndex: null } reference
+                } && reference.ListCount is null)
+            {
+                found = true;
+                return false;
+            }
+
+            return !found;
+        });
+
+        if (found)
+        {
+            throw new UnfilteredDmlException($"{operation} does not permit an optional filter on a client parameter (IS NULL); a NULL value would match every row.");
+        }
+    }
+
     private void EnsureFilteredDml(Expression? where, string operation)
     {
+        RejectOptionalClientFilter(where, operation);
         if (!_options.RejectUnfilteredDml) return;
 
         if (where == null)
