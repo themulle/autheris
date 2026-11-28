@@ -15,6 +15,7 @@ using Autheris.Application.Common.Quota;
 using Autheris.Application.Security;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Internal;
+using Autheris.Application.Sql.Paging;
 using Autheris.Application.Sql.Policy;
 using Autheris.Application.Sql.ResultCache;
 using Autheris.Domain.Common;
@@ -145,6 +146,11 @@ public sealed partial class GovernedSqlExecutor
     {
         string dsName = rewrite.DataSourceName;
         var paged = request.Page is not null;
+        if (rewrite.KeysetPage)
+        {
+            return Ineligible(plan, dsName, WebSqlResultCacheReasons.KeysetPage);
+        }
+
         if (paged && (rewrite.PagingUnavailable is not null || !rewrite.BindPageOffset || request.Page!.Offset > int.MaxValue))
         {
             return Ineligible(plan, dsName, WebSqlResultCacheReasons.PagingUnavailable);
@@ -417,6 +423,7 @@ public sealed partial class GovernedSqlExecutor
         ClaimsPrincipal user,
         TenantId tenantId,
         GovernedRewrite rewrite,
+        GovernedRewrite pageRewrite,
         ResultCachePlan? plan,
         ResultCacheFill? fill,
         Func<DbDataReader, GovernedResultInfo, CancellationToken, Task> rowWriter,
@@ -435,8 +442,9 @@ public sealed partial class GovernedSqlExecutor
             using var reader = plan.Paged
                 ? new CachedResultDataReader(hit.Result, plan.Offset, plan.WindowSize)
                 : new CachedResultDataReader(hit.Result);
-            await rowWriter(reader, hit.Result.Info, ct).ConfigureAwait(false);
-            NotifyPageOutcome(request, user, tenantId, rewrite, reader.HasMoreRows);
+            var capture = KeysetCaptureFor(request, pageRewrite, reader);
+            await rowWriter(capture ?? (DbDataReader)reader, hit.Result.Info, ct).ConfigureAwait(false);
+            NotifyPageOutcome(request, user, tenantId, rewrite, reader.HasMoreRows, capture);
             return true;
         }
         finally

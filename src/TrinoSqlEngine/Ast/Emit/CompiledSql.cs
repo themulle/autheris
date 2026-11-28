@@ -7,7 +7,7 @@ using TrinoSqlEngine.Ast.Nodes;
 using TrinoSqlEngine.Governance;
 
 /// <summary>Origin of a bound value (plan 4.2). It decides how the binder and the plan cache treat the value.</summary>
-public enum ParameterOrigin { ClientNamed, ClientPositional, QueryLiteral, Tenant, Policy, Mask, PageOffset }
+public enum ParameterOrigin { ClientNamed, ClientPositional, QueryLiteral, Tenant, Policy, Mask, PageOffset, KeysetSeek }
 
 /// <summary>The value family a client bind must conform to because the statement compares it with a typed column under a row policy (checked by the binder).</summary>
 public enum BindFamily { Numeric, Temporal, Boolean, Text }
@@ -58,6 +58,12 @@ public sealed record CompiledSql(
     /// Output column mask flags for each root output column of a SELECT query.
     /// </summary>
     public ImmutableArray<bool> OutputColumnMasks { get; internal init; } = ImmutableArray<bool>.Empty;
+
+    /// <summary>The keyset shape of an eligible paged read (<see cref="CompileRequest.Keyset"/> was set); null otherwise.</summary>
+    public KeysetKeyInfo? KeysetKey { get; internal init; }
+
+    /// <summary>Why a statement with a <see cref="CompileRequest.Keyset"/> candidate is not keyset-eligible (a <see cref="KeysetUnavailableReasons"/> value), else null.</summary>
+    public string? KeysetUnavailable { get; internal init; }
 
     /// <summary>
     /// Issue #277: true when the emitted statement contains a recursive WITH definition. The cache keeps it, so a template hit

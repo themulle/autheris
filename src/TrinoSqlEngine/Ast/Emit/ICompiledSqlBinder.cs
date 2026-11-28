@@ -247,6 +247,10 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
             {
                 throw new SecurityException("A PageOffset slot requires a server-issued bound value.");
             }
+            else if (bound.Origin == ParameterOrigin.KeysetSeek && value is null)
+            {
+                throw new SecurityException("A KeysetSeek slot requires a server-issued bound value.");
+            }
 
             if (bound.RequiredFamily is { } family && bound.Origin == ParameterOrigin.ClientNamed
                 && !CompilerHooks.IsDisabled(SecurityControl.RowPolicyExpressionAllowlist))
@@ -281,7 +285,7 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
 
             // CR-ADG-09: tenant and policy values follow the catalog type of the column they are compared with.
             // The PostgreSQL style (server-inferred type) is for user literals only.
-            var style = ColumnStyle == ColumnBindStyle.PostgreSql && bound.Origin != ParameterOrigin.QueryLiteral ? ColumnBindStyle.None : ColumnStyle;
+            var style = ColumnStyle == ColumnBindStyle.PostgreSql && bound.Origin is not (ParameterOrigin.QueryLiteral or ParameterOrigin.KeysetSeek) ? ColumnBindStyle.None : ColumnStyle;
             var adapted = ColumnBindAdapter.Adapt(style, type, value, bound.ColumnType);
             Configure(parameter, adapted.Type, adapted.Value);
             if (adapted.AnsiString)
@@ -332,7 +336,7 @@ public abstract class DbCommandCompiledSqlBinder : ICompiledSqlBinder
         return zones;
     }
 
-    private static SqlParameterType InferType(object? value) => value switch
+    internal static SqlParameterType InferType(object? value) => value switch
     {
         null or DBNull => SqlParameterType.Null,
         string => SqlParameterType.String,

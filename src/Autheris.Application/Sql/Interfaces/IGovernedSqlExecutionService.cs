@@ -117,6 +117,9 @@ public sealed record GovernedSqlQueryRequest(
     internal ResultByteBudget? ResultByteBudget { get; init; }
 
     internal Autheris.Application.Common.Quota.QueryCostAdmission? Admission { get; init; }
+    /// <summary>The verified keyset continuation decoded from <see cref="NextToken"/> (internal; never bound from client input).</summary>
+    internal Autheris.Application.Sql.Paging.WebSqlKeysetContinuation? Keyset { get; init; }
+
     public Action<Autheris.Application.Usage.SourceExecutionStats>? OnSourceStats { get; init; }
     public int? PageOffset { get; init; }
     public bool IsPaged { get; init; }

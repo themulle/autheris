@@ -84,6 +84,7 @@ public sealed partial class McpQuerySqlPagingTests
             new TableColumn { ColumnName = "name", DataType = "varchar" },
             new TableColumn { ColumnName = "email", DataType = "varchar" }
         ],
+        PrimaryKeyColumns = ["id"],
         ColumnMaskingRules = new Dictionary<string, MaskingRule>(StringComparer.OrdinalIgnoreCase)
         {
             ["email"] = new MaskingRule { RuleType = "REDACT" }
@@ -97,7 +98,7 @@ public sealed partial class McpQuerySqlPagingTests
         bool withDemoSource = false,
         List<IReadOnlyList<object?>>? boundValues = null,
         List<CapturingSqlService>? capture = null,
-        int maxOffset = 10_000,
+        long maxOffset = 10_000,
         Action<IGovernedSqlExecutionService>? captureService = null,
         Action<WebSqlPageTokenCodec>? captureCodec = null)
     {
@@ -289,6 +290,73 @@ public sealed partial class McpQuerySqlPagingTests
         seenIds.ShouldBe([1, 2, 3, 4, 5]);
     }
 
+    private static async Task<(JsonElement Root, JsonDocument Doc)> QueryPageAsync(McpToolExecutionHandler handler, McpSessionContext session, string sql, string? cursor)
+    {
+        string argsJson = cursor is null
+            ? JsonSerializer.Serialize(new { query = sql })
+            : JsonSerializer.Serialize(new { query = sql, cursor });
+        var doc = JsonDocument.Parse(await handler.ExecuteToolAsync(QuerySqlTool, argsJson, session));
+        return (doc.RootElement, doc);
+    }
+
+    [Fact]
+    public async Task QuerySql_CursorContinuesBeyondMaxOffset()
+    {
+        var (handler, _, executedSql) = CreatePipeline(maxResultRows: 2, maxOffset: 2);
+        var session = CreateSession();
+        const string sql = "SELECT id, name FROM sales.public.orders ORDER BY id";
+
+        var seenIds = new List<int>();
+        string? cursor = null;
+        var pages = 0;
+        do
+        {
+            pages++;
+            var (root, doc) = await QueryPageAsync(handler, session, sql, cursor);
+            using (doc)
+            {
+                seenIds.AddRange(root.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("id").GetInt32()));
+                cursor = root.TryGetProperty("cursor", out var c) ? c.GetString() : null;
+                if (pages == 3)
+                {
+                    root.GetProperty("hasMore").GetBoolean().ShouldBeFalse();
+                }
+            }
+        }
+        while (cursor is not null && pages < 10);
+
+        pages.ShouldBe(3);
+        seenIds.ShouldBe([1, 2, 3, 4, 5]);
+        executedSql[^1].ShouldNotContain("OFFSET", Case.Insensitive);
+    }
+
+    [Fact]
+    public async Task Cursor_TamperedKeyset_InvalidParams()
+    {
+        var (handler, _, _) = CreatePipeline(maxResultRows: 2, maxOffset: 2);
+        var session = CreateSession();
+        const string sql = "SELECT id, name FROM sales.public.orders ORDER BY id";
+
+        var (first, firstDoc) = await QueryPageAsync(handler, session, sql, null);
+        string page2Cursor;
+        using (firstDoc)
+        {
+            page2Cursor = first.GetProperty("cursor").GetString()!;
+        }
+
+        var (second, secondDoc) = await QueryPageAsync(handler, session, sql, page2Cursor);
+        string keysetCursor;
+        using (secondDoc)
+        {
+            keysetCursor = second.GetProperty("cursor").GetString()!;
+        }
+
+        var mid = keysetCursor.Length / 2;
+        var tampered = keysetCursor[..mid] + (keysetCursor[mid] == 'A' ? 'B' : 'A') + keysetCursor[(mid + 1)..];
+
+        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor = tampered }), session));
+    }
+
     [Theory]
     [Trait("Category", "Security")]
     [InlineData("SELECT id, name, email FROM sales.public.orders ORDER BY id", true)]
@@ -388,12 +456,42 @@ public sealed partial class McpQuerySqlPagingTests
 
         // Malformed inputs
         AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor = "" }), ownerSession));
-        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor = new string('x', 513) }), ownerSession));
+        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor = new string('x', 1025) }), ownerSession));
         AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, """{"query":"SELECT id, name FROM sales.public.orders ORDER BY id","cursor":123}""", ownerSession));
 
         // Expired token
         time.Advance(TimeSpan.FromMinutes(16));
         AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor }), ownerSession));
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Cursor_Between512And1024_ReachesTokenVerification()
+    {
+        var (handler, _, _) = CreatePipeline(maxResultRows: 2);
+        var session = CreateSession("S-1-5-21-1055-OWNER", "tenant-1");
+        const string sql = "SELECT id, name FROM sales.public.orders ORDER BY id";
+
+        foreach (int length in new[] { 513, 600, 1024 })
+        {
+            var json = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor = new string('x', length) }), session);
+            using var doc = JsonDocument.Parse(json);
+            doc.RootElement.GetProperty("error").GetProperty("code").GetString().ShouldBe("INVALID_PARAMS");
+            // The error envelope reports every invalid-params cause alike, so the code is all that is observable here.
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task Cursor_Over1024_InvalidParams()
+    {
+        var (handler, _, _) = CreatePipeline(maxResultRows: 2);
+        var session = CreateSession("S-1-5-21-1055-OWNER", "tenant-1");
+        const string sql = "SELECT id, name FROM sales.public.orders ORDER BY id";
+
+        var json = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor = new string('x', 1025) }), session);
+        using var doc = JsonDocument.Parse(json);
+        doc.RootElement.GetProperty("error").GetProperty("code").GetString().ShouldBe("INVALID_PARAMS");
     }
 
     [Fact]
@@ -675,7 +773,17 @@ public sealed partial class McpQuerySqlPagingTests
 
         public override string GetString(int ordinal) => Convert.ToString(rows[_index][ordinal], CultureInfo.InvariantCulture) ?? string.Empty;
         public override object GetValue(int ordinal) => rows[_index][ordinal] ?? DBNull.Value;
-        public override int GetValues(object[] values) => 0;
+        public override int GetValues(object[] values)
+        {
+            var count = Math.Min(values.Length, columns.Count);
+            for (var i = 0; i < count; i++)
+            {
+                values[i] = rows[_index][i] ?? DBNull.Value;
+            }
+
+            return count;
+        }
+
         public override bool IsDBNull(int ordinal) => rows[_index][ordinal] is null or DBNull;
         public override bool NextResult() => false;
         public override bool Read() => ++_index < rows.Count;

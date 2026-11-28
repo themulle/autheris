@@ -64,6 +64,7 @@ public class SqlAstRewriter : ISqlAstVisitor<SqlNode>
             ColumnReference cr => VisitColumnReference(cr),
             ParameterReference p => VisitParameterReference(p),
             PolicyParameterExpression policyParameter => policyParameter,
+            KeysetSeekParameterExpression keysetSeek => keysetSeek,
             // INV-3: injected security predicates are opaque; a rewriter never descends into them.
             SecurityPredicateExpression securityPredicate => securityPredicate,
             MaskExpression mask => mask,

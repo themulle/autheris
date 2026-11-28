@@ -234,6 +234,12 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             expr = p.Expression;
         }
 
+        // A keyset seek is a continuation of the page, not a filter the caller chose: it never satisfies a required filter column.
+        if (expr is not BinaryExpression { Operator: BinaryOperator.And } && KeysetSeekInjector.ContainsSeek(expr))
+        {
+            return false;
+        }
+
         switch (expr)
         {
             case BinaryExpression b when b.Operator == BinaryOperator.And:

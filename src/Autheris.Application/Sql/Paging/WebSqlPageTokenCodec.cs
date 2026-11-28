@@ -4,6 +4,7 @@ using System;
 using System.Buffers.Binary;
 using System.Buffers.Text;
 using System.Collections.Generic;
+using System.Collections.Immutable;
 using System.IO;
 using System.Security.Claims;
 using System.Security.Cryptography;
@@ -19,12 +20,17 @@ public sealed record WebSqlPageTokenPayload(
     [property: JsonPropertyName("o")] long o,
     [property: JsonPropertyName("n")] int n,
     [property: JsonPropertyName("p")] int p,
-    [property: JsonPropertyName("exp")] long exp);
+    [property: JsonPropertyName("exp")] long exp,
+    [property: JsonPropertyName("h"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string? h = null,
+    [property: JsonPropertyName("k"), JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)] string[]? k = null);
+
+public sealed record WebSqlKeysetContinuation(string ShapeHash, ImmutableArray<object> Values);
 
 public sealed record WebSqlDecodedPageToken(
     long Offset,
     int Size,
-    int PageNumber);
+    int PageNumber,
+    WebSqlKeysetContinuation? Keyset = null);
 
 public interface IWebSqlPageTokenCodec
 {
@@ -40,6 +46,24 @@ public interface IWebSqlPageTokenCodec
         int pageNumber,
         TimeSpan lifetime);
 
+    /// <summary>
+    /// Issues a keyset continuation token, or returns null when the key values cannot be represented
+    /// (null or unsupported type, wrong count) or the token would exceed <see cref="WebSqlPageTokenCodec.MaxTokenLength"/>.
+    /// </summary>
+    string? EncodeKeysetToken(
+        string sql,
+        IReadOnlyDictionary<string, object?>? parameters,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        string resolvedDataSource,
+        string transport,
+        long logicalOffset,
+        int size,
+        int pageNumber,
+        string shapeHash,
+        IReadOnlyList<object?> keyValues,
+        TimeSpan lifetime);
+
     WebSqlDecodedPageToken DecodeToken(
         string token,
         string sql,
@@ -53,6 +77,10 @@ public interface IWebSqlPageTokenCodec
 
 public sealed class WebSqlPageTokenCodec : IWebSqlPageTokenCodec
 {
+    public const int MaxTokenLength = 1024;
+    public const int MaxKeyValues = 8;
+    public const int MaxPageSize = 100_000;
+    public const int ShapeHashLength = 16;
     public const string HkdfInfo = "autheris/websql-page-token/v1";
     private static readonly byte[] MacLabel = "autheris-wsql-page/v1"u8.ToArray();
 
@@ -90,14 +118,91 @@ public sealed class WebSqlPageTokenCodec : IWebSqlPageTokenCodec
 
         long exp = _timeProvider.GetUtcNow().Add(lifetime).ToUnixTimeSeconds();
         var payloadObj = new WebSqlPageTokenPayload(1, offset, size, pageNumber, exp);
-        byte[] payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payloadObj);
+        return Seal(payloadObj, sql, parameters, userSid, tenantId.Value, resolvedDataSource, transport);
+    }
 
-        byte[] mac = ComputeMac(payloadBytes, sql, parameters, userSid, tenantId.Value, resolvedDataSource, transport);
+    public string? EncodeKeysetToken(
+        string sql,
+        IReadOnlyDictionary<string, object?>? parameters,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        string resolvedDataSource,
+        string transport,
+        long logicalOffset,
+        int size,
+        int pageNumber,
+        string shapeHash,
+        IReadOnlyList<object?> keyValues,
+        TimeSpan lifetime)
+    {
+        ArgumentNullException.ThrowIfNull(sql);
+        ArgumentNullException.ThrowIfNull(user);
+        ArgumentNullException.ThrowIfNull(resolvedDataSource);
+        ArgumentNullException.ThrowIfNull(transport);
+        ArgumentNullException.ThrowIfNull(shapeHash);
+        ArgumentNullException.ThrowIfNull(keyValues);
 
-        string payloadB64 = Base64Url.EncodeToString(payloadBytes);
-        string macB64 = Base64Url.EncodeToString(mac);
+        var userSid = user.GetUserSid()?.Value;
+        if (string.IsNullOrWhiteSpace(userSid))
+        {
+            throw new InvalidOperationException("Principal has no SID; caller is not bindable for paging tokens.");
+        }
 
-        return $"{payloadB64}.{macB64}";
+        if (keyValues.Count is < 1 or > MaxKeyValues
+            || !IsShapeHash(shapeHash)
+            || size <= 0 || size > MaxPageSize
+            || pageNumber <= 0
+            || logicalOffset < 0
+            || pageNumber != (logicalOffset / size) + 1)
+        {
+            return null;
+        }
+
+        var encodedKeys = new string[keyValues.Count];
+        for (int i = 0; i < encodedKeys.Length; i++)
+        {
+            if (!WebSqlKeysetValueCodec.TryEncode(keyValues[i], out encodedKeys[i]!))
+            {
+                return null;
+            }
+        }
+
+        long exp = _timeProvider.GetUtcNow().Add(lifetime).ToUnixTimeSeconds();
+        var payloadObj = new WebSqlPageTokenPayload(2, logicalOffset, size, pageNumber, exp, shapeHash, encodedKeys);
+        string token = Seal(payloadObj, sql, parameters, userSid, tenantId.Value, resolvedDataSource, transport);
+        return token.Length > MaxTokenLength ? null : token;
+    }
+
+    internal string Seal(
+        WebSqlPageTokenPayload payload,
+        string sql,
+        IReadOnlyDictionary<string, object?>? parameters,
+        string userSid,
+        string tenantId,
+        string resolvedDataSource,
+        string transport)
+    {
+        byte[] payloadBytes = JsonSerializer.SerializeToUtf8Bytes(payload);
+        byte[] mac = ComputeMac(payloadBytes, sql, parameters, userSid, tenantId, resolvedDataSource, transport);
+        return $"{Base64Url.EncodeToString(payloadBytes)}.{Base64Url.EncodeToString(mac)}";
+    }
+
+    private static bool IsShapeHash(string value)
+    {
+        if (value.Length != ShapeHashLength)
+        {
+            return false;
+        }
+
+        foreach (char c in value)
+        {
+            if (!char.IsAsciiHexDigit(c))
+            {
+                return false;
+            }
+        }
+
+        return true;
     }
 
     public WebSqlDecodedPageToken DecodeToken(
@@ -110,7 +215,7 @@ public sealed class WebSqlPageTokenCodec : IWebSqlPageTokenCodec
         string transport,
         long maxOffset)
     {
-        if (string.IsNullOrWhiteSpace(token) || token.Length > 512)
+        if (string.IsNullOrWhiteSpace(token) || token.Length > MaxTokenLength)
         {
             throw new SqlPagingTokenInvalidException();
         }
@@ -158,7 +263,7 @@ public sealed class WebSqlPageTokenCodec : IWebSqlPageTokenCodec
             throw new SqlPagingTokenInvalidException();
         }
 
-        if (payload == null || payload.v != 1)
+        if (payload == null || payload.v is not (1 or 2))
         {
             throw new SqlPagingTokenInvalidException();
         }
@@ -169,12 +274,46 @@ public sealed class WebSqlPageTokenCodec : IWebSqlPageTokenCodec
             throw new SqlPagingTokenInvalidException();
         }
 
-        if (payload.o < 0 || payload.o > maxOffset || payload.n <= 0 || payload.p <= 0 || payload.p != (payload.o / payload.n) + 1)
+        if (payload.o < 0 || payload.n <= 0 || payload.n > MaxPageSize || payload.p <= 0
+            || payload.p != (payload.o / payload.n) + 1)
         {
             throw new SqlPagingTokenInvalidException();
         }
 
-        return new WebSqlDecodedPageToken(payload.o, payload.n, payload.p);
+        if (payload.v == 1)
+        {
+            if (payload.k is not null || payload.h is not null || payload.o > maxOffset)
+            {
+                throw new SqlPagingTokenInvalidException();
+            }
+
+            return new WebSqlDecodedPageToken(payload.o, payload.n, payload.p);
+        }
+
+        // Keyset continuations only exist beyond the offset window.
+        if (payload.o <= maxOffset
+            || payload.h is null || !IsShapeHash(payload.h)
+            || payload.k is null || payload.k.Length is < 1 or > MaxKeyValues)
+        {
+            throw new SqlPagingTokenInvalidException();
+        }
+
+        var values = ImmutableArray.CreateBuilder<object>(payload.k.Length);
+        foreach (string entry in payload.k)
+        {
+            if (!WebSqlKeysetValueCodec.TryDecode(entry, out var value))
+            {
+                throw new SqlPagingTokenInvalidException();
+            }
+
+            values.Add(value);
+        }
+
+        return new WebSqlDecodedPageToken(
+            payload.o,
+            payload.n,
+            payload.p,
+            new WebSqlKeysetContinuation(payload.h, values.MoveToImmutable()));
     }
 
     private byte[] ComputeMac(

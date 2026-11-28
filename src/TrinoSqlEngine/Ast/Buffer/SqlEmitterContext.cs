@@ -229,6 +229,26 @@ public sealed class SqlEmitterContext
             sourceName: null);
     }
 
+    /// <summary>
+    /// Binds a keyset continuation slot. The value is supplied at rebind time and never emitted as text, so there is no literal fallback:
+    /// an unbound context fails closed.
+    /// </summary>
+    public string BindKeysetValue(int index, SqlParameterType type, string? columnType)
+    {
+        if (!IsBound)
+        {
+            throw new SecurityException("A keyset seek value requires a bound emitter context.");
+        }
+
+        return Bind(
+            new DedupKey(DedupKind.Value, (int)type, (int)ParameterOrigin.KeysetSeek, null, columnType, index, null),
+            value: null,
+            type: type,
+            origin: ParameterOrigin.KeysetSeek,
+            sourceName: $"keyset:{index}",
+            columnType: columnType);
+    }
+
     private static void ValidateClientParameter(ParameterReference parameter)
     {
         ArgumentNullException.ThrowIfNull(parameter);

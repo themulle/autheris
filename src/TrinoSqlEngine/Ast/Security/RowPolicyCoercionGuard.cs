@@ -136,7 +136,7 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog, bool evaluat
                 };
             case TypedLiteralExpression or CurrentDateTimeExpression or DateFunctionExpression: return Fam.Temporal;
             case ParameterReference or NamedBindMarkerExpression: return Fam.Bind;
-            case IntervalLiteralExpression or PolicyParameterExpression or PageOffsetParameterExpression: return Fam.Any;
+            case IntervalLiteralExpression or PolicyParameterExpression or PageOffsetParameterExpression or KeysetSeekParameterExpression: return Fam.Any;
             case ScalarSubqueryExpression scalar: return FirstFamily(scalar.Subquery);
             case BinaryExpression b:
                 return b.Operator switch

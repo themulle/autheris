@@ -30,9 +30,6 @@ internal readonly record struct McpRowShorteningOutcome(McpRowShorteningStatus S
 /// </summary>
 internal static class McpRowShortening
 {
-    /// <summary>Longest continuation token the codec accepts; a longer offer is ignored.</summary>
-    private const int MaxCursorLength = 512;
-
     private static readonly JsonSerializerOptions Relaxed = new() { Encoder = JavaScriptEncoder.UnsafeRelaxedJsonEscaping };
 
     public static bool AppliesTo(string toolName) => RowsProperty(toolName) is not null;
@@ -102,7 +99,7 @@ internal static class McpRowShortening
             }
 
             mints++;
-            return resume(rows) is { Length: > 0 and <= MaxCursorLength } token ? token : null;
+            return resume(rows) is { Length: > 0 and <= Autheris.Application.Sql.Paging.WebSqlPageTokenCodec.MaxTokenLength } token ? token : null;
         }
 
         var cursor = Mint(kept);

@@ -420,6 +420,7 @@ public class CompileApiTests
             [nameof(CompileRequest.AllowRecursiveCte)] = baseRequest with { AllowRecursiveCte = true },
             [nameof(CompileRequest.MaxRecursionDepth)] = baseRequest with { MaxRecursionDepth = 7 },
             [nameof(CompileRequest.BindPageOffset)] = baseRequest with { BindPageOffset = true },
+            [nameof(CompileRequest.Keyset)] = baseRequest with { Keyset = new KeysetCandidate(ImmutableArray.Create("id")) },
             [nameof(CompileRequest.GatewayLikePatternParameters)] = baseRequest with { GatewayLikePatternParameters = new HashSet<string> { "gw_tf_0" } }
         };
 

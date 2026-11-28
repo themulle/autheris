@@ -8,6 +8,7 @@ using TrinoSqlEngine.Ast.Emit;
 /// <param name="Compiled">The only SQL text that may reach a command: the output of <c>ISqlEngine.Compile</c>, every value bound.</param>
 /// <param name="DeliveredRowLimit">Rows handed to the caller; the statement reads one more as probe (0 = no probe).</param>
 /// <param name="VirtualFilters">Virtual filters applied per referenced table (audit).</param>
+/// <param name="KeysetPage">The page continues a keyset token: its statement carries seek slots and no page offset slot.</param>
 /// <param name="CallerAttributes">129 (BC-129-15): the caller attributes resolved per referenced table (audit only: ids, outcomes, reason codes).</param>
 internal sealed record GovernedRewrite(
     CompiledSql Compiled,
@@ -23,7 +24,8 @@ internal sealed record GovernedRewrite(
     long? WriteMaxRowsPerStatement = null,
     IReadOnlyList<Autheris.Domain.Interfaces.MaskedColumnAuditEntry>? MaskedColumnsAudit = null,
     string? MetricViewHiddenCountAlias = null,
-    int MetricViewMinGroupSize = 0);
+    int MetricViewMinGroupSize = 0,
+    bool KeysetPage = false);
 
 /// <summary>
 /// Collects the DML classification during governance so that executed AND rejected DML can be audited.

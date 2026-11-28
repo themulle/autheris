@@ -36,6 +36,7 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
     private static readonly TableIdentifier Ledger = new("default", "main", "mcp_ledger");
     private static readonly TableIdentifier Vault = new("default", "main", "mcp_vault");
     private static readonly TableIdentifier KeyVault = new("default", "main", "mcp_keyvault");
+    private static readonly TableIdentifier PagedLedger = new("default", "main", "mcp_paged_ledger");
 
     private readonly WebApplicationFactory<Program> _factory;
 
@@ -62,6 +63,8 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
                 INSERT INTO mcp_ledger VALUES ('rent',10),('fuel',20),('tolls',30);
                 CREATE TABLE mcp_keyvault (id INTEGER PRIMARY KEY, label TEXT NOT NULL);
                 INSERT INTO mcp_keyvault VALUES (1,'alpha'),(2,'beta'),(3,'gamma');
+                CREATE TABLE mcp_paged_ledger (id INTEGER PRIMARY KEY, label TEXT NOT NULL);
+                INSERT INTO mcp_paged_ledger SELECT g, 'entry-' || g FROM generate_series(1, 75) g;
                 """);
         }
 
@@ -83,6 +86,7 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
             // The described list, aggregate and connection queries are priced per requested row; the Standard tier default budget is too small for them.
             builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxTokensCapacity", "10000");
             builder.UseSetting("Gateway:RateLimiting:ClientTiers:TierLimits:Standard:MaxCostPerQuery", "10000");
+            builder.UseSetting("Gateway:WebSql:Paging:MaxOffset", "20");
         }
 
         protected override void Dispose(bool disposing)
@@ -166,6 +170,42 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
                 new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear },
                 new ConsentColumnRule { ColumnName = "label", AccessLevel = ColumnAccessLevel.Clear },
                 new ConsentColumnRule { ColumnName = "secret", AccessLevel = ColumnAccessLevel.Mask }
+            ]
+        });
+    }
+
+    private async Task SeedPagedLedgerAsync()
+    {
+        using var scope = _factory.Services.CreateScope();
+        var repo = scope.ServiceProvider.GetRequiredService<IGovernanceRepository>();
+        await repo.UpsertTableMetadataAsync(new TableMetadata
+        {
+            Table = new Table { Id = Guid.NewGuid(), DisplayName = "mcp_paged_ledger", TableName = "mcp_paged_ledger", SchemaName = "main", SourceType = "PostgreSql", SourceName = "default", Description = "Paged ledger" },
+            Identifier = PagedLedger,
+            PrimaryKeyColumns = ["id"],
+            ReplaceKeyDefinition = true,
+            Columns = new List<TableColumn>
+            {
+                new() { ColumnName = "id", DataType = "integer", Description = "Key" },
+                new() { ColumnName = "label", DataType = "varchar", Description = "Label" },
+            }
+        });
+
+        var meta = await repo.GetTableMetadataAsync(PagedLedger);
+        await repo.CreateConsentAsync(new Consent
+        {
+            TableId = meta!.Table.Id,
+            TableIdentifier = PagedLedger,
+            TenantId = new TenantId(Tenant),
+            Effect = ConsentEffect.Allow,
+            GranteeType = GranteeType.User,
+            GranteeSid = new Sid(UserSid),
+            ValidFrom = DateTimeOffset.UtcNow.AddDays(-1),
+            ValidTo = DateTimeOffset.UtcNow.AddDays(1),
+            ColumnRules =
+            [
+                new ConsentColumnRule { ColumnName = "id", AccessLevel = ColumnAccessLevel.Clear },
+                new ConsentColumnRule { ColumnName = "label", AccessLevel = ColumnAccessLevel.Clear }
             ]
         });
     }
@@ -610,5 +650,30 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
         Shape(denied).ShouldBe(Shape(ledger.GetProperty("graphQl").GetProperty("connection")));
         Shape(denied).ShouldBe("False|no_usable_key|False");
         cranes.ToString().ShouldNotContain("owner_email");
+    }
+
+    [Fact]
+    public async Task QuerySql_CursorReadsBeyondMaxOffset()
+    {
+        await SeedPagedLedgerAsync();
+        var client = Client();
+        const string sql = "SELECT id, label FROM default.main.mcp_paged_ledger ORDER BY id";
+
+        var ids = new List<int>();
+        string? cursor = null;
+        var calls = 0;
+        do
+        {
+            object args = cursor is null ? new { query = sql, limit = 10 } : new { query = sql, limit = 10, cursor };
+            var (isError, payload) = await CallAsync(client, "query_sql", args);
+            isError.ShouldBeFalse(payload.ToString());
+            ids.AddRange(payload.GetProperty("rows").EnumerateArray().Select(r => r.ValueKind == JsonValueKind.Array ? r[0].GetInt32() : r.GetProperty("id").GetInt32()));
+            cursor = payload.TryGetProperty("cursor", out var c) && c.ValueKind == JsonValueKind.String ? c.GetString() : null;
+            calls++;
+        }
+        while (cursor != null && calls < 20);
+
+        calls.ShouldBe(8);
+        ids.ShouldBe(Enumerable.Range(1, 75).ToList());
     }
 }

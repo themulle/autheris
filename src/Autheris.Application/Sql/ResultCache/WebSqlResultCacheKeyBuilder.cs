@@ -219,6 +219,7 @@ public static class WebSqlResultCacheKeyBuilder
                     && writer.Value(clientValue);
             case ParameterOrigin.ClientPositional:
             case ParameterOrigin.PageOffset:
+            case ParameterOrigin.KeysetSeek:
                 return false;
             default:
                 return writer.Value(p.Value);

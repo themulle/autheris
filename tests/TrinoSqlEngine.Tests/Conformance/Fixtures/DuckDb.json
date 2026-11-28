@@ -7579,6 +7579,21 @@
       ]
     },
     {
+      "Id": "ast-017",
+      "Group": "ast",
+      "Sql": "@keyset-seek",
+      "Outcome": "ok",
+      "Expected": "SELECT \"a\" AS \"r\" FROM \"s\".\"t\" WHERE \"id\" > $1",
+      "Parameters": [
+        {
+          "Marker": "$1",
+          "Type": "Int32",
+          "Origin": "KeysetSeek",
+          "ValueType": "null"
+        }
+      ]
+    },
+    {
       "Id": "fn-measure-001",
       "Group": "functions",
       "Sql": "SELECT a, MEASURE(b) FROM t GROUP BY a",

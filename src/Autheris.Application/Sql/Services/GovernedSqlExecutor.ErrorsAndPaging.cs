@@ -24,6 +24,7 @@ using Autheris.Application.Sql.Errors;
 using Autheris.Application.Sql.Interfaces;
 using Autheris.Application.Sql.Internal;
 using Autheris.Application.Sql.ListParameters;
+using Autheris.Application.Sql.Paging;
 using Autheris.Application.Sql.Synthetic;
 using Autheris.Domain.Audit;
 using Autheris.Domain.Common;
@@ -129,7 +130,7 @@ public sealed partial class GovernedSqlExecutor
             ? _options.Value.WebSql.DefaultDataSourceName
             : _dataSourceResolver.ResolveAllowedDataSource(request.DataSourceName, tenantId);
 
-    private void NotifyPageOutcome(GovernedSqlQueryRequest request, ClaimsPrincipal user, TenantId tenantId, GovernedRewrite? rewrite, bool isTruncated)
+    private void NotifyPageOutcome(GovernedSqlQueryRequest request, ClaimsPrincipal user, TenantId tenantId, GovernedRewrite? rewrite, bool isTruncated, KeysetCaptureReader? keysetCapture = null)
     {
         if (request.Page == null || request.OnPageOutcome == null)
         {
@@ -143,7 +144,11 @@ public sealed partial class GovernedSqlExecutor
         {
             long nextOffset = checked(request.Page.Offset + request.Page.Size);
             long maxOffset = _options.Value.WebSql.Paging?.MaxOffset ?? 10_000;
-            if (nextOffset > maxOffset)
+            if (TryEncodeKeysetNextToken(request, user, tenantId, keysetCapture, nextOffset, maxOffset) is { } keysetToken)
+            {
+                nextToken = keysetToken;
+            }
+            else if (nextOffset > maxOffset)
             {
                 pagingUnavailable = "offset_limit";
             }
@@ -164,7 +169,6 @@ public sealed partial class GovernedSqlExecutor
             {
                 if (rowsKept < 1
                     || rowsKept >= request.Page.Size
-                    || request.Page.Offset + rowsKept > maxResumeOffset
                     || user.GetUserSid() == null)
                 {
                     return null;
@@ -172,7 +176,11 @@ public sealed partial class GovernedSqlExecutor
 
                 try
                 {
-                    return EncodePageToken(request, user, tenantId, request.Page.Offset + rowsKept);
+                    // Past the offset window, or on a keyset page, only a keyset token can resume; it is minted from the key values of the
+                    // last row that was kept, never from the last row read.
+                    return request.Keyset is not null || request.Page.Offset + rowsKept > maxResumeOffset
+                        ? TryEncodeKeysetResumeToken(request, user, tenantId, keysetCapture, rowsKept)
+                        : EncodePageToken(request, user, tenantId, request.Page.Offset + rowsKept);
                 }
                 catch (Exception ex) when (ex is InvalidOperationException or ArgumentException or OverflowException)
                 {

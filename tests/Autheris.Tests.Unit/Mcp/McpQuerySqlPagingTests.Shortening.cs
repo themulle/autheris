@@ -152,6 +152,46 @@ public sealed partial class McpQuerySqlPagingTests
 
     [Fact]
     [Trait("Category", "Security")]
+    public async Task ShortenedMcpPage_BeyondMaxOffset_ResumesByKeyset_FromLastDeliveredRow()
+    {
+        var (handler, _, executedSql) = CreatePipeline(maxResultRows: 4, maxOffset: 2);
+        var session = CreateSession();
+        var (resume, _) = await FirstPageAsync(handler, session);
+
+        // Keeping 3 of 4 rows puts the resume offset (3) beyond the window (2): a keyset token seeded from row 3 (id 3), not row 4.
+        var token = resume!(3);
+        token.ShouldNotBeNullOrWhiteSpace();
+        (await PageIdsAsync(handler, session, token!)).ShouldBe([4, 5]);
+        executedSql[^1].ShouldNotContain("OFFSET", Case.Insensitive);
+
+        resume(4).ShouldBeNull();
+        resume(0).ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task ShortenedKeysetPage_ResumesWithoutSkipOrDuplicate()
+    {
+        var (handler, _, _) = CreatePipeline(maxResultRows: 2, maxOffset: 1);
+        var session = CreateSession();
+        var (_, first) = await FirstPageAsync(handler, session);
+        var keysetCursor = first.GetProperty("cursor").GetString()!;
+
+        // The second page is a keyset page (offset 2 is beyond the window of 1); keeping one of its rows resumes after that row.
+        using var scope = McpRowContinuation.Begin();
+        var json = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = OrderedSql, cursor = keysetCursor }), session);
+        using (var doc = JsonDocument.Parse(json))
+        {
+            doc.RootElement.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("id").GetInt32()).ToArray().ShouldBe([3, 4]);
+        }
+
+        var resumed = scope.ResumeAfter!(1);
+        resumed.ShouldNotBeNullOrWhiteSpace();
+        (await PageIdsAsync(handler, session, resumed!)).ShouldBe([4, 5]);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
     public async Task QuerySql_ResumeAfter_OutOfRangeOrBeyondMaxOffset_ReturnsNull()
     {
         var (handler, _, _) = CreatePipeline(maxResultRows: 4);
@@ -167,14 +207,14 @@ public sealed partial class McpQuerySqlPagingTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task QuerySql_ResumeAfter_AtMaxOffsetBoundary_ReturnsNullBeyondAndTokenAtBoundary()
+    public async Task QuerySql_ResumeAfter_AtMaxOffsetBoundary_ReturnsNullOnlyBeyondThePage_AndTokenAtBoundary()
     {
         var (handler, _, _) = CreatePipeline(maxResultRows: 4, maxOffset: 2);
         var session = CreateSession();
         var (resume, _) = await FirstPageAsync(handler, session);
 
         resume!(2).ShouldNotBeNull();
-        resume(3).ShouldBeNull();
+        resume(4).ShouldBeNull();
         (await PageIdsAsync(handler, session, resume(2)!)).ShouldBe([3, 4, 5]);
     }
 

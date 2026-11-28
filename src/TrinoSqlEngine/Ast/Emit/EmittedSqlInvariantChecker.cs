@@ -46,6 +46,8 @@ public sealed class EmittedSqlInvariantViolationException : SecurityException
 /// </summary>
 public static class EmittedSqlInvariantChecker
 {
+    private const int MaxKeysetSeekSlots = 8;
+
     public const int MaxEmittedSqlLength = 1 << 20;
 
     /// <summary>The text before n of the only query hint the gateway emits (SQL Server, recursive SELECT).</summary>
@@ -156,6 +158,7 @@ public static class EmittedSqlInvariantChecker
         }
 
         int pageOffsetCount = 0;
+        int keysetSeekCount = 0;
         var declared = new HashSet<string>(parameters.Length + 4, StringComparer.Ordinal);
         foreach (var p in parameters)
         {
@@ -168,6 +171,15 @@ public static class EmittedSqlInvariantChecker
                 }
             }
 
+            if (p.Origin == ParameterOrigin.KeysetSeek)
+            {
+                keysetSeekCount++;
+                if (statementClass != SqlStatementClass.Select || keysetSeekCount > MaxKeysetSeekSlots)
+                {
+                    throw new EmittedSqlInvariantViolationException("invalid-keyset-seek", 0);
+                }
+            }
+
             if (!declared.Add(p.Marker))
             {
                 throw new EmittedSqlInvariantViolationException("duplicate-parameter-marker", 0);
@@ -177,6 +189,12 @@ public static class EmittedSqlInvariantChecker
             {
                 throw new EmittedSqlInvariantViolationException("parameter-without-marker", 0);
             }
+        }
+
+        if (keysetSeekCount > 0 && pageOffsetCount > 0)
+        {
+            // A keyset continuation replaces the offset; both together would skip rows.
+            throw new EmittedSqlInvariantViolationException("invalid-keyset-seek", 0);
         }
 
         foreach (var marker in markersInText)
