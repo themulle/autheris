@@ -83,6 +83,107 @@ public sealed class AgentOutputGuardMiddlewareTests
     }
 
     [Theory]
+    [InlineData("/v1/statement")]
+    [InlineData("/v1/statement/executing/abc/1")]
+    [InlineData("/v1/statement/queued/abc/0")]
+    [InlineData("/api/v1/queries/customers")]
+    [InlineData("/api/v1/queries")]
+    public async Task AgentToken_TrinoAndNamedQueries_AreScrubbedAndInjectionWithheld(string path)
+    {
+        var payload = JsonSerializer.Serialize(new { data = new[] { new[] { "jane.doe@example.com", Injection } } });
+        var (middleware, _) = Create(Writes(payload));
+        var ctx = Context(Principal("Agent.Read"), path);
+
+        await middleware.InvokeAsync(ctx);
+
+        var body = ReadBody(ctx);
+        body.ShouldNotContain("jane.doe@example.com");
+        body.ShouldNotContain("system prompt");
+    }
+
+    [Theory]
+    [InlineData("/v1/statement")]
+    [InlineData("/api/v1/queries/customers")]
+    public async Task AppToken_TrinoAndNamedQueries_AreUnchanged(string path)
+    {
+        var (middleware, _) = Create(Writes(Rows));
+        var ctx = Context(Principal("App.Read"), path);
+
+        await middleware.InvokeAsync(ctx);
+
+        ReadBody(ctx).ShouldBe(Rows);
+    }
+
+    [Theory]
+    [InlineData("/v1/statement")]
+    [InlineData("/api/v1/queries/customers")]
+    public async Task AgentToken_TrinoAndNamedQueries_NonJsonAndStreaming_AreWithheld(string path)
+    {
+        var (middleware, _) = Create(Writes("mail\njane.doe@example.com\n", "text/csv"));
+        var ctx = Context(Principal("Agent.Read"), path);
+        await middleware.InvokeAsync(ctx);
+        ctx.Response.StatusCode.ShouldBe(StatusCodes.Status406NotAcceptable);
+        ReadBody(ctx).ShouldNotContain("jane.doe@example.com");
+
+        var called = false;
+        var (streaming, _) = Create(c => { called = true; return Task.CompletedTask; });
+        var ctx2 = Context(Principal("Agent.Read"), path, "application/x-ndjson");
+        await streaming.InvokeAsync(ctx2);
+        called.ShouldBeFalse();
+        ctx2.Response.StatusCode.ShouldBe(StatusCodes.Status406NotAcceptable);
+    }
+
+    [Theory]
+    [InlineData("Agent.Read")]
+    [InlineData("App.Read Agent.Read")]
+    public async Task AgentToken_ArrowExport_IsRefused_WithoutCallingNext(string scopes)
+    {
+        var called = false;
+        var (middleware, _) = Create(c => { called = true; return Task.CompletedTask; });
+        var ctx = Context(Principal(scopes), "/api/v1/export/arrow");
+
+        await middleware.InvokeAsync(ctx);
+
+        called.ShouldBeFalse();
+        ctx.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+    }
+
+    [Fact]
+    public async Task AgentToken_ArrowExport_ViaAutonomousAgentsTierScope_IsRefused()
+    {
+        var called = false;
+        var options = new GatewayOptions
+        {
+            ResourceGroups = new ResourceGroupsOptions
+            {
+                ScopeTiers = new Dictionary<string, ResourceGroupTier>(StringComparer.OrdinalIgnoreCase)
+                {
+                    ["Analysis.Run"] = ResourceGroupTier.AutonomousAgents
+                }
+            }
+        };
+        var (middleware, _) = Create(c => { called = true; return Task.CompletedTask; }, options);
+        var ctx = Context(Principal("Analysis.Run"), "/api/v1/export/arrow");
+
+        await middleware.InvokeAsync(ctx);
+
+        called.ShouldBeFalse();
+        ctx.Response.StatusCode.ShouldBe(StatusCodes.Status403Forbidden);
+    }
+
+    [Fact]
+    public async Task AppToken_ArrowExport_PassesThrough()
+    {
+        var called = false;
+        var (middleware, _) = Create(c => { called = true; return Task.CompletedTask; });
+        var ctx = Context(Principal("App.Read"), "/api/v1/export/arrow");
+
+        await middleware.InvokeAsync(ctx);
+
+        called.ShouldBeTrue();
+    }
+
+    [Theory]
     [InlineData("/graphql")]
     [InlineData("/api/v1/sql")]
     public async Task AgentToken_InjectionPayload_IsWithheld_OtherValuesKept(string path)
