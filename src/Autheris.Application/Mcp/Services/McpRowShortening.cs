@@ -184,16 +184,27 @@ internal static class McpRowShortening
             return;
         }
 
-        root["hasMore"] = true;
+        // The WebSQL body has no hasMore: a cut page says so with truncated, and its continuation is next (replaced, or absent).
+        root["truncated"] = true;
         if (cursor is null)
         {
             root.Remove("next");
-            root.Remove("cursor");
+        }
+        else if (root.ContainsKey("next"))
+        {
+            root["next"] = cursor;
         }
         else
         {
-            root["next"] = cursor;
-            root["cursor"] = cursor;
+            var pageIndex = root.IndexOf("page");
+            if (pageIndex >= 0)
+            {
+                root.Insert(pageIndex + 1, "next", cursor);
+            }
+            else
+            {
+                root["next"] = cursor;
+            }
         }
     }
 

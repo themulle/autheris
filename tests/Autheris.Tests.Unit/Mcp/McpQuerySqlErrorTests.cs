@@ -12,7 +12,7 @@ public sealed class McpQuerySqlErrorTests
 {
     private const string Broken = "SELECT FROM WHERE ((";
 
-    private static string Args(string sql) => System.Text.Json.JsonSerializer.Serialize(new { query = sql });
+    private static string Args(string sql) => System.Text.Json.JsonSerializer.Serialize(new { sql });
 
     private static async Task<SqlErrorMapping?> MapperResult(string sql)
     {

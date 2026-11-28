@@ -20,7 +20,6 @@ using Autheris.Tests.Common.Fakes;
 using Autheris.Tests.Unit.TestSupport;
 using HotChocolate;
 using HotChocolate.Execution;
-using HotChocolate.Language;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using NSubstitute;
@@ -248,41 +247,6 @@ public sealed class McpDatasetToolWiringTests
 
         json.ShouldContain(expected == "parse" ? "GRAPHQL_PARSE_FAILED" : "INVALID_PARAMS");
         await provider.DidNotReceiveWithAnyArgs().GetExecutorAsync(default, default);
-    }
-
-    [Fact]
-    public async Task Executor_QueryGraphQl_WithVariables_AugmentsDefaultValues()
-    {
-        var provider = Substitute.For<IRequestExecutorProvider>();
-        var requestExecutor = Substitute.For<IRequestExecutor>();
-        provider.GetExecutorAsync(Arg.Any<string?>(), Arg.Any<CancellationToken>())
-            .Returns(requestExecutor);
-
-        IOperationRequest? capturedRequest = null;
-        requestExecutor.ExecuteAsync(Arg.Do<IOperationRequest>(r => capturedRequest = r), Arg.Any<CancellationToken>())
-            .Returns(Task.FromResult<IExecutionResult>(OperationResult.FromError(ErrorBuilder.New().SetMessage("success").Build())));
-
-        var executor = new GatewayMcpQueryExecutor(provider, new StubGatewayExecutionService(), NullLogger<GatewayMcpQueryExecutor>.Instance, Autheris.Tests.Unit.Mcp.McpRowCapTests.Options(100),
-            datasetCatalog: StubMcpDatasetCatalog.Empty, persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
-
-        var args = """
-        {
-            "query": "query GetInvoices($limit: Int) { finance_invoices(first: $limit) { id } }",
-            "variables": { "limit": 5 }
-        }
-        """;
-
-        await executor.ExecuteOperationAsync(Tool("query_graphql"), args, Session());
-
-        capturedRequest.ShouldNotBeNull();
-        capturedRequest.Document.ShouldNotBeNull();
-        var nodeProvider = capturedRequest.Document.ShouldBeAssignableTo<IOperationDocumentNodeProvider>();
-        var docNode = nodeProvider.Document;
-        docNode.ShouldNotBeNull();
-        var op = docNode.Definitions.OfType<OperationDefinitionNode>().Single();
-        var limitVar = op.VariableDefinitions.Single(v => v.Variable.Name.Value == "limit");
-        limitVar.DefaultValue.ShouldNotBeNull();
-        ((IntValueNode)limitVar.DefaultValue).ToInt32().ShouldBe(5);
     }
 
     [Fact]

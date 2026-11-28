@@ -257,8 +257,8 @@ public sealed partial class McpQuerySqlPagingTests
         {
             pageCount++;
             string argsJson = cursor is null
-                ? JsonSerializer.Serialize(new { query = sql })
-                : JsonSerializer.Serialize(new { query = sql, cursor });
+                ? JsonSerializer.Serialize(new { sql })
+                : JsonSerializer.Serialize(new { sql, next = cursor });
 
             var json = await handler.ExecuteToolAsync(QuerySqlTool, argsJson, session);
             using var doc = JsonDocument.Parse(json);
@@ -267,19 +267,17 @@ public sealed partial class McpQuerySqlPagingTests
             var pageIds = root.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("id").GetInt32()).ToList();
             seenIds.AddRange(pageIds);
 
-            bool hasMore = root.GetProperty("hasMore").GetBoolean();
+            root.TryGetProperty("hasMore", out _).ShouldBeFalse();
             if (pageCount < 3)
             {
                 pageIds.Count.ShouldBe(2);
-                hasMore.ShouldBeTrue();
-                cursor = root.GetProperty("cursor").GetString();
+                cursor = root.GetProperty("next").GetString();
                 cursor.ShouldNotBeNullOrWhiteSpace();
             }
             else
             {
                 pageIds.Count.ShouldBe(1);
-                hasMore.ShouldBeFalse();
-                root.TryGetProperty("cursor", out _).ShouldBeFalse();
+                root.TryGetProperty("next", out _).ShouldBeFalse();
                 cursor = null;
             }
         }
@@ -298,7 +296,7 @@ public sealed partial class McpQuerySqlPagingTests
         var (handler, _, _) = CreatePipeline(maxResultRows: 5, maskEmail: true);
         using var scope = McpResultMasking.Begin();
 
-        await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql }), CreateSession());
+        await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql }), CreateSession());
 
         scope.Outcome.ShouldBe(expected);
     }
@@ -310,13 +308,12 @@ public sealed partial class McpQuerySqlPagingTests
         var session = CreateSession();
         const string sql = "SELECT id, name FROM demo.public.orders ORDER BY id";
 
-        var firstJson = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql }), session);
+        var firstJson = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql }), session);
         using var firstDoc = JsonDocument.Parse(firstJson);
-        firstDoc.RootElement.GetProperty("hasMore").GetBoolean().ShouldBeTrue();
-        var cursor = firstDoc.RootElement.GetProperty("cursor").GetString();
+        var cursor = firstDoc.RootElement.GetProperty("next").GetString();
         cursor.ShouldNotBeNullOrWhiteSpace();
 
-        var secondJson = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor }), session);
+        var secondJson = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql, next = cursor }), session);
         using var secondDoc = JsonDocument.Parse(secondJson);
         secondDoc.RootElement.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("id").GetInt32()).ToList()
             .ShouldBe([3, 4]);
@@ -335,8 +332,8 @@ public sealed partial class McpQuerySqlPagingTests
         do
         {
             string argsJson = cursor is null
-                ? JsonSerializer.Serialize(new { query = sql })
-                : JsonSerializer.Serialize(new { query = sql, cursor });
+                ? JsonSerializer.Serialize(new { sql })
+                : JsonSerializer.Serialize(new { sql, next = cursor });
 
             var json = await handler.ExecuteToolAsync(QuerySqlTool, argsJson, session);
             json.ShouldNotContain("@secret.example");
@@ -350,8 +347,7 @@ public sealed partial class McpQuerySqlPagingTests
                 totalRows++;
             }
 
-            bool hasMore = doc.RootElement.GetProperty("hasMore").GetBoolean();
-            cursor = hasMore ? doc.RootElement.GetProperty("cursor").GetString() : null;
+            cursor = doc.RootElement.TryGetProperty("next", out var nextProp) ? nextProp.GetString() : null;
         }
         while (cursor is not null);
 
@@ -366,34 +362,34 @@ public sealed partial class McpQuerySqlPagingTests
         var ownerSession = CreateSession("S-1-5-21-1055-OWNER", "tenant-1");
         const string sql = "SELECT id, name FROM sales.public.orders ORDER BY id";
 
-        var firstJson = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql }), ownerSession);
+        var firstJson = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql }), ownerSession);
         using var firstDoc = JsonDocument.Parse(firstJson);
-        var cursor = firstDoc.RootElement.GetProperty("cursor").GetString()!;
+        var cursor = firstDoc.RootElement.GetProperty("next").GetString()!;
 
         // Tampered signature
         var tamperedCursor = cursor[..^1] + (cursor[^1] == 'A' ? 'B' : 'A');
-        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor = tamperedCursor }), ownerSession));
+        AssertPagingTokenInvalid(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql, next = tamperedCursor }), ownerSession));
 
         // Wrong user
         var otherUser = CreateSession("S-1-5-21-1055-OTHER", "tenant-1");
-        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor }), otherUser));
+        AssertPagingTokenInvalid(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql, next = cursor }), otherUser));
 
         // Wrong tenant
         var otherTenant = CreateSession("S-1-5-21-1055-OWNER", "tenant-2");
-        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor }), otherTenant));
+        AssertPagingTokenInvalid(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql, next = cursor }), otherTenant));
 
         // Modified SQL text
         const string alteredSql = "SELECT id, name FROM sales.public.orders ORDER BY id DESC";
-        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = alteredSql, cursor }), ownerSession));
+        AssertPagingTokenInvalid(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql = alteredSql, next = cursor }), ownerSession));
 
         // Malformed inputs
-        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor = "" }), ownerSession));
-        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor = new string('x', 513) }), ownerSession));
-        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, """{"query":"SELECT id, name FROM sales.public.orders ORDER BY id","cursor":123}""", ownerSession));
+        AssertPagingTokenInvalid(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql, next = "" }), ownerSession));
+        AssertPagingTokenInvalid(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql, next = new string('x', 513) }), ownerSession));
+        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, """{"sql":"SELECT id, name FROM sales.public.orders ORDER BY id","next":123}""", ownerSession));
 
         // Expired token
         time.Advance(TimeSpan.FromMinutes(16));
-        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor }), ownerSession));
+        AssertPagingTokenInvalid(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql, next = cursor }), ownerSession));
     }
 
     [Fact]
@@ -404,41 +400,35 @@ public sealed partial class McpQuerySqlPagingTests
         const string sql = "SELECT id, name FROM sales.public.orders ORDER BY id";
 
         // limit > Mcp:MaxResultRows is clamped to 2
-        var clampedJson = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, limit = 50 }), session);
+        var clampedJson = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql, page = new { size = 50 } }), session);
         using (var clampedDoc = JsonDocument.Parse(clampedJson))
         {
             clampedDoc.RootElement.GetProperty("rowCount").GetInt32().ShouldBe(2);
-            clampedDoc.RootElement.GetProperty("hasMore").GetBoolean().ShouldBeTrue();
+            clampedDoc.RootElement.GetProperty("next").GetString().ShouldNotBeNullOrWhiteSpace();
         }
 
         // Smaller explicit limit=1 is honoured across pages
-        var smallPage1Json = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, limit = 1 }), session);
+        var smallPage1Json = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql, page = new { size = 1 } }), session);
         using var smallPage1Doc = JsonDocument.Parse(smallPage1Json);
         smallPage1Doc.RootElement.GetProperty("rowCount").GetInt32().ShouldBe(1);
-        var smallCursor = smallPage1Doc.RootElement.GetProperty("cursor").GetString()!;
+        var smallCursor = smallPage1Doc.RootElement.GetProperty("next").GetString()!;
 
-        // Page 2 without repeating limit keeps page size 1
-        var smallPage2Json = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor = smallCursor }), session);
+        // Page 2 without repeating page.size keeps the token's page size 1, as on POST /api/v1/sql
+        var smallPage2Json = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql, next = smallCursor }), session);
         using var smallPage2Doc = JsonDocument.Parse(smallPage2Json);
         smallPage2Doc.RootElement.GetProperty("rowCount").GetInt32().ShouldBe(1);
         smallPage2Doc.RootElement.GetProperty("rows")[0].GetProperty("id").GetInt32().ShouldBe(2);
 
         // Changing limit mid-cursor fails closed
-        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, limit = 2, cursor = smallCursor }), session));
+        AssertPagingTokenInvalid(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql, page = new { size = 2 }, next = smallCursor }), session));
 
         // Invalid limits rejected
-        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, limit = 0 }), session));
-        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, limit = -1 }), session));
-        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, """{"query":"SELECT id FROM sales.public.orders","limit":"2"}""", session));
+        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql, page = new { size = 0 } }), session));
+        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql, page = new { size = -1 } }), session));
+        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, """{"sql":"SELECT id FROM sales.public.orders","page":{"size":"2"}}""", session));
 
-        // McpRowCap alignment
-        McpRowCap.LimitArgument(McpDatasetTools.QuerySql).ShouldBe("limit");
-        var trimmed = McpRowCap.TrimRows("""{"rows":[{"id":1},{"id":2},{"id":3}],"rowCount":3,"hasMore":false,"cursor":"c1","next":"c1"}""", 2);
-        using var trimmedDoc = JsonDocument.Parse(trimmed);
-        trimmedDoc.RootElement.GetProperty("rowCount").GetInt32().ShouldBe(2);
-        trimmedDoc.RootElement.GetProperty("hasMore").GetBoolean().ShouldBeTrue();
-        trimmedDoc.RootElement.TryGetProperty("cursor", out _).ShouldBeFalse();
-        trimmedDoc.RootElement.TryGetProperty("next", out _).ShouldBeFalse();
+        // The page size is not a post-execution row limit any more.
+        McpRowCap.LimitArgument(McpDatasetTools.QuerySql).ShouldBeNull();
     }
 
     [Fact]
@@ -448,10 +438,10 @@ public sealed partial class McpQuerySqlPagingTests
         using var doc = JsonDocument.Parse(tool.InputJsonSchema);
         var props = doc.RootElement.GetProperty("properties");
 
-        props.TryGetProperty("query", out _).ShouldBeTrue();
-        props.TryGetProperty("limit", out var limitSchema).ShouldBeTrue();
-        limitSchema.GetProperty("type").GetString().ShouldBe("integer");
-        props.TryGetProperty("cursor", out var cursorSchema).ShouldBeTrue();
+        props.TryGetProperty("sql", out _).ShouldBeTrue();
+        props.TryGetProperty("page", out var pageSchema).ShouldBeTrue();
+        pageSchema.GetProperty("properties").GetProperty("size").GetProperty("type").GetString().ShouldBe("integer");
+        props.TryGetProperty("next", out var cursorSchema).ShouldBeTrue();
         cursorSchema.GetProperty("type").GetString().ShouldBe("string");
     }
 
@@ -462,25 +452,23 @@ public sealed partial class McpQuerySqlPagingTests
         var session = CreateSession();
 
         // Non-ORDER BY query capped at min(Mcp:MaxResultRows=10, WebSql:MaxAllowedRows=2) = 2 reports truncated:true, hasMore:true, pagingUnavailable:"order_by_required"
-        var noOrderJson = await handler.ExecuteToolAsync(QuerySqlTool, """{"query":"SELECT id, name FROM sales.public.orders"}""", session);
+        var noOrderJson = await handler.ExecuteToolAsync(QuerySqlTool, """{"sql":"SELECT id, name FROM sales.public.orders"}""", session);
         using (var noOrderDoc = JsonDocument.Parse(noOrderJson))
         {
             noOrderDoc.RootElement.GetProperty("rowCount").GetInt32().ShouldBe(2);
             noOrderDoc.RootElement.GetProperty("truncated").GetBoolean().ShouldBeTrue();
-            noOrderDoc.RootElement.GetProperty("hasMore").GetBoolean().ShouldBeTrue();
             noOrderDoc.RootElement.GetProperty("pagingUnavailable").GetString().ShouldBe("order_by_required");
-            noOrderDoc.RootElement.TryGetProperty("cursor", out _).ShouldBeFalse();
+            noOrderDoc.RootElement.TryGetProperty("next", out _).ShouldBeFalse();
         }
 
         // Explicit LIMIT query exceeding cap preserves statement_has_limit and truncated:true without issuing a cursor.
-        var explicitLimitJson = await handler.ExecuteToolAsync(QuerySqlTool, """{"query":"SELECT id, name FROM sales.public.orders ORDER BY id LIMIT 4","limit":10}""", session);
+        var explicitLimitJson = await handler.ExecuteToolAsync(QuerySqlTool, """{"sql":"SELECT id, name FROM sales.public.orders ORDER BY id LIMIT 4"}""", session);
         using (var explicitLimitDoc = JsonDocument.Parse(explicitLimitJson))
         {
             explicitLimitDoc.RootElement.GetProperty("rowCount").GetInt32().ShouldBe(2);
             explicitLimitDoc.RootElement.GetProperty("truncated").GetBoolean().ShouldBeTrue();
-            explicitLimitDoc.RootElement.GetProperty("hasMore").GetBoolean().ShouldBeTrue();
             explicitLimitDoc.RootElement.GetProperty("pagingUnavailable").GetString().ShouldBe("statement_has_limit");
-            explicitLimitDoc.RootElement.TryGetProperty("cursor", out _).ShouldBeFalse();
+            explicitLimitDoc.RootElement.TryGetProperty("next", out _).ShouldBeFalse();
         }
 
         // Federated execution refuses cursor continuation on both buffered and streaming entry points.
@@ -519,6 +507,13 @@ public sealed partial class McpQuerySqlPagingTests
         using var doc = JsonDocument.Parse(json);
         doc.RootElement.TryGetProperty("isError", out _).ShouldBeFalse();
         doc.RootElement.GetProperty("error").GetProperty("code").GetString().ShouldBe("INVALID_PARAMS");
+    }
+
+    private static void AssertPagingTokenInvalid(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        doc.RootElement.TryGetProperty("isError", out _).ShouldBeFalse();
+        doc.RootElement.GetProperty("error").GetProperty("code").GetString().ShouldBe("SQL_PAGING_TOKEN_INVALID");
     }
 
     private sealed record SeedRow(int Id, string Name, string Email);

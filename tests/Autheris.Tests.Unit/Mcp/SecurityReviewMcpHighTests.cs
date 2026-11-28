@@ -87,7 +87,7 @@ public sealed class SecurityReviewMcpHighTests
     private static McpSessionContext Session(IReadOnlyList<string>? roles = null, bool readOnly = false) =>
         new("s1", "agent", "tenant-a", DateTimeOffset.UtcNow, DateTimeOffset.UtcNow, UserSid: "S-1-USER", Roles: roles, IsReadOnly: readOnly);
 
-    private static string SqlArgs(string sql) => JsonSerializer.Serialize(new { query = sql });
+    private static string SqlArgs(string sql) => JsonSerializer.Serialize(new { sql });
 
     [Theory]
     [InlineData("SELECT p.id FROM sales.public.pub p JOIN sales.public.secret s ON s.id = p.id")]

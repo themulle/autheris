@@ -206,10 +206,10 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
         }
 
         // query_sql: a projected masked column, a derived expression over it, an unmasked projection, and a masked projection without rows.
-        await AssertMetaAsync("query_sql", new { query = "SELECT id, secret FROM default.main.mcp_vault ORDER BY id" }, true);
-        await AssertMetaAsync("query_sql", new { query = "SELECT id, upper(secret) AS s FROM default.main.mcp_vault ORDER BY id" }, true);
-        await AssertMetaAsync("query_sql", new { query = "SELECT id, label FROM default.main.mcp_vault ORDER BY id" }, false);
-        await AssertMetaAsync("query_sql", new { query = "SELECT id, secret FROM default.main.mcp_vault WHERE id > 1000" }, false);
+        await AssertMetaAsync("query_sql", new { sql = "SELECT id, secret FROM default.main.mcp_vault ORDER BY id" }, true);
+        await AssertMetaAsync("query_sql", new { sql = "SELECT id, upper(secret) AS s FROM default.main.mcp_vault ORDER BY id" }, true);
+        await AssertMetaAsync("query_sql", new { sql = "SELECT id, label FROM default.main.mcp_vault ORDER BY id" }, false);
+        await AssertMetaAsync("query_sql", new { sql = "SELECT id, secret FROM default.main.mcp_vault WHERE id > 1000" }, false);
 
         // query_dataset
         await AssertMetaAsync("query_dataset", new { dataset = "default.main.mcp_vault", select = new[] { "id", "secret" } }, true);
@@ -347,7 +347,7 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
 
         // (a) a syntax error: the code and the position of POST /api/v1/sql, no statement text.
         const string broken = "SELECT FROM WHERE ((";
-        var syntax = AssertEnvelope(await ToolAsync(client, "query_sql", new { query = broken }));
+        var syntax = AssertEnvelope(await ToolAsync(client, "query_sql", new { sql = broken }));
         using var httpSyntax = await client.PostAsJsonAsync("/api/v1/sql", new { sql = broken });
         using var httpSyntaxBody = JsonDocument.Parse(await httpSyntax.Content.ReadAsStringAsync());
         syntax.GetProperty("code").GetString().ShouldBe(httpSyntaxBody.RootElement.GetProperty("code").GetString());
@@ -361,8 +361,8 @@ public sealed class McpDatasetToolsEndToEndTests : IClassFixture<McpDatasetTools
 
         // (b) an unknown and a not consented table: byte-identical and equal to the HTTP code.
         await SeedVaultWithoutConsentAsync();
-        var unknownTable = await ToolAsync(client, "query_sql", new { query = "SELECT * FROM default.main.mcp_ghost" });
-        var deniedTable = await ToolAsync(client, "query_sql", new { query = "SELECT * FROM default.main.mcp_unconsented" });
+        var unknownTable = await ToolAsync(client, "query_sql", new { sql = "SELECT * FROM default.main.mcp_ghost" });
+        var deniedTable = await ToolAsync(client, "query_sql", new { sql = "SELECT * FROM default.main.mcp_unconsented" });
         TextOf(unknownTable).ShouldBe(TextOf(deniedTable));
         AssertEnvelope(unknownTable).GetProperty("code").GetString().ShouldBe("SQL_POLICY_DENIED");
         using var httpDenied = await client.PostAsJsonAsync("/api/v1/sql", new { sql = "SELECT * FROM default.main.mcp_unconsented" });

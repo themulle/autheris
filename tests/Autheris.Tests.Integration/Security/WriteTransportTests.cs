@@ -186,7 +186,7 @@ public sealed class WriteTransportTests : IClassFixture<WriteTransportTests.Fixt
         // MCP: query_sql INSERT.
         await using (var mcp = await McpTestClient.ConnectAsync(client))
         {
-            var (isError, text) = await McpTestClient.CallAsync(mcp, "query_sql", new { query = $"INSERT INTO {Source}.main.{Table} VALUES (3, 'written', 'default')" });
+            var (isError, text) = await McpTestClient.CallAsync(mcp, "query_sql", new { sql = $"INSERT INTO {Source}.main.{Table} VALUES (3, 'written', 'default')" });
             isError.ShouldBeTrue(text);
         }
 

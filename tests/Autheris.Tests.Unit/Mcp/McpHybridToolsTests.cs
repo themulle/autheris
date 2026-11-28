@@ -78,7 +78,7 @@ public sealed class McpHybridToolsTests
                 RowCount: 1,
                 ElapsedMilliseconds: 15));
 
-        var resultJson = await handler.ExecuteToolAsync(tool, JsonSerializer.Serialize(new { query }), session);
+        var resultJson = await handler.ExecuteToolAsync(tool, JsonSerializer.Serialize(new { sql = query }), session);
 
         resultJson.ShouldNotBeNullOrWhiteSpace();
         resultJson.ShouldContain("a***@example.com");
@@ -98,7 +98,7 @@ public sealed class McpHybridToolsTests
             Arg.Any<CancellationToken>())
             .Returns(new GovernedSqlResult("q", [], [], 0, 1));
 
-        await handler.ExecuteToolAsync(tool, JsonSerializer.Serialize(new { query = "SELECT 1" }), session);
+        await handler.ExecuteToolAsync(tool, JsonSerializer.Serialize(new { sql = "SELECT 1" }), session);
 
         captured.ShouldNotBeNull();
         return captured!;

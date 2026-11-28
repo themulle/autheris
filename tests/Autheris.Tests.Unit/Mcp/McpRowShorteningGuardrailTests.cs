@@ -12,7 +12,7 @@ using Xunit;
 
 public sealed class McpRowShorteningGuardrailTests
 {
-    private const string SqlArgs = """{"query":"SELECT id, name FROM sales.public.orders ORDER BY id"}""";
+    private const string SqlArgs = """{"sql":"SELECT id, name FROM sales.public.orders ORDER BY id"}""";
     private const string DatasetArgs = """{"dataset":"sales.public.orders"}""";
     private const string OriginalNext = "original-next-token";
 
@@ -21,13 +21,12 @@ public sealed class McpRowShorteningGuardrailTests
 
     private static string SqlPayload(int rows, Func<int, string?>? extra = null) => new JsonObject
     {
-        ["originalSql"] = "SELECT id, name FROM sales.public.orders ORDER BY id",
-        ["columns"] = new JsonArray("id", "name"),
+        ["columns"] = new JsonArray(
+            new JsonObject { ["name"] = "id", ["type"] = "integer", ["nullable"] = false, ["masked"] = false },
+            new JsonObject { ["name"] = "name", ["type"] = "varchar", ["nullable"] = true, ["masked"] = false }),
         ["rows"] = new JsonArray(Enumerable.Range(0, rows).Select(i => Row(i, extra?.Invoke(i))).ToArray()),
         ["rowCount"] = rows,
-        ["truncated"] = true,
-        ["hasMore"] = true,
-        ["cursor"] = OriginalNext,
+        ["truncated"] = false,
         ["page"] = new JsonObject { ["number"] = 1, ["offset"] = 0, ["size"] = rows },
         ["next"] = OriginalNext,
     }.ToJsonString();

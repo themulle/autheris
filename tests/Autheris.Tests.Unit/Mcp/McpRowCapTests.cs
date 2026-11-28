@@ -43,7 +43,7 @@ public sealed class McpRowCapTests
         public List<Order> Orders => Enumerable.Range(0, Produced).Select(i => new Order { Id = i }).ToList();
     }
 
-    public static TheoryData<string> Tools => new() { "query_dataset", "query_sql", "call_procedure", "sample_rows", "query_graphql" };
+    public static TheoryData<string> Tools => new() { "query_dataset", "call_procedure", "sample_rows" };
 
     private static string RowsJson(string arrayName, int n, string countName) =>
         JsonSerializer.Serialize(new Dictionary<string, object?>
@@ -104,8 +104,7 @@ public sealed class McpRowCapTests
     private static string ArgsFor(string tool, string? limitJson = null) => tool switch
     {
         "query_dataset" => $$"""{"dataset":"a.b.c"{{(limitJson is null ? "" : $",\"limit\":{limitJson}")}}}""",
-        "query_sql" => """{"query":"SELECT * FROM a.b.c LIMIT 1000"}""",
-        "call_procedure" => $$"""{"procedure_name":"p"{{(limitJson is null ? "" : $",\"max_rows\":{limitJson}")}}}""",
+                "call_procedure" => $$"""{"procedure_name":"p"{{(limitJson is null ? "" : $",\"max_rows\":{limitJson}")}}}""",
         "sample_rows" => $$"""{"dataset":"a.b.c"{{(limitJson is null ? "" : $",\"count\":{limitJson}")}}}""",
         _ => """{"query":"{ orders { id } }"}""",
     };
@@ -180,42 +179,41 @@ public sealed class McpRowCapTests
     [Trait("Category", "Security")]
     public async Task QuerySql_client_LIMIT_above_cap_is_trimmed()
     {
-        // SEC-53-01: the statement text is not trusted; the executor trims.
+        // The statement text is not trusted: query_sql pages before execution, so the executor hands the page through untouched
+        // (a cap-sized page with its continuation) and adds no row-cap fields.
         var f = await CreateAsync();
+        f.Handler.ExecuteToolAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
+            .Returns(RowsJson("rows", Cap, "rowCount"));
 
-        var root = await RunAsync(f, "query_sql", """{"query":"SELECT * FROM a.b.c LIMIT 100000"}""");
+        var root = await RunAsync(f, "query_sql", """{"sql":"SELECT * FROM a.b.c LIMIT 100000"}""");
 
         root.GetProperty("rows").GetArrayLength().ShouldBe(Cap);
         root.GetProperty("rowCount").GetInt32().ShouldBe(Cap);
-        root.TryGetProperty("next", out _).ShouldBeFalse("a continuation cursor would skip the trimmed rows");
+        root.GetProperty("next").GetString().ShouldBe("cursor");
+        root.TryGetProperty("rowCap", out _).ShouldBeFalse();
+        root.TryGetProperty("truncated", out _).ShouldBeFalse();
     }
 
     [Fact]
     [Trait("Category", "Security")]
-    public async Task GraphQl_nested_list_and_alias_trimmed_to_cap()
+    public void QuerySql_NotInLimitArgumentMap() => McpRowCap.LimitArgument("query_sql").ShouldBeNull();
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task GraphQl_nested_list_and_alias_NotTrimmed()
     {
-        // SEC-53-04
+        // query_graphql answers like POST /graphql: the guards are the cost rule, GraphQL:MaxResponseRows and the token budget, not Mcp:MaxResultRows.
         var f = await CreateAsync();
 
         var root = await RunAsync(f, "query_graphql",
             """{"query":"{ a: orders { id tags { name } } b: orders { id } }"}""");
 
         var data = root.GetProperty("data");
-        data.GetProperty("a").GetArrayLength().ShouldBe(Cap);
-        data.GetProperty("b").GetArrayLength().ShouldBe(Cap);
-        data.GetProperty("a")[0].GetProperty("tags").GetArrayLength().ShouldBe(Cap);
-        root.GetProperty("truncated").GetBoolean().ShouldBeTrue();
-    }
-
-    [Fact]
-    public async Task GraphQl_cap_applies_per_root_list()
-    {
-        var f = await CreateAsync();
-
-        var root = await RunAsync(f, "query_graphql", """{"query":"{ x: orders { id } y: orders { id } }"}""");
-
-        root.GetProperty("data").GetProperty("x").GetArrayLength().ShouldBe(Cap);
-        root.GetProperty("data").GetProperty("y").GetArrayLength().ShouldBe(Cap);
+        data.GetProperty("a").GetArrayLength().ShouldBe(Produced);
+        data.GetProperty("b").GetArrayLength().ShouldBe(Produced);
+        data.GetProperty("a")[0].GetProperty("tags").GetArrayLength().ShouldBe(Produced);
+        root.TryGetProperty("truncated", out _).ShouldBeFalse();
+        root.TryGetProperty("rowCap", out _).ShouldBeFalse();
     }
 
     [Fact]
@@ -235,7 +233,7 @@ public sealed class McpRowCapTests
         // SEC-53-05, SEC-53-08: numeric cap only, no total, no remaining count, no row values in the note.
         var f = await CreateAsync();
 
-        var root = await RunAsync(f, "query_sql", ArgsFor("query_sql"));
+        var root = await RunAsync(f, "call_procedure", ArgsFor("call_procedure"));
 
         root.GetProperty("truncated").GetBoolean().ShouldBeTrue();
         root.GetProperty("rowCap").GetInt32().ShouldBe(Cap);
@@ -248,7 +246,7 @@ public sealed class McpRowCapTests
     {
         var f = await CreateAsync(producedRows: Cap);
 
-        var root = await RunAsync(f, "query_sql", ArgsFor("query_sql"));
+        var root = await RunAsync(f, "call_procedure", ArgsFor("call_procedure"));
 
         root.TryGetProperty("truncated", out _).ShouldBeFalse();
         root.TryGetProperty("rowCap", out _).ShouldBeFalse();
@@ -262,7 +260,7 @@ public sealed class McpRowCapTests
         // SEC-53-06: the executor only sees the policy-filtered rows; fewer than the cap come back untouched and unflagged.
         var f = await CreateAsync(producedRows: 7);
 
-        var root = await RunAsync(f, "query_sql", ArgsFor("query_sql"));
+        var root = await RunAsync(f, "call_procedure", ArgsFor("call_procedure"));
 
         root.GetProperty("rows").GetArrayLength().ShouldBe(7);
         root.TryGetProperty("truncated", out _).ShouldBeFalse();
@@ -287,7 +285,7 @@ public sealed class McpRowCapTests
     {
         var f = await CreateAsync(maxRows: 0, producedRows: 500);
 
-        var root = await RunAsync(f, "query_sql", ArgsFor("query_sql"));
+        var root = await RunAsync(f, "call_procedure", ArgsFor("call_procedure"));
 
         root.GetProperty("rows").GetArrayLength().ShouldBe(100);
     }
@@ -313,7 +311,7 @@ public sealed class McpRowCapTests
         f.Handler.ExecuteToolAsync(Arg.Any<McpToolDefinition>(), Arg.Any<string>(), Arg.Any<McpSessionContext>(), Arg.Any<CancellationToken>())
             .Returns(json);
 
-        var root = await RunAsync(f, "query_sql", ArgsFor("query_sql"));
+        var root = await RunAsync(f, "call_procedure", ArgsFor("call_procedure"));
 
         root.GetProperty("truncated").GetBoolean().ShouldBeTrue();
         root.TryGetProperty("next", out _).ShouldBeFalse();
@@ -332,9 +330,9 @@ public sealed class McpRowCapTests
         var executor = new GatewayMcpQueryExecutor(Substitute.For<IRequestExecutorProvider>(), Substitute.For<IGatewayExecutionService>(),
             logger, Options(Cap), toolExecutionHandler: handler, persistedToolValidator: new Autheris.Application.Mcp.Services.PersistedToolValidator());
 
-        await executor.ExecuteOperationAsync(Tool("query_sql"), ArgsFor("query_sql"), Session());
+        await executor.ExecuteOperationAsync(Tool("call_procedure"), ArgsFor("call_procedure"), Session());
 
-        logger.Messages.ShouldContain(m => m.Contains("row cap 20") && m.Contains("query_sql"));
+        logger.Messages.ShouldContain(m => m.Contains("row cap 20") && m.Contains("call_procedure"));
         logger.Messages.ShouldNotContain(m => m.Contains("\"id\""));
     }
 
@@ -373,7 +371,7 @@ public sealed class McpRowCapTests
         using var scope = provider.CreateScope();
 
         var json = await scope.ServiceProvider.GetRequiredService<IMcpQueryExecutor>()
-            .ExecuteOperationAsync(Tool("query_sql"), ArgsFor("query_sql"), Session());
+            .ExecuteOperationAsync(Tool("call_procedure"), ArgsFor("call_procedure"), Session());
 
         JsonDocument.Parse(json).RootElement.GetProperty("rows").GetArrayLength().ShouldBe(7);
     }

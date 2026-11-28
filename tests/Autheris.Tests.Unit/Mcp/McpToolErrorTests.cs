@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.Mcp;
 
 using System.Text.Json;
+using System.Text.Json.Nodes;
 using Autheris.Application.Mcp.Services;
 using Autheris.Application.Policy.WriteGrants;
 using Autheris.Application.Sql.Errors;
@@ -290,5 +291,123 @@ public sealed class McpToolErrorTests
         McpErrorEnvelopeAssert.Message(leaked.ContentJson).ShouldBe(McpErrorCodes.FixedMessage(McpErrorCodes.AdminOperationRejected));
         leaked.ContentJson.ShouldNotContain("hunter2");
         leaked.ContentJson.ShouldNotContain("plan_secret");
+    }
+
+    private const string GraphQlResult = """
+        {"data":null,"errors":[{"message":"The query is too expensive.","path":["orders"],"locations":[{"line":1,"column":3}],
+          "extensions":{"code":"GRAPHQL_COST_EXCEEDED","estimatedCost":900}},{"message":"second","extensions":{"code":"OTHER_CODE"}}]}
+        """;
+
+    private static JsonElement RootOf(string json) => JsonDocument.Parse(json).RootElement.Clone();
+
+    [Fact]
+    public void SerializeGraphQl_CodeIsFirstErrorExtensionsCode_ErrorsVerbatim()
+    {
+        var json = McpToolError.SerializeGraphQl(GraphQlResult);
+
+        var root = RootOf(json);
+        Members(root).ShouldBe(["error", "errors"]);
+        Members(root.GetProperty("error")).ShouldBe(["code", "message"]);
+        root.GetProperty("error").GetProperty("code").GetString().ShouldBe("GRAPHQL_COST_EXCEEDED");
+        JsonNode.DeepEquals(JsonNode.Parse(root.GetProperty("errors").GetRawText()), JsonNode.Parse(GraphQlResult)!["errors"]).ShouldBeTrue();
+        json.ShouldNotContain("\"data\"");
+    }
+
+    [Fact]
+    public void SerializeGraphQl_NoCode_IsExecutionFailed()
+    {
+        var json = McpToolError.SerializeGraphQl("""{"data":null,"errors":[{"message":"boom"}]}""");
+
+        RootOf(json).GetProperty("error").GetProperty("code").GetString().ShouldBe("EXECUTION_FAILED");
+        RootOf(json).GetProperty("error").GetProperty("message").GetString().ShouldBe(McpErrorCodes.FixedMessage(McpErrorCodes.ExecutionFailed));
+        RootOf(json).GetProperty("errors")[0].GetProperty("message").GetString().ShouldBe("boom");
+    }
+
+    [Fact]
+    public void SerializeGraphQl_NonCatalogueCode_FixedGraphQlMessage()
+    {
+        var json = McpToolError.SerializeGraphQl(GraphQlResult);
+
+        RootOf(json).GetProperty("error").GetProperty("message").GetString().ShouldBe("GraphQL execution returned errors.");
+        RootOf(json).GetProperty("error").GetProperty("message").GetString()!.ShouldNotContain("expensive");
+    }
+
+    [Fact]
+    public void Normalize_QueryGraphQl_KeepsErrorsVerbatim_Idempotent()
+    {
+        var once = McpToolError.SerializeGraphQl(GraphQlResult);
+
+        McpToolError.Normalize(once, "query_graphql").ShouldBe(once);
+        McpToolError.Normalize(McpToolError.Normalize(once, "query_graphql"), "query_graphql").ShouldBe(once);
+    }
+
+    [Fact]
+    public void Normalize_OtherTool_DropsRootErrors()
+    {
+        var envelope = McpToolError.SerializeGraphQl(GraphQlResult);
+
+        foreach (var tool in new[] { "query_dataset", "sample_rows", "QUERY_GRAPHQL" })
+        {
+            var json = McpToolError.Normalize(envelope, tool);
+            Members(RootOf(json)).ShouldBe(["error"]);
+            RootOf(json).GetProperty("error").GetProperty("code").GetString().ShouldBe("EXECUTION_FAILED");
+        }
+    }
+
+    [Fact]
+    public void Normalize_QueryGraphQl_CodeNotEqualFirstError_IsExecutionFailed()
+    {
+        var forged = """{"error":{"code":"DATASET_NOT_FOUND","message":"m"},"errors":[{"message":"x","extensions":{"code":"GRAPHQL_COST_EXCEEDED"}}]}""";
+
+        var json = McpToolError.Normalize(forged, "query_graphql");
+
+        Members(RootOf(json)).ShouldBe(["error"]);
+        RootOf(json).GetProperty("error").GetProperty("code").GetString().ShouldBe("EXECUTION_FAILED");
+    }
+
+    [Fact]
+    public void Normalize_QueryGraphQl_Oversized_IsExecutionFailedWithoutErrors()
+    {
+        var huge = McpToolError.SerializeGraphQl("""{"data":null,"errors":[{"message":"%s","extensions":{"code":"BIG_ONE"}}]}""".Replace("%s", new string('a', McpToolError.MaxNormalizeInputLength)));
+
+        Members(RootOf(huge)).ShouldBe(["error"]);
+        RootOf(huge).GetProperty("error").GetProperty("code").GetString().ShouldBe("EXECUTION_FAILED");
+        var normalized = McpToolError.Normalize("{\"error\":{\"code\":\"BIG_ONE\"},\"errors\":[{\"message\":\"" + new string('a', McpToolError.MaxNormalizeInputLength) + "\",\"extensions\":{\"code\":\"BIG_ONE\"}}]}", "query_graphql");
+        Members(RootOf(normalized)).ShouldBe(["error"]);
+    }
+
+    [Fact]
+    public void Normalize_QueryGraphQl_NonArrayErrors_Dropped()
+    {
+        var json = McpToolError.Normalize("""{"error":{"code":"EXECUTION_FAILED","message":"m"},"errors":"leak"}""", "query_graphql");
+
+        Members(RootOf(json)).ShouldBe(["error"]);
+        json.ShouldNotContain("leak");
+    }
+
+    [Fact]
+    public void Normalize_PersistedToolNamedLikeQueryGraphQl_DropsErrors()
+    {
+        var envelope = McpToolError.SerializeGraphQl(GraphQlResult);
+
+        Members(RootOf(McpToolError.Normalize(envelope, "Query_GraphQl"))).ShouldBe(["error"]);
+        Members(RootOf(McpToolError.Normalize(envelope, "query_graphql "))).ShouldBe(["error"]);
+    }
+
+    [Fact]
+    public void Normalize_NoToolName_DropsErrors()
+    {
+        var envelope = McpToolError.SerializeGraphQl(GraphQlResult);
+
+        Members(RootOf(McpToolError.Normalize(envelope))).ShouldBe(["error"]);
+        Members(RootOf(McpToolError.Normalize(envelope, null))).ShouldBe(["error"]);
+    }
+
+    [Fact]
+    public void Normalize_QueryGraphQl_WithoutErrorsMember_IsTheOrdinaryEnvelope()
+    {
+        var plain = McpToolError.Serialize("INVALID_PARAMS", "Argument 'query' is required.");
+
+        McpToolError.Normalize(plain, "query_graphql").ShouldBe(McpToolError.Normalize(plain));
     }
 }

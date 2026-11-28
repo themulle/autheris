@@ -26,22 +26,20 @@ public sealed class FlatAggregateMcpSecurityTests
         total: 18,
         meta: new AggregationMetadata(5, SmallGroupStrategy.Suppress, false, 0, 0, false, truncated));
 
+    // MCP query_graphql returns the POST /graphql body unchanged (no row cap since #1208): every flat row and the
+    // aggregation facts reach the caller as the service produced them, and a service-side truncation is never falsified.
     [Theory]
     [InlineData(false)]
     [InlineData(true)]
-    public async Task McpRowCap_TrimsFlatRows_KeepsExtensions_TruncatedNotFalsified(bool serviceTruncated)
+    public async Task McpGraphQlBody_FlatRowsNotTrimmed_ExtensionsTruncatedNotFalsified(bool serviceTruncated)
     {
         var run = await RunAsync(new TypedAggregateTestHost(), $"{{ {Root} {{ region n: count }} }}", ThreeGroups(serviceTruncated));
-        var raw = run.Result.ToJson();
+        var body = JsonDocument.Parse(run.Result.ToJson());
 
-        var trimmed = JsonDocument.Parse(McpRowCap.TrimGraphQl(raw, 2));
-
-        trimmed.RootElement.GetProperty("data").GetProperty(Root).GetArrayLength().ShouldBe(2);
-        trimmed.RootElement.GetProperty("truncated").GetBoolean().ShouldBeTrue();
-        trimmed.RootElement.GetProperty("rowCap").GetInt32().ShouldBe(2);
-        var before = JsonDocument.Parse(raw);
-        var fact = Facts(trimmed).GetProperty(Root);
-        JsonSerializer.Serialize(fact).ShouldBe(JsonSerializer.Serialize(Facts(before).GetProperty(Root)));
+        body.RootElement.GetProperty("data").GetProperty(Root).GetArrayLength().ShouldBe(3);
+        body.RootElement.TryGetProperty("truncated", out _).ShouldBeFalse();
+        body.RootElement.TryGetProperty("rowCap", out _).ShouldBeFalse();
+        var fact = Facts(body).GetProperty(Root);
         fact.GetProperty("truncated").GetBoolean().ShouldBe(serviceTruncated);
         fact.GetProperty("count").GetInt64().ShouldBe(18);
     }

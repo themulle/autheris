@@ -101,6 +101,9 @@ public static class McpErrorCodes
 
     internal const string DefaultMessage = "Tool execution failed.";
 
+    /// <summary>The fixed message of a query_graphql failure whose code is the GraphQL error code (not a catalogue code).</summary>
+    internal const string GraphQlErrorsMessage = "GraphQL execution returned errors.";
+
     // The GraphQL query simulator reads the same datasets as query_graphql and is answered alike.
     private const string SimulateQueryTool = "simulate_query";
 
@@ -170,6 +173,7 @@ public static class McpErrorCodes
         (InvalidParams, "Fix the arguments and call again."),
         (GovernedSqlErrorCodes.SyntaxError, "Correct the statement at the given line and column."),
         (GovernedSqlErrorCodes.PolicyDenied, "Use only tables the dataset catalog lists for you."),
+        (GovernedSqlErrorCodes.PagingTokenInvalid, "Repeat the call without 'next' to restart; a 'next' is valid only with the same sql, parameters and dataSource."),
         (InvalidQuery, "Fix the filter, select or orderBy and call again."),
         (RequiredFilterColumnMissing, "Add a filter on the required column."),
         (MetricNotFound, "Use a metric name returned by the semantic catalog."),

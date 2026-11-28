@@ -146,7 +146,8 @@ public sealed class McpIsMaskedSignalTests
         var clear = await RunQuerySqlAsync(SqlResult(false));
 
         Keys(masked).ShouldBe(Keys(clear));
-        masked.ToLowerInvariant().ShouldNotContain("masked");
+        // The body carries the HTTP column flag (columns[].masked) but never the MCP-only signal.
+        masked.ShouldNotContain("isMasked");
     }
 
     private static string[] Keys(string json)
@@ -178,7 +179,7 @@ public sealed class McpIsMaskedSignalTests
     private static async Task<string> RunQuerySqlAsync(GovernedSqlResult result)
     {
         var tool = McpDatasetTools.Definitions().First(t => t.Name == McpDatasetTools.QuerySql);
-        return await Handler(sql: result).ExecuteToolAsync(tool, """{"query":"SELECT id, ssn FROM sales.dbo.customers"}""", Session());
+        return await Handler(sql: result).ExecuteToolAsync(tool, """{"sql":"SELECT id, ssn FROM sales.dbo.customers"}""", Session());
     }
 
     [Fact]
@@ -187,6 +188,22 @@ public sealed class McpIsMaskedSignalTests
         using var scope = McpResultMasking.Begin();
         await RunQuerySqlAsync(SqlResult(true));
         scope.Outcome.ShouldBe(true);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public async Task QuerySql_IsMaskedConsistentWithColumnMasked_BeforeShortening()
+    {
+        using var masked = McpResultMasking.Begin();
+        var maskedBody = JsonDocument.Parse(await RunQuerySqlAsync(SqlResult(true)));
+        using var clear = McpResultMasking.Begin();
+        var clearBody = JsonDocument.Parse(await RunQuerySqlAsync(SqlResult(false)));
+
+        masked.Outcome.ShouldBe(true);
+        maskedBody.RootElement.GetProperty("columns").EnumerateArray().Any(c => c.GetProperty("masked").GetBoolean()).ShouldBeTrue();
+        maskedBody.RootElement.GetProperty("columns")[0].GetProperty("masked").GetBoolean().ShouldBeFalse();
+        clear.Outcome.ShouldBe(false);
+        clearBody.RootElement.GetProperty("columns").EnumerateArray().Any(c => c.GetProperty("masked").GetBoolean()).ShouldBeFalse();
     }
 
     [Fact]

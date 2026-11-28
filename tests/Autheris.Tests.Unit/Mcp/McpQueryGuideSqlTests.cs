@@ -164,11 +164,13 @@ public sealed class McpQueryGuideSqlTests
 
     [Fact]
     [Trait("Category", "Security")]
-    public void Issue1201_Sql_GivenQuerySqlEnabled_WhenBuild_ThenStatesNoParametersAndExampleIsHttpOnly()
+    public void Issue1201_Sql_GivenQuerySqlEnabled_WhenBuild_ThenStatesHttpContractAndExampleIsHttpOnly()
     {
         var guide = Build(Enabled());
 
-        guide.ShouldContain("it takes no `parameters`");
+        guide.ShouldContain("takes the same fields as the HTTP body (`sql`, `parameters`, `dataSource`, `page.size`, `next`; no `resultCache`)");
+        guide.ShouldNotContain("`cursor`");
+        guide.ShouldNotContain("`hasMore`");
         guide.ShouldContain("### Example: A Stored Statement Run With Values (HTTP)");
     }
 

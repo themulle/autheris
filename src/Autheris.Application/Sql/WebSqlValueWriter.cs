@@ -1,4 +1,4 @@
-namespace Autheris.Api.Endpoints;
+namespace Autheris.Application.Sql;
 
 using System;
 using System.Globalization;
@@ -8,14 +8,14 @@ using System.Text.Json;
 /// Writes provider values as JSON for WebSQL result streams. All formatting is culture-invariant
 /// with fixed ISO formats.
 /// </summary>
-internal static class WebSqlValueWriter
+public static class WebSqlValueWriter
 {
     private const string TimestampFormat = "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF'Z'";
     private const string LocalTimestampFormat = "yyyy-MM-dd'T'HH:mm:ss.FFFFFFF";
     private const string DateFormat = "yyyy-MM-dd";
     private const string TimeFormat = "HH:mm:ss.FFFFFFF";
 
-    internal static void Write(Utf8JsonWriter writer, object? val)
+    public static void Write(Utf8JsonWriter writer, object? val)
     {
         if (val is null or DBNull)
         {

@@ -122,7 +122,7 @@ public sealed class McpDataTargetResolverAsyncTests
 
         var sqlTables = await AiDataGuardrailService.ParseTablesFromToolAsync(
             querySqlTool,
-            """{"query":"SELECT id FROM sales.public.orders"}""",
+            """{"sql":"SELECT id FROM sales.public.orders"}""",
             engine,
             "default");
         var apiTables = await AiDataGuardrailService.ParseTablesFromToolAsync(
@@ -274,7 +274,7 @@ public sealed class McpDataTargetResolverAsyncTests
         var session = new McpSessionContext("sess-async", "agent-async", "tenant-a", DateTimeOffset.UnixEpoch, DateTimeOffset.UnixEpoch);
 
         var sqlResult = await guardrail.ExecuteToolWithGuardrailAsync(
-            new McpToolCallRequest(McpDatasetTools.QuerySql, """{"query":"SELECT id FROM sales.public.orders"}""", session.SessionId),
+            new McpToolCallRequest(McpDatasetTools.QuerySql, """{"sql":"SELECT id FROM sales.public.orders"}""", session.SessionId),
             session);
         var apiResult = await guardrail.ExecuteToolWithGuardrailAsync(
             new McpToolCallRequest(
@@ -310,7 +310,7 @@ public sealed class McpDataTargetResolverAsyncTests
 
         await Should.ThrowAsync<OperationCanceledException>(async () =>
             await guardrail.ExecuteToolWithGuardrailAsync(
-                new McpToolCallRequest(McpDatasetTools.QuerySql, """{"query":"SELECT id FROM sales.public.orders"}""", session.SessionId),
+                new McpToolCallRequest(McpDatasetTools.QuerySql, """{"sql":"SELECT id FROM sales.public.orders"}""", session.SessionId),
                 session,
                 cts.Token));
     }

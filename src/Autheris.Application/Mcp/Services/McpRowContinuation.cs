@@ -34,11 +34,22 @@ public static class McpRowContinuation
         Interlocked.CompareExchange(ref holder.ResumeAfter, resumeAfter, null);
     }
 
+    /// <summary>Records that the page size of this call was reduced before execution. A no-op without an open scope.</summary>
+    public static void ReportPageSizeCapped()
+    {
+        var holder = Current.Value;
+        if (holder is not null)
+        {
+            Interlocked.Exchange(ref holder.PageSizeCapped, 1);
+        }
+    }
+
     internal static void Restore(Holder? previous) => Current.Value = previous;
 
     internal sealed class Holder
     {
         public Func<int, string?>? ResumeAfter;
+        public int PageSizeCapped;
     }
 }
 
@@ -56,6 +67,9 @@ public sealed class McpRowContinuationScope : IDisposable
     }
 
     public Func<int, string?>? ResumeAfter => Volatile.Read(ref _holder.ResumeAfter);
+
+    /// <summary>True when a producer reported that the requested page size was reduced before execution.</summary>
+    public bool PageSizeCapped => Volatile.Read(ref _holder.PageSizeCapped) == 1;
 
     public void Dispose()
     {

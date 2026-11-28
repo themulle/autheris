@@ -23,13 +23,13 @@ public sealed partial class McpQuerySqlPagingTests
         McpToolExecutionHandler handler, McpSessionContext session, string sql = OrderedSql)
     {
         using var scope = McpRowContinuation.Begin();
-        var json = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql }), session);
+        var json = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql }), session);
         return (scope.ResumeAfter, JsonDocument.Parse(json).RootElement.Clone());
     }
 
     private static async Task<int[]> PageIdsAsync(McpToolExecutionHandler handler, McpSessionContext session, string cursor, string sql = OrderedSql)
     {
-        var json = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = sql, cursor }), session);
+        var json = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql, next = cursor }), session);
         using var doc = JsonDocument.Parse(json);
         return doc.RootElement.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("id").GetInt32()).ToArray();
     }
@@ -63,7 +63,7 @@ public sealed partial class McpQuerySqlPagingTests
         var token = resume!(1)!;
 
         // The resumed page starts at row 2 (offset 1) and its own next continues at row 4 (offset 3, number 2).
-        var json = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = OrderedSql, cursor = token }), session);
+        var json = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql = OrderedSql, next = token }), session);
         using var doc = JsonDocument.Parse(json);
         doc.RootElement.GetProperty("rows").EnumerateArray().Select(r => r.GetProperty("id").GetInt32()).ToArray().ShouldBe([2, 3]);
         var next = doc.RootElement.GetProperty("next").GetString()!;
@@ -80,7 +80,7 @@ public sealed partial class McpQuerySqlPagingTests
         var token = resume!(2)!;
         var tampered = FlipMidMacChar(token);
 
-        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = OrderedSql, cursor = tampered }), session));
+        AssertPagingTokenInvalid(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql = OrderedSql, next = tampered }), session));
     }
 
     [Fact]
@@ -93,7 +93,7 @@ public sealed partial class McpQuerySqlPagingTests
         var token = resume!(2)!;
 
         const string changed = "SELECT id, name FROM sales.public.orders ORDER BY id DESC";
-        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = changed, cursor = token }), session));
+        AssertPagingTokenInvalid(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql = changed, next = token }), session));
 
         // The parameter half: a resume token minted for one set of bound values only continues that set.
         Func<int, string?>? paramResume;
@@ -109,7 +109,7 @@ public sealed partial class McpQuerySqlPagingTests
         ErrorCode(same).ShouldBeNull(same);
         foreach (var variant in new object[] { new { n = "yyy" }, new { n = "zzz", extra = "x" }, new { N = "zzz" } })
         {
-            AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, Args(ParamSql, variant, paramToken), session));
+            AssertPagingTokenInvalid(await handler.ExecuteToolAsync(QuerySqlTool, Args(ParamSql, variant, paramToken), session));
         }
     }
 
@@ -122,8 +122,8 @@ public sealed partial class McpQuerySqlPagingTests
         var (resume, _) = await FirstPageAsync(handler, owner);
         var token = resume!(2)!;
 
-        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = OrderedSql, cursor = token }), CreateSession("S-1-5-21-1055-OTHER", "tenant-1")));
-        AssertInvalidParams(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = OrderedSql, cursor = token }), CreateSession("S-1-5-21-1055-OWNER", "tenant-2")));
+        AssertPagingTokenInvalid(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql = OrderedSql, next = token }), CreateSession("S-1-5-21-1055-OTHER", "tenant-1")));
+        AssertPagingTokenInvalid(await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql = OrderedSql, next = token }), CreateSession("S-1-5-21-1055-OWNER", "tenant-2")));
     }
 
     /// <summary>Changes a character in the middle of the signature part, which always changes the decoded bytes.</summary>
@@ -220,7 +220,7 @@ public sealed partial class McpQuerySqlPagingTests
 
         // The page at offset 3 delivers two rows (4 and 5) although its window is four wide.
         using var scope = McpRowContinuation.Begin();
-        var json = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { query = OrderedSql, cursor = lastPageCursor }), session);
+        var json = await handler.ExecuteToolAsync(QuerySqlTool, JsonSerializer.Serialize(new { sql = OrderedSql, next = lastPageCursor }), session);
         JsonDocument.Parse(json).RootElement.GetProperty("rows").GetArrayLength().ShouldBe(2);
 
         scope.ResumeAfter!(1).ShouldNotBeNull();

@@ -59,7 +59,7 @@ internal static partial class McpQueryGuideBuilder
 
         if (Tool(switches, McpDatasetTools.QueryGraphQl))
         {
-            sb.AppendLine($"- **MCP GraphQL Tool:** `{McpDatasetTools.QueryGraphQl}` executes governed GraphQL queries directly.");
+            sb.AppendLine($"- **MCP GraphQL Tool:** `{McpDatasetTools.QueryGraphQl}` executes governed GraphQL queries directly. Results equal `POST {gql.EndpointPath}`; a failure answers `{{error:{{code,message}}, errors:[...]}}` with the GraphQL errors list, and data next to errors is a normal result.");
         }
 
         var discoveryTools = new List<string>();
@@ -81,7 +81,7 @@ internal static partial class McpQueryGuideBuilder
 
         if (Tool(switches, McpDatasetTools.QuerySql))
         {
-            sb.AppendLine($"- **SQL Query Tool:** `{McpDatasetTools.QuerySql}` executes governed SQL queries. Pass values in `parameters` bound to `@name` placeholders (`IN (@ids)` for a list); a statement rejected with `SQL_LITERAL_NOT_PERMITTED` is resent with the value as a parameter; a `cursor` call repeats the same `parameters`.");
+            sb.AppendLine($"- **SQL Query Tool:** `{McpDatasetTools.QuerySql}` executes governed SQL queries (input `sql`, `dataSource`, `page.size`, `next`, `parameters`; the result has the same fields as the governed SQL HTTP body). Pass values in `parameters` bound to `@name` placeholders (`IN (@ids)` for a list); a statement rejected with `SQL_LITERAL_NOT_PERMITTED` is resent with the value as a parameter; a `next` call repeats the same `parameters`.");
             sb.AppendLine("- **Optional Filters:** `(@p IS NULL OR col = @p)` is an optional filter: JSON `null` drops it, an absent parameter is an error.");
         sb.AppendLine("- **Selectable Sort:** `ORDER BY CASE @sort WHEN 'name' THEN name END, CASE @sort WHEN 'created' THEN created END, id`; end with a unique tie-breaker, a `null` sort orders by it alone.");
             sb.AppendLine("- **Timestamp Parameters:** Date-time strings may end in `Z` or `+HH:mm`; they are converted to UTC.");
