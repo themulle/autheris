@@ -30,7 +30,7 @@ public static class SpecKnownGaps
         ["right"] = (400, "SQL_SYNTAX_ERROR"),
     };
 
-    public const string UnsupportedFunctionCode = "SQL_POLICY_VIOLATION";
+    public const string UnsupportedFunctionCode = "SQL_FUNCTION_NOT_PERMITTED";
 
     /// <summary>GraphQL cell key <c>field.arg</c> => gap id.</summary>
     public static readonly IReadOnlyDictionary<string, string> Fields = new Dictionary<string, string>(StringComparer.Ordinal);

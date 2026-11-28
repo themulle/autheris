@@ -131,6 +131,24 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
         }
     }
 
+    public async Task ValidateAsync(
+        string rawSql,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        string? dataSourceName,
+        CancellationToken ct = default)
+    {
+        try
+        {
+            await _rewriter.ValidateAsync(rawSql, user, tenantId, dataSourceName, SqlTransports.WebSql, ct).ConfigureAwait(false);
+        }
+        catch (CrossSourceRoutingException)
+        {
+            var federatedService = ResolveFederatedService();
+            await federatedService.ValidateAsync(rawSql, user, tenantId, ct).ConfigureAwait(false);
+        }
+    }
+
     internal Task<TrinoSqlEngine.Ast.Emit.CompiledSql> CompileAsync(string rawSql, ClaimsPrincipal user, TenantId tenantId, CancellationToken ct = default) =>
         _rewriter.CompileAsync(rawSql, user, tenantId, ct);
 

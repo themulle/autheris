@@ -95,7 +95,7 @@ public class FunctionMappingTests
     [InlineData("date_add('day', 1, email)", TargetSqlDialect.SqlServer)]
     [InlineData("date_add('day', 1, email)", TargetSqlDialect.Oracle)]
     public void NameWithoutARuleInTheDialect_IsNotInTheFunctionMap(string expression, TargetSqlDialect dialect) =>
-        Assert.Throws<System.Security.SecurityException>(() => Sql(expression, dialect));
+        Assert.Throws<TrinoSqlEngine.Ast.Security.FunctionNotPermittedException>(() => Sql(expression, dialect));
 
     [Theory]
     [InlineData("arbitrary(email)", TargetSqlDialect.DuckDb)]

@@ -575,7 +575,10 @@ public sealed partial class FastSqlEngine : ISqlEngine, IAsyncSqlEngine, Governa
                 {
                     throw new SqlSyntaxErrorException(
                         token.Line, token.Column + 1,
-                        $"line {token.Line}:{token.Column}: Nested block comments ('/* ... /* ... */') are strictly prohibited due to dialect lexer differentials.");
+                        $"line {token.Line}:{token.Column}: Nested block comments ('/* ... /* ... */') are strictly prohibited due to dialect lexer differentials.")
+                    {
+                        Rejection = SqlSyntaxRejection.NestedComment
+                    };
                 }
             }
 
@@ -583,7 +586,10 @@ public sealed partial class FastSqlEngine : ISqlEngine, IAsyncSqlEngine, Governa
             {
                 throw new SqlSyntaxErrorException(
                     token.Line, token.Column + 1,
-                    $"line {token.Line}:{token.Column}: SQL comments are not permitted in governed execution.");
+                    $"line {token.Line}:{token.Column}: SQL comments are not permitted in governed execution.")
+                {
+                    Rejection = SqlSyntaxRejection.Comment
+                };
             }
 
             if (type == SqlBaseLexer.WS || type == SqlBaseLexer.SIMPLE_COMMENT || type == SqlBaseLexer.BRACKETED_COMMENT)

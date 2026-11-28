@@ -822,7 +822,7 @@ public sealed partial class GovernedSqlExecutor
         catch (Exception ex)
         {
             // A driver error is reduced to a stable code first; the original is logged server-side only (see SanitizeProviderError).
-            var sanitized = SanitizeProviderError(ex, binderDialect, dsName, BindsValueFromTheCaller(compiled, clientValues));
+            var sanitized = NameUnknownColumn(SanitizeProviderError(ex, binderDialect, dsName, BindsValueFromTheCaller(compiled, clientValues)), rewrite.ColumnProbe, binderDialect);
             var reported = sanitized ?? ex;
 
             if (!dmlContext.IsDml)

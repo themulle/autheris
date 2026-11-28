@@ -197,22 +197,22 @@ public sealed class WebSqlParserGatewaySecurityTests
     {
         var service = CreatePostgreSqlService();
 
-        await Should.ThrowAsync<WebSqlPolicyException>(() => RewriteAsync(service, $"SELECT {functionName}('x'), id FROM employees"));
+        await Should.ThrowAsync<TrinoSqlEngine.Ast.Security.FunctionNotPermittedException>(() => RewriteAsync(service, $"SELECT {functionName}('x'), id FROM employees"));
     }
 
     [Fact]
     public async Task SQ06_FunctionOutsideDialectAllowlist_IsRejected_UnlessAdditionallyAllowed()
     {
         var strict = CreatePostgreSqlService();
-        var ex = await Should.ThrowAsync<WebSqlPolicyException>(() => RewriteAsync(strict, "SELECT md5(name) FROM employees"));
+        var ex = await Should.ThrowAsync<TrinoSqlEngine.Ast.Security.FunctionNotPermittedException>(() => RewriteAsync(strict, "SELECT md5(name) FROM employees"));
         ex.Message.ShouldContain("md5");
 
         // X1 (CR-ADG-02): AdditionalAllowedFunctions can only narrow the dialect's function map; the compiler has no emission rule
-        // for md5 on PostgreSQL, so the statement is still rejected (stable code SQL_POLICY_VIOLATION), never passed through.
+        // for md5 on PostgreSQL, so the statement is still rejected (stable code SQL_FUNCTION_NOT_PERMITTED), never passed through.
         var extended = CreatePostgreSqlService(["md5"]);
         var rejected = await Should.ThrowAsync<System.Security.SecurityException>(() => RewriteAsync(extended, "SELECT md5(name) FROM employees"));
         SqlCompilerErrorMapper.TryMap(rejected, out var mapped).ShouldBeTrue();
-        mapped.Code.ShouldBe("SQL_POLICY_VIOLATION");
+        mapped.Code.ShouldBe("SQL_FUNCTION_NOT_PERMITTED");
     }
 
     [Fact]
@@ -220,9 +220,9 @@ public sealed class WebSqlParserGatewaySecurityTests
     {
         var service = CreatePostgreSqlService(["ts_stat", "setval", "load_extension"]);
 
-        await Should.ThrowAsync<WebSqlPolicyException>(() => RewriteAsync(service, "SELECT ts_stat('SELECT 1'), id FROM employees"));
-        await Should.ThrowAsync<WebSqlPolicyException>(() => RewriteAsync(service, "SELECT setval('s', 1), id FROM employees"));
-        await Should.ThrowAsync<WebSqlPolicyException>(() => RewriteAsync(service, "SELECT load_extension('x'), id FROM employees"));
+        await Should.ThrowAsync<TrinoSqlEngine.Ast.Security.FunctionNotPermittedException>(() => RewriteAsync(service, "SELECT ts_stat('SELECT 1'), id FROM employees"));
+        await Should.ThrowAsync<TrinoSqlEngine.Ast.Security.FunctionNotPermittedException>(() => RewriteAsync(service, "SELECT setval('s', 1), id FROM employees"));
+        await Should.ThrowAsync<TrinoSqlEngine.Ast.Security.FunctionNotPermittedException>(() => RewriteAsync(service, "SELECT load_extension('x'), id FROM employees"));
     }
 
     [Fact]
@@ -234,7 +234,7 @@ public sealed class WebSqlParserGatewaySecurityTests
         secured.ShouldContain("LEN(", Case.Insensitive);
 
         var postgres = CreateService(CreateOptions(), CreateRepository(CreateTable("orders", "PostgreSQL")));
-        await Should.ThrowAsync<WebSqlPolicyException>(() => RewriteAsync(postgres, "SELECT len(name) FROM orders"));
+        await Should.ThrowAsync<TrinoSqlEngine.Ast.Security.FunctionNotPermittedException>(() => RewriteAsync(postgres, "SELECT len(name) FROM orders"));
     }
 
     // =========================================================================

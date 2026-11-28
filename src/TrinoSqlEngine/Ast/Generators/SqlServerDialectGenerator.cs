@@ -672,7 +672,7 @@ public sealed class SqlServerDialectGenerator : SqlDialectGeneratorBase
 
         if (statement is not SelectStatement)
         {
-            throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "WITH RECURSIVE");
+            throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "WITH RECURSIVE", TrinoSqlEngine.Ast.Builder.SqlConstructCatalog.WithRecursive);
         }
 
         if (context.MaxRecursionDepth is < 1 or > CompileLimits.MaxRecursionDepthLimit)

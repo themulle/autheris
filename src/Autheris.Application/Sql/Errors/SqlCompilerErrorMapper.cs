@@ -20,7 +20,18 @@ using TrinoSqlEngine.Governance;
 /// The result of <see cref="SqlCompilerErrorMapper.TryMap"/>: HTTP status, stable code and the fixed client message. <c>Limit</c> is
 /// the <see cref="SqlLimitKind"/> name of a limit error and never a count.
 /// </summary>
-public readonly record struct SqlErrorMapping(int Status, string Code, string Title, string? Limit = null, int? Line = null, int? Column = null, string? Hint = null);
+public readonly record struct SqlErrorMapping(int Status, string Code, string Title, string? Limit = null, int? Line = null, int? Column = null, string? Hint = null, SqlErrorSubject? Subject = null);
+
+/// <summary>
+/// The sanitized name a rejection may echo: <c>Kind</c> is the response extension key (<c>function</c>, <c>construct</c> or
+/// <c>columnName</c>). The name is either a catalogued construct label or a value that passed <see cref="PublicSqlName.TryCreate"/>.
+/// </summary>
+public readonly record struct SqlErrorSubject(string Kind, string Name)
+{
+    public const string Function = "function";
+    public const string Construct = "construct";
+    public const string ColumnName = "columnName";
+}
 
 /// <summary>
 /// WP-X0a (plan section 28.4.3): the one mapping of compiler and execution errors to a status, a stable code
@@ -152,6 +163,13 @@ public static class SqlCompilerErrorMapper
         e => e is LiteralTokenRejectedException ? Of(400, GovernedSqlErrorCodes.LiteralNotPermitted) : null,
         e => e switch
         {
+            SqlSyntaxErrorException { Rejection: not SqlSyntaxRejection.Syntax } syn => new SqlErrorMapping(
+                400,
+                GovernedSqlErrorCodes.CommentNotPermitted,
+                GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.CommentNotPermitted),
+                Line: syn.Line,
+                Column: syn.Column,
+                Hint: syn.Rejection == SqlSyntaxRejection.NestedComment ? NestedCommentHint : StrictCommentHint),
             SqlSyntaxErrorException syn => new SqlErrorMapping(400, GovernedSqlErrorCodes.SyntaxError, GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.SyntaxError), Line: syn.Line, Column: syn.Column),
             ParseCanceledException or RecognitionException => Of(400, GovernedSqlErrorCodes.SyntaxError),
             _ => null
@@ -167,10 +185,13 @@ public static class SqlCompilerErrorMapper
         e => e is SqlTimeZoneException zone ? MapTimeZone(zone.Code) : null,
         // Phase 5 L3: a user error (a reserved identifier), not a gateway defect: no invariant metric.
         e => e is ReservedIdentifierException ? Of(400, GovernedSqlErrorCodes.ReservedIdentifier) : null,
+        // A function refused by the client statement gate. The row precedes the generic SecurityException row (the type derives from it).
+        // The name is echoed only when it passes the one sanitizer; otherwise the body carries neither name nor hint.
+        e => e is FunctionNotPermittedException fn ? MapFunctionNotPermitted(fn) : null,
         e => e switch
         {
-            SqlCompileNotSupportedException { Reason: SqlCompileNotSupportedReason.Construct } or AstBuildException
-                => Of(422, GovernedSqlErrorCodes.ConstructNotSupported),
+            SqlCompileNotSupportedException { Reason: SqlCompileNotSupportedReason.Construct } nse => MapConstruct(nse.PublicConstruct, nse.Line, nse.Column),
+            AstBuildException abe => MapConstruct(abe.PublicConstruct, abe.Line, abe.Column),
             _ => null
         },
         e => e is SqlCompileNotSupportedException { Reason: SqlCompileNotSupportedReason.StatementClass } ? Of(403, GovernedSqlErrorCodes.StatementNotPermitted) : null,
@@ -203,11 +224,68 @@ public static class SqlCompilerErrorMapper
             ? new SqlErrorMapping(422, GovernedSqlErrorCodes.RowPolicyExpressionNotAllowed, GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.RowPolicyExpressionNotAllowed), Hint: rpe.Hint)
             : null,
         e => e is SecurityException ? Of(403, GovernedSqlErrorCodes.PolicyViolation) : null,
+        e => e is SqlUnknownColumnException col ? MapUnknownColumn(col) : null,
         e => e is GovernedSqlException governed ? MapGoverned(governed.Code) : null,
         // Phase 5 M4: a data source that cannot hand out a correctly pinned session (missing or invalid default schema, a pin that did
         // not verify). The exception derives from InvalidOperationException, so the classifier would not know it.
         e => e is SqlSourceUnavailableException ? Of(503, GovernedSqlErrorCodes.SourceUnavailable) : null
     ];
+
+    private const string NestedCommentHint = "Nested block comments are not permitted. Remove the inner /* ... */.";
+    private const string StrictCommentHint = "Comments are not permitted on this surface. Remove -- and /* */ comments.";
+
+    private static SqlErrorMapping MapFunctionNotPermitted(FunctionNotPermittedException fn)
+    {
+        var plain = Of(403, GovernedSqlErrorCodes.FunctionNotPermitted);
+        if (!PublicSqlName.TryCreate(fn.FunctionName?.ToLowerInvariant(), out var name))
+        {
+            return plain;
+        }
+
+        return plain with
+        {
+            Line = fn.Line is not null && fn.Column is not null ? fn.Line : null,
+            Column = fn.Line is not null && fn.Column is not null ? fn.Column : null,
+            Hint = $"The function '{name}' is not permitted for this data source. Remove it or use a permitted function.",
+            Subject = new SqlErrorSubject(SqlErrorSubject.Function, name)
+        };
+    }
+
+    private static SqlErrorMapping MapConstruct(string? publicConstruct, int? line, int? column)
+    {
+        var plain = Of(422, GovernedSqlErrorCodes.ConstructNotSupported);
+        if (!SqlConstructCatalog.IsPublic(publicConstruct))
+        {
+            return plain;
+        }
+
+        bool located = line is not null && column is not null;
+        return plain with
+        {
+            Line = located ? line : null,
+            Column = located ? column : null,
+            Hint = $"{publicConstruct} is not supported for this data source. Rewrite the statement without it.",
+            Subject = new SqlErrorSubject(SqlErrorSubject.Construct, publicConstruct!)
+        };
+    }
+
+    private static SqlErrorMapping MapUnknownColumn(SqlUnknownColumnException col)
+    {
+        // Fail closed to the denial body (identical for an unknown and a hidden column) when the name does not pass the sanitizer.
+        if (!PublicSqlName.TryCreate(col.ColumnName, out var name))
+        {
+            return Of(403, GovernedSqlErrorCodes.PolicyDenied);
+        }
+
+        bool located = col.Line is not null && col.Column is not null;
+        return Of(400, GovernedSqlErrorCodes.UnknownColumn) with
+        {
+            Line = located ? col.Line : null,
+            Column = located ? col.Column : null,
+            Hint = $"The column '{name}' does not exist on the referenced tables. Check the spelling against the catalog.",
+            Subject = new SqlErrorSubject(SqlErrorSubject.ColumnName, name)
+        };
+    }
 
     private static SqlErrorMapping MapTimeZone(string code) => code switch
     {
@@ -245,6 +323,8 @@ public static class SqlCompilerErrorMapper
         GovernedSqlErrorCodes.StatementRejected => Of(400, code),
         // #312: the executor classified an unknown identifier by provider code; it answers exactly like a denied column.
         GovernedSqlErrorCodes.PolicyDenied => Of(403, code),
+        // Reached only for an unknown column without a usable name; the named variant has its own row.
+        GovernedSqlErrorCodes.UnknownColumn => Of(400, code),
         // #321: a provider set-operation column-count error, classified by provider code in the sanitizer.
         GovernedSqlErrorCodes.SyntaxError => Of(400, code),
         GovernedSqlErrorCodes.CheckedExecutionRequired => Of(500, code),

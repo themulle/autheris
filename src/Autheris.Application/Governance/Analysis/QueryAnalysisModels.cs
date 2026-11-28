@@ -19,6 +19,9 @@ public static class QueryDiagnosticCodes
     public const string ReferencedTablesMismatch = "REFERENCED_TABLES_MISMATCH";
     public const string QueryTooComplex = "QUERY_TOO_COMPLEX";
 
+    /// <summary>Informational: the compile check of execution is skipped because the target is a simulated principal.</summary>
+    public const string CompileCheckNotRunForSimulation = "COMPILE_CHECK_NOT_RUN_FOR_SIMULATION";
+
     /// <summary>Informational: the analysis target is another principal whose token scopes are unknown (issue #127).</summary>
     public const string TargetScopesUnknown = "TARGET_SCOPES_UNKNOWN";
 }
@@ -97,7 +100,19 @@ public sealed record QueryValidationDiagnostic(
     string Message,
     string? QueryName = null,
     string? Dataset = null,
-    string? Column = null);
+    string? Column = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    QueryDiagnosticLocation? Location = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? Function = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? Construct = null,
+    [property: System.Text.Json.Serialization.JsonIgnore(Condition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull)]
+    string? Hint = null,
+    bool BlocksExecution = false);
+
+/// <summary>Line and column (1-based) of a statement diagnostic, as execution reports them.</summary>
+public sealed record QueryDiagnosticLocation(int Line, int Column);
 
 /// <summary>
 /// Issue #79: An output column projected by one or more analyzed queries, with its catalog type and effective access level.

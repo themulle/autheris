@@ -85,11 +85,11 @@ public sealed class TrinoErrorLocationTests
 
     public class DummyCharPosAstBuildException : AstBuildException
     {
-        public int Line { get; }
+        public int LineNumber { get; }
         public int CharPositionInLine { get; }
         public DummyCharPosAstBuildException(int line, int charPos, string message) : base(message)
         {
-            Line = line;
+            LineNumber = line;
             CharPositionInLine = charPos;
         }
     }

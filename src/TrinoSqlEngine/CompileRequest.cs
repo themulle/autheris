@@ -212,6 +212,46 @@ public class SqlCompileNotSupportedException : SecurityException
     {
         Reason = reason;
     }
+
+    /// <summary>A rejection of a catalogued statement-structure construct; the label is safe to show the caller.</summary>
+    public SqlCompileNotSupportedException(SqlCompileNotSupportedReason reason, string detail, string publicConstruct)
+        : this(reason, detail)
+    {
+        PublicConstruct = publicConstruct;
+    }
+
+    /// <summary>The <see cref="Ast.Builder.SqlConstructCatalog"/> label of the rejected construct, or <c>null</c> when it must stay unnamed.</summary>
+    public string? PublicConstruct { get; private set; }
+
+    /// <summary>1-based line of the construct in the client text, when known.</summary>
+    public int? Line { get; private set; }
+
+    /// <summary>1-based column of the construct in the client text, when known.</summary>
+    public int? Column { get; private set; }
+
+    /// <summary>Sets the position once; a position that is already known is kept.</summary>
+    public void LocateAt(int line, int column)
+    {
+        if (Line is null)
+        {
+            Line = line;
+            Column = column;
+        }
+    }
+    /// <summary>Makes the rejection unnamed again (the construct cannot be tied to the client text).</summary>
+    public void WithdrawPublicConstruct()
+    {
+        PublicConstruct = null;
+        Line = null;
+        Column = null;
+    }
+
+    /// <summary>Forgets the position (it was computed against text the client did not write).</summary>
+    public void DropPosition()
+    {
+        Line = null;
+        Column = null;
+    }
 }
 
 /// <summary>

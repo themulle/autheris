@@ -26,6 +26,7 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
     private readonly Stack<HashSet<string>> _cteScopeStack = new();
     private readonly List<string> _functionCalls = new();
     private readonly HashSet<string> _seenFunctionCalls = new(StringComparer.Ordinal);
+    private readonly List<SqlFunctionCallSite> _functionCallSites = new();
     private readonly List<string> _tableFunctionCalls = new();
     private readonly List<string> _definingNonRecursiveCtes = new();
     private bool _hasRecursiveCte;
@@ -112,6 +113,7 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
             FilterColumnReferences: _filterColumnReferences.ToArray())
         {
             WindowColumnReferences = _windowColumnReferences.ToArray(),
+            FunctionCallSites = _functionCallSites.ToArray(),
             HasRecursiveCte = _hasRecursiveCte,
             HasNonRecursiveSelfReference = _hasNonRecursiveSelfReference,
             CrossJoinCount = _crossJoinCount,
@@ -140,6 +142,7 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
         _cteScopeStack.Push(new HashSet<string>(StringComparer.Ordinal));
         _functionCalls.Clear();
         _seenFunctionCalls.Clear();
+        _functionCallSites.Clear();
         _tableFunctionCalls.Clear();
         _definingNonRecursiveCtes.Clear();
         _hasRecursiveCte = false;
@@ -216,6 +219,7 @@ public sealed class SqlQueryAnalyzer : SqlBaseBaseListener, ISqlQueryAnalyzer
         if (name.Length > 0 && _seenFunctionCalls.Add(name))
         {
             _functionCalls.Add(name);
+            _functionCallSites.Add(new SqlFunctionCallSite(name, context.Start.Line, context.Start.Column + 1));
         }
     }
 

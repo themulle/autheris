@@ -59,6 +59,9 @@ public class GovernedSqlErrorCodesTests
         [GovernedSqlErrorCodes.LiteralNotPermitted, "A string literal contains a character sequence that is not permitted; pass the value as a parameter."],
         [GovernedSqlErrorCodes.AggregationInvalidFunctionForType, "The aggregate function is not valid for the type of its argument."],
         [GovernedSqlErrorCodes.RowPolicyExpressionNotAllowed, "The statement uses an expression that is not permitted on a table with a row policy. Use non-raising expressions such as TRY_CAST or NULLIF instead."],
+        [GovernedSqlErrorCodes.FunctionNotPermitted, "The statement calls a function that is not permitted for this data source."],
+        [GovernedSqlErrorCodes.CommentNotPermitted, "The statement contains a comment that is not permitted."],
+        [GovernedSqlErrorCodes.UnknownColumn, "The statement references a column that does not exist."],
     ];
 
     [Theory]
@@ -70,6 +73,19 @@ public class GovernedSqlErrorCodesTests
         Assert.Equal(message, exception.Message);
         Assert.Equal(code, exception.Code);
         Assert.Null(exception.InnerException);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void NewCodes_FixedMessagesAreStatic()
+    {
+        foreach (var code in new[] { GovernedSqlErrorCodes.FunctionNotPermitted, GovernedSqlErrorCodes.CommentNotPermitted, GovernedSqlErrorCodes.UnknownColumn })
+        {
+            var message = GovernedSqlErrorCodes.FixedMessage(code);
+            Assert.DoesNotContain("{", message, StringComparison.Ordinal);
+            Assert.DoesNotContain("'", message, StringComparison.Ordinal);
+            Assert.Equal(message, new GovernedSqlException(code, TargetSqlDialect.PostgreSql).Message);
+        }
     }
 
     [Fact]
@@ -123,6 +139,9 @@ public class GovernedSqlErrorCodesTests
             ["WriteBudgetExhausted"] = "WRITE_BUDGET_EXHAUSTED",
             ["DmlWriteConnectionMissing"] = "DML_WRITE_CONNECTION_MISSING",
             ["RowPolicyExpressionNotAllowed"] = "ROW_POLICY_EXPRESSION_NOT_ALLOWED",
+            ["FunctionNotPermitted"] = "SQL_FUNCTION_NOT_PERMITTED",
+            ["CommentNotPermitted"] = "SQL_COMMENT_NOT_PERMITTED",
+            ["UnknownColumn"] = "UNKNOWN_COLUMN",
         };
         foreach (var (name, value) in expected)
         {

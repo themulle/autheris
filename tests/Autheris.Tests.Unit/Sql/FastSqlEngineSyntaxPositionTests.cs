@@ -47,6 +47,56 @@ public sealed class FastSqlEngineSyntaxPositionTests
     }
 
     [Fact]
+    [Trait("Category", "Security")]
+    public void NestedBlockComment_CarriesNestedCommentRejection()
+    {
+        var ex = Should.Throw<SqlSyntaxErrorException>(() =>
+            FastSqlEngine.Default.Parse("SELECT 1 /* a /* b */ */".AsMemory(), ClientSqlTokenPolicy.Analysis));
+
+        ex.Rejection.ShouldBe(SqlSyntaxRejection.NestedComment);
+        ex.Line.ShouldBe(1);
+        ex.Column.ShouldBe(10);
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void StrictOptionsComment_CarriesCommentRejection()
+    {
+        var ex = Should.Throw<SqlSyntaxErrorException>(() =>
+            FastSqlEngine.Default.Parse("SELECT 1\n-- secret".AsMemory(), StrictOptions));
+
+        ex.Rejection.ShouldBe(SqlSyntaxRejection.Comment);
+        ex.Line.ShouldBe(2);
+        ex.Column.ShouldBe(1);
+        ex.Message.ShouldNotContain("secret");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void CommentRejection_DoesNotEchoCommentText()
+    {
+        var nested = Should.Throw<SqlSyntaxErrorException>(() =>
+            FastSqlEngine.Default.Parse("SELECT 1 /* topsecret /* b */ */".AsMemory(), ClientSqlTokenPolicy.Analysis));
+        nested.Message.ShouldNotContain("topsecret");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void PlainComment_StillAccepted_WebSql()
+    {
+        var (tree, _) = FastSqlEngine.Default.Parse("SELECT 1 -- note\n/* block */".AsMemory(), ClientSqlTokenPolicy.Analysis);
+        tree.ShouldNotBeNull();
+    }
+
+    [Fact]
+    public void SyntaxError_HasDefaultSyntaxRejection()
+    {
+        var ex = Should.Throw<SqlSyntaxErrorException>(() =>
+            FastSqlEngine.Default.Parse("SELECT\n  FROM".AsMemory(), ClientSqlTokenPolicy.Analysis));
+        ex.Rejection.ShouldBe(SqlSyntaxRejection.Syntax);
+    }
+
+    [Fact]
     public void TrailingSemicolon_Accepted_WhenAllowed()
     {
         var (tree, _) = FastSqlEngine.Default.Parse("SELECT 1;".AsMemory(), ClientSqlTokenPolicy.Analysis);

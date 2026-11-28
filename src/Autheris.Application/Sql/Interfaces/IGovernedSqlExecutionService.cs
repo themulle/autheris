@@ -199,4 +199,18 @@ public interface IGovernedSqlExecutionService
         ClaimsPrincipal user,
         TenantId tenantId,
         CancellationToken ct = default);
+
+    /// <summary>
+    /// Dry run of the WebSQL pipeline for one data source (query analysis): the verdict execution would give, without a connection,
+    /// cost admission, quota charge or deny audit. Implementations that cannot scope the dry run to a data source refuse it.
+    /// </summary>
+    Task ValidateAsync(
+        string rawSql,
+        ClaimsPrincipal user,
+        TenantId tenantId,
+        string? dataSourceName,
+        CancellationToken ct = default) =>
+        dataSourceName is null
+            ? ValidateAsync(rawSql, user, tenantId, ct)
+            : throw new NotSupportedException("This SQL execution service cannot validate a statement for a named data source.");
 }
