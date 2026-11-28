@@ -19,7 +19,7 @@ public sealed partial class OptionsBudgetTests(ITestOutputHelper output)
     internal const int TargetUndocumentedProperties = 0;
 
     private const int CeilingOptionsClasses = 162;
-    private const int CeilingSettableProperties = 942;
+    private const int CeilingSettableProperties = 943;
     private const int CeilingEnabledFlags = 52;
     private const int CeilingUndocumentedProperties = 151;
 

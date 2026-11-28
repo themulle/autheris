@@ -1,3 +1,5 @@
+using System.Security;
+using TrinoSqlEngine.Ast.Security;
 using System.Collections.Frozen;
 using TrinoSqlEngine.Ast.Emit;
 using TrinoSqlEngine.Ast.Nodes;
@@ -88,5 +90,192 @@ public class SelectableSortOrderTests
         Assert.Equal(plain?.GetType(), inCase?.GetType());
         Assert.Equal(plain?.Message, inCase?.Message);
         Assert.Equal((plain as GovernedSqlException)?.Code, (inCase as GovernedSqlException)?.Code);
+    }
+
+    private void Refused(TargetSqlDialect dialect, string sql)
+    {
+        var ex = Assert.Throws<RowPolicyExpressionRejectedException>(() => _h.Compile(dialect, sql));
+        Assert.Equal(GovernedSqlErrorCodes.RowPolicyExpressionNotAllowed, ex.Code);
+    }
+
+    private const string SortSql = "SELECT id FROM orders ORDER BY CASE __param_sort WHEN 'region' THEN region END, " +
+        "CASE __param_sort WHEN 'status' THEN status END, id";
+
+    private static List<BoundParameter> SortSlots(CompiledSql compiled) =>
+        compiled.Parameters.Where(p => p.Origin == ParameterOrigin.ClientNamed && string.Equals(p.SourceName, "sort", StringComparison.OrdinalIgnoreCase)).ToList();
+
+    [Theory]
+    [MemberData(nameof(AllDialectData))]
+    public void Case_per_key_order_by_compiles_and_emits_binds(TargetSqlDialect dialect)
+    {
+        var compiled = _h.Compile(dialect, SortSql);
+
+        Assert.Single(SortSlots(compiled));
+        Assert.Contains("CASE", compiled.Sql, StringComparison.OrdinalIgnoreCase);
+        Assert.DoesNotContain("__param_", compiled.Sql);
+    }
+
+    [Theory]
+    [MemberData(nameof(AllDialectData))]
+    public void Sort_pattern_with_page_offset_compiles(TargetSqlDialect dialect)
+    {
+        var compiled = _h.Engine.Compile(SortSql.AsMemory(), _h.Request(dialect) with
+        {
+            BindPageOffset = true,
+            EnforcedMaxRows = 100,
+            PageOffset = 0
+        }, CancellationToken.None);
+
+        Assert.Single(compiled.Parameters, p => p.Origin == ParameterOrigin.PageOffset);
+        Assert.Single(SortSlots(compiled));
+    }
+
+    [Theory]
+    [MemberData(nameof(AllDialectData))]
+    public void Sort_pattern_compiles_under_row_policy(TargetSqlDialect dialect)
+    {
+        var compiled = _h.Compile(dialect, SortSql);
+
+        Assert.Contains(compiled.Parameters, p => p.Origin == ParameterOrigin.Tenant);
+        Assert.All(SortSlots(compiled), s => Assert.Equal(BindFamily.Text, s.RequiredFamily));
+    }
+
+    [Theory]
+    [MemberData(nameof(AllDialectData))]
+    public void Null_sort_value_orders_by_tie_breaker_only(TargetSqlDialect dialect)
+    {
+        var compiled = _h.Compile(dialect, SortSql, nulls: ClientNullShapes.Create(["sort"]));
+
+        // a NULL sort value matches no WHEN: every CASE key is NULL and the unique tie-breaker alone orders the rows
+        Assert.Contains("CASE", compiled.Sql, StringComparison.OrdinalIgnoreCase);
+        Assert.Contains(compiled.Parameters, p => p.Origin == ParameterOrigin.Tenant);
+    }
+
+    // ---- row policy: the root ORDER BY resolves columns in the scope of its single query block ----
+
+    [Theory]
+    [MemberData(nameof(AllDialectData))]
+    [Trait("Category", "Security")]
+    public void OrderByCase_ColumnFamilyResolvedInBodyScope_UnderRowPolicy(TargetSqlDialect dialect)
+    {
+        var compiled = _h.Compile(dialect,
+            "SELECT Id FROM Orders ORDER BY CASE __param_sort WHEN 'region' THEN Region WHEN 'status' THEN Status END, Id");
+
+        Assert.Contains(compiled.Parameters, p => p.Origin == ParameterOrigin.Tenant);
+    }
+
+    [Theory]
+    [MemberData(nameof(AllDialectData))]
+    [Trait("Category", "Security")]
+    public void OrderByCase_MixedFamilies_StillRefused(TargetSqlDialect dialect)
+    {
+        Refused(dialect, "SELECT Id FROM Orders ORDER BY CASE __param_sort WHEN 'region' THEN Region WHEN 'amount' THEN Amount END, Id");
+        Refused(dialect, "SELECT Id FROM Orders ORDER BY CASE WHEN Id > 1 THEN Region ELSE Amount END, Id");
+        Refused(dialect, "SELECT Id FROM Orders ORDER BY CASE WHEN Region > 1 THEN Id END");
+    }
+
+    [Theory]
+    [MemberData(nameof(AllDialectData))]
+    [Trait("Category", "Security")]
+    public void OrderBy_SetOperationBody_CaseColumn_StillRefused(TargetSqlDialect dialect)
+    {
+        Refused(dialect, "SELECT Id, Region FROM Orders UNION ALL SELECT Id, Region FROM Orders ORDER BY CASE WHEN Region = 'a' THEN Region END");
+    }
+
+    [Theory]
+    [MemberData(nameof(AllDialectData))]
+    [Trait("Category", "Security")]
+    public void OrderByCase_OutputAliasFamily_IsProjectionFamily(TargetSqlDialect dialect)
+    {
+        // an alias takes the family of the projection it names ...
+        _h.Compile(dialect, "SELECT Region AS k, Id FROM Orders ORDER BY CASE __param_sort WHEN 'k' THEN k WHEN 'r' THEN Region END, Id");
+        // ... never the family of a column that happens to share a name elsewhere: Amount is numeric, Region is text
+        Refused(dialect, "SELECT Amount AS k, Id FROM Orders ORDER BY CASE WHEN Id > 1 THEN k ELSE Region END, Id");
+        // repeated output names stay unknown
+        Refused(dialect, "SELECT Region AS k, Region AS k FROM Orders ORDER BY CASE WHEN Id > 1 THEN k ELSE Region END");
+    }
+
+    [Theory]
+    [MemberData(nameof(AllDialectData))]
+    [Trait("Category", "Security")]
+    public void OrderByCase_UnresolvableColumn_StillRefused(TargetSqlDialect dialect)
+    {
+        Assert.ThrowsAny<Exception>(() => _h.Compile(dialect, "SELECT Id FROM Orders ORDER BY CASE WHEN no_such = 'a' THEN Region ELSE Status END"));
+        Refused(dialect, "SELECT Id FROM Orders ORDER BY CASE WHEN nope.Region = 'a' THEN nope.Region ELSE Status END");
+    }
+
+    [Theory]
+    [MemberData(nameof(AllDialectData))]
+    [Trait("Category", "Security")]
+    public void OrderByCase_MaskedColumn_UnderRowPolicy_IsFilterOnMaskedColumn(TargetSqlDialect dialect)
+    {
+        MaskEmail();
+
+        var ex = Assert.Throws<MaskedColumnPredicateException>(() => _h.Compile(dialect,
+            "SELECT Id FROM Orders ORDER BY CASE __param_sort WHEN 'email' THEN Email WHEN 'region' THEN Region END, Id"));
+
+        Assert.True(ex.Data.Contains(GovernedSqlErrorCodes.FilterOnMaskedColumn));
+    }
+
+    [Theory]
+    [MemberData(nameof(AllDialectData))]
+    [Trait("Category", "Security")]
+    public void OrderBy_OuterScopeOrCorrelatedRowPolicyColumn_StillRefused(TargetSqlDialect dialect)
+    {
+        // a column of a source that is not in the body scope
+        Refused(dialect, "SELECT Id FROM Orders AS o ORDER BY CASE WHEN x.Region = 'a' THEN x.Region ELSE o.Status END");
+        // the ORDER BY of a subquery or CTE is not the root ORDER BY: it keeps the unresolved families
+        Refused(dialect, "SELECT Id FROM Orders WHERE Id IN (SELECT OrderId FROM Entitlements ORDER BY CASE WHEN Id > 1 THEN OrderId END)");
+        Refused(dialect, "WITH c AS (SELECT Id, Region FROM Orders ORDER BY CASE WHEN zz > 1 THEN Region END) SELECT Id FROM c");
+    }
+
+    [Theory]
+    [MemberData(nameof(AllDialectData))]
+    [Trait("Category", "Security")]
+    public void OrderBy_WindowAndAggregateOrderBy_Unchanged(TargetSqlDialect dialect)
+    {
+        // a window ORDER BY inside a projection and an aggregate ORDER BY resolve as before (the block scope is not re-entered for them)
+        Refused(dialect, "SELECT Id, row_number() OVER (ORDER BY CASE WHEN Id > 1 THEN Region ELSE Amount END) AS rn FROM Orders");
+    }
+
+    [Theory]
+    [MemberData(nameof(AllDialectData))]
+    [Trait("Category", "Security")]
+    public void OrderByCase_AliasShadowingDifferentlyTypedColumn_StillRefused(TargetSqlDialect dialect)
+    {
+        // Region (text) is output as Amount, which is also a numeric input column: databases differ in which one binds inside an expression
+        Refused(dialect, "SELECT Region AS Amount, Id FROM Orders ORDER BY CASE WHEN Amount > 'a' THEN Id END");
+        // a bare element is not judged and keeps working with an alias
+        _h.Compile(dialect, "SELECT Region AS k, Id FROM Orders ORDER BY k, Id");
+        // a colliding alias of the same family is accepted
+        _h.Compile(dialect, "SELECT Status AS Region, Id FROM Orders ORDER BY CASE WHEN Region > 'a' THEN Region END, Id");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void OrderBy_AggregateOrderBy_Unchanged()
+    {
+        // array_agg(x ORDER BY ...) is the aggregate form the function allowlist accepts (PostgreSQL); the other dialects refuse the function or the clause
+        const TargetSqlDialect dialect = TargetSqlDialect.PostgreSql;
+        const string keyed = "CASE WHEN Id > 1 THEN Region END";
+
+        // controls: the bare aggregate and a keyed aggregate in a projection compile under the row policy
+        _h.Compile(dialect, "SELECT Id FROM Orders GROUP BY Id ORDER BY array_agg(Region ORDER BY Id)");
+        _h.Compile(dialect, $"SELECT array_agg(Region ORDER BY {keyed}) FROM Orders");
+        // the same key inside the root ORDER BY resolves as before the change (without the body scope), so it stays refused
+        Refused(dialect, $"SELECT Id FROM Orders GROUP BY Id ORDER BY length(string_agg(Region, ',' ORDER BY {keyed}))");
+        // a mixed-family key is refused there as well
+        Refused(dialect, "SELECT Id FROM Orders ORDER BY length(string_agg(Region, ',' ORDER BY CASE WHEN Id > 1 THEN Region ELSE Amount END))");
+    }
+
+    [Theory]
+    [MemberData(nameof(AllDialectData))]
+    [Trait("Category", "Security")]
+    public void OrderBy_WindowInsideRootOrderBy_Unchanged(TargetSqlDialect dialect)
+    {
+        Refused(dialect, "SELECT Id FROM Orders ORDER BY row_number() OVER (ORDER BY CASE WHEN Id > 1 THEN Region ELSE Amount END)");
+        Refused(dialect, "SELECT Id, row_number() OVER (ORDER BY CASE WHEN Id > 1 THEN Region ELSE Amount END) AS rn FROM Orders");
+        // a column that only resolves in the body scope stays unresolved inside the nested window ORDER BY
+        Refused(dialect, "SELECT Id FROM Orders ORDER BY row_number() OVER (ORDER BY CASE WHEN Id > 1 THEN Region END)");
     }
 }

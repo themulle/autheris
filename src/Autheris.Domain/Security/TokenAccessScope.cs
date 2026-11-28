@@ -31,6 +31,10 @@ public static class TokenAccessScope
         "scope"
     ];
 
+    /// <summary>True for the claim types that carry delegated scopes: <c>scp</c>, its JwtBearer-mapped URI and RFC 9068 <c>scope</c>.</summary>
+    public static bool IsScopeClaimType(string? type) =>
+        type is not null && OidcScopeClaimTypes.Contains(type, StringComparer.OrdinalIgnoreCase);
+
     public static bool IsReadOnly(this ClaimsPrincipal? principal) =>
         principal?.HasClaim(c => c.Type == ClaimType && c.Value == ReadOnlyValue && c.Issuer == Issuer) == true;
 
