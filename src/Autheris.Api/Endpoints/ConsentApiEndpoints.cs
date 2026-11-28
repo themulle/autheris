@@ -76,8 +76,9 @@ public static partial class ConsentApiEndpoints
         };
 
         var limit = Math.Max(1, perMinute);
+        // The tenant keeps a client id that repeats across tenants (multi-tenant app, free-text Keycloak client) from sharing a budget.
         var principalKey = ResolvePrincipalBucketKey(context.User);
-        var bucketKey = string.Concat("consent-api:", bucket.ToString(), ":", principalKey);
+        var bucketKey = string.Concat("consent-api:", bucket.ToString(), ":", ResolveCaller(context).TenantId.Value, ":", principalKey);
         var rateOptions = new PostAuthSidRateLimitOptions
         {
             TokenBucketCapacity = limit,
@@ -410,11 +411,19 @@ public static partial class ConsentApiEndpoints
             c.GrantKind.ToString(),
             c.TargetColumns);
 
-    private static string ResolvePrincipalBucketKey(ClaimsPrincipal principal) =>
-        ExternalApiPermissions.GetClientId(principal)
-        ?? principal.GetUserSid()?.Value
-        ?? principal.Identity?.Name
-        ?? "anonymous";
+    /// <summary>
+    /// The rate-limit bucket of a caller (issue #1283): a person by their SID, whatever client carries the token, so persons
+    /// behind one client (a portal) never share a budget; an app-only caller, or a caller without SID, by its client id.
+    /// </summary>
+    private static string ResolvePrincipalBucketKey(ClaimsPrincipal principal)
+    {
+        if (!ExternalApiPermissions.IsServicePrincipal(principal) && principal.GetUserSid()?.Value is { Length: > 0 } sid)
+        {
+            return "sid:" + sid;
+        }
+
+        return "client:" + (ExternalApiPermissions.GetClientId(principal) ?? principal.Identity?.Name ?? "anonymous");
+    }
 }
 
 internal enum ConsentApiRateLimitBucket

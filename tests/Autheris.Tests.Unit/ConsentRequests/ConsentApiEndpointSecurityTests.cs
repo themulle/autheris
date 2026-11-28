@@ -1,6 +1,7 @@
 namespace Autheris.Tests.Unit.ConsentRequests;
 
 using System.Linq;
+using System.Security.Claims;
 using System.Text.RegularExpressions;
 using Autheris.Api.Endpoints;
 using System.Threading.Tasks;
@@ -136,6 +137,76 @@ public sealed class ConsentApiEndpointSecurityTests
         var r3 = await harness.DecideAsync(client, req3.Id, "approve", "rl-3", "\"r1\"", approverSid: "S-1-5-21-APPR-1");
         r3.StatusCode.ShouldBe(StatusCodes.Status429TooManyRequests);
         r3.Headers.ContainsKey("Retry-After").ShouldBeTrue();
+    }
+
+    [Fact]
+    public async Task RateLimit_counts_each_person_behind_one_client_separately()
+    {
+        // Issue #1283: persons whose tokens come from the same client (e.g. a portal) each get their own budget.
+        await using var harness = ConsentApiTestHarness.Create(readsPerMinute: 2);
+        var alice = PersonViaClient("S-1-5-21-USER-1", "portal-client");
+        var bob = PersonViaClient("S-1-5-21-USER-2", "portal-client");
+
+        (await harness.ListRequestsAsync(alice)).StatusCode.ShouldBe(StatusCodes.Status200OK);
+        (await harness.ListRequestsAsync(alice)).StatusCode.ShouldBe(StatusCodes.Status200OK);
+        (await harness.ListRequestsAsync(alice)).StatusCode.ShouldBe(StatusCodes.Status429TooManyRequests);
+
+        (await harness.ListRequestsAsync(bob)).StatusCode.ShouldBe(StatusCodes.Status200OK);
+        (await harness.ListRequestsAsync(bob)).StatusCode.ShouldBe(StatusCodes.Status200OK);
+    }
+
+    [Fact]
+    public async Task RateLimit_counts_an_app_only_client_on_its_own_not_with_its_persons()
+    {
+        await using var harness = ConsentApiTestHarness.Create(readsPerMinute: 2);
+        var app = ConsentApiTestHarness.BuildAppPrincipal("tenant-a", harness.RegisteredClientId, ExternalApiPermissions.ConsentRead);
+        var person = PersonViaClient("S-1-5-21-USER-1", harness.RegisteredClientId);
+
+        (await harness.ListRequestsAsync(person)).StatusCode.ShouldBe(StatusCodes.Status200OK);
+        (await harness.ListRequestsAsync(person)).StatusCode.ShouldBe(StatusCodes.Status200OK);
+        (await harness.ListRequestsAsync(person)).StatusCode.ShouldBe(StatusCodes.Status429TooManyRequests);
+
+        (await harness.ListRequestsAsync(app)).StatusCode.ShouldBe(StatusCodes.Status200OK);
+        (await harness.ListRequestsAsync(app)).StatusCode.ShouldBe(StatusCodes.Status200OK);
+        (await harness.ListRequestsAsync(app)).StatusCode.ShouldBe(StatusCodes.Status429TooManyRequests);
+    }
+
+    [Fact]
+    public async Task RateLimit_counts_app_only_tokens_of_one_client_together_even_with_distinct_sids()
+    {
+        // The identity pipeline stamps every service principal with its own SID ("{realm}|{client}"); app-only callers must still
+        // be counted per client, never per SID.
+        await using var harness = ConsentApiTestHarness.Create(readsPerMinute: 2);
+        var first = AppWithSid(harness.RegisteredClientId, "realm-a|instance-1");
+        var second = AppWithSid(harness.RegisteredClientId, "realm-a|instance-2");
+
+        (await harness.ListRequestsAsync(first)).StatusCode.ShouldBe(StatusCodes.Status200OK);
+        (await harness.ListRequestsAsync(second)).StatusCode.ShouldBe(StatusCodes.Status200OK);
+        (await harness.ListRequestsAsync(first)).StatusCode.ShouldBe(StatusCodes.Status429TooManyRequests);
+    }
+
+    [Fact]
+    public async Task RateLimit_counts_one_person_across_clients_together()
+    {
+        await using var harness = ConsentApiTestHarness.Create(readsPerMinute: 2);
+
+        (await harness.ListRequestsAsync(PersonViaClient("S-1-5-21-USER-1", "client-a"))).StatusCode.ShouldBe(StatusCodes.Status200OK);
+        (await harness.ListRequestsAsync(PersonViaClient("S-1-5-21-USER-1", "client-a"))).StatusCode.ShouldBe(StatusCodes.Status200OK);
+        (await harness.ListRequestsAsync(PersonViaClient("S-1-5-21-USER-1", "client-b"))).StatusCode.ShouldBe(StatusCodes.Status429TooManyRequests);
+    }
+
+    private static ClaimsPrincipal PersonViaClient(string sid, string clientId)
+    {
+        var person = ConsentApiTestHarness.BuildDelegatedUserPrincipal("tenant-a", sid, "access_as_user", "Developer");
+        ((ClaimsIdentity)person.Identity!).AddClaim(new Claim("azp", clientId));
+        return person;
+    }
+
+    private static ClaimsPrincipal AppWithSid(string clientId, string sid)
+    {
+        var app = ConsentApiTestHarness.BuildAppPrincipal("tenant-a", clientId, ExternalApiPermissions.ConsentRead);
+        ((ClaimsIdentity)app.Identity!).AddClaim(new Claim(ClaimTypes.PrimarySid, sid));
+        return app;
     }
 
     [Fact]

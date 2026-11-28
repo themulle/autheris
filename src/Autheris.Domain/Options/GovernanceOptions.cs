@@ -79,22 +79,22 @@ public sealed class ExternalApiSettings
 }
 
 /// <summary>
-/// Rate limit budgets (requests per minute per authenticated principal SID) for the consent REST API.
+/// Rate limit budgets (requests per minute, per tenant: per person (SID) and per app-only client id) for the consent REST API.
 /// </summary>
 public sealed class ExternalApiRateLimitSettings
 {
     /// <summary>
-    /// Maximum read requests per minute allowed per authenticated principal SID on consent REST endpoints.
+    /// Maximum read requests per minute on consent REST endpoints, per person (SID) and per app-only client id.
     /// </summary>
     public int ReadsPerMinute { get; init; } = 600;
 
     /// <summary>
-    /// Maximum decision and revocation write requests per minute allowed per authenticated principal SID on consent REST endpoints.
+    /// Maximum decision and revocation write requests per minute on consent REST endpoints, per person (SID) and per app-only client id.
     /// </summary>
     public int DecisionsAndRevokesPerMinute { get; init; } = 60;
 
     /// <summary>
-    /// Maximum cryptographic grant-proof inspection requests per minute allowed per authenticated principal SID.
+    /// Maximum cryptographic grant-proof inspection requests per minute, per person (SID) and per app-only client id.
     /// </summary>
     public int ProofPerMinute { get; init; } = 120;
 }
