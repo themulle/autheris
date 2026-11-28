@@ -191,38 +191,50 @@ public class OptionalFilterReductionTests
         return new PolicyExpressionParser(new FastSqlEngine(), new FakeTimeProvider(), null).Parse(text, builder.Build());
     }
 
+    [Theory]
+    [Trait("Category", "Security")]
+    [MemberData(nameof(ClientListHarness.DialectData), MemberType = typeof(ClientListHarness))]
+    public void Dml_optional_client_filter_is_refused_for_every_dialect_and_null_ness(TargetSqlDialect dialect)
+    {
+        const StatementPermissions all = StatementPermissions.Update | StatementPermissions.Delete;
+        foreach (var sql in new[]
+                 {
+                     "UPDATE orders SET status = 'x' WHERE id = 1 AND (__param_region IS NULL OR region = __param_region)",
+                     "UPDATE orders SET status = 'x' WHERE id = 1 AND (region = __param_region OR __param_region IS NULL)",
+                     "DELETE FROM orders WHERE id = 1 AND (__param_region IS NULL OR region = __param_region)",
+                     "DELETE FROM orders WHERE (__param_region IS NULL OR region = __param_region) AND id = 1",
+                     "DELETE FROM orders WHERE id = 1 AND __param_region IS NULL"
+                 })
+        {
+            foreach (var nulls in new ClientNullShapes?[] { Null("region"), null })
+            {
+                Assert.Throws<UnfilteredDmlException>(() => _h.Compile(dialect, sql, statements: all, nulls: nulls));
+            }
+        }
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Dml_plain_client_filter_is_still_accepted()
+    {
+        var update = _h.Compile(TargetSqlDialect.PostgreSql,
+            "UPDATE orders SET status = 'x' WHERE id = 1 AND region = __param_region", statements: StatementPermissions.Update);
+        Assert.Single(ClientSlots(update));
+    }
+
     [Fact]
     [Trait("Category", "Security")]
     public void Dml_and_insert_select_keep_or_form()
     {
         const StatementPermissions all = StatementPermissions.Insert | StatementPermissions.Update | StatementPermissions.Delete;
-        var update = _h.Compile(TargetSqlDialect.PostgreSql,
-            "UPDATE orders SET status = 'x' WHERE id = 1 AND (__param_region IS NULL OR region = __param_region)", statements: all, nulls: Null("region"));
-        Assert.Contains(" OR ", update.Sql, StringComparison.OrdinalIgnoreCase);
-        Assert.Single(ClientSlots(update));
-
-        // INSERT .. SELECT either keeps the OR form or is refused; it is never reduced
-        var refusal = Record.Exception(() => _h.Compile(TargetSqlDialect.PostgreSql,
-            "INSERT INTO orders (id, tenantid, status) SELECT id, tenantid, status FROM orders WHERE (__param_region IS NULL OR region = __param_region)",
-            statements: all, nulls: Null("region")));
+        const string sql = "INSERT INTO orders (id, tenantid, status) SELECT id, tenantid, status FROM orders WHERE (__param_region IS NULL OR region = __param_region)";
+        var refusal = Record.Exception(() => _h.Compile(TargetSqlDialect.PostgreSql, sql, statements: all, nulls: Null("region")));
         if (refusal is null)
         {
-            var insertSelect = _h.Compile(TargetSqlDialect.PostgreSql,
-                "INSERT INTO orders (id, tenantid, status) SELECT id, tenantid, status FROM orders WHERE (__param_region IS NULL OR region = __param_region)",
-                statements: all, nulls: Null("region"));
+            var insertSelect = _h.Compile(TargetSqlDialect.PostgreSql, sql, statements: all, nulls: Null("region"));
             Assert.Contains(" OR ", insertSelect.Sql, StringComparison.OrdinalIgnoreCase);
             Assert.Contains("IS NULL", insertSelect.Sql, StringComparison.OrdinalIgnoreCase);
         }
-    }
-
-    [Fact]
-    public void Dml_keeps_the_or_form()
-    {
-        var update = _h.Compile(TargetSqlDialect.SqlServer,
-            "DELETE FROM orders WHERE id = 1 AND (__param_region IS NULL OR region = __param_region)",
-            statements: StatementPermissions.Delete, nulls: Null("region"));
-
-        Assert.Contains(" OR ", update.Sql, StringComparison.OrdinalIgnoreCase);
     }
 
     [Fact]
