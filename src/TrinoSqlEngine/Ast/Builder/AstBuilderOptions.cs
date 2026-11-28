@@ -9,6 +9,15 @@ using TrinoSqlEngine;
 /// </summary>
 public sealed record AstBuilderOptions
 {
+    /// <summary>
+    /// When true, a rejection raised while parsing client statement text may name the rejected function or construct.
+    /// Only parsers of client text set it; every policy-text parser keeps the default so policy facts are never named.
+    /// </summary>
+    internal bool ExposeRejectionDetails { get; private init; }
+
+    /// <summary>A copy that lets a rejection of client statement text name the rejected function or construct. Never call it for policy text.</summary>
+    public AstBuilderOptions WithRejectionDetailsExposed() => this with { ExposeRejectionDetails = true };
+
     /// <summary>Maximum permitted AST nesting depth before parsing fails.</summary>
     public int MaxAllowedAstDepth { get; init; } = 64;
 

@@ -65,8 +65,48 @@ internal sealed class GovernedSqlCompiler
         }
         catch (Exception ex)
         {
+            LocateNamedConstruct(ex, sql);
             CompilerTelemetry.RecordRejected(request.TargetDialect, ex);
             throw;
+        }
+    }
+
+    /// <summary>
+    /// Adds the position of a catalogued construct to its rejection by locating the construct's keywords in the client statement text. A
+    /// construct without keywords, or one that is not found, keeps no position. Never throws.
+    /// </summary>
+    private static void LocateNamedConstruct(Exception ex, ReadOnlyMemory<char> sql)
+    {
+        string label;
+        switch (ex)
+        {
+            case AstBuildException { PublicConstruct: { } built, Line: null }:
+                label = built;
+                break;
+            case SqlCompileNotSupportedException { PublicConstruct: { } emitted, Line: null }:
+                label = emitted;
+                break;
+            default:
+                return;
+        }
+
+        if (!SqlConstructCatalog.Anchors.TryGetValue(label, out var keywords) || keywords.Length == 0
+            || !SqlConstructLocator.TryLocateTokens(sql.ToString(), keywords, out int line, out int column))
+        {
+            // An emit-time rejection (no builder position) can stem from a policy tree (a row-policy subquery, a mask). Without its keywords in the
+            // client text it cannot be shown to be the client's construct, so it stays unnamed.
+            if (ex is AstBuildException abe0) abe0.WithdrawPublicConstruct();
+            else if (ex is SqlCompileNotSupportedException nse0) nse0.WithdrawPublicConstruct();
+            return;
+        }
+
+        if (ex is AstBuildException build)
+        {
+            build.LocateAt(line, column);
+        }
+        else if (ex is SqlCompileNotSupportedException notSupported)
+        {
+            notSupported.LocateAt(line, column);
         }
     }
 
@@ -166,7 +206,7 @@ internal sealed class GovernedSqlCompiler
             AllowedTableFunctions = request.AllowedTableFunctions,
             TranslateTrinoDateFunctions = request.TranslateTrinoDateFunctions,
             RejectTimeTravelQueries = true
-        };
+        }.WithRejectionDetailsExposed();
         var ast = new SqlAstBuilder(builderOptions).BuildStatement(tree);
         Pass("validate");
         new AstValidationVisitor { CancellationToken = token }.Validate(ast);
@@ -175,7 +215,7 @@ internal sealed class GovernedSqlCompiler
         // before the security visitor, so no shadow check, catalog lookup or injection precedes it.
         if (statementClass != SqlStatementClass.Select && ContainsRecursiveWith(ast))
         {
-            throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "WITH RECURSIVE");
+            throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "WITH RECURSIVE", SqlConstructCatalog.WithRecursive);
         }
 
         // 4b. time zone conversion: every call is checked on the USER tree, before simplification (no folding can turn a non-literal

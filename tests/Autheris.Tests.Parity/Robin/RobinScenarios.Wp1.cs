@@ -330,7 +330,7 @@ public sealed partial class RobinScenarios
         {
             ("WebSql", "sum_string") => (await Sql("SELECT SUM(product) AS t FROM parity_sales"), "AGGREGATION_INVALID_FUNCTION_FOR_TYPE"),
             ("GraphQl", "sum_string") => (await GqlAggregate($"aggregates: [{Agg("SUM", "product", "t")}]"), "AGGREGATION_INVALID_FUNCTION_FOR_TYPE"),
-            ("WebSql", "unknown_function") => (await Sql("SELECT NOPE_FN(amount) AS t FROM parity_sales"), "SQL_POLICY_VIOLATION"),
+            ("WebSql", "unknown_function") => (await Sql("SELECT NOPE_FN(amount) AS t FROM parity_sales"), "SQL_FUNCTION_NOT_PERMITTED"),
             ("GraphQl", "unknown_function") => (await GqlAggregate($"aggregates: [{Agg("NOPE", "amount", "t")}]"), "GRAPHQL_VALIDATION_FAILED"),
             ("WebSql", _) => (await Sql("SELECT COUNT(*) AS n FROM parity_sales GROUP BY nope"), "SQL_POLICY_DENIED"),
             _ => (await GqlAggregate($"groupBy: [nope], aggregates: [{count}]"), "GRAPHQL_VALIDATION_FAILED"),

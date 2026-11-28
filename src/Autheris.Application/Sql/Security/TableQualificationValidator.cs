@@ -49,7 +49,7 @@ public sealed class TableQualificationValidator : SqlAstRewriter
         {
             EnforceFunctionPolicy = true,
             AllowedFunctions = SqlDialectMapper.AllSafeDialectFunctions
-        }).BuildStatement(tree);
+        }.WithRejectionDetailsExposed()).BuildStatement(tree);
         Validate(statement, authorizedCatalogs);
     }
 

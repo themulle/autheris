@@ -38,22 +38,7 @@ internal static class SqlErrorResponse
 
         // `limit` carries the limit kind only, never a count; `line` and `column` are the 1-based syntax error position; the title is the fixed message of the code (never exception text).
         Dictionary<string, object?>? ext = null;
-        if (mapped.Limit is not null)
-        {
-            ext ??= new Dictionary<string, object?>();
-            ext["limit"] = mapped.Limit;
-        }
-        if (mapped.Line is not null && mapped.Column is not null)
-        {
-            ext ??= new Dictionary<string, object?>();
-            ext["line"] = mapped.Line.Value;
-            ext["column"] = mapped.Column.Value;
-        }
-        if (mapped.Hint is not null)
-        {
-            ext ??= new Dictionary<string, object?>();
-            ext["hint"] = mapped.Hint;
-        }
+        AddMappedExtensions(ref ext, mapped);
         if (ex is TrinoSqlEngine.Ast.Emit.SqlCostExceededException costEx)
         {
             ext ??= new Dictionary<string, object?>();
@@ -73,5 +58,31 @@ internal static class SqlErrorResponse
             ext["retryAfterSeconds"] = budgetEx.RetryAfterSeconds;
         }
         await ApiProblems.WriteAsync(httpContext, mapped.Status, mapped.Code, mapped.Title, ct, ext).ConfigureAwait(false);
+    }
+
+    /// <summary>Adds the limit kind, the position, the hint and the sanitized subject name of a mapped error to the problem extensions.</summary>
+    internal static void AddMappedExtensions(ref Dictionary<string, object?>? ext, in SqlErrorMapping mapped)
+    {
+        if (mapped.Limit is not null)
+        {
+            ext ??= new Dictionary<string, object?>();
+            ext["limit"] = mapped.Limit;
+        }
+        if (mapped.Line is not null && mapped.Column is not null)
+        {
+            ext ??= new Dictionary<string, object?>();
+            ext["line"] = mapped.Line.Value;
+            ext["column"] = mapped.Column.Value;
+        }
+        if (mapped.Subject is { } subject)
+        {
+            ext ??= new Dictionary<string, object?>();
+            ext[subject.Kind] = subject.Name;
+        }
+        if (mapped.Hint is not null)
+        {
+            ext ??= new Dictionary<string, object?>();
+            ext["hint"] = mapped.Hint;
+        }
     }
 }

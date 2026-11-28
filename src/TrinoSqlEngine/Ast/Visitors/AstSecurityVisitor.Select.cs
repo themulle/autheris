@@ -37,7 +37,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
             // Issue #277: the opt-in gate is the first check of a recursive WITH, before the ambiguity and catalog-name checks.
             if (node.With.IsRecursive && !_options.AllowRecursiveCte)
             {
-                throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "WITH RECURSIVE");
+                throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "WITH RECURSIVE", TrinoSqlEngine.Ast.Builder.SqlConstructCatalog.WithRecursive);
             }
 
             _cteScopeStack.Push(new HashSet<string>(_cteScopeStack.Peek(), CteScopeComparer));

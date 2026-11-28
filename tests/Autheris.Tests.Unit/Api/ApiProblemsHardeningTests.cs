@@ -1,5 +1,6 @@
 namespace Autheris.Tests.Unit.Api;
 
+using System.Collections.Generic;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
@@ -58,6 +59,25 @@ public sealed class ApiProblemsHardeningTests
         ApiErrorCodes.IsGoverned("INDIVIDUAL_GRANT_EXCEEDS_MAXIMUM").ShouldBeTrue();
         ApiErrorCodes.IsGoverned(ApiErrorCodes.ProcedureRejected).ShouldBeTrue();
         ApiProblems.CreateProblemDetails(400, "SQL_SYNTAX_ERROR", "x").Extensions["code"].ShouldBe("SQL_SYNTAX_ERROR");
+    }
+
+    [Fact]
+    public void NameExtensions_PassAllowlist()
+    {
+        var ext = new Dictionary<string, object?>
+        {
+            ["function"] = "pg_sleep",
+            ["construct"] = "TABLESAMPLE",
+            ["columnName"] = "custmer_id",
+            ["detail"] = "must be dropped"
+        };
+
+        var problem = ApiProblems.Problem(400, "UNKNOWN_COLUMN", "x", extraExtensions: ext).ShouldBeOfType<ProblemHttpResult>().ProblemDetails;
+
+        problem.Extensions["function"].ShouldBe("pg_sleep");
+        problem.Extensions["construct"].ShouldBe("TABLESAMPLE");
+        problem.Extensions["columnName"].ShouldBe("custmer_id");
+        problem.Extensions.ContainsKey("detail").ShouldBeFalse();
     }
 
     [Fact]

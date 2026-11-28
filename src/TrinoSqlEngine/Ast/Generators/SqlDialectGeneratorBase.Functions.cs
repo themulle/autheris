@@ -95,6 +95,10 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
     protected static TrinoSqlEngine.Ast.Builder.AstBuildException UnsupportedConstruct(string construct, TargetSqlDialect dialect) =>
         new($"SQL construct {construct} is not supported for {dialect}.");
 
+    /// <summary>A rejection of a catalogued statement-structure construct (never one a policy or a mask can contain); the label is shown to the caller.</summary>
+    protected static TrinoSqlEngine.Ast.Builder.AstBuildException UnsupportedConstruct(string construct, TargetSqlDialect dialect, string publicConstruct) =>
+        new($"SQL construct {construct} is not supported for {dialect}.", publicConstruct, null, null);
+
     /// <summary>Wunsch 4: ANSI <c>CURRENT_DATE</c> … <c>LOCALTIMESTAMP</c>.</summary>
     protected virtual void FormatCurrentDateTime(ref ValueStringBuilder builder, CurrentDateTimeKind kind, SqlEmitterContext context)
     {
@@ -289,7 +293,7 @@ public abstract partial class SqlDialectGeneratorBase : ISqlDialectGenerator
         {
             if (!SupportsGroupByAll)
             {
-                throw new TrinoSqlEngine.Ast.Builder.AstBuildException($"SQL construct GROUP BY ALL is not supported for {TargetDialect}.");
+                throw UnsupportedConstruct("GROUP BY ALL", TargetDialect, TrinoSqlEngine.Ast.Builder.SqlConstructCatalog.GroupByAll);
             }
 
             builder.Append("ALL");

@@ -287,7 +287,7 @@ public sealed class WebSqlExecutorAndConnectorSecurityTests
     {
         var service = CreateService();
 
-        await Should.ThrowAsync<WebSqlPolicyException>(() =>
+        await Should.ThrowAsync<TrinoSqlEngine.Ast.Security.FunctionNotPermittedException>(() =>
             service.RewriteSqlAsync("SELECT query_to_xml('SELECT * FROM hr.salaries', true, false, ''), id FROM employees", CreateUser(), new TenantId(Tenant)));
     }
 

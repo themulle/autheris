@@ -652,7 +652,7 @@ public sealed class GovernedSqlExecutorX1Tests
         written.ShouldBeFalse();
 
         // a statement the compiler rejects is rejected as well
-        await Should.ThrowAsync<SecurityException>(() => service.ExecuteGovernedQueryAsync(
+        await Should.ThrowAsync<TrinoSqlEngine.Ast.Security.FunctionNotPermittedException>(() => service.ExecuteGovernedQueryAsync(
             new GovernedSqlQueryRequest("SELECT load_extension('x') FROM orders"), user, new TenantId(Tenant), (_, _) => { written = true; return Task.CompletedTask; }));
         written.ShouldBeFalse();
     }

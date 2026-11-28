@@ -330,4 +330,167 @@ public sealed class SqlCompilerErrorMapperTests
         mapping.Title.ShouldBe(GovernedSqlErrorCodes.FixedMessage(GovernedSqlErrorCodes.SourceUnavailable));
         mapping.Title.ShouldNotContain("secret_user");
     }
+
+    [Fact]
+    public void NestedComment_MapsToCommentNotPermitted_WithPositionAndHint()
+    {
+        var ex = new SqlSyntaxErrorException(2, 5, HostileMarker) { Rejection = SqlSyntaxRejection.NestedComment };
+
+        SqlCompilerErrorMapper.TryMap(ex, out var mapping).ShouldBeTrue();
+
+        mapping.Status.ShouldBe(400);
+        mapping.Code.ShouldBe("SQL_COMMENT_NOT_PERMITTED");
+        mapping.Title.ShouldBe(GovernedSqlErrorCodes.FixedMessage("SQL_COMMENT_NOT_PERMITTED"));
+        (mapping.Line, mapping.Column).ShouldBe((2, 5));
+        mapping.Hint.ShouldBe("Nested block comments are not permitted. Remove the inner /* ... */.");
+        mapping.Subject.ShouldBeNull();
+    }
+
+    [Fact]
+    public void StrictComment_MapsToCommentNotPermitted_WithStrictHint()
+    {
+        var ex = new SqlSyntaxErrorException(1, 9, HostileMarker) { Rejection = SqlSyntaxRejection.Comment };
+
+        SqlCompilerErrorMapper.TryMap(ex, out var mapping).ShouldBeTrue();
+
+        mapping.Code.ShouldBe("SQL_COMMENT_NOT_PERMITTED");
+        mapping.Hint.ShouldBe("Comments are not permitted on this surface. Remove -- and /* */ comments.");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void CommentRejection_DoesNotEchoCommentText()
+    {
+        var ex = new SqlSyntaxErrorException(1, 1, HostileMarker) { Rejection = SqlSyntaxRejection.NestedComment };
+
+        SqlCompilerErrorMapper.TryMap(ex, out var mapping).ShouldBeTrue();
+
+        (mapping.Title + mapping.Hint + mapping.Code).ShouldNotContain(HostileMarker);
+        mapping.Subject.ShouldBeNull();
+    }
+
+    [Fact]
+    public void PlainSyntaxError_StaysSyntaxError()
+    {
+        SqlCompilerErrorMapper.TryMap(new SqlSyntaxErrorException(1, 3, "x"), out var mapping).ShouldBeTrue();
+
+        mapping.Code.ShouldBe("SQL_SYNTAX_ERROR");
+        mapping.Hint.ShouldBeNull();
+    }
+
+    [Fact]
+    public void FunctionNotPermitted_Maps403_WithNamePositionHint()
+    {
+        SqlCompilerErrorMapper.TryMap(new FunctionNotPermittedException("PG_Sleep", 1, 8), out var mapping).ShouldBeTrue();
+
+        mapping.Status.ShouldBe(403);
+        mapping.Code.ShouldBe("SQL_FUNCTION_NOT_PERMITTED");
+        mapping.Title.ShouldBe(GovernedSqlErrorCodes.FixedMessage("SQL_FUNCTION_NOT_PERMITTED"));
+        mapping.Subject.ShouldBe(new SqlErrorSubject("function", "pg_sleep"));
+        (mapping.Line, mapping.Column).ShouldBe((1, 8));
+        mapping.Hint.ShouldBe("The function 'pg_sleep' is not permitted for this data source. Remove it or use a permitted function.");
+    }
+
+    [Theory]
+    [Trait("Category", "Security")]
+    [InlineData("pg sleep")]
+    [InlineData("a'b")]
+    [InlineData("<script>")]
+    [InlineData("a..b")]
+    [InlineData("")]
+    public void FunctionNotPermitted_UnsafeName_OmitsNameAndHint(string name)
+    {
+        SqlCompilerErrorMapper.TryMap(new FunctionNotPermittedException(name, 1, 8), out var mapping).ShouldBeTrue();
+
+        mapping.Status.ShouldBe(403);
+        mapping.Code.ShouldBe("SQL_FUNCTION_NOT_PERMITTED");
+        mapping.Subject.ShouldBeNull();
+        mapping.Hint.ShouldBeNull();
+        mapping.Line.ShouldBeNull();
+        mapping.Column.ShouldBeNull();
+    }
+
+    [Fact]
+    public void FunctionNotPermitted_WrappedInPolicyException_StillMapped()
+    {
+        var wrapped = new WebSqlPolicyException("wrapper", new FunctionNotPermittedException("pg_sleep", 1, 8));
+
+        SqlCompilerErrorMapper.TryMap(wrapped, out var mapping).ShouldBeTrue();
+
+        mapping.Code.ShouldBe("SQL_FUNCTION_NOT_PERMITTED");
+        mapping.Subject.ShouldBe(new SqlErrorSubject("function", "pg_sleep"));
+    }
+
+    [Fact]
+    public void Construct_Catalogued_Named()
+    {
+        var ex = new AstBuildException(HostileMarker, SqlConstructCatalog.TableSample, 3, 14);
+
+        SqlCompilerErrorMapper.TryMap(ex, out var mapping).ShouldBeTrue();
+
+        mapping.Status.ShouldBe(422);
+        mapping.Code.ShouldBe("SQL_CONSTRUCT_NOT_SUPPORTED");
+        mapping.Subject.ShouldBe(new SqlErrorSubject("construct", "TABLESAMPLE"));
+        (mapping.Line, mapping.Column).ShouldBe((3, 14));
+        mapping.Hint.ShouldBe("TABLESAMPLE is not supported for this data source. Rewrite the statement without it.");
+    }
+
+    [Fact]
+    public void Construct_CataloguedWithoutLocation_OmitsPosition()
+    {
+        var ex = new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, HostileMarker, SqlConstructCatalog.Lateral);
+
+        SqlCompilerErrorMapper.TryMap(ex, out var mapping).ShouldBeTrue();
+
+        mapping.Subject.ShouldBe(new SqlErrorSubject("construct", "LATERAL"));
+        mapping.Line.ShouldBeNull();
+        mapping.Column.ShouldBeNull();
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void Construct_Uncatalogued_ByteIdenticalToToday()
+    {
+        var uncatalogued = new AstBuildException(HostileMarker, "INTERVAL '5 evil'", 1, 1);
+        var plain = new AstBuildException(HostileMarker);
+
+        SqlCompilerErrorMapper.TryMap(uncatalogued, out var a).ShouldBeTrue();
+        SqlCompilerErrorMapper.TryMap(plain, out var b).ShouldBeTrue();
+
+        a.ShouldBe(b);
+        a.Subject.ShouldBeNull();
+        a.Hint.ShouldBeNull();
+        a.Line.ShouldBeNull();
+    }
+
+    [Fact]
+    public void UnknownColumn_Maps400_WithColumnName()
+    {
+        var ex = new SqlUnknownColumnException("custmer_id", 1, 8, TargetSqlDialect.PostgreSql);
+
+        SqlCompilerErrorMapper.TryMap(ex, out var mapping).ShouldBeTrue();
+
+        mapping.Status.ShouldBe(400);
+        mapping.Code.ShouldBe("UNKNOWN_COLUMN");
+        mapping.Title.ShouldBe(GovernedSqlErrorCodes.FixedMessage("UNKNOWN_COLUMN"));
+        mapping.Subject.ShouldBe(new SqlErrorSubject("columnName", "custmer_id"));
+        (mapping.Line, mapping.Column).ShouldBe((1, 8));
+        mapping.Hint.ShouldBe("The column 'custmer_id' does not exist on the referenced tables. Check the spelling against the catalog.");
+    }
+
+    [Fact]
+    [Trait("Category", "Security")]
+    public void UnknownColumn_UnsafeName_FallsBackToPolicyDeniedBody()
+    {
+        var ex = new SqlUnknownColumnException("bad name", 1, 8, TargetSqlDialect.PostgreSql);
+
+        SqlCompilerErrorMapper.TryMap(ex, out var mapping).ShouldBeTrue();
+
+        mapping.Status.ShouldBe(403);
+        mapping.Code.ShouldBe("SQL_POLICY_DENIED");
+        mapping.Subject.ShouldBeNull();
+        mapping.Hint.ShouldBeNull();
+        mapping.Line.ShouldBeNull();
+        mapping.Column.ShouldBeNull();
+    }
 }

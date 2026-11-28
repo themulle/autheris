@@ -46,6 +46,26 @@ using TrinoSqlEngine.Governance;
 public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
 {
     // 07(e): "__rls_ks" is the reserved prefix of the key-set subquery parameters. A pure deny check; the text never decides whether later steps run.
+    private static TrinoSqlEngine.Ast.Security.FunctionNotPermittedException FunctionNotPermitted(SqlQueryMetadata metadata, string functionName)
+    {
+        int? line = null;
+        int? column = null;
+        if (metadata.FunctionCallSites is { } sites)
+        {
+            foreach (var site in sites)
+            {
+                if (string.Equals(site.Name, functionName, StringComparison.Ordinal))
+                {
+                    line = site.Line;
+                    column = site.Column;
+                    break;
+                }
+            }
+        }
+
+        return new TrinoSqlEngine.Ast.Security.FunctionNotPermittedException(functionName, line, column);
+    }
+
     private static void ThrowIfReservedGatewayIdentifier(string rawSql)
     {
         if (rawSql.Contains(InternalParameterPrefix, StringComparison.OrdinalIgnoreCase) || rawSql.Contains("__rls_ks", StringComparison.OrdinalIgnoreCase))
@@ -308,7 +328,7 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
             {
                 if (SqlFunctionPolicy.IsDeniedByDefault(functionName))
                 {
-                    throw new WebSqlPolicyException($"Function '{functionName}' is not permitted in WebSQL.");
+                    throw FunctionNotPermitted(metadata, functionName);
                 }
             }
         }
@@ -774,6 +794,7 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
             throw new WebSqlPolicyException(SqlDialectMapper.UnsupportedDialectMessage);
         }
 
+        var clientSql = rawSql;
         (rawSql, var mvGuard) = await EnforceMetricViewGuardAsync(
             rawSql, decidedTableMetadata, decisions, targetDatabaseDialect.Value, tenantId, ct).ConfigureAwait(false);
 
@@ -794,7 +815,7 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
             {
                 if (!SqlFunctionPolicy.IsFunctionAllowed(functionName, allowedFunctions, additionalDeniedFunctions: null))
                 {
-                    throw new WebSqlPolicyException($"Function '{functionName}' is not permitted in WebSQL.");
+                    throw FunctionNotPermitted(metadata, functionName);
                 }
             }
         }
@@ -818,7 +839,23 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
         // Stage 5: Compile (Security invariant 2). Engine exceptions propagate unwrapped: SqlCompilerErrorMapper maps them to
         // stable codes with fixed messages at every error surface, and no Exception.Message is copied into a new exception.
         // -------------------------------------------------------------
-        var compiled = CompileStatement(rawSql, request, ct);
+        CompiledSql compiled;
+        try
+        {
+            compiled = CompileStatement(rawSql, request, ct, ReferenceEquals(clientSql, rawSql));
+        }
+        catch (TrinoSqlEngine.Ast.Security.RowPolicyExpressionRejectedException)
+        {
+            // an unresolvable column reference must not answer with the guard's code (see UnresolvedColumnAnswer); any other cause keeps it
+            var answer = UnresolvedColumnAnswer(rawSql, ReferenceEquals(clientSql, rawSql), metadata.StatementType == SqlStatementType.Select && !isDml,
+                distinctCatalogs.Count, targetSqlDialect, decisions, decidedTableMetadata);
+            if (answer is null)
+            {
+                throw;
+            }
+
+            throw answer;
+        }
 
         bool allowStatementText = _options.Value.Logging?.AllowStatementText ?? true;
         if (_options.Value.Logging?.LogGeneratedSql == true && allowStatementText && _logger != null && _logger.IsEnabled(LogLevel.Debug))
@@ -834,6 +871,7 @@ public sealed partial class GovernedSqlRewriter : ISqlRewritePipeline
             : null;
 
         var maskedAudit = decisions.Values.SelectMany(d => d.MaskedColumnsAudit).ToList();
-        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, callerAttributes, metadata, pagingUnavailable, bindPageOffset, indexHints, dmlMaxRowsCap, maskedAudit, mvGuard.HiddenCountColumnAlias, mvGuard.EffectiveMinGroupSize);
+        return new GovernedRewrite(compiled, accessedTables, effectiveDataSourceName, deliveredRowLimit, virtualFilters, callerAttributes, metadata, pagingUnavailable, bindPageOffset, indexHints, dmlMaxRowsCap, maskedAudit, mvGuard.HiddenCountColumnAlias, mvGuard.EffectiveMinGroupSize,
+            BuildColumnProbe(rawSql, metadata.StatementType == SqlStatementType.Select && !isDml, distinctCatalogs.Count, decisions, decidedTableMetadata));
     }
 }

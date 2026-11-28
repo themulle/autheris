@@ -291,7 +291,7 @@ public sealed partial class RobinScenarios(ParityHostFixture host) : ParityTestB
         {
             // convert_timezone is not advertised on SQLite (PARITY-GAP-019 resolved by removal): a documented fail-closed rejection.
             (await Sql("SELECT CAST(convert_timezone('UTC', 'Europe/Berlin', CAST(sold_at AS timestamp)) AS date) AS d FROM parity_sales WHERE id IN (6, 10)"))
-                .Rejected("SQL_POLICY_VIOLATION");
+                .Rejected("SQL_FUNCTION_NOT_PERMITTED");
             return;
         }
 

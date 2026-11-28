@@ -31,6 +31,9 @@ public readonly record struct CrossJoinTarget(
     string? RightTableOrAlias,
     bool IsUnknownCardinality = false);
 
+/// <summary>The first occurrence of a called function in the client statement: lower-case name as written, 1-based line and column.</summary>
+public readonly record struct SqlFunctionCallSite(string Name, int Line, int Column);
+
 public sealed record SqlQueryMetadata(
     SqlStatementType StatementType,
     IReadOnlyList<TableAccessTarget> ReferencedTables,
@@ -52,6 +55,9 @@ public sealed record SqlQueryMetadata(
     /// needs "all referenced columns" must read both lists.
     /// </summary>
     public IReadOnlyList<FilterColumnReference>? WindowColumnReferences { get; init; }
+
+    /// <summary>The first occurrence of every function in <see cref="FunctionCalls"/> with its position in the analyzed statement text.</summary>
+    public IReadOnlyList<SqlFunctionCallSite>? FunctionCallSites { get; init; }
 
     /// <summary>Issue #277: the statement contains a <c>WITH RECURSIVE</c> (any nesting level).</summary>
     public bool HasRecursiveCte { get; init; }

@@ -106,6 +106,8 @@ public sealed class GovernedWebSqlIntegrationTests : IClassFixture<GovernedWebSq
             CREATE TABLE accounts (id TEXT, balance TEXT, tenant_id TEXT);
             INSERT INTO accounts VALUES ('1','10','victim'),('2','20','tenant_evil');
             CREATE TABLE crm_customers (id TEXT, email TEXT, tenant_id TEXT);
+            CREATE TABLE ledger (id TEXT, note TEXT, ssn TEXT, tenant_id TEXT);
+            INSERT INTO ledger VALUES ('1','n1','111-11-1111','tenant_alpha');
             CREATE TABLE secure_users (id TEXT, email TEXT, tenant_id TEXT);
             CREATE TABLE hr_employees (id TEXT, ssn TEXT, tenant_id TEXT);
             CREATE TABLE payroll (id TEXT, ssn TEXT, tenant_id TEXT);

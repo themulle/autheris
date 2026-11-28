@@ -31,7 +31,7 @@ public sealed partial class AstSecurityVisitor : SqlAstRewriter
         if (node.Name.IsSimple && !_cteScopeStack.Peek().Contains(scopeKey) && _definingNonRecursiveCtes.Contains(scopeKey))
         {
             // Issue #277: the same typed answer as the router's pre-check (422); fixed text, no CTE or table name.
-            throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "CTE self-reference without WITH RECURSIVE");
+            throw new SqlCompileNotSupportedException(SqlCompileNotSupportedReason.Construct, "CTE self-reference without WITH RECURSIVE", TrinoSqlEngine.Ast.Builder.SqlConstructCatalog.CteSelfReference);
         }
 
         // SEC C-02: Only simple (unqualified) names in CTE scope are considered CTEs
