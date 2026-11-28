@@ -117,6 +117,12 @@ public sealed record GovernedSqlQueryRequest(
     internal ResultByteBudget? ResultByteBudget { get; init; }
 
     internal Autheris.Application.Common.Quota.QueryCostAdmission? Admission { get; init; }
+
+    /// <summary>
+    /// Opt-in dataset facts: called once, right after the statement passed governance and before any row is read, with the
+    /// access facts of every table the statement reads (read statements only). Null for every caller that did not ask.
+    /// </summary>
+    public Action<IReadOnlyList<Autheris.Application.Sql.Tree.DatasetAccessFacts>>? OnDatasetFacts { get; init; }
     public Action<Autheris.Application.Usage.SourceExecutionStats>? OnSourceStats { get; init; }
     public int? PageOffset { get; init; }
     public bool IsPaged { get; init; }

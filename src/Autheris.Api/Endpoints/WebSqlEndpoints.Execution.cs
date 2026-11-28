@@ -355,6 +355,14 @@ public static partial class WebSqlEndpoints
         }
 
         // Only plain JSON reads take part in the result cache: statement, poll, cancel and write paths never do.
+        // Opt-in dataset facts: plain JSON reads only (no statement/poll, parquet or idempotent replay path carries them).
+        IReadOnlyList<Autheris.Application.Sql.Tree.DatasetAccessFacts>? accessFacts = null;
+        bool datasetFactsOn = bodyDto?.DatasetFacts == true && idempotencyLease == null;
+        if (datasetFactsOn)
+        {
+            governedRequest = governedRequest with { OnDatasetFacts = f => accessFacts = f };
+        }
+
         bool resultCacheOn = webSqlOptions.ResultCacheMaxMegabytes > 0 && idempotencyLease == null;
         WebSqlResultCacheOutcome? cacheOutcome = null;
         if (resultCacheOn)
@@ -489,6 +497,16 @@ public static partial class WebSqlEndpoints
                 WriteResultCacheField(writer, reportedCacheOutcome);
             }
 
+            if (datasetFactsOn)
+            {
+                var tables = await Autheris.Application.Sql.Tree.SqlDatasetFacts.ResolveAsync(
+                    httpContext.RequestServices?.GetService<Autheris.Application.Catalog.Interfaces.ICatalogVisibilityService>(),
+                    new Autheris.Application.Catalog.Interfaces.CatalogCaller(user, tenantId, Autheris.Application.Catalog.Interfaces.CatalogChannel.Rest),
+                    accessFacts,
+                    ct);
+                WriteDatasetFacts(writer, tables, truncated);
+            }
+
             if (indexHints is { Count: > 0 })
             {
                 writer.WriteStartArray("indexHints");
@@ -539,6 +557,39 @@ public static partial class WebSqlEndpoints
             }
             idempotencyBuffer?.Dispose();
         }
+    }
+
+    private static void WriteDatasetFacts(Utf8JsonWriter writer, IReadOnlyList<Autheris.Application.Sql.Tree.SqlDatasetFact> tables, bool truncated)
+    {
+        writer.WriteStartObject("datasetFacts");
+        writer.WriteBoolean("truncated", truncated);
+        writer.WriteStartArray("tables");
+        foreach (var table in tables)
+        {
+            writer.WriteStartObject();
+            writer.WriteString("dataset", table.Dataset);
+            writer.WriteStartArray("tags");
+            foreach (var tag in table.Tags)
+            {
+                writer.WriteStringValue(tag);
+            }
+
+            writer.WriteEndArray();
+            writer.WriteBoolean("rowFilterApplied", table.RowFilterApplied);
+            writer.WriteStartArray("rowFilters");
+            foreach (var description in table.RowFilters)
+            {
+                writer.WriteStartObject();
+                writer.WriteString("description", description);
+                writer.WriteEndObject();
+            }
+
+            writer.WriteEndArray();
+            writer.WriteEndObject();
+        }
+
+        writer.WriteEndArray();
+        writer.WriteEndObject();
     }
 
     /// <summary>

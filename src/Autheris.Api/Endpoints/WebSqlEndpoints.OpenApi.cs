@@ -155,6 +155,7 @@ public static partial class WebSqlEndpoints
                 ("dataSource", Prim("string", "Data source to run on. Default: the gateway's default data source.")),
                 ("page", Ref("WebSqlPageRequest")),
                 ("next", Ref("WebSqlNext")),
+                ("datasetFacts", Prim("boolean", "Opt-in: true adds datasetFacts to a plain JSON response (not to statement, poll or Parquet responses): per table the statement reads that you can see, the dataset id, its tags and rowFilterApplied.")),
                 ("resultCache", Obj(
                     ("type", "string"),
                     ("enum", new[] { "default", "bypass" }),
@@ -193,6 +194,25 @@ public static partial class WebSqlEndpoints
                         ("status", Obj(("type", "string"), ("enum", new[] { "hit", "miss", "store", "bypass", "ineligible" }))),
                         ("ageSeconds", Prim("integer")),
                         ("reason", Prim("string")))))),
+                ("datasetFacts", Obj(
+                    ("type", "object"),
+                    ("description",
+                        "Present only when the request set datasetFacts: true. One entry per table the statement reads that you can see in the catalog (others are left out). " +
+                        "rowFilterApplied means a row filter defined by the data owner or by consent applies to you, not that all rows are returned; tenant isolation, virtual and mandatory filters are not reported. " +
+                        "Descriptions are fixed texts, never SQL or values."),
+                    ("required", new[] { "truncated", "tables" }),
+                    ("properties", Obj(
+                        ("truncated", Prim("boolean", "True when the result was cut by a governed limit.")),
+                        ("tables", Obj(("type", "array"), ("items", Obj(
+                            ("type", "object"),
+                            ("required", new[] { "dataset", "tags", "rowFilterApplied", "rowFilters" }),
+                            ("properties", Obj(
+                                ("dataset", Prim("string", "Dataset id domain.schema.table.")),
+                                ("tags", Obj(("type", "array"), ("items", Prim("string")))),
+                                ("rowFilterApplied", Prim("boolean")),
+                                ("rowFilters", Obj(("type", "array"), ("items", Obj(
+                                    ("type", "object"),
+                                    ("properties", Obj(("description", Prim("string")))))))))))))))))),
                 ("indexHints", Obj(("type", "array"), ("items", Obj(
                     ("type", "object"),
                     ("required", new[] { "table", "reason", "helpfulIndexColumns" }),

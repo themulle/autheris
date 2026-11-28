@@ -460,6 +460,8 @@ public sealed partial class GovernedSqlExecutor
             throw;
         }
 
+        request.OnDatasetFacts?.Invoke(rewrite.DatasetFacts ?? []);
+
         var cachePlan = await PlanResultCacheAsync(request, user, tenantId, rewrite, dmlContext, clientValues, sqlForRewrite, requestedDs, shapes, ct, nullShapes).ConfigureAwait(false);
         var result = await ExecuteRewrittenAsync(request, user, tenantId, rewrite, dmlContext, clientValues, rowWriter, ct, cachePlan).ConfigureAwait(false);
         return (result, null, null);

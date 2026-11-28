@@ -54,6 +54,17 @@ public sealed partial class McpToolExecutionHandler
             }
         }
 
+        var datasetFacts = false;
+        if (root.TryGetProperty("datasetFacts", out var factsProp) && factsProp.ValueKind != JsonValueKind.Null)
+        {
+            if (factsProp.ValueKind is not (JsonValueKind.True or JsonValueKind.False))
+            {
+                return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, "'datasetFacts' must be a boolean.");
+            }
+
+            datasetFacts = factsProp.ValueKind == JsonValueKind.True;
+        }
+
         if (!McpSqlParameters.TryRead(root, out var parameters))
         {
             return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, McpSqlParameters.InvalidMessage);
@@ -82,6 +93,8 @@ public sealed partial class McpToolExecutionHandler
             boundedRowLimit = activeSqlScope.ClampRowLimit(boundedRowLimit);
         }
 
+        IReadOnlyList<Autheris.Application.Sql.Tree.DatasetAccessFacts>? accessFacts = null;
+        Action<IReadOnlyList<Autheris.Application.Sql.Tree.DatasetAccessFacts>>? onFacts = datasetFacts ? f => accessFacts = f : null;
         try
         {
             GovernedSqlResult sqlResult;
@@ -94,7 +107,10 @@ public sealed partial class McpToolExecutionHandler
                         Transport: SqlTransports.Mcp,
                         Page: pageWindow,
                         NextToken: cursor,
-                    Parameters: parameters),
+                    Parameters: parameters)
+                    {
+                        OnDatasetFacts = onFacts,
+                    },
                     userPrincipal,
                     tenantId,
                     ct).ConfigureAwait(false);
@@ -102,7 +118,10 @@ public sealed partial class McpToolExecutionHandler
             catch (SqlPagingUnsupportedException) when (cursor is null && requestedLimit is null)
             {
                 sqlResult = await _sqlExecutionService.ExecuteQueryBufferedAsync(
-                    new GovernedSqlQueryRequest(query, RowLimit: boundedRowLimit, Transport: SqlTransports.Mcp, Parameters: parameters),
+                    new GovernedSqlQueryRequest(query, RowLimit: boundedRowLimit, Transport: SqlTransports.Mcp, Parameters: parameters)
+                    {
+                        OnDatasetFacts = onFacts,
+                    },
                     userPrincipal,
                     tenantId,
                     ct).ConfigureAwait(false);
@@ -110,7 +129,18 @@ public sealed partial class McpToolExecutionHandler
 
             McpResultMasking.Report(sqlResult.HasPolicyMaskedValues);
             McpRowContinuation.Offer(sqlResult.ResumeAfter);
-            return JsonSerializer.Serialize(McpSqlQueryResult.From(sqlResult), JsonOpts);
+            IReadOnlyDictionary<string, object?>? factsResponse = null;
+            if (datasetFacts)
+            {
+                var tables = await Autheris.Application.Sql.Tree.SqlDatasetFacts.ResolveAsync(
+                    _catalogVisibility,
+                    new Autheris.Application.Catalog.Interfaces.CatalogCaller(userPrincipal, tenantId, Autheris.Application.Catalog.Interfaces.CatalogChannel.Mcp),
+                    accessFacts,
+                    ct).ConfigureAwait(false);
+                factsResponse = Autheris.Application.Sql.Tree.SqlDatasetFacts.ToResponse(tables, sqlResult.Truncated);
+            }
+
+            return JsonSerializer.Serialize(McpSqlQueryResult.From(sqlResult, factsResponse), JsonOpts);
         }
         catch (SqlPagingTokenInvalidException)
         {
