@@ -535,20 +535,20 @@ public static partial class ConsentApiEndpoints
             return limited;
         }
 
+        // Issue #1284: the feed belongs to registered external systems. A person (delegated or interactive, any role) has no
+        // feed: without a system id the repository would read every event of the tenant.
         var (tenantId, _, clientId, isServicePrincipal, _, _) = ResolveCaller(context);
-        Guid? externalSystemId = null;
-        if (isServicePrincipal)
+        var system = isServicePrincipal
+            ? await ResolveAuthorizedExternalSystemAsync(tenantId, clientId, workflowConfigRepo, ct).ConfigureAwait(false)
+            : null;
+
+        // Issue #1161: an observer reads its (tenant-wide) feed only with both app roles.
+        if (system is null || (system.Role == ExternalWorkflowSystemRole.Observer && !IsAuthorizedObserver(system, context.User)))
         {
-            var system = await ResolveAuthorizedExternalSystemAsync(tenantId, clientId, workflowConfigRepo, ct).ConfigureAwait(false);
-
-            // Issue #1161: an observer reads its (tenant-wide) feed only with both app roles.
-            if (system is null || (system.Role == ExternalWorkflowSystemRole.Observer && !IsAuthorizedObserver(system, context.User)))
-            {
-                return ApiProblems.NotFound(ConsentDecisionErrorCodes.RequestNotFound, "Registered external system not found for caller.", context);
-            }
-
-            externalSystemId = system.Id;
+            return ApiProblems.NotFound(ConsentDecisionErrorCodes.RequestNotFound, "Registered external system not found for caller.", context);
         }
+
+        Guid? externalSystemId = system.Id;
 
         var retentionDays = Math.Max(1, eventsOptions?.Value?.RetentionDays ?? 30);
         var now = (timeProvider ?? TimeProvider.System).GetUtcNow();

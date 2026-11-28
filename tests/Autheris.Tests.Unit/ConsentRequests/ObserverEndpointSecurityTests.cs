@@ -73,6 +73,36 @@ public sealed class ObserverEndpointSecurityTests
         (await harness.GetEventsAsync(observer)).StatusCode.ShouldBe(StatusCodes.Status404NotFound);
     }
 
+    [Theory]
+    [InlineData("Developer")]
+    [InlineData("GovernanceAdmin")]
+    public async Task Person_never_reads_the_tenant_event_feed(string role)
+    {
+        // Issue #1284: the feed is for registered external systems only; a person saw every event of the tenant.
+        var (harness, _, internalId) = await SeedAsync();
+        await using var __ = harness;
+        harness.Store.AddEvent("tenant-a", 1, ConsentEventTypes.RequestCreated, internalId.ToString("D"), "{}", ConsentApiTestHarness.FixedNow);
+
+        var other = ConsentApiTestHarness.BuildUserPrincipal("tenant-a", "S-1-5-21-USER-2", role);
+        var feed = await harness.GetEventsAsync(other);
+
+        feed.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
+        feed.Body.ShouldNotContain(internalId.ToString("D"));
+    }
+
+    [Fact]
+    public async Task Delegated_person_token_never_reads_the_tenant_event_feed()
+    {
+        var (harness, _, internalId) = await SeedAsync();
+        await using var __ = harness;
+        harness.Store.AddEvent("tenant-a", 1, ConsentEventTypes.RequestCreated, internalId.ToString("D"), "{}", ConsentApiTestHarness.FixedNow);
+
+        var feed = await harness.GetEventsAsync(ConsentApiTestHarness.BuildDelegatedUserPrincipal("tenant-a", "S-1-5-21-USER-2", "access_as_user"));
+
+        feed.StatusCode.ShouldNotBe(StatusCodes.Status200OK);
+        feed.Body.ShouldNotContain(internalId.ToString("D"));
+    }
+
     [Fact]
     public async Task Authorized_observer_reads_the_event_feed()
     {
