@@ -52,7 +52,7 @@ public sealed partial class GovernedSqlRewriter
     /// A row-policy guard refusal that is caused by a column the statement references but no table, alias or CTE defines answers like every
     /// other unknown column: <c>UNKNOWN_COLUMN</c> when the caller sees every table, else the denial of a hidden column. Without this, the
     /// guard's own code would tell an unknown column from a hidden one on a table with a row policy. It reads only the client text and the
-    /// catalog (hidden columns included) and returns null when the refusal has another cause, so the guard's decision and code stay.
+    /// catalog (hidden columns included) and returns null only when every reference is a plain catalog column, so the guard's decision and code stay.
     /// </summary>
     private static Exception? UnresolvedColumnAnswer(
         string clientSql,
@@ -77,12 +77,16 @@ public sealed partial class GovernedSqlRewriter
             }
         }
 
-        var finding = UnknownColumnResolver.Classify(new UnknownColumnProbe(clientSql, catalogColumns), out var name, out var line, out var columnPos);
-        if (finding == UnknownColumnResolver.Finding.None)
+        var probe = new UnknownColumnProbe(clientSql, catalogColumns);
+
+        // Only a statement whose every reference is an unshadowed catalog column keeps the guard's code: a hidden one was refused earlier.
+        // Anything else (an unknown name, a name the statement defines itself, a deep path, a failed read) must not answer differently from a hidden column.
+        if (UnknownColumnResolver.AllReferencesAreUnshadowedCatalogColumns(probe))
         {
             return null;
         }
 
+        var finding = UnknownColumnResolver.Classify(probe, out var name, out var line, out var columnPos);
         if (finding == UnknownColumnResolver.Finding.Named &&
             BuildColumnProbe(clientSql, isPlainSelect, distinctCatalogCount, decisions, decidedTableMetadata) is not null)
         {

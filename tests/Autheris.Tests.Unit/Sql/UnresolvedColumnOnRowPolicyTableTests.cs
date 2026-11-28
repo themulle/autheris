@@ -5,6 +5,7 @@ using System.Collections.Generic;
 using System.Threading.Tasks;
 using Autheris.Application.Sql;
 using Autheris.Application.Sql.Errors;
+using Autheris.Application.Sql.Internal;
 using Autheris.Application.Sql.Services;
 using Autheris.Domain.Model;
 using Shouldly;
@@ -113,5 +114,43 @@ public sealed class UnresolvedColumnOnRowPolicyTableTests
         // a name that is not safe to echo is a denial even where the caller sees every table
         var unsafeName = await RefusalAsync(UnknownColumnNamingTests.Rewriter(), "SELECT id FROM orders WHERE \"bad name\" = 'x'");
         unsafeName.ShouldBeOfType<WebSqlTableDeniedException>();
+    }
+
+    private const string HiddenFilter = "SELECT id FROM orders WHERE secret = 'x'";
+
+    [Fact]
+    public Task UnknownSpelledAsSelectAlias_AnswersLikeDeniedColumn() =>
+        AssertLooksLikeDeniedColumnAsync("SELECT 1 AS nope FROM orders WHERE nope = 'x'", HiddenFilter);
+
+    [Fact]
+    public async Task UnknownSpelledAsTableAlias_OnFullyVisibleTable_IsNeverNamed()
+    {
+        // A name the statement defines itself is never echoed as an unknown column. (UNNEST alias lists are not supported by the compiler,
+        // so they never reach the guard. On a table with masked columns a table alias spelled like a column is answered earlier by the
+        // whole-row guard, which is outside this refusal.)
+        var error = await RefusalAsync(UnknownColumnNamingTests.Rewriter(), "SELECT id FROM orders nope WHERE nope = 'x'");
+
+        error.ShouldBeOfType<WebSqlTableDeniedException>();
+        UnknownColumnNamingTests.Body(error).ShouldContain("SQL_POLICY_DENIED");
+        UnknownColumnNamingTests.Body(error).ShouldNotContain("nope");
+    }
+
+    [Fact]
+    public Task UnknownSpelledAsCteName_AnswersLikeDeniedColumn() =>
+        AssertLooksLikeDeniedColumnAsync("WITH nope AS (SELECT id FROM orders) SELECT id FROM orders WHERE nope = 'x'", HiddenFilter);
+
+    [Fact]
+    public Task UnknownStructPath_AnswersLikeDeniedColumn() =>
+        AssertLooksLikeDeniedColumnAsync("SELECT id FROM orders WHERE orders.nope.x = 'x'", HiddenFilter);
+
+    [Fact]
+    public async Task ResolverException_AnswersDenied()
+    {
+        // a statement the resolver cannot read is never "all catalog columns": the answer is then the denial, not the guard's code
+        var probe = new UnknownColumnProbe("SELEC ??? FROM", new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "id" });
+
+        UnknownColumnResolver.AllReferencesAreUnshadowedCatalogColumns(probe).ShouldBeFalse();
+        UnknownColumnResolver.Classify(probe, out _, out _, out _).ShouldBe(UnknownColumnResolver.Finding.None);
+        await Task.CompletedTask;
     }
 }

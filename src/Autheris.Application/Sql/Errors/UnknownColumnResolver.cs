@@ -83,14 +83,60 @@ internal static class UnknownColumnResolver
         return Finding.None;
     }
 
+    /// <summary>
+    /// True only when the statement text was read and every column reference is a plain catalog column (hidden ones included) that no name
+    /// of the statement itself shadows: no alias, CTE, derived or table name of that spelling, and no path of more than two parts. A refusal
+    /// that remains is then about a real column's expression. Anything else, including a read failure, is false (fail closed).
+    /// </summary>
+    public static bool AllReferencesAreUnshadowedCatalogColumns(UnknownColumnProbe probe)
+    {
+        try
+        {
+            var (tree, _) = FastSqlEngine.Default.Parse(probe.ClientSql.AsMemory(), ClientSqlTokenPolicy.Analysis);
+            var statement = new SqlAstBuilder(new AstBuilderOptions
+            {
+                EnforceFunctionPolicy = false,
+                TranslateTrinoDateFunctions = true
+            }).BuildStatement(tree);
+
+            var collector = new Collector();
+            collector.Visit(statement);
+            if (collector.DeepPath)
+            {
+                return false;
+            }
+
+            foreach (var candidate in collector.References)
+            {
+                if (!probe.CatalogColumns.Contains(candidate) || collector.Defined.Contains(candidate))
+                {
+                    return false;
+                }
+            }
+
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;
+        }
+    }
+
     private sealed class Collector : SqlAstRewriter
     {
         public List<string> References { get; } = [];
 
         public HashSet<string> Defined { get; } = new(StringComparer.OrdinalIgnoreCase);
 
+        public bool DeepPath { get; private set; }
+
         public override SqlNode VisitColumnReference(ColumnReference node)
         {
+            if (node.Name.Parts.Count > 2)
+            {
+                DeepPath = true;
+            }
+
             References.Add(node.Name.SimpleName);
             return node;
         }
