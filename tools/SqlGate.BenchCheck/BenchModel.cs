@@ -50,10 +50,12 @@ public sealed record BenchThresholds
 
     /// <summary>
     /// ARCH-MNT-15-FU-01: the cold-cache parse (ANTLR cap forced to 1) may be at most this multiple of the warm P99. A ratio, so it does not depend
-    /// on the runner. Value: 93.0 = about 1.5 x the 61.77x measured in CI run 40870422455 (2026-10-29, nightly profile, a single sample; the
-    /// earlier local calibration of 48 was too tight for the CI runners). Re-check after 3 nightly runs; raise it only together with a new recorded measurement (SC-07).
+    /// on the runner speed in principle, but the warm denominator (23 to 62 us) moves with the runner CPU while the cold parse stays within 1.8 to 3.7 ms.
+    /// Value: 140.0 = about 1.5 x the highest recorded nightly ratio. Recorded CI nightly ratios (2026-11-18 to 2026-11-27, 7 runs): 55.1, 60.9, 60.9,
+    /// 77.9, 81.5, 87.5 and 95.4 (run 45984460386, which failed the earlier limit of 93.0, calibrated from a single sample of 61.77). The limit still
+    /// fails a real cold-path regression (cold parse more than about 1.5x slower than the recorded worst case). Raise it only together with a new recorded measurement (SC-07).
     /// </summary>
-    public double MaxColdWarmP99Ratio { get; init; } = 93.0;
+    public double MaxColdWarmP99Ratio { get; init; } = 140.0;
 }
 
 public sealed record BenchViolation(string Rule, string Bucket, string Message);

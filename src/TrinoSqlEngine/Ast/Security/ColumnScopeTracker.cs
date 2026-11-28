@@ -78,6 +78,26 @@ internal abstract class ColumnScopeTracker(ITableCatalog catalog) : SqlAstRewrit
 
     protected void PopBlock() => _scopes.Pop();
 
+    /// <summary>Takes the innermost scope off the stack (for a nested clause that must not see it); hand the result to <see cref="RestoreBlock"/>.</summary>
+    protected object SuspendBlock() => _scopes.Pop();
+
+    protected void RestoreBlock(object block) => _scopes.Push((IReadOnlyList<Source>)block);
+
+    /// <summary>
+    /// True unless the name is certainly not an input column of the current query block: that needs every source to be a catalog table and none to
+    /// have a column of this name. An opaque source (CTE, derived table) may hold it, so it counts as present.
+    /// </summary>
+    protected bool MayBeInputColumn(string name)
+    {
+        if (_scopes.Count == 0) return true;
+        foreach (var source in _scopes.Peek())
+        {
+            if (source.Entry is null || Lookup(source.Entry, name) is not null) return true;
+        }
+
+        return false;
+    }
+
     public override SqlNode VisitUpdateStatement(UpdateStatement node) => WithTarget(node.TargetTable, () => base.VisitUpdateStatement(node));
 
     public override SqlNode VisitDeleteStatement(DeleteStatement node) => WithTarget(node.TargetTable, () => base.VisitDeleteStatement(node));

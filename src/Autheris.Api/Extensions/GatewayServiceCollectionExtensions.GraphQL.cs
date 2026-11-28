@@ -140,6 +140,7 @@ public static partial class GatewayServiceCollectionExtensions
         services.AddSingleton<Autheris.GraphQL.Catalog.ICatalogRelationRegistry>(Autheris.GraphQL.Catalog.CatalogRelationRegistry.Current);
         // M-16: Singleton so registered API keys and the key cache persist across requests.
         services.AddSingleton<IClientTierResolver, ClientTierResolver>();
+        services.AddSingleton<Autheris.Application.Common.Quota.ICallerQueryLimitsService, Autheris.Application.Common.Quota.CallerQueryLimitsService>();
         services.AddSingleton<Autheris.Application.Common.Quota.IQueryCostQuota, Autheris.Application.Common.Quota.QueryCostQuota>();
         services.AddSingleton<Autheris.Application.Common.Quota.IScopeQueryExecutionGuard, Autheris.Application.Common.Quota.ScopeQueryExecutionGuard>();
         services.AddHttpClient("OpenApiIngestion").AddSecureOutboundHandlers(EgressIntegrations.OpenApiIngestion);
@@ -195,6 +196,8 @@ public static partial class GatewayServiceCollectionExtensions
 
         gqlBuilder
             .UseDocumentParser()
+            // Issue #1198: table-roots-only scopes are enforced before validation and cost, on every request (cache hits included).
+            .UseRequest<Autheris.GraphQL.Interceptors.TableRootsOnlyScopeMiddleware>()
             .UseDocumentValidation()
             .UseRequest<Autheris.GraphQL.Interceptors.ReadOnlyOperationMiddleware>()
             .UseRequest<Autheris.GraphQL.Interceptors.DbtHealthExecutionMiddleware>()

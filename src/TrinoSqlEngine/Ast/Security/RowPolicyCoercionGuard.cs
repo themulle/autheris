@@ -21,6 +21,12 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog, bool evaluat
 
     private int _wideningAggregateCastDepth;
 
+    // The root ORDER BY that sees the scope of its single query block, and, while it is visited, the families of that block's output names.
+    private OrderByClause? _scopedOrderBy;
+    private QuerySpecification? _scopedBody;
+    private int _selectDepth;
+    private Dictionary<string, Fam>? _orderByAliases;
+
     private readonly Dictionary<string, Dictionary<string, Fam>> _derived = new(StringComparer.Ordinal);
     private readonly Dictionary<QuerySpecification, List<(string? Name, Fam Family)>> _outputs = new(ReferenceEqualityComparer.Instance);
 
@@ -181,6 +187,17 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog, bool evaluat
 
     private Fam OfColumn(ColumnReference column)
     {
+        // Inside an expression of the root ORDER BY, databases differ in whether an output alias or an input column of the same name binds: a name
+        // that is both is only accepted when both families agree. A bare ORDER BY element is never judged, so it needs no family.
+        string name = Fold(column.Name.Parts[^1]);
+        if (_orderByAliases is null || column.Name.Parts.Count != 1 || !_orderByAliases.TryGetValue(name, out var aliased)) return OfInputColumn(column);
+        if (!MayBeInputColumn(column.Name.Parts[0].Value)) return aliased;
+        var input = OfInputColumn(column);
+        return input == aliased ? input : Fam.Unknown;
+    }
+
+    private Fam OfInputColumn(ColumnReference column)
+    {
         if ((ResolveColumn(column) ?? ResolveOuterColumn(column)) is { } resolved) return OfType(resolved.DataType);
 
         var parts = column.Name.Parts;
@@ -267,6 +284,69 @@ internal sealed class RowPolicyCoercionGuard(ITableCatalog catalog, bool evaluat
         }
 
         return result;
+    }
+
+    public override SqlNode VisitSelectStatement(SelectStatement node)
+    {
+        // Only the root statement and only a single query block have a scope to resolve in; a set operation body, a CTE or a subquery keep the
+        // unresolved (refused) families.
+        bool root = _selectDepth++ == 0;
+        var (previousOrderBy, previousBody, previousAliases) = (_scopedOrderBy, _scopedBody, _orderByAliases);
+        _scopedBody = root ? node.Body as QuerySpecification : null;
+        _scopedOrderBy = _scopedBody is null ? null : node.OrderBy;
+        _orderByAliases = null;
+        try
+        {
+            return base.VisitSelectStatement(node);
+        }
+        finally
+        {
+            _selectDepth--;
+            (_scopedOrderBy, _scopedBody, _orderByAliases) = (previousOrderBy, previousBody, previousAliases);
+        }
+    }
+
+    public override SqlNode VisitOrderByClause(OrderByClause node)
+    {
+        if (_orderByAliases is not null && !ReferenceEquals(node, _scopedOrderBy))
+        {
+            // A window or aggregate ORDER BY inside the root ORDER BY resolves as it did before: without the body scope and the output names.
+            var (savedAliases, scope) = (_orderByAliases, SuspendBlock());
+            _orderByAliases = null;
+            try
+            {
+                return base.VisitOrderByClause(node);
+            }
+            finally
+            {
+                _orderByAliases = savedAliases;
+                RestoreBlock(scope);
+            }
+        }
+
+        if (!ReferenceEquals(node, _scopedOrderBy) || _scopedBody is not { } spec || !_outputs.TryGetValue(spec, out var outputs) || !PushLastBlock())
+        {
+            return base.VisitOrderByClause(node);
+        }
+
+        var previous = _orderByAliases;
+        var aliases = new Dictionary<string, Fam>(StringComparer.Ordinal);
+        foreach (var (name, family) in outputs)
+        {
+            if (name is null) continue;
+            aliases[name] = aliases.ContainsKey(name) ? Fam.Unknown : family;
+        }
+
+        _orderByAliases = aliases;
+        try
+        {
+            return base.VisitOrderByClause(node);
+        }
+        finally
+        {
+            _orderByAliases = previous;
+            PopBlock();
+        }
     }
 
     private void RegisterDerivedSources(TableSource? source)

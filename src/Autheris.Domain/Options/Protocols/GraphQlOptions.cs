@@ -52,6 +52,18 @@ public sealed class GraphQLOptions
     [Range(0, 10000)] public int MaxAllowedOffset { get; init; } = 10000;
     public List<string> TrustedOrigins { get; init; } = [];
 
+    /// <summary>
+    /// Scopes whose tokens may only use catalog table root fields of the GraphQL endpoint: <c>&lt;table&gt;</c>,
+    /// <c>&lt;table&gt;_aggregate</c> and <c>&lt;table&gt;Connection</c>, plus <c>__typename</c>. Any other known root
+    /// field (the legacy <c>table(...)</c> root, catalog, consent and compliance roots, <c>__schema</c>/<c>__type</c>,
+    /// federation roots) and every mutation or subscription operation (WebSocket included) is rejected before validation
+    /// with <c>ROOT_FIELD_NOT_ALLOWED</c> and HTTP 403. A scope entry matches by bare name, case-insensitively
+    /// (<c>Agent.Read</c> equals <c>api://app/agent.read</c>); a token carrying any listed scope is restricted.
+    /// Applies to GraphQL only (including the GraphQL tools of MCP); REST, OData, WebSQL and the other MCP tools of the
+    /// scope are unaffected. Entries must be single scope names without whitespace. Empty (default) = off.
+    /// </summary>
+    public List<string> TableRootsOnlyScopes { get; init; } = [];
+
     /// <summary>#112: typed aggregate fields (<c>Gateway:GraphQL:Aggregation</c>).</summary>
     public GraphQLAggregationOptions Aggregation { get; init; } = new();
 
