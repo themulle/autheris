@@ -188,7 +188,7 @@ public sealed partial class GovernedSqlExecutor
     private string EncodePageToken(GovernedSqlQueryRequest request, ClaimsPrincipal user, TenantId tenantId, long offset) =>
         _pageTokenCodec.EncodeToken(
             request.Sql,
-            request.Parameters,
+            request.TokenBoundParameters,
             user,
             tenantId,
             PageTokenSourceBinding(request, tenantId),

@@ -119,6 +119,54 @@ public static partial class WebSqlEndpoints
                 $"offset_limit: the next offset would exceed {webSql.Paging.MaxOffset}. caller_not_bindable: the caller has no stable identity."));
     }
 
+    /// <summary>The optional structured view of the request. The only place that describes it in this document.</summary>
+    private static void AddViewSchemas(Dictionary<string, object> schemas)
+    {
+        var scalar = Obj(("oneOf", new List<object> { Prim("string"), Prim("number"), Prim("boolean") }));
+
+        schemas["WebSqlViewCondition"] = Obj(
+            ("type", "object"),
+            ("description",
+                "One condition, or a group with exactly one of and, or, not. A condition has column, op and, depending on the op, value (eq, ne, gt, gte, lt, lte, contains, startsWith, endsWith) " +
+                "or values (in, notIn, between with exactly two). isNull and isNotNull take no value. Values are strings, numbers or booleans and are always bound. " +
+                "contains, startsWith and endsWith match literally (wildcards in the value are escaped); letter case follows the data source collation."),
+            ("properties", Obj(
+                ("column", Prim("string", "An output column of the statement, by name.")),
+                ("op", Obj(("type", "string"), ("enum", new[]
+                {
+                    "eq", "ne", "in", "notIn", "contains", "startsWith", "endsWith", "gt", "gte", "lt", "lte", "between", "isNull", "isNotNull"
+                }))),
+                ("value", scalar),
+                ("values", Obj(("type", "array"), ("items", scalar))),
+                ("and", Obj(("type", "array"), ("items", Ref("WebSqlViewCondition")))),
+                ("or", Obj(("type", "array"), ("items", Ref("WebSqlViewCondition")))),
+                ("not", Ref("WebSqlViewCondition")))),
+            ("additionalProperties", false));
+
+        schemas["WebSqlView"] = Obj(
+            ("type", "object"),
+            ("description",
+                "Optional structured view over the result of the fixed statement, for server-side data grids. It only narrows and sorts that result; it never reads more than the statement and is not SQL. " +
+                "Columns are the output columns the statement names (no wildcard, every expression aliased, no ORDER BY without LIMIT), otherwise 400 SQL_VIEW_INVALID. " +
+                "Row rules, tenant, consent and masks apply to the statement unchanged; a masked column in filter or orderBy is refused (403 FILTER_ON_MASKED_COLUMN). " +
+                $"Limits: filter depth {Autheris.Application.Sql.View.WebSqlViewComposer.MaxFilterDepth}, {Autheris.Application.Sql.View.WebSqlViewComposer.MaxFilterLeaves} conditions, " +
+                $"{Autheris.Application.Sql.View.WebSqlViewComposer.MaxStringValueLength} characters per string, {Autheris.Application.Sql.View.WebSqlViewComposer.MaxOrderByColumns} sort columns. " +
+                "Add a unique column last in orderBy for stable paging. groupBy and aggregates are not supported yet."),
+            ("properties", Obj(
+                ("filter", Ref("WebSqlViewCondition")),
+                ("orderBy", Obj(("type", "array"), ("items", Obj(
+                    ("type", "object"),
+                    ("required", new[] { "column" }),
+                    ("properties", Obj(
+                        ("column", Prim("string")),
+                        ("direction", Obj(("type", "string"), ("enum", new[] { "asc", "desc" }))))),
+                    ("additionalProperties", false))))),
+                ("totalCount", Prim("boolean", "True adds totalCount to the result (a second governed statement over the same statement and filter; JSON only, not with wait_timeout or Parquet).")))),
+            ("additionalProperties", false),
+            ("example", System.Text.Json.Nodes.JsonNode.Parse(
+                """{"filter":{"and":[{"column":"werk","op":"in","values":["Ehingen","Nenzing"]},{"column":"kunde","op":"contains","value":"bau"},{"column":"betrag","op":"gte","value":10000}]},"orderBy":[{"column":"betrag","direction":"desc"},{"column":"auftrag"}],"totalCount":true}""")!));
+    }
+
     private static Dictionary<string, object> BuildSchemas(WebSqlOptions webSql)
     {
         var schemas = new Dictionary<string, object>();
@@ -153,12 +201,15 @@ public static partial class WebSqlEndpoints
                     ("additionalProperties", parameterValue),
                     ("example", System.Text.Json.Nodes.JsonNode.Parse(WebSqlGuideExample.ParametersJson)!))),
                 ("dataSource", Prim("string", "Data source to run on. Default: the gateway's default data source.")),
+                ("view", Ref("WebSqlView")),
                 ("page", Ref("WebSqlPageRequest")),
                 ("next", Ref("WebSqlNext")),
                 ("resultCache", Obj(
                     ("type", "string"),
                     ("enum", new[] { "default", "bypass" }),
                     ("description", "Result cache use (only effective when the gateway result cache is enabled). 'bypass' skips the lookup and refreshes the caller's own entry."))))));
+
+        AddViewSchemas(schemas);
 
         schemas["WebSqlResult"] = Obj(
             ("type", "object"),
@@ -182,6 +233,7 @@ public static partial class WebSqlEndpoints
                     }))))),
                 ("rowCount", Prim("integer")),
                 ("truncated", Prim("boolean", "True when more rows existed than were returned.")),
+                ("totalCount", Prim("integer", "Rows of the view before paging. Present only when the request asked for view.totalCount.")),
                 ("page", Ref("WebSqlPage")),
                 ("next", Ref("WebSqlNext")),
                 ("pagingUnavailable", Ref("WebSqlPagingUnavailable")),
@@ -282,7 +334,7 @@ public static partial class WebSqlEndpoints
                         ("application/json", Obj(("schema", Ref("WebSqlResult")))),
                         ("application/vnd.apache.parquet", Obj(("schema", Obj(("type", "string"), ("format", "binary")))))))))
                 ,
-                ("400", ProblemResponse("Invalid request. Codes include SQL_SYNTAX_ERROR, SQL_PARAMETER_MISSING, SQL_LIST_PARAM_*, SQL_PAGING_TOKEN_INVALID, SQL_PAGING_UNSUPPORTED, BAD_REQUEST.")),
+                ("400", ProblemResponse("Invalid request. Codes include SQL_SYNTAX_ERROR, SQL_PARAMETER_MISSING, SQL_LIST_PARAM_*, SQL_PAGING_TOKEN_INVALID, SQL_PAGING_UNSUPPORTED, SQL_VIEW_INVALID, BAD_REQUEST.")),
                 ("401", Obj(("description", "Not authenticated"))),
                 ("403", ProblemResponse("Rejected by the security policy. Codes include SQL_POLICY_DENIED, SQL_POLICY_VIOLATION, FILTER_ON_MASKED_COLUMN, AGGREGATION_ON_MASKED_COLUMN.")),
                 ("406", Obj(("description", "The Accept header names no supported format (no body)."))),

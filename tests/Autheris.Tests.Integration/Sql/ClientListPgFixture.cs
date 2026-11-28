@@ -99,9 +99,10 @@ internal sealed class ClientListPgFixture : IAsyncDisposable
             await conn.OpenAsync();
             await using var setup = conn.CreateCommand();
             setup.CommandText =
-                "CREATE TABLE public.orders (id INTEGER, status TEXT, amount DOUBLE PRECISION, tenant_id TEXT);" +
+                "CREATE TABLE public.orders (id INTEGER, status TEXT, amount DOUBLE PRECISION, tenant_id TEXT, created TIMESTAMP);" +
                 "INSERT INTO public.orders VALUES (1, 'new', 10, 'tenant_a'), (2, 'new', 20, 'tenant_a'), (3, 'paid', 30, 'tenant_a'), (4, 'paid', 40, 'tenant_a'), (5, 'void', 50, 'tenant_a');" +
-                "INSERT INTO public.orders VALUES (6, 'new', 60, 'tenant_b'), (7, 'paid', 70, 'tenant_b');";
+                "INSERT INTO public.orders VALUES (6, 'new', 60, 'tenant_b'), (7, 'paid', 70, 'tenant_b');" +
+                "UPDATE public.orders SET created = TIMESTAMP '2026-01-01 00:00:00' + (id * INTERVAL '1 day');";
             await setup.ExecuteNonQueryAsync();
         }
 
@@ -149,7 +150,8 @@ internal sealed class ClientListPgFixture : IAsyncDisposable
                 new TableColumn { ColumnName = "id", DataType = "int" },
                 new TableColumn { ColumnName = "status", DataType = "varchar" },
                 new TableColumn { ColumnName = "amount", DataType = "decimal" },
-                new TableColumn { ColumnName = "tenant_id", DataType = "varchar" }
+                new TableColumn { ColumnName = "tenant_id", DataType = "varchar" },
+                new TableColumn { ColumnName = "created", DataType = "timestamp" }
             ]
         };
 

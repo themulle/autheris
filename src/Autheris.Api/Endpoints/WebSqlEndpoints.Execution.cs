@@ -185,6 +185,24 @@ public static partial class WebSqlEndpoints
             return;
         }
 
+        // An optional structured view narrows and sorts the result of the fixed statement. It is compiled to a wrapper around the statement
+        // (the statement still decides what can be read); a refused view never reaches the governed pipeline.
+        Autheris.Application.Sql.View.WebSqlViewPlan? viewPlan = null;
+        if (bodyDto?.View is { ValueKind: not (JsonValueKind.Null or JsonValueKind.Undefined) } viewElement)
+        {
+            try
+            {
+                viewPlan = Autheris.Application.Sql.View.WebSqlViewComposer.Plan(sql, viewElement, ct);
+            }
+            catch (Autheris.Application.Sql.View.WebSqlViewException ex)
+            {
+                await WriteRequestValidationErrorAsync(httpContext, Autheris.Application.Sql.View.WebSqlViewException.ErrorCode, ex.UserMessage, ct);
+                return;
+            }
+
+            sql = viewPlan.Sql;
+        }
+
         // The option value is never echoed back.
         string? resultCacheOption = bodyDto?.ResultCache;
         if (!TryParseResultCacheMode(resultCacheOption, out var resultCacheMode))
@@ -273,6 +291,19 @@ public static partial class WebSqlEndpoints
             NextToken: nextTok,
             OnPageOutcome: isPagingRequested ? outcome => pageOutcome = outcome : null,
             OnIndexHints: hints => indexHints = hints);
+
+        if (viewPlan != null)
+        {
+            if (viewPlan.CountSql != null && (waitTimeout != null || ParquetContentNegotiation.IsParquetRequested(httpContext.Request) ||
+                string.Equals(httpContext.Request.Query["format"], "parquet", StringComparison.OrdinalIgnoreCase)))
+            {
+                await WriteRequestValidationErrorAsync(httpContext, Autheris.Application.Sql.View.WebSqlViewException.ErrorCode,
+                    "view.totalCount is only available for a plain JSON response without wait_timeout.", ct);
+                return;
+            }
+
+            governedRequest = viewPlan.Apply(governedRequest);
+        }
 
         if (waitTimeout != null)
         {
@@ -371,6 +402,16 @@ public static partial class WebSqlEndpoints
         MemoryStream? idempotencyBuffer = idempotencyLease != null ? new MemoryStream() : null;
         try
         {
+            // The count runs first, as its own governed statement over the same fixed statement and filter (never the page window).
+            long? totalCount = null;
+            if (viewPlan?.ApplyCount(governedRequest) is { } countRequest)
+            {
+                var countResult = await sqlService.ExecuteQueryBufferedAsync(countRequest, user, tenantId, ct);
+                totalCount = countResult.Rows.Count == 1 && countResult.Rows[0].Count == 1
+                    ? Convert.ToInt64(countResult.Rows[0].Values.First(), System.Globalization.CultureInfo.InvariantCulture)
+                    : throw new InvalidOperationException("The total count statement returned no single value.");
+            }
+
             int rowCount = 0;
             bool truncated = false;
             string[] columnNames = Array.Empty<string>();
@@ -464,6 +505,10 @@ public static partial class WebSqlEndpoints
 
             writer.WriteNumber("rowCount", rowCount);
             writer.WriteBoolean("truncated", truncated);
+            if (totalCount is { } total)
+            {
+                writer.WriteNumber("totalCount", total);
+            }
 
             if (pageOutcome?.Page != null)
             {

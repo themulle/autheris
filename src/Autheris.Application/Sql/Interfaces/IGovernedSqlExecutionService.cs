@@ -112,6 +112,36 @@ public sealed record GovernedSqlQueryRequest(
     internal IReadOnlyDictionary<string, object?>? GatewayParameters { get; init; }
 
     /// <summary>
+    /// True only for a read whose text the gateway composed from a fixed statement and a validated structured view (internal; never from
+    /// client input). It admits <see cref="GatewayParameters"/> without being a planned table read: the statement stays client SQL for
+    /// the quota, cost and audit paths.
+    /// </summary>
+    internal bool StructuredViewRead { get; init; }
+
+    /// <summary>
+    /// The parameters a page token binds: the client parameters plus the gateway-owned view values, so a token never continues a page
+    /// under a different filter value.
+    /// </summary>
+    internal IReadOnlyDictionary<string, object?>? TokenBoundParameters
+    {
+        get
+        {
+            if (GatewayParameters is not { Count: > 0 } gateway)
+            {
+                return Parameters;
+            }
+
+            var merged = new Dictionary<string, object?>(Parameters ?? new Dictionary<string, object?>(), StringComparer.Ordinal);
+            foreach (var (name, value) in gateway)
+            {
+                merged[name] = value;
+            }
+
+            return merged;
+        }
+    }
+
+    /// <summary>
     /// #398: byte budget for the string cells of a buffered read (planned aggregations with text group keys). Internal; never from client input.
     /// </summary>
     internal ResultByteBudget? ResultByteBudget { get; init; }

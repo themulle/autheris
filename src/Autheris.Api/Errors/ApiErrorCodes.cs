@@ -204,7 +204,8 @@ public static class ApiErrorCodes
             typeof(Autheris.Application.Analytics.AggregationErrorCodes),
             typeof(Autheris.Domain.Model.AccessProfileAssignmentRules),
             typeof(Autheris.Application.ConsentRequests.ConsentDecisionErrorCodes),
-            typeof(Autheris.Application.Products.ProductErrorCodes)
+            typeof(Autheris.Application.Products.ProductErrorCodes),
+            typeof(Autheris.Application.Sql.View.WebSqlViewException)
         })
         {
             foreach (var field in type.GetFields(System.Reflection.BindingFlags.Public | System.Reflection.BindingFlags.Static))

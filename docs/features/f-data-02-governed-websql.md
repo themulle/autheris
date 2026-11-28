@@ -216,7 +216,7 @@ The same content is served to agents in the query guide (`autheris://api/docs/qu
 
 #### 4.5.1 Entry points
 
-- HTTP: `POST /api/v1/sql` with a JSON body `{ "sql", "parameters", "dataSource", "page", "next", "resultCache" }`, or the statement alone as `text/plain` or `application/sql`.
+- HTTP: `POST /api/v1/sql` with a JSON body `{ "sql", "parameters", "dataSource", "view", "page", "next", "resultCache" }`, or the statement alone as `text/plain` or `application/sql`.
 - MCP: `query_sql` takes `query` and optional `limit` and `cursor`; it takes no `parameters`. While `hasMore` is true, call it again with the returned `cursor`. `list_datasets` returns each table's `sqlName` (`<catalog>.<schema>.<table>`).
 
 #### 4.5.2 Dialect and names
@@ -274,11 +274,39 @@ Errors are RFC 9457 problem details (`Content-Type: application/problem+json`) w
 
 | Status | Codes |
 |---|---|
-| 400 | `SQL_SYNTAX_ERROR`, `SQL_PARAMETER_MISSING`, `SQL_LIST_PARAM_*`, `SQL_PAGING_TOKEN_INVALID`, `SQL_PAGING_UNSUPPORTED`, `BAD_REQUEST` |
+| 400 | `SQL_SYNTAX_ERROR`, `SQL_PARAMETER_MISSING`, `SQL_LIST_PARAM_*`, `SQL_PAGING_TOKEN_INVALID`, `SQL_PAGING_UNSUPPORTED`, `SQL_VIEW_INVALID`, `BAD_REQUEST` |
 | 403 | `SQL_POLICY_DENIED`, `SQL_POLICY_VIOLATION`, `FILTER_ON_MASKED_COLUMN`, `AGGREGATION_ON_MASKED_COLUMN` |
 | 422 | `SQL_CONSTRUCT_NOT_SUPPORTED`, `SQL_LIMIT_EXCEEDED`, `SQL_TIMEZONE_ARGUMENT` |
 | 429 | `RATE_LIMIT_EXCEEDED`, `QUERY_COST_QUOTA_EXCEEDED` (with `Retry-After`) |
 | 504 | `SQL_TIMEOUT` |
+
+#### 4.5.9 Structured view (`view`, for data grids)
+
+A client that keeps the statement fixed (an app version, a saved report) can send the filter, sort and total count of a data grid as an optional `view` object instead of building SQL. The view is not SQL. It only narrows and sorts the result of the fixed statement and never reads more than the statement: the gateway wraps the statement as a derived table (`SELECT * FROM (<statement>) AS v WHERE ... ORDER BY ...`) and runs the wrapped text through the same governed pipeline, so row rules, tenant, consent, masks, the cost gate and the audit apply to the statement exactly as without a view. Every value is a bound parameter; the audited text holds bind names only.
+
+```json
+{
+  "sql": "SELECT auftrag, kunde, werk, betrag, datum FROM erp.sales.auftraege WHERE datum >= @ab",
+  "parameters": { "ab": "2026-01-01" },
+  "view": {
+    "filter": { "and": [
+      { "column": "werk",   "op": "in",       "values": ["Ehingen", "Nenzing"] },
+      { "column": "kunde",  "op": "contains", "value": "bau" },
+      { "column": "betrag", "op": "gte",      "value": 10000 } ] },
+    "orderBy": [ { "column": "betrag", "direction": "desc" }, { "column": "auftrag" } ],
+    "totalCount": true },
+  "page": { "size": 1000 }
+}
+```
+
+- `view.filter`: one condition or a group `and`, `or` (non-empty arrays) or `not`. A condition is `{ column, op, value }` (`eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `contains`, `startsWith`, `endsWith`), `{ column, op, values }` (`in`, `notIn`, `between` with exactly two values) or `{ column, op }` (`isNull`, `isNotNull`). Values are string, number or boolean; a null, object or array value is refused (use `isNull`). `contains`, `startsWith` and `endsWith` match literally (wildcards in the value are escaped). Letter case follows the data source collation, and null ordering follows the source.
+- `view.orderBy`: up to 8 `{ column, direction }` entries (`asc` default, or `desc`). The gateway adds no tie-break column; end the list with a unique column for stable paging.
+- `view.totalCount: true` adds `totalCount` (rows of the view before paging) to the response. It is a second governed statement over the same fixed statement and filter, JSON only (not with `wait_timeout` or Parquet).
+- Columns are resolved only against the output columns the stored statement names. The statement must name every output column (no `*`, every expression aliased, unique names), must be a single `SELECT`, and must not have an `ORDER BY` without `LIMIT`. Otherwise the view is refused with 400 `SQL_VIEW_INVALID`, as is an unknown or non-output column, an unknown member or op, `groupBy` or `aggregates` (not supported yet), or a limit exceeded: filter depth 15, 64 conditions, 1000 list values, 1024 characters per string, 8 sort columns.
+- A masked output column in `filter` or `orderBy` is refused (403 `FILTER_ON_MASKED_COLUMN`) for every value and operator.
+- Paging works as in 4.5.4. The page token is bound to the wrapped statement and to the view values, so it does not continue under another filter. Continuation beyond `Paging:MaxOffset` is not available yet (`pagingUnavailable: offset_limit`).
+- A view on a statement that reads more than one data source (cross-source) is refused.
+- MCP: `query_sql` takes the same `view` object as an optional argument, and returns `totalCount` when asked.
 
 ---
 

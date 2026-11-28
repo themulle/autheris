@@ -126,7 +126,7 @@ public sealed class WebSqlOpenApiSpecTests
         spec["paths"]!["/api/v1/sql"]!["post"]!["operationId"]!.GetValue<string>().ShouldBe("executeGovernedWebSql");
         spec["components"]!["schemas"]!.AsObject().Select(s => s.Key)
             .OrderBy(n => n, StringComparer.Ordinal)
-            .ShouldBe(new[] { "Problem", "WebSqlNext", "WebSqlPage", "WebSqlPageRequest", "WebSqlPagingUnavailable", "WebSqlRequest", "WebSqlResult" });
+            .ShouldBe(new[] { "Problem", "WebSqlNext", "WebSqlPage", "WebSqlPageRequest", "WebSqlPagingUnavailable", "WebSqlRequest", "WebSqlResult", "WebSqlView", "WebSqlViewCondition" });
     }
 
     [Fact]

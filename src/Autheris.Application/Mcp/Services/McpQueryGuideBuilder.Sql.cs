@@ -29,6 +29,7 @@ internal static partial class McpQueryGuideBuilder
         AppendSqlDialect(sb, webSql);
         AppendSqlParameters(sb, webSql);
         AppendSqlPaging(sb, webSql);
+        AppendSqlView(sb, Tool(switches, McpDatasetTools.QuerySql));
         AppendSqlRefusals(sb);
         AppendSqlTimeStamps(sb);
         AppendSqlLimitsAndResponse(sb, webSql);
@@ -39,7 +40,7 @@ internal static partial class McpQueryGuideBuilder
     private static void AppendSqlEntryPoints(StringBuilder sb, IReadPathSwitches? switches)
     {
         sb.AppendLine("### Entry Points");
-        sb.AppendLine("- **HTTP:** `POST /api/v1/sql` with a JSON body `{ \"sql\", \"parameters\", \"dataSource\", \"page\", \"next\", \"resultCache\" }`, or the statement alone as `text/plain` or `application/sql`. The OpenAPI document is `GET /api/v1/sql/openapi.json`.");
+        sb.AppendLine("- **HTTP:** `POST /api/v1/sql` with a JSON body `{ \"sql\", \"parameters\", \"dataSource\", \"view\", \"page\", \"next\", \"resultCache\" }`, or the statement alone as `text/plain` or `application/sql`. The OpenAPI document is `GET /api/v1/sql/openapi.json`.");
         if (Tool(switches, McpDatasetTools.QuerySql))
         {
             sb.AppendLine($"- **MCP Tool:** `{McpDatasetTools.QuerySql}` takes `query` and optional `limit` and `cursor`; it takes no `parameters`. While `hasMore` is true, call it again with the returned `cursor`.");
@@ -90,6 +91,17 @@ internal static partial class McpQueryGuideBuilder
         sb.AppendLine(CultureInfo.InvariantCulture,
             $"- `pagingUnavailable` says why there is no `next`: `order_by_required`, `statement_has_limit` or `federated` (the rows come back unpaged under the normal row limit); `offset_limit` (the next offset would exceed {webSql.Paging.MaxOffset}); `caller_not_bindable` (the caller has no stable identity).");
         sb.AppendLine("- Paging is refused together with `wait_timeout` and for statements other than `SELECT` (400 `SQL_PAGING_UNSUPPORTED`).");
+        sb.AppendLine();
+    }
+
+    private static void AppendSqlView(StringBuilder sb, bool queryToolEnabled)
+    {
+        sb.AppendLine("### Structured View (`view`, for data grids)");
+        sb.AppendLine($"- An app keeps the statement fixed and sends the filter, sort and total count of a grid as an optional `view` object{(queryToolEnabled ? $" (`{McpDatasetTools.QuerySql}` takes the same `view` argument)" : string.Empty)}. The view is not SQL: it only narrows and sorts what the statement already returns and never reads more than the statement. Row rules, masks and consent apply to the statement as without a view.");
+        sb.AppendLine("- `view.filter` is one condition or a group `{ \"and\": [...] }`, `{ \"or\": [...] }` or `{ \"not\": {...} }`. A condition is `{ \"column\", \"op\", \"value\" }` (`eq`, `ne`, `gt`, `gte`, `lt`, `lte`, `contains`, `startsWith`, `endsWith`), `{ \"column\", \"op\", \"values\" }` (`in`, `notIn`, `between` with two values) or `{ \"column\", \"op\" }` (`isNull`, `isNotNull`). Values are string, number or boolean and are bound; `contains`, `startsWith` and `endsWith` match literally, and letter case follows the data source collation.");
+        sb.AppendLine("- `view.orderBy` is `[{ \"column\", \"direction\": \"asc\" | \"desc\" }]`; end it with a unique column for stable paging. `view.totalCount: true` adds `totalCount` (the rows before paging; a second governed statement; not with `wait_timeout` or Parquet).");
+        sb.AppendLine("- Columns are the output columns the statement names. The statement must name every output column (no `*`, every expression aliased, unique names) and must not have an `ORDER BY` without `LIMIT`. A masked column in `filter` or `orderBy` is refused (403 `FILTER_ON_MASKED_COLUMN`). Anything else outside this model (unknown column or op, `groupBy`, a limit exceeded) is 400 `SQL_VIEW_INVALID`.");
+        sb.AppendLine("- Example: `{ \"sql\": \"SELECT auftrag, kunde, werk, betrag FROM erp.sales.auftraege WHERE datum >= @ab\", \"parameters\": { \"ab\": \"2026-01-01\" }, \"view\": { \"filter\": { \"and\": [ { \"column\": \"werk\", \"op\": \"in\", \"values\": [\"Ehingen\", \"Nenzing\"] }, { \"column\": \"betrag\", \"op\": \"gte\", \"value\": 10000 } ] }, \"orderBy\": [ { \"column\": \"betrag\", \"direction\": \"desc\" }, { \"column\": \"auftrag\" } ], \"totalCount\": true }, \"page\": { \"size\": 100 } }`.");
         sb.AppendLine();
     }
 
