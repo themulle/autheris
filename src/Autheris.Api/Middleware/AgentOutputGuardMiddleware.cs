@@ -20,9 +20,9 @@ using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 
 /// <summary>
-/// Applies the MCP output guardrails (prompt-injection sanitizing, PII scrubbing) to GraphQL and WebSQL responses for agent tokens,
+/// Applies the MCP output guardrails (prompt-injection sanitizing, PII scrubbing) to GraphQL, WebSQL, Trino and named SQL endpoint responses for agent tokens,
 /// so the protection depends on the token scope and not on the transport. Fail closed: a response that cannot be inspected
-/// (streaming, non-JSON, above the buffer cap) is withheld and never passed through. App tokens are not touched.
+/// (streaming, non-JSON, above the buffer cap) is withheld and never passed through. The Arrow export is refused for agent tokens. App tokens are not touched.
 /// </summary>
 public sealed class AgentOutputGuardMiddleware
 {
@@ -51,9 +51,20 @@ public sealed class AgentOutputGuardMiddleware
 
     public async Task InvokeAsync(HttpContext context)
     {
-        if (!IsGuardedRoute(context) || !IsAgentCaller(context.User, _options))
+        var refused = IsRefusedRoute(context);
+        if ((!refused && !IsGuardedRoute(context)) || !IsAgentCaller(context.User, _options))
         {
             await _next(context);
+            return;
+        }
+
+        if (refused)
+        {
+            // The binary export format cannot be inspected or scrubbed, so agent tokens never receive it.
+            await ApiProblems.WriteAsync(
+                context, StatusCodes.Status403Forbidden, ApiErrorCodes.AccessDenied,
+                "Binary exports are not available to agent tokens because they cannot be inspected; use a JSON endpoint.",
+                context.RequestAborted);
             return;
         }
 
@@ -180,10 +191,14 @@ public sealed class AgentOutputGuardMiddleware
         return false;
     }
 
+    private static bool IsRefusedRoute(HttpContext context) =>
+        context.Request.Path.StartsWithSegments("/api/v1/export/arrow", StringComparison.OrdinalIgnoreCase);
+
     private bool IsGuardedRoute(HttpContext context)
     {
         if (GatewayEndpointMetadata.HasTransport(context, DataSourceTransportFlags.GraphQL) ||
-            GatewayEndpointMetadata.HasTransport(context, DataSourceTransportFlags.WebSql))
+            GatewayEndpointMetadata.HasTransport(context, DataSourceTransportFlags.WebSql) ||
+            GatewayEndpointMetadata.HasTransport(context, DataSourceTransportFlags.Trino))
         {
             return true;
         }
@@ -191,7 +206,9 @@ public sealed class AgentOutputGuardMiddleware
         var path = context.Request.Path;
         return path.StartsWithSegments(_graphQlPath, StringComparison.OrdinalIgnoreCase) ||
                path.StartsWithSegments("/api/v1/sql", StringComparison.OrdinalIgnoreCase) ||
-               path.StartsWithSegments("/api/sql", StringComparison.OrdinalIgnoreCase);
+               path.StartsWithSegments("/api/sql", StringComparison.OrdinalIgnoreCase) ||
+               path.StartsWithSegments("/api/v1/queries", StringComparison.OrdinalIgnoreCase) ||
+               path.StartsWithSegments("/v1/statement", StringComparison.OrdinalIgnoreCase);
     }
 
     private static bool IsJson(string? contentType)
