@@ -87,6 +87,8 @@ public sealed class WebSqlKeysetPagingIntegrationTests : IClassFixture<WebSqlKey
                 ["Gateway:WebSql:DefaultDataSourceName"] = "default",
                 ["Gateway:WebSql:AllowDml"] = "false",
                 ["Gateway:WebSql:ResultCacheMaxMegabytes"] = "64",
+                ["Gateway:WebSql:ResultCacheMaxRowsPerEntry"] = "1000",
+                ["Gateway:WebSql:MaxAllowedRows"] = "1000",
                 ["Gateway:WebSql:Paging:MaxOffset"] = "20",
             });
         }
