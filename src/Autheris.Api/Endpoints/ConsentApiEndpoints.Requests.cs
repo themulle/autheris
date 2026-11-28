@@ -548,8 +548,6 @@ public static partial class ConsentApiEndpoints
             return ApiProblems.NotFound(ConsentDecisionErrorCodes.RequestNotFound, "Registered external system not found for caller.", context);
         }
 
-        Guid? externalSystemId = system.Id;
-
         var retentionDays = Math.Max(1, eventsOptions?.Value?.RetentionDays ?? 30);
         var now = (timeProvider ?? TimeProvider.System).GetUtcNow();
         var retentionCutoff = now.AddDays(-retentionDays);
@@ -558,7 +556,7 @@ public static partial class ConsentApiEndpoints
             tenantId,
             Math.Max(0L, since),
             Math.Clamp(limit, 1, 500),
-            externalSystemId,
+            system.Id,
             retentionCutoff,
             ct).ConfigureAwait(false);
 

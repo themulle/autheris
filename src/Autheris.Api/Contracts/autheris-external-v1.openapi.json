@@ -256,12 +256,14 @@
     "/api/v1/consent/events": {
       "get": {
         "operationId": "getConsentEvents",
+        "description": "Event feed for registered external systems only: a workflow system reads the events delivered to it, an observer (Autheris.Consent.Read and Autheris.Consent.Observe) the tenant-wide feed. Persons get 404.",
         "parameters": [
           { "name": "since", "in": "query", "schema": { "type": "integer", "format": "int64", "default": 0 } },
           { "name": "limit", "in": "query", "schema": { "type": "integer", "default": 100 } }
         ],
         "responses": {
           "200": { "description": "Consent events feed" },
+          "404": { "description": "No registered external system for the caller (always for persons)" },
           "410": { "description": "Cursor expired" },
           "429": { "description": "Rate limited" }
         }

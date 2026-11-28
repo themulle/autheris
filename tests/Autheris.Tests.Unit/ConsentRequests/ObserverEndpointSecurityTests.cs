@@ -99,7 +99,24 @@ public sealed class ObserverEndpointSecurityTests
 
         var feed = await harness.GetEventsAsync(ConsentApiTestHarness.BuildDelegatedUserPrincipal("tenant-a", "S-1-5-21-USER-2", "access_as_user"));
 
-        feed.StatusCode.ShouldNotBe(StatusCodes.Status200OK);
+        feed.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
+        feed.Body.ShouldNotContain(internalId.ToString("D"));
+    }
+
+    [Fact]
+    public async Task Delegated_person_token_of_a_registered_client_never_reads_the_feed()
+    {
+        // The app registration of an observer can also serve person sign-in: its delegated tokens carry the same azp.
+        var (harness, _, internalId) = await SeedAsync();
+        await using var __ = harness;
+        harness.Store.AddEvent("tenant-a", 1, ConsentEventTypes.RequestCreated, internalId.ToString("D"), "{}", ConsentApiTestHarness.FixedNow);
+        var person = ConsentApiTestHarness.BuildDelegatedUserPrincipal(
+            "tenant-a", "S-1-5-21-USER-2", "access_as_user", $"{ExternalApiPermissions.ConsentRead} {ExternalApiPermissions.ConsentObserve}");
+        ((System.Security.Claims.ClaimsIdentity)person.Identity!).AddClaim(new System.Security.Claims.Claim("azp", ObserverClient));
+
+        var feed = await harness.GetEventsAsync(person);
+
+        feed.StatusCode.ShouldBe(StatusCodes.Status404NotFound);
         feed.Body.ShouldNotContain(internalId.ToString("D"));
     }
 
