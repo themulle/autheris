@@ -139,6 +139,45 @@ public sealed class ConsentApiEndpointSecurityTests
     }
 
     [Fact]
+    public async Task RateLimit_counts_each_person_behind_one_client_separately()
+    {
+        // Issue #1283: persons whose tokens come from the same client (e.g. a portal) each get their own budget.
+        await using var harness = ConsentApiTestHarness.Create(readsPerMinute: 2);
+        var alice = PersonViaClient("S-1-5-21-USER-1", "portal-client");
+        var bob = PersonViaClient("S-1-5-21-USER-2", "portal-client");
+
+        (await harness.ListRequestsAsync(alice)).StatusCode.ShouldBe(StatusCodes.Status200OK);
+        (await harness.ListRequestsAsync(alice)).StatusCode.ShouldBe(StatusCodes.Status200OK);
+        (await harness.ListRequestsAsync(alice)).StatusCode.ShouldBe(StatusCodes.Status429TooManyRequests);
+
+        (await harness.ListRequestsAsync(bob)).StatusCode.ShouldBe(StatusCodes.Status200OK);
+        (await harness.ListRequestsAsync(bob)).StatusCode.ShouldBe(StatusCodes.Status200OK);
+    }
+
+    [Fact]
+    public async Task RateLimit_counts_an_app_only_client_on_its_own_not_with_its_persons()
+    {
+        await using var harness = ConsentApiTestHarness.Create(readsPerMinute: 2);
+        var app = ConsentApiTestHarness.BuildAppPrincipal("tenant-a", harness.RegisteredClientId, ExternalApiPermissions.ConsentRead);
+        var person = PersonViaClient("S-1-5-21-USER-1", harness.RegisteredClientId);
+
+        (await harness.ListRequestsAsync(person)).StatusCode.ShouldBe(StatusCodes.Status200OK);
+        (await harness.ListRequestsAsync(person)).StatusCode.ShouldBe(StatusCodes.Status200OK);
+        (await harness.ListRequestsAsync(person)).StatusCode.ShouldBe(StatusCodes.Status429TooManyRequests);
+
+        (await harness.ListRequestsAsync(app)).StatusCode.ShouldBe(StatusCodes.Status200OK);
+        (await harness.ListRequestsAsync(app)).StatusCode.ShouldBe(StatusCodes.Status200OK);
+        (await harness.ListRequestsAsync(app)).StatusCode.ShouldBe(StatusCodes.Status429TooManyRequests);
+    }
+
+    private static System.Security.Claims.ClaimsPrincipal PersonViaClient(string sid, string clientId)
+    {
+        var person = ConsentApiTestHarness.BuildUserPrincipal("tenant-a", sid, "Developer");
+        ((System.Security.Claims.ClaimsIdentity)person.Identity!).AddClaim(new System.Security.Claims.Claim("azp", clientId));
+        return person;
+    }
+
+    [Fact]
     public async Task All_ConsentApi_Routes_Require_Expected_Authorization_Policies_And_No_AllowAnonymous()
     {
         await using var harness = ConsentApiTestHarness.Create();

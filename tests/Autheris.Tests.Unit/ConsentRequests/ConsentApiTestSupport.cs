@@ -78,7 +78,7 @@ internal sealed class ConsentApiTestHarness : IAsyncDisposable
     public string RegisteredClientId { get; }
     public IServiceProvider Services => _services;
 
-    public static ConsentApiTestHarness Create(int decisionsPerMinute = 60)
+    public static ConsentApiTestHarness Create(int decisionsPerMinute = 60, int readsPerMinute = 600)
     {
         var clock = new FakeTimeProvider(FixedNow);
         var signer = EcdsaGrantRecordSigner.CreateEphemeral("test-grant-key-1");
@@ -100,7 +100,8 @@ internal sealed class ConsentApiTestHarness : IAsyncDisposable
             {
                 RateLimits = new ExternalApiRateLimitSettings
                 {
-                    DecisionsAndRevokesPerMinute = decisionsPerMinute
+                    DecisionsAndRevokesPerMinute = decisionsPerMinute,
+                    ReadsPerMinute = readsPerMinute
                 }
             }
         }));
