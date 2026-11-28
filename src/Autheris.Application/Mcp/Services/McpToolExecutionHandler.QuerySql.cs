@@ -68,9 +68,9 @@ public sealed partial class McpToolExecutionHandler
             {
                 viewPlan = Autheris.Application.Sql.View.WebSqlViewComposer.Plan(query, viewProp, ct);
             }
-            catch (Autheris.Application.Sql.View.WebSqlViewException ex)
+            catch (Autheris.Application.Sql.View.WebSqlViewException)
             {
-                return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, ex.UserMessage);
+                return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, "Invalid view specification.");
             }
         }
 
