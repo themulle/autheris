@@ -76,8 +76,9 @@ public static partial class ConsentApiEndpoints
         };
 
         var limit = Math.Max(1, perMinute);
+        // The tenant keeps a client id that repeats across tenants (multi-tenant app, free-text Keycloak client) from sharing a budget.
         var principalKey = ResolvePrincipalBucketKey(context.User);
-        var bucketKey = string.Concat("consent-api:", bucket.ToString(), ":", principalKey);
+        var bucketKey = string.Concat("consent-api:", bucket.ToString(), ":", ResolveCaller(context).TenantId.Value, ":", principalKey);
         var rateOptions = new PostAuthSidRateLimitOptions
         {
             TokenBucketCapacity = limit,
