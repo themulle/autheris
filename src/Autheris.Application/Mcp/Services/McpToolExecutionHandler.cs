@@ -876,9 +876,10 @@ public sealed partial class McpToolExecutionHandler : IMcpToolExecutionHandler
         GovernedSqlPageResponse? Page,
         string? Next,
         string? PagingUnavailable,
-        IReadOnlyList<WebSqlIndexHint>? IndexHints)
+        IReadOnlyList<WebSqlIndexHint>? IndexHints,
+        long? TotalCount = null)
     {
-        public static McpSqlQueryResult From(GovernedSqlResult result) => new(
+        public static McpSqlQueryResult From(GovernedSqlResult result, long? totalCount = null) => new(
             OriginalSql: result.OriginalSql,
             Columns: result.Columns,
             Rows: result.Rows,
@@ -890,6 +891,7 @@ public sealed partial class McpToolExecutionHandler : IMcpToolExecutionHandler
             Page: result.Page,
             Next: result.Next,
             PagingUnavailable: result.PagingUnavailable,
-            IndexHints: result.IndexHints);
+            IndexHints: result.IndexHints,
+            TotalCount: totalCount);
     }
 }

@@ -457,9 +457,9 @@ public sealed class GovernedSqlExecutionService : IGovernedSqlExecutionService, 
             return request.Parameters;
         }
 
-        if (!request.PlannedTableRead)
+        if (!request.PlannedTableRead && !request.StructuredViewRead)
         {
-            throw new System.Security.SecurityException("Gateway parameters require a planned table read (fail-closed).");
+            throw new System.Security.SecurityException("Gateway parameters require a planned table read or a structured view (fail-closed).");
         }
 
         if (gateway.Count > Autheris.Application.Sql.Tree.TreeSqlCompiler.MaxParameters)

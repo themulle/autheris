@@ -315,7 +315,7 @@ public static class McpDatasetTools
 
         yield return new McpToolDefinition(
             Name: QuerySql,
-            Description: "Executes a governed SQL query with row-level security, column masking, and tenant isolation under the caller's context. Results are capped at Mcp:MaxResultRows; pass optional 'limit' and follow the returned 'cursor' (when 'hasMore' is true) to retrieve subsequent pages of a deterministic ORDER BY query. Pass values as named 'parameters' bound to @name placeholders instead of SQL literals; a cursor is only valid with the same query and parameters." + McpErrorCodes.ErrorsSentence("SQL_SYNTAX_ERROR", "SQL_POLICY_DENIED", "SQL_PARAMETER_MISSING", "QUERY_TIMEOUT", "TOKEN_BUDGET_EXCEEDED"),
+            Description: "Executes a governed SQL query with row-level security, column masking, and tenant isolation under the caller's context. Results are capped at Mcp:MaxResultRows; pass optional 'limit' and follow the returned 'cursor' (when 'hasMore' is true) to retrieve subsequent pages of a deterministic ORDER BY query. Pass values as named 'parameters' bound to @name placeholders instead of SQL literals; a cursor is only valid with the same query and parameters. An optional 'view' narrows and sorts the result of the fixed query (filter, orderBy, totalCount); it can only use the output columns the query names and never reads more than the query." + McpErrorCodes.ErrorsSentence("SQL_SYNTAX_ERROR", "SQL_POLICY_DENIED", "SQL_PARAMETER_MISSING", "QUERY_TIMEOUT", "TOKEN_BUDGET_EXCEEDED"),
             InputJsonSchema: """
             {
               "type": "object",
@@ -324,6 +324,16 @@ public static class McpDatasetTools
                 "query": { "type": "string", "description": "SQL SELECT query to execute against the gateway." },
                 "limit": { "type": "integer", "minimum": 1, "description": "Optional maximum rows per page (capped server-side to Mcp:MaxResultRows)." },
                 "cursor": { "type": "string", "description": "Optional signed continuation cursor returned by a previous query_sql call." },
+                "view": {
+                  "type": ["object", "null"],
+                  "description": "Optional structured view over the result of the query, for grids: filter (and/or/not of conditions {column, op, value|values}; ops eq, ne, in, notIn, contains, startsWith, endsWith, gt, gte, lt, lte, between, isNull, isNotNull), orderBy ([{column, direction asc|desc}]) and totalCount (true adds totalCount to the result). Columns are output columns of the query; values are bound. The query must name its output columns and have no ORDER BY without LIMIT.",
+                  "additionalProperties": false,
+                  "properties": {
+                    "filter": { "type": "object" },
+                    "orderBy": { "type": "array", "items": { "type": "object" } },
+                    "totalCount": { "type": "boolean" }
+                  }
+                },
                 "parameters": {
                   "type": ["object", "null"],
                   "description": "Optional named values bound to @name placeholders, as in POST /api/v1/sql: string, number, boolean or null; an array of scalars only as the single item of IN (@name) or NOT IN (@name). Values are bound, never inlined.",

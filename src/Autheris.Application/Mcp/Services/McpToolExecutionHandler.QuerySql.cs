@@ -1,6 +1,7 @@
 namespace Autheris.Application.Mcp.Services;
 
 using System;
+using System.Linq;
 using System.Security.Claims;
 using System.Text.Json;
 using System.Threading;
@@ -59,6 +60,22 @@ public sealed partial class McpToolExecutionHandler
             return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, McpSqlParameters.InvalidMessage);
         }
 
+        // The optional structured view narrows and sorts the result of the fixed statement; a refused view never reaches the pipeline.
+        Autheris.Application.Sql.View.WebSqlViewPlan? viewPlan = null;
+        if (root.TryGetProperty("view", out var viewProp) && viewProp.ValueKind is not (JsonValueKind.Null or JsonValueKind.Undefined))
+        {
+            try
+            {
+                viewPlan = Autheris.Application.Sql.View.WebSqlViewComposer.Plan(query, viewProp, ct);
+            }
+            catch (Autheris.Application.Sql.View.WebSqlViewException ex)
+            {
+                return CreateMcpError(sessionContext.TenantId, tool.Name, InvalidParamsCode, ex.UserMessage);
+            }
+        }
+
+        GovernedSqlQueryRequest WithView(GovernedSqlQueryRequest request) => viewPlan is null ? request : viewPlan.Apply(request);
+
         var effectiveLimit = McpRowCap.Effective(
             requestedLimit,
             McpRowCap.ResolveCap(_gatewayOptions?.Mcp?.MaxResultRows ?? McpRowCap.DefaultCap));
@@ -84,17 +101,27 @@ public sealed partial class McpToolExecutionHandler
 
         try
         {
+            // The count is its own governed statement over the same fixed statement and filter (never the page window).
+            long? totalCount = null;
+            if (viewPlan?.ApplyCount(new GovernedSqlQueryRequest(query, RowLimit: boundedRowLimit, Transport: SqlTransports.Mcp, Parameters: parameters)) is { } countRequest)
+            {
+                var countResult = await _sqlExecutionService.ExecuteQueryBufferedAsync(countRequest, userPrincipal, tenantId, ct).ConfigureAwait(false);
+                totalCount = countResult.Rows.Count == 1 && countResult.Rows[0].Count == 1
+                    ? Convert.ToInt64(countResult.Rows[0].Values.First(), System.Globalization.CultureInfo.InvariantCulture)
+                    : throw new InvalidOperationException("The total count statement returned no single value.");
+            }
+
             GovernedSqlResult sqlResult;
             try
             {
                 sqlResult = await _sqlExecutionService.ExecuteQueryBufferedAsync(
-                    new GovernedSqlQueryRequest(
+                    WithView(new GovernedSqlQueryRequest(
                         query,
                         RowLimit: boundedRowLimit,
                         Transport: SqlTransports.Mcp,
                         Page: pageWindow,
                         NextToken: cursor,
-                    Parameters: parameters),
+                        Parameters: parameters)),
                     userPrincipal,
                     tenantId,
                     ct).ConfigureAwait(false);
@@ -102,7 +129,7 @@ public sealed partial class McpToolExecutionHandler
             catch (SqlPagingUnsupportedException) when (cursor is null && requestedLimit is null)
             {
                 sqlResult = await _sqlExecutionService.ExecuteQueryBufferedAsync(
-                    new GovernedSqlQueryRequest(query, RowLimit: boundedRowLimit, Transport: SqlTransports.Mcp, Parameters: parameters),
+                    WithView(new GovernedSqlQueryRequest(query, RowLimit: boundedRowLimit, Transport: SqlTransports.Mcp, Parameters: parameters)),
                     userPrincipal,
                     tenantId,
                     ct).ConfigureAwait(false);
@@ -110,7 +137,7 @@ public sealed partial class McpToolExecutionHandler
 
             McpResultMasking.Report(sqlResult.HasPolicyMaskedValues);
             McpRowContinuation.Offer(sqlResult.ResumeAfter);
-            return JsonSerializer.Serialize(McpSqlQueryResult.From(sqlResult), JsonOpts);
+            return JsonSerializer.Serialize(McpSqlQueryResult.From(sqlResult, totalCount), JsonOpts);
         }
         catch (SqlPagingTokenInvalidException)
         {

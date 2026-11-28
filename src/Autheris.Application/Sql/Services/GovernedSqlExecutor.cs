@@ -370,7 +370,7 @@ public sealed partial class GovernedSqlExecutor
             var decoded = _pageTokenCodec.DecodeToken(
                 request.NextToken,
                 request.Sql,
-                request.Parameters,
+                request.TokenBoundParameters,
                 user,
                 tenantId,
                 sourceId,
