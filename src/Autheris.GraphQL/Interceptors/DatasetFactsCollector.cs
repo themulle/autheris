@@ -19,7 +19,7 @@ using Microsoft.Extensions.Logging;
 /// Per-request collector of the opt-in <c>extensions.autheris.roots</c> facts. Resolvers record the facts of a root that was
 /// read successfully; <see cref="DatasetFactsMiddleware"/> turns them into plain response data. A fact entry exists only
 /// when the read succeeded and the table is catalog-visible to the caller. <c>rowFilterApplied</c> means "a row filter
-/// defined by the data owner or by consent applies to you", not "all rows are returned"; tenant isolation, virtual and
+/// defined by the data owner or by consent (including per-cell consent) applies to you", not "all rows are returned"; tenant isolation, virtual and
 /// mandatory filters are intentionally not reported.
 /// </summary>
 public sealed class DatasetFactsCollector

@@ -6,7 +6,7 @@ namespace Autheris.Application.Sql.Tree;
 
 /// <summary>
 /// What a caller may learn about one read table: fixed-text row-filter descriptions only. <see cref="RowFilterApplied"/>
-/// means "a row filter defined by the data owner or consent applies to you", not "all rows are returned"; tenant
+/// means "a row filter defined by the data owner or consent (including per-cell consent) applies to you", not "all rows are returned"; tenant
 /// isolation, virtual and mandatory filters are intentionally not reported.
 /// </summary>
 public sealed record DatasetAccessFacts(TableIdentifier Table, IReadOnlyList<string> Path, IReadOnlyList<string> RowFilterDescriptions)

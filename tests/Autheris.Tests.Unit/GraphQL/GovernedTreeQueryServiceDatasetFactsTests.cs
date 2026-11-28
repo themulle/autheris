@@ -151,9 +151,9 @@ public sealed class GovernedTreeQueryServiceDatasetFactsTests
 
         var facts = service.GetDatasetFacts(DefaultTenantCaller.Principal(), Tree(), opId);
 
-        // Same decision shape as describe_my_access: the virtual predicate is part of the combined filter, so only the constant shows.
-        facts[0].RowFilterDescriptions.ShouldBe([EffectiveAccessExplanationService.RowFilterDescription]);
-        string.Join(' ', facts[0].RowFilterDescriptions).ShouldNotContain("virtual-secret");
+        // Same as describe_my_access: a Virtual Filter is composed into the combined filter but is never reported (no flag, no description).
+        facts[0].RowFilterApplied.ShouldBeFalse();
+        facts[0].RowFilterDescriptions.ShouldBeEmpty();
     }
 
     [Fact]
